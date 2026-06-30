@@ -11,10 +11,12 @@ There are three mechanisms for integrating Erlang code with Beamtalk, each suite
 | Mechanism | Use case | Declared in |
 |-----------|----------|-------------|
 | `(Erlang module)` FFI | Call any Erlang function from a method body | Per-method |
-| `native:` + `self delegate` | Actor backed by a hand-written gen_server | Class declaration |
+| `native:` + `self delegate` | A class wholesale-backed by a hand-written Erlang module (a stateless `Object` *or* an `Actor` gen_server) | Class declaration |
 | `[native.dependencies]` | Use hex.pm packages from native Erlang code | `beamtalk.toml` |
 
-These mechanisms are complementary. A single package might use all three — FFI for simple utility calls, `native:` for actors that need direct OTP control, and hex dependencies for ecosystem libraries like `gun` or `cowboy`.
+These mechanisms are complementary. A single package might use all three — FFI for simple utility calls, `native:` for classes that delegate wholesale to one Erlang module, and hex dependencies for ecosystem libraries like `gun` or `cowboy`.
+
+> **Unified model (ADR 0101).** `native:` is the universal "this class is backed by a named Erlang module" declaration; the **class kind selects the lowering** — a `native:` `Object` delegates with an in-process synchronous call, while a `native:` `Actor` delegates across a process boundary via `gen_server:call`. Both share the same boundary, so all FFI is **safe by default**: `error:*` exceptions become structured `#beamtalk_error{}` values (a user never sees a raw Erlang tuple at the REPL), while `exit:*`/`throw:*` still propagate. See [Native Stateless Objects](#native-stateless-objects--native-for-object) and [Wrap-by-Default Error Handling](#wrap-by-default-error-handling).
 
 ## Directory Layout
 
@@ -96,6 +98,94 @@ FFI is the right choice when:
 - You need to call a handful of Erlang functions
 - The Erlang module is stateless or manages its own state externally
 - You want explicit control over which Erlang function each method calls
+
+## Wrap-by-Default Error Handling
+
+All Erlang calls — inline `(Erlang …)` FFI, `native:` `Object` delegation, and `native:` `Actor` delegation — share one error boundary (ADR 0101 Part 2). The boundary handles the two channels a BEAM function can use independently:
+
+| Outcome of the Erlang call | Channel | Beamtalk result | How you handle it |
+|----------------------------|---------|-----------------|-------------------|
+| *returns* `{ok, V}` / `{error, R}` | return value | a `Result(V, R)` **value** (ADR 0076) | `isOk` / `value` / `andThen:` |
+| *raises* `error:Reason` | exception | a **raised** `#beamtalk_error{}` | `on:do:` / `ensure:`, or it bubbles to the REPL |
+| *raises* `exit:Reason` | exception | **propagates** unwrapped (caught by an enclosing `on:do:` as `erlang_exit`, else process death) | supervision / let-it-crash |
+| *raises* `throw:Term` | exception | **passes through** unchanged | `^` and Beamtalk exceptions are throw/catch |
+
+The key guarantee: **a user never sees a raw Erlang error tuple at the REPL.** A `badarg`, `{badkey, K}`, `function_clause`, etc. is converted to a structured `#beamtalk_error{}` with a `kind`, a hint, and a `Class`/`selector` breadcrumb — not a bare `{badarg, [...]}`.
+
+`exit:`/`throw:` are deliberately **not** wrapped: process exit and foreign throws are semantically meaningful (intentional `erlang:exit/1`, `{noproc, _}` from a dead actor, control-flow throws) and must not be flattened into `#beamtalk_error{}`. So `(Erlang erlang) exit: #killed` still terminates the process with reason `killed`.
+
+### Same function, both channels
+
+The return channel (`Result`) and the exception channel (`#beamtalk_error{}`) are orthogonal and mutually exclusive *per call* — a function either returns or raises — so the **same** function can use both:
+
+```beamtalk
+// File readAll: -> Result(String, Error)
+
+// Modeled, recoverable failure → a RETURNED Result error: value
+File readAll: "missing.txt"        // => Result error: File 'readAll:': file not found
+
+// Misuse / fault (a non-String path) → a RAISED #beamtalk_error{}
+File readAll: 12345                 // raises: Type error in 'readAll:' on File
+```
+
+The split is principled: **`Result` for expected/recoverable outcomes the API models, exceptions for misuse/faults.** Wrap-by-default changes no return type — a raised `#beamtalk_error{}` is invisible to the type system, so `Result` remains the only type-visible error channel.
+
+### Error context: `Class` + selector vs Erlang MFA
+
+A wrapped `native:` error carries the Beamtalk `Class` and selector, so it reads `Stream` / `take:` rather than the backing `beamtalk_stream:take`:
+
+```beamtalk
+(Stream from: 1) take: -1          // raises Type error in 'take:' on Stream
+```
+
+Inline `(Erlang …)` FFI has a documented limitation: the proxy knows the Erlang MFA, not the Beamtalk class, so an inline-FFI error carries the `ErlangModule` context (e.g. `Type error in 'atom_to_list' on ErlangModule`). It is still structured — just less specific than a `native:` method's breadcrumb. Prefer `native:` for whole-class delegation precisely so errors name your class.
+
+## Native Stateless Objects — `native:` for `Object`
+
+`native:` is not limited to actors. A stateless `Object` that delegates wholesale to a single Erlang module declares the module on `subclass:` and uses `=> self delegate` bodies — **identical surface** to a native Actor, but the lowering is an in-process synchronous call rather than a gen_server round-trip (the class kind selects the lowering). `Stream` is the worked example:
+
+```beamtalk
+sealed typed Object subclass: Stream(E) native: beamtalk_stream
+
+  class sealed from: start :: Integer -> Stream(Integer) => self delegate   // ⇒ beamtalk_stream:from(Start)
+  select: predicate :: Block -> Stream(E)                => self delegate   // ⇒ beamtalk_stream:select(Self, Predicate)
+  take: count :: Integer -> List(E)                      => self delegate   // ⇒ beamtalk_stream:take(Self, Count)
+  asList -> List(E)                                       => self delegate   // ⇒ beamtalk_stream:asList(Self)
+```
+
+A class may freely mix `self delegate` methods with full-bodied Beamtalk methods.
+
+### Object vs Actor delegation
+
+| | `native:` `Object` | `native:` `Actor` |
+|---|---|---|
+| `self delegate` lowers to | `beamtalk_erlang_proxy:native_call(Mod, Fn, [Self\|Args], {Class, Sel})` | `beamtalk_actor:sync_send(Pid, Sel, Args)` |
+| Receiver (`self`) | first positional arg | the actor pid |
+| Call shape | in-process, synchronous — cannot block, time out, or raise `noproc` | crosses a process boundary — can block, time out, raise `noproc`, cross nodes |
+| State | none (`state:` is for Actors) | lives in the gen_server |
+
+> **Caution (leaky abstraction).** Because both kinds read `self delegate`, switching a delegation class between `Object subclass:` and `Actor subclass:` silently flips the lowering (in-process call ⇄ cross-process `sync_send`) with no type error. The class kind one line above is the only signal of the failure/performance profile.
+
+### The naming rule (normative)
+
+The Erlang function name is the **first keyword with its colon removed**; the remaining keyword *values* follow as positional args. Self-threading is inferred from the declaration side:
+
+- **Instance methods prepend `self`**: `take: count` → `mod:take(Self, Count)`; `inject: i into: b` → `mod:inject(Self, I, B)`; unary `asList` → `mod:asList(Self)`.
+- **Class methods omit `self`**: `class from: start` → `mod:from(Start)`.
+
+This is the same first-keyword convention as inline FFI (`(Erlang mod) do: x with: y` → `mod:do(X, Y)`).
+
+### The `delegate` sentinel
+
+`self delegate` typechecks because the `Object`/`Value` base (and `Object class`, for class-side constructors) defines a `delegate` sentinel — exactly mirroring the `delegate` sentinel ADR 0056 added to `Actor`. On a `native:` class, codegen rewrites `self delegate` to the real call before the sentinel runs; on a non-`native:` class the sentinel raises, catching the misuse. `delegate` is therefore a **reserved selector** on the Object protocol.
+
+### Inheritance
+
+`native:` delegation follows the class declaration, **not** inheritance. A subclass that does not redeclare `native:` inherits no backing module and cannot add `self delegate` methods of its own; a subclass that redeclares `native: other_mod` uses `other_mod` only for the `self delegate` methods it declares.
+
+### Reserved-word constraint
+
+If a method's first keyword is an Erlang reserved word (`after and andalso band begin bnot bor bsl bsr bxor case catch cond div end fun if let not of or orelse receive rem try when xor`), codegen emits a compile error rather than producing invalid output like `mod:receive(Self, X)`. Use inline FFI with an explicitly-named function for those (rare) cases.
 
 ## Native Actors — `native:` and `self delegate`
 
@@ -569,8 +659,9 @@ beamtalk test
 | Need | Use |
 |------|-----|
 | Call a stateless Erlang function | `(Erlang module)` FFI in method body |
-| Wrap a utility library as class methods | `Object subclass:` with FFI calls |
-| Actor with OTP gen_server control | `native:` + `self delegate` |
+| Stateless `Object` delegating wholesale to one module | `Object subclass: … native: module` + `self delegate` |
+| Wrap a few utility functions as class methods | `Object subclass:` with inline FFI calls |
+| Actor with OTP gen_server control | `Actor subclass: … native: module` + `self delegate` |
 | Actor with Beamtalk-only logic | Standard `Actor subclass:` (no `native:`) |
 | Hex.pm package dependency | `[native.dependencies]` in `beamtalk.toml` |
 | Port, NIF, or raw process | Per-method `(Erlang module)` FFI |
@@ -598,3 +689,4 @@ Use `self delegate` for operations that modify state or need gen_server guarante
 - [ADR 0055](ADR/0055-erlang-backed-class-authoring-protocol.md) -- Erlang-backed class authoring protocol
 - [ADR 0056](ADR/0056-native-erlang-backed-actors.md) -- Native actors design decisions
 - [ADR 0072](ADR/0072-user-erlang-sources-in-packages.md) -- User Erlang sources in packages
+- [ADR 0101](ADR/0101-unified-erlang-interop-native-objects.md) -- Unified interop: `native:` for stateless Objects, wrap-by-default FFI

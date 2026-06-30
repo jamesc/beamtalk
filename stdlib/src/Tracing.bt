@@ -51,7 +51,7 @@
 /// Tracing clear
 /// // => nil
 /// ```
-sealed typed Object subclass: Tracing
+sealed typed Object subclass: Tracing native: beamtalk_tracing
 
   // === Trace context ===
 
@@ -64,8 +64,7 @@ sealed typed Object subclass: Tracing
   /// Tracing setContext: #{#workflowId => "wf-123", #workflowType => "OrderWorkflow"}
   /// // => nil
   /// ```
-  class sealed setContext: ctx :: Dictionary -> Nil =>
-    (Erlang beamtalk_tracing) setContext: ctx
+  class sealed setContext: ctx :: Dictionary -> Nil => self delegate
 
   /// Get the current application-level trace context.
   /// Returns an empty dictionary when no context has been set.
@@ -75,7 +74,7 @@ sealed typed Object subclass: Tracing
   /// Tracing context
   /// // => _
   /// ```
-  class sealed context -> Dictionary => (Erlang beamtalk_tracing) context
+  class sealed context -> Dictionary => self delegate
 
   /// Clear the application-level trace context.
   /// Removes all trace context keys from the process and logger metadata.
@@ -85,7 +84,7 @@ sealed typed Object subclass: Tracing
   /// Tracing clearContext
   /// // => nil
   /// ```
-  class sealed clearContext -> Nil => (Erlang beamtalk_tracing) clearContext
+  class sealed clearContext -> Nil => self delegate
 
   // === Tracing lifecycle ===
 
@@ -96,7 +95,7 @@ sealed typed Object subclass: Tracing
   /// Tracing enable
   /// // => nil
   /// ```
-  class sealed enable -> Nil => (Erlang beamtalk_tracing) enable
+  class sealed enable -> Nil => self delegate
 
   /// Stop capturing trace events.
   ///
@@ -105,7 +104,7 @@ sealed typed Object subclass: Tracing
   /// Tracing disable
   /// // => nil
   /// ```
-  class sealed disable -> Nil => (Erlang beamtalk_tracing) disable
+  class sealed disable -> Nil => self delegate
 
   /// Check whether trace capture is active.
   ///
@@ -114,7 +113,7 @@ sealed typed Object subclass: Tracing
   /// Tracing isEnabled
   /// // => _
   /// ```
-  class sealed isEnabled -> Boolean => (Erlang beamtalk_tracing) isEnabled
+  class sealed isEnabled -> Boolean => self delegate
 
   /// Clear all trace events and aggregate stats.
   ///
@@ -123,7 +122,7 @@ sealed typed Object subclass: Tracing
   /// Tracing clear
   /// // => nil
   /// ```
-  class sealed clear -> Nil => (Erlang beamtalk_tracing) clear
+  class sealed clear -> Nil => self delegate
 
   // === Trace event queries ===
 
@@ -135,7 +134,7 @@ sealed typed Object subclass: Tracing
   /// Tracing traces
   /// // => _
   /// ```
-  class sealed traces -> List(Dictionary) => (Erlang beamtalk_tracing) traces
+  class sealed traces -> List(Dictionary) => self delegate
 
   /// Trace events for a specific actor.
   ///
@@ -144,8 +143,7 @@ sealed typed Object subclass: Tracing
   /// // Tracing tracesFor: myCounter
   /// // => _
   /// ```
-  class sealed tracesFor: actor :: Actor -> List(Dictionary) =>
-    (Erlang beamtalk_tracing) tracesFor: actor
+  class sealed tracesFor: actor :: Actor -> List(Dictionary) => self delegate
 
   /// Trace events for a specific actor + method.
   ///
@@ -155,7 +153,7 @@ sealed typed Object subclass: Tracing
   /// // => _
   /// ```
   class sealed tracesFor: actor :: Actor selector: sel :: Symbol -> List(Dictionary) =>
-    (Erlang beamtalk_tracing) tracesFor: actor selector: sel
+    self delegate
 
   // === Aggregate stats ===
 
@@ -166,7 +164,7 @@ sealed typed Object subclass: Tracing
   /// Tracing stats
   /// // => _
   /// ```
-  class sealed stats -> Dictionary => (Erlang beamtalk_tracing) stats
+  class sealed stats -> Dictionary => self delegate
 
   /// Aggregate stats for a specific actor.
   /// Returns #{} for unknown actors.
@@ -176,8 +174,7 @@ sealed typed Object subclass: Tracing
   /// // Tracing statsFor: myCounter
   /// // => _
   /// ```
-  class sealed statsFor: actor :: Actor -> Dictionary =>
-    (Erlang beamtalk_tracing) statsFor: actor
+  class sealed statsFor: actor :: Actor -> Dictionary => self delegate
 
   // === Analysis (computed from aggregates) ===
 
@@ -189,7 +186,7 @@ sealed typed Object subclass: Tracing
   /// // => _
   /// ```
   class sealed slowMethods: limit :: Integer -> List(Dictionary) =>
-    (Erlang beamtalk_tracing) slowMethods: limit
+    self delegate
 
   /// Top N methods by call count (descending).
   ///
@@ -198,8 +195,7 @@ sealed typed Object subclass: Tracing
   /// Tracing hotMethods: 10
   /// // => _
   /// ```
-  class sealed hotMethods: limit :: Integer -> List(Dictionary) =>
-    (Erlang beamtalk_tracing) hotMethods: limit
+  class sealed hotMethods: limit :: Integer -> List(Dictionary) => self delegate
 
   /// Top N methods by error + timeout rate (descending).
   ///
@@ -209,7 +205,7 @@ sealed typed Object subclass: Tracing
   /// // => _
   /// ```
   class sealed errorMethods: limit :: Integer -> List(Dictionary) =>
-    (Erlang beamtalk_tracing) errorMethods: limit
+    self delegate
 
   /// Top N actors by message queue length — live snapshot.
   ///
@@ -219,7 +215,7 @@ sealed typed Object subclass: Tracing
   /// // => _
   /// ```
   class sealed bottlenecks: limit :: Integer -> List(Dictionary) =>
-    (Erlang beamtalk_tracing) bottlenecks: limit
+    self delegate
 
   // === Live process health ===
 
@@ -231,8 +227,7 @@ sealed typed Object subclass: Tracing
   /// // Tracing healthFor: myCounter
   /// // => _
   /// ```
-  class sealed healthFor: actor :: Actor -> Dictionary =>
-    (Erlang beamtalk_tracing) healthFor: actor
+  class sealed healthFor: actor :: Actor -> Dictionary => self delegate
 
   /// VM overview: scheduler count, memory breakdown, process count, run queue lengths.
   ///
@@ -241,8 +236,7 @@ sealed typed Object subclass: Tracing
   /// Tracing systemHealth
   /// // => _
   /// ```
-  class sealed systemHealth -> Dictionary =>
-    (Erlang beamtalk_tracing) systemHealth
+  class sealed systemHealth -> Dictionary => self delegate
 
   // === Configuration ===
 
@@ -253,7 +247,7 @@ sealed typed Object subclass: Tracing
   /// Tracing maxEvents
   /// // => _
   /// ```
-  class sealed maxEvents -> Integer => (Erlang beamtalk_tracing) maxEvents
+  class sealed maxEvents -> Integer => self delegate
 
   /// Set ring buffer capacity.
   ///
@@ -262,5 +256,4 @@ sealed typed Object subclass: Tracing
   /// Tracing maxEvents: 50000
   /// // => nil
   /// ```
-  class sealed maxEvents: size :: Integer -> Nil =>
-    (Erlang beamtalk_tracing) maxEvents: size
+  class sealed maxEvents: size :: Integer -> Nil => self delegate

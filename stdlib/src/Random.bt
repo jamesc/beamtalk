@@ -29,7 +29,7 @@
 /// rng := Random seed: 42
 /// rng next                     // => deterministic value
 /// ```
-sealed typed Value subclass: Random
+sealed typed Value subclass: Random native: beamtalk_random
 
   /// Use 'Random seed: integer' for a seeded instance, or 'Random new' for a random seed.
   class new: _ :: Object -> Nil =>
@@ -43,7 +43,7 @@ sealed typed Value subclass: Random
   /// ```beamtalk
   /// Random next                  // => a Float between 0.0 and 1.0
   /// ```
-  class sealed next -> Float => (Erlang beamtalk_random) next
+  class sealed next -> Float => self delegate
 
   /// Return a random integer between 1 and max (inclusive).
   ///
@@ -54,8 +54,7 @@ sealed typed Value subclass: Random
   /// Random nextInteger: 6        // => 1..6
   /// Random nextInteger: 100      // => 1..100
   /// ```
-  class sealed nextInteger: max :: Integer -> Integer =>
-    (Erlang beamtalk_random) nextInteger: max
+  class sealed nextInteger: max :: Integer -> Integer => self delegate
 
   /// Create a new Random instance with an auto-generated seed.
   ///
@@ -66,7 +65,7 @@ sealed typed Value subclass: Random
   /// rng := Random new
   /// rng next                     // => 0.0..1.0
   /// ```
-  class sealed new -> Random => (Erlang beamtalk_random) new
+  class sealed new -> Random => self delegate
 
   /// Create a new Random instance with a specific seed for reproducibility.
   ///
@@ -78,8 +77,7 @@ sealed typed Value subclass: Random
   /// rng := Random seed: 42
   /// rng next                     // => deterministic value
   /// ```
-  class sealed seed: seed :: Integer -> Random =>
-    (Erlang beamtalk_random) seed: seed
+  class sealed seed: seed :: Integer -> Random => self delegate
 
   /// Return a display string. Overrides the default structural Value form
   /// because the instance holds an opaque internal `rand` generator state

@@ -28,7 +28,7 @@
 /// Json prettyPrint: #{"name" => "Ada"}
 /// // => _
 /// ```
-sealed typed Object subclass: Json
+sealed typed Object subclass: Json native: beamtalk_json
 
   /// Parse a JSON string into a Beamtalk value (class method).
   ///
@@ -42,8 +42,7 @@ sealed typed Object subclass: Json
   /// (Json parse: "42") unwrap          // => 42
   /// (Json parse: "null") unwrap        // => nil
   /// ```
-  class sealed parse: jsonString :: String -> Result =>
-    (Erlang beamtalk_json) parse: jsonString
+  class sealed parse: jsonString :: String -> Result => self delegate
 
   /// Generate a JSON string from a Beamtalk value (class method).
   ///
@@ -57,8 +56,7 @@ sealed typed Object subclass: Json
   /// Json generate: nil                 // => null
   /// Json generate: 42                  // => 42
   /// ```
-  class sealed generate: value :: Printable -> String =>
-    (Erlang beamtalk_json) generate: value
+  class sealed generate: value :: Printable -> String => self delegate
 
   /// Generate a pretty-printed JSON string with indentation (class method).
   ///
@@ -66,5 +64,4 @@ sealed typed Object subclass: Json
   /// ```beamtalk
   /// Json prettyPrint: #{"name" => "Ada", "age" => 36}
   /// ```
-  class sealed prettyPrint: value :: Printable -> String =>
-    (Erlang beamtalk_json) prettyPrint: value
+  class sealed prettyPrint: value :: Printable -> String => self delegate

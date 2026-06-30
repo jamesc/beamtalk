@@ -1,0 +1,109 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E (REPL-protocol) tests for the unified Erlang interop model (ADR 0101).
+//
+// This file validates, end-to-end from the REPL, the four guarantees of the
+// unified model that EUnit/BUnit alone cannot catch:
+//
+//   1. `native:` Object delegation — a stateless `Object` backed by an Erlang
+//      module (`Stream` → `beamtalk_stream`) dispatches `self delegate` methods
+//      through the shared FFI boundary and returns ordinary values.
+//   2. The dual error channel — the SAME class uses BOTH channels: a modeled
+//      failure *returns* a `Result error:` value, while a misuse fault *raises*
+//      a structured `#beamtalk_error{}` (return-vs-raise, ADR 0101 Part 2 /
+//      ADR 0076).
+//   3. `native:` errors carry `Class`+`selector` context (e.g. `Stream` /
+//      `take:`), not a bare Erlang MFA (`beamtalk_stream:take`).
+//   4. `(Erlang erlang) exit:` still propagates raw — it is NOT flattened into
+//      a `#beamtalk_error{}`.
+//   5. A user NEVER sees a raw Erlang error tuple at the REPL — every faulting
+//      FFI call surfaces a structured error, never `{badarg, ...}`.
+//
+// Lower-level coverage lives in:
+//   runtime/apps/beamtalk_runtime/test/beamtalk_erlang_proxy_tests.erl (native_call/4)
+//   stdlib/test/*.bt (per-class BUnit)
+
+// ===========================================================================
+// 1. native: OBJECT DELEGATION (Stream → beamtalk_stream)
+// ===========================================================================
+
+// `class from:` is a class-side `self delegate` → beamtalk_stream:from(Start)
+// `take:` is an instance-side `self delegate` → beamtalk_stream:take(Self, 5)
+(Stream from: 1) take: 5
+// => [1,2,3,4,5]
+
+// `on:` (class-side) + `asList` (instance-side) delegate correctly
+(Stream on: #(1, 2, 3)) asList
+// => [1,2,3]
+
+// Chained delegation: select: returns a Stream, take: forces it to a List
+((Stream from: 1) select: [:n | n isEven]) take: 3
+// => [2,4,6]
+
+// Delegation persists across REPL turns via a workspace binding
+s := (Stream on: #(10, 20, 30)) collect: [:n | n + 1]
+// => _
+
+s asList
+// => [11,21,31]
+
+// ===========================================================================
+// 2. DUAL ERROR CHANNEL — SAME FUNCTION, BOTH CHANNELS
+// (File readAll: -> Result(String, Error))
+// ===========================================================================
+
+// Modeled failure (missing file) is a RETURNED Result error: value — not raised.
+File readAll: "bt_definitely_nonexistent_file_xyz.txt"
+// => Result error: _
+
+// It is an ordinary value the program can branch on.
+(File readAll: "bt_definitely_nonexistent_file_xyz.txt") isError
+// => true
+
+// Misuse fault (a non-String path) is RAISED as a structured #beamtalk_error{},
+// not returned as a Result. Same function, different channel (ADR 0101 Part 2).
+File readAll: 12345
+// => ERROR: Type error in 'readAll:' on File
+
+// ===========================================================================
+// 3. native: ERROR CARRIES Class + selector CONTEXT (not a bare Erlang MFA)
+// ===========================================================================
+
+// `take: -1` reaches beamtalk_stream:take/2 with a valid Integer, so it passes
+// any arg typing and faults *inside* the Erlang module. native_call wraps it
+// carrying the Beamtalk {Class, Selector}, so the surfaced error names the
+// Beamtalk class `Stream` and selector `take:` — NOT the backing module
+// function `beamtalk_stream:take`.
+(Stream from: 1) take: -1
+// => ERROR: Type error in 'take:' on Stream
+
+// ===========================================================================
+// 4. (Erlang erlang) exit: STILL PROPAGATES (not wrapped)
+// ===========================================================================
+
+// `exit:` is deliberately NOT caught by the FFI proxy: it propagates past the
+// boundary with its exit reason intact (`killed`), rather than being converted
+// into a structured `type_error` the way an `error:*` fault like `badarg` is
+// (ADR 0101 Part 2). The surfaced value is the exit reason, not a `Type error`.
+// (If caught by an enclosing `on:do:` it classifies as kind `erlang_exit` — it
+// is never flattened into a generic FFI error.)
+(Erlang erlang) exit: #killed
+// => ERROR: killed
+
+// ===========================================================================
+// 5. WRAP-BY-DEFAULT — NO RAW ERLANG TUPLE EVER REACHES THE REPL
+// ===========================================================================
+
+// Inline FFI (`Erlang <module> <selector>`): a badarg is wrapped into a
+// structured #beamtalk_error{} (kind = type_error). The user sees a readable
+// message, never a raw `{badarg, ...}` tuple. (Inline FFI carries the
+// Erlang-facing `ErlangModule` context — the documented limitation vs the
+// Beamtalk-class context a `native:` method gets.)
+Erlang erlang atom_to_list: 42
+// => ERROR: Type error in 'atom_to_list' on ErlangModule
+
+// First-keyword naming rule: `merge: a with: b` calls `maps:merge/2`
+// (first keyword only, args positional) — NOT `maps:merge_with/3`.
+Erlang maps merge: #{#a => 1} with: #{#b => 2}
+// => #{#a => 1, #b => 2}

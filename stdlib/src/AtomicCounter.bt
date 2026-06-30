@@ -30,7 +30,7 @@
 /// c := AtomicCounter named: #hits
 /// c increment
 /// ```
-typed Object subclass: AtomicCounter
+typed Object subclass: AtomicCounter native: beamtalk_atomic_counter
 
   /// Create a new named counter starting at 0 (class method).
   ///
@@ -41,8 +41,7 @@ typed Object subclass: AtomicCounter
   /// ```beamtalk
   /// c := AtomicCounter new: #requests
   /// ```
-  class sealed new: name :: Symbol -> AtomicCounter =>
-    (Erlang beamtalk_atomic_counter) new: name
+  class sealed new: name :: Symbol -> AtomicCounter => self delegate
 
   /// Look up an existing counter by name (class method).
   ///
@@ -53,8 +52,7 @@ typed Object subclass: AtomicCounter
   /// ```beamtalk
   /// c := AtomicCounter named: #requests
   /// ```
-  class sealed named: name :: Symbol -> AtomicCounter =>
-    (Erlang beamtalk_atomic_counter) named: name
+  class sealed named: name :: Symbol -> AtomicCounter => self delegate
 
   /// Atomically add 1. Returns the new value.
   ///
@@ -62,7 +60,7 @@ typed Object subclass: AtomicCounter
   /// ```beamtalk
   /// c increment    // => 1
   /// ```
-  increment -> Integer => (Erlang beamtalk_atomic_counter) increment: self
+  increment -> Integer => self delegate
 
   /// Atomically add N. Returns the new value.
   ///
@@ -70,8 +68,7 @@ typed Object subclass: AtomicCounter
   /// ```beamtalk
   /// c incrementBy: 5    // => 6
   /// ```
-  incrementBy: n :: Integer -> Integer =>
-    (Erlang beamtalk_atomic_counter) incrementBy: self by: n
+  incrementBy: n :: Integer -> Integer => self delegate
 
   /// Atomically subtract 1. Returns the new value.
   ///
@@ -79,7 +76,7 @@ typed Object subclass: AtomicCounter
   /// ```beamtalk
   /// c decrement    // => -1
   /// ```
-  decrement -> Integer => (Erlang beamtalk_atomic_counter) decrement: self
+  decrement -> Integer => self delegate
 
   /// Atomically subtract N. Returns the new value.
   ///
@@ -87,8 +84,7 @@ typed Object subclass: AtomicCounter
   /// ```beamtalk
   /// c decrementBy: 3    // => -3
   /// ```
-  decrementBy: n :: Integer -> Integer =>
-    (Erlang beamtalk_atomic_counter) decrementBy: self by: n
+  decrementBy: n :: Integer -> Integer => self delegate
 
   /// Read the current value.
   ///
@@ -108,7 +104,7 @@ typed Object subclass: AtomicCounter
   /// ```beamtalk
   /// c reset
   /// ```
-  reset -> Nil => (Erlang beamtalk_atomic_counter) reset: self
+  reset -> Nil => self delegate
 
   /// Destroy the backing ETS table. Returns nil.
   ///
@@ -118,4 +114,4 @@ typed Object subclass: AtomicCounter
   /// ```beamtalk
   /// c delete
   /// ```
-  delete -> Nil => (Erlang beamtalk_atomic_counter) delete: self
+  delete -> Nil => self delegate
