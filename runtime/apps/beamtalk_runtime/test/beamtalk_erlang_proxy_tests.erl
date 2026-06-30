@@ -398,7 +398,12 @@ dispatch_generic_error_maps_to_runtime_error_test() ->
             ?assertEqual('error:', Inner#beamtalk_error.selector),
             ?assert(is_binary(Inner#beamtalk_error.message)),
             Details = Inner#beamtalk_error.details,
-            ?assertEqual({custom_reason, 42}, maps:get(reason, Details))
+            ?assertEqual({custom_reason, 42}, maps:get(reason, Details)),
+            %% BT-2730: the generic path also carries the FFI `erlang_error`
+            %% contract key (+ stacktrace), matching the specific clauses, so
+            %% `details at: #erlang_error` resolves uniformly.
+            ?assertEqual({custom_reason, 42}, maps:get(erlang_error, Details)),
+            ?assert(is_list(maps:get(erlang_stacktrace, Details)))
     end.
 
 dispatch_badkey_is_readable_key_error_test() ->
@@ -913,7 +918,10 @@ direct_call_generic_error_wraps_as_runtime_error_test() ->
             ?assertEqual(runtime_error, Inner#beamtalk_error.kind),
             ?assertEqual('ErlangModule', Inner#beamtalk_error.class),
             Details = Inner#beamtalk_error.details,
-            ?assertEqual({custom_reason, 42}, maps:get(reason, Details))
+            ?assertEqual({custom_reason, 42}, maps:get(reason, Details)),
+            %% BT-2730: generic path carries the FFI `erlang_error` key too.
+            ?assertEqual({custom_reason, 42}, maps:get(erlang_error, Details)),
+            ?assert(is_list(maps:get(erlang_stacktrace, Details)))
     end.
 
 direct_call_beamtalk_error_passthrough_test() ->
@@ -1032,7 +1040,11 @@ native_call_generic_error_wraps_with_context_test() ->
         error:#{error := Inner} ->
             ?assertEqual(runtime_error, Inner#beamtalk_error.kind),
             ?assertEqual('Stream', Inner#beamtalk_error.class),
-            ?assertEqual('collect:', Inner#beamtalk_error.selector)
+            ?assertEqual('collect:', Inner#beamtalk_error.selector),
+            %% BT-2730: generic path carries the FFI `erlang_error` key too.
+            Details = Inner#beamtalk_error.details,
+            ?assertEqual({custom_reason, 7}, maps:get(erlang_error, Details)),
+            ?assert(is_list(maps:get(erlang_stacktrace, Details)))
     end.
 
 native_call_exit_propagates_test() ->

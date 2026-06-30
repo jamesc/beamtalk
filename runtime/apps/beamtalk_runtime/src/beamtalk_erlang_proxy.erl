@@ -243,33 +243,23 @@ apply_with_coercion(Module, FunName, Args, OrigSelector, Context) ->
     try
         coerce_ffi_result(Module, erlang:apply(Module, FunName, Args))
     catch
-        %% Clause order mirrors maybe_retry_badarg/6 for readability. The patterns
-        %% are mutually exclusive (distinct atoms vs map vs record), so order only
-        %% matters for the trailing catch-all, which must stay last.
-        error:#{error := #beamtalk_error{}} = Wrapped:WrappedStack ->
-            %% Re-raise already-wrapped Beamtalk exceptions unchanged
-            %% (e.g. from Beamtalk code reached via Erlang). Idempotent.
-            erlang:raise(error, Wrapped, WrappedStack);
-        error:#beamtalk_error{} = Rec:RecStack ->
-            %% A bare #beamtalk_error{} record raised by an Erlang shim
-            %% (e.g. error(#beamtalk_error{kind = type_error, …})) is already
-            %% classified — wrap it into the map form *preserving its kind*
-            %% (idempotent); do not reclassify it as a generic runtime_error.
-            erlang:raise(error, beamtalk_exception_handler:wrap(Rec), RecStack);
-        error:badarg:Stack ->
-            maybe_retry_badarg(Module, FunName, Args, OrigSelector, Context, Stack);
-        error:undef:_Stack ->
-            %% TOCTOU / hot code reload: function unloaded between check and apply
-            raise_undef_error(Module, FunName, length(Args), OrigSelector, Context);
-        error:function_clause:Stack ->
-            raise_function_clause_error(Module, FunName, OrigSelector, Context, Stack);
-        error:badarith:Stack ->
-            raise_badarith_error(Module, FunName, OrigSelector, Context, Stack);
-        error:Reason:Stack ->
-            raise_generic_error(Module, FunName, OrigSelector, Context, Reason, Stack)
-        %% exit:* and throw:* are deliberately NOT caught — they propagate
-        %% (ADR 0101 Part 2: process exit and foreign throws are semantically
-        %% meaningful and must not be flattened into #beamtalk_error{}).
+        Class:Reason:Stack ->
+            %% Single catch → shared classifier (BT-2730): the apply and the
+            %% badarg-retry paths used to carry near-verbatim copies of this
+            %% clause set, which drifted apart silently when one gained a clause.
+            %% On `badarg` this path retries once with charlist-coerced args
+            %% (BT-1127); see classify_ffi_exception/9 for the full policy.
+            classify_ffi_exception(
+                Class,
+                Reason,
+                Stack,
+                Module,
+                FunName,
+                Args,
+                OrigSelector,
+                Context,
+                fun maybe_retry_badarg/6
+            )
     end.
 
 -doc """
@@ -288,25 +278,105 @@ maybe_retry_badarg(Module, FunName, Args, OrigSelector, Context, Stack) ->
             try
                 coerce_ffi_result(Module, erlang:apply(Module, FunName, CoercedArgs))
             catch
-                error:#{error := #beamtalk_error{}} = Wrapped:WrappedStack ->
-                    erlang:raise(error, Wrapped, WrappedStack);
-                error:#beamtalk_error{} = Rec:RecStack ->
-                    erlang:raise(error, beamtalk_exception_handler:wrap(Rec), RecStack);
-                error:badarg:Stack2 ->
-                    raise_badarg_error(Module, FunName, OrigSelector, Context, Stack2);
-                error:undef:_Stack2 ->
-                    raise_undef_error(Module, FunName, length(CoercedArgs), OrigSelector, Context);
-                error:function_clause:Stack2 ->
-                    raise_function_clause_error(Module, FunName, OrigSelector, Context, Stack2);
-                error:badarith:Stack2 ->
-                    raise_badarith_error(Module, FunName, OrigSelector, Context, Stack2);
-                error:Reason2:Stack2 ->
-                    raise_generic_error(Module, FunName, OrigSelector, Context, Reason2, Stack2)
-                %% exit:* / throw:* propagate (see apply_with_coercion/5)
+                %% Same classifier as apply_with_coercion/5, but `badarg` is now
+                %% terminal (no second retry) — the OnBadarg continuation raises
+                %% directly instead of looping back here.
+                Class:Reason:Stack2 ->
+                    classify_ffi_exception(
+                        Class,
+                        Reason,
+                        Stack2,
+                        Module,
+                        FunName,
+                        CoercedArgs,
+                        OrigSelector,
+                        Context,
+                        fun raise_badarg_terminal/6
+                    )
             end;
         false ->
             raise_badarg_error(Module, FunName, OrigSelector, Context, Stack)
     end.
+
+-doc """
+Terminal `OnBadarg` continuation for the badarg-retry path: the charlist retry
+already happened, so a second `badarg` is raised, not retried. Drops the unused
+`Args` to match the 6-arg continuation shape `classify_ffi_exception/9` calls.
+""".
+-spec raise_badarg_terminal(atom(), atom(), list(), atom(), error_context(), list()) -> no_return().
+raise_badarg_terminal(Module, FunName, _Args, OrigSelector, Context, Stack) ->
+    raise_badarg_error(Module, FunName, OrigSelector, Context, Stack).
+
+-doc """
+The single FFI exception classifier shared by the apply and badarg-retry paths
+(BT-2730).
+
+Both `apply_with_coercion/5` and `maybe_retry_badarg/6` used to inline a copy of
+this clause set; they only differed in what `badarg` does (retry vs. raise). That
+divergence is now the `OnBadarg` continuation — a `fun/6` invoked as
+`OnBadarg(Module, FunName, Args, OrigSelector, Context, Stack)` — so adding a new
+exception clause here cannot silently skip one path.
+
+Policy (ADR 0101 Part 2), matching the doc on `apply_with_coercion/5`:
+- `error:#{error := #beamtalk_error{}}` / `error:#beamtalk_error{}` → re-raised
+  (idempotent; never reclassified)
+- `error:badarg` → `OnBadarg` (charlist retry on the first pass, terminal on the
+  retry pass)
+- `error:undef` → structured `does_not_understand` (hot-reload TOCTOU)
+- `error:function_clause` → `arity_mismatch`
+- `error:badarith` → `type_error`
+- any other `error:Reason` → `runtime_error` catch-all
+- `exit:*` / `throw:*` → re-raised unchanged with the captured stacktrace so
+  process exit and foreign throws stay semantically meaningful
+""".
+-spec classify_ffi_exception(
+    atom(),
+    term(),
+    list(),
+    atom(),
+    atom(),
+    list(),
+    atom(),
+    error_context(),
+    fun((atom(), atom(), list(), atom(), error_context(), list()) -> no_return())
+) -> no_return().
+classify_ffi_exception(
+    error, #{error := #beamtalk_error{}} = Wrapped, Stack, _M, _F, _Args, _Sel, _Ctx, _OnBadarg
+) ->
+    %% Re-raise already-wrapped Beamtalk exceptions unchanged (e.g. from Beamtalk
+    %% code reached via Erlang). Idempotent.
+    erlang:raise(error, Wrapped, Stack);
+classify_ffi_exception(error, #beamtalk_error{} = Rec, Stack, _M, _F, _Args, _Sel, _Ctx, _OnBadarg) ->
+    %% A bare #beamtalk_error{} record raised by an Erlang shim is already
+    %% classified — wrap into the map form *preserving its kind* (idempotent); do
+    %% not reclassify it as a generic runtime_error.
+    erlang:raise(error, beamtalk_exception_handler:wrap(Rec), Stack);
+classify_ffi_exception(
+    error, badarg, Stack, Module, FunName, Args, OrigSelector, Context, OnBadarg
+) ->
+    OnBadarg(Module, FunName, Args, OrigSelector, Context, Stack);
+classify_ffi_exception(
+    error, undef, _Stack, Module, FunName, Args, OrigSelector, Context, _OnBadarg
+) ->
+    %% TOCTOU / hot code reload: function unloaded between check and apply.
+    raise_undef_error(Module, FunName, length(Args), OrigSelector, Context);
+classify_ffi_exception(
+    error, function_clause, Stack, Module, FunName, _Args, OrigSelector, Context, _OnBadarg
+) ->
+    raise_function_clause_error(Module, FunName, OrigSelector, Context, Stack);
+classify_ffi_exception(
+    error, badarith, Stack, Module, FunName, _Args, OrigSelector, Context, _OnBadarg
+) ->
+    raise_badarith_error(Module, FunName, OrigSelector, Context, Stack);
+classify_ffi_exception(
+    error, Reason, Stack, Module, FunName, _Args, OrigSelector, Context, _OnBadarg
+) ->
+    %% Catch-all that makes casual FFI safe by default (ADR 0101 Part 2).
+    raise_generic_error(Module, FunName, OrigSelector, Context, Reason, Stack);
+classify_ffi_exception(Class, Reason, Stack, _M, _F, _Args, _Sel, _Ctx, _OnBadarg) ->
+    %% exit:* and throw:* propagate unchanged — re-raising with the captured
+    %% stacktrace is transparent, but lets a single catch own the whole policy.
+    erlang:raise(Class, Reason, Stack).
 
 %%% ============================================================================
 %%% Internal helpers
@@ -530,8 +600,31 @@ classifier rather than re-deriving FFI error text in the proxy.
 -spec raise_generic_error(atom(), atom(), atom(), error_context(), term(), list()) -> no_return().
 raise_generic_error(_Module, _FunName, OrigSelector, Context, Reason, Stack) ->
     Ctx = generic_error_context(Context, OrigSelector),
-    Wrapped = beamtalk_exception_handler:ensure_wrapped(error, Reason, Stack, Ctx),
+    Wrapped0 = beamtalk_exception_handler:ensure_wrapped(error, Reason, Stack, Ctx),
+    %% BT-2730: keep the FFI `details` contract uniform. The specific clauses
+    %% (raise_wrapped_error/7) store the raw Erlang fault under `erlang_error`
+    %% (+ `erlang_stacktrace`); the shared classifier (wrap_raw) instead records
+    %% the canonical `reason`/`key`/`value`. Backfill the FFI keys here — without
+    %% clobbering a classifier key — so `details at: #erlang_error` resolves on
+    %% every wrapped FFI error, whichever clause produced it.
+    Wrapped = backfill_ffi_error_details(Wrapped0, Reason, Stack),
     erlang:raise(error, Wrapped, Stack).
+
+-doc """
+Merge the FFI `details` contract keys (`erlang_error` + `erlang_stacktrace`) into
+a generically-wrapped error so its details shape matches the specific clauses
+(BT-2730). `maps:merge/2` puts the wrapped error's own keys first so an existing
+`erlang_error`/`erlang_stacktrace` (there is none today, but stay defensive) is
+never overwritten.
+""".
+-spec backfill_ffi_error_details(map(), term(), list()) -> map().
+backfill_ffi_error_details(
+    #{error := #beamtalk_error{details = Details} = Err} = Wrapped, Reason, Stack
+) ->
+    Merged = maps:merge(#{erlang_error => Reason, erlang_stacktrace => Stack}, Details),
+    Wrapped#{error => Err#beamtalk_error{details = Merged}};
+backfill_ffi_error_details(Wrapped, _Reason, _Stack) ->
+    Wrapped.
 
 -doc """
 Build the dispatch breadcrumb map (`#{class, selector}`) handed to
