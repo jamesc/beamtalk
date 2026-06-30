@@ -21,7 +21,7 @@ abstract nil subclass: ProtoObject
   /// 42 == 42           // => true
   /// "abc" == "abc"     // => true
   /// ```
-  == other -> Boolean => @primitive
+  == other -> Boolean => @intrinsic "=="
 
   /// Test value inequality (negation of `==`).
   ///
@@ -30,7 +30,7 @@ abstract nil subclass: ProtoObject
   /// 1 /= 2             // => true
   /// 42 /= 42           // => false
   /// ```
-  /= other -> Boolean => @primitive
+  /= other -> Boolean => @intrinsic "/="
 
   /// Return the class of the receiver.
   ///
@@ -39,7 +39,7 @@ abstract nil subclass: ProtoObject
   /// 42 class            // => Integer
   /// "hello" class       // => String
   /// ```
-  class => @primitive
+  class => @intrinsic "class"
 
   /// Handle messages the receiver does not understand. Override for custom dispatch.
   ///
@@ -47,7 +47,8 @@ abstract nil subclass: ProtoObject
   /// ```beamtalk
   /// 42 unknownMessage   // => ERROR: does_not_understand
   /// ```
-  doesNotUnderstand: selector args: arguments => @primitive
+  doesNotUnderstand: selector args: arguments =>
+    @intrinsic "doesNotUnderstand:args:"
 
   /// Send a message dynamically with an arguments list.
   ///
@@ -55,7 +56,8 @@ abstract nil subclass: ProtoObject
   /// ```beamtalk
   /// 42 perform: #abs withArguments: #()   // => 42
   /// ```
-  perform: selector withArguments: arguments => @primitive
+  perform: selector withArguments: arguments =>
+    @intrinsic "perform:withArguments:"
 
   /// Execute a class method in the caller's process, bypassing gen_server dispatch.
   ///
@@ -71,7 +73,8 @@ abstract nil subclass: ProtoObject
   /// ```beamtalk
   /// MyClass performLocally: #run:ctx: withArguments: #(input, ctx)
   /// ```
-  performLocally: selector withArguments: arguments => @primitive
+  performLocally: selector withArguments: arguments =>
+    @intrinsic "performLocally:withArguments:"
 
   /// Send a message dynamically with an arguments list and explicit timeout.
   ///
@@ -82,4 +85,5 @@ abstract nil subclass: ProtoObject
   /// ```beamtalk
   /// actor perform: #query withArguments: #(sql) timeout: 30000
   /// ```
-  perform: selector withArguments: arguments timeout: timeoutMs => @primitive
+  perform: selector withArguments: arguments timeout: timeoutMs =>
+    @intrinsic "perform:withArguments:timeout:"

@@ -2483,7 +2483,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_internal: false,
             package: Some("stdlib".into()),
             is_value: false,
-            is_native: false,
+            is_native: true,
             state: vec![],
             state_types: HashMap::new(),
             state_has_default: HashMap::new(),
@@ -2493,7 +2493,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "close".into(), arity: 0, kind: MethodKind::Primary, defined_in: "ReactiveSubprocess".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![], doc: Some("Force-close the subprocess (sends kill to process group).\n\n## Examples\n```beamtalk\nproc close.\n```".into()) },
             ],
             class_methods: vec![
-                MethodInfo { selector: "open:args:notify:".into(), arity: 3, kind: MethodKind::Primary, defined_in: "ReactiveSubprocess".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Result(ReactiveSubprocess, Error)".into()), param_types: vec![Some("String".into()), Some("List(String)".into()), Some("Actor".into())], doc: Some("Open a subprocess in push mode, delivering lines to `notify`.\n\nThe `notify` actor receives async casts for each stdout line, stderr line,\nand the final exit code.\n\n## Examples\n```beamtalk\nproc := (ReactiveSubprocess open: \"echo\" args: #(\"hello\") notify: delegate) unwrap\n```".into()) },
+                MethodInfo { selector: "open:args:notify:".into(), arity: 3, kind: MethodKind::Primary, defined_in: "ReactiveSubprocess".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Result(ReactiveSubprocess, Error)".into()), param_types: vec![Some("String".into()), Some("List(String)".into()), Some("Actor".into())], doc: Some("Open a subprocess in push mode, delivering lines to `notify`.\n\nThe `notify` actor receives async casts for each stdout line, stderr line,\nand the final exit code.\n\nThe class-side constructors delegate to the backing module's validating\n`open` function via FFI (ADR 0101): the actor `native:` path provides no\nclass-side `self delegate`, and these constructors must validate arguments\nand spawn the child under the supervisor (isolated, so a bad argument\nraises a structured `type_error` without crashing the caller). Instance\nmethods below use the `native:` `self delegate` path.\n\n## Examples\n```beamtalk\nproc := (ReactiveSubprocess open: \"echo\" args: #(\"hello\") notify: delegate) unwrap\n```".into()) },
                 MethodInfo { selector: "open:args:env:dir:notify:".into(), arity: 5, kind: MethodKind::Primary, defined_in: "ReactiveSubprocess".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Result(ReactiveSubprocess, Error)".into()), param_types: vec![Some("String".into()), Some("List(String)".into()), Some("Dictionary".into()), Some("String".into()), Some("Actor".into())], doc: Some("Open a subprocess with environment and working directory, delivering lines to `notify`.\n\n## Examples\n```beamtalk\nproc := (ReactiveSubprocess\n  open: \"make\" args: #(\"test\")\n  env: #{#\"CI\" => #\"true\"} dir: #\"/tmp\"\n  notify: delegate) unwrap\n```".into()) },
             ],
             class_variables: vec![],

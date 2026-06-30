@@ -292,7 +292,7 @@ Object subclass: Actor
   /// ```beamtalk
   /// counter delegate   // => ERROR: delegate called on a non-native Actor
   /// ```
-  sealed delegate => @primitive "actorDelegate"
+  sealed delegate => @intrinsic "actorDelegate"
 
   /// Return the raw Erlang PID backing this actor.
   ///
@@ -303,7 +303,7 @@ Object subclass: Actor
   /// rawPid := counter pid
   /// rawPid class           // => Pid
   /// ```
-  sealed pid -> Pid => @primitive "actorPid"
+  sealed pid -> Pid => @intrinsic "actorPid"
 
   /// Create an Erlang monitor on this actor's process.
   ///
@@ -317,7 +317,7 @@ Object subclass: Actor
   /// ref class              // => Reference
   /// ref demonitor          // cancel the monitor
   /// ```
-  sealed monitor -> Reference => @primitive "actorMonitor"
+  sealed monitor -> Reference => @intrinsic "actorMonitor"
 
   /// Register a callback to be invoked when this actor exits.
   ///
@@ -331,7 +331,7 @@ Object subclass: Actor
   ///   Logger info: "worker exited" metadata: #{"reason" => reason displayString}
   /// ]
   /// ```
-  sealed onExit: block :: Block -> Symbol => @primitive "actorOnExit"
+  sealed onExit: block :: Block -> Symbol => @intrinsic "actorOnExit"
 
   /// Gracefully stop this actor (gen_server:stop).
   ///
@@ -342,7 +342,7 @@ Object subclass: Actor
   /// ```beamtalk
   /// counter stop   // => ok
   /// ```
-  sealed stop -> Symbol => @primitive "actorStop"
+  sealed stop -> Symbol => @intrinsic "actorStop"
 
   /// Forcefully kill this actor (exit(Pid, kill)).
   ///
@@ -352,7 +352,7 @@ Object subclass: Actor
   /// ```beamtalk
   /// counter kill   // => ok
   /// ```
-  sealed kill -> Symbol => @primitive "actorKill"
+  sealed kill -> Symbol => @intrinsic "actorKill"
 
   /// Check if this actor's process is still alive.
   ///
@@ -364,4 +364,4 @@ Object subclass: Actor
   /// ```beamtalk
   /// counter isAlive   // => true or false
   /// ```
-  sealed isAlive -> Boolean => @primitive "actorIsAlive"
+  sealed isAlive -> Boolean => @intrinsic "actorIsAlive"

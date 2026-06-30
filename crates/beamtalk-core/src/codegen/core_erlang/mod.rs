@@ -3335,9 +3335,10 @@ impl CoreErlangGenerator {
             //  - Stdlib mode only. User/FFI @primitive (via --allow-primitives)
             //    keeps BT-938's warn-and-fallback behavior for runtime dispatch.
             //  - Value-type context only. Actor classes legitimately route
-            //    unmapped quoted primitives through their hand-written
-            //    `beamtalk_X:dispatch` module (e.g. Actor's `actorPid`,
-            //    ReactiveSubprocess's `open:args:notify:`).
+            //    unmapped quoted primitives/intrinsics through their
+            //    hand-written `beamtalk_X:dispatch` module (e.g. Actor's
+            //    `actorPid`, now a quoted `@intrinsic`, and
+            //    ReactiveSubprocess's class-side `open:args:notify:`).
             //  - Excluding a small set of call-site-intercepted reflective /
             //    identity / dynamic operations whose method body is only a
             //    runtime-dispatch placeholder (see

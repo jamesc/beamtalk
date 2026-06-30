@@ -441,33 +441,32 @@ flush_and_collect_partial_result_test() ->
     ).
 
 %%% ============================================================================
-%%% Additional coverage — dispatch/3 type errors and DNU (BT-2456)
+%%% Additional coverage — class-side constructor type errors (ADR 0101)
 %%% ============================================================================
 
-dispatch_open_args_env_dir_notify_type_error_test() ->
-    %% Covers the type-error fallback clause for 'open:args:env:dir:notify:' (lines
-    %% 133–135): the guard requires is_binary(Command); passing an atom fails it.
+open_args_notify_type_error_test() ->
+    %% open/3 guard requires is_binary(Command); passing an atom fails it and
+    %% raises a structured type_error (called via FFI from the native: facade).
     ?assertError(
         #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_reactive_subprocess:dispatch(
-            'open:args:env:dir:notify:',
-            [
-                not_a_binary,
-                [],
-                #{},
-                <<"/dir">>,
-                #beamtalk_object{class = 'MockNotify', class_mod = 'mock', pid = self()}
-            ],
-            undefined
+        beamtalk_reactive_subprocess:open(
+            not_a_binary,
+            [],
+            #beamtalk_object{class = 'MockNotify', class_mod = 'mock', pid = self()}
         )
     ).
 
-dispatch_unknown_selector_raises_dnu_test() ->
-    %% Covers the catch-all dispatch/3 clause (lines 136–139): an unrecognised
-    %% selector raises a does_not_understand beamtalk_error.
+open_args_env_dir_notify_type_error_test() ->
+    %% open/5 guard requires is_binary(Command); passing an atom fails it.
     ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = does_not_understand}},
-        beamtalk_reactive_subprocess:dispatch('unknown:selector:', [], undefined)
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_reactive_subprocess:open(
+            not_a_binary,
+            [],
+            #{},
+            <<"/dir">>,
+            #beamtalk_object{class = 'MockNotify', class_mod = 'mock', pid = self()}
+        )
     ).
 
 %%% ============================================================================

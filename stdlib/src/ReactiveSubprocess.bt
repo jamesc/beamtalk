@@ -43,19 +43,29 @@
 /// ```
 ///
 /// @see Subprocess (for pull-mode synchronous I/O)
-typed Actor subclass: ReactiveSubprocess
+typed Actor subclass: ReactiveSubprocess native: beamtalk_reactive_subprocess
 
   /// Open a subprocess in push mode, delivering lines to `notify`.
   ///
   /// The `notify` actor receives async casts for each stdout line, stderr line,
   /// and the final exit code.
   ///
+  /// The class-side constructors delegate to the backing module's validating
+  /// `open` function via FFI (ADR 0101): the actor `native:` path provides no
+  /// class-side `self delegate`, and these constructors must validate arguments
+  /// and spawn the child under the supervisor (isolated, so a bad argument
+  /// raises a structured `type_error` without crashing the caller). Instance
+  /// methods below use the `native:` `self delegate` path.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// proc := (ReactiveSubprocess open: "echo" args: #("hello") notify: delegate) unwrap
   /// ```
   class open: command :: String args: args :: List(String) notify: notify :: Actor -> Result(ReactiveSubprocess, Error) =>
-    @primitive
+    (Erlang beamtalk_reactive_subprocess)
+      open: command
+      args: args
+      notify: notify
 
   /// Open a subprocess with environment and working directory, delivering lines to `notify`.
   ///
@@ -67,7 +77,12 @@ typed Actor subclass: ReactiveSubprocess
   ///   notify: delegate) unwrap
   /// ```
   class open: command :: String args: args :: List(String) env: env :: Dictionary dir: dir :: String notify: notify :: Actor -> Result(ReactiveSubprocess, Error) =>
-    @primitive
+    (Erlang beamtalk_reactive_subprocess)
+      open: command
+      args: args
+      env: env
+      dir: dir
+      notify: notify
 
   /// Write a line to the subprocess's stdin (appends newline).
   ///
@@ -75,7 +90,7 @@ typed Actor subclass: ReactiveSubprocess
   /// ```beamtalk
   /// proc writeLine: "{\"jsonrpc\":\"2.0\",\"method\":\"ping\"}"
   /// ```
-  writeLine: data :: String -> Nil => @primitive
+  writeLine: data :: String -> Nil => self delegate
 
   /// Get the exit code. Returns nil if the subprocess is still running.
   ///
@@ -83,7 +98,7 @@ typed Actor subclass: ReactiveSubprocess
   /// ```beamtalk
   /// proc exitCode.   // => 0
   /// ```
-  exitCode -> Integer | Nil => @primitive
+  exitCode -> Integer | Nil => self delegate
 
   /// Force-close the subprocess (sends kill to process group).
   ///
@@ -91,4 +106,4 @@ typed Actor subclass: ReactiveSubprocess
   /// ```beamtalk
   /// proc close.
   /// ```
-  close -> Nil => @primitive
+  close -> Nil => self delegate

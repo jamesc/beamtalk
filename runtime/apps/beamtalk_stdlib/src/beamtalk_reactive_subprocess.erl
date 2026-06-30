@@ -60,8 +60,9 @@ The `notify` actor must implement:
 
 %% Public API
 -export([start_link/1, start/1]).
-%% Class-side @primitive dispatch (called from compiled bt@stdlib@reactive_subprocess)
--export([dispatch/3]).
+%% Class-side constructors (ADR 0101): called via FFI from the compiled
+%% `bt@stdlib@reactive_subprocess` native facade's class methods.
+-export([open/3, open/5]).
 
 %% gen_server callbacks
 -export([
@@ -86,19 +87,21 @@ The `notify` actor must implement:
 }.
 
 %%% ============================================================================
-%%% Class-side @primitive dispatch
+%%% Class-side constructors (ADR 0101)
 %%% ============================================================================
 
 -doc """
-Dispatch a class-side @primitive method call for ReactiveSubprocess.
+Open a reactive subprocess (push mode), delivering lines to `Notify`.
 
-Called by the compiled `bt@stdlib@reactive_subprocess:dispatch/3` for
-class-side `@primitive` annotations: `open:args:notify:` and
-`open:args:env:dir:notify:`.
+Called via FFI from `ReactiveSubprocess open:args:notify:` (the `native:` facade
+has no class-side `self delegate`). Validates arguments and spawns the child
+under `beamtalk_reactive_subprocess_sup` (supervisor-isolated), so a bad
+argument raises a structured `type_error` and a spawn failure surfaces as
+`Result error:` — neither crashes the calling class process. Returns
+`Result ok: proc` on success.
 """.
--spec dispatch(atom(), list(), term()) -> term().
-
-dispatch('open:args:notify:', [Command, Args, Notify], _ClassSelf) when
+-spec open(term(), term(), term()) -> beamtalk_result:t().
+open(Command, Args, Notify) when
     is_binary(Command), is_record(Notify, beamtalk_object)
 ->
     ArgsList = beamtalk_subprocess_port:bt_array_to_list(
@@ -110,10 +113,18 @@ dispatch('open:args:notify:', [Command, Args, Notify], _ClassSelf) when
     start_subprocess(
         #{executable => Command, args => ArgsList, notify => Notify}, 'open:args:notify:'
     );
-dispatch('open:args:notify:', [_Command, _Args, _Notify], _ClassSelf) ->
+open(_Command, _Args, _Notify) ->
     Err = beamtalk_error:new(type_error, 'ReactiveSubprocess', 'open:args:notify:'),
-    beamtalk_error:raise(Err);
-dispatch('open:args:env:dir:notify:', [Command, Args, Env, Dir, Notify], _ClassSelf) when
+    beamtalk_error:raise(Err).
+
+-doc """
+Open a reactive subprocess with environment and working directory.
+
+Class-side constructor for `ReactiveSubprocess open:args:env:dir:notify:`; see
+`open/3` for the validation/spawn contract.
+""".
+-spec open(term(), term(), term(), term(), term()) -> beamtalk_result:t().
+open(Command, Args, Env, Dir, Notify) when
     is_binary(Command), is_binary(Dir), is_map(Env), is_record(Notify, beamtalk_object)
 ->
     ArgsList = beamtalk_subprocess_port:bt_array_to_list(
@@ -130,13 +141,9 @@ dispatch('open:args:env:dir:notify:', [Command, Args, Env, Dir, Notify], _ClassS
         #{executable => Command, args => ArgsList, env => EnvMap, dir => Dir, notify => Notify},
         'open:args:env:dir:notify:'
     );
-dispatch('open:args:env:dir:notify:', [_Command, _Args, _Env, _Dir, _Notify], _ClassSelf) ->
+open(_Command, _Args, _Env, _Dir, _Notify) ->
     Err = beamtalk_error:new(type_error, 'ReactiveSubprocess', 'open:args:env:dir:notify:'),
-    beamtalk_error:raise(Err);
-dispatch(Selector, _Args, _Self) ->
-    Err0 = beamtalk_error:new(does_not_understand, 'ReactiveSubprocess'),
-    Err1 = beamtalk_error:with_selector(Err0, Selector),
-    beamtalk_error:raise(Err1).
+    beamtalk_error:raise(Err).
 
 -doc """
 Start a supervised beamtalk_reactive_subprocess gen_server.
