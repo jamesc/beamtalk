@@ -15,6 +15,15 @@
 /// ```
 ProtoObject subclass: Object
 
+  /// Class-side `delegate` sentinel (ADR 0101, BT-2720).
+  ///
+  /// Mirrors the instance-side sentinel for class-method bodies. A `native:`
+  /// Object's class-side constructors (e.g. `Stream class from:`) use
+  /// `self delegate`, where `self` is the class object; this sentinel makes
+  /// those bodies typecheck and is the runtime safety net on a non-native class.
+  class sealed delegate -> Never =>
+    self error: "delegate called on a non-native Object"
+
   /// Return the class of the receiver.
   ///
   /// ## Examples
@@ -285,3 +294,22 @@ ProtoObject subclass: Object
   /// self error: "something went wrong"
   /// ```
   error: message :: String -> Never => @intrinsic error
+
+  /// Delegate message dispatch to the backing Erlang module (ADR 0101, BT-2720).
+  ///
+  /// This method is a sentinel — a plain `Object` has no backing Erlang module,
+  /// so calling `delegate` raises an Error at runtime. Stateless `Object`s
+  /// declared with `native:` have their `self delegate` method bodies rewritten
+  /// by the compiler's codegen phase to call the backing module directly, so the
+  /// sentinel is never reached on a `native:` class.
+  ///
+  /// Unlike `Actor`'s `delegate` (visible only to `Actor` subclasses), this
+  /// `Object`-base sentinel is visible to *every* class, so `delegate` is a
+  /// reserved selector on the Object protocol.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 42 delegate   // => ERROR: delegate called on a non-native Object
+  /// ```
+  sealed delegate -> Never =>
+    self error: "delegate called on a non-native Object"

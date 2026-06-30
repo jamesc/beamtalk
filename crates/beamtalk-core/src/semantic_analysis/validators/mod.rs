@@ -36,7 +36,10 @@ pub(crate) use lint_validators::{
     check_redundant_super_initialize,
 };
 pub(crate) use match_validators::{check_match_exhaustiveness, warn_assignment_in_match_arms};
-pub(crate) use native_validators::{check_native_delegate_return_type, check_native_state_fields};
+pub(crate) use native_validators::{
+    check_native_delegate_reserved_word, check_native_delegate_return_type,
+    check_native_state_fields,
+};
 pub(crate) use package_validators::check_package_qualifiers;
 pub(crate) use structural_validators::{
     check_ffi_arity, check_unresolved_classes, check_unresolved_ffi_modules,

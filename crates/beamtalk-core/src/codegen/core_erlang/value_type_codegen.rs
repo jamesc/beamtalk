@@ -1330,10 +1330,66 @@ impl CoreErlangGenerator {
     ///
     /// Value type methods are pure functions that take Self as first parameter
     /// and return a new instance (immutable semantics).
+    /// ADR 0101 / BT-2720: Build the body of a `self delegate` method on a
+    /// `native:` Object as a call through the unified FFI boundary.
+    ///
+    /// Lowers to:
+    /// ```erlang
+    /// call 'beamtalk_erlang_proxy':'native_call'(
+    ///     'BackingModule', 'fnName', [Arg1, ...], {'ClassName', 'selector:'})
+    /// ```
+    ///
+    /// `arg_vars` are the Core Erlang variables to forward verbatim — the caller
+    /// prepends `Self` for instance methods and omits it for class methods. The
+    /// `{Class, Sel}` context lets the proxy report `ClassName>>selector:` on a
+    /// wrapped error instead of the bare Erlang MFA. Routing through
+    /// `native_call/4` (rather than a bare `Mod:Fn` call) is what gives the
+    /// generated dispatch wrap-by-default error handling and ADR 0076
+    /// ok/error → `Result` coercion, identical to inline `(Erlang …)` FFI.
+    pub(in crate::codegen::core_erlang) fn native_delegate_body_doc(
+        backing_module: &str,
+        class_name: &str,
+        selector: &MessageSelector,
+        arg_vars: &[String],
+    ) -> Document<'static> {
+        let fn_name = Self::native_delegate_fn_name(selector);
+        let args_list = join(
+            arg_vars.iter().map(|v| leaf::var(v.clone())),
+            &Document::Str(", "),
+        );
+        docvec![
+            "call 'beamtalk_erlang_proxy':'native_call'(",
+            leaf::atom(backing_module.to_string()),
+            ", ",
+            leaf::atom(fn_name),
+            ", [",
+            args_list,
+            "], {",
+            leaf::atom(class_name.to_string()),
+            ", ",
+            leaf::atom(selector.to_erlang_atom()),
+            "})"
+        ]
+    }
+
+    /// ADR 0101 / BT-2720: the Erlang function name a `native:` `self delegate`
+    /// method calls — the first keyword with its colon removed (or the bare
+    /// unary/binary selector). Mirrors the inline-FFI naming convention
+    /// (`docs/beamtalk-native-erlang.md`): `select: pred` → `select`,
+    /// `inject: i into: b` → `inject`, unary `asList` → `asList`.
+    pub(in crate::codegen::core_erlang) fn native_delegate_fn_name(
+        selector: &MessageSelector,
+    ) -> String {
+        match selector {
+            MessageSelector::Unary(name) | MessageSelector::Binary(name) => name.to_string(),
+            MessageSelector::Keyword(parts) => parts[0].keyword.trim_end_matches(':').to_string(),
+        }
+    }
+
     fn generate_value_type_method(
         &mut self,
         method: &MethodDefinition,
-        _class: &ClassDefinition,
+        class_def: &ClassDefinition,
     ) -> Result<Document<'static>> {
         let mangled = method.selector.to_erlang_atom();
         let arity = method.parameters.len() + 1; // +1 for Self
@@ -1357,6 +1413,29 @@ impl CoreErlangGenerator {
             // BT-2709: Record declared type for the arithmetic fast path.
             self.record_method_param_type(&param.name.name, param.type_annotation.as_ref());
             params.push(var_name);
+        }
+
+        // ADR 0101 / BT-2720: On a `native:` Object, a `self delegate` body
+        // lowers through the unified FFI boundary (`beamtalk_erlang_proxy:
+        // native_call/4`) carrying `{Class, Sel}` — instance methods prepend
+        // `Self` to the arg list (`params` already starts with Self).
+        if let Some(backing) = class_def.backing_module.as_ref() {
+            if method.is_self_delegate() {
+                self.pop_scope();
+                self.current_method_selector = None;
+                let body = Self::native_delegate_body_doc(
+                    backing.name.as_str(),
+                    class_def.name.name.as_str(),
+                    &method.selector,
+                    &params,
+                );
+                let params_doc = join(params.into_iter().map(leaf::var), &Document::Str(", "));
+                let mut fun_doc = docvec!["fun (", params_doc, ") ->\n    ", body, "\n"];
+                if let Some(line_num) = self.span_to_line(method.span) {
+                    fun_doc = self.annotate_with_line(fun_doc, line_num);
+                }
+                return Ok(docvec![leaf::fname(mangled, arity), " = ", fun_doc, "\n"]);
+            }
         }
 
         // BT-754: Detect whether any block argument in this method body contains ^.

@@ -2312,8 +2312,30 @@ impl CoreErlangGenerator {
                 None
             };
 
+            // ADR 0101 / BT-2720: On a `native:` Object, a class-side
+            // `self delegate` body lowers through the unified FFI boundary,
+            // omitting `self` from the arg list (class methods are not
+            // instances). Gated to value-type codegen so native *actor* class
+            // methods (compiled via the native facade with context=Actor) keep
+            // their existing lowering.
+            let native_class_delegate = matches!(self.context, CodeGenContext::ValueType)
+                && method.is_self_delegate()
+                && class.backing_module.is_some();
+
             // Generate body as Document and keep it in the Document pipeline (BT-875).
-            let body_doc: Document<'static> = if method.body.is_empty() {
+            let body_doc: Document<'static> = if native_class_delegate {
+                self.set_current_nlr_token(None);
+                let backing = class
+                    .backing_module
+                    .as_ref()
+                    .expect("native_class_delegate implies backing_module is Some");
+                Self::native_delegate_body_doc(
+                    backing.name.as_str(),
+                    class.name.name.as_str(),
+                    &method.selector,
+                    &param_vars,
+                )
+            } else if method.body.is_empty() {
                 self.set_current_nlr_token(None);
                 // Empty class method body returns self (ClassSelf)
                 docvec!["ClassSelf"]
