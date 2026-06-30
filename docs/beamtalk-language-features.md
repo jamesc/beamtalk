@@ -753,13 +753,18 @@ proxy strong_rand_bytes: 16            // => random binary
 The `(Erlang module)` pattern is used throughout the stdlib to wrap Erlang functions as Beamtalk class methods:
 
 ```beamtalk
-// How File.readAll: is implemented — a thin wrapper
+// How File.readAll: is implemented — a thin wrapper.
+// The `{ok, _} | {error, _}` tuples beamtalk_file returns become a Result
+// at the FFI boundary (see "Result conversion" below), so the return type
+// is Result(String, Error), not a bare String.
 Object subclass: File
-  class readAll: path :: String -> String =>
+  class readAll: path :: String -> Result(String, Error) =>
     (Erlang beamtalk_file) readAll: path
 ```
 
-**Keyword mapping:** Beamtalk keyword selectors map to Erlang function names by joining with underscores. `Erlang maps merge: a with: b` calls `maps:merge_with(A, B)`. Unary selectors map directly: `Erlang erlang node` calls `erlang:node()`.
+> A class that delegates *wholesale* to one Erlang module can declare the module on `subclass:` and replace each body with `=> self delegate` instead of hand-writing the FFI call — see [`native:` for stateless Objects](beamtalk-native-erlang.md#native-stateless-objects--native-for-object). `Stream` (`native: beamtalk_stream`) is the worked example.
+
+**Keyword mapping:** The Erlang function name is taken from the **first keyword** (with its colon removed); the remaining keyword *values* follow as positional arguments. `Erlang maps merge: a with: b` calls `maps:merge(A, B)` (not `maps:merge_with` — only the first keyword names the function). Unary selectors map directly: `Erlang erlang node` calls `erlang:node()`.
 
 **Result conversion (ADR 0076):** Erlang functions that return `{ok, Value}` or `{error, Reason}` tuples are automatically converted to `Result` objects at the FFI boundary. This means FFI calls use the same error-handling idiom as native Beamtalk code:
 
@@ -824,13 +829,28 @@ result ifOk: [:content | content] ifError: [:e | "error"]
 result value  // raises on error
 ```
 
-**Error handling:** Errors from Erlang calls are wrapped as `BEAMError`, `ExitError`, or `ThrowError` — catchable with `on:do:`. The handler block parameter is typed from the exception class argument, so `e` in `on: BEAMError do: [:e | ...]` is inferred as `BEAMError` (not `Dynamic`):
+**Error handling — wrap by default (ADR 0101):** every FFI call is *safe by default*. The boundary treats the two channels a BEAM function can use independently, and they are mutually exclusive per call (a function either returns or raises):
+
+| Outcome of the call | Channel | Beamtalk result | Handle with |
+|---------------------|---------|-----------------|-------------|
+| *returns* `{ok, V}` / `{error, R}` | return value | a `Result(V, R)` **value** | `isOk` / `value` / `andThen:` |
+| *raises* `error:Reason` (`badarg`, `{badkey,_}`, `function_clause`, …) | exception | a **raised** `#beamtalk_error{}` | `on:do:` / `ensure:`, or bubbles to the REPL |
+| *raises* `exit:Reason` | exception | **propagates** unwrapped (an enclosing `on:do:` catches it as `erlang_exit`) | supervision / let-it-crash |
+| *raises* `throw:Term` | exception | **passes through** unchanged | `^` / Beamtalk exceptions |
+
+The guarantee: **a user never sees a raw Erlang error tuple.** A `badarg` becomes a structured `#beamtalk_error{}` (kind `type_error`) with a hint, not a bare `{badarg, [...]}` — most visible at the REPL, where the abstraction is most exposed. `exit:`/`throw:` are deliberately *not* wrapped, so `(Erlang erlang) exit: #killed` still terminates the process with reason `killed`.
+
+**Same function, both channels.** Because the channels are orthogonal, one function can use both: `File readAll:` *returns* a `Result error:` for the modeled missing-file case, but *raises* a `#beamtalk_error{}` if called with a non-String path. The rule is **`Result` for expected/recoverable outcomes the API models, exceptions for misuse/faults.** Wrapping changes no return type — a raised `#beamtalk_error{}` is invisible to the type system, so `Result` stays the only type-visible error channel.
+
+A raised FFI error is catchable as `BEAMError`, `ExitError`, or `ThrowError`. The handler block parameter is typed from the exception class argument, so `e` in `on: BEAMError do: [:e | ...]` is inferred as `BEAMError` (not `Dynamic`):
 
 ```beamtalk
 [Erlang erlang error: #badarg] on: BEAMError do: [:e | e message]
 // => "badarg"
 // e is typed as BEAMError — `e message` type-checks without warnings
 ```
+
+A `native:` method's wrapped error carries the Beamtalk `Class`/selector (e.g. `Type error in 'take:' on Stream`), whereas inline `(Erlang …)` FFI carries the Erlang-facing `ErlangModule` context (e.g. `Type error in 'atom_to_list' on ErlangModule`) — a documented limitation, since the proxy knows the MFA but not the calling class.
 
 ### Type Specs for Native Modules
 
@@ -4423,6 +4443,8 @@ hash => @intrinsic hash
 ```
 
 The full list of structural intrinsics: `actorSpawn`, `actorSpawnWith`, `blockValue`, `blockValue1`–`blockValue3`, `whileTrue`, `whileFalse`, `repeat`, `onDo`, `ensure`, `timesRepeat`, `toDo`, `toByDo`, `basicNew`, `basicNewWith`, `hash`, `respondsTo`, `fieldNames`, `fieldAt`, `fieldAtPut`, `dynamicSend`, `dynamicSendWithArgs`, `error`.
+
+**Relationship to `native:` (ADR 0101).** `@primitive` and `@intrinsic` cover native BEAM *value types* and compiler *substrate*. A third mechanism, the class-level `native:` declaration with `=> self delegate` bodies, covers whole-class **delegation** to a single Erlang module (a stateless `Object` such as `Stream`, or an `Actor` gen_server). Pick by what the method needs: guarded dispatch + the open-world extension registry → `@primitive`; the dispatch act itself (`==`, `class`, `perform:`, actor lifecycle) → `@intrinsic`; pure pass-through to one module → `native:`. See [`native:` for stateless Objects](beamtalk-native-erlang.md#native-stateless-objects--native-for-object).
 
 ---
 
