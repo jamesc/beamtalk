@@ -147,6 +147,11 @@ sealed typed Value subclass: DateTime native: beamtalk_datetime
   diffSeconds: other :: DateTime -> Integer => self delegate
 
   // ===== Instance Methods — Comparison =====
+  //
+  // These 7 operators stay inline FFI (not `self delegate`, ADR 0101 / BT-2731):
+  // an operator selector (`<`, `=:=`, …) is not a valid Erlang function name, so
+  // `self delegate` cannot emit the call. They dispatch through the named shims
+  // `lt`/`gt`/`lte`/`gte`/`eql`/`sneq`/`neq` instead (still wrapped-by-default).
 
   /// True if this DateTime is earlier than `other`.
   ///

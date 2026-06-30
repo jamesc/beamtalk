@@ -17,6 +17,12 @@
 /// WorkspaceInterface current actorsOf: Counter
 /// ```
 sealed typed Object subclass: WorkspaceInterface
+  // Stays inline FFI rather than `native:` (ADR 0101 / BT-2731): like
+  // BeamtalkInterface, this is a receiver-ignoring singleton facade. Its backing
+  // functions are arity-0/N and operate on workspace/ETS state without
+  // consulting the receiver, so the self-threading `self delegate` form would be
+  // wrong. The methods stay receiver-ignoring instance FFI, wrapped-by-default
+  // since BT-2722.
   classState: current :: WorkspaceInterface | Nil = nil
 
   /// Return the current singleton instance.

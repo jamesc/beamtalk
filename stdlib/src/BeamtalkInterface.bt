@@ -15,6 +15,12 @@
 /// Beamtalk classNamed: #Integer
 /// ```
 sealed typed Object subclass: BeamtalkInterface
+  // Stays inline FFI rather than `native:` (ADR 0101 / BT-2731): this is a
+  // receiver-ignoring singleton facade. Its backing functions are arity-0/N and
+  // read global state (class registry, logger config) without consulting the
+  // receiver, so the first-keyword + self-threading `self delegate` form would
+  // be wrong (it would pass a meaningless `self`). The methods stay
+  // receiver-ignoring instance FFI, wrapped-by-default since BT-2722.
   classState: current :: BeamtalkInterface | Nil = nil
 
   /// Return the current singleton instance (nil before workspace bootstrap).

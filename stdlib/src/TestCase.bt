@@ -24,6 +24,13 @@
 /// ```
 Value subclass: TestCase
 
+  // Stays inline FFI rather than `native:` (ADR 0101 / BT-2731): only one method
+  // (`suiteFixture`) is first-keyword + self-threaded, and it lacks a return type
+  // (a `self delegate` body requires one). `fail:`/`skip:` don't thread `self`,
+  // and `run:`/`should:raise:` use renamed/reserved backing names. Adding
+  // `native:` to this heavily-subclassed base test class for one method isn't
+  // worth it; all methods stay inline FFI, wrapped-by-default since BT-2722.
+
   /// Run all test methods in this class and print a summary.
   ///
   /// ## Examples
