@@ -57,3 +57,23 @@ TestCase subclass: ErlangInteropTest
     directSeq := Erlang lists seq: 1 with: 5
     proxySeq := proxyLists seq: 1 with: 5
     self assert: (directSeq =:= proxySeq)
+
+  // BT-2723 / ADR 0101 Part 2: wrap-by-default. A raw FFI error:* from a
+  // backing module that has NO per-module try...catch wrapper (the `erlang`
+  // module is raw OTP) must still surface as a structured #beamtalk_error{}
+  // at the proxy boundary — never a raw `badarg` atom. `erlang:abs/1` on a
+  // non-number raises error:badarg, which the proxy wraps as a type_error.
+  testRawFfiBadargSurfacesAsStructuredError =>
+    kind := [(Erlang erlang) abs: #notanumber] on: TypeError do: [:e | e kind]
+    self assert: kind equals: #type_error
+
+  testRawFfiBadargIsCatchableAsExceptionWithCoherentMessage =>
+    // Catchable not just as the specific TypeError but as the broad Exception
+    // root, and the wrapped error is structurally identified (kind) and carries
+    // a coherent String message — never a raw `badarg` atom leaking the host VM.
+    caught := [(Erlang erlang) abs: #notanumber] on: Exception do: [:e | e]
+    self assert: caught kind equals: #type_error
+    self assert: caught message class equals: String
+    // ...and the human-readable message never leaks the raw `badarg` atom
+    // (the raw reason lives in `hint` and `details`, not the user-facing message).
+    self assert: (caught message includesSubstring: "badarg") equals: false
