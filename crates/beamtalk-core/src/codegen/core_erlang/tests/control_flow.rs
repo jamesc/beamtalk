@@ -964,3 +964,108 @@ fn test_vt_nested_loop_in_conditional_assign_rhs_threads_local() {
         "Nested loop inside a conditional assign-RHS branch must thread 'sum'. Got:\n{code}"
     );
 }
+
+// BT-2378: Actor-boundary conditional threading — last-position and assign-RHS paths.
+//
+// All existing BT-915 tests cover the *non-last* Actor path: the conditional is
+// followed by another expression (e.g. `.self.count`), so the framework only needs
+// to extract NewState via element(2,…) and continue.  The *last* position path
+// (`lower_actor_threaded_last`) and the assign-RHS path (`emit_actor_threaded_assign_rhs`)
+// were entirely uncovered.
+
+#[test]
+fn test_bt2378_actor_conditional_with_mutations_as_last_expr_threads_reply() {
+    // BT-2378: When a conditional (ifTrue:ifFalse:) containing a field mutation is
+    // the LAST (sole) expression in an Actor method, `lower_actor_threaded_last` must
+    // unpack the {Reply, NewState} tuple and feed both halves into the gen_server reply.
+    //
+    // Exercises: lower_actor_threaded_last, threading_result_tail(Actor boundary).
+    let src = "Actor subclass: Ctr
+  state: count = 0
+
+  increment: flag =>
+    flag ifTrue: [self.count := self.count + 1. 42] ifFalse: [0]
+";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("ctr_last_cond").with_workspace_mode(true),
+    )
+    .expect("codegen should succeed");
+
+    eprintln!("BT-2378 Actor last-position conditional with mutation:\n{code}");
+
+    // element(1, Tuple) extracts the Reply value from {Reply, NewState}
+    assert!(
+        code.contains("'erlang':'element'(1,"),
+        "BT-2378: lower_actor_threaded_last must extract Reply via element(1, …). Got:\n{code}"
+    );
+    // element(2, Tuple) extracts the new gen_server State map
+    assert!(
+        code.contains("'erlang':'element'(2,"),
+        "BT-2378: lower_actor_threaded_last must extract NewState via element(2, …). Got:\n{code}"
+    );
+    // The true branch mutates the count field
+    assert!(
+        code.contains("maps':'put'('count'"),
+        "BT-2378: true branch must update 'count' via maps:put. Got:\n{code}"
+    );
+    // The conditional must be compiled as an inline case (not runtime dispatch)
+    assert!(
+        code.contains("case "),
+        "BT-2378: ifTrue:ifFalse: with mutations must compile to an inline case. Got:\n{code}"
+    );
+    // Mutation threading uses StateAcc inside branches
+    assert!(
+        code.contains("StateAcc"),
+        "BT-2378: mutation-threading branch must use StateAcc. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_bt2378_actor_assign_rhs_conditional_with_mutations_advances_state() {
+    // BT-2378: When `r := flag ifTrue: [<field mutation>] ifFalse: [...]` appears
+    // in an Actor method, `emit_actor_threaded_assign_rhs` must:
+    //   1. bind `r` to element(1, Tuple) — the conditional's logical result, and
+    //   2. advance the gen_server State to element(2, Tuple) — the post-mutation State.
+    //
+    // Exercises: emit_actor_threaded_assign_rhs (LocalAssignControlFlow path).
+    let src = "Actor subclass: Ctr
+  state: count = 0
+
+  test: flag =>
+    r := flag ifTrue: [self.count := self.count + 1. 42] ifFalse: [0]
+    self.count
+";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("ctr_assign_rhs").with_workspace_mode(true),
+    )
+    .expect("codegen should succeed");
+
+    eprintln!("BT-2378 Actor assign-RHS conditional with mutation:\n{code}");
+
+    // element(1, Tuple) binds `r` to the conditional's logical result (42 or 0)
+    assert!(
+        code.contains("'erlang':'element'(1,"),
+        "BT-2378: emit_actor_threaded_assign_rhs must bind target to element(1, …). Got:\n{code}"
+    );
+    // element(2, Tuple) advances the State for subsequent expressions
+    assert!(
+        code.contains("'erlang':'element'(2,"),
+        "BT-2378: emit_actor_threaded_assign_rhs must advance State via element(2, …). Got:\n{code}"
+    );
+    // The true branch must still mutate the count field
+    assert!(
+        code.contains("maps':'put'('count'"),
+        "BT-2378: true branch must update 'count' via maps:put. Got:\n{code}"
+    );
+    // The conditional is compiled as an inline case
+    assert!(
+        code.contains("case "),
+        "BT-2378: ifTrue:ifFalse: with mutations must compile to an inline case. Got:\n{code}"
+    );
+}
