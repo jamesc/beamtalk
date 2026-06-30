@@ -129,7 +129,7 @@ unsubscribe(TranscriptRef) ->
 -doc "Initialize the TranscriptStream gen_server with the given buffer size.".
 -spec init([max_buffer()]) -> {ok, state()} | {stop, term()}.
 init([MaxBuffer]) when is_integer(MaxBuffer), MaxBuffer > 0 ->
-    logger:set_process_metadata(#{domain => [beamtalk, stdlib]}),
+    beamtalk_logging_config:set_domain(stdlib),
     SelfRef = {beamtalk_object, 'TranscriptStream', beamtalk_transcript_stream, self()},
     {ok, #state{
         buffer = queue:new(),

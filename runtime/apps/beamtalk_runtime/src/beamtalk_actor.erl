@@ -1460,7 +1460,7 @@ State must be a map containing '$beamtalk_class' and '__methods__' keys.
 """.
 -spec init(map()) -> {ok, map()} | {stop, term()}.
 init(State) when is_map(State) ->
-    logger:set_process_metadata(#{domain => [beamtalk, runtime]}),
+    beamtalk_logging_config:set_domain(runtime),
     %% Validate required keys
     ClassKey = beamtalk_tagged_map:class_key(),
     case maps:find(ClassKey, State) of

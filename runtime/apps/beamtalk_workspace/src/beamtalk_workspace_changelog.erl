@@ -885,7 +885,7 @@ read_source_file(Ref) ->
 
 init(Config) ->
     %% Inherit the runtime logging domain for every log call from this process.
-    logger:set_process_metadata(#{domain => [beamtalk, runtime]}),
+    beamtalk_logging_config:set_domain(runtime),
     WorkspaceId = maps:get(workspace_id, Config, undefined),
     ChangesDir = changes_dir(WorkspaceId),
     ensure_ets(),

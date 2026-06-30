@@ -191,7 +191,7 @@ start(Config) ->
 -doc "Open the exec port, spawn the child subprocess, and store self-reference.".
 -spec init(config()) -> {ok, map()} | {stop, term()}.
 init(Config) ->
-    logger:set_process_metadata(#{domain => [beamtalk, stdlib]}),
+    beamtalk_logging_config:set_domain(stdlib),
     Executable = maps:get(executable, Config),
     Args = maps:get(args, Config, []),
     Options = maps:with([env, dir], Config),
