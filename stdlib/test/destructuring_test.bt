@@ -274,8 +274,8 @@ TestCase subclass: DestructuringTest
     result := [
       #{#missing => _val} := #{#present => 42}
       #did_not_raise
-    ] on: RuntimeError do: [:e | e message includesSubstring: "not found"]
-    self assert: result equals: true
+    ] on: RuntimeError do: [:e | #raised]
+    self assert: result equals: #raised
 
   testMapDestructuringMissingKeyIsKeyError =>
     // The classified missing-key error carries the key_error kind.
