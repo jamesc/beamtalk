@@ -3337,8 +3337,7 @@ impl CoreErlangGenerator {
             //  - Value-type context only. Actor classes legitimately route
             //    unmapped quoted primitives/intrinsics through their
             //    hand-written `beamtalk_X:dispatch` module (e.g. Actor's
-            //    `actorPid`, now a quoted `@intrinsic`, and
-            //    ReactiveSubprocess's class-side `open:args:notify:`).
+            //    `actorPid`, now a quoted `@intrinsic`).
             //  - Excluding a small set of call-site-intercepted reflective /
             //    identity / dynamic operations whose method body is only a
             //    runtime-dispatch placeholder (see
