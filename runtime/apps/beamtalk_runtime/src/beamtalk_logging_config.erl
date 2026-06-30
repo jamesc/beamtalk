@@ -28,6 +28,7 @@ Debug targets are tracked in an ETS table so that
 -include_lib("kernel/include/logger.hrl").
 
 -export([
+    set_domain/1,
     logLevel/0,
     logLevel/1,
     logFormat/0,
@@ -86,6 +87,17 @@ subsystem_modules(_) ->
 %%====================================================================
 %% Public API
 %%====================================================================
+
+-doc """
+Set the OTP logger process-metadata domain for the calling process.
+
+Writes `#{domain => [beamtalk, SubDomain]}` via `logger:set_process_metadata/1`.
+Call once from a gen_server `init/1` so every subsequent log call from that
+process inherits the domain without repeating the map literal.
+""".
+-spec set_domain(atom()) -> ok.
+set_domain(SubDomain) ->
+    logger:set_process_metadata(#{domain => [beamtalk, SubDomain]}).
 
 -doc "Return the current OTP primary log level as an atom.".
 %% Narrow return (BT-2632): the primary log level is one of the eight standard

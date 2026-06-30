@@ -418,7 +418,7 @@ handle_vm_measurements(_EventName, Measurements, _Metadata, _Config) ->
 %%====================================================================
 
 init([]) ->
-    logger:set_process_metadata(#{domain => [beamtalk, runtime]}),
+    beamtalk_logging_config:set_domain(runtime),
 
     %% Get supervisor pid for heir option
     SupPid = find_supervisor(),

@@ -1116,7 +1116,7 @@ log_xref_miss(Class, Query) ->
 %%====================================================================
 
 init([]) ->
-    logger:set_process_metadata(#{domain => [beamtalk, runtime]}),
+    beamtalk_logging_config:set_domain(runtime),
 
     %% Create the four ETS tables, owned by this process. Heir is undefined
     %% per the acceptance criteria — tables die with the process, supervisor

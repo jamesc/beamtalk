@@ -1046,7 +1046,7 @@ handler_kind(_Handler, false) ->
 %%====================================================================
 
 init([]) ->
-    logger:set_process_metadata(#{domain => [beamtalk, announcements]}),
+    beamtalk_logging_config:set_domain(announcements),
 
     %% Dedicated Beamtalk pg scope (ADR 0093 §1) — kept separate from the
     %% default `pg` scope used for class-registry membership, and from any pg
