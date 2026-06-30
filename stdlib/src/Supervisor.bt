@@ -106,8 +106,12 @@ abstract Object subclass: Supervisor
   /// `{ok, [atom()]}` spec resolves `unwrap` to `List(Symbol)`. The declared
   /// return type matches that inferred body type so no type-mismatch warning
   /// is produced (the runtime value is a list of atoms, i.e. `List(Symbol)`).
-  children -> List(Symbol) =>
-    ((Erlang beamtalk_supervisor) whichChildren: self) unwrap
+  children -> List(Symbol) => self whichChildrenResult unwrap
+
+  /// Internal FFI seam (ADR 0101 Part 4): the raw `Result`-shaped
+  /// `whichChildren/1` call. Keeps `children` pure Beamtalk.
+  internal whichChildrenResult =>
+    (Erlang beamtalk_supervisor) whichChildren: self
 
   /// Look up the running child process for the given class.
   ///
@@ -132,11 +136,20 @@ abstract Object subclass: Supervisor
   /// BT-1997 / ADR 0080 Phase 1: `countChildren/1` returns a Result-shaped
   /// value; call `unwrap` at the FFI boundary to preserve the pre-migration
   /// user-facing signature.
-  count -> Integer => ((Erlang beamtalk_supervisor) countChildren: self) unwrap
+  count -> Integer => self countChildrenResult unwrap
+
+  /// Internal FFI seam (ADR 0101 Part 4): the raw `Result`-shaped
+  /// `countChildren/1` call. Keeps `count` pure Beamtalk.
+  internal countChildrenResult =>
+    (Erlang beamtalk_supervisor) countChildren: self
 
   /// Stop this supervisor and all its children.
   ///
   /// BT-1997 / ADR 0080 Phase 1: `stop/1` returns a Result-shaped value;
   /// call `unwrap` at the FFI boundary to preserve the pre-migration
   /// user-facing signature.
-  stop -> Nil => ((Erlang beamtalk_supervisor) stop: self) unwrap
+  stop -> Nil => self stopResult unwrap
+
+  /// Internal FFI seam (ADR 0101 Part 4): the raw `Result`-shaped `stop/1`
+  /// call. Keeps `stop` pure Beamtalk.
+  internal stopResult => (Erlang beamtalk_supervisor) stop: self

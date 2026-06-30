@@ -66,7 +66,7 @@ sealed typed Object subclass: SystemNavigation
   /// SystemNavigation default actorClasses  // => [Actor, ClassBuilder, ...]
   /// ```
   actorClasses -> List(Behaviour) =>
-    actorClass := (Erlang beamtalk_interface) findClass: #Actor
+    actorClass := self findClass: #Actor
     actorClass isNil ifTrue: [^List new]
     actors := self allClasses select: [:c |
       c superclassChain includes: actorClass
@@ -125,7 +125,7 @@ sealed typed Object subclass: SystemNavigation
   extendersOf: aClass :: Behaviour -> List(Package) =>
     targetName := self requireClassName: aClass selector: "extendersOf:"
     loaded := Package all
-    owners := (Erlang beamtalk_extensions) extenders_of: targetName
+    owners := self extensionOwnersOf: targetName
     owners
       inject: List new
       into: [:acc :ownerAtom |
@@ -159,7 +159,7 @@ sealed typed Object subclass: SystemNavigation
       ifFalse: [
         self error: "SystemNavigation extensionsBy: requires a Package object, e.g. (Package named: aPackageName)."
       ]
-    pairs := (Erlang beamtalk_extensions) extensions_by: aPackage name asAtom
+    pairs := self extensionPairsBy: aPackage name asAtom
     pairs
       collect: [:pair |
         extendedName := pair at: 1
@@ -218,7 +218,7 @@ sealed typed Object subclass: SystemNavigation
     names
       inject: List new
       into: [:acc :sym |
-        cls := (Erlang beamtalk_interface) findClass: sym
+        cls := self findClass: sym
         cls isNil ifTrue: [acc] ifFalse: [acc add: cls]
       ]
 
@@ -297,7 +297,7 @@ sealed typed Object subclass: SystemNavigation
     // ADR 0087: the runtime applies the miss policy and hands back the indexed
     // implementor rows (stale rows already dropped) plus the loaded-but-unindexed
     // classes that still need a direct `includesSelector:` probe.
-    partition := (Erlang beamtalk_xref) implementors_of_bt: aSelector
+    partition := self xrefImplementorsOf: aSelector
     indexedRows := partition at: #indexed
     fallbackClasses := partition at: #fallback_classes
     // Map each indexed `{#owner, #class_side}` row to the class object
@@ -361,7 +361,7 @@ sealed typed Object subclass: SystemNavigation
       ]
     src := aMethod source
     src isNil ifTrue: [^List new]
-    sends := (Erlang beamtalk_interface) allSendsIn: src
+    sends := self allSendsIn: src
     sends
       inject: List new
       into: [:acc :s |
@@ -428,7 +428,7 @@ sealed typed Object subclass: SystemNavigation
     // ADR 0087: the runtime applies the miss policy and hands back the indexed
     // call sites (stale rows already dropped) plus the loaded-but-unindexed
     // classes that still need a source scan.
-    partition := (Erlang beamtalk_xref) senders_of_bt: aSelector
+    partition := self xrefSendersOf: aSelector
     indexedRows := partition at: #indexed
     fallbackClasses := partition at: #fallback_classes
     indexScan := self indexedSiteRecordsFrom: indexedRows into: List new
@@ -546,7 +546,7 @@ sealed typed Object subclass: SystemNavigation
   /// FFI call out so the surrounding `inject:into:` body stays a single
   /// expression, which keeps the type-inference behaviour predictable.
   appendSendersIn: methodSource :: String selector: aSelector :: Symbol class: aClass :: Behaviour methodSelector: methodSel :: Symbol into: result :: List(Dictionary) -> List(Dictionary) =>
-    lines := (Erlang beamtalk_interface) findSendersIn: methodSource selector: aSelector
+    lines := self sendersIn: methodSource selector: aSelector
     lines
       inject: result
       into: [:acc :line |
@@ -683,13 +683,13 @@ sealed typed Object subclass: SystemNavigation
   /// `Announcement` subclass — unresolvable arguments and non-announcement
   /// receivers (a misclassified constructor send) are both skipped.
   appendAnnounceSitesIn: methodSource :: String class: aClass :: Object methodSelector: methodSel :: Symbol into: result :: List(Dictionary) -> List(Dictionary) =>
-    sites := (Erlang beamtalk_interface) announceSitesIn: methodSource
+    sites := self announceSitesIn: methodSource
     sites
       inject: result
       into: [:acc :site |
         line := site at: 1
         announcementName := site at: 2
-        cls := (Erlang beamtalk_interface) findClass: announcementName
+        cls := self findClass: announcementName
         (self isAnnouncementClass: cls)
           ifTrue: [
             acc
@@ -716,7 +716,7 @@ sealed typed Object subclass: SystemNavigation
   isAnnouncementClass: aClass :: Object -> Boolean =>
     aClass isNil ifTrue: [^false]
     (aClass respondsTo: #superclassChain) ifFalse: [^false]
-    announcementClass := (Erlang beamtalk_interface) findClass: #Announcement
+    announcementClass := self findClass: #Announcement
     announcementClass isNil ifTrue: [^false]
     // `aClass` is typed `Object` (it may be a class object, a metaclass object,
     // or `nil`); the `respondsTo: #superclassChain` guard above makes the send
@@ -741,21 +741,18 @@ sealed typed Object subclass: SystemNavigation
     // name]` — the instance-side and class-side tags a matching extension can
     // carry.
     targetNames := (List new add: aClass name) add: aClass class name
-    extEntries := (Erlang beamtalk_extensions) listAllWithSource
+    extEntries := self allExtensionsWithSource
     extEntries
       inject: result
       into: [:acc :entry |
         extClassTag := entry at: 1
         extSelector := entry at: 2
-        extSource := entry at: 3
+        extSource :: String := entry at: 3
         extClass := self resolveExtensionClass: extClassTag
         (self extensionTargets: extClass names: targetNames)
           ifTrue: [
-            // BT-2254: `extSource` (entry at: 3) is typed `String | Binary` from
-            // the `binary()` FFI spec but is always source text (a String),
-            // which `appendAnnounceSitesIn:` requires; suppress the union-member
-            // arg-type warning.
-            @expect type
+            // `extSource` is bound `:: String` above to re-assert the
+            // source-text invariant the seam erases (BT-2254).
             self
               appendAnnounceSitesIn: extSource
               class: extClass
@@ -866,7 +863,7 @@ sealed typed Object subclass: SystemNavigation
     // ADR 0087: the runtime applies the miss policy and hands back the indexed
     // reference sites (stale rows already dropped) plus the loaded-but-unindexed
     // classes that still need a source scan.
-    partition := (Erlang beamtalk_xref) references_to_bt: targetSymbol
+    partition := self xrefReferencesTo: targetSymbol
     indexedRows := partition at: #indexed
     fallbackClasses := partition at: #fallback_classes
     indexScan := self indexedSiteRecordsFrom: indexedRows into: List new
@@ -929,7 +926,7 @@ sealed typed Object subclass: SystemNavigation
   /// per-method FFI call out so the surrounding `inject:into:` body stays a
   /// single expression — same shape as `appendSendersIn:selector:class:methodSelector:into:`.
   appendReferencesIn: methodSource :: String targetName: targetName :: String owner: ownerClass :: Behaviour methodSelector: methodSel :: Symbol into: result :: List(Dictionary) -> List(Dictionary) =>
-    lines := (Erlang beamtalk_interface) findReferencesToIn: methodSource class: targetName
+    lines := self referencesIn: methodSource class: targetName
     lines
       inject: result
       into: [:acc :line |
@@ -1110,10 +1107,8 @@ sealed typed Object subclass: SystemNavigation
   /// `wantReaders` picks the reader vs writer FFI entry point.
   appendFieldAccessesIn: methodSource :: String field: aSym :: Symbol owner: ownerClass :: Behaviour methodSelector: methodSel :: Symbol readers: wantReaders :: Boolean into: result :: List(Dictionary) -> List(Dictionary) =>
     lines := wantReaders ifTrue: [
-      (Erlang beamtalk_interface) findFieldReadersIn: methodSource field: aSym
-    ] ifFalse: [
-      (Erlang beamtalk_interface) findFieldWritersIn: methodSource field: aSym
-    ]
+      self fieldReadersIn: methodSource field: aSym
+    ] ifFalse: [self fieldWritersIn: methodSource field: aSym]
     lines
       inject: result
       into: [:acc :line |
@@ -1273,7 +1268,7 @@ sealed typed Object subclass: SystemNavigation
   /// per-method FFI call out so the surrounding `inject:into:` body stays a
   /// single expression — same shape as `appendSendersIn:selector:class:methodSelector:into:`.
   appendFfiSitesIn: methodSource :: String module: module :: String function: function :: String arity: arity :: Object owner: ownerClass :: Behaviour methodSelector: methodSel :: Symbol into: result :: List(Dictionary) -> List(Dictionary) =>
-    lines := (Erlang beamtalk_interface)
+    lines := self
       ffiSitesIn: methodSource
       module: module
       function: function
@@ -1290,15 +1285,15 @@ sealed typed Object subclass: SystemNavigation
   /// per-method scan to the FFI-site query and threading the module/function/
   /// arity target.
   collectExtensionFfiSitesFor: module :: String function: function :: String arity: arity :: Object into: result :: List(Dictionary) -> List(Dictionary) =>
-    extEntries := (Erlang beamtalk_extensions) listAllWithSource
+    extEntries := self allExtensionsWithSource
     extEntries
       inject: result
       into: [:acc :entry |
         extClassTag := entry at: 1
         extSelector := entry at: 2
-        extSource := entry at: 3
+        extSource :: String := entry at: 3
         extClass := self resolveExtensionClass: extClassTag
-        lines := (Erlang beamtalk_interface)
+        lines := self
           ffiSitesIn: extSource
           module: module
           function: function
@@ -1468,7 +1463,7 @@ sealed typed Object subclass: SystemNavigation
     // ADR 0087: the runtime applies the miss policy and hands back the indexed
     // class-body selector rows (stale rows already dropped) plus the
     // loaded-but-unindexed classes that still need a `selectorsForClass:` gather.
-    partition := (Erlang beamtalk_xref) defined_selectors_bt
+    partition := self xrefDefinedSelectors
     indexedRows := partition at: #indexed
     fallbackClasses := partition at: #fallback_classes
     indexedSels := self indexedSelectorsFrom: indexedRows into: List new
@@ -1528,7 +1523,7 @@ sealed typed Object subclass: SystemNavigation
     // class_object_tag/1 is the runtime authority that encodes the metaclass
     // display tag (`Foo` -> `Foo class`); resolveExtensionClass: decodes it via
     // the same authority (BT-2223), so forward and reverse cannot drift.
-    metaTag := (Erlang beamtalk_class_registry) class_object_tag: className
+    metaTag := self classObjectTag: className
     classSideExtensions := self extensionSelectorsFor: metaTag
     instanceExtensions ++ classSideExtensions
 
@@ -1543,7 +1538,7 @@ sealed typed Object subclass: SystemNavigation
   /// `{atom(), atom()}` tuples, so the per-entry `entry at: 1` infers `Symbol`
   /// directly — no `@expect type` suppression needed.
   extensionSelectorsFor: classTag :: Symbol -> List(Symbol) =>
-    rawEntries := Erlang beamtalk_extensions list: classTag
+    rawEntries := self extensionEntriesFor: classTag
     rawEntries collect: [:entry | entry at: 1]
 
   /// Append senders of `aSelector` found in every extension method source
@@ -1565,15 +1560,15 @@ sealed typed Object subclass: SystemNavigation
   /// atom (e.g. `#'String class'`) when no class lookup succeeds (e.g. for
   /// metaclass-tagged class-side extensions).
   collectExtensionSendersFor: aSelector :: Symbol into: result :: List(Dictionary) -> List(Dictionary) =>
-    extEntries := (Erlang beamtalk_extensions) listAllWithSource
+    extEntries := self allExtensionsWithSource
     extEntries
       inject: result
       into: [:acc :entry |
         extClassTag := entry at: 1
         extSelector := entry at: 2
-        extSource := entry at: 3
+        extSource :: String := entry at: 3
         extClass := self resolveExtensionClass: extClassTag
-        lines := (Erlang beamtalk_interface) findSendersIn: extSource selector: aSelector
+        lines := self sendersIn: extSource selector: aSelector
         lines
           inject: acc
           into: [:innerAcc :line |
@@ -1590,15 +1585,15 @@ sealed typed Object subclass: SystemNavigation
   /// result. Mirrors `collectExtensionSendersFor:into:`, swapping the
   /// per-method scan to `findReferencesToIn:class:`.
   collectExtensionReferencesFor: targetName :: String into: result :: List(Dictionary) -> List(Dictionary) =>
-    extEntries := (Erlang beamtalk_extensions) listAllWithSource
+    extEntries := self allExtensionsWithSource
     extEntries
       inject: result
       into: [:acc :entry |
         extClassTag := entry at: 1
         extSelector := entry at: 2
-        extSource := entry at: 3
+        extSource :: String := entry at: 3
         extClass := self resolveExtensionClass: extClassTag
-        lines := (Erlang beamtalk_interface) findReferencesToIn: extSource class: targetName
+        lines := self referencesIn: extSource class: targetName
         lines
           inject: acc
           into: [:innerAcc :line |
@@ -1616,18 +1611,16 @@ sealed typed Object subclass: SystemNavigation
   /// but iterates the extension sources table rather than a class's
   /// instance method dictionary.
   collectExtensionMethodsMatching: aRegex :: Regex into: result :: List(Dictionary) -> List(Dictionary) =>
-    extEntries := (Erlang beamtalk_extensions) listAllWithSource
+    extEntries := self allExtensionsWithSource
     extEntries
       inject: result
       into: [:acc :entry |
         extClassTag := entry at: 1
         extSelector := entry at: 2
-        extSource := entry at: 3
+        extSource :: String := entry at: 3
         extClass := self resolveExtensionClass: extClassTag
-        // BT-2254: `entry at: 3` is the extension source, typed `String | Binary`
-        // because the FFI spec uses `binary()`. It is always source text (a
-        // String), so `matchesRegex:` is valid; suppress the union-member dnu.
-        @expect type
+        // `extSource` is bound `:: String` above to re-assert the source-text
+        // invariant the `allExtensionsWithSource` seam erases (BT-2254).
         (extSource matchesRegex: aRegex) ifTrue: [
           acc add: #{#class => extClass, #selector => extSelector}
         ] ifFalse: [acc]
@@ -1723,9 +1716,9 @@ sealed typed Object subclass: SystemNavigation
     // ADR 0087: the runtime applies the miss policy and hands back the indexed
     // defined-selector rows / send sites (stale rows already dropped) plus the
     // loaded-but-unindexed classes that still need a source scan.
-    definedPartition := (Erlang beamtalk_xref) defined_selectors_bt
+    definedPartition := self xrefDefinedSelectors
     definedRows := definedPartition at: #indexed
-    sendsPartition := (Erlang beamtalk_xref) all_sends_bt
+    sendsPartition := self xrefAllSends
     sendRows := sendsPartition at: #indexed
     // The miss-policy fallback set is the union of the two partitions' fallback
     // classes: a loaded-but-unindexed class needs BOTH its defined selectors
@@ -1953,7 +1946,7 @@ sealed typed Object subclass: SystemNavigation
   /// - the owner defines `doesNotUnderstand:` and the receiver is `#self` /
   ///   `#super` (the coarse DNU heuristic — see `unimplementedSelectors`).
   appendAllSendsIn: methodSource :: String owner: ownerClass :: Object methodSelector: methodSel :: Symbol handlesDnu: handlesDnu :: Boolean excluding: excluded :: Set(Symbol) into: result :: Dictionary -> Dictionary =>
-    sends := (Erlang beamtalk_interface) allSendsIn: methodSource
+    sends := self allSendsIn: methodSource
     sends
       inject: result
       into: [:acc :s |
@@ -2011,18 +2004,16 @@ sealed typed Object subclass: SystemNavigation
   /// safe — extension bodies are rare and the user can add a documented
   /// exclusion if a real false positive ever appears.
   collectExtensionAllSendsExcluding: excluded :: Set(Symbol) into: result :: Dictionary -> Dictionary =>
-    extEntries := (Erlang beamtalk_extensions) listAllWithSource
+    extEntries := self allExtensionsWithSource
     extEntries
       inject: result
       into: [:acc :entry |
         extClassTag := entry at: 1
         extSelector := entry at: 2
-        extSource := entry at: 3
+        extSource :: String := entry at: 3
         extClass := self resolveExtensionClass: extClassTag
-        // BT-2254: `extSource` (entry at: 3) is typed `String | Binary` from the
-        // `binary()` FFI spec but is always source text (a String), which
-        // `appendAllSendsIn:` requires; suppress the union arg-type warning.
-        @expect type
+        // `extSource` is bound `:: String` above to re-assert the source-text
+        // invariant the `allExtensionsWithSource` seam erases (BT-2254).
         self
           appendAllSendsIn: extSource
           owner: extClass
@@ -2060,7 +2051,7 @@ sealed typed Object subclass: SystemNavigation
   /// object, a metaclass object, or (defensively) the raw atom, which have
   /// no shared supertype in the declared type system.
   resolveExtensionClass: classTag :: Symbol -> Object =>
-    resolved := (Erlang beamtalk_interface) findClass: classTag
+    resolved := self findClass: classTag
     resolved isNil ifTrue: [classTag] ifFalse: [resolved]
 
   /// Return a List of dead-method *candidates* — selectors that are DEFINED on
@@ -2164,7 +2155,7 @@ sealed typed Object subclass: SystemNavigation
     // ADR 0087: the runtime applies the miss policy and hands back the indexed
     // sent selectors (stale rows + Erlang-FFI sends already dropped) plus the
     // loaded-but-unindexed classes that still need a source scan for their sends.
-    sentPartition := (Erlang beamtalk_xref) all_sent_selectors_bt
+    sentPartition := self xrefAllSentSelectors
     indexedSent := sentPartition at: #indexed
     fallbackClasses := sentPartition at: #fallback_classes
     sentSet := self sentSetFromIndex: indexedSent into: Set new
@@ -2274,7 +2265,7 @@ sealed typed Object subclass: SystemNavigation
   /// the selector is added unless the receiver kind is `#erlang_ffi` (an Erlang
   /// call, not a Beamtalk send — see `unusedSelectors`).
   addSentSelectorsIn: methodSource :: String into: result :: Set(Symbol) -> Set(Symbol) =>
-    sends := (Erlang beamtalk_interface) allSendsIn: methodSource
+    sends := self allSendsIn: methodSource
     sends
       inject: result
       into: [:acc :s |
@@ -2293,15 +2284,13 @@ sealed typed Object subclass: SystemNavigation
   /// methods as used even though extension methods themselves are not candidates
   /// for the unused report.
   collectExtensionSentSelectorsInto: result :: Set(Symbol) -> Set(Symbol) =>
-    extEntries := (Erlang beamtalk_extensions) listAllWithSource
+    extEntries := self allExtensionsWithSource
     extEntries
       inject: result
       into: [:acc :entry |
-        extSource := entry at: 3
-        // BT-2254: `extSource` (entry at: 3) is typed `String | Binary` from the
-        // `binary()` FFI spec but is always source text (a String), which
-        // `addSentSelectorsIn:` requires; suppress the union arg-type warning.
-        @expect type
+        extSource :: String := entry at: 3
+        // `extSource` is bound `:: String` above to re-assert the source-text
+        // invariant the `allExtensionsWithSource` seam erases (BT-2254).
         self addSentSelectorsIn: extSource into: acc
       ]
 
@@ -2388,3 +2377,104 @@ sealed typed Object subclass: SystemNavigation
           src includesSubstring: "@intrinsic"
         ]
       ]
+
+  // ===== Internal FFI seams (ADR 0101 Part 4) =====
+  //
+  // SystemNavigation orchestrates four backing modules
+  // (`beamtalk_interface` / `beamtalk_xref` / `beamtalk_extensions` /
+  // `beamtalk_class_registry`), so it cannot be a single `native:` class.
+  // Instead, every Erlang call the query logic makes is funnelled through one
+  // of the thin `internal` seams below. The public/helper methods above stay
+  // pure Beamtalk; each Erlang call site is a one-line seam, deduplicated by
+  // backing function (e.g. one `findClass:` seam serves five callers). Errors
+  // are wrapped by default at the FFI boundary (ADR 0101 Part 2).
+
+  /// Indexed/fallback partition of implementor rows for `aSelector` (ADR 0087).
+  internal xrefImplementorsOf: aSelector :: Symbol -> Dictionary =>
+    (Erlang beamtalk_xref) implementors_of_bt: aSelector
+
+  /// Indexed/fallback partition of sender call sites for `aSelector` (ADR 0087).
+  internal xrefSendersOf: aSelector :: Symbol -> Dictionary =>
+    (Erlang beamtalk_xref) senders_of_bt: aSelector
+
+  /// Indexed/fallback partition of reference sites for `aSymbol` (ADR 0087).
+  internal xrefReferencesTo: aSymbol :: Symbol -> Dictionary =>
+    (Erlang beamtalk_xref) references_to_bt: aSymbol
+
+  /// Indexed/fallback partition of defined-selector rows (ADR 0087).
+  internal xrefDefinedSelectors -> Dictionary =>
+    (Erlang beamtalk_xref) defined_selectors_bt
+
+  /// Indexed/fallback partition of every send site (ADR 0087).
+  internal xrefAllSends -> Dictionary => (Erlang beamtalk_xref) all_sends_bt
+
+  /// Indexed/fallback partition of the distinct sent-selector set (ADR 0087).
+  internal xrefAllSentSelectors -> Dictionary =>
+    (Erlang beamtalk_xref) all_sent_selectors_bt
+
+  /// Resolve a class-name tag to the class/metaclass object, or `nil`.
+  internal findClass: aName :: Object -> Object =>
+    (Erlang beamtalk_interface) findClass: aName
+
+  /// Every message send (with line + receiver tag) in `aSource`.
+  internal allSendsIn: aSource :: String -> List(Tuple) =>
+    (Erlang beamtalk_interface) allSendsIn: aSource
+
+  /// Line numbers of `aSelector` sends within `aSource`.
+  internal sendersIn: aSource :: String | Binary selector: aSelector :: Symbol -> List(Integer) =>
+    (Erlang beamtalk_interface) findSendersIn: aSource selector: aSelector
+
+  /// Line numbers of references to class `aName` within `aSource`.
+  internal referencesIn: aSource :: String | Binary class: aName :: String -> List(Integer) =>
+    (Erlang beamtalk_interface) findReferencesToIn: aSource class: aName
+
+  /// Announcement emission sites (line + resolved class name) in `aSource`.
+  internal announceSitesIn: aSource :: String -> List(Tuple) =>
+    (Erlang beamtalk_interface) announceSitesIn: aSource
+
+  /// Line numbers reading field `aSym` within `aSource`.
+  internal fieldReadersIn: aSource :: String field: aSym :: Symbol -> List(Integer) =>
+    (Erlang beamtalk_interface) findFieldReadersIn: aSource field: aSym
+
+  /// Line numbers writing field `aSym` within `aSource`.
+  internal fieldWritersIn: aSource :: String field: aSym :: Symbol -> List(Integer) =>
+    (Erlang beamtalk_interface) findFieldWritersIn: aSource field: aSym
+
+  /// Line numbers of FFI call sites matching `aModule`:`aFunction`/`anArity`
+  /// within `aSource`.
+  internal ffiSitesIn: aSource :: String | Binary module: aModule :: String function: aFunction :: String arity: anArity :: Object -> List(Integer) =>
+    (Erlang beamtalk_interface)
+      ffiSitesIn: aSource
+      module: aModule
+      function: aFunction
+      arity: anArity
+
+  /// Package owners (atoms) of extension methods on class `aName`.
+  internal extensionOwnersOf: aName :: Symbol -> List(Symbol) =>
+    (Erlang beamtalk_extensions) extenders_of: aName
+
+  /// `{extendedClass, selector}` pairs contributed by owner `anOwner`.
+  internal extensionPairsBy: anOwner :: Symbol -> List(Tuple) =>
+    (Erlang beamtalk_extensions) extensions_by: anOwner
+
+  /// Every registered extension `{classTag, selector, source}` entry.
+  ///
+  /// INVARIANT: the third tuple element (`entry at: 3`, the extension source)
+  /// is always a String. The underlying FFI spec types it `binary()`
+  /// (String | Binary, BT-2254), but the runtime always delivers source text.
+  /// The `List(Tuple)` return type drops per-element precision, so `entry at: 3`
+  /// reads as `Dynamic`. To restore the static `String` check the inline FFI
+  /// gave (e.g. at the `ffiSitesIn:…` seam in `collectExtensionFfiSitesFor:`),
+  /// every consumer re-asserts the invariant by binding the source through a
+  /// typed local: `extSource :: String := entry at: 3`. If a non-String third
+  /// element ever appears, that typed binding fails loudly rather than silently.
+  internal allExtensionsWithSource -> List(Tuple) =>
+    (Erlang beamtalk_extensions) listAllWithSource
+
+  /// `{selector, owner}` entries registered against class tag `aTag`.
+  internal extensionEntriesFor: aTag :: Symbol -> List(Tuple) =>
+    (Erlang beamtalk_extensions) list: aTag
+
+  /// The metaclass display tag (`Foo` -> `Foo class`) for `aName`.
+  internal classObjectTag: aName :: Symbol -> Symbol =>
+    (Erlang beamtalk_class_registry) class_object_tag: aName

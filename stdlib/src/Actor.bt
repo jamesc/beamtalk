@@ -195,8 +195,12 @@ Object subclass: Actor
   sealed unregister -> Symbol =>
     // FFI returns bare `ok` which auto-converts to `Result ok: nil`; discard
     // it and return the documented `#ok` Symbol directly (ADR 0079).
-    (Erlang beamtalk_actor) unregister: self
+    self unregisterName
     #ok
+
+  /// Internal FFI seam (ADR 0101 Part 4): release this actor's registered
+  /// name. Keeps `unregister` pure Beamtalk.
+  internal unregisterName -> Object => (Erlang beamtalk_actor) unregister: self
 
   /// Return the Symbol this actor is registered under, or `nil` if unnamed.
   ///
