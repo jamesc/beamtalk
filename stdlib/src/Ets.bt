@@ -39,7 +39,7 @@
 /// shared := Ets named: #sharedCache
 /// shared at: "counter" put: 1
 /// ```
-typed Object subclass: Ets(K, V)
+typed Object subclass: Ets(K, V) native: beamtalk_ets
 
   /// Create a new named public ETS table (class method).
   ///
@@ -54,7 +54,7 @@ typed Object subclass: Ets(K, V)
   /// counters := Ets new: #counters type: #set
   /// ```
   class sealed new: name :: Symbol type: tableType :: #set | #orderedSet | #bag | #duplicateBag -> Ets =>
-    (Erlang beamtalk_ets) new: name type: tableType
+    self delegate
 
   /// Look up an existing named ETS table (class method).
   ///
@@ -65,7 +65,7 @@ typed Object subclass: Ets(K, V)
   /// ```beamtalk
   /// cache := Ets named: #myCache
   /// ```
-  class sealed named: name :: Symbol -> Ets => (Erlang beamtalk_ets) named: name
+  class sealed named: name :: Symbol -> Ets => self delegate
 
   /// Check whether a named ETS table exists.
   ///
@@ -77,8 +77,7 @@ typed Object subclass: Ets(K, V)
   /// Ets new: #myCache type: #set
   /// Ets exists: #myCache    // => true
   /// ```
-  class sealed exists: name :: Symbol -> Boolean =>
-    (Erlang beamtalk_ets) exists: name
+  class sealed exists: name :: Symbol -> Boolean => self delegate
 
   /// Create a named table or return the existing one.
   ///
@@ -92,7 +91,7 @@ typed Object subclass: Ets(K, V)
   /// table := Ets newOrExisting: #events type: #set
   /// ```
   class sealed newOrExisting: name :: Symbol type: tableType :: #set | #orderedSet | #bag | #duplicateBag -> Ets =>
-    (Erlang beamtalk_ets) newOrExisting: name type: tableType
+    self delegate
 
   /// Look up a key. Returns the value, or `nil` if the key is absent.
   ///
@@ -146,8 +145,7 @@ typed Object subclass: Ets(K, V)
   /// ```beamtalk
   /// cache includesKey: "key"    // => true or false
   /// ```
-  includesKey: key :: K -> Boolean =>
-    (Erlang beamtalk_ets) includesKey: self key: key
+  includesKey: key :: K -> Boolean => self delegate
 
   /// Remove the entry for `key`. Returns `nil`. Idempotent if key is absent.
   ///
@@ -155,7 +153,7 @@ typed Object subclass: Ets(K, V)
   /// ```beamtalk
   /// cache removeKey: "oldKey"
   /// ```
-  removeKey: key :: K -> Nil => (Erlang beamtalk_ets) removeKey: self key: key
+  removeKey: key :: K -> Nil => self delegate
 
   /// Return all keys in the table as a `List`.
   ///
@@ -167,7 +165,7 @@ typed Object subclass: Ets(K, V)
   /// ```beamtalk
   /// cache keys    // => #("key1", "key2")
   /// ```
-  keys -> List(K) => (Erlang beamtalk_ets) keys: self
+  keys -> List(K) => self delegate
 
   /// Return the number of entries in the table.
   ///

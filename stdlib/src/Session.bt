@@ -31,7 +31,7 @@
 /// Session current id                            // => "user-repl-abc-123"
 /// Session current clear                         // => nil
 /// ```
-sealed typed Object subclass: Session
+sealed typed Object subclass: Session native: beamtalk_session_primitives
 
   // ===== Class-side: factory methods only =====
 
@@ -44,7 +44,7 @@ sealed typed Object subclass: Session
   /// ```beamtalk
   /// Session current                               // => Session(repl: _) (in REPL)
   /// ```
-  class current -> Session | Nil => (Erlang beamtalk_session_primitives) current
+  class current -> Session | Nil => self delegate
 
   /// Look up a session by its protocol session id. Returns `nil` if no
   /// such session exists or it is no longer alive. Used for cross-session
@@ -54,8 +54,7 @@ sealed typed Object subclass: Session
   /// ```beamtalk
   /// Session withId: "user-repl-abc-123"           // => Session(repl: _) | nil
   /// ```
-  class withId: aSessionId :: String -> Session | Nil =>
-    (Erlang beamtalk_session_primitives) withId: aSessionId
+  class withId: aSessionId :: String -> Session | Nil => self delegate
 
   // ===== Instance-side: all operations live here =====
 

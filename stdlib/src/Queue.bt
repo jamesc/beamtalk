@@ -21,7 +21,7 @@
 /// value := result at: 1     // => 1
 /// rest := result at: 2      // => Queue with [2]
 /// ```
-typed Value subclass: Queue
+typed Value subclass: Queue native: beamtalk_queue
 
   /// Create an empty Queue (class method).
   ///
@@ -29,7 +29,7 @@ typed Value subclass: Queue
   /// ```beamtalk
   /// q := Queue new
   /// ```
-  class sealed new -> Queue => (Erlang beamtalk_queue) new
+  class sealed new -> Queue => self delegate
 
   /// Add an element to the back of the queue. Returns a new Queue.
   ///
@@ -39,8 +39,7 @@ typed Value subclass: Queue
   /// ```beamtalk
   /// q2 := q enqueue: 42
   /// ```
-  enqueue: elem :: Object -> Queue =>
-    (Erlang beamtalk_queue) enqueue: self elem: elem
+  enqueue: elem :: Object -> Queue => self delegate
 
   /// Remove and return the front element as a `{value, newQueue}` Tuple.
   ///
@@ -52,7 +51,7 @@ typed Value subclass: Queue
   /// value := result at: 1
   /// rest := result at: 2
   /// ```
-  dequeue -> Tuple => (Erlang beamtalk_queue) dequeue: self
+  dequeue -> Tuple => self delegate
 
   /// Return the front element without removing it.
   ///
@@ -62,7 +61,7 @@ typed Value subclass: Queue
   /// ```beamtalk
   /// front := q peek    // => first element
   /// ```
-  peek -> Object => (Erlang beamtalk_queue) peek: self
+  peek -> Object => self delegate
 
   /// Return `true` if the queue contains no elements.
   ///
@@ -70,7 +69,7 @@ typed Value subclass: Queue
   /// ```beamtalk
   /// Queue new isEmpty    // => true
   /// ```
-  isEmpty -> Boolean => (Erlang beamtalk_queue) isEmpty: self
+  isEmpty -> Boolean => self delegate
 
   /// Return the number of elements in the queue.
   ///
@@ -81,4 +80,4 @@ typed Value subclass: Queue
   /// ```beamtalk
   /// q size    // => 3
   /// ```
-  size -> Integer => (Erlang beamtalk_queue) size: self
+  size -> Integer => self delegate

@@ -14,7 +14,7 @@
 /// TestRunner run: CounterTest                 // => TestResult for one class
 /// TestRunner run: CounterTest method: #testIncrement  // => one method
 /// ```
-typed Object subclass: TestRunner
+typed Object subclass: TestRunner native: beamtalk_test_runner
 
   /// Run all test methods across all discovered TestCase subclasses.
   /// Returns a TestResult aggregating the combined results.
@@ -25,7 +25,7 @@ typed Object subclass: TestRunner
   /// result := TestRunner runAll
   /// result hasPassed       // => true
   /// ```
-  class runAll -> TestResult => (Erlang beamtalk_test_runner) runAll
+  class runAll -> TestResult => self delegate
 
   /// Run all tests with up to `maxJobs` classes running concurrently.
   ///
@@ -37,8 +37,7 @@ typed Object subclass: TestRunner
   /// result := TestRunner runAll: 4    // run up to 4 classes concurrently
   /// result hasPassed                  // => true
   /// ```
-  class runAll: maxJobs :: Integer -> TestResult =>
-    (Erlang beamtalk_test_runner) runAll: maxJobs
+  class runAll: maxJobs :: Integer -> TestResult => self delegate
 
   /// Run all test methods in the given TestCase subclass `testClass`.
   /// Returns a TestResult for that class.
@@ -48,8 +47,7 @@ typed Object subclass: TestRunner
   /// result := TestRunner run: CounterTest
   /// result summary         // => "3 tests, 3 passed (0.0s)"
   /// ```
-  class run: testClass :: Object -> TestResult =>
-    (Erlang beamtalk_test_runner) run: testClass
+  class run: testClass :: Object -> TestResult => self delegate
 
   /// Run a single named test method in `testClass`.
   /// Returns a TestResult containing just that method's outcome.
@@ -60,4 +58,4 @@ typed Object subclass: TestRunner
   /// result hasPassed       // => true
   /// ```
   class run: testClass :: Object method: testName :: Symbol -> TestResult =>
-    (Erlang beamtalk_test_runner) run: testClass method: testName
+    self delegate

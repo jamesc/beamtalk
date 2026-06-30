@@ -43,7 +43,7 @@
 /// Console flush
 /// // => nil
 /// ```
-sealed typed Object subclass: Console
+sealed typed Object subclass: Console native: beamtalk_console
 
   /// Write a value to stdout followed by a newline. Returns nil.
   ///
@@ -55,8 +55,7 @@ sealed typed Object subclass: Console
   /// Console printLine: "hello"
   /// // => nil
   /// ```
-  class sealed printLine: aValue :: Printable -> Nil =>
-    (Erlang beamtalk_console) printLine: aValue
+  class sealed printLine: aValue :: Printable -> Nil => self delegate
 
   /// Write a value to stdout with no trailing newline. Returns nil.
   ///
@@ -65,8 +64,7 @@ sealed typed Object subclass: Console
   /// Console print: "hello"
   /// // => nil
   /// ```
-  class sealed print: aValue :: Printable -> Nil =>
-    (Erlang beamtalk_console) print: aValue
+  class sealed print: aValue :: Printable -> Nil => self delegate
 
   /// Write a value to stderr followed by a newline. Returns nil.
   ///
@@ -75,8 +73,7 @@ sealed typed Object subclass: Console
   /// Console errorLine: "boom"
   /// // => nil
   /// ```
-  class sealed errorLine: aValue :: Printable -> Nil =>
-    (Erlang beamtalk_console) errorLine: aValue
+  class sealed errorLine: aValue :: Printable -> Nil => self delegate
 
   /// Write a value to stderr with no trailing newline. Returns nil.
   ///
@@ -85,8 +82,7 @@ sealed typed Object subclass: Console
   /// Console error: "boom"
   /// // => nil
   /// ```
-  class sealed error: aValue :: Printable -> Nil =>
-    (Erlang beamtalk_console) error: aValue
+  class sealed error: aValue :: Printable -> Nil => self delegate
 
   /// Flush buffered output. Returns nil.
   ///
@@ -99,7 +95,7 @@ sealed typed Object subclass: Console
   /// Console flush
   /// // => nil
   /// ```
-  class sealed flush -> Nil => (Erlang beamtalk_console) flush
+  class sealed flush -> Nil => self delegate
 
   /// Read one line from stdin, with the trailing newline stripped.
   ///
@@ -113,7 +109,7 @@ sealed typed Object subclass: Console
   /// Console readLine
   /// // => _
   /// ```
-  class sealed readLine -> String | Nil => (Erlang beamtalk_console) readLine
+  class sealed readLine -> String | Nil => self delegate
 
   /// Write a prompt to stdout (no newline), then read one line from stdin.
   ///
@@ -125,5 +121,4 @@ sealed typed Object subclass: Console
   /// Console readLine: "name? "
   /// // => _
   /// ```
-  class sealed readLine: prompt :: String -> String | Nil =>
-    (Erlang beamtalk_console) readLine: prompt
+  class sealed readLine: prompt :: String -> String | Nil => self delegate
