@@ -100,7 +100,7 @@ sealed typed Value subclass: Random native: beamtalk_random
   /// rng := Random new
   /// rng next                     // => 0.0..1.0
   /// ```
-  next -> Float => (Erlang beamtalk_random) instanceNext: self
+  next -> Float => self delegate
 
   /// Return a random integer between 1 and max from the instance state.
   ///
@@ -113,5 +113,4 @@ sealed typed Value subclass: Random native: beamtalk_random
   /// rng := Random new
   /// rng nextInteger: 6           // => 1..6
   /// ```
-  nextInteger: max :: Integer -> Integer =>
-    (Erlang beamtalk_random) instanceNextInteger: self with: max
+  nextInteger: max :: Integer -> Integer => self delegate

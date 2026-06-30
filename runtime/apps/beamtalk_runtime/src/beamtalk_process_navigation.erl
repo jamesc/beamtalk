@@ -91,12 +91,12 @@ timeout-guarded `sys:get_status/1` fetch — never called during snapshotting.
     enrich/1,
     child_handles/1,
     rootOf/1,
-    childrenOf/1,
-    parentOf/1,
-    parentPidOf/1,
-    strategyOf/1,
-    restartIntensityOf/1,
-    truncatedOf/1
+    children/1,
+    parent/1,
+    parentPid/1,
+    strategy/1,
+    restartIntensity/1,
+    truncated/1
 ]).
 
 -include("beamtalk.hrl").
@@ -342,8 +342,8 @@ rootOf(FlatList) ->
 Return the (enriched) snapshot children of `Node` — the sibling nodes whose
 `parent_pid` is `Node`'s pid. Backs `SupervisionNode children`.
 """.
--spec childrenOf(node_map()) -> [node_map()].
-childrenOf(Node) ->
+-spec children(node_map()) -> [node_map()].
+children(Node) ->
     Siblings = maps:get(siblings, Node, []),
     case maps:get(pid, Node, nil) of
         nil ->
@@ -359,8 +359,8 @@ childrenOf(Node) ->
 Return the (enriched) snapshot parent of `Node`, or `nil` for a root node or a
 node mid-restart. Backs `SupervisionNode parent`.
 """.
--spec parentOf(node_map()) -> node_map() | nil.
-parentOf(Node) ->
+-spec parent(node_map()) -> node_map() | nil.
+parent(Node) ->
     Siblings = maps:get(siblings, Node, []),
     case maps:get(parent_pid, Node, nil) of
         nil ->
@@ -375,25 +375,25 @@ parentOf(Node) ->
 -doc """
 Return a node's parent pid directly (`pid() | nil`), without resolving the full
 parent node. The O(1) adjacency key for serialisation — avoids the O(n) sibling
-search `parentOf/1` does when only the parent's identity is needed.
+search `parent/1` does when only the parent's identity is needed.
 """.
--spec parentPidOf(node_map()) -> pid() | nil.
-parentPidOf(Node) ->
+-spec parentPid(node_map()) -> pid() | nil.
+parentPid(Node) ->
     maps:get(parent_pid, Node, nil).
 
 -doc "Return a node's configured supervisor `strategy` (supervisors only; else `nil`).".
--spec strategyOf(node_map()) -> atom() | nil.
-strategyOf(Node) ->
+-spec strategy(node_map()) -> atom() | nil.
+strategy(Node) ->
     maps:get(strategy, Node, nil).
 
 -doc "Return a node's configured `restartIntensity` budget (supervisors only; else `nil`).".
--spec restartIntensityOf(node_map()) -> map() | nil.
-restartIntensityOf(Node) ->
+-spec restartIntensity(node_map()) -> map() | nil.
+restartIntensity(Node) ->
     maps:get(restartIntensity, Node, nil).
 
 -doc "Return whether a node's children were truncated by the child cap.".
--spec truncatedOf(node_map()) -> boolean().
-truncatedOf(Node) ->
+-spec truncated(node_map()) -> boolean().
+truncated(Node) ->
     maps:get(truncated, Node, false).
 
 %% Attach the shared sibling set to a node so its parent/child accessors resolve.

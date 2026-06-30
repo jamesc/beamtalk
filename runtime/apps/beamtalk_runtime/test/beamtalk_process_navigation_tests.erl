@@ -589,41 +589,41 @@ enrich_attaches_siblings_test() ->
 children_of_returns_direct_children_test() ->
     Flat = sample_flat_tree(),
     Root = beamtalk_process_navigation:rootOf(Flat),
-    Children = beamtalk_process_navigation:childrenOf(Root),
+    Children = beamtalk_process_navigation:children(Root),
     ChildPids = lists:sort([maps:get(pid, C) || C <- Children]),
     Expected = lists:sort([list_to_pid("<0.1.0>"), list_to_pid("<0.2.0>")]),
     ?assertEqual(Expected, ChildPids),
     %% Children are enriched, so navigation chains (childA has a grandchild).
     [GrandParent] = [C || C <- Children, maps:get(pid, C) =:= list_to_pid("<0.1.0>")],
-    Grandchildren = beamtalk_process_navigation:childrenOf(GrandParent),
+    Grandchildren = beamtalk_process_navigation:children(GrandParent),
     ?assertEqual([list_to_pid("<0.3.0>")], [maps:get(pid, G) || G <- Grandchildren]).
 
 children_of_leaf_is_empty_test() ->
     Flat = sample_flat_tree(),
     Enriched = beamtalk_process_navigation:enrich(Flat),
     [Leaf] = [N || N <- Enriched, maps:get(pid, N) =:= list_to_pid("<0.2.0>")],
-    ?assertEqual([], beamtalk_process_navigation:childrenOf(Leaf)).
+    ?assertEqual([], beamtalk_process_navigation:children(Leaf)).
 
 parent_of_returns_parent_test() ->
     Flat = sample_flat_tree(),
     Enriched = beamtalk_process_navigation:enrich(Flat),
     [ChildA] = [N || N <- Enriched, maps:get(pid, N) =:= list_to_pid("<0.1.0>")],
-    Parent = beamtalk_process_navigation:parentOf(ChildA),
+    Parent = beamtalk_process_navigation:parent(ChildA),
     ?assertEqual(self(), maps:get(pid, Parent)).
 
 parent_of_root_is_nil_test() ->
     Flat = sample_flat_tree(),
     Root = beamtalk_process_navigation:rootOf(Flat),
-    ?assertEqual(nil, beamtalk_process_navigation:parentOf(Root)).
+    ?assertEqual(nil, beamtalk_process_navigation:parent(Root)).
 
 parent_pid_of_returns_parent_pid_directly_test() ->
     Flat = sample_flat_tree(),
     Enriched = beamtalk_process_navigation:enrich(Flat),
     [ChildA] = [N || N <- Enriched, maps:get(pid, N) =:= list_to_pid("<0.1.0>")],
     %% Direct adjacency key: the parent's pid, without resolving the parent node.
-    ?assertEqual(self(), beamtalk_process_navigation:parentPidOf(ChildA)),
+    ?assertEqual(self(), beamtalk_process_navigation:parentPid(ChildA)),
     Root = beamtalk_process_navigation:rootOf(Flat),
-    ?assertEqual(nil, beamtalk_process_navigation:parentPidOf(Root)).
+    ?assertEqual(nil, beamtalk_process_navigation:parentPid(Root)).
 
 node_field_accessors_test() ->
     Node = #{
@@ -638,11 +638,11 @@ node_field_accessors_test() ->
         truncated => true,
         parent_pid => nil
     },
-    ?assertEqual(oneForOne, beamtalk_process_navigation:strategyOf(Node)),
+    ?assertEqual(oneForOne, beamtalk_process_navigation:strategy(Node)),
     ?assertEqual(
-        #{maxRestarts => 10, window => 60}, beamtalk_process_navigation:restartIntensityOf(Node)
+        #{maxRestarts => 10, window => 60}, beamtalk_process_navigation:restartIntensity(Node)
     ),
-    ?assertEqual(true, beamtalk_process_navigation:truncatedOf(Node)).
+    ?assertEqual(true, beamtalk_process_navigation:truncated(Node)).
 
 %%====================================================================
 %% Tests: child_handles/1 — Inspector supervisor-aware inspection (BT-2634)

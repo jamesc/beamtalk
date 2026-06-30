@@ -30,7 +30,7 @@
 /// node isSupervisor    // => false
 /// node isBeamtalk      // => true
 /// ```
-typed Value subclass: SupervisionNode
+typed Value subclass: SupervisionNode native: beamtalk_process_navigation
   /// The process id, or `nil` for a child caught mid-restart (`#restarting`).
   field: pid :: Pid | Nil = nil
   /// The process's registered name, or `nil` if it is anonymous.
@@ -74,8 +74,7 @@ typed Value subclass: SupervisionNode
   /// ```beamtalk
   /// node children   // => #(a SupervisionNode, ...)
   /// ```
-  children -> List(SupervisionNode) =>
-    (Erlang beamtalk_process_navigation) childrenOf: self
+  children -> List(SupervisionNode) => self delegate
 
   /// The snapshot parent of this node, or `nil` for a root node or a node
   /// caught mid-restart.
@@ -84,8 +83,7 @@ typed Value subclass: SupervisionNode
   /// ```beamtalk
   /// node parent   // => a SupervisionNode | nil
   /// ```
-  parent -> SupervisionNode | Nil =>
-    (Erlang beamtalk_process_navigation) parentOf: self
+  parent -> SupervisionNode | Nil => self delegate
 
   /// The pid of this node's parent supervisor, or `nil` for a root node — the
   /// O(1) adjacency key, without materialising the full parent node (`parent`).
@@ -94,8 +92,7 @@ typed Value subclass: SupervisionNode
   /// ```beamtalk
   /// node parentPid   // => a Pid | nil
   /// ```
-  parentPid -> Pid | Nil =>
-    (Erlang beamtalk_process_navigation) parentPidOf: self
+  parentPid -> Pid | Nil => self delegate
 
   /// The configured OTP restart strategy (`#oneForOne`, `#simpleOneForOne`, …)
   /// for a Beamtalk supervisor node, or `nil` for actors and foreign processes.
@@ -104,8 +101,7 @@ typed Value subclass: SupervisionNode
   /// ```beamtalk
   /// node strategy   // => #oneForOne
   /// ```
-  strategy -> Symbol | Nil =>
-    (Erlang beamtalk_process_navigation) strategyOf: self
+  strategy -> Symbol | Nil => self delegate
 
   /// The configured restart *budget* — `#{#maxRestarts => n, #window => secs}` —
   /// for a Beamtalk supervisor node, or `nil` otherwise. This is the public,
@@ -116,8 +112,7 @@ typed Value subclass: SupervisionNode
   /// ```beamtalk
   /// node restartIntensity   // => #{#maxRestarts => 10, #window => 60}
   /// ```
-  restartIntensity -> Dictionary | Nil =>
-    (Erlang beamtalk_process_navigation) restartIntensityOf: self
+  restartIntensity -> Dictionary | Nil => self delegate
 
   /// Whether this supervisor's children were truncated by the snapshot child cap
   /// (a large `simpleOneForOne` pool, ADR 0092 §Constraints 1). When `true`,
@@ -127,7 +122,7 @@ typed Value subclass: SupervisionNode
   /// ```beamtalk
   /// node truncated   // => false
   /// ```
-  truncated -> Boolean => (Erlang beamtalk_process_navigation) truncatedOf: self
+  truncated -> Boolean => self delegate
 
   /// Lazily fetch this node's live OTP status (ADR 0092 §5).
   ///
@@ -141,6 +136,11 @@ typed Value subclass: SupervisionNode
   /// ```beamtalk
   /// node status   // => #{#module => ..., #sysState => #running} | nil
   /// ```
+  ///
+  /// Stays inline FFI (not `self delegate`): the backing `status/1` takes the
+  /// node's *pid*, not the node map, so the call threads `self pid` rather than
+  /// `self` and cannot use the first-keyword + self-threading delegation form
+  /// (ADR 0101 / BT-2731).
   status -> Dictionary | Nil =>
     (Erlang beamtalk_process_navigation) status: self pid
 
