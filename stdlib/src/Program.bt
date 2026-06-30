@@ -17,7 +17,7 @@
 /// Program commandName
 /// // => "beamtalk"
 /// ```
-sealed typed Object subclass: Program
+sealed typed Object subclass: Program native: beamtalk_program
 
   /// The invoked program's name as a `String`.
   ///
@@ -35,7 +35,7 @@ sealed typed Object subclass: Program
   /// Program commandName
   /// // => "beamtalk"
   /// ```
-  class sealed commandName -> String => (Erlang beamtalk_program) commandName
+  class sealed commandName -> String => self delegate
 
   /// End this program with status 0 — the job-level, safe exit. Does not return.
   ///
@@ -48,7 +48,7 @@ sealed typed Object subclass: Program
   /// Program exit
   /// // => _
   /// ```
-  class sealed exit -> Nil => (Erlang beamtalk_program) exit
+  class sealed exit -> Nil => self delegate
 
   /// End this program with status `code` — the job-level, safe exit (ADR 0099).
   /// Does not return.
@@ -70,5 +70,4 @@ sealed typed Object subclass: Program
   /// Program exit: 2
   /// // => _
   /// ```
-  class sealed exit: code :: Integer -> Nil =>
-    (Erlang beamtalk_program) exit: code
+  class sealed exit: code :: Integer -> Nil => self delegate

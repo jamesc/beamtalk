@@ -23,7 +23,7 @@
 /// System uniqueId
 /// // => _
 /// ```
-sealed typed Object subclass: System
+sealed typed Object subclass: System native: beamtalk_system
 
   /// Read an environment variable by name. Returns nil if not set.
   ///
@@ -34,8 +34,7 @@ sealed typed Object subclass: System
   /// System getEnv: "NONEXISTENT_VAR_12345"
   /// // => nil
   /// ```
-  class sealed getEnv: name :: String -> String | Nil =>
-    (Erlang beamtalk_system) getEnv: name
+  class sealed getEnv: name :: String -> String | Nil => self delegate
 
   /// Read an environment variable with a default fallback.
   ///
@@ -47,7 +46,7 @@ sealed typed Object subclass: System
   /// // => "8080"
   /// ```
   class sealed getEnv: name :: String default: fallback :: String -> String =>
-    (Erlang beamtalk_system) getEnv: name default: fallback
+    self delegate
 
   /// Set an environment variable. Both arguments must be Strings.
   ///
@@ -61,7 +60,7 @@ sealed typed Object subclass: System
   /// // => "hello"
   /// ```
   class sealed setEnv: name :: String value: val :: String -> Boolean =>
-    (Erlang beamtalk_system) setEnv: name value: val
+    self delegate
 
   /// Remove an environment variable. Argument must be a String.
   ///
@@ -76,8 +75,7 @@ sealed typed Object subclass: System
   /// System getEnv: "BT_TEST_UNSET_ENV"
   /// // => nil
   /// ```
-  class sealed unsetEnv: name :: String -> Boolean =>
-    (Erlang beamtalk_system) unsetEnv: name
+  class sealed unsetEnv: name :: String -> Boolean => self delegate
 
   /// Return the OS platform name: "linux", "darwin", or "win32".
   ///
@@ -86,7 +84,7 @@ sealed typed Object subclass: System
   /// System osPlatform
   /// // => _
   /// ```
-  class sealed osPlatform -> String => (Erlang beamtalk_system) osPlatform
+  class sealed osPlatform -> String => self delegate
 
   /// Return the OS family: "unix" or "win32".
   ///
@@ -95,7 +93,7 @@ sealed typed Object subclass: System
   /// System osFamily
   /// // => _
   /// ```
-  class sealed osFamily -> String => (Erlang beamtalk_system) osFamily
+  class sealed osFamily -> String => self delegate
 
   /// Return the system architecture string (e.g., "x86_64-pc-linux-gnu").
   ///
@@ -104,7 +102,7 @@ sealed typed Object subclass: System
   /// System architecture
   /// // => _
   /// ```
-  class sealed architecture -> String => (Erlang beamtalk_system) architecture
+  class sealed architecture -> String => self delegate
 
   /// Return the hostname of the current machine.
   ///
@@ -113,7 +111,7 @@ sealed typed Object subclass: System
   /// System hostname
   /// // => _
   /// ```
-  class sealed hostname -> String => (Erlang beamtalk_system) hostname
+  class sealed hostname -> String => self delegate
 
   /// Return the OTP/Erlang version string (e.g., "27").
   ///
@@ -122,7 +120,7 @@ sealed typed Object subclass: System
   /// System erlangVersion
   /// // => _
   /// ```
-  class sealed erlangVersion -> String => (Erlang beamtalk_system) erlangVersion
+  class sealed erlangVersion -> String => self delegate
 
   /// Return the OS process ID as an Integer.
   ///
@@ -131,7 +129,7 @@ sealed typed Object subclass: System
   /// System pid
   /// // => _
   /// ```
-  class sealed pid -> Integer => (Erlang beamtalk_system) pid
+  class sealed pid -> Integer => self delegate
 
   /// Return a unique positive monotonic integer.
   ///
@@ -143,7 +141,7 @@ sealed typed Object subclass: System
   /// System uniqueId
   /// // => _
   /// ```
-  class sealed uniqueId -> Integer => (Erlang beamtalk_system) uniqueId
+  class sealed uniqueId -> Integer => self delegate
 
   /// Halt the whole VM with status 0 — the nuclear, whole-node option.
   /// Does not return.
@@ -155,7 +153,7 @@ sealed typed Object subclass: System
   /// System halt
   /// // => _
   /// ```
-  class sealed halt -> Nil => (Erlang beamtalk_system) halt
+  class sealed halt -> Nil => self delegate
 
   /// Halt the whole VM with status `code` (ADR 0099) — the nuclear option.
   /// Does not return.
@@ -175,5 +173,4 @@ sealed typed Object subclass: System
   /// System halt: 1
   /// // => _
   /// ```
-  class sealed halt: code :: Integer -> Nil =>
-    (Erlang beamtalk_system) halt: code
+  class sealed halt: code :: Integer -> Nil => self delegate

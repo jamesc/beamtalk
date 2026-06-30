@@ -61,3 +61,17 @@ TestCase subclass: FileIoTest
   testUnicodeContent =>
     self assert: (File writeAll: "target/bt-test-tmp/unicode.txt" contents: "Hello 世界 🌍") isOk
     self assert: (File readAll: "target/bt-test-tmp/unicode.txt") unwrap equals: "Hello 世界 🌍"
+
+  // ADR 0101 / BT-2721: after migrating File to `native: beamtalk_file`, the
+  // return-vs-raise dual channel is preserved — `Result` for modeled outcomes,
+  // a raised `#beamtalk_error{}` for misuse. native_call applies the same ADR
+  // 0076 ok/error → Result coercion and wrap-by-default as inline FFI.
+  testNativeResultDualChannel =>
+    // ok arm: a successful read returns a Result (value channel)
+    self assert: (File writeAll: "target/bt-test-tmp/dual.txt" contents: "ok") isOk
+    self assert: (File readAll: "target/bt-test-tmp/dual.txt") isOk
+    // error arm: a modeled failure still returns a Result error (value channel)
+    self assert: (File readAll: "target/bt-test-tmp/no_such_dual_xyz.txt") isError
+    // misuse: a non-string path raises a #beamtalk_error (exception channel)
+    @expect type
+    self should: [File readAll: 42] raise: #type_error

@@ -20,7 +20,7 @@
 /// ```
 ///
 /// @see docs/ADR/0070-package-namespaces-and-dependencies.md Section 8
-sealed typed Value subclass: Package
+sealed typed Value subclass: Package native: beamtalk_package
   field: name :: String = ""
   field: version :: String = ""
   field: classes :: List(Symbol) = #()
@@ -39,7 +39,7 @@ sealed typed Value subclass: Package
   /// Package all includes: "stdlib"
   /// // => true
   /// ```
-  class sealed all -> List(String) => (Erlang beamtalk_package) all
+  class sealed all -> List(String) => self delegate
 
   /// Return a Package for the given package name.
   ///
@@ -50,8 +50,7 @@ sealed typed Value subclass: Package
   /// (Package named: "stdlib") name
   /// // => "stdlib"
   /// ```
-  class sealed named: name :: String -> Package =>
-    (Erlang beamtalk_package) named: name
+  class sealed named: name :: String -> Package => self delegate
 
   /// Return a List of class names (Symbols) belonging to the given package.
   ///
@@ -62,8 +61,7 @@ sealed typed Value subclass: Package
   /// Package classes: "stdlib"
   /// // => _
   /// ```
-  class sealed classes: name :: String -> List(Symbol) =>
-    (Erlang beamtalk_package) classes: name
+  class sealed classes: name :: String -> List(Symbol) => self delegate
 
   /// Return a List of dependency package names (Strings) for the given package.
   ///
@@ -74,8 +72,7 @@ sealed typed Value subclass: Package
   /// Package dependencies: "stdlib"
   /// // => _
   /// ```
-  class sealed dependencies: name :: String -> List(String) =>
-    (Erlang beamtalk_package) dependencies: name
+  class sealed dependencies: name :: String -> List(String) => self delegate
 
   /// Return the package name (String) that owns the given class name (Symbol).
   ///
@@ -87,7 +84,7 @@ sealed typed Value subclass: Package
   /// // => _
   /// ```
   class sealed packageNameFor: className :: Symbol -> String | Nil =>
-    (Erlang beamtalk_package) packageNameFor: className
+    self delegate
 
   // ===== Instance Methods — Accessors =====
 

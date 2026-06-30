@@ -14,7 +14,7 @@
 /// result summary      // => "5 tests, 5 passed (0.1s)"
 /// result failures     // => [] or [#{ name => ..., error => ... }, ...]
 /// ```
-typed Object subclass: TestResult
+typed Object subclass: TestResult native: beamtalk_test_runner
 
   /// Number of test methods that passed.
   ///
@@ -22,7 +22,7 @@ typed Object subclass: TestResult
   /// ```beamtalk
   /// result passed      // => 5
   /// ```
-  passed -> Integer => (Erlang beamtalk_test_runner) passed: self
+  passed -> Integer => self delegate
 
   /// Number of test methods that failed or raised an error.
   ///
@@ -30,7 +30,7 @@ typed Object subclass: TestResult
   /// ```beamtalk
   /// result failed      // => 0
   /// ```
-  failed -> Integer => (Erlang beamtalk_test_runner) failed: self
+  failed -> Integer => self delegate
 
   /// Number of test methods that were skipped.
   ///
@@ -38,7 +38,7 @@ typed Object subclass: TestResult
   /// ```beamtalk
   /// result skipped     // => 0
   /// ```
-  skipped -> Integer => (Erlang beamtalk_test_runner) skipped: self
+  skipped -> Integer => self delegate
 
   /// Total number of test methods that were run.
   ///
@@ -46,7 +46,7 @@ typed Object subclass: TestResult
   /// ```beamtalk
   /// result total       // => 5
   /// ```
-  total -> Integer => (Erlang beamtalk_test_runner) total: self
+  total -> Integer => self delegate
 
   /// Wall-clock duration of the test run in seconds.
   ///
@@ -54,7 +54,7 @@ typed Object subclass: TestResult
   /// ```beamtalk
   /// result duration    // => 0.123
   /// ```
-  duration -> Float => (Erlang beamtalk_test_runner) duration: self
+  duration -> Float => self delegate
 
   /// List of failure records. Each record is a Dictionary with keys
   /// `name` (String) and `error` (String).
@@ -63,7 +63,7 @@ typed Object subclass: TestResult
   /// ```beamtalk
   /// result failures    // => []
   /// ```
-  failures -> List => (Erlang beamtalk_test_runner) failures: self
+  failures -> List => self delegate
 
   /// True if all tests passed (i.e. `failed` is zero).
   ///
@@ -71,7 +71,7 @@ typed Object subclass: TestResult
   /// ```beamtalk
   /// result hasPassed   // => true
   /// ```
-  hasPassed -> Boolean => (Erlang beamtalk_test_runner) hasPassed: self
+  hasPassed -> Boolean => self delegate
 
   /// Human-readable summary line.
   ///
@@ -79,7 +79,7 @@ typed Object subclass: TestResult
   /// ```beamtalk
   /// result summary     // => "5 tests, 5 passed (0.1s)"
   /// ```
-  summary -> String => (Erlang beamtalk_test_runner) summary: self
+  summary -> String => self delegate
 
   /// Developer-readable representation of the result.
   ///
@@ -87,4 +87,4 @@ typed Object subclass: TestResult
   /// ```beamtalk
   /// result printString // => "TestResult(5/5 passed)"
   /// ```
-  printString -> String => (Erlang beamtalk_test_runner) printString: self
+  printString -> String => self delegate
