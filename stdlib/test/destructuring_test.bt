@@ -268,14 +268,14 @@ TestCase subclass: DestructuringTest
     self assert: c equals: 3
 
   testMapDestructuringMissingKeyRaisesError =>
-    // Accessing a missing key raises a {badkey, Key} error via erlang:map_get/2.
-    // BT-2707 classifies it into a readable key_error (a RuntimeError subclass)
-    // instead of leaking the raw `badkey` term.
+    // Accessing a missing key raises a RuntimeError (any kind) — here we only
+    // assert that it raises at all. The error kind is checked by
+    // testMapDestructuringMissingKeyIsKeyError (#key_error, classified by BT-2707).
     result := [
       #{#missing => _val} := #{#present => 42}
       #did_not_raise
-    ] on: RuntimeError do: [:e | e message includesSubstring: "not found"]
-    self assert: result equals: true
+    ] on: RuntimeError do: [:e | #raised]
+    self assert: result equals: #raised
 
   testMapDestructuringMissingKeyIsKeyError =>
     // The classified missing-key error carries the key_error kind.

@@ -4,8 +4,9 @@
 /// Console echo — interactive-read smoke test for ADR 0099 §1 (Console).
 ///
 /// Demonstrates the `Console` stdio surface: prompt, read a line from stdin,
-/// echo it to stdout, and write a goodbye to stderr. Returns nil at EOF
-/// (e.g. when stdin is closed or piped from /dev/null).
+/// echo it to stdout, and write a goodbye to stderr. `readLine:` returns nil
+/// at EOF (e.g. when stdin is closed or piped from /dev/null); `run` always
+/// returns self.
 ///
 /// Run it (stdin attached to your terminal):
 ///   $ beamtalk run ConsoleEcho run
