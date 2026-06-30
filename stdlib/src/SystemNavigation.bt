@@ -747,13 +747,12 @@ sealed typed Object subclass: SystemNavigation
       into: [:acc :entry |
         extClassTag := entry at: 1
         extSelector := entry at: 2
-        extSource := entry at: 3
+        extSource :: String := entry at: 3
         extClass := self resolveExtensionClass: extClassTag
         (self extensionTargets: extClass names: targetNames)
           ifTrue: [
-            // `extSource` (entry at: 3) is always source text (a String) — the
-            // FFI spec types it `binary()` (BT-2254) — arriving Dynamic-typed
-            // through the `allExtensionsWithSource` seam.
+            // `extSource` is bound `:: String` above to re-assert the
+            // source-text invariant the seam erases (BT-2254).
             self
               appendAnnounceSitesIn: extSource
               class: extClass
@@ -1292,7 +1291,7 @@ sealed typed Object subclass: SystemNavigation
       into: [:acc :entry |
         extClassTag := entry at: 1
         extSelector := entry at: 2
-        extSource := entry at: 3
+        extSource :: String := entry at: 3
         extClass := self resolveExtensionClass: extClassTag
         lines := self
           ffiSitesIn: extSource
@@ -1567,7 +1566,7 @@ sealed typed Object subclass: SystemNavigation
       into: [:acc :entry |
         extClassTag := entry at: 1
         extSelector := entry at: 2
-        extSource := entry at: 3
+        extSource :: String := entry at: 3
         extClass := self resolveExtensionClass: extClassTag
         lines := self sendersIn: extSource selector: aSelector
         lines
@@ -1592,7 +1591,7 @@ sealed typed Object subclass: SystemNavigation
       into: [:acc :entry |
         extClassTag := entry at: 1
         extSelector := entry at: 2
-        extSource := entry at: 3
+        extSource :: String := entry at: 3
         extClass := self resolveExtensionClass: extClassTag
         lines := self referencesIn: extSource class: targetName
         lines
@@ -1618,11 +1617,10 @@ sealed typed Object subclass: SystemNavigation
       into: [:acc :entry |
         extClassTag := entry at: 1
         extSelector := entry at: 2
-        extSource := entry at: 3
+        extSource :: String := entry at: 3
         extClass := self resolveExtensionClass: extClassTag
-        // `extSource` (entry at: 3) is always source text (a String) — the FFI
-        // spec types it `binary()` (BT-2254) — arriving Dynamic-typed through
-        // the `allExtensionsWithSource` seam.
+        // `extSource` is bound `:: String` above to re-assert the source-text
+        // invariant the `allExtensionsWithSource` seam erases (BT-2254).
         (extSource matchesRegex: aRegex) ifTrue: [
           acc add: #{#class => extClass, #selector => extSelector}
         ] ifFalse: [acc]
@@ -2012,11 +2010,10 @@ sealed typed Object subclass: SystemNavigation
       into: [:acc :entry |
         extClassTag := entry at: 1
         extSelector := entry at: 2
-        extSource := entry at: 3
+        extSource :: String := entry at: 3
         extClass := self resolveExtensionClass: extClassTag
-        // `extSource` (entry at: 3) is always source text (a String) — the FFI
-        // spec types it `binary()` (BT-2254) — arriving Dynamic-typed through
-        // the `allExtensionsWithSource` seam.
+        // `extSource` is bound `:: String` above to re-assert the source-text
+        // invariant the `allExtensionsWithSource` seam erases (BT-2254).
         self
           appendAllSendsIn: extSource
           owner: extClass
@@ -2291,10 +2288,9 @@ sealed typed Object subclass: SystemNavigation
     extEntries
       inject: result
       into: [:acc :entry |
-        extSource := entry at: 3
-        // `extSource` (entry at: 3) is always source text (a String) — the FFI
-        // spec types it `binary()` (BT-2254) — arriving Dynamic-typed through
-        // the `allExtensionsWithSource` seam.
+        extSource :: String := entry at: 3
+        // `extSource` is bound `:: String` above to re-assert the source-text
+        // invariant the `allExtensionsWithSource` seam erases (BT-2254).
         self addSentSelectorsIn: extSource into: acc
       ]
 
@@ -2466,11 +2462,12 @@ sealed typed Object subclass: SystemNavigation
   /// INVARIANT: the third tuple element (`entry at: 3`, the extension source)
   /// is always a String. The underlying FFI spec types it `binary()`
   /// (String | Binary, BT-2254), but the runtime always delivers source text.
-  /// The `List(Tuple)` return type drops per-element precision, so callers
-  /// see `entry at: 3` as `Dynamic` — this silently bypasses the static
-  /// `String | Binary` check the inline FFI used to give (e.g. at the
-  /// `ffiSitesIn:…` seam in `collectExtensionFfiSitesFor:`). If a non-String
-  /// third element ever appears, that mistyping would surface only at runtime.
+  /// The `List(Tuple)` return type drops per-element precision, so `entry at: 3`
+  /// reads as `Dynamic`. To restore the static `String` check the inline FFI
+  /// gave (e.g. at the `ffiSitesIn:…` seam in `collectExtensionFfiSitesFor:`),
+  /// every consumer re-asserts the invariant by binding the source through a
+  /// typed local: `extSource :: String := entry at: 3`. If a non-String third
+  /// element ever appears, that typed binding fails loudly rather than silently.
   internal allExtensionsWithSource -> List(Tuple) =>
     (Erlang beamtalk_extensions) listAllWithSource
 
