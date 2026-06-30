@@ -110,10 +110,14 @@ const REGISTRY: &[(&str, PrimitiveLowerFn)] = &[
     ("FileHandle", actor_types::generate_file_handle_bif),
 ];
 
-/// BT-2233: Quoted `@primitive "selector"` declarations that intentionally
-/// route through runtime dispatch instead of an inline BIF, so the fail-loud
-/// cross-check (and `generate_primitive`'s hard error in `mod.rs`) must not
-/// flag them as unmapped.
+/// BT-2233: Quoted `@primitive "selector"` / `@intrinsic "selector"`
+/// declarations that intentionally route through runtime dispatch instead of an
+/// inline BIF, so the fail-loud cross-check (and `generate_primitive`'s hard
+/// error in `mod.rs`) must not flag them as unmapped. (Both labels lower
+/// identically when quoted — only `is_quoted` drives the body codegen — so the
+/// ADR 0101 substrate methods relabelled `@primitive`→`@intrinsic "=="`/`"class"`
+/// etc. stay on this list, since their selectors are operators/keyword selectors
+/// that cannot be bare-identifier structural intrinsics.)
 ///
 /// Each entry is `(defining class, quoted selector)`. These are
 /// call-site-intercepted reflective / identity / dynamic-dispatch operations:
