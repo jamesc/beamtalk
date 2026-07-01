@@ -964,3 +964,66 @@ fn test_vt_nested_loop_in_conditional_assign_rhs_threads_local() {
         "Nested loop inside a conditional assign-RHS branch must thread 'sum'. Got:\n{code}"
     );
 }
+
+#[test]
+fn test_actor_conditional_last_expr_lower_actor_threaded_last() {
+    // BT-2378: When the LAST expression of an Actor method is a conditional with
+    // field mutations, `lower_actor_threaded_last` must bind element 1 of the
+    // {Value, NewState} tuple as the reply value and element 2 as the new
+    // gen_server State, then emit {'reply', ReplyValue, NewState}.
+    //
+    // All prior Actor conditional-mutation tests read `self.count` AFTER the
+    // conditional, so the conditional was never in last position. This exercises
+    // the `lower_actor_threaded_last` path that was completely uncovered.
+    let src = "Actor subclass: Ctr\n  state: count = 0\n\n  setByFlag: flag =>\n    flag ifTrue: [self.count := 1] ifFalse: [self.count := -1]\n";
+    let code = codegen(src);
+    eprintln!("Generated code for actor conditional-as-last:\n{code}");
+
+    // lower_actor_threaded_last binds element 1 (reply value) and element 2 (State).
+    assert!(
+        code.contains("'erlang':'element'(1,"),
+        "Last-position conditional must extract reply value via element(1, ...). Got:\n{code}"
+    );
+    assert!(
+        code.contains("'erlang':'element'(2,"),
+        "Last-position conditional must extract new State via element(2, ...). Got:\n{code}"
+    );
+    // The gen_server reply tuple must carry the State extracted from element 2.
+    assert!(
+        code.contains("{'reply',"),
+        "Actor method must return a gen_server reply tuple. Got:\n{code}"
+    );
+    // The conditional compiles to an inline case.
+    assert!(
+        code.contains("case "),
+        "Conditional must compile to an inline case expression. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_actor_conditional_assign_rhs_emit_actor_threaded_assign_rhs() {
+    // BT-2378: `result := flag ifTrue: [...] ifFalse: [...]` with local variable
+    // mutations in an Actor method must route through `emit_actor_threaded_assign_rhs`:
+    //   - bind element 1 of the {Value, NewState} tuple → assignment target
+    //   - bind element 2 → next gen_server State version
+    //   - rebind sibling outer locals (here `x`) from the new State map
+    let src = "Actor subclass: Ctr\n  state: count = 0\n\n  compute: flag =>\n    x := 0\n    result := flag ifTrue: [x := 1. x] ifFalse: [x := -1. x]\n    result\n";
+    let code = codegen(src);
+    eprintln!("Generated code for actor conditional assign-RHS:\n{code}");
+
+    // emit_actor_threaded_assign_rhs must extract value (element 1) and State (element 2).
+    assert!(
+        code.contains("'erlang':'element'(1,") && code.contains("'erlang':'element'(2,"),
+        "Conditional assign-RHS must extract value (element 1) and new State (element 2). Got:\n{code}"
+    );
+    // The sibling local `x` must be rebound from the updated State map.
+    assert!(
+        code.contains("'__local__x'"),
+        "Sibling local 'x' must be rebound from the updated State map. Got:\n{code}"
+    );
+    // The conditional compiles to an inline case.
+    assert!(
+        code.contains("case "),
+        "Conditional must compile to an inline case expression. Got:\n{code}"
+    );
+}
