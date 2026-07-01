@@ -221,6 +221,33 @@ orchestration — but each is a wrapped, single-purpose call, not buried logic. 
 Erlang call is one of: a `@primitive`, a `native:` delegate, an `@intrinsic`, or a
 wrapped inline/`internal` FFI seam. Nothing leaks raw errors.
 
+**Why shipped `internal` seams came in at 19, not ~45:** the ~45 estimate bundled
+SystemNavigation (Part 4 projected "~29") plus a "thin tail" of embedded FFI in
+other classes. As shipped, **all 19 seams live in SystemNavigation** — and the
+19-vs-29 difference is *consolidation, not omission*: the 19 named `internal`
+helpers cover SystemNavigation's ~25 inline `(Erlang …)` sites across four backing
+modules (`beamtalk_interface`, `beamtalk_xref`, `beamtalk_extensions`,
+`beamtalk_class_registry`), since several call sites fold into one seam and a few
+FFI calls legitimately stay inline inside orchestration logic. The estimated
+"thin tail" in other classes was **not** extracted into separate seams: those are
+the Resolved-Decision-5 intentionally-inline classes above, already wrapped-by-default
+by Part 2, so extracting them would only inflate the xref index (see Consequences —
+"Part 4 inflates the xref index") for no safety gain.
+
+**Why shipped `@intrinsic` is 48, not 54:** the 54 estimate was `39 existing + 15
+reclassified`, but that arithmetic does not reconcile line-by-line with the shipped
+count and should be read as a projection, not a ledger. The `39 existing` baseline
+was a point-in-time snapshot that drifted as concurrent stdlib work landed between
+the ADR draft and implementation, and the 15 reclassifications shipped at different
+granularity than projected (e.g. Object carries 9 `@intrinsic` bindings as shipped
+vs the "1" the Part 3 table projected, while other predicted moves were absorbed into
+the `@primitive` dispatch layer rather than relabelled). The **as-shipped 48 is the
+authoritative measured count** (`grep '@intrinsic' stdlib/src/*.bt`, doc-comment lines
+excluded); the per-class distribution is Object 9, Block 9, Actor 9, Logger 8,
+ProtoObject 7, Value 2, and singletons on Erlang/ErlangModule/ClassBuilder. No attempt
+is made here to attribute the 6-method delta to specific methods, as that would
+require archaeology of the pre-ADR baseline that the reclassification did not record.
+
 ## Prior Art
 
 - **Smalltalk (Pharo/Squeak)** — named VM primitives `<primitive: 'name' module: 'mod'>` with a Smalltalk fallback body. We keep the *named-primitive* idea for value types but deliberately reject the raw `module:` MFA escape hatch (ADR 0007) — `native:`/`@primitive`/`@intrinsic` all route through safety layers. Smalltalk has no equivalent of `native:`-class delegation; its primitives are per-method only.
