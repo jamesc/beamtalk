@@ -70,30 +70,18 @@ pub(super) struct AutoSlotMethods {
 impl AutoSlotMethods {
     /// Computes the `with*:` selector name for a slot.
     ///
-    /// Capitalises the first letter of the field name and prepends `"with"`:
-    /// - `"x"` → `"withX:"`
-    /// - `"firstName"` → `"withFirstName:"`
+    /// Delegates to [`crate::synthetic_selectors::with_star_selector`], the shared
+    /// naming authority for value-class synthetics.
     pub(super) fn with_star_selector(field_name: &str) -> String {
-        let mut chars = field_name.chars();
-        match chars.next() {
-            None => "with:".to_string(),
-            Some(first) => {
-                let cap: String = first.to_uppercase().collect();
-                format!("with{}{}:", cap, chars.as_str())
-            }
-        }
+        crate::synthetic_selectors::with_star_selector(field_name)
     }
 
     /// Returns the keyword constructor selector for the given slot names.
     ///
-    /// E.g. `["x", "y"]` → `"x:y:"`
+    /// E.g. `["x", "y"]` → `"x:y:"`. Delegates to the shared naming authority in
+    /// [`crate::synthetic_selectors`].
     fn keyword_selector(slots: &[String]) -> String {
-        let mut sel = String::new();
-        for s in slots {
-            sel.push_str(s);
-            sel.push(':');
-        }
-        sel
+        crate::synthetic_selectors::keyword_constructor_selector(slots.iter().map(String::as_str))
     }
 }
 

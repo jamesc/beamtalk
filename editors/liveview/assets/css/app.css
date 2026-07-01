@@ -366,6 +366,18 @@
   max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .row .source-origin-tag.project { display: none; }
+/* Compiler-derived synthetic method (BT-2714): auto-generated Value accessors,
+   `with<Field>:` copy-setters, keyword constructors, and actor `new`/`spawn`.
+   Tagged in the System Browser method list so a derived method is visibly
+   distinct from a hand-written or runtime one (the ticket's "visibly tagged as
+   derived" criterion). Uses the neutral accent pill so it reads as metadata, not
+   an error/runtime signal. */
+.row .derived-tag {
+  flex: none;
+  font-size: 9px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase;
+  padding: 0 4px; border-radius: 3px;
+  background: var(--accent-soft); color: var(--accent-2);
+}
 .sb-classdef { border-bottom: 1px solid var(--line-soft); padding-bottom: 2px; }
 .sb-protocols { border-bottom: 1px solid var(--line-soft); padding-bottom: 2px; }
 

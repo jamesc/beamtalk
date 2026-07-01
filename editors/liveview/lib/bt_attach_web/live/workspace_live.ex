@@ -5439,6 +5439,14 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp runtime_only?(%{"origin" => "runtime"}), do: true
   defp runtime_only?(_), do: false
 
+  # A selector row is "derived" (BT-2714) when its xref `source_status` is
+  # `synthetic` — a compiler-synthesized method (Value accessors, `with<Field>:`
+  # setters, keyword constructors, actor `new`/`spawn`) with no hand-written
+  # source line. The method list badges these `derived` so the synthetic magic is
+  # visible rather than indistinguishable from real methods.
+  defp synthetic?(%{"source_status" => "synthetic"}), do: true
+  defp synthetic?(_), do: false
+
   # Source origin badge helpers (BT-2552, BT-2643, BT-2641). Two orthogonal
   # fields drive the badge: `source_origin` is the classification ("stdlib" |
   # "dependency" | "project") and keys the css class + title; `package` is the
@@ -8201,6 +8209,13 @@ defmodule BtAttachWeb.WorkspaceLive do
                 {source_origin_label(m)}
               </span>
               <span :if={runtime_only?(m)} class="runtime-tag" title="runtime-only">⚡</span>
+              <span
+                :if={synthetic?(m)}
+                class="derived-tag"
+                title="compiler-derived (auto-generated synthetic method)"
+              >
+                derived
+              </span>
             </div>
           </div>
         <% end %>

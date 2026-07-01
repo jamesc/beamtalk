@@ -28,6 +28,7 @@ pub mod repl;
 pub mod semantic_analysis;
 pub mod source_analysis;
 pub(crate) mod state_threading_selectors;
+pub(crate) mod synthetic_selectors;
 pub mod test_helpers;
 pub mod unparse;
 
