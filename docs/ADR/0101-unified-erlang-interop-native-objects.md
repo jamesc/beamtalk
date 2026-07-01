@@ -1,14 +1,14 @@
 # ADR 0101: Unified Erlang Interop — `native:` for Stateless Objects, Wrap-by-Default FFI, and a Clean `@primitive`/`@intrinsic`/`native:` Split
 
 ## Status
-Accepted (2026-06-28)
+Implemented (2026-07-01)
 
 ## Implementation Tracking
 
 **Epic:** BT-2719
-**Issues:** BT-2720 (native: codegen) · BT-2721 (bulk migrate) · BT-2722 (unify FFI proxy) · BT-2723 (migrate exit/throw catches) · BT-2724 (optional @primitive string) · BT-2725 (substrate→@intrinsic + ReactiveSubprocess) · BT-2726 (internal seams) · BT-2727 (E2E + docs)
+**Issues:** BT-2720 (native: codegen) · BT-2721 (bulk migrate) · BT-2722 (unify FFI proxy) · BT-2723 (migrate exit/throw catches) · BT-2724 (optional @primitive string) · BT-2725 (substrate→@intrinsic + ReactiveSubprocess) · BT-2726 (internal seams) · BT-2727 (E2E + docs) · BT-2730 (FFI error-details harmonization) · BT-2731 (remaining FFI Object classes)
 **Start:** BT-2722 (foundation — adds the `native_call` helper + unified wrapping; no deps), then BT-2720 (consumes `native_call`)
-**Status:** Planned
+**Status:** Implemented (2026-07-01) — all phases landed. `native:` grew from 2 classes to 31; `@intrinsic` at 54 (substrate relabelled); `ReactiveSubprocess` migrated to `native:`; SystemNavigation embedded FFI extracted into 19 `internal` seams. Follow-ups BT-2730/BT-2731 harmonized FFI error details and finished the remaining Object-class migrations (see Resolved Decision 5).
 
 ## Context
 
