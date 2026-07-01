@@ -6,7 +6,7 @@
 use super::super::super::document::Document;
 use super::super::super::document::leaf;
 use super::super::super::intrinsics::validate_block_arity_exact;
-use super::super::super::{CoreErlangGenerator, Result, block_analysis};
+use super::super::super::{CoreErlangGenerator, Result};
 use super::super::{BodyKind, ThreadingPlan};
 use crate::ast::{Block, Expression};
 use crate::docvec;
@@ -26,12 +26,8 @@ impl CoreErlangGenerator {
              \x20 list anySatisfy: [:item | item > 0]",
         )?;
 
-        if let Expression::Block(body_block) = body {
-            let analysis = block_analysis::analyze_block(body_block);
-            if self.needs_mutation_threading(&analysis) {
-                return self
-                    .generate_list_bool_predicate_with_mutations(receiver, body_block, false);
-            }
+        if let Some(body_block) = self.block_needs_mutation_threading(body) {
+            return self.generate_list_bool_predicate_with_mutations(receiver, body_block, false);
         }
 
         // No mutations: fall through to simple BIF call (lists:any/2)
@@ -77,12 +73,8 @@ impl CoreErlangGenerator {
              \x20 list allSatisfy: [:item | item > 0]",
         )?;
 
-        if let Expression::Block(body_block) = body {
-            let analysis = block_analysis::analyze_block(body_block);
-            if self.needs_mutation_threading(&analysis) {
-                return self
-                    .generate_list_bool_predicate_with_mutations(receiver, body_block, true);
-            }
+        if let Some(body_block) = self.block_needs_mutation_threading(body) {
+            return self.generate_list_bool_predicate_with_mutations(receiver, body_block, true);
         }
 
         // No mutations: fall through to simple BIF call (lists:all/2)
@@ -322,11 +314,8 @@ impl CoreErlangGenerator {
              \x20 list detect: [:item | item > 0]",
         )?;
 
-        if let Expression::Block(body_block) = body {
-            let analysis = block_analysis::analyze_block(body_block);
-            if self.needs_mutation_threading(&analysis) {
-                return self.generate_list_detect_with_mutations(receiver, body_block);
-            }
+        if let Some(body_block) = self.block_needs_mutation_threading(body) {
+            return self.generate_list_detect_with_mutations(receiver, body_block);
         }
 
         // No mutations: fall through to BIF call (beamtalk_list:detect/2)
@@ -384,12 +373,8 @@ impl CoreErlangGenerator {
              \x20 list detect: [:item | item > 0] ifNone: ['not found']",
         )?;
 
-        if let Expression::Block(pred_block) = predicate {
-            let analysis = block_analysis::analyze_block(pred_block);
-            if self.needs_mutation_threading(&analysis) {
-                return self
-                    .generate_list_detect_if_none_with_mutations(receiver, pred_block, if_none);
-            }
+        if let Some(pred_block) = self.block_needs_mutation_threading(predicate) {
+            return self.generate_list_detect_if_none_with_mutations(receiver, pred_block, if_none);
         }
 
         // No mutations: fall through to runtime dispatch

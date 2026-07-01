@@ -6,7 +6,7 @@
 use super::super::super::document::Document;
 use super::super::super::document::leaf;
 use super::super::super::intrinsics::validate_block_arity_exact;
-use super::super::super::{CodeGenContext, CoreErlangGenerator, Result, block_analysis};
+use super::super::super::{CodeGenContext, CoreErlangGenerator, Result};
 use super::super::{BodyKind, ThreadingPlan};
 use crate::ast::{Block, Expression};
 use crate::docvec;
@@ -31,12 +31,8 @@ impl CoreErlangGenerator {
         )?;
 
         // Check if body is a literal block (enables mutation analysis)
-        if let Expression::Block(body_block) = body {
-            // Analyze block for mutations
-            let analysis = block_analysis::analyze_block(body_block);
-            if self.needs_mutation_threading(&analysis) {
-                return self.generate_list_do_with_mutations(receiver, body_block);
-            }
+        if let Some(body_block) = self.block_needs_mutation_threading(body) {
+            return self.generate_list_do_with_mutations(receiver, body_block);
         }
 
         // Simple case: no mutations, use standard lists:foreach
@@ -223,11 +219,8 @@ impl CoreErlangGenerator {
         )?;
 
         // BT-904: Check if body has state-affecting operations (self-sends, field writes)
-        if let Expression::Block(body_block) = body {
-            let analysis = block_analysis::analyze_block(body_block);
-            if self.needs_mutation_threading(&analysis) {
-                return self.generate_list_collect_with_mutations(receiver, body_block);
-            }
+        if let Some(body_block) = self.block_needs_mutation_threading(body) {
+            return self.generate_list_collect_with_mutations(receiver, body_block);
         }
 
         // Simple case: no mutations, use standard lists:map
