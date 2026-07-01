@@ -334,7 +334,7 @@ Policy (ADR 0101 Part 2), matching the doc on `apply_with_coercion/5`:
 %% (`maybe_retry_badarg/6`) can *return* the charlist-coerced retry result on
 %% success. That value flows back through here to `apply_with_coercion/5`.
 -spec classify_ffi_exception(
-    atom(),
+    error | exit | throw,
     term(),
     list(),
     atom(),
