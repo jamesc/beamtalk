@@ -58,21 +58,19 @@ There is **no injected `Session` binding** at the shell level; the class is reac
 ### API
 
 ```beamtalk
-sealed typed Object subclass: Session
+sealed typed Object subclass: Session native: beamtalk_session_primitives
 
   // ─── Class-side: factory methods only ───
 
   /// The calling process's session as a value. Returns `nil` outside a
   /// REPL eval context (compiled program code has no session), matching
   /// `Workspace currentSession`.
-  class current -> Session | Nil =>
-    (Erlang beamtalk_session_primitives) current
+  class current -> Session | Nil => self delegate
 
   /// Look up a session by its protocol session ID. Returns `nil` if no
   /// such session exists or it is no longer alive. Used for cross-session
   /// access — see "Cross-session access (LSP, VS Code)" below.
-  class withId: aSessionId :: String -> Session | Nil =>
-    (Erlang beamtalk_session_primitives) withId: aSessionId
+  class withId: aSessionId :: String -> Session | Nil => self delegate
 
   // ─── Instance-side: all operations live here ───
 
@@ -81,8 +79,7 @@ sealed typed Object subclass: Session
   /// session state (write-through, for the calling session only).
   /// (There is no `globals` here — globals are workspace-owned;
   /// use `Workspace globals`.)
-  bindings -> BindingsView =>
-    (Erlang beamtalk_session_primitives) bindingsViewFor: self
+  bindings -> BindingsView => self delegate
 
   /// Resolve a name exactly the way bare-name lookup does, returning the
   /// first match or nil. Order: session locals → workspace globals
@@ -90,23 +87,23 @@ sealed typed Object subclass: Session
   /// tool: answers "where does this name resolve from?" interactively.
   /// Uses the one shared resolver (see "Binding storage model"), so it can
   /// never disagree with how the name actually resolves.
-  resolve: aName :: Symbol -> Object =>
-    (Erlang beamtalk_session_primitives) resolveFor: self name: aName
+  resolve: aName :: Symbol -> Object => self delegate
 
   /// Clear this session's local bindings. Workspace globals remain.
-  clear -> Nil =>
-    (Erlang beamtalk_session_primitives) clearFor: self
+  clear -> Nil => self delegate
 
   /// Stable session identifier (matches the protocol session ID).
-  id -> String =>
-    (Erlang beamtalk_session_primitives) idOf: self
+  id -> String => self delegate
 ```
 
-> **Note (ADR 0101 / BT-2731):** the backing primitives shown here were later
-> renamed to their first-keyword form and `Session` / `BindingsView` migrated to
-> `native:` `self delegate` (`bindings`, `resolve`, `clear`, `id`, `at`, `keys`,
-> `size`, …). The design below is unchanged; only the Erlang function names and
-> the delegation mechanism differ. See ADR 0101 Resolved Decision 5.
+> **Note (ADR 0101 / BT-2731):** the example above reflects the shipped form —
+> `Session` / `BindingsView` are `native: beamtalk_session_primitives` and each
+> method is a `self delegate`. The original design expressed these as inline
+> `(Erlang beamtalk_session_primitives) bindingsViewFor: self` etc.; the backing
+> primitives were later renamed to their first-keyword form (`bindings`,
+> `resolve`, `clear`, `id`, `at`, `keys`, `size`, …). The design is unchanged;
+> only the Erlang function names and the delegation mechanism differ. See ADR
+> 0101 Resolved Decision 5.
 
 The common idiom is `Session current bindings keys`; for another session, `(Session withId: "…") bindings keys`. Binding a session to a temp (`s := Session current`) works too, but note `s` then becomes a session-local and will appear in `s bindings keys` — so the inline form is cleaner for one-off inspection.
 

@@ -14,6 +14,17 @@ error wrapping, and printString formatting.
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 
+%% Exported so the proxy can `erlang:apply/3` them (external call). Fixtures for
+%% the charlist-retry exit/throw tests: raise `badarg` on a binary arg (to
+%% trigger the retry) then `exit`/`throw` on the charlist-coerced retry arg.
+-export([retry_then_exit/1, retry_then_throw/1]).
+
+retry_then_exit(Arg) when is_binary(Arg) -> erlang:error(badarg);
+retry_then_exit(Arg) when is_list(Arg) -> exit(retry_exit_reason).
+
+retry_then_throw(Arg) when is_binary(Arg) -> erlang:error(badarg);
+retry_then_throw(Arg) when is_list(Arg) -> throw(retry_throw_value).
+
 %%% ===================================================================
 %%% Proxy construction
 %%% ===================================================================
@@ -1063,6 +1074,33 @@ native_call_throw_passes_through_test() ->
         ?assert(false)
     catch
         throw:oops -> ok
+    end.
+
+%%% BT-2730 review follow-up: exit/throw raised on the charlist-coercion RETRY
+%%% (the inner try in maybe_retry_badarg/6, not the first apply) must still
+%%% propagate unchanged. The retry routes through the same classify_ffi_exception/9
+%%% catch-all as the first pass, so these guard the shared classifier's retry arm.
+native_call_retry_exit_propagates_test() ->
+    %% First apply on the binary arg raises badarg → retry with the charlist-coerced
+    %% arg, which exits. The exit must propagate, not become a #beamtalk_error{}.
+    try
+        beamtalk_erlang_proxy:native_call(
+            ?MODULE, retry_then_exit, [<<"x">>], {'Stream', 'take:'}
+        ),
+        ?assert(false)
+    catch
+        exit:retry_exit_reason -> ok
+    end.
+
+native_call_retry_throw_passes_through_test() ->
+    %% Same, but the charlist retry throws — the throw must pass through unchanged.
+    try
+        beamtalk_erlang_proxy:native_call(
+            ?MODULE, retry_then_throw, [<<"x">>], {'Stream', 'take:'}
+        ),
+        ?assert(false)
+    catch
+        throw:retry_throw_value -> ok
     end.
 
 native_call_beamtalk_error_passthrough_test() ->
