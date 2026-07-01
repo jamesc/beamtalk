@@ -9,7 +9,7 @@
 EUnit tests for beamtalk_random module (BT-1165).
 
 Tests class-side methods (next, nextInteger:, new, seed:),
-instance methods (instanceNext, instanceNextInteger:),
+instance methods (next/1, nextInteger/2),
 collection integration (atRandom), FFI shims, and error paths.
 """.
 
@@ -106,79 +106,79 @@ seed_non_integer_test() ->
     ).
 
 %%% ============================================================================
-%%% instanceNext/1 — instance float
+%%% next/1 — instance float
 %%% ============================================================================
 
 instance_next_returns_float_test() ->
     R = beamtalk_random:'seed:'(42),
-    V = beamtalk_random:'instanceNext'(R),
+    V = beamtalk_random:next(R),
     ?assert(is_float(V)).
 
 instance_next_in_range_test() ->
     R = beamtalk_random:'seed:'(42),
-    V = beamtalk_random:'instanceNext'(R),
+    V = beamtalk_random:next(R),
     ?assert(V >= 0.0),
     ?assert(V < 1.0).
 
 instance_next_deterministic_test() ->
     R = beamtalk_random:'seed:'(99),
-    V1 = beamtalk_random:'instanceNext'(R),
-    V2 = beamtalk_random:'instanceNext'(R),
+    V1 = beamtalk_random:next(R),
+    V2 = beamtalk_random:next(R),
     %% Same instance = same state = same result (value object semantics)
     ?assertEqual(V1, V2).
 
 instance_next_bad_receiver_test() ->
     ?assertError(
         #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_random:'instanceNext'(not_a_random)
+        beamtalk_random:next(not_a_random)
     ).
 
 %%% ============================================================================
-%%% instanceNextInteger:/2 — instance integer
+%%% nextInteger/2 — instance integer
 %%% ============================================================================
 
 instance_next_integer_returns_integer_test() ->
     R = beamtalk_random:'seed:'(42),
-    V = beamtalk_random:'instanceNextInteger:'(R, 100),
+    V = beamtalk_random:nextInteger(R, 100),
     ?assert(is_integer(V)).
 
 instance_next_integer_in_range_test() ->
     R = beamtalk_random:'seed:'(42),
-    V = beamtalk_random:'instanceNextInteger:'(R, 100),
+    V = beamtalk_random:nextInteger(R, 100),
     ?assert(V >= 1),
     ?assert(V =< 100).
 
 instance_next_integer_deterministic_test() ->
     R = beamtalk_random:'seed:'(7),
-    V1 = beamtalk_random:'instanceNextInteger:'(R, 10),
-    V2 = beamtalk_random:'instanceNextInteger:'(R, 10),
+    V1 = beamtalk_random:nextInteger(R, 10),
+    V2 = beamtalk_random:nextInteger(R, 10),
     ?assertEqual(V1, V2).
 
 instance_next_integer_zero_max_test() ->
     R = beamtalk_random:'seed:'(1),
     ?assertError(
         #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_random:'instanceNextInteger:'(R, 0)
+        beamtalk_random:nextInteger(R, 0)
     ).
 
 instance_next_integer_negative_max_test() ->
     R = beamtalk_random:'seed:'(1),
     ?assertError(
         #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_random:'instanceNextInteger:'(R, -1)
+        beamtalk_random:nextInteger(R, -1)
     ).
 
 instance_next_integer_non_integer_max_test() ->
     R = beamtalk_random:'seed:'(1),
     ?assertError(
         #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_random:'instanceNextInteger:'(R, 1.5)
+        beamtalk_random:nextInteger(R, 1.5)
     ).
 
 instance_next_integer_bad_receiver_test() ->
     ?assertError(
         #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_random:'instanceNextInteger:'(not_a_random, 10)
+        beamtalk_random:nextInteger(not_a_random, 10)
     ).
 
 %%% ============================================================================
@@ -246,7 +246,7 @@ ffi_shim_seed_error_propagates_test() ->
 
 ffi_shim_instance_next_integer_returns_integer_test() ->
     R = beamtalk_random:'seed:'(42),
-    V = beamtalk_random:instanceNextInteger(R, 100),
+    V = beamtalk_random:nextInteger(R, 100),
     ?assert(is_integer(V)),
     ?assert(V >= 1),
     ?assert(V =< 100).
@@ -255,5 +255,5 @@ ffi_shim_instance_next_integer_error_propagates_test() ->
     R = beamtalk_random:'seed:'(1),
     ?assertError(
         #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_random:instanceNextInteger(R, 0)
+        beamtalk_random:nextInteger(R, 0)
     ).

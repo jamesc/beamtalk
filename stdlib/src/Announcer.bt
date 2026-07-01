@@ -30,6 +30,14 @@
 /// ```
 typed Object subclass: Announcer
 
+  // Stays inline `(Erlang beamtalk_announcements)` FFI rather than `native:`
+  // (ADR 0101 / BT-2731): the instance methods can't take the first-keyword +
+  // self-threading form — `when:do:` and `when:doOnce:` both collapse to
+  // `when/3` (collision; `when` is also an Erlang reserved word), and `announce`
+  // would collide with the backing module's Layer-1 global `announce/2,3` bus
+  // API. The `*On`/`whenDo` backing names are deliberate. All calls are
+  // wrapped-by-default since BT-2722.
+
   /// Create a new Announcer handle (mints a fresh runtime ref via FFI).
   ///
   /// ## Examples

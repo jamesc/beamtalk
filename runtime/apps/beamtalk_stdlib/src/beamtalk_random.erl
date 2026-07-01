@@ -34,19 +34,24 @@ Wraps Erlang's `rand` module. Default algorithm is `exsss` (Xorshift116**).
 
 ## FFI Shims
 
-The `beamtalk_erlang_proxy:direct_call/3` dispatch derives the Erlang function
-name from the first keyword of the Beamtalk selector (stripping the trailing
-colon). The shims (`nextInteger/1`, `seed/1`, `instanceNextInteger/2`) bridge
-the gap so that `(Erlang beamtalk_random) nextInteger: max` dispatches
-correctly to the canonical `'nextInteger:'/1` implementation.
+The FFI / `native:` dispatch derives the Erlang function name from the first
+keyword of the Beamtalk selector (stripping the trailing colon). The class-side
+shims (`nextInteger/1`, `seed/1`) bridge the gap so that
+`Random nextInteger: max` dispatches to the canonical `'nextInteger:'/1`
+implementation. The instance-side `next`/`nextInteger:` selectors delegate
+directly to `next/1` / `nextInteger/2` (ADR 0101 / BT-2731).
 """.
 
 -export(['next'/0, 'nextInteger:'/1, 'new'/0, 'seed:'/1]).
--export(['instanceNext'/1, 'instanceNextInteger:'/2]).
+%% Instance-side `native:` delegation targets (ADR 0101 / BT-2731): the first
+%% keyword + self-threading rule maps `rng next` → `next/1` and
+%% `rng nextInteger: n` → `nextInteger/2`. They coexist with the arity-0/1
+%% class-side `next/0` / `nextInteger/1` (arity disambiguates).
+-export([next/1, nextInteger/2]).
 -export(['atRandom'/1]).
 
 %% FFI shims for (Erlang beamtalk_random) dispatch
--export([nextInteger/1, seed/1, instanceNextInteger/2]).
+-export([nextInteger/1, seed/1]).
 
 -type t() :: #{'$beamtalk_class' := 'Random', atom() => term()}.
 -export_type([t/0]).
@@ -111,11 +116,11 @@ Return a random float from instance state.
 Random instances are immutable value types — calling next on the same
 instance always returns the same value.
 """.
--spec 'instanceNext'(t()) -> float().
-'instanceNext'(#{state := State0}) ->
+-spec next(t()) -> float().
+next(#{state := State0}) ->
     {Value, _State1} = rand:uniform_s(State0),
     Value;
-'instanceNext'(_) ->
+next(_) ->
     Error0 = beamtalk_error:new(type_error, 'Random'),
     Error1 = beamtalk_error:with_selector(Error0, 'next'),
     Error2 = beamtalk_error:with_hint(Error1, <<"Receiver must be a Random instance">>),
@@ -126,21 +131,21 @@ Return a random integer between 1 and Max from instance state.
 Random instances are immutable value types — calling nextInteger: on
 the same instance always returns the same value.
 """.
--spec 'instanceNextInteger:'(t(), integer()) -> integer().
-'instanceNextInteger:'(#{state := State0}, Max) when is_integer(Max), Max > 0 ->
+-spec nextInteger(t(), integer()) -> integer().
+nextInteger(#{state := State0}, Max) when is_integer(Max), Max > 0 ->
     {Value, _State1} = rand:uniform_s(Max, State0),
     Value;
-'instanceNextInteger:'(#{state := _}, Max) when is_integer(Max) ->
+nextInteger(#{state := _}, Max) when is_integer(Max) ->
     Error0 = beamtalk_error:new(type_error, 'Random'),
     Error1 = beamtalk_error:with_selector(Error0, 'nextInteger:'),
     Error2 = beamtalk_error:with_hint(Error1, <<"Argument must be a positive Integer">>),
     beamtalk_error:raise(Error2);
-'instanceNextInteger:'(#{state := _}, _) ->
+nextInteger(#{state := _}, _) ->
     Error0 = beamtalk_error:new(type_error, 'Random'),
     Error1 = beamtalk_error:with_selector(Error0, 'nextInteger:'),
     Error2 = beamtalk_error:with_hint(Error1, <<"Argument must be an Integer">>),
     beamtalk_error:raise(Error2);
-'instanceNextInteger:'(_, _) ->
+nextInteger(_, _) ->
     Error0 = beamtalk_error:new(type_error, 'Random'),
     Error1 = beamtalk_error:with_selector(Error0, 'nextInteger:'),
     Error2 = beamtalk_error:with_hint(Error1, <<"Receiver must be a Random instance">>),
@@ -185,12 +190,13 @@ Used by List atRandom and Tuple atRandom.
 %%% Beamtalk selector (stripping the trailing colon). These shims provide
 %%% the colon-free entry points that the proxy calls:
 %%%
-%%%   (Erlang beamtalk_random) next              → next/0  (direct)
 %%%   (Erlang beamtalk_random) nextInteger: max  → nextInteger/1
-%%%   (Erlang beamtalk_random) new               → new/0   (direct)
 %%%   (Erlang beamtalk_random) seed: seed        → seed/1
-%%%   (Erlang beamtalk_random) instanceNext: self            → instanceNext/1 (direct)
-%%%   (Erlang beamtalk_random) instanceNextInteger: self with: max → instanceNextInteger/2
+%%%
+%%% The class-side `next`/`new` and the instance-side `next`/`nextInteger:`
+%%% delegations need no shim: their first keyword already names an exported
+%%% function (`next/0`, `new/0`, `next/1`, `nextInteger/2` — see the `native:`
+%%% `self delegate` methods on the Random class, ADR 0101 / BT-2731).
 %%% ============================================================================
 
 -doc "FFI shim: `(Erlang beamtalk_random) nextInteger: max`".
@@ -200,7 +206,3 @@ nextInteger(Max) -> 'nextInteger:'(Max).
 -doc "FFI shim: `(Erlang beamtalk_random) seed: seed`".
 -spec seed(integer()) -> t().
 seed(Seed) -> 'seed:'(Seed).
-
--doc "FFI shim: `(Erlang beamtalk_random) instanceNextInteger: self with: max`".
--spec instanceNextInteger(t(), integer()) -> integer().
-instanceNextInteger(Self, Max) -> 'instanceNextInteger:'(Self, Max).

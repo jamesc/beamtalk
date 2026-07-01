@@ -86,6 +86,10 @@ typed Object subclass: AtomicCounter native: beamtalk_atomic_counter
   /// ```
   decrementBy: n :: Integer -> Integer => self delegate
 
+  // `value` stays inline FFI (not `self delegate`, ADR 0101 / BT-2731): the
+  // unary `value` selector is intercepted by block-evaluation codegen (BT-1260),
+  // so the backing function is deliberately named `readValue` rather than `value`.
+
   /// Read the current value.
   ///
   /// ## Examples

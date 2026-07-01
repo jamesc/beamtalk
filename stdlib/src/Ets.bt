@@ -41,6 +41,15 @@
 /// ```
 typed Object subclass: Ets(K, V) native: beamtalk_ets
 
+  // Inline-FFI exceptions (ADR 0101 / BT-2731): `at:`, `at:put:` and
+  // `at:ifAbsent:` share the first keyword `at`, and `at:put:`/`at:ifAbsent:`
+  // both want `at/3` — an irreducible first-keyword + arity collision — while a
+  // backing `size/1` would shadow the auto-imported `erlang:size/1` BIF (needing
+  // a `-compile({no_auto_import, [size/1]})`, as beamtalk_session_primitives does)
+  // and `delete/1` collides with the `ets:delete` mental model. These
+  // five stay `(Erlang …)` FFI (still wrapped-by-default since BT-2722); the
+  // rest delegate.
+
   /// Create a new named public ETS table (class method).
   ///
   /// `tableType` must be one of: `#set`, `#orderedSet`, `#bag`, `#duplicateBag`.

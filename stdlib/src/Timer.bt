@@ -16,6 +16,10 @@ sealed typed Object subclass: Timer native: beamtalk_timer
 
   // ===== Class Methods =====
 
+  // `after:do:` stays inline FFI (not `self delegate`, ADR 0101 / BT-2731): the
+  // first keyword `after` is an Erlang reserved word, so it cannot name a backing
+  // function (the native_validators reserved-word check would reject it).
+
   /// Evaluate `block` once after `ms` milliseconds. Returns a cancellable Timer.
   ///
   /// ## Examples
