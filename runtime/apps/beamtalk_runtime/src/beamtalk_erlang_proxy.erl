@@ -329,6 +329,10 @@ Policy (ADR 0101 Part 2), matching the doc on `apply_with_coercion/5`:
 - `exit:*` / `throw:*` → re-raised unchanged with the captured stacktrace so
   process exit and foreign throws stay semantically meaningful
 """.
+%% Returns `term()`, not `no_return()`: every classified-exception clause raises,
+%% but the `badarg` clause defers to `OnBadarg`, and the first-pass continuation
+%% (`maybe_retry_badarg/6`) can *return* the charlist-coerced retry result on
+%% success. That value flows back through here to `apply_with_coercion/5`.
 -spec classify_ffi_exception(
     atom(),
     term(),
@@ -338,8 +342,8 @@ Policy (ADR 0101 Part 2), matching the doc on `apply_with_coercion/5`:
     list(),
     atom(),
     error_context(),
-    fun((atom(), atom(), list(), atom(), error_context(), list()) -> no_return())
-) -> no_return().
+    fun((atom(), atom(), list(), atom(), error_context(), list()) -> term())
+) -> term().
 classify_ffi_exception(
     error, #{error := #beamtalk_error{}} = Wrapped, Stack, _M, _F, _Args, _Sel, _Ctx, _OnBadarg
 ) ->
