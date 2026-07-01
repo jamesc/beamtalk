@@ -471,16 +471,8 @@ impl ClassHierarchy {
             }
 
             // Auto with*: setter
-            let with_sel = {
-                let mut chars = slot_name.chars();
-                match chars.next() {
-                    None => EcoString::from("with:"),
-                    Some(first) => {
-                        let cap: String = first.to_uppercase().collect();
-                        EcoString::from(format!("with{}{}:", cap, chars.as_str()))
-                    }
-                }
-            };
+            let with_sel =
+                EcoString::from(crate::synthetic_selectors::with_star_selector(slot_name));
             if !existing_instance_selectors.contains(&with_sel) {
                 instance_methods.push(MethodInfo {
                     selector: with_sel,
@@ -499,14 +491,10 @@ impl ClassHierarchy {
 
         // Keyword constructor (class method)
         if !slots.is_empty() {
-            let kw_sel: EcoString = {
-                let mut s = String::new();
-                for (name, _) in slots {
-                    s.push_str(name);
-                    s.push(':');
-                }
-                EcoString::from(s)
-            };
+            let kw_sel: EcoString =
+                EcoString::from(crate::synthetic_selectors::keyword_constructor_selector(
+                    slots.iter().map(|(name, _)| name.as_str()),
+                ));
             if !existing_class_selectors.contains(&kw_sel) {
                 class_methods.push(MethodInfo {
                     selector: kw_sel,
@@ -616,10 +604,10 @@ impl ClassHierarchy {
     /// Synthesizes auto-generated slot methods for a `Value subclass:` class
     /// and appends them to `instance_methods` / `class_methods`.
     ///
-    /// Mirrors the selector-computation logic in
-    /// `codegen::core_erlang::value_type_codegen::compute_auto_slot_methods` so
-    /// that the class hierarchy (and therefore the type checker) knows about
-    /// these methods before codegen runs.
+    /// Selector names come from [`crate::synthetic_selectors`], the shared naming
+    /// authority also used by `codegen::core_erlang::value_type_codegen`, so the
+    /// class hierarchy (and therefore the type checker) agrees byte-for-byte with
+    /// the methods codegen emits — without duplicating the naming logic.
     #[allow(clippy::too_many_lines)] // field-mapping function — length is proportional to slot count
     pub(super) fn add_value_auto_methods(
         class: &ClassDefinition,
@@ -667,16 +655,8 @@ impl ClassHierarchy {
             }
 
             // Auto with*: setter: keyword method returning a new instance
-            let with_sel = {
-                let mut chars = slot_name.chars();
-                match chars.next() {
-                    None => EcoString::from("with:"),
-                    Some(first) => {
-                        let cap: String = first.to_uppercase().collect();
-                        EcoString::from(format!("with{}{}:", cap, chars.as_str()))
-                    }
-                }
-            };
+            let with_sel =
+                EcoString::from(crate::synthetic_selectors::with_star_selector(slot_name));
             if !user_instance_selectors.contains(&with_sel) {
                 let setter_doc = format!(
                     "Returns a new `{class_name}` with `{slot_name}` set to the given value.\n\n*(compiler-generated)*"
@@ -698,15 +678,10 @@ impl ClassHierarchy {
 
         // Auto keyword constructor on the class side (e.g., `x:y:`)
         if !class.state.is_empty() {
-            let slot_names: Vec<&str> = class.state.iter().map(|s| s.name.name.as_str()).collect();
-            let kw_sel: EcoString = {
-                let mut s = String::new();
-                for name in &slot_names {
-                    s.push_str(name);
-                    s.push(':');
-                }
-                EcoString::from(s)
-            };
+            let kw_sel: EcoString =
+                EcoString::from(crate::synthetic_selectors::keyword_constructor_selector(
+                    class.state.iter().map(|s| s.name.name.as_str()),
+                ));
             let arity = class.state.len();
             if !user_class_selectors.contains(&kw_sel) {
                 let args_desc: String = class

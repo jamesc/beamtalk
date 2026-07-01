@@ -633,7 +633,13 @@ defmodule BtAttachWeb.StubWorkspaceClient do
         side == "instance" and
             (class == "Counter" or class == "Ledger" or
                MapSet.member?(get(:defined_classes), class)) ->
-          [%{"selector" => "value"}, %{"selector" => "increment"}]
+          # BT-2714: `value` carries the xref `synthetic` tag (a compiler-derived
+          # accessor) so the System Browser's `derived` badge can be reached by
+          # navigation; `increment` is a hand-written `indexed` method for contrast.
+          [
+            %{"selector" => "value", "source_status" => "synthetic"},
+            %{"selector" => "increment", "source_status" => "indexed"}
+          ]
 
         true ->
           []
