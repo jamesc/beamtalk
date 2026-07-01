@@ -3706,8 +3706,13 @@ Announcements (typed domain events you subscribe to in app logic):
 
 ## Namespace and Class Visibility
 
-Beamtalk uses a **flat global namespace** (ADR 0031). All classes are globally
-visible — no `import`, `export`, or namespace declaration is needed or available.
+Within a package (and the REPL workspace), Beamtalk uses a **flat namespace** — all
+classes are visible to each other, with no `import` or `export` declarations. Across
+packages, dependencies are declared in `beamtalk.toml` and a dependency's classes are
+referenced by their short name, with qualified `package@Class` names available to
+resolve collisions ([ADR 0070](ADR/0070-package-namespaces-and-dependencies.md)). The
+original v0.1 flat-global-namespace decision is [ADR 0031](ADR/0031-flat-namespace-for-v01.md)
+(superseded by ADR 0070).
 
 ### How loading works
 
@@ -3810,8 +3815,13 @@ Integer subclass: SafeInteger
 
 ### Namespace
 
-Class names must be globally unique. A package namespace and dependency system is designed ([ADR 0070](ADR/0070-package-namespaces-and-dependencies.md)) but not yet implemented. See [known-limitations.md](known-limitations.md) and
-[ADR 0031](ADR/0031-flat-namespace-for-v01.md) for details.
+Within a package, class names must be unique. Across packages, the namespace and
+dependency system ([ADR 0070](ADR/0070-package-namespaces-and-dependencies.md)) makes
+each declared dependency's classes available by their short name; collisions between
+dependencies are a compile error, resolved with qualified `package@Class` names. See the
+[Package Management guide](beamtalk-packages.md) for `beamtalk.toml`, dependencies, and
+qualified names. [ADR 0031](ADR/0031-flat-namespace-for-v01.md) (superseded by ADR 0070)
+records the original v0.1 flat-namespace decision.
 
 ### Visibility and Access Control (ADR 0071)
 
