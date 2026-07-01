@@ -102,6 +102,12 @@ sealed typed Object subclass: Session
     (Erlang beamtalk_session_primitives) idOf: self
 ```
 
+> **Note (ADR 0101 / BT-2731):** the backing primitives shown here were later
+> renamed to their first-keyword form and `Session` / `BindingsView` migrated to
+> `native:` `self delegate` (`bindings`, `resolve`, `clear`, `id`, `at`, `keys`,
+> `size`, …). The design below is unchanged; only the Erlang function names and
+> the delegation mechanism differ. See ADR 0101 Resolved Decision 5.
+
 The common idiom is `Session current bindings keys`; for another session, `(Session withId: "…") bindings keys`. Binding a session to a temp (`s := Session current`) works too, but note `s` then becomes a session-local and will appear in `s bindings keys` — so the inline form is cleaner for one-off inspection.
 
 **Session instance representation.** `Session` is declared `Object subclass` (no `field:`/`state:` declarations, which an `Object` subclass cannot have), yet a `Session` *value* returned by `current` / `withId:` must carry its session's PID and protocol ID. This follows the existing `FileHandle` / `Port` pattern: a `sealed typed Object subclass` whose per-instance identity lives in the runtime representation (a tagged map produced by the primitive), not in a declared field. Instance methods pass `self` to a `*For:` primitive, which extracts the PID/ID from that representation — exactly as `FileHandle lines` passes `self` to `(Erlang beamtalk_file) handleLines: self`.
@@ -492,7 +498,11 @@ Factory (class-side):
 - `current/0` — returns a Session value carrying the calling session's PID and ID (read from the process dictionary), or `nil` outside an eval context.
 - `withId/1` — looks up a session by protocol ID and **checks liveness** (`is_process_alive`, the `resolve_pid` discipline — not a raw `beamtalk_session_table:lookup/1`, which can return a dead PID). Returns a Session value or `nil`.
 
-Operations (instance-side, all take a Session value):
+Operations (instance-side, all take a Session value). *Backing-function names below
+predate ADR 0101 / BT-2731, which renamed them to their first-keyword form
+(`bindingsViewFor`→`bindings`, `resolveFor`→`resolve`, `clearFor`→`clear`,
+`idOf`→`id`, `view_at`→`at`, `view_size`→`size`, …) and moved dispatch to
+`native:` `self delegate`; the semantics are unchanged.*
 - `bindingsViewFor/1` — returns a `BindingsView` over the target session's locals map. After Phase 1 that map *is* the locals (no subtraction); a cross-session read is the target shell's existing `get_bindings`. The view records the target session id so cross-session writes can be rejected.
 - `resolveFor/2` — delegates to the shared `resolve_name/2` (Phase 1): locals → `bind:as:` → singletons → classes.
 - `clearFor/1` — enqueue a clear mutation via the shell's pending-mutations API (Phase 2). Against a non-self session, raises `cross_session_mutation_unsupported`.
