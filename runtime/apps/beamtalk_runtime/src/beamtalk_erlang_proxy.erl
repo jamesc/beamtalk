@@ -617,9 +617,10 @@ raise_generic_error(_Module, _FunName, OrigSelector, Context, Reason, Stack) ->
 -doc """
 Merge the FFI `details` contract keys (`erlang_error` + `erlang_stacktrace`) into
 a generically-wrapped error so its details shape matches the specific clauses
-(BT-2730). `maps:merge/2` puts the wrapped error's own keys first so an existing
-`erlang_error`/`erlang_stacktrace` (there is none today, but stay defensive) is
-never overwritten.
+(BT-2730). Passing the backfill keys as `maps:merge/2`'s *first* argument and the
+classifier's own `Details` as the *second* means `Details` wins on any key clash
+(the second map takes precedence), so a pre-existing `erlang_error`/
+`erlang_stacktrace` (there is none today, but stay defensive) is never overwritten.
 """.
 -spec backfill_ffi_error_details(map(), term(), list()) -> map().
 backfill_ffi_error_details(
