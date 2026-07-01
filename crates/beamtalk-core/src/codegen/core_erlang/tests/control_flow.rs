@@ -1013,8 +1013,12 @@ fn test_actor_conditional_assign_rhs_emit_actor_threaded_assign_rhs() {
 
     // emit_actor_threaded_assign_rhs must extract value (element 1) and State (element 2).
     assert!(
-        code.contains("'erlang':'element'(1,") && code.contains("'erlang':'element'(2,"),
-        "Conditional assign-RHS must extract value (element 1) and new State (element 2). Got:\n{code}"
+        code.contains("'erlang':'element'(1,"),
+        "Conditional assign-RHS must extract value via element(1, ...). Got:\n{code}"
+    );
+    assert!(
+        code.contains("'erlang':'element'(2,"),
+        "Conditional assign-RHS must extract new State via element(2, ...). Got:\n{code}"
     );
     // The sibling local `x` must be rebound from the updated State map.
     assert!(
