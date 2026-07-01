@@ -8,38 +8,38 @@
 // beamtalk_future:maybe_await/1 for backward compatibility during migration
 
 TestCase subclass: FutureAutoAwaitTest
+  field: a = nil
+
+  setUp => self.a := ActorChainingFixture spawn
+
+  tearDown => self.a isNil ifFalse: [self.a stop]
 
   // Equality: actor method result used in == comparison
   testEqualityWithActorMethod =>
-    a := ActorChainingFixture spawn
-    self assert: (a getValue == 0) equals: true
+    self assert: (self.a getValue == 0) equals: true
 
   // Arithmetic: actor method result used in + operation
   testArithmeticAddWithActorMethod =>
-    a := ActorChainingFixture spawn
-    self assert: (a getValue + 1) equals: 1
+    self assert: (self.a getValue + 1) equals: 1
 
   // Comparison: actor method result used in > comparison
   testGreaterThanWithActorMethod =>
-    a := ActorChainingFixture spawn
-    a increment
-    self assert: (a getValue > 0) equals: true
+    self.a increment
+    self assert: (self.a getValue > 0) equals: true
 
   // Comparison: actor method result used in < comparison
   testLessThanWithActorMethod =>
-    a := ActorChainingFixture spawn
-    self assert: (a getValue < 10) equals: true
+    self assert: (self.a getValue < 10) equals: true
 
   // Arithmetic: actor method result used in * operation
   testArithmeticAfterIncrement =>
-    a := ActorChainingFixture spawn
-    a increment
-    a increment
-    self assert: (a getValue * 3) equals: 6
+    self.a increment
+    self.a increment
+    self assert: (self.a getValue * 3) equals: 6
 
   // Both operands are actor method results
   testBothOperandsAreActorResults =>
-    a := ActorChainingFixture spawn
     b := ActorChainingFixture spawn
-    a increment
-    self assert: (a getValue + b getValue) equals: 1
+    self.a increment
+    self assert: (self.a getValue + b getValue) equals: 1
+    b stop
