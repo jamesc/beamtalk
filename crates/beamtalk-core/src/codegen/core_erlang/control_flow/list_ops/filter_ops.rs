@@ -6,7 +6,7 @@
 use super::super::super::document::Document;
 use super::super::super::document::leaf;
 use super::super::super::intrinsics::validate_block_arity_exact;
-use super::super::super::{CoreErlangGenerator, Result, block_analysis};
+use super::super::super::{CoreErlangGenerator, Result};
 use super::super::{BodyKind, ThreadingPlan};
 use crate::ast::{Block, Expression};
 use crate::docvec;
@@ -27,11 +27,8 @@ impl CoreErlangGenerator {
         )?;
 
         // BT-904: Check if body has state-affecting operations
-        if let Expression::Block(body_block) = body {
-            let analysis = block_analysis::analyze_block(body_block);
-            if self.needs_mutation_threading(&analysis) {
-                return self.generate_list_filter_with_mutations(receiver, body_block, false);
-            }
+        if let Some(body_block) = self.block_needs_mutation_threading(body) {
+            return self.generate_list_filter_with_mutations(receiver, body_block, false);
         }
 
         // Simple case: no mutations, use standard lists:filter
@@ -53,11 +50,8 @@ impl CoreErlangGenerator {
         )?;
 
         // BT-904: Check if body has state-affecting operations
-        if let Expression::Block(body_block) = body {
-            let analysis = block_analysis::analyze_block(body_block);
-            if self.needs_mutation_threading(&analysis) {
-                return self.generate_list_filter_with_mutations(receiver, body_block, true);
-            }
+        if let Some(body_block) = self.block_needs_mutation_threading(body) {
+            return self.generate_list_filter_with_mutations(receiver, body_block, true);
         }
 
         // list reject: is opposite of filter - we need to negate the predicate

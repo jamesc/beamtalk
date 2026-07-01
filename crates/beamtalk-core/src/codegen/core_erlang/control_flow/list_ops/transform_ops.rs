@@ -7,7 +7,7 @@
 use super::super::super::document::Document;
 use super::super::super::document::leaf;
 use super::super::super::intrinsics::validate_block_arity_exact;
-use super::super::super::{CoreErlangGenerator, Result, block_analysis};
+use super::super::super::{CoreErlangGenerator, Result};
 use super::super::{BodyKind, ThreadingPlan};
 use crate::ast::{Block, Expression};
 use crate::docvec;
@@ -31,11 +31,8 @@ impl CoreErlangGenerator {
              \x20 list count: [:item | item > 0]",
         )?;
 
-        if let Expression::Block(body_block) = body {
-            let analysis = block_analysis::analyze_block(body_block);
-            if self.needs_mutation_threading(&analysis) {
-                return self.generate_list_count_with_mutations(receiver, body_block);
-            }
+        if let Some(body_block) = self.block_needs_mutation_threading(body) {
+            return self.generate_list_count_with_mutations(receiver, body_block);
         }
 
         // No mutations: use lists:filter + erlang:length
@@ -262,11 +259,8 @@ impl CoreErlangGenerator {
              \x20 list flatMap: [:item | #(item, item * 2)]",
         )?;
 
-        if let Expression::Block(body_block) = body {
-            let analysis = block_analysis::analyze_block(body_block);
-            if self.needs_mutation_threading(&analysis) {
-                return self.generate_list_flat_map_with_mutations(receiver, body_block);
-            }
+        if let Some(body_block) = self.block_needs_mutation_threading(body) {
+            return self.generate_list_flat_map_with_mutations(receiver, body_block);
         }
 
         // No mutations: use lists:flatmap
@@ -517,12 +511,8 @@ impl CoreErlangGenerator {
         )?;
 
         // Check if body is a literal block (enables mutation analysis)
-        if let Expression::Block(body_block) = body {
-            // Analyze block for mutations
-            let analysis = block_analysis::analyze_block(body_block);
-            if self.needs_mutation_threading(&analysis) {
-                return self.generate_list_inject_with_mutations(receiver, initial, body_block);
-            }
+        if let Some(body_block) = self.block_needs_mutation_threading(body) {
+            return self.generate_list_inject_with_mutations(receiver, initial, body_block);
         }
 
         // BT-1327: Pure-block fast path — emit inline lists:foldl instead of
@@ -826,11 +816,8 @@ impl CoreErlangGenerator {
              \x20 list takeWhile: [:item | item < 10]",
         )?;
 
-        if let Expression::Block(body_block) = body {
-            let analysis = block_analysis::analyze_block(body_block);
-            if self.needs_mutation_threading(&analysis) {
-                return self.generate_list_take_while_with_mutations(receiver, body_block);
-            }
+        if let Some(body_block) = self.block_needs_mutation_threading(body) {
+            return self.generate_list_take_while_with_mutations(receiver, body_block);
         }
 
         // No mutations: use lists:takewhile
@@ -1082,11 +1069,8 @@ impl CoreErlangGenerator {
              \x20 list dropWhile: [:item | item < 10]",
         )?;
 
-        if let Expression::Block(body_block) = body {
-            let analysis = block_analysis::analyze_block(body_block);
-            if self.needs_mutation_threading(&analysis) {
-                return self.generate_list_drop_while_with_mutations(receiver, body_block);
-            }
+        if let Some(body_block) = self.block_needs_mutation_threading(body) {
+            return self.generate_list_drop_while_with_mutations(receiver, body_block);
         }
 
         // No mutations: use lists:dropwhile
@@ -1334,11 +1318,8 @@ impl CoreErlangGenerator {
              \x20 list partition: [:item | item > 0]",
         )?;
 
-        if let Expression::Block(body_block) = body {
-            let analysis = block_analysis::analyze_block(body_block);
-            if self.needs_mutation_threading(&analysis) {
-                return self.generate_list_partition_with_mutations(receiver, body_block);
-            }
+        if let Some(body_block) = self.block_needs_mutation_threading(body) {
+            return self.generate_list_partition_with_mutations(receiver, body_block);
         }
 
         // No mutations: use beamtalk_list:partition
@@ -1638,11 +1619,8 @@ impl CoreErlangGenerator {
              \x20 list groupBy: [:item | item isEven]",
         )?;
 
-        if let Expression::Block(body_block) = body {
-            let analysis = block_analysis::analyze_block(body_block);
-            if self.needs_mutation_threading(&analysis) {
-                return self.generate_list_group_by_with_mutations(receiver, body_block);
-            }
+        if let Some(body_block) = self.block_needs_mutation_threading(body) {
+            return self.generate_list_group_by_with_mutations(receiver, body_block);
         }
 
         // No mutations: use beamtalk_list:group_by
@@ -1890,11 +1868,8 @@ impl CoreErlangGenerator {
              \x20 list sort: [:a :b | a < b]",
         )?;
 
-        if let Expression::Block(body_block) = body {
-            let analysis = block_analysis::analyze_block(body_block);
-            if self.needs_mutation_threading(&analysis) {
-                return self.generate_list_sort_with_mutations(receiver, body_block);
-            }
+        if let Some(body_block) = self.block_needs_mutation_threading(body) {
+            return self.generate_list_sort_with_mutations(receiver, body_block);
         }
 
         // No mutations: use beamtalk_list:sort_with

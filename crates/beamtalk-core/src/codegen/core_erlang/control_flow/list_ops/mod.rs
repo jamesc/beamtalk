@@ -30,8 +30,8 @@ mod tests;
 
 use super::super::document::Document;
 use super::super::document::leaf;
-use super::super::{CodeGenContext, CoreErlangGenerator, Result};
-use crate::ast::Expression;
+use super::super::{CodeGenContext, CoreErlangGenerator, Result, block_analysis};
+use crate::ast::{Block, Expression};
 use crate::docvec;
 
 /// Emits the Core Erlang preamble that binds a receiver to a guaranteed-list
@@ -72,6 +72,21 @@ pub(super) fn list_recv_to_safe_list_doc(
 }
 
 impl CoreErlangGenerator {
+    /// Returns `Some(&Block)` if `body` is a literal block that needs mutation
+    /// threading via `lists:foldl`; `None` when simple dispatch is sufficient.
+    pub(in crate::codegen::core_erlang) fn block_needs_mutation_threading<'a>(
+        &mut self,
+        body: &'a Expression,
+    ) -> Option<&'a Block> {
+        if let Expression::Block(body_block) = body {
+            let analysis = block_analysis::analyze_block(body_block);
+            if self.needs_mutation_threading(&analysis) {
+                return Some(body_block);
+            }
+        }
+        None
+    }
+
     pub(in crate::codegen::core_erlang) fn generate_simple_list_op(
         &mut self,
         receiver: &Expression,
