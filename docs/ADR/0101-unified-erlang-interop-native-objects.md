@@ -1,14 +1,14 @@
 # ADR 0101: Unified Erlang Interop — `native:` for Stateless Objects, Wrap-by-Default FFI, and a Clean `@primitive`/`@intrinsic`/`native:` Split
 
 ## Status
-Accepted (2026-06-28)
+Implemented (2026-07-01)
 
 ## Implementation Tracking
 
 **Epic:** BT-2719
-**Issues:** BT-2720 (native: codegen) · BT-2721 (bulk migrate) · BT-2722 (unify FFI proxy) · BT-2723 (migrate exit/throw catches) · BT-2724 (optional @primitive string) · BT-2725 (substrate→@intrinsic + ReactiveSubprocess) · BT-2726 (internal seams) · BT-2727 (E2E + docs)
+**Issues:** BT-2720 (native: codegen) · BT-2721 (bulk migrate) · BT-2722 (unify FFI proxy) · BT-2723 (migrate exit/throw catches) · BT-2724 (optional @primitive string) · BT-2725 (substrate→@intrinsic + ReactiveSubprocess) · BT-2726 (internal seams) · BT-2727 (E2E + docs) · BT-2730 (FFI error-details harmonization) · BT-2731 (remaining FFI Object classes)
 **Start:** BT-2722 (foundation — adds the `native_call` helper + unified wrapping; no deps), then BT-2720 (consumes `native_call`)
-**Status:** Planned
+**Status:** Implemented (2026-07-01) — all phases landed. As shipped (see the End-state table for the estimate-vs-actual reconciliation): `native:` grew from 2 classes to **23** (170 `self delegate` methods); `@primitive` at **343**; `@intrinsic` at **48** (substrate relabelled); `ReactiveSubprocess` migrated to `native:`; SystemNavigation embedded FFI extracted into 19 `internal` seams. Follow-ups BT-2730/BT-2731 harmonized FFI error details and finished the remaining Object-class migrations, deliberately leaving several classes on wrapped inline FFI (see Resolved Decision 5).
 
 ## Context
 
@@ -191,14 +191,62 @@ This does **not** make `SystemNavigation` a `native:` class — it hits four bac
 
 ### End state — the whole interop surface
 
-| Mechanism | Methods | Meaning |
-|---|---|---|
-| **`@primitive`** | **342** | native BEAM value types, perf folds, runtime-extensible reflection (keeps dispatch + extension + wrapping) |
-| **`native:`** | **310** (5 + 305) | pure stateless delegation to one backing module — grows from 2 classes to ~45 |
-| **`internal` FFI seam** | ~45 | one-line `(Erlang …)`, wrapped-by-default (post-Part 4; embedded → 0) |
-| **`@intrinsic`** | 15 (+39 existing) | dispatch / actor / block substrate |
+The table below gives the **design estimate** next to the **as-shipped** counts
+(measured 2026-07-01 over `stdlib/src/*.bt` by method-body binding pattern,
+excluding doc-comment mentions):
 
-`native:` does not become the single largest mechanism (`@primitive` stays ahead at 342) — but it goes from **2 classes to ~45**, absorbing every pure-delegate FFI method. Every Erlang call is then one of: a `@primitive`, a `native:` delegate, an `@intrinsic`, or a one-line `internal` seam. Nothing buried in logic; nothing leaking raw errors.
+| Mechanism | Design estimate | As shipped | Meaning |
+|---|---|---|---|
+| **`@primitive`** | 342 | **343** | native BEAM value types, perf folds, runtime-extensible reflection (keeps dispatch + extension + wrapping) |
+| **`native:`** | 310 methods / ~45 classes | **170 methods / 23 classes** | pure stateless delegation to one backing module (`=> self delegate`) — grew from 2 classes |
+| **`internal` FFI seam** | ~45 | **19** (SystemNavigation) | one-line `(Erlang …)`, wrapped-by-default |
+| **`@intrinsic`** | 54 (15 + 39 existing) | **48** | dispatch / actor / block substrate |
+
+`native:` did not become the single largest mechanism (`@primitive` stays ahead at
+343) — but it grew from **2 classes to 23**, absorbing the pure-delegate FFI methods
+that satisfy the first-keyword + `self`-threading rule.
+
+**Why shipped `native:` came in below the estimate (23 classes / 170 methods, not
+~45 / 310):** BT-2731 (Resolved Decision 5) deliberately kept a set of classes on
+inline `(Erlang …)` FFI where a clean first-keyword rename is blocked or wrong —
+`Ets` (`at:`/`at:put:` first-keyword+arity collision), `AtomicCounter` (`value`
+intercepted by block-eval codegen), `DateTime` (operator selectors aren't valid
+Erlang function names), `Timer` (`after:` is reserved), `Announcer` (`when:`
+collision/reserved), `TestCase` (`fail:`/`skip:` don't thread `self`), and the
+`BeamtalkInterface`/`WorkspaceInterface` receiver-ignoring singletons. These stay
+inline but are **wrapped-by-default** since Part 2, so they still never leak raw
+Erlang errors. Consequently inline `(Erlang …)` call sites are not driven to zero —
+~170 remain across those intentionally-inline classes plus SystemNavigation's
+orchestration — but each is a wrapped, single-purpose call, not buried logic. Every
+Erlang call is one of: a `@primitive`, a `native:` delegate, an `@intrinsic`, or a
+wrapped inline/`internal` FFI seam. Nothing leaks raw errors.
+
+**Why shipped `internal` seams came in at 19, not ~45:** the ~45 estimate bundled
+SystemNavigation (Part 4 projected "~29") plus a "thin tail" of embedded FFI in
+other classes. As shipped, **all 19 seams live in SystemNavigation** — and the
+19-vs-29 difference is *consolidation, not omission*: the 19 named `internal`
+helpers cover SystemNavigation's ~25 inline `(Erlang …)` sites across four backing
+modules (`beamtalk_interface`, `beamtalk_xref`, `beamtalk_extensions`,
+`beamtalk_class_registry`), since several call sites fold into one seam and a few
+FFI calls legitimately stay inline inside orchestration logic. The estimated
+"thin tail" in other classes was **not** extracted into separate seams: those are
+the Resolved-Decision-5 intentionally-inline classes above, already wrapped-by-default
+by Part 2, so extracting them would only inflate the xref index (see Consequences —
+"Part 4 inflates the xref index") for no safety gain.
+
+**Why shipped `@intrinsic` is 48, not 54:** the 54 estimate was `39 existing + 15
+reclassified`, but that arithmetic does not reconcile line-by-line with the shipped
+count and should be read as a projection, not a ledger. The `39 existing` baseline
+was a point-in-time snapshot that drifted as concurrent stdlib work landed between
+the ADR draft and implementation, and the 15 reclassifications shipped at different
+granularity than projected (e.g. Object carries 9 `@intrinsic` bindings as shipped
+vs the "1" the Part 3 table projected, while other predicted moves were absorbed into
+the `@primitive` dispatch layer rather than relabelled). The **as-shipped 48 is the
+authoritative measured count** (`grep '@intrinsic' stdlib/src/*.bt`, doc-comment lines
+excluded); the per-class distribution is Object 9, Block 9, Actor 9, Logger 8,
+ProtoObject 7, Value 2, and singletons on Erlang/ErlangModule/ClassBuilder. No attempt
+is made here to attribute the 6-method delta to specific methods, as that would
+require archaeology of the pre-ADR baseline that the reclassification did not record.
 
 ## Prior Art
 
