@@ -122,8 +122,7 @@ Validates that the argument is a valid Unicode scalar value
 value(CP) when is_integer(CP), CP >= 0, CP =< 16#D7FF -> CP;
 value(CP) when is_integer(CP), CP >= 16#E000, CP =< 16#10FFFF -> CP;
 value(CP) ->
-    Error0 = beamtalk_error:new(type_error, 'Character'),
-    Error1 = beamtalk_error:with_selector(Error0, 'value:'),
+    Error1 = beamtalk_error:new(type_error, 'Character', 'value:'),
     Error2 = beamtalk_error:with_hint(
         Error1,
         <<

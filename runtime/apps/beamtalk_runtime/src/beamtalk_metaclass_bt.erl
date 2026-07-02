@@ -69,8 +69,7 @@ dispatch('isClass', [], _Self, State) ->
 dispatch('isMetaclass', [], _Self, State) ->
     {reply, true, State};
 dispatch(Selector, _Args, _Self, State) ->
-    Error0 = beamtalk_error:new(does_not_understand, 'Metaclass'),
-    Error = beamtalk_error:with_selector(Error0, Selector),
+    Error = beamtalk_error:new(does_not_understand, 'Metaclass', Selector),
     {error, Error, State}.
 
 -doc """

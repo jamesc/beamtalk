@@ -45,8 +45,7 @@ module replaces this dispatch via update_class on_load.
 -spec dispatch(atom(), list(), term(), map()) ->
     {reply, term(), map()} | {error, #beamtalk_error{}, map()}.
 dispatch(Selector, _Args, _Self, State) ->
-    Error0 = beamtalk_error:new(does_not_understand, 'Behaviour'),
-    Error = beamtalk_error:with_selector(Error0, Selector),
+    Error = beamtalk_error:new(does_not_understand, 'Behaviour', Selector),
     {error, Error, State}.
 
 -doc """

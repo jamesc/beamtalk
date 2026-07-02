@@ -58,8 +58,7 @@ resolve(#beamtalk_object{class = ClassTag, pid = ClassPid} = Obj, Selector) when
         true ->
             resolve_with_hierarchy(ClassPid, Selector);
         false ->
-            Error0 = beamtalk_error:new(type_error, ClassTag),
-            Error1 = beamtalk_error:with_selector(Error0, '>>'),
+            Error1 = beamtalk_error:new(type_error, ClassTag, '>>'),
             Error2 = beamtalk_error:with_hint(
                 Error1,
                 iolist_to_binary(
@@ -71,8 +70,7 @@ resolve(#beamtalk_object{class = ClassTag, pid = ClassPid} = Obj, Selector) when
 resolve(ClassName, Selector) when is_atom(ClassName) ->
     case beamtalk_class_registry:whereis_class(ClassName) of
         undefined ->
-            Error0 = beamtalk_error:new(does_not_understand, ClassName),
-            Error1 = beamtalk_error:with_selector(Error0, '>>'),
+            Error1 = beamtalk_error:new(does_not_understand, ClassName, '>>'),
             Error2 = beamtalk_error:with_hint(Error1, <<"Class not found. Is it loaded?">>),
             beamtalk_error:raise(Error2);
         Pid ->
@@ -80,8 +78,7 @@ resolve(ClassName, Selector) when is_atom(ClassName) ->
     end;
 resolve(Other, _Selector) ->
     Class = beamtalk_primitive:class_of(Other),
-    Error0 = beamtalk_error:new(type_error, Class),
-    Error1 = beamtalk_error:with_selector(Error0, '>>'),
+    Error1 = beamtalk_error:new(type_error, Class, '>>'),
     Error2 = beamtalk_error:with_hint(
         Error1,
         iolist_to_binary(

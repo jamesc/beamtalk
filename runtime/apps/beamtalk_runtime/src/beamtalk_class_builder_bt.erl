@@ -66,8 +66,7 @@ ClassBuilder.bt exports.
 -spec dispatch(atom(), list(), term(), map()) ->
     {reply, term(), map()} | {error, #beamtalk_error{}, map()}.
 dispatch(Selector, _Args, _Self, State) ->
-    Error0 = beamtalk_error:new(does_not_understand, 'ClassBuilder'),
-    Error = beamtalk_error:with_selector(Error0, Selector),
+    Error = beamtalk_error:new(does_not_understand, 'ClassBuilder', Selector),
     {error, Error, State}.
 
 -doc """
