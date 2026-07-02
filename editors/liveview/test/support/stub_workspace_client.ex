@@ -662,6 +662,10 @@ defmodule BtAttachWeb.StubWorkspaceClient do
 
         "value" ->
           # A method with a signature but no `///` doc — exercises the no-doc path.
+          # Intentionally modelled as `indexed` here (though `browse_protocols`
+          # tags it `synthetic` for the derived-badge test) so the existing
+          # badge-only tests still get a real editable source body; use
+          # `withValue:` below for the full read-only-pane / synthetic path.
           {"value => self.value", nil, "value -> Integer", "indexed"}
 
         "withValue:" ->

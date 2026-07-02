@@ -107,6 +107,10 @@ defmodule BtAttachWeb.WorkspaceDerivedBadgeTest do
       # The doc resolved by the backend (the same `:help` path) renders in the doc
       # block, forced open for a synthetic tab (no editor competes for the space).
       assert Floki.text(frag) =~ "Compiler-derived copy-setter"
+
+      # The "in image" breadcrumb note is meaningless for a synthetic method (it's
+      # always compiler-generated, never flushed) — suppressed per Claude review nit.
+      refute Floki.text(frag) =~ "in image"
     end
 
     test "an ordinary editable method still opens the editor form", %{view: view} do

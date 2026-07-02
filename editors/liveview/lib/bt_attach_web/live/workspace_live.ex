@@ -9648,10 +9648,14 @@ defmodule BtAttachWeb.WorkspaceLive do
                       >
                         edited
                       </span>
+                      <%!-- BT-2714: suppressed on a synthetic tab — a compiler-derived
+                       method is always "in image" (generated at compile time, never
+                       flushed), so the note would be meaningless noise there. --%>
                       <span
                         :if={
                           @role == :owner and not active_tab(assigns).new and
-                            not active_tab(assigns).dirty
+                            not active_tab(assigns).dirty and
+                            not synthetic_tab?(active_tab(assigns))
                         }
                         class="meta-note"
                       >
