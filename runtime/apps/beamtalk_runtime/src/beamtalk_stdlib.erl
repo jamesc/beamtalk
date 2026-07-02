@@ -317,8 +317,7 @@ dispatch(version, [], _Receiver) ->
     end;
 dispatch(Selector, _Args, _Receiver) ->
     %% Unknown method
-    Error0 = beamtalk_error:new(does_not_understand, 'Beamtalk'),
-    Error1 = beamtalk_error:with_selector(Error0, Selector),
+    Error1 = beamtalk_error:new(does_not_understand, 'Beamtalk', Selector),
     Error2 = beamtalk_error:with_hint(
         Error1, <<"Check spelling or use 'Beamtalk respondsTo:' to verify method exists">>
     ),

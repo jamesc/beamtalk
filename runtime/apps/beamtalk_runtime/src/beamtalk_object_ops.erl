@@ -147,8 +147,7 @@ dispatch('perform:withArguments:', [TargetSelector, ArgList], Self, State) when
     normalize_dispatch_result(Result, State);
 dispatch('perform:withArguments:', [_TargetSelector, _ArgList], Self, State) ->
     ClassName = class_name(Self, State, 'Object'),
-    Error0 = beamtalk_error:new(type_error, ClassName),
-    Error1 = beamtalk_error:with_selector(Error0, 'perform:withArguments:'),
+    Error1 = beamtalk_error:new(type_error, ClassName, 'perform:withArguments:'),
     Error2 = beamtalk_error:with_hint(Error1, <<"Expected atom selector and list of arguments">>),
     {error, Error2, State};
 %% BT-1190: Dynamic message send with explicit timeout.
@@ -164,8 +163,7 @@ dispatch('perform:withArguments:timeout:', [TargetSelector, ArgList, Timeout], S
     normalize_dispatch_result(Result, State);
 dispatch('perform:withArguments:timeout:', [_TargetSelector, _ArgList, _Timeout], Self, State) ->
     ClassName = class_name(Self, State, 'Object'),
-    Error0 = beamtalk_error:new(type_error, ClassName),
-    Error1 = beamtalk_error:with_selector(Error0, 'perform:withArguments:timeout:'),
+    Error1 = beamtalk_error:new(type_error, ClassName, 'perform:withArguments:timeout:'),
     Error2 = beamtalk_error:with_hint(
         Error1,
         <<"Expected atom selector, list of arguments, and non-negative integer or #infinity timeout">>
@@ -184,8 +182,7 @@ dispatch(subclassResponsibility, [], Self, State) ->
 
 dispatch(Selector, _Args, Self, State) ->
     ClassName = class_name(Self, State, 'Object'),
-    Error0 = beamtalk_error:new(does_not_understand, ClassName),
-    Error1 = beamtalk_error:with_selector(Error0, Selector),
+    Error1 = beamtalk_error:new(does_not_understand, ClassName, Selector),
     Error2 = beamtalk_error:with_hint(Error1, <<"Method not found in Object">>),
     {error, Error2, State}.
 
