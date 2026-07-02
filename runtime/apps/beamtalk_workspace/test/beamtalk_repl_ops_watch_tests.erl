@@ -99,3 +99,30 @@ handle_term_pid_stats_live_actor_returns_value_map_test() ->
         catch gen_server:stop(ActorPid),
         catch gen_server:stop(RegistryPid)
     end.
+
+%%====================================================================
+%% Internal helpers — exposed via -ifdef(TEST)
+%%====================================================================
+
+describe_ops_returns_pid_stats_descriptor_test() ->
+    Ops = beamtalk_repl_ops_watch:describe_ops(),
+    ?assert(is_map(Ops)),
+    ?assert(maps:is_key(<<"pid-stats">>, Ops)).
+
+pid_stats_dead_process_returns_dead_map_test() ->
+    Pid = spawn(fun() -> ok end),
+    Ref = erlang:monitor(process, Pid),
+    receive
+        {'DOWN', Ref, process, Pid, _} -> ok
+    after 1000 -> ok
+    end,
+    ?assertNot(erlang:is_process_alive(Pid)),
+    Stats = beamtalk_repl_ops_watch:pid_stats(Pid),
+    PidBin = list_to_binary(pid_to_list(Pid)),
+    ?assertMatch(#{<<"pid">> := PidBin, <<"alive">> := false, <<"status">> := <<"dead">>}, Stats).
+
+format_mfa_undefined_returns_nil_test() ->
+    ?assertEqual(nil, beamtalk_repl_ops_watch:format_mfa(undefined)).
+
+format_mfa_catch_all_returns_nil_test() ->
+    ?assertEqual(nil, beamtalk_repl_ops_watch:format_mfa(not_an_mfa)).
