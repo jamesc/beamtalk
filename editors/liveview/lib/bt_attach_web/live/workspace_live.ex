@@ -4618,6 +4618,9 @@ defmodule BtAttachWeb.WorkspaceLive do
                 # Keeps the false → true invariant the `nil ->` branch documents.
                 disk_differs: existing.disk_differs or info.disk_differs,
                 runtime_only: info.runtime_only,
+                # BT-2714: re-derive derived-ness from the live image too, so a
+                # tab that (out-of-band) became / stopped being synthetic tracks it.
+                synthetic: info.synthetic,
                 # Carry the on-disk body forward across the re-activation. A fresh
                 # snapshot wins when the image is back in sync with disk; a method
                 # whose image diverged but is *still* disk-backed keeps the prior
@@ -4670,6 +4673,9 @@ defmodule BtAttachWeb.WorkspaceLive do
           # re-activated (see the `%{} = existing` branch above).
           disk_differs: info.disk_differs,
           runtime_only: info.runtime_only,
+          # BT-2714: a compiler-derived method — renders read-only (no editable
+          # CodeMirror), showing the resolved doc block instead of a blank buffer.
+          synthetic: info.synthetic,
           # The on-disk body captured while the image matched disk, so a later
           # compile diffs against it instead of flagging every re-save (BT-2550).
           disk_source: disk_body_snapshot(info),
@@ -4712,6 +4718,12 @@ defmodule BtAttachWeb.WorkspaceLive do
           source: if(is_binary(result["source"]), do: result["source"], else: ""),
           disk_differs: result["disk_differs"] == true,
           runtime_only: runtime_only?(result),
+          # BT-2714: a compiler-derived method (value accessors / `with<Field>:`
+          # setters / actor `new`/`spawn`) has no editable source — the backend
+          # returns `source: null` but resolves the real doc/signature. The tab
+          # renders read-only (no CodeMirror), showing that doc block instead of
+          # a blank editable buffer.
+          synthetic: result["source_status"] == "synthetic",
           # BT-2558: the method's `///` doc-comment and signature, carried so the
           # editor can show a read-only doc block alongside the editable body.
           # `nil` when the method has no doc / no resolvable signature.
@@ -4746,6 +4758,7 @@ defmodule BtAttachWeb.WorkspaceLive do
       source: "",
       disk_differs: false,
       runtime_only: false,
+      synthetic: false,
       doc: nil,
       signature: nil,
       native_delegate: false
@@ -5446,6 +5459,15 @@ defmodule BtAttachWeb.WorkspaceLive do
   # visible rather than indistinguishable from real methods.
   defp synthetic?(%{"source_status" => "synthetic"}), do: true
   defp synthetic?(_), do: false
+
+  # BT-2714: whether the *active editor tab* was opened for a compiler-derived
+  # method (its `browse-method-source` came back `source_status: synthetic`). Such
+  # a tab has no editable body — it renders read-only (the doc block + a
+  # "compiler-derived" note) instead of a blank CodeMirror. Bracket-style pattern
+  # match so the many non-method tab kinds (class definition, native module) that
+  # never set the key read as `false` rather than raising a KeyError.
+  defp synthetic_tab?(%{synthetic: true}), do: true
+  defp synthetic_tab?(_), do: false
 
   # Source origin badge helpers (BT-2552, BT-2643, BT-2641). Two orthogonal
   # fields drive the badge: `source_origin` is the classification ("stdlib" |
@@ -9570,8 +9592,11 @@ defmodule BtAttachWeb.WorkspaceLive do
                       </span>
                       <%!-- Doc toggle inline on the breadcrumb line (BT-2604). --%>
                       <% doc_tab = active_tab(assigns) %>
+                      <%!-- BT-2714: a compiler-derived tab has no editor competing
+                       for space, so its doc block is forced open below and the
+                       collapse toggle is hidden (nothing to collapse into). --%>
                       <button
-                        :if={doc_tab.doc != nil}
+                        :if={doc_tab.doc != nil and not synthetic_tab?(doc_tab)}
                         type="button"
                         class="doc-toggle-inline"
                         phx-click="toggle_doc"
@@ -9640,7 +9665,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                        expanded doc body when the user has opened it. `doc_tab` is
                        already bound in the breadcrumb section above. --%>
                       <div
-                        :if={doc_tab.doc != nil and @doc_expanded}
+                        :if={doc_tab.doc != nil and (@doc_expanded or synthetic_tab?(doc_tab))}
                         id="doc-body-content"
                         class="doc-body-inline"
                       >
@@ -9716,25 +9741,53 @@ defmodule BtAttachWeb.WorkspaceLive do
                           />
                         </div>
                       </section>
-                      <%= if @role == :owner do %>
-                        <%!-- ⌘S submits this editor form via the KeyboardShortcuts
+                      <%= cond do %>
+                        <% synthetic_tab?(active_tab(assigns)) -> %>
+                          <%!-- BT-2714: a compiler-derived method (value accessor,
+                           `with<Field>:` setter, actor `new`/`spawn`) has no editable
+                           source. Render read-only where the editor would be: the
+                           resolved signature + doc already show in the doc block above
+                           (forced open for synthetic tabs), so this panel states the
+                           read-only reason and keeps Senders/Implementors navigation.
+                           Shown for every role, owner included — there is nothing to
+                           edit, so the blank editable buffer (the old bug) is gone. --%>
+                          <div class="synthetic-note">
+                            <div :if={active_tab(assigns).signature} class="mono synthetic-sig">
+                              {active_tab(assigns).signature}
+                            </div>
+                            <p class="muted-note">
+                              Compiler-derived method — auto-generated, with no editable
+                              source. Any documentation is shown above.
+                            </p>
+                            <div :if={active_tab(assigns).kind == :method} class="nav-actions">
+                              <button class="btn" type="button" phx-click="senders">
+                                Senders
+                              </button>
+                              <button class="btn" type="button" phx-click="implementors">
+                                Implementors
+                              </button>
+                              <.nav_popover nav={@nav_popover} />
+                            </div>
+                          </div>
+                        <% @role == :owner -> %>
+                          <%!-- ⌘S submits this editor form via the KeyboardShortcuts
                          hook (BT-2485): the chord request-submits the form so
                          the class/selector/source/tab ride the normal phx-submit,
                          exactly as clicking "Compile" would. `phx-change` reports
                          live edits so the active tab's dirty dot tracks them. --%>
-                        <form
-                          id="method-editor-form"
-                          phx-submit="save_method"
-                          phx-change="edit_source"
-                          phx-hook="KeyboardShortcuts"
-                          data-scope="window"
-                          data-shortcuts={Jason.encode!(%{"mod+s" => "submit"})}
-                        >
-                          <%!-- the active tab id rides every compile so the handler
+                          <form
+                            id="method-editor-form"
+                            phx-submit="save_method"
+                            phx-change="edit_source"
+                            phx-hook="KeyboardShortcuts"
+                            data-scope="window"
+                            data-shortcuts={Jason.encode!(%{"mod+s" => "submit"})}
+                          >
+                            <%!-- the active tab id rides every compile so the handler
                            knows which tab to clean and whether it's a class
                            definition. --%>
-                          <input type="hidden" name="tab" value={@active_tab} />
-                          <%!-- Class + selector ride the form as hidden fields — the
+                            <input type="hidden" name="tab" value={@active_tab} />
+                            <%!-- Class + selector ride the form as hidden fields — the
                            breadcrumb above is the canonical display of "which
                            class › selector this tab edits", so the old editable
                            inputs are redundant: the author types the full method
@@ -9744,15 +9797,15 @@ defmodule BtAttachWeb.WorkspaceLive do
                            save handler derives the selector by parsing the body's
                            signature (BT-2606). The save_method payload (class +
                            selector + source) shape is identical in every case. --%>
-                          <input type="hidden" name="class" value={@edit_class} />
-                          <% tab = active_tab(assigns) %>
-                          <%= cond do %>
-                            <% tab.kind == :def -> %>
-                              <input type="hidden" name="selector" value="▸ class definition" />
-                            <% true -> %>
-                              <input type="hidden" name="selector" value={@edit_selector} />
-                          <% end %>
-                          <%!-- CodeMirror 6 editor (BT-2539). Re-keyed on the active
+                            <input type="hidden" name="class" value={@edit_class} />
+                            <% tab = active_tab(assigns) %>
+                            <%= cond do %>
+                              <% tab.kind == :def -> %>
+                                <input type="hidden" name="selector" value="▸ class definition" />
+                              <% true -> %>
+                                <input type="hidden" name="selector" value={@edit_selector} />
+                            <% end %>
+                            <%!-- CodeMirror 6 editor (BT-2539). Re-keyed on the active
                            tab id (`@active_tab`) so switching tabs remounts the
                            CmEditor hook and the editor picks up the new tab's
                            source. BT-2655: the key also carries `@editor_rev`, bumped
@@ -9767,108 +9820,111 @@ defmodule BtAttachWeb.WorkspaceLive do
                            phx-change="edit_source" dirty-dot tracking with the
                            300 ms debounce. Selection reports ride select_source
                            via data-select-event, kept in `:edit_selection`. --%>
-                          <div
-                            id={"method-editor-overlay-" <> @active_tab <> "-" <> to_string(@editor_rev)}
-                            class="cm-wrap field"
-                            phx-hook="CmEditor"
-                            data-select-event="select_source"
-                            data-tab-id={@active_tab}
-                            data-lint-mode={if active_tab(assigns).kind == :method, do: "method"}
-                          >
-                            <textarea
-                              id={"method-editor-source-" <> @active_tab <> "-" <> to_string(@editor_rev)}
-                              class="cm-field"
-                              name="source"
-                              spellcheck="false"
-                              autocomplete="off"
-                              phx-debounce="300"
-                              phx-update="ignore"
-                              hidden
-                            ><%= @edit_source %></textarea>
                             <div
-                              class="cm-host"
-                              id={"method-editor-cm-" <> @active_tab <> "-" <> to_string(@editor_rev)}
-                              phx-update="ignore"
+                              id={"method-editor-overlay-" <> @active_tab <> "-" <> to_string(@editor_rev)}
+                              class="cm-wrap field"
+                              phx-hook="CmEditor"
+                              data-select-event="select_source"
+                              data-tab-id={@active_tab}
+                              data-lint-mode={if active_tab(assigns).kind == :method, do: "method"}
                             >
+                              <textarea
+                                id={"method-editor-source-" <> @active_tab <> "-" <> to_string(@editor_rev)}
+                                class="cm-field"
+                                name="source"
+                                spellcheck="false"
+                                autocomplete="off"
+                                phx-debounce="300"
+                                phx-update="ignore"
+                                hidden
+                              ><%= @edit_source %></textarea>
+                              <div
+                                class="cm-host"
+                                id={"method-editor-cm-" <> @active_tab <> "-" <> to_string(@editor_rev)}
+                                phx-update="ignore"
+                              >
+                              </div>
                             </div>
-                          </div>
-                          <%!-- Single action row (BT-2495): Senders / Implementors on
+                            <%!-- Single action row (BT-2495): Senders / Implementors on
                            the left, Compile / Save All pushed to the right. The nav
                            buttons are type="button" (they fire phx-click, never
                            submit) and only show on a method tab. Observers get the
                            same nav row in the read-only branch below. --%>
-                          <div class="editor-actions">
-                            <div :if={active_tab(assigns).kind == :method} class="nav-actions">
-                              <button class="btn" type="button" phx-click="senders">
-                                Senders
-                              </button>
-                              <button class="btn" type="button" phx-click="implementors">
-                                Implementors
-                              </button>
-                              <.nav_popover nav={@nav_popover} />
-                            </div>
-                            <%!-- Protocol action row (BT-2639): the protocol
+                            <div class="editor-actions">
+                              <div :if={active_tab(assigns).kind == :method} class="nav-actions">
+                                <button class="btn" type="button" phx-click="senders">
+                                  Senders
+                                </button>
+                                <button class="btn" type="button" phx-click="implementors">
+                                  Implementors
+                                </button>
+                                <.nav_popover nav={@nav_popover} />
+                              </div>
+                              <%!-- Protocol action row (BT-2639): the protocol
                              equivalent of Senders/Implementors — only on a
                              class-definition tab whose class is a Protocol.
                              Observers get the same row in the read-only branch. --%>
-                            <div
-                              :if={
-                                active_tab(assigns).kind == :def and active_tab(assigns)[:is_protocol]
-                              }
-                              class="nav-actions"
-                            >
-                              <button class="btn" type="button" phx-click="required_methods">
-                                Required methods
+                              <div
+                                :if={
+                                  active_tab(assigns).kind == :def and
+                                    active_tab(assigns)[:is_protocol]
+                                }
+                                class="nav-actions"
+                              >
+                                <button class="btn" type="button" phx-click="required_methods">
+                                  Required methods
+                                </button>
+                                <button class="btn" type="button" phx-click="conforming_classes">
+                                  Conforming classes
+                                </button>
+                                <.nav_popover nav={@nav_popover} />
+                              </div>
+                              <span class="spacer"></span>
+                              <button class="btn btn-sm primary" type="submit">
+                                Compile <span class="k">⌘S</span>
                               </button>
-                              <button class="btn" type="button" phx-click="conforming_classes">
-                                Conforming classes
+                              <button class="btn btn-sm" type="button" phx-click="flush">
+                                Save All to Disk
                               </button>
-                              <.nav_popover nav={@nav_popover} />
                             </div>
-                            <span class="spacer"></span>
-                            <button class="btn btn-sm primary" type="submit">
-                              Compile <span class="k">⌘S</span>
-                            </button>
-                            <button class="btn btn-sm" type="button" phx-click="flush">
-                              Save All to Disk
-                            </button>
-                          </div>
-                        </form>
-                        <%!-- NEW CLASS (BT-2293, ADR 0082 Phase 5): the create-a-class
+                          </form>
+                          <%!-- NEW CLASS (BT-2293, ADR 0082 Phase 5): the create-a-class
                          affordance now lives in the System Browser head (class-
                          oriented, collapsed by default), not here under the method
                          editor — see `system_browser_classes`. --%>
-                      <% else %>
-                        <p class="muted-note">
-                          Your role is read-only — evaluation and editing are disabled. You can
-                          still browse bindings, follow references in the Inspector, and watch
-                          the live Transcript.
-                        </p>
-                        <%!-- Observers still get Senders / Implementors navigation
+                        <% true -> %>
+                          <p class="muted-note">
+                            Your role is read-only — evaluation and editing are disabled. You can
+                            still browse bindings, follow references in the Inspector, and watch
+                            the live Transcript.
+                          </p>
+                          <%!-- Observers still get Senders / Implementors navigation
                          (BT-2495); both ride the read-only `nav-query` op. --%>
-                        <div :if={active_tab(assigns).kind == :method} class="nav-actions">
-                          <button class="btn" type="button" phx-click="senders">
-                            Senders
-                          </button>
-                          <button class="btn" type="button" phx-click="implementors">
-                            Implementors
-                          </button>
-                          <.nav_popover nav={@nav_popover} />
-                        </div>
-                        <%!-- Observers also get the protocol action row (BT-2639);
+                          <div :if={active_tab(assigns).kind == :method} class="nav-actions">
+                            <button class="btn" type="button" phx-click="senders">
+                              Senders
+                            </button>
+                            <button class="btn" type="button" phx-click="implementors">
+                              Implementors
+                            </button>
+                            <.nav_popover nav={@nav_popover} />
+                          </div>
+                          <%!-- Observers also get the protocol action row (BT-2639);
                          both ride the read-only `nav-query` op. --%>
-                        <div
-                          :if={active_tab(assigns).kind == :def and active_tab(assigns)[:is_protocol]}
-                          class="nav-actions"
-                        >
-                          <button class="btn" type="button" phx-click="required_methods">
-                            Required methods
-                          </button>
-                          <button class="btn" type="button" phx-click="conforming_classes">
-                            Conforming classes
-                          </button>
-                          <.nav_popover nav={@nav_popover} />
-                        </div>
+                          <div
+                            :if={
+                              active_tab(assigns).kind == :def and active_tab(assigns)[:is_protocol]
+                            }
+                            class="nav-actions"
+                          >
+                            <button class="btn" type="button" phx-click="required_methods">
+                              Required methods
+                            </button>
+                            <button class="btn" type="button" phx-click="conforming_classes">
+                              Conforming classes
+                            </button>
+                            <.nav_popover nav={@nav_popover} />
+                          </div>
                       <% end %>
                     </div>
                   <% true -> %>

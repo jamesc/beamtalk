@@ -638,7 +638,11 @@ defmodule BtAttachWeb.StubWorkspaceClient do
           # navigation; `increment` is a hand-written `indexed` method for contrast.
           [
             %{"selector" => "value", "source_status" => "synthetic"},
-            %{"selector" => "increment", "source_status" => "indexed"}
+            %{"selector" => "increment", "source_status" => "indexed"},
+            # BT-2714: `withValue:` is a compiler-derived copy-setter — synthetic in
+            # BOTH the protocol list AND `browse_method_source` (source null, doc +
+            # signature resolved), so opening it exercises the read-only derived pane.
+            %{"selector" => "withValue:", "source_status" => "synthetic"}
           ]
 
         true ->
@@ -649,19 +653,28 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   end
 
   def browse_method_source(class, _side, selector) do
-    {disk_source, doc, signature} =
+    {disk_source, doc, signature, status} =
       case selector do
         "increment" ->
           {"increment => self.value := self.value + 1",
            "Increment the counter by one.\n\n## Examples\n```beamtalk\nc increment\n```",
-           "increment -> Counter"}
+           "increment -> Counter", "indexed"}
 
         "value" ->
           # A method with a signature but no `///` doc — exercises the no-doc path.
-          {"value => self.value", nil, "value -> Integer"}
+          {"value => self.value", nil, "value -> Integer", "indexed"}
+
+        "withValue:" ->
+          # BT-2714: a compiler-derived copy-setter. The backend keeps `source`
+          # null (no editable body) but resolves the real doc + signature the same
+          # way `:help` does — modelled here so the read-only derived pane has a
+          # doc block to render.
+          {nil,
+           "Compiler-derived copy-setter.\n\nReturns a copy of the Counter with the `value` slot replaced by the argument.",
+           "withValue: aValue -> Counter", "synthetic"}
 
         _ ->
-          {"stub => nil", nil, nil}
+          {"stub => nil", nil, nil, "indexed"}
       end
 
     # BT-2566: in production `browse_method_source` returns the current *image*
@@ -683,7 +696,7 @@ defmodule BtAttachWeb.StubWorkspaceClient do
        "source" => source,
        "doc" => doc,
        "signature" => signature,
-       "source_status" => "indexed",
+       "source_status" => status,
        "origin" => "both",
        "disk_differs" => disk_differs,
        # BT-2578: methods on the stubbed native: class are `self delegate` facades,
