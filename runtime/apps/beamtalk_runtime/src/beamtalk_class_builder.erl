@@ -128,8 +128,7 @@ register(BuilderState) when is_map(BuilderState) ->
                     end
             end;
         ok ->
-            Error0 = beamtalk_error:new(type_error, 'ClassBuilder'),
-            Error1 = beamtalk_error:with_selector(Error0, register),
+            Error1 = beamtalk_error:new(type_error, 'ClassBuilder', register),
             {error, beamtalk_error:with_hint(Error1, <<"fieldSpecs and methodSpecs must be maps">>)}
     end.
 
@@ -160,8 +159,7 @@ do_register(ClassName, ClassInfo) ->
                         module => ?MODULE,
                         domain => [beamtalk, runtime]
                     }),
-                    Error0 = beamtalk_error:new(internal_error, 'ClassBuilder'),
-                    Error1 = beamtalk_error:with_selector(Error0, register),
+                    Error1 = beamtalk_error:new(internal_error, 'ClassBuilder', register),
                     Error = beamtalk_error:with_hint(
                         Error1,
                         iolist_to_binary(io_lib:format("update_class failed: ~p", [Reason]))
@@ -169,8 +167,7 @@ do_register(ClassName, ClassInfo) ->
                     {error, Error}
             end;
         {error, Reason} ->
-            Error0 = beamtalk_error:new(internal_error, 'ClassBuilder'),
-            Error1 = beamtalk_error:with_selector(Error0, register),
+            Error1 = beamtalk_error:new(internal_error, 'ClassBuilder', register),
             Error = beamtalk_error:with_hint(
                 Error1,
                 iolist_to_binary(io_lib:format("start failed: ~p", [Reason]))
@@ -198,16 +195,13 @@ stdlib loading registers Integer (sealed) before Character (BT-791).
 """.
 -spec validate(term(), term(), boolean()) -> ok | {error, #beamtalk_error{}}.
 validate(nil, _, _) ->
-    Error0 = beamtalk_error:new(missing_parameter, 'ClassBuilder'),
-    Error1 = beamtalk_error:with_selector(Error0, 'name:'),
+    Error1 = beamtalk_error:new(missing_parameter, 'ClassBuilder', 'name:'),
     {error, beamtalk_error:with_hint(Error1, <<"className must be a Symbol (atom)">>)};
 validate(ClassName, _, _) when not is_atom(ClassName) ->
-    Error0 = beamtalk_error:new(type_error, 'ClassBuilder'),
-    Error1 = beamtalk_error:with_selector(Error0, 'name:'),
+    Error1 = beamtalk_error:new(type_error, 'ClassBuilder', 'name:'),
     {error, beamtalk_error:with_hint(Error1, <<"className must be a Symbol (atom)">>)};
 validate(_ClassName, nil, _) ->
-    Error0 = beamtalk_error:new(no_superclass, 'ClassBuilder'),
-    Error1 = beamtalk_error:with_selector(Error0, 'superclass:'),
+    Error1 = beamtalk_error:new(no_superclass, 'ClassBuilder', 'superclass:'),
     {error,
         beamtalk_error:with_hint(Error1, <<"superclassRef must be set before calling register">>)};
 validate(_ClassName, SuperclassRef, _) when
@@ -215,8 +209,7 @@ validate(_ClassName, SuperclassRef, _) when
     not is_pid(SuperclassRef),
     not is_record(SuperclassRef, beamtalk_object)
 ->
-    Error0 = beamtalk_error:new(type_error, 'ClassBuilder'),
-    Error1 = beamtalk_error:with_selector(Error0, 'superclass:'),
+    Error1 = beamtalk_error:new(type_error, 'ClassBuilder', 'superclass:'),
     {error,
         beamtalk_error:with_hint(
             Error1,
@@ -257,8 +250,7 @@ validate_superclass_not_sealed(SuperclassRef) ->
             case beamtalk_object_class:is_sealed(ClassPid) of
                 true ->
                     SuperclassName = beamtalk_object_class:class_name(ClassPid),
-                    Error0 = beamtalk_error:new(instantiation_error, 'ClassBuilder'),
-                    Error1 = beamtalk_error:with_selector(Error0, 'superclass:'),
+                    Error1 = beamtalk_error:new(instantiation_error, 'ClassBuilder', 'superclass:'),
                     {error,
                         beamtalk_error:with_hint(
                             Error1,
@@ -594,8 +586,7 @@ block or a computed fun.
     #beamtalk_error{}.
 class_method_arity_error(ClassName, Selector, Expected, Actual) ->
     BlockParams = Expected - 1,
-    Error0 = beamtalk_error:new(arity_mismatch, ClassName),
-    Error1 = beamtalk_error:with_selector(Error0, Selector),
+    Error1 = beamtalk_error:new(arity_mismatch, ClassName, Selector),
     beamtalk_error:with_hint(
         Error1,
         iolist_to_binary(

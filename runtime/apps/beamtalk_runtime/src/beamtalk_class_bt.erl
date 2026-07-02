@@ -67,12 +67,10 @@ dispatch('classBuilder', _Args, _Self, State) ->
     %% Class respondsTo: #classBuilder returns true after bootstrap. The dispatch here
     %% returns does_not_understand because Phase 1 only makes it discoverable; the full
     %% ClassBuilder protocol is implemented in Phase 2 (ClassBuilder.bt stdlib module).
-    Error0 = beamtalk_error:new(does_not_understand, 'Class'),
-    Error = beamtalk_error:with_selector(Error0, 'classBuilder'),
+    Error = beamtalk_error:new(does_not_understand, 'Class', 'classBuilder'),
     {error, Error, State};
 dispatch(Selector, _Args, _Self, State) ->
-    Error0 = beamtalk_error:new(does_not_understand, 'Class'),
-    Error = beamtalk_error:with_selector(Error0, Selector),
+    Error = beamtalk_error:new(does_not_understand, 'Class', Selector),
     {error, Error, State}.
 
 -doc """

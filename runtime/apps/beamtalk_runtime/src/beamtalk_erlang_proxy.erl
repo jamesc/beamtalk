@@ -97,16 +97,14 @@ dispatch('call:args:', [SelectorSym, ArgsTuple], _Self) ->
     %% Type validation for call:args: arguments
     case {is_atom(SelectorSym), is_tuple(ArgsTuple)} of
         {false, _} ->
-            Error0 = beamtalk_error:new(type_error, 'ErlangModule'),
-            Error1 = beamtalk_error:with_selector(Error0, 'call:args:'),
+            Error1 = beamtalk_error:new(type_error, 'ErlangModule', 'call:args:'),
             Error2 = beamtalk_error:with_hint(
                 Error1,
                 <<"call:args: first argument must be a Symbol (function name)">>
             ),
             beamtalk_error:raise(Error2);
         {_, false} ->
-            Error0 = beamtalk_error:new(type_error, 'ErlangModule'),
-            Error1 = beamtalk_error:with_selector(Error0, 'call:args:'),
+            Error1 = beamtalk_error:new(type_error, 'ErlangModule', 'call:args:'),
             Error2 = beamtalk_error:with_hint(
                 Error1,
                 <<"call:args: second argument must be a Tuple of arguments">>
@@ -133,8 +131,7 @@ dispatch(Selector, Args, Self) ->
                     validate_and_apply(Module, FunName, Args, Selector);
                 {error, FunStr} ->
                     %% Function name not in atom table — cannot be an export
-                    Error0 = beamtalk_error:new(does_not_understand, 'ErlangModule'),
-                    Error1 = beamtalk_error:with_selector(Error0, Selector),
+                    Error1 = beamtalk_error:new(does_not_understand, 'ErlangModule', Selector),
                     Hint = iolist_to_binary([
                         <<"This Erlang function does not exist. Check spelling and arity.">>
                     ]),
@@ -481,8 +478,7 @@ raise_function_or_arity_error(Module, FunName, Arity, OrigSelector, Exports) ->
     MatchingArities = [A || {F, A} <- Exports, F =:= FunName],
     case MatchingArities of
         [] ->
-            Error0 = beamtalk_error:new(does_not_understand, 'ErlangModule'),
-            Error1 = beamtalk_error:with_selector(Error0, OrigSelector),
+            Error1 = beamtalk_error:new(does_not_understand, 'ErlangModule', OrigSelector),
             Error2 = beamtalk_error:with_hint(
                 Error1,
                 <<"This Erlang function does not exist. Check spelling and arity.">>
@@ -509,8 +505,7 @@ raise_function_or_arity_error(Module, FunName, Arity, OrigSelector, Exports) ->
                 integer_to_binary(Arity),
                 <<" arguments">>
             ]),
-            Error0 = beamtalk_error:new(arity_mismatch, 'ErlangModule'),
-            Error1 = beamtalk_error:with_selector(Error0, OrigSelector),
+            Error1 = beamtalk_error:new(arity_mismatch, 'ErlangModule', OrigSelector),
             Error2 = beamtalk_error:with_hint(Error1, Hint),
             beamtalk_error:raise(
                 beamtalk_error:with_details(Error2, #{
@@ -555,8 +550,7 @@ raise_undef_error(Module, FunName, Arity, OrigSelector, none) ->
             )
     end;
 raise_undef_error(Module, FunName, Arity, _OrigSelector, {Class, Selector}) ->
-    Error0 = beamtalk_error:new(does_not_understand, Class),
-    Error1 = beamtalk_error:with_selector(Error0, Selector),
+    Error1 = beamtalk_error:new(does_not_understand, Class, Selector),
     Error2 = beamtalk_error:with_hint(
         Error1,
         erlang_error_hint(Module, FunName, undef)
@@ -653,8 +647,7 @@ and the original Erlang error + stacktrace in details.
     no_return().
 raise_wrapped_error(Kind, ErlangError, Module, FunName, OrigSelector, Context, Stack) ->
     {ErrClass, ErrSelector} = error_class_selector(Context, OrigSelector),
-    Error0 = beamtalk_error:new(Kind, ErrClass),
-    Error1 = beamtalk_error:with_selector(Error0, ErrSelector),
+    Error1 = beamtalk_error:new(Kind, ErrClass, ErrSelector),
     Error2 = beamtalk_error:with_hint(
         Error1,
         erlang_error_hint(Module, FunName, ErlangError)
@@ -812,8 +805,7 @@ raise_module_not_loaded(Module, Selector) ->
         atom_to_binary(Module, utf8),
         <<"' is not loaded. Is it on the code path?">>
     ]),
-    Error0 = beamtalk_error:new(does_not_understand, 'ErlangModule'),
-    Error1 = beamtalk_error:with_selector(Error0, Selector),
+    Error1 = beamtalk_error:new(does_not_understand, 'ErlangModule', Selector),
     Error2 = beamtalk_error:with_hint(Error1, Hint),
     Error3 = beamtalk_error:with_details(Error2, #{module => Module}),
     beamtalk_error:raise(Error3).

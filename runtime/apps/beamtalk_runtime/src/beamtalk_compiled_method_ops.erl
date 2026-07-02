@@ -105,8 +105,7 @@ builtin_dispatch(_Selector, _Args, _Value) ->
 -doc "Raise a does_not_understand error for an unknown CompiledMethod selector.".
 -spec does_not_understand(atom(), list(), map()) -> no_return().
 does_not_understand(Selector, _Args, _Value) ->
-    Error0 = beamtalk_error:new(does_not_understand, 'CompiledMethod'),
-    Error1 = beamtalk_error:with_selector(Error0, Selector),
+    Error1 = beamtalk_error:new(does_not_understand, 'CompiledMethod', Selector),
     Error2 = beamtalk_error:with_hint(
         Error1,
         <<"CompiledMethod supports: selector, source, doc, argumentCount, class, printString, asString, respondsTo:">>

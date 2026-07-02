@@ -70,8 +70,7 @@ handle_spawn(Args, ClassName, Module, false) ->
                 [InitArgs] ->
                     erlang:apply(Module, spawn, [InitArgs]);
                 _ ->
-                    Error0 = beamtalk_error:new(type_error, ClassName),
-                    Error1 = beamtalk_error:with_selector(Error0, 'spawnWith:'),
+                    Error1 = beamtalk_error:new(type_error, ClassName, 'spawnWith:'),
                     Error2 = beamtalk_error:with_hint(
                         Error1, <<"spawnWith: expects a Dictionary argument">>
                     ),
@@ -190,8 +189,7 @@ handle_new_generic(Args, ClassName) ->
                         [InitMap] when is_map(InitMap) ->
                             build_generic_instance(ClassName, Defaults, InitMap);
                         _ ->
-                            Error0 = beamtalk_error:new(type_error, ClassName),
-                            Error1 = beamtalk_error:with_selector(Error0, 'new:'),
+                            Error1 = beamtalk_error:new(type_error, ClassName, 'new:'),
                             Error2 = beamtalk_error:with_hint(
                                 Error1, <<"new: expects a Dictionary argument">>
                             ),
@@ -369,8 +367,7 @@ handle_new_compiled(Args, ClassName, Module, IsConstructible0) ->
                         false ->
                             erlang:apply(Module, new, []);
                         true ->
-                            Error0 = beamtalk_error:new(type_error, ClassName),
-                            Error1 = beamtalk_error:with_selector(Error0, 'new:'),
+                            Error1 = beamtalk_error:new(type_error, ClassName, 'new:'),
                             Error2 = beamtalk_error:with_hint(
                                 Error1, <<"new: expects a Dictionary argument">>
                             ),
@@ -565,8 +562,7 @@ compute_is_constructible(Module, false) ->
 -doc "Build a structured instantiation_error for abstract classes.".
 -spec abstract_class_error(atom(), atom()) -> #beamtalk_error{}.
 abstract_class_error(ClassName, Selector) ->
-    Error0 = beamtalk_error:new(instantiation_error, ClassName),
-    Error1 = beamtalk_error:with_selector(Error0, Selector),
+    Error1 = beamtalk_error:new(instantiation_error, ClassName, Selector),
     beamtalk_error:with_hint(
         Error1, <<"Abstract classes cannot be instantiated. Subclass it first.">>
     ).
