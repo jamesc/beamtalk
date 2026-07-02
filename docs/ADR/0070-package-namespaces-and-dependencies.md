@@ -1,7 +1,7 @@
 # ADR 0070: Package Namespaces and Dependencies
 
 ## Status
-Implemented (2026-03-24)
+Implemented (2026-03-24). Supersedes [ADR 0031](0031-flat-namespace-for-v01.md) (Flat Namespace for v0.1).
 
 ## Context
 
@@ -54,7 +54,7 @@ http = { git = "https://github.com/someone/beamtalk-http", branch = "main" }
 
 Each dependency must point to a directory containing a `beamtalk.toml`. The compiler resolves dependencies transitively in topological order, compiles each, and places their `ebin/` on the BEAM code path.
 
-A **lockfile** (`beamtalk.lock`) pins exact commit SHAs for git dependencies, ensuring reproducible builds. It is generated on first resolve and updated explicitly via a future `beamtalk deps update` command (not yet implemented). Path deps are not locked — they resolve to whatever is on disk, so they are only reproducible within a single repository checkout.
+A **lockfile** (`beamtalk.lock`) pins exact commit SHAs for git dependencies, ensuring reproducible builds. It is generated on first resolve and updated explicitly via the `beamtalk deps update` command. Path deps are not locked — they resolve to whatever is on disk, so they are only reproducible within a single repository checkout.
 
 **Version policy:** Each package name may appear at most once in the resolved dependency graph. If two dependencies require different versions of the same transitive dependency, this is a **resolve error** — the user must align versions. This matches Hex.pm's single-version policy and avoids the complexity of multiple coexisting versions. Diamond dependency resolution with version ranges is deferred to the registry-based dependency phase.
 

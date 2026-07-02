@@ -57,7 +57,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0028](0028-beam-interop-strategy.md) | BEAM Interop Strategy | Implemented | 2026-02-17 |
 | [0029](0029-streaming-eval-output.md) | Streaming Eval Output | Implemented | 2026-02-18 |
 | [0030](0030-cargo-dist-evaluation.md) | cargo-dist Evaluation for Release Packaging | Rejected | 2026-02-18 |
-| [0031](0031-flat-namespace-for-v01.md) | Flat Namespace for v0.1 | Implemented | 2026-02-18 |
+| [0031](0031-flat-namespace-for-v01.md) | Flat Namespace for v0.1 | Superseded by 0070 | 2026-02-18 |
 | [0032](0032-early-class-protocol.md) | Early Class Protocol — Behaviour and Class in Beamtalk Stdlib | Implemented | 2026-02-24 |
 | [0033](0033-runtime-embedded-documentation.md) | Runtime-Embedded Documentation on Class and CompiledMethod | Implemented | 2026-02-24 |
 | [0034](0034-stdlib-self-hosting-in-beamtalk.md) | Stdlib Self-Hosting — Moving Logic from Erlang to Beamtalk | Implemented | 2026-02-24 |

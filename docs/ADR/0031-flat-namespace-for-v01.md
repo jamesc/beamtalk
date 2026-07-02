@@ -1,7 +1,9 @@
 # ADR 0031: Flat Namespace for v0.1
 
 ## Status
-Implemented (2026-02-18)
+Superseded by [ADR 0070](0070-package-namespaces-and-dependencies.md) (2026-03-24)
+
+Originally Implemented (2026-02-18). The flat global namespace shipped in v0.1 exactly as described below. [ADR 0070](0070-package-namespaces-and-dependencies.md) later added the package namespace and dependency system (`beamtalk.toml` dependencies, qualified `package@Class` names, collision-as-error), and [ADR 0071](0071-class-visibility-internal-modifier.md) added the `internal` visibility modifier. This ADR is preserved as the historical record of the v0.1 decision — its "v0.2 will introduce a module/import system" framing is now fulfilled by those ADRs.
 
 ## Context
 

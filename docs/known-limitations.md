@@ -4,18 +4,15 @@ Beamtalk is under active development. This page documents features that are **no
 
 ## Language Features
 
-### No Module or Import System
+### Package Dependencies: Path and Git Only (No Registry Yet)
 
-Beamtalk uses a **flat global namespace**: all classes are globally visible with no `import`, `export`, or namespace syntax. This is an explicit design decision documented in [ADR 0031](ADR/0031-flat-namespace-for-v01.md).
+Beamtalk has a package namespace and dependency system ([ADR 0070](ADR/0070-package-namespaces-and-dependencies.md)): declare dependencies in `beamtalk.toml`, reference a dependency's classes by their short name, and disambiguate with qualified `package@Class` names when needed. Class-name collisions between dependencies are a **compile error** (not silent shadowing) — resolve them with the qualified name. There are no per-file `import`/`export` statements: within a package (and the REPL workspace) all classes share a flat namespace by design.
 
-- Class names must be unique across all loaded packages
-- When two packages define the same class name, the second `:load` hot-reloads the class and emits a warning: `Class 'X' redefined (was old_module, now new_module)`
-- ADR 0016 prevents Erlang-level module collisions under the hood via `bt@package@class` naming
-- A package namespace and dependency system is designed ([ADR 0070](ADR/0070-package-namespaces-and-dependencies.md)) but not yet implemented (see [BT-714](https://linear.app/beamtalk/issue/BT-714))
+The remaining gap is the **source** of dependencies: only `path` (local) and `git` dependencies are supported. Registry-based resolution (e.g. `json = "1.0"` via a Hex.pm-style registry) is deferred until the ecosystem warrants it.
 
-**Workaround:** Use distinctive, package-specific class names to avoid collisions (e.g. `MyAppCounter` instead of `Counter`).
+**Workaround:** Vendor a package via a `git` or `path` dependency instead of a registry name.
 
-**References:** [ADR 0031](ADR/0031-flat-namespace-for-v01.md), [ADR 0070](ADR/0070-package-namespaces-and-dependencies.md), [BT-714](https://linear.app/beamtalk/issue/BT-714)
+**References:** [ADR 0070](ADR/0070-package-namespaces-and-dependencies.md) (package namespaces + dependencies), [ADR 0031](ADR/0031-flat-namespace-for-v01.md) (superseded — the original v0.1 flat-namespace decision), [Package Management guide](beamtalk-packages.md)
 
 ### No `try`/`catch` Keywords
 
