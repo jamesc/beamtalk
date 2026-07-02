@@ -93,6 +93,30 @@ defmodule BtAttachWeb.WorkspaceNativeModulesTest do
       assert html =~ ~s(aria-label="Class source filter")
     end
 
+    test "switching to Native hides the Beamtalk method browser; Classes restores it (BT-2733)",
+         %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      # Select a Beamtalk class so the lower method browser shows its protocol/method
+      # list (the `sb-classdef` "class definition" + owner-only "Add a method…" rows).
+      html = render_click(view, "browser_select_class", %{"class" => "Counter"})
+      assert html =~ ~s(class="tree sb-classdef")
+      assert html =~ "Add a method"
+
+      # BT-2733: switching to Native must NOT leave that class's method list showing
+      # beneath the unrelated native-module list — the whole method panel is hidden.
+      html = render_click(view, "browser_mode", %{"mode" => "native"})
+      assert html =~ ~s(phx-value-module="beamtalk_http_client")
+      refute html =~ ~s(class="tree sb-classdef")
+      refute html =~ "Add a method"
+
+      # `@selected_class` is left intact, so switching back to Classes restores the
+      # method list with no re-selection.
+      html = render_click(view, "browser_mode", %{"mode" => "classes"})
+      assert html =~ ~s(class="tree sb-classdef")
+      assert html =~ "Add a method"
+    end
+
     test "the native origin filter defaults to All when no module is project-origin", %{
       conn: conn
     } do
