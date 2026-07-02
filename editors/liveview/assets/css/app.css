@@ -403,8 +403,14 @@
    method opens it here). The highlighted-source overlay grows; the New File form
    and nav actions stay compact below it. */
 .editor-panel .panel-body { display: flex; flex-direction: column; }
-#method-editor-form { display: flex; flex-direction: column; flex: 1; min-height: 0; }
-#method-editor-form .cm-wrap { flex: 1; min-height: 6rem; }
+/* BT-2670: the editable native (.erl) editor tab reuses the method editor's
+   CodeMirror chrome under its own form id, so it needs the same fill rules —
+   without them its `.cm-wrap` (whose `.cm-host` is absolutely `inset: 0`)
+   collapses to zero height and the editor renders blank. */
+#method-editor-form,
+#native-editor-form { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+#method-editor-form .cm-wrap,
+#native-editor-form .cm-wrap { flex: 1; min-height: 6rem; }
 
 /* ============================================================================
    Tabbed method editor — write-surface tab strip + breadcrumb (BT-2494)
