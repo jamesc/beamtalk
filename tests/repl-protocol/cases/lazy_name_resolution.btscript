@@ -21,7 +21,7 @@ Transcript
 
 // Singleton receiver dispatch still works (binding-aware class send).
 Transcript show: "hi"
-// => _
+// => Actor(TranscriptStream, _)
 
 // ===========================================================================
 // SHADOWING: a session local shadows a workspace binding of the same name
