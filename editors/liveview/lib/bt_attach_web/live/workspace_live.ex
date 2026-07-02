@@ -8570,7 +8570,16 @@ defmodule BtAttachWeb.WorkspaceLive do
                      re-renders the class tree inside it), but the SplitDrag hook's
                      own MutationObserver — not updated() — re-applies the saved size
                      when that happens. --%>
+                <%!-- BT-2733: the method browser (gutter + protocol/method list) is a
+                     Beamtalk-class surface — native `.erl` modules have no protocol
+                     browsing here (their clauses open in an editor tab). In Native
+                     mode we hide it so a stale `@selected_class` method list can't
+                     linger under the unrelated native-module list; `@selected_class`
+                     is left intact, so switching back to Classes restores it with no
+                     re-fetch. The remaining class/native panel then fills the column
+                     (the `.browser-split > .panel:last-of-type` flex rule). --%>
                 <div
+                  :if={@browser_mode != :native}
                   id="browser-split-gutter"
                   class="split-gutter split-gutter-y"
                   phx-hook="SplitDrag"
@@ -8587,6 +8596,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                 >
                 </div>
                 <.system_browser_methods
+                  :if={@browser_mode != :native}
                   browser_protocols={@browser_protocols}
                   selected_protocol={@selected_protocol}
                   selected_class={@selected_class}
