@@ -18,7 +18,7 @@ use crate::ast::{
     TypeAnnotation, TypeParamDecl, WellKnownSelector,
 };
 use crate::docvec;
-use crate::unparse::unparse_method_display_signature;
+use crate::unparse::{unparse_method_display_signature, unparse_type_annotation_display};
 
 /// ADR 0098 Phase 3: producing-toolchain identity baked into a module's
 /// `__beamtalk_meta/0` map so a *loaded* module is self-describing — consumers
@@ -36,6 +36,36 @@ pub(crate) struct MetaProvenance<'a> {
     pub beamtalk_version: Option<&'a str>,
     /// The producing compound OTP version (`<release>-<erts>`).
     pub otp_release: Option<&'a str>,
+}
+
+/// BT-2734: Compiler-derived `__signature__` / `__doc__` selector-map entries
+/// for a value class's auto-generated accessors, split by dispatch side.
+///
+/// Each `Vec` holds ready-to-embed `'selector' => <binary>` fragments (built by
+/// [`CoreErlangGenerator::synthetic_selector_map_entry`]). Instance-side entries
+/// feed the `methodSignatures` / `methodDocs` maps; class-side entries feed the
+/// `classMethodSignatures` / `classMethodDocs` maps (the keyword constructor).
+#[derive(Default)]
+struct SyntheticAccessorMetadata {
+    instance_sigs: Vec<Document<'static>>,
+    instance_docs: Vec<Document<'static>>,
+    class_sigs: Vec<Document<'static>>,
+    class_docs: Vec<Document<'static>>,
+}
+
+/// BT-2734: one compiler-derived accessor's readable metadata:
+/// `(selector, signature, doc)`. The pure, unit-testable intermediate produced
+/// by [`CoreErlangGenerator::synthetic_value_accessor_entries`] before it is
+/// rendered into Core Erlang `'selector' => <binary>` map fragments.
+type SyntheticAccessorEntry = (String, String, String);
+
+/// BT-2734: a value class's synthetic-accessor metadata, split by dispatch side.
+/// `instance` holds slot getters and `with*:` setters; `class` holds the keyword
+/// constructor.
+#[derive(Default)]
+struct SyntheticAccessorEntries {
+    instance: Vec<SyntheticAccessorEntry>,
+    class: Vec<SyntheticAccessorEntry>,
 }
 
 /// Collects the class names referenced by a type annotation into `out`
@@ -1769,6 +1799,43 @@ impl CoreErlangGenerator {
                     m.doc_comment.as_ref().map(|doc| leaf::binary_lit(doc))
                 });
 
+            // BT-2734: Value-type auto-accessors (slot getters, `with*:` copy-
+            // setters, keyword constructor) are emitted by value_type_codegen with
+            // no AST `MethodDefinition`, so the selector maps above have no entry
+            // for them and their runtime `__doc__` / `__signature__` would be nil.
+            // Inject compiler-derived doc + signature entries so every reflective
+            // surface (System Browser read-only pane, `Beamtalk help:`, MCP docs)
+            // shows them uniformly — reusing the BT-2714 resolver, no new read path.
+            // A no-op for non-`Value` classes and value classes with no auto-
+            // accessors (returns empty entry lists).
+            let synth = Self::build_synthetic_value_accessor_metadata(class);
+            let method_sigs_doc = Self::extend_selector_map_doc(
+                method_sigs_doc,
+                instance_methods.len(),
+                synth.instance_sigs,
+            );
+            let method_docs_doc = Self::extend_selector_map_doc(
+                method_docs_doc,
+                instance_methods
+                    .iter()
+                    .filter(|m| m.doc_comment.is_some())
+                    .count(),
+                synth.instance_docs,
+            );
+            let class_method_sigs_doc = Self::extend_selector_map_doc(
+                class_method_sigs_doc,
+                class_methods_primary.len(),
+                synth.class_sigs,
+            );
+            let class_method_docs_doc = Self::extend_selector_map_doc(
+                class_method_docs_doc,
+                class_methods_primary
+                    .iter()
+                    .filter(|m| m.doc_comment.is_some())
+                    .count(),
+                synth.class_docs,
+            );
+
             // BT-877: Detect non-constructible classes at compile time.
             // Emit `isConstructible = false` for: abstract classes, actors, and
             // classes with `new => self error: "..."`. For all others, omit the key
@@ -1920,6 +1987,157 @@ impl CoreErlangGenerator {
             }
         }
         Document::Vec(parts)
+    }
+
+    /// BT-2734: Appends pre-built `'selector' => value` entries to an existing
+    /// selector-map body document, inserting `, ` separators so the combined
+    /// interior remains a valid comma-separated `~{ ... }~` map body.
+    ///
+    /// `base_len` is the number of entries already present in `base` (0 when it
+    /// is empty) — used solely to decide whether the first appended entry needs a
+    /// leading separator. Returns `base` unchanged when there are no extras.
+    fn extend_selector_map_doc(
+        base: Document<'static>,
+        base_len: usize,
+        extra: Vec<Document<'static>>,
+    ) -> Document<'static> {
+        if extra.is_empty() {
+            return base;
+        }
+        let mut parts: Vec<Document<'static>> = vec![base];
+        for (i, entry) in extra.into_iter().enumerate() {
+            if base_len > 0 || i > 0 {
+                parts.push(Document::Str(", "));
+            }
+            parts.push(entry);
+        }
+        Document::Vec(parts)
+    }
+
+    /// BT-2734: Builds a single `'selector' => <binary>` selector-map entry for a
+    /// compiler-derived signature or doc string. The value is a human-readable
+    /// data string (not a Core Erlang structural fragment), so it is wrapped once
+    /// in a `binary_lit` typed leaf — mirroring how the AST-driven maps embed
+    /// `unparse_method_display_signature` / `doc_comment` strings.
+    fn synthetic_selector_map_entry(selector: &str, value: &str) -> Document<'static> {
+        docvec![
+            leaf::atom(selector.to_string()),
+            " => ",
+            leaf::binary_lit(value),
+        ]
+    }
+
+    /// BT-2734: Builds the four Core Erlang selector-map entry lists for a value
+    /// class's auto-generated accessors, ready to inject into the
+    /// `methodSignatures` / `methodDocs` (instance) and
+    /// `classMethodSignatures` / `classMethodDocs` (class-side) maps.
+    ///
+    /// Value-type slot getters, `with*:` copy-setters, and the keyword constructor
+    /// are emitted by `value_type_codegen` with no AST `MethodDefinition`, so they
+    /// never reach those maps and their runtime `__doc__` / `__signature__` would
+    /// be `nil`. Wrapping [`Self::synthetic_value_accessor_entries`], this renders
+    /// each `(selector, signature, doc)` triple into `'selector' => <binary>`
+    /// entries so the synthetics carry the same self-describing metadata every
+    /// reflective surface reads (reusing the BT-2714 resolver — no new read path).
+    fn build_synthetic_value_accessor_metadata(
+        class: &ClassDefinition,
+    ) -> SyntheticAccessorMetadata {
+        let raw = Self::synthetic_value_accessor_entries(class);
+        let mut md = SyntheticAccessorMetadata::default();
+        for (selector, sig, doc) in &raw.instance {
+            md.instance_sigs
+                .push(Self::synthetic_selector_map_entry(selector, sig));
+            md.instance_docs
+                .push(Self::synthetic_selector_map_entry(selector, doc));
+        }
+        for (selector, sig, doc) in &raw.class {
+            md.class_sigs
+                .push(Self::synthetic_selector_map_entry(selector, sig));
+            md.class_docs
+                .push(Self::synthetic_selector_map_entry(selector, doc));
+        }
+        md
+    }
+
+    /// BT-2734: Computes the readable `(selector, signature, doc)` triples for a
+    /// value class's compiler-generated accessors — the pure, unit-testable core
+    /// of [`Self::build_synthetic_value_accessor_metadata`].
+    ///
+    /// The auto-accessor set and slot types come from the same sources
+    /// [`Self::build_synthetic_accessor_xref_entries`] uses:
+    /// [`compute_auto_slot_methods`] (which slots the user has *not* overridden)
+    /// and each slot's `StateDeclaration` type annotation. `instance` holds the
+    /// getters and `with*:` setters; `class` holds the keyword constructor.
+    /// Returns all-empty for non-`Value` classes and for value classes with no
+    /// auto-generated accessors.
+    fn synthetic_value_accessor_entries(class: &ClassDefinition) -> SyntheticAccessorEntries {
+        use super::super::value_type_codegen::{AutoSlotMethods, compute_auto_slot_methods};
+
+        let mut entries = SyntheticAccessorEntries::default();
+        let Some(auto) = compute_auto_slot_methods(class) else {
+            return entries;
+        };
+        let class_name = class.name.name.as_str();
+
+        // Getters: `field -> <SlotType>`. The return type is the slot's declared
+        // type (falling back to `Object` for an untyped slot).
+        for field in &auto.getters {
+            let Some(slot) = class.state.iter().find(|s| s.name.name.as_str() == field) else {
+                continue;
+            };
+            let slot_type = Self::synthetic_slot_type_display(slot);
+            entries.instance.push((
+                field.clone(),
+                format!("{field} -> {slot_type}"),
+                format!("Compiler-derived accessor. Returns the value of slot `{field}`."),
+            ));
+        }
+
+        // Setters: `withField: aValue -> <ClassName>` (returns a copy).
+        for field in &auto.setters {
+            if !class.state.iter().any(|s| s.name.name.as_str() == field) {
+                continue;
+            }
+            let with_sel = AutoSlotMethods::with_star_selector(field);
+            entries.instance.push((
+                with_sel.clone(),
+                format!("{with_sel} aValue -> {class_name}"),
+                format!(
+                    "Compiler-derived copy-setter. Returns a copy with slot `{field}` replaced."
+                ),
+            ));
+        }
+
+        // Keyword constructor (class-side): `slot0: slot0 slot1: slot1 -> <ClassName>`.
+        // The selector's keyword parts are the slot names in declaration order, so
+        // the same names serve as the display parameter names.
+        if let Some(kw_sel) = auto.keyword_constructor {
+            let sig_parts: Vec<String> = class
+                .state
+                .iter()
+                .map(|s| {
+                    let n = s.name.name.as_str();
+                    format!("{n}: {n}")
+                })
+                .collect();
+            entries.class.push((
+                kw_sel,
+                format!("{} -> {class_name}", sig_parts.join(" ")),
+                format!(
+                    "Compiler-derived keyword constructor. Returns a new {class_name} from the given slot values."
+                ),
+            ));
+        }
+
+        entries
+    }
+
+    /// BT-2734: Display form of a slot's declared type for a synthetic accessor
+    /// signature, falling back to `Object` when the slot carries no annotation.
+    fn synthetic_slot_type_display(slot: &StateDeclaration) -> String {
+        slot.type_annotation
+            .as_ref()
+            .map_or_else(|| "Object".to_string(), unparse_type_annotation_display)
     }
 
     /// ADR 0087 Phase 2 (BT-2298): Builds the `method_xref` list document baked
@@ -5142,6 +5360,119 @@ mod tests {
         assert!(
             output.contains("'visibility' => 'internal'"),
             "internal method should have visibility 'internal'. Got: {output}"
+        );
+    }
+
+    // ── BT-2734: synthetic value-accessor doc / signature metadata ──
+
+    use crate::ast::{DeclaredKeyword, StateDeclaration};
+
+    fn slot(name: &str, ty: Option<&str>) -> StateDeclaration {
+        StateDeclaration {
+            name: Identifier::new(name, s()),
+            type_annotation: ty.map(|t| TypeAnnotation::Simple(Identifier::new(t, s()))),
+            default_value: None,
+            expect: None,
+            comments: crate::ast::CommentAttachment::default(),
+            doc_comment: None,
+            declared_keyword: DeclaredKeyword::default(),
+            span: s(),
+        }
+    }
+
+    fn value_class(name: &str, slots: Vec<StateDeclaration>) -> ClassDefinition {
+        ClassDefinition::new(
+            Identifier::new(name, s()),
+            Identifier::new("Value", s()),
+            slots,
+            vec![],
+            s(),
+        )
+    }
+
+    fn find_entry<'a>(
+        entries: &'a [super::SyntheticAccessorEntry],
+        selector: &str,
+    ) -> &'a super::SyntheticAccessorEntry {
+        entries
+            .iter()
+            .find(|(sel, _, _)| sel == selector)
+            .unwrap_or_else(|| panic!("no synthetic entry for {selector}"))
+    }
+
+    #[test]
+    fn test_synthetic_getter_signature_and_doc() {
+        let class = value_class("Point", vec![slot("x", Some("Integer"))]);
+        let entries = CoreErlangGenerator::synthetic_value_accessor_entries(&class);
+        let (_, sig, doc) = find_entry(&entries.instance, "x");
+        assert_eq!(sig, "x -> Integer");
+        assert_eq!(
+            doc,
+            "Compiler-derived accessor. Returns the value of slot `x`."
+        );
+    }
+
+    #[test]
+    fn test_synthetic_setter_signature_and_doc() {
+        let class = value_class("Point", vec![slot("x", Some("Integer"))]);
+        let entries = CoreErlangGenerator::synthetic_value_accessor_entries(&class);
+        let (_, sig, doc) = find_entry(&entries.instance, "withX:");
+        assert_eq!(sig, "withX: aValue -> Point");
+        assert_eq!(
+            doc,
+            "Compiler-derived copy-setter. Returns a copy with slot `x` replaced."
+        );
+    }
+
+    #[test]
+    fn test_synthetic_keyword_constructor_is_class_side() {
+        let class = value_class(
+            "Point",
+            vec![slot("x", Some("Integer")), slot("y", Some("Integer"))],
+        );
+        let entries = CoreErlangGenerator::synthetic_value_accessor_entries(&class);
+        assert_eq!(entries.class.len(), 1, "one keyword constructor entry");
+        let (sel, sig, doc) = &entries.class[0];
+        assert_eq!(sel, "x:y:");
+        assert_eq!(sig, "x: x y: y -> Point");
+        assert_eq!(
+            doc,
+            "Compiler-derived keyword constructor. Returns a new Point from the given slot values."
+        );
+    }
+
+    #[test]
+    fn test_synthetic_untyped_slot_falls_back_to_object() {
+        let class = value_class("Box", vec![slot("v", None)]);
+        let entries = CoreErlangGenerator::synthetic_value_accessor_entries(&class);
+        let (_, sig, _) = find_entry(&entries.instance, "v");
+        assert_eq!(sig, "v -> Object");
+    }
+
+    #[test]
+    fn test_synthetic_entries_empty_for_non_value_class() {
+        let class = make_actor_class("Counter");
+        let entries = CoreErlangGenerator::synthetic_value_accessor_entries(&class);
+        assert!(
+            entries.instance.is_empty() && entries.class.is_empty(),
+            "actor classes get no synthetic value accessors"
+        );
+    }
+
+    #[test]
+    fn test_synthetic_skips_user_overridden_getter() {
+        // A user-defined `x` getter shadows the auto getter, but the auto
+        // `withX:` copy-setter is still synthesized.
+        let mut class = value_class("Point", vec![slot("x", Some("Integer"))]);
+        class.methods.push(simple_unary_method("x"));
+        let entries = CoreErlangGenerator::synthetic_value_accessor_entries(&class);
+        assert!(
+            entries.instance.iter().all(|(sel, _, _)| sel != "x"),
+            "user-defined getter must not be re-synthesized"
+        );
+        assert!(
+            entries.instance.iter().any(|(sel, _, _)| sel == "withX:"),
+            "the copy-setter is still auto-generated"
         );
     }
 }

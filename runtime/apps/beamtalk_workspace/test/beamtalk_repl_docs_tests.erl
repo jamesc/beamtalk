@@ -753,3 +753,51 @@ format_class_docs_class_side_test_() ->
             ?assert(binary:match(Result, <<"== Metaclass ==">>) =/= nomatch)
         end}
     ]}.
+
+%% BT-2734: Value-type synthetic accessors (auto slot getters, `with*:` copy-
+%% setters, keyword constructor) are emitted by codegen with no AST
+%% MethodDefinition, so their CompiledMethod `__doc__` / `__signature__` used to
+%% be nil and `:help` / the System Browser showed only the bare selector. Codegen
+%% now injects a compiler-derived doc + signature for each. ChangeEntry's
+%% `withSeq:` (auto copy-setter for the `seq :: Integer` slot) and `clean` (auto
+%% getter for `clean :: Boolean`) are representative stdlib value accessors.
+value_synthetic_accessor_docs_test_() ->
+    {setup, fun integration_setup/0, fun(_) -> ok end, [
+        {"ChangeEntry withSeq: CompiledMethod carries synthetic __doc__/__signature__", fun() ->
+            wait_for_class('ChangeEntry', 50),
+            ClassPid = beamtalk_class_registry:whereis_class('ChangeEntry'),
+            ?assert(is_pid(ClassPid)),
+            Method = gen_server:call(ClassPid, {method, 'withSeq:'}, 5000),
+            ?assert(is_map(Method)),
+            Sig = maps:get('__signature__', Method, nil),
+            Doc = maps:get('__doc__', Method, nil),
+            ?assert(is_binary(Sig)),
+            ?assert(is_binary(Doc)),
+            ?assertEqual(<<"withSeq: aValue -> ChangeEntry">>, Sig),
+            ?assertNotEqual(
+                nomatch, binary:match(Doc, <<"Compiler-derived copy-setter">>)
+            )
+        end},
+        {"format_method_doc surfaces the synthetic doc + signature for withSeq:", fun() ->
+            wait_for_class('ChangeEntry', 50),
+            {ok, Result} = beamtalk_repl_docs:format_method_doc(
+                'ChangeEntry', <<"withSeq:">>
+            ),
+            ?assert(is_binary(Result)),
+            ?assertNotEqual(
+                nomatch, binary:match(Result, <<"withSeq: aValue -> ChangeEntry">>)
+            ),
+            ?assertNotEqual(
+                nomatch, binary:match(Result, <<"Compiler-derived copy-setter">>)
+            )
+        end},
+        {"auto getter (clean) carries a synthetic signature from its slot type", fun() ->
+            wait_for_class('ChangeEntry', 50),
+            ClassPid = beamtalk_class_registry:whereis_class('ChangeEntry'),
+            Method = gen_server:call(ClassPid, {method, clean}, 5000),
+            ?assert(is_map(Method)),
+            ?assertEqual(
+                <<"clean -> Boolean">>, maps:get('__signature__', Method, nil)
+            )
+        end}
+    ]}.

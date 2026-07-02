@@ -267,6 +267,17 @@ pub fn escape_string_literal(s: &str) -> String {
         .replace('{', "\\{")
 }
 
+/// Renders a type annotation to its Beamtalk display form (e.g. `Integer`,
+/// `String | Nil`, `List(Integer)`).
+///
+/// Used by codegen (BT-2734) to build the `__signature__` string for value-type
+/// auto-accessors, whose slot types come straight from the `StateDeclaration`
+/// annotation rather than a full `MethodDefinition`.
+#[must_use]
+pub fn unparse_type_annotation_display(ty: &TypeAnnotation) -> String {
+    unparse_type_annotation(ty).to_pretty_string()
+}
+
 /// Builds a [`Document`] for a method display signature (no `sealed`, no ` =>`).
 fn unparse_method_display_signature_doc(method: &MethodDefinition) -> Document<'static> {
     let sig = match &method.selector {
