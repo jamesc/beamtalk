@@ -148,6 +148,7 @@
 - **Cockpit: System Browser native-class Erlang source** — `native:` classes show a read-only "Erlang backend" pane on the class-definition tab, with jump-to-implementation from a `self delegate` facade method to the corresponding `handle_call` clause in the backing `.erl` module (BT-2578).
 - **Cockpit: collapsible method-editor doc block** — the method-editor doc block is now collapsed by default (signature line visible as expand/collapse toggle), removing the duplicated doc-comment display between the rendered block and the editable source (BT-2558).
 - **Cockpit: New Class form in System Browser** — the create-a-class widget moves from the method-editor panel into the System Browser header as a collapsed-by-default form; the target path `src/<ClassName>.bt` is derived automatically from the declared class name (BT-2293).
+- Fix LiveView System Browser: editable native (`.erl`) editor rendered blank (CSS sizing rules scoped only to the method editor form); stale Beamtalk method list shown when switching to Native browser mode (BT-2733, #2817).
 - Fix LiveView IDE System Browser not showing stdlib class definitions — class definitions are now synthesized from reflection for every loaded class, independent of a disk source file. The method editor opens to an empty tab strip with a "new method" entry for creating methods directly in the browser (#2637, #2634).
 - Fix LiveView IDE method-editor false `expected expression, found ⇒` diagnostics — the `diagnostics` op now accepts a `mode` parameter so the System Browser parses bare method bodies with `parse_method` instead of the full-module grammar (BT-2569).
 - Fix LiveView IDE method-editor doc block rendering template whitespace — `white-space: pre-wrap` on doc-block spans no longer inherits into toggle/signature elements (#2633).
@@ -159,6 +160,7 @@
 
 ### Internal
 
+- Collapse `beamtalk_error:new/2` + `with_selector/2` chains to `new/3` across 12 runtime modules — 36 call sites, no behavior change (#2814).
 - Consolidate zero-param dispatch BIFs to use `leaf::atom` pattern (BT-2498).
 - Add codegen unit tests for Actor initialize chain (BT-2499).
 - Replace placeholder assertions in `value_objects.btscript` with explicit expected values (BT-2500).

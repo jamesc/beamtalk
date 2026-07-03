@@ -166,7 +166,7 @@ The beamtalk codebase follows strict architectural principles for code organizat
 - Validate file paths and buffer boundaries
 - Document unsafe code with `// SAFETY:` comment explaining invariants
 - Run `cargo audit` before releases
-- **Use structured errors at public API boundaries** - `beamtalk_error:new/with_selector/with_hint` for all user-facing error paths
+- **Use structured errors at public API boundaries** - `beamtalk_error:new/3` + `with_hint`/`with_details` for all user-facing error paths
 
 See full guide: [docs/development/architecture-principles.md](../docs/development/architecture-principles.md)
 
@@ -196,10 +196,9 @@ All errors use `#beamtalk_error{}` records defined in `runtime/include/beamtalk.
 Use `beamtalk_error` module helpers:
 
 ```erlang
-Error0 = beamtalk_error:new(does_not_understand, 'Integer'),
-Error1 = beamtalk_error:with_selector(Error0, 'foo'),
-Error2 = beamtalk_error:with_hint(Error1, <<"Check spelling">>),
-error(Error2)
+Error0 = beamtalk_error:new(does_not_understand, 'Integer', 'foo'),
+Error1 = beamtalk_error:with_hint(Error0, <<"Check spelling">>),
+error(Error1)
 ```
 
 ### In Generated Core Erlang Code
@@ -211,10 +210,9 @@ Codegen MUST use `beamtalk_error` calls:
 call 'erlang':'error'({'some_error', 'message'})
 
 %% ✅ RIGHT - structured error
-let Error0 = call 'beamtalk_error':'new'('instantiation_error', 'Actor') in
-let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'new') in
-let Error2 = call 'beamtalk_error':'with_hint'(Error1, <<"Use spawn instead">>) in
-call 'erlang':'error'(Error2)
+let Error0 = call 'beamtalk_error':'new'('instantiation_error', 'Actor', 'new') in
+let Error1 = call 'beamtalk_error':'with_hint'(Error0, <<"Use spawn instead">>) in
+call 'erlang':'error'(Error1)
 ```
 
 ### Error Kinds
