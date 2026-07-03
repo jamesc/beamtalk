@@ -77,4 +77,50 @@ defmodule BtAttachWeb.WorkspaceDerivedBadgeTest do
       assert Floki.find(frag, ~s(div[phx-value-selector="increment"] .derived-tag)) == []
     end
   end
+
+  describe "compiler-derived method is read-only (BT-2714)" do
+    setup %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+      render_async(view, 5_000)
+
+      view
+      |> element(~s(div[phx-click="browser_select_class"][phx-value-class="Counter"]))
+      |> render_click()
+
+      {:ok, view: view}
+    end
+
+    test "opening a derived method renders a read-only pane, not a blank editor", %{view: view} do
+      # `withValue:` is `synthetic` in both the protocol list and
+      # `browse_method_source` (source null, doc/signature resolved).
+      html = view |> element(~s(div[phx-value-selector="withValue:"])) |> render_click()
+      frag = Floki.parse_fragment!(html)
+
+      # The read-only "compiler-derived" note is shown where the editor would be...
+      assert Floki.find(frag, ".synthetic-note") != []
+      assert Floki.text(frag) =~ "Compiler-derived method"
+
+      # ...and the editable CodeMirror form is NOT rendered — the old bug was a
+      # blank editable buffer for an un-editable method.
+      assert Floki.find(frag, ~s(form#method-editor-form)) == []
+
+      # The doc resolved by the backend (the same `:help` path) renders in the doc
+      # block, forced open for a synthetic tab (no editor competes for the space).
+      assert Floki.text(frag) =~ "Compiler-derived copy-setter"
+
+      # The "in image" breadcrumb note is meaningless for a synthetic method (it's
+      # always compiler-generated, never flushed) — suppressed per Claude review nit.
+      refute Floki.text(frag) =~ "in image"
+    end
+
+    test "an ordinary editable method still opens the editor form", %{view: view} do
+      html = view |> element(~s(div[phx-value-selector="increment"])) |> render_click()
+      frag = Floki.parse_fragment!(html)
+
+      # A hand-written method keeps the editable buffer + Compile form...
+      assert Floki.find(frag, ~s(form#method-editor-form)) != []
+      # ...and shows no derived read-only note.
+      assert Floki.find(frag, ".synthetic-note") == []
+    end
+  end
 end

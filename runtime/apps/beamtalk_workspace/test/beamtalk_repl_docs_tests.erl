@@ -653,6 +653,40 @@ format_method_doc_known_test_() ->
         end}
     ]}.
 
+%% BT-2714: `method_doc_signature_resolved/3` is the reusable extraction the
+%% System Browser's `browse-method-source` calls for a synthetic method — it must
+%% return the SAME curated `{Doc, Signature}` that `:help` renders (so the browser
+%% and `:help` never disagree), and `{null, null}` when the method cannot be
+%% resolved.
+method_doc_signature_resolved_test_() ->
+    {setup, fun integration_setup/0, fun(_) -> ok end, [
+        {"returns the real curated doc + signature for a documented class method", fun() ->
+            Pid = beamtalk_class_registry:whereis_class('System'),
+            {Doc, Sig} = beamtalk_repl_docs:method_doc_signature_resolved(
+                Pid, true, 'getEnv:'
+            ),
+            ?assert(is_binary(Sig)),
+            ?assert(is_binary(Doc)),
+            %% The exact doc text `:help System getEnv:` shows — reused verbatim,
+            %% not re-synthesized, so the browser pane matches `:help`.
+            ?assert(binary:match(Doc, <<"environment variable">>) =/= nomatch)
+        end},
+        {"resolves an instance method's signature (Integer +)", fun() ->
+            Pid = beamtalk_class_registry:whereis_class('Integer'),
+            {_Doc, Sig} = beamtalk_repl_docs:method_doc_signature_resolved(Pid, false, '+'),
+            ?assert(is_binary(Sig))
+        end},
+        {"an unresolvable method yields {null, null}", fun() ->
+            Pid = beamtalk_class_registry:whereis_class('Integer'),
+            ?assertEqual(
+                {null, null},
+                beamtalk_repl_docs:method_doc_signature_resolved(
+                    Pid, false, 'xyzzy_not_a_method'
+                )
+            )
+        end}
+    ]}.
+
 format_method_doc_class_side_test_() ->
     {setup, fun integration_setup/0, fun(_) -> ok end, [
         %% BT-1634: Class method doc comments should be displayed by :help

@@ -378,6 +378,15 @@
   padding: 0 4px; border-radius: 3px;
   background: var(--accent-soft); color: var(--accent-2);
 }
+/* Read-only pane for a compiler-derived method's editor tab (BT-2714): shown
+   where the CodeMirror editor would be, since a synthetic method has no editable
+   source. The resolved doc/signature render in the doc block above; this block
+   carries only the "derived, read-only" note + Senders/Implementors nav. */
+.synthetic-note { padding: 8px 2px; display: flex; flex-direction: column; gap: 8px; }
+.synthetic-note .synthetic-sig {
+  font-size: 12px; color: var(--fg); padding: 6px 8px;
+  background: var(--panel-2, var(--accent-soft)); border-radius: 4px;
+}
 .sb-classdef { border-bottom: 1px solid var(--line-soft); padding-bottom: 2px; }
 .sb-protocols { border-bottom: 1px solid var(--line-soft); padding-bottom: 2px; }
 

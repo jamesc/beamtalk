@@ -19,7 +19,8 @@ Method docs are retrieved via `>> #selector` (CompiledMethod maps).
     format_class_docs/1,
     format_class_docs_class_side/1,
     format_method_doc/2,
-    format_method_doc_class_side/2
+    format_method_doc_class_side/2,
+    method_doc_signature_resolved/3
 ]).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -410,6 +411,46 @@ method_doc_info(MethodObj, SelectorAtom) ->
                 {false, false}
         end,
     {Signature, Doc, IsSealed, IsInternal}.
+
+-doc """
+Resolve a method's `{Doc, Signature}` exactly the way `:help ClassName selector`
+does — walking the class hierarchy (`resolve_method_obj` for the instance side,
+`resolve_class_side_method_obj` for the class side) and reading the resolved
+`CompiledMethod`'s `__doc__` / `__signature__` (BT-2714).
+
+Used by the System Browser's `browse-method-source` / `browse-protocols` to
+surface the *real* documentation of a compiler-synthesized method — e.g. a
+subclass's synthetic `spawn` shows `Actor`'s curated `spawn` doc — WITHOUT
+surfacing an editable source body (that stays `null`, so the browser still
+badges the method read-only). Because it reuses the same resolution `Beamtalk
+help:` uses, the browser pane and `:help` never disagree on a method's docs.
+
+`Doc` is `null` when the resolved method carries no `__doc__`; `Signature` falls
+back to the selector name (never `null` on a hit). Both are `null` when the
+method cannot be resolved at all (missing / timed-out class process).
+""".
+-spec method_doc_signature_resolved(pid(), boolean(), atom()) ->
+    {binary() | null, binary() | null}.
+method_doc_signature_resolved(ClassPid, ClassSide, Selector) ->
+    Resolve =
+        case ClassSide of
+            true -> fun resolve_class_side_method_obj/2;
+            false -> fun resolve_method_obj/2
+        end,
+    try Resolve(ClassPid, Selector) of
+        {ok, MethodObj, _DefClass} ->
+            {Sig, Doc, _IsSealed, _IsInternal} = method_doc_info(MethodObj, Selector),
+            {doc_to_null(Doc), Sig};
+        not_found ->
+            {null, null}
+    catch
+        exit:{timeout, _} -> {null, null};
+        exit:{noproc, _} -> {null, null}
+    end.
+
+-spec doc_to_null(binary() | none) -> binary() | null.
+doc_to_null(none) -> null;
+doc_to_null(Doc) when is_binary(Doc) -> Doc.
 
 -doc """
 Get method signatures and docs with both sealed and internal flags.

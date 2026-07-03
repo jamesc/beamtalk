@@ -441,14 +441,22 @@ browse_method_source(ClassName, ClassSide, Selector) ->
     {binary() | null, binary() | null, binary() | null}.
 method_text_fields(_ClassPid, _ClassSide, _Selector, unindexed_runtime_fun) ->
     {null, null, null};
-%% BT-2614: synthetic methods (compiler-injected — value-type auto-accessors and
-%% actor `new`/`new:`/`spawn`/`spawn:` constructors) carry no editable user
-%% source. Short-circuit to null so the browser badges them read-only with no
-%% `[source]` jump. Without this, a class-side `spawn` would walk the superclass
-%% chain and surface `Actor`'s real `spawn` body under the subclass's synthetic
-%% row — an inconsistent, misleading "source" for a generated method.
-method_text_fields(_ClassPid, _ClassSide, _Selector, synthetic) ->
-    {null, null, null};
+%% BT-2614/BT-2714: synthetic methods (compiler-injected — value-type
+%% auto-accessors and actor `new`/`new:`/`spawn`/`spawn:` constructors) carry no
+%% editable user source. `source` stays null so the browser badges them read-only
+%% with no `[source]` jump — and, crucially, so a class-side `spawn` does NOT
+%% surface `Actor`'s real `spawn` body under the subclass's synthetic row (an
+%% inconsistent, misleading "source" for a generated method).
+%%
+%% BT-2714: but doc/signature DO resolve — via the same hierarchy walk `Beamtalk
+%% help:` uses (`method_doc_signature_resolved/3`) — so the read-only pane shows
+%% the method's real curated docs (the actor entry points inherit `Actor`'s
+%% docs; a value accessor shows its generated signature) instead of a blank
+%% pane. Reusing the `help:` resolver guarantees the browser and `:help` agree.
+method_text_fields(ClassPid, ClassSide, Selector, synthetic) ->
+    {Doc, Signature} =
+        beamtalk_repl_docs:method_doc_signature_resolved(ClassPid, ClassSide, Selector),
+    {null, Doc, Signature};
 method_text_fields(ClassPid, ClassSide, Selector, _SourceStatus) ->
     Call =
         case ClassSide of
