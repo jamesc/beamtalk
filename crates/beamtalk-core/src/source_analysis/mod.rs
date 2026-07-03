@@ -63,3 +63,57 @@ pub use parser::{
 pub use span::Span;
 pub use summary::{DiagnosticSummary, SeverityCounts, category_name};
 pub use token::{Token, TokenKind, Trivia};
+
+/// Returns `true` if `name` is a valid Beamtalk class name.
+///
+/// A valid class name:
+/// - is non-empty
+/// - starts with an ASCII uppercase letter
+/// - contains only ASCII alphanumeric characters and underscores
+///
+/// This is the canonical definition; tools that validate user-supplied class
+/// names (LSP, MCP, CLI) must delegate their boolean check here so the rule
+/// stays in one place.
+pub fn is_valid_class_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.starts_with(|c: char| c.is_ascii_uppercase())
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+#[cfg(test)]
+mod naming_tests {
+    use super::*;
+
+    #[test]
+    fn valid_simple() {
+        assert!(is_valid_class_name("Counter"));
+        assert!(is_valid_class_name("FooBarBaz"));
+        assert!(is_valid_class_name("X123"));
+        assert!(is_valid_class_name("X_y"));
+        assert!(is_valid_class_name("A"));
+    }
+
+    #[test]
+    fn invalid_empty() {
+        assert!(!is_valid_class_name(""));
+    }
+
+    #[test]
+    fn invalid_lowercase_start() {
+        assert!(!is_valid_class_name("counter"));
+        assert!(!is_valid_class_name("myClass"));
+    }
+
+    #[test]
+    fn invalid_bad_chars() {
+        assert!(!is_valid_class_name("With Space"));
+        assert!(!is_valid_class_name("Bad!"));
+        assert!(!is_valid_class_name("Has-Hyphen"));
+        assert!(!is_valid_class_name("Has.Dot"));
+    }
+
+    #[test]
+    fn invalid_digit_start() {
+        assert!(!is_valid_class_name("123Foo"));
+    }
+}
