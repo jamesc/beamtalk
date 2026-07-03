@@ -151,11 +151,10 @@ All Beamtalk errors use `#beamtalk_error{}` records from `runtime/include/beamta
 -include("beamtalk.hrl").
 
 %% Creating errors in runtime Erlang code
-Error0 = beamtalk_error:new(does_not_understand, 'Integer'),
-Error1 = beamtalk_error:with_selector(Error0, 'foo'),
-Error2 = beamtalk_error:with_hint(Error1, <<"Check spelling">>),
-Error3 = beamtalk_error:with_details(Error2, #{arity => 0}),
-error(Error3).
+Error0 = beamtalk_error:new(does_not_understand, 'Integer', 'foo'),
+Error1 = beamtalk_error:with_hint(Error0, <<"Check spelling">>),
+Error2 = beamtalk_error:with_details(Error1, #{arity => 0}),
+error(Error2).
 ```
 
 ### Generated Core Erlang Errors
@@ -168,10 +167,9 @@ call 'erlang':'error'({'some_error', 'message'})
 call 'erlang':'error'('simple_atom')
 
 %% ✅ RIGHT - structured error
-let Error0 = call 'beamtalk_error':'new'('instantiation_error', 'Actor') in
-let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'new') in
-let Error2 = call 'beamtalk_error':'with_hint'(Error1, <<"Use spawn instead">>) in
-call 'erlang':'error'(Error2)
+let Error0 = call 'beamtalk_error':'new'('instantiation_error', 'Actor', 'new') in
+let Error1 = call 'beamtalk_error':'with_hint'(Error0, <<"Use spawn instead">>) in
+call 'erlang':'error'(Error1)
 ```
 
 ### Error Kinds
@@ -712,9 +710,8 @@ build_error(Kind, Class) ->
 %% All immutable_primitive_error functions
 -spec immutable_primitive_error(atom(), term()) -> beamtalk_error:error().
 immutable_primitive_error(Class, FieldName) ->
-    Error0 = beamtalk_error:new(immutable_primitive, Class),
-    Error1 = beamtalk_error:with_selector(Error0, 'fieldAt:put:'),
-    beamtalk_error:with_hint(Error1, <<"Use assignment instead">>).
+    Error0 = beamtalk_error:new(immutable_primitive, Class, 'fieldAt:put:'),
+    beamtalk_error:with_hint(Error0, <<"Use assignment instead">>).
 ```
 
 **When to be vague:**
