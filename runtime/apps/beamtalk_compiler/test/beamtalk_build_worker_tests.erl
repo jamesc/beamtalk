@@ -51,6 +51,26 @@ compile_core_erlang_empty_test() ->
     ?assertMatch({error, _}, Result).
 
 %%% ---------------------------------------------------------------
+%%% compile_core_erlang/1 — {cerl, Etf} wire variant (ADR 0088 Phase 0b, BT-2315)
+%%%
+%%% beamtalk_cerl_wire_tests exercises this path but is a standalone
+%%% suite silently skipped by 'rebar3 eunit --app=beamtalk_compiler'
+%%% (--app only discovers <Module>_tests companions). These tests
+%%% bring lines 272/274/277 of beamtalk_build_worker into coverage.
+%%% ---------------------------------------------------------------
+
+%% A valid cerl module term encoded as ETF compiles successfully.
+compile_core_erlang_cerl_valid_test() ->
+    Mod = cerl_minimum_module(bt_bw_tests_cerl_valid),
+    Result = beamtalk_build_worker:compile_core_erlang({cerl, term_to_binary(Mod)}),
+    ?assertMatch({ok, bt_bw_tests_cerl_valid, _}, Result).
+
+%% Malformed ETF (not valid binary_to_term input) returns cerl_decode_error.
+compile_core_erlang_cerl_malformed_etf_test() ->
+    Result = beamtalk_build_worker:compile_core_erlang({cerl, <<0, 1, 2, 3>>}),
+    ?assertMatch({error, {cerl_decode_error, _}}, Result).
+
+%%% ---------------------------------------------------------------
 %%% compile_core_file/2 — reads file, compiles, writes .beam
 %%% ---------------------------------------------------------------
 
@@ -227,3 +247,19 @@ core_erlang_module(Name) ->
         "  attributes []\n"
         "  'hello'/0 = fun () -> 'ok'\n"
         "end\n">>.
+
+%% Smallest cerl module that compiles: only module_info/0 and module_info/1.
+cerl_minimum_module(ModName) ->
+    Mi0Var = cerl:c_var({module_info, 0}),
+    Mi1Var = cerl:c_var({module_info, 1}),
+    Mi0Fun = cerl:c_fun(
+        [],
+        cerl:c_call(cerl:c_atom(erlang), cerl:c_atom(get_module_info), [cerl:c_atom(ModName)])
+    ),
+    X = cerl:c_var('X'),
+    Mi1Fun = cerl:c_fun(
+        [X],
+        cerl:c_call(cerl:c_atom(erlang), cerl:c_atom(get_module_info), [cerl:c_atom(ModName), X])
+    ),
+    Defs = [{Mi0Var, Mi0Fun}, {Mi1Var, Mi1Fun}],
+    cerl:c_module(cerl:c_atom(ModName), [Mi0Var, Mi1Var], [], Defs).
