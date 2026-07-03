@@ -45,7 +45,7 @@ NativeCalc version
 
 // Save the path to the native .erl file for modification
 erlPath := "tests/repl-protocol/fixtures/native_package_project/native/native_calc.erl"
-// => _
+// => tests/repl-protocol/fixtures/native_package_project/native/native_calc.erl
 
 // Save original content so we can restore it after the test
 originalContent := (File readAll: erlPath) unwrap
@@ -56,7 +56,7 @@ modifiedContent := originalContent replaceAll: "version() -> 1." with: "version(
 // => _
 
 File writeAll: erlPath contents: modifiedContent
-// => _
+// => Result ok: nil
 
 // Reload the class — demand-driven compilation detects the stale .erl
 :reload NativeCalc
@@ -79,4 +79,4 @@ NativeCalc add: 10 with: 20
 // (1 second on most filesystems) can prevent stale detection when the
 // restore and reload happen within the same second.
 File writeAll: erlPath contents: originalContent
-// => _
+// => Result ok: nil
