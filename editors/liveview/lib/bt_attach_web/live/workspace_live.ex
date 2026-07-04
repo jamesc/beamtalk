@@ -5468,7 +5468,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   # path) fall back to the bare selector, the pre-BT-2735 behaviour.
   defp method_row_title(m) do
     case {presence(m["signature"]), first_doc_line(m["doc"])} do
-      {nil, nil} -> m["selector"]
+      {nil, nil} -> presence(m["selector"])
       {sig, nil} -> sig
       {nil, doc} -> "#{m["selector"]}\n#{doc}"
       {sig, doc} -> "#{sig}\n#{doc}"
