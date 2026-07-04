@@ -113,8 +113,15 @@ handle_term(<<"nav-query">>, Params, _Msg, _SessionPid) ->
             Classes = beamtalk_protocol_registry:conforming_classes(ProtocolName),
             {value, conforming_classes_value(Classes, ProtocolName)};
         {ok, {callers_of_native_module, Module}} ->
-            Rows = beamtalk_xref:callers_of_native_module(Module),
-            {value, native_callers_value(Rows)};
+            %% BT-2669 explicit `(Erlang <module>) …` FFI callers, plus BT-2732
+            %% ADR 0056 `self delegate` callers (a `native:` class's delegating
+            %% methods route into its backing module via generated dispatch, not
+            %% `erlang_ffi` sends, so the xref index alone misses them). Both sets
+            %% share the `native_caller_row()` shape; `merge_native_caller_rows/2`
+            %% de-duplicates by calling method and keeps a stable order.
+            FfiRows = beamtalk_xref:callers_of_native_module(Module),
+            DelegateRows = beamtalk_repl_ops_browse:delegate_callers_of_native_module(Module),
+            {value, native_callers_value(merge_native_caller_rows(FfiRows, DelegateRows))};
         {error, Reason} ->
             {error,
                 beamtalk_repl_errors:make(
@@ -261,6 +268,37 @@ sites_value(Sites) ->
 native_callers_value(Rows) ->
     SiteRows = [native_caller_to_row(R) || R <- Rows],
     #{<<"sites">> => SiteRows}.
+
+%% BT-2732: fold the FFI callers (BT-2669) and the `self delegate` callers into a
+%% single caller list. Both are already de-duplicated within their own producer;
+%% here we de-dup across the two by `{owner, class_side, method}` — a `self
+%% delegate` method has no explicit FFI send, so a key collision is only
+%% theoretical, but if one occurred we keep the earliest line (the same anchor
+%% policy `beamtalk_xref:dedup_caller_rows/1` applies to FFI sites). The result is
+%% sorted by `{owner, method}` for a stable, reproducible order in the UI / tests.
+-spec merge_native_caller_rows(
+    [beamtalk_xref:native_caller_row()], [beamtalk_xref:native_caller_row()]
+) -> [beamtalk_xref:native_caller_row()].
+merge_native_caller_rows(FfiRows, DelegateRows) ->
+    Folded = lists:foldl(
+        fun(#{owner := Owner, class_side := ClassSide, method := Method, line := Line} = Row, Acc) ->
+            Key = {Owner, ClassSide, Method},
+            case Acc of
+                #{Key := #{line := ExistingLine}} when ExistingLine =< Line ->
+                    Acc;
+                _ ->
+                    Acc#{Key => Row}
+            end
+        end,
+        #{},
+        FfiRows ++ DelegateRows
+    ),
+    lists:sort(
+        fun(#{owner := O1, method := M1}, #{owner := O2, method := M2}) ->
+            {O1, M1} =< {O2, M2}
+        end,
+        maps:values(Folded)
+    ).
 
 -spec native_caller_to_row(beamtalk_xref:native_caller_row()) -> map().
 native_caller_to_row(Row) ->

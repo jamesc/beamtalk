@@ -765,6 +765,121 @@ protocol_tests(_) ->
     ].
 
 %%====================================================================
+%% handle/4 — callers_of_native_module merges self delegate callers (BT-2732)
+%%====================================================================
+
+native_delegate_callers_test_() ->
+    {setup, fun delegate_callers_setup/0, fun delegate_callers_cleanup/1,
+        fun delegate_callers_tests/1}.
+
+%% A live class backed by `beamtalk_test_native_facade` (backing module
+%% `bt_test_native_backing`), carrying two `self delegate` instance methods plus
+%% one explicit `(Erlang bt_test_native_backing) …` FFI caller — so the merged nav
+%% op must surface all three: the delegate rows (BT-2732) alongside the FFI row
+%% (BT-2669, no regression). Unique class name + isolated cleanup.
+delegate_callers_setup() ->
+    XrefPid =
+        case whereis(beamtalk_xref) of
+            undefined ->
+                {ok, P} = beamtalk_xref:start_link(),
+                P;
+            P ->
+                P
+        end,
+    clear_xref_tables(),
+    %% Load the facade so its `__beamtalk_meta/0` + `dispatch_<selector>` exports
+    %% are visible to the reflection reads (and the backing-module atom interned
+    %% for the op's `binary_to_existing_atom`).
+    {module, beamtalk_test_native_facade} = code:ensure_loaded(beamtalk_test_native_facade),
+    Uniq = erlang:integer_to_list(erlang:unique_integer([positive, monotonic])),
+    ClassName = list_to_atom("NavDelegateCounter_" ++ Uniq),
+    {ClassPid, Owned} =
+        case
+            beamtalk_object_class:start(ClassName, #{
+                name => ClassName,
+                module => beamtalk_test_native_facade,
+                superclass => none,
+                fields => [],
+                instance_methods => #{
+                    'increment' => #{block => fun(_, _) -> ok end, arity => 0},
+                    'incrementBy:' => #{block => fun(_, _, _) -> ok end, arity => 1}
+                }
+            })
+        of
+            {ok, SP} -> {SP, true};
+            {error, {already_started, SP}} -> {SP, false}
+        end,
+    ok = beamtalk_xref:register_class(ClassName, [
+        %% `self delegate` methods → delegate caller rows anchored at their header.
+        delegate_method_row('increment', 61, []),
+        delegate_method_row('incrementBy:', 71, []),
+        %% An explicit FFI caller into the SAME backing module → BT-2669 row.
+        delegate_method_row('rawPoke', 90, [
+            #{
+                selector => 'poke',
+                line => 92,
+                recv_kind => erlang_ffi,
+                target_module => bt_test_native_backing
+            }
+        ])
+    ]),
+    #{xref => XrefPid, class => {ClassName, ClassPid, Owned}}.
+
+delegate_callers_cleanup(#{class := {ClassName, ClassPid, Owned}}) ->
+    catch beamtalk_xref:purge_class(ClassName),
+    case Owned of
+        true -> catch gen_server:stop(ClassPid);
+        false -> ok
+    end,
+    clear_xref_tables(),
+    ok.
+
+delegate_method_row(Selector, Line, Sends) ->
+    #{
+        class_side => false,
+        selector => Selector,
+        line => Line,
+        sends => Sends,
+        references => [],
+        source_status => indexed,
+        provenance => class_body
+    }.
+
+delegate_callers_tests(#{class := {ClassName, _Pid, _Owned}}) ->
+    ClassBin = atom_to_binary(ClassName, utf8),
+    %% Rows attributed to our fixture class (the image may hold other native
+    %% classes; a unique name keeps the assertions deterministic).
+    MyRows = fun() ->
+        Response = beamtalk_repl_ops_nav:handle(
+            <<"nav-query">>,
+            #{
+                <<"kind">> => <<"callers_of_native_module">>,
+                <<"module">> => <<"bt_test_native_backing">>
+            },
+            make_msg(),
+            self()
+        ),
+        #{<<"value">> := #{<<"sites">> := Sites}} = json:decode(Response),
+        [R || R <- Sites, maps:get(<<"class">>, R) =:= ClassBin]
+    end,
+    [
+        {"the delegating class's self delegate methods appear as callers", fun() ->
+            Methods = [maps:get(<<"method">>, R) || R <- MyRows()],
+            ?assert(lists:member(<<"increment">>, Methods)),
+            ?assert(lists:member(<<"incrementBy:">>, Methods))
+        end},
+        {"explicit FFI callers still appear alongside (BT-2669 no regression)", fun() ->
+            Methods = [maps:get(<<"method">>, R) || R <- MyRows()],
+            ?assert(lists:member(<<"rawPoke">>, Methods))
+        end},
+        {"a delegate row is instance-side and anchored at the method header line", fun() ->
+            [IncRow] = [R || R <- MyRows(), maps:get(<<"method">>, R) =:= <<"increment">>],
+            ?assertEqual(61, maps:get(<<"line">>, IncRow)),
+            ?assertEqual(false, maps:get(<<"class_side">>, IncRow))
+        end}
+    ].
+
+%%====================================================================
 %% Fixtures
 %%====================================================================
 
