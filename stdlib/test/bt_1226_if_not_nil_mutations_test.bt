@@ -12,6 +12,8 @@ TestCase subclass: BT1226IfNotNilMutationsTest
 
   setUp => self.a := IfNotNilMutActor spawn
 
+  tearDown => self.a stop
+
   // Exact issue pattern: receiver reads state, 1-arg block mutates state
   testIfNotNilWithMutationThreadsState =>
     self.a addEntry: "x" withValue: 10
