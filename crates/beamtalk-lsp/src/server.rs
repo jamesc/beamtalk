@@ -2817,7 +2817,9 @@ fn validate_class_name(name: &str) -> std::result::Result<(), String> {
     let c = name
         .chars()
         .find(|c| !(c.is_ascii_alphanumeric() || *c == '_'))
-        .unwrap();
+        .expect(
+            "invariant: is_valid_class_name=false, non-empty, starts-uppercase → must have bad char",
+        );
     Err(format!(
         "class name '{name}' contains invalid character '{c}' (allowed: letters, digits, underscore)"
     ))
