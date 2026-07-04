@@ -148,10 +148,7 @@ fn error_result(msg: impl Into<String>) -> CallToolResult {
 
 /// Validate that a string is a valid Beamtalk class name (uppercase-starting identifier).
 fn validate_class_name(name: &str) -> Result<(), rmcp::ErrorData> {
-    if name.is_empty()
-        || !name.starts_with(|c: char| c.is_ascii_uppercase())
-        || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
-    {
+    if !beamtalk_core::source_analysis::is_valid_class_name(name) {
         return Err(rmcp::ErrorData::invalid_params(
             format!("Invalid class name: '{name}'. Must be an uppercase-starting identifier."),
             None,

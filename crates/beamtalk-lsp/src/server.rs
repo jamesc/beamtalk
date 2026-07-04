@@ -2801,26 +2801,28 @@ fn expect_string_arg(
 /// flush expression. Tight on purpose — Beamtalk class names are a closed
 /// alphabet.
 fn validate_class_name(name: &str) -> std::result::Result<(), String> {
+    if beamtalk_core::source_analysis::is_valid_class_name(name) {
+        return Ok(());
+    }
     if name.is_empty() {
         return Err("class name must not be empty".to_string());
     }
-    let mut chars = name.chars();
-    match chars.next() {
-        Some(c) if c.is_ascii_uppercase() => {}
-        _ => {
-            return Err(format!(
-                "class name '{name}' must start with an uppercase letter"
-            ));
-        }
+    if !name.starts_with(|c: char| c.is_ascii_uppercase()) {
+        return Err(format!(
+            "class name '{name}' must start with an uppercase letter"
+        ));
     }
-    for c in chars {
-        if !(c.is_ascii_alphanumeric() || c == '_') {
-            return Err(format!(
-                "class name '{name}' contains invalid character '{c}' (allowed: letters, digits, underscore)"
-            ));
-        }
-    }
-    Ok(())
+    // is_valid_class_name returned false, name is non-empty with uppercase start,
+    // so there must be at least one disallowed character.
+    let c = name
+        .chars()
+        .find(|c| !(c.is_ascii_alphanumeric() || *c == '_'))
+        .expect(
+            "invariant: is_valid_class_name=false, non-empty, starts-uppercase → must have bad char",
+        );
+    Err(format!(
+        "class name '{name}' contains invalid character '{c}' (allowed: letters, digits, underscore)"
+    ))
 }
 
 fn workspace_roots(params: &InitializeParams) -> Vec<PathBuf> {
