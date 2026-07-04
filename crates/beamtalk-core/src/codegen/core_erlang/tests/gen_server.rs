@@ -2784,6 +2784,132 @@ fn generate_module_with_pre_class_hierarchy_does_not_panic() {
     assert!(result.is_ok(), "generate_module should succeed: {result:?}");
 }
 
+/// BT-2728: Builds a `ClassInfo` for a foreign target class named `PriceBand`
+/// with a single state field `lo` carrying the given declared type. Used by the
+/// extension-method field-type threading tests.
+fn price_band_class_info_with_lo_type(
+    lo_type: Option<&str>,
+) -> crate::semantic_analysis::class_hierarchy::ClassInfo {
+    use crate::semantic_analysis::class_hierarchy::ClassInfo;
+    use std::collections::HashMap;
+
+    let mut state_types = HashMap::new();
+    if let Some(ty) = lo_type {
+        state_types.insert(ecow::EcoString::from("lo"), ecow::EcoString::from(ty));
+    }
+    ClassInfo {
+        name: ecow::EcoString::from("PriceBand"),
+        superclass: Some(ecow::EcoString::from("Object")),
+        is_sealed: false,
+        is_abstract: false,
+        is_typed: false,
+        is_internal: false,
+        package: None,
+        is_value: false,
+        is_native: false,
+        state: vec![ecow::EcoString::from("lo")],
+        state_types,
+        state_has_default: HashMap::new(),
+        methods: vec![],
+        class_methods: vec![],
+        class_variables: vec![],
+        type_params: vec![],
+        type_param_bounds: vec![],
+        superclass_type_args: vec![],
+    }
+}
+
+#[test]
+fn test_bt2728_extension_object_typed_field_dispatches() {
+    // BT-2728: An extension method comparing an object-typed `self.<field>` must
+    // route through the runtime guard so it dispatches to the field type's
+    // operator — same as an in-class method. The target class (`PriceBand`) is
+    // foreign (declared elsewhere); its `lo :: Money` field type is resolved
+    // from the class hierarchy threaded into extension codegen.
+    let src = "PriceBand >> below: other => self.lo < other";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@geo@price_band_ext")
+            .with_class_hierarchy(vec![price_band_class_info_with_lo_type(Some("Money"))]),
+    )
+    .expect("codegen should succeed");
+
+    assert!(
+        code.contains("call 'beamtalk_primitive':'is_object'("),
+        "object-typed self.<field> comparison in an extension must be guarded (dispatch); got:\n{code}"
+    );
+}
+
+#[test]
+fn test_bt2728_extension_object_typed_field_arithmetic_dispatches() {
+    // BT-2728: The arithmetic guard (`is_number`) follows a parallel path to the
+    // comparison guard and shares the same `set_extension_target_field_types`
+    // fix. An extension method doing arithmetic on an object-typed `self.<field>`
+    // must route through the `is_number` guard so `self.lo + other` dispatches to
+    // the field type's `+` instead of `badarith`-ing.
+    let src = "PriceBand >> plus: other => self.lo + other";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@geo@price_band_ext")
+            .with_class_hierarchy(vec![price_band_class_info_with_lo_type(Some("Money"))]),
+    )
+    .expect("codegen should succeed");
+
+    assert!(
+        code.contains("call 'erlang':'is_number'("),
+        "object-typed self.<field> arithmetic in an extension must be guarded (dispatch); got:\n{code}"
+    );
+}
+
+#[test]
+fn test_bt2728_extension_untyped_field_stays_bare() {
+    // BT-2728: An untyped `self.<field>` in an extension keeps the bare BIF (no
+    // regression) — the guard/dispatch path is only taken for object-typed
+    // fields.
+    let src = "PriceBand >> below: other => self.lo < other";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@geo@price_band_ext")
+            .with_class_hierarchy(vec![price_band_class_info_with_lo_type(None)]),
+    )
+    .expect("codegen should succeed");
+
+    assert!(
+        code.contains("call 'erlang':'<'(") && !code.contains("is_object"),
+        "untyped self.<field> comparison in an extension must stay bare; got:\n{code}"
+    );
+}
+
+#[test]
+fn test_bt2728_extension_primitive_field_stays_bare() {
+    // BT-2728: A primitive-typed (`Integer`) `self.<field>` in an extension keeps
+    // the bare comparison BIF — parity with in-class primitive fields.
+    let src = "PriceBand >> below: other => self.lo < other";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@geo@price_band_ext")
+            .with_class_hierarchy(vec![price_band_class_info_with_lo_type(Some("Integer"))]),
+    )
+    .expect("codegen should succeed");
+
+    assert!(
+        code.contains("call 'erlang':'<'(") && !code.contains("is_object"),
+        "primitive-typed self.<field> comparison in an extension must stay bare; got:\n{code}"
+    );
+}
+
 #[test]
 fn test_value_subclass_typed_fields_emit_type_alias() {
     // BT-1156: Value subclass with typed state: declarations emits '-type t()' attribute.
