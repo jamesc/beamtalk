@@ -213,6 +213,125 @@ native_delegate_exported_marker_test() ->
     ?assertNot(beamtalk_repl_ops_browse:delegate_exported([], readLine)).
 
 %%====================================================================
+%% delegate_callers_of_native_module/1 (BT-2732)
+%%====================================================================
+
+%% self_delegate_selectors/1 recovers the `self delegate` selectors from a facade's
+%% `dispatch_<selector>` exports (native_facade.rs) — keyword colon included — and
+%% ignores every non-`dispatch_` export (`spawn`, `__beamtalk_meta`, module_info).
+self_delegate_selectors_extracts_dispatch_exports_test() ->
+    Exports = beamtalk_test_native_facade:module_info(exports),
+    ?assertEqual(
+        [increment, 'incrementBy:'],
+        beamtalk_repl_ops_browse:self_delegate_selectors(Exports)
+    ).
+
+%% A bare exports list: the prefix must be an exact `dispatch_` head, and the
+%% stripped remainder must already be an interned selector atom — an unknown one
+%% is skipped rather than growing the atom table.
+self_delegate_selectors_filters_non_dispatch_test() ->
+    ?assertEqual([], beamtalk_repl_ops_browse:self_delegate_selectors([])),
+    %% `dispatcher`/`dispatch` share a prefix but are not `dispatch_<x>`.
+    ?assertEqual(
+        [],
+        beamtalk_repl_ops_browse:self_delegate_selectors([{dispatcher, 0}, {dispatch, 1}])
+    ),
+    %% `dispatch_` + an atom that is not interned as a selector → skipped.
+    ?assertEqual(
+        [],
+        beamtalk_repl_ops_browse:self_delegate_selectors([
+            {'dispatch_totallyUninternedSelectorXyz', 1}
+        ])
+    ).
+
+delegate_callers_test_() ->
+    {setup, fun delegate_setup/0, fun delegate_cleanup/1, fun delegate_tests/1}.
+
+%% A live class whose module is the test native facade (backing module
+%% `bt_test_native_backing`), with its two `self delegate` instance methods seeded
+%% into xref so `delegate_row/2` resolves their header lines. Unique class name per
+%% invocation, isolated cleanup — mirrors `browse_setup/0` (no global xref clears).
+delegate_setup() ->
+    XrefPid =
+        case whereis(beamtalk_xref) of
+            undefined ->
+                case beamtalk_xref:start_link() of
+                    {ok, P} -> P;
+                    {error, {already_started, P}} -> P
+                end;
+            P ->
+                P
+        end,
+    %% Load the facade so its `__beamtalk_meta/0` + `dispatch_<selector>` exports
+    %% are visible to the reflection reads, regardless of test ordering.
+    {module, beamtalk_test_native_facade} = code:ensure_loaded(beamtalk_test_native_facade),
+    Uniq = erlang:integer_to_list(erlang:unique_integer([positive, monotonic])),
+    ClassName = list_to_atom("DelegateCounter_" ++ Uniq),
+    {Pid, Owned} = start_browse_class(ClassName, #{
+        name => ClassName,
+        %% The facade module carries `__beamtalk_meta/0` (backing_module) and the
+        %% `dispatch_<selector>` exports — the two reflection reads the delegate
+        %% lookup depends on.
+        module => beamtalk_test_native_facade,
+        superclass => none,
+        fields => [],
+        instance_methods => #{
+            'increment' => #{block => fun(_, _) -> ok end, arity => 0},
+            'incrementBy:' => #{block => fun(_, _, _) -> ok end, arity => 1}
+        }
+    }),
+    %% Seed the delegate methods' header lines (and intern the `'incrementBy:'`
+    %% selector so `list_to_existing_atom/1` in the lookup resolves it).
+    ok = beamtalk_xref:register_class(ClassName, [
+        method_row('increment', 61, indexed, class_body),
+        method_row('incrementBy:', 71, indexed, class_body)
+    ]),
+    #{xref => XrefPid, class_name => ClassName, class => {ClassName, Pid, Owned}}.
+
+delegate_cleanup(#{class := {Name, Pid, Owned}}) ->
+    catch beamtalk_xref:purge_class(Name),
+    case Owned of
+        true -> catch gen_server:stop(Pid);
+        false -> ok
+    end,
+    ok.
+
+delegate_tests(#{class_name := ClassName}) ->
+    [
+        {"lists the class's self delegate methods, anchored at their header lines", fun() ->
+            Rows = beamtalk_repl_ops_browse:delegate_callers_of_native_module(
+                bt_test_native_backing
+            ),
+            MyRows = [R || R <- Rows, maps:get(owner, R) =:= ClassName],
+            ?assertEqual(
+                lists:sort([
+                    #{owner => ClassName, class_side => false, method => increment, line => 61},
+                    #{
+                        owner => ClassName,
+                        class_side => false,
+                        method => 'incrementBy:',
+                        line => 71
+                    }
+                ]),
+                lists:sort(MyRows)
+            )
+        end},
+        {"a module that backs no loaded class yields the empty state", fun() ->
+            ?assertEqual(
+                [],
+                beamtalk_repl_ops_browse:delegate_callers_of_native_module(
+                    bt_no_such_native_backing_module_xyz
+                )
+            )
+        end},
+        {"the `none` backing-module sentinel is guarded (never matches)", fun() ->
+            %% `none` is `meta_backing_module/1`'s "no backing module" answer, so a
+            %% `module=none` query must NOT match classes that report no backing.
+            ?assertEqual([], beamtalk_repl_ops_browse:delegate_callers_of_native_module(none))
+        end}
+    ].
+
+%%====================================================================
 %% browse-native-modules — enumeration + filter + source-path (BT-2648)
 %%====================================================================
 

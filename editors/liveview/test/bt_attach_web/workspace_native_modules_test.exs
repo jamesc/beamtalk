@@ -308,6 +308,42 @@ defmodule BtAttachWeb.WorkspaceNativeModulesTest do
       assert html =~ "Callers"
       assert html =~ "Subprocess"
     end
+
+    # BT-2732: the most common native module in a project is the gen_server that
+    # backs an actor class via ADR 0056 (`native:` + `self delegate`). Its
+    # delegating methods route into it via generated dispatch, not `(Erlang …)`
+    # FFI sends, so the server-side nav op merges them in — the Callers view must
+    # list the delegating class + its `self delegate` methods, each opening the
+    # Beamtalk method.
+    test "Callers lists an actor class's self delegate methods for its backing module",
+         %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      render_click(view, "browser_mode", %{"mode" => "native"})
+
+      # `beamtalk_atomic_counter` backs the `AtomicCounter` actor class.
+      render_click(view, "browser_open_native_module", %{"module" => "beamtalk_atomic_counter"})
+
+      html = render_click(view, "native_callers", %{})
+      assert html =~ ~s(class="nav-popover")
+      assert html =~ "Callers"
+      assert html =~ "beamtalk_atomic_counter"
+      # The delegating class and its `self delegate` methods render as caller rows.
+      assert html =~ "AtomicCounter"
+      assert html =~ "increment"
+      assert html =~ "incrementBy:"
+
+      # Clicking a delegate row opens that Beamtalk method (reusing nav_open).
+      html =
+        render_click(view, "nav_open", %{
+          "class" => "AtomicCounter",
+          "side" => "instance",
+          "selector" => "incrementBy:"
+        })
+
+      assert html =~ "incrementBy:"
+      refute html =~ ~s(class="nav-popover")
+    end
   end
 
   # BT-2670: a *project-owned* native (`.erl`) module is editable in the IDE —

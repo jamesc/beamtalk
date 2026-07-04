@@ -76,14 +76,24 @@ See `docs/ADR/0096-system-browser-data-source.md`.
 %% its source lives. Authorization seam: only `<<"project">>` is writable.
 -export([native_module_editable_target/1]).
 
+%% BT-2732: the ADR 0056 `self delegate` callers of a native module — the
+%% complement of the explicit `(Erlang <module>)` FFI callers
+%% `beamtalk_xref:callers_of_native_module/1` reports. Called by the
+%% `callers_of_native_module` nav op (`beamtalk_repl_ops_nav`), which merges both
+%% sets, so a native module that backs an actor class lists that class's
+%% delegating methods under "Callers".
+-export([delegate_callers_of_native_module/1]).
+
 -ifdef(TEST).
 %% Pure helpers exercised directly in EUnit (BT-2578): clause parsing and the
 %% delegate-source marker have no live-class dependency. BT-2643: the
-%% source_origin (classification) / package (name) split helpers.
+%% source_origin (classification) / package (name) split helpers. BT-2732: the
+%% `dispatch_<selector>` export → `self delegate` selector recovery.
 -export([
     handle_call_clause_lines/1,
     clause_selector/1,
     delegate_exported/2,
+    self_delegate_selectors/1,
     package_of/2,
     package_of_module/1
 ]).
@@ -1125,6 +1135,112 @@ is_native_delegate(_ModName, _ClassSide, _Selector) ->
 delegate_exported(Exports, Selector) ->
     Target = "dispatch_" ++ atom_to_list(Selector),
     lists:any(fun({Name, _Arity}) -> atom_to_list(Name) =:= Target end, Exports).
+
+%%% ====================================================================
+%%% Native-module delegate callers (BT-2732)
+%%% ====================================================================
+
+-doc """
+The Beamtalk methods that delegate into native module `Module` via ADR 0056
+`self delegate` — the complement of the explicit `(Erlang <module>)` FFI callers
+`beamtalk_xref:callers_of_native_module/1` reports (BT-2732).
+
+A `native:` class compiles each `self delegate` method into a `dispatch_<selector>`
+function on its facade module, routed through `beamtalk_actor:sync_send/3`. Those
+sends are generated dispatch, not `erlang_ffi` sends, so the xref FFI index never
+sees them and the reverse "Callers" view would miss the most common native module
+in a project — the gen_server that backs an actor class. Here we walk the loaded
+classes, keep those whose backing native module is `Module`, and surface each
+class's `self delegate` instance methods as `native_caller_row()`s anchored at the
+delegating method's own header line (the same shape the FFI callers use, so the
+IDE renders both together).
+
+Class-side selectors are never delegated this way, so every row is instance-side.
+Returns `[]` for a module that backs no loaded class (or the unresolved-module
+sentinel), so a module with neither FFI callers nor delegating classes keeps the
+honest empty state.
+""".
+-spec delegate_callers_of_native_module(atom()) -> [beamtalk_xref:native_caller_row()].
+delegate_callers_of_native_module(none) ->
+    %% `none` is `meta_backing_module/1`'s "no backing module" sentinel, never a
+    %% real native module name. Guarding it here keeps a `module="none"` query
+    %% from match-binding against that sentinel in `delegate_rows_for_class/2` and
+    %% mis-attributing the delegates of a class that reports no backing module.
+    [];
+delegate_callers_of_native_module(Module) when is_atom(Module) ->
+    ClassPids =
+        try
+            beamtalk_runtime_api:all_classes()
+        catch
+            _:_ -> []
+        end,
+    lists:flatmap(fun(Pid) -> delegate_rows_for_class(Pid, Module) end, ClassPids).
+
+%% One `native_caller_row()` per `self delegate` instance method of the class
+%% behind `Pid`, but only when that class's backing native module is `Module`.
+%% Any reflection failure on a single class degrades to `[]` for that class — the
+%% Callers view must still list the other classes' delegates — mirroring
+%% `class_row/2`'s per-class isolation.
+-spec delegate_rows_for_class(pid(), atom()) -> [beamtalk_xref:native_caller_row()].
+delegate_rows_for_class(Pid, Module) ->
+    try
+        ModName = beamtalk_runtime_api:module_name(Pid),
+        case meta_backing_module(native_meta_of(ModName)) of
+            Module ->
+                ClassName = beamtalk_runtime_api:class_name(Pid),
+                Exports = safe_module_exports(ModName),
+                [delegate_row(ClassName, Sel) || Sel <- self_delegate_selectors(Exports)];
+            _ ->
+                []
+        end
+    catch
+        _:_ -> []
+    end.
+
+-spec safe_module_exports(atom()) -> [{atom(), arity()}].
+safe_module_exports(ModName) ->
+    try
+        ModName:module_info(exports)
+    catch
+        _:_ -> []
+    end.
+
+%% The `self delegate` instance selectors a facade exposes, recovered from its
+%% `dispatch_<selector>` exports (the compiler's own `is_self_delegate` decision,
+%% native_facade.rs). The dispatch name embeds the selector verbatim — keyword
+%% colon included (`dispatch_readLine`, `'dispatch_writeLine:'`) — so stripping the
+%% `dispatch_` prefix recovers it exactly. `usort` collapses any duplicate export
+%% pair; a stripped name that is not already an interned atom (never true for a
+%% real, registered method) is skipped rather than growing the atom table.
+-spec self_delegate_selectors([{atom(), arity()}]) -> [atom()].
+self_delegate_selectors(Exports) ->
+    lists:usort(lists:filtermap(fun dispatch_export_selector/1, Exports)).
+
+-spec dispatch_export_selector({atom(), arity()}) -> {true, atom()} | false.
+dispatch_export_selector({Name, _Arity}) ->
+    case atom_to_list(Name) of
+        "dispatch_" ++ Rest when Rest =/= [] ->
+            try
+                {true, list_to_existing_atom(Rest)}
+            catch
+                error:badarg -> false
+            end;
+        _ ->
+            false
+    end.
+
+%% A single delegate caller row: the delegating class + selector, anchored at the
+%% method's own header line from the xref index. A `self delegate` method is always
+%% registered, so `method_info/3` resolves its line; the line=1 fallback is purely
+%% defensive so the row stays clickable rather than being silently dropped.
+-spec delegate_row(atom(), atom()) -> beamtalk_xref:native_caller_row().
+delegate_row(ClassName, Selector) ->
+    Line =
+        case beamtalk_xref:method_info(ClassName, false, Selector) of
+            #{line := L} when is_integer(L), L > 0 -> L;
+            _ -> 1
+        end,
+    #{owner => ClassName, class_side => false, method => Selector, line => Line}.
 
 %% Optional `selector` param for `browse-native-source`: absent/empty → no clause
 %% selection; otherwise resolved to an existing atom (an unknown selector reads as

@@ -1,6 +1,5 @@
 # Copyright 2026 James Casey
 # SPDX-License-Identifier: Apache-2.0
-
 defmodule BtAttachWeb.StubWorkspaceClient do
   @moduledoc """
   A fully-stubbed workspace client for integration-testing the LiveView mount
@@ -937,6 +936,25 @@ defmodule BtAttachWeb.StubWorkspaceClient do
      }}
   end
 
+  # BT-2732: a native module that backs an actor class via ADR 0056 `native:` +
+  # `self delegate` (here `beamtalk_atomic_counter` backs `AtomicCounter`). Opened
+  # directly by module so the Callers view can be exercised against a
+  # delegate-backed native.
+  def browse_native_module_source("beamtalk_atomic_counter") do
+    {:value,
+     %{
+       "class" => :null,
+       "backing_module" => "beamtalk_atomic_counter",
+       "source_file" => "apps/beamtalk_stdlib/src/beamtalk_atomic_counter.erl",
+       "source_origin" => "stdlib",
+       "editable" => false,
+       "content" =>
+         "-module(beamtalk_atomic_counter).\n-export([init/1]).\n\ninit(_) -> {ok, #{}}.\n",
+       "clauses" => [],
+       "selected_clause" => :null
+     }}
+  end
+
   def browse_native_module_source(module),
     do: {:error, "module `#{module}` not found"}
 
@@ -1041,6 +1059,35 @@ defmodule BtAttachWeb.StubWorkspaceClient do
            "class_side" => false,
            "method" => "spawn:",
            "line" => 12,
+           "source_file" => nil,
+           "source_origin" => "stdlib"
+         }
+       ]
+     }}
+  end
+
+  # BT-2732: a native module that backs an actor class (`beamtalk_atomic_counter`
+  # backs `AtomicCounter`) surfaces that class's ADR 0056 `self delegate` methods
+  # as callers — the delegate rows the server-side nav op merges in alongside any
+  # explicit FFI callers. Same site-row shape, so the popover renders them like
+  # the FFI rows and each opens the delegating Beamtalk method.
+  def callers_of_native_module("beamtalk_atomic_counter") do
+    {:value,
+     %{
+       "sites" => [
+         %{
+           "class" => "AtomicCounter",
+           "class_side" => false,
+           "method" => "increment",
+           "line" => 61,
+           "source_file" => nil,
+           "source_origin" => "stdlib"
+         },
+         %{
+           "class" => "AtomicCounter",
+           "class_side" => false,
+           "method" => "incrementBy:",
+           "line" => 71,
            "source_file" => nil,
            "source_origin" => "stdlib"
          }
