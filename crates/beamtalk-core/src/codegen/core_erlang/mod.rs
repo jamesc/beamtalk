@@ -1683,11 +1683,16 @@ impl CoreErlangGenerator {
     /// via `TypeAnnotation::type_name`, losing the variant; this reconstructs the
     /// `Simple`-only filter so extension-method field typing matches the in-class
     /// path. Every non-`Simple` `type_name` rendering contains one of `(`, `|`,
-    /// `#`, or a space, none of which a simple identifier can contain.
+    /// `#`, or a space (`Generic`, `Union`, `FalseOr`, `Singleton`, `SelfClass`,
+    /// `ClassOf`) — none of which a simple identifier can contain — *except*
+    /// `SelfType`, which renders as the bare word `"Self"`; that one is excluded
+    /// explicitly so a (return-position-only, but defensively handled) `:: Self`
+    /// field never diverges from the in-class path's bare-BIF status quo.
     ///
     /// [`ClassInfo::state_types`]: crate::semantic_analysis::class_hierarchy::ClassInfo::state_types
     fn is_simple_type_name(ty: &str) -> bool {
         !ty.is_empty()
+            && ty != "Self"
             && !ty
                 .chars()
                 .any(|c| c == '(' || c == ')' || c == '|' || c == '#' || c == ' ' || c == ',')
