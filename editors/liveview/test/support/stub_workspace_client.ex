@@ -637,12 +637,29 @@ defmodule BtAttachWeb.StubWorkspaceClient do
           # accessor) so the System Browser's `derived` badge can be reached by
           # navigation; `increment` is a hand-written `indexed` method for contrast.
           [
-            %{"selector" => "value", "source_status" => "synthetic"},
+            # BT-2735: synthetic rows carry the resolved `signature`/`doc` the
+            # backend adds only for `synthetic` selectors, so the method-row
+            # hover (`title`) reads VS Code-style. `value` has a signature but no
+            # doc (exercises the signature-only hover); `withValue:` carries both.
+            %{
+              "selector" => "value",
+              "source_status" => "synthetic",
+              "signature" => "value -> Integer",
+              "doc" => nil
+            },
+            # A hand-written `indexed` method for contrast: no signature/doc on the
+            # row, so its hover falls back to the bare selector.
             %{"selector" => "increment", "source_status" => "indexed"},
             # BT-2714: `withValue:` is a compiler-derived copy-setter — synthetic in
             # BOTH the protocol list AND `browse_method_source` (source null, doc +
             # signature resolved), so opening it exercises the read-only derived pane.
-            %{"selector" => "withValue:", "source_status" => "synthetic"}
+            %{
+              "selector" => "withValue:",
+              "source_status" => "synthetic",
+              "signature" => "withValue: aValue -> Counter",
+              "doc" =>
+                "Compiler-derived copy-setter.\n\nReturns a copy of the Counter with the `value` slot replaced by the argument."
+            }
           ]
 
         true ->

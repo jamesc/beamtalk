@@ -78,6 +78,36 @@ defmodule BtAttachWeb.WorkspaceDerivedBadgeTest do
     end
   end
 
+  describe "System Browser method-row hover (BT-2735)" do
+    test "a synthetic row's hover shows signature + first doc line; others fall back to the selector",
+         %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+      render_async(view, 5_000)
+
+      html =
+        view
+        |> element(~s(div[phx-click="browser_select_class"][phx-value-class="Counter"]))
+        |> render_click()
+
+      frag = Floki.parse_fragment!(html)
+
+      # `withValue:` carries both a resolved signature and a doc, so its hover
+      # reads VS Code-style: the signature over the doc's first line.
+      with_value = Floki.find(frag, ~s(div[phx-value-selector="withValue:"]))
+      title = Floki.attribute(with_value, "title") |> List.first()
+      assert title == "withValue: aValue -> Counter\nCompiler-derived copy-setter."
+
+      # `value` has a signature but no doc — the hover is just the signature.
+      value_row = Floki.find(frag, ~s(div[phx-value-selector="value"]))
+      assert Floki.attribute(value_row, "title") |> List.first() == "value -> Integer"
+
+      # The hand-written `increment` row was not enriched (no signature/doc), so
+      # the hover falls back to the bare selector — the pre-BT-2735 behaviour.
+      inc_row = Floki.find(frag, ~s(div[phx-value-selector="increment"]))
+      assert Floki.attribute(inc_row, "title") |> List.first() == "increment"
+    end
+  end
+
   describe "compiler-derived method is read-only (BT-2714)" do
     setup %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")

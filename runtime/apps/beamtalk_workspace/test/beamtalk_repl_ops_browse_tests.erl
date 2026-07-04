@@ -407,7 +407,11 @@ browse_setup() ->
             %% A body that would crash if *invoked*; browse must never run it
             %% (ADR 0091 no-user-code guarantee).
             'increment' => #{block => fun(_, _) -> erlang:error(must_not_run) end, arity => 0},
-            'value' => #{block => fun(_, _) -> erlang:error(must_not_run) end, arity => 0}
+            'value' => #{block => fun(_, _) -> erlang:error(must_not_run) end, arity => 0},
+            %% BT-2735: a synthetic accessor that IS resolvable (registered with a
+            %% signature + doc), so browse-protocols can enrich its hover row via
+            %% `method_doc_signature_resolved/3`. Its xref row below is `synthetic`.
+            'total' => #{block => fun(_, _) -> erlang:error(must_not_run) end, arity => 0}
         },
         method_source => #{
             'increment' => <<"increment =>\n  self.value := self.value + self.step">>,
@@ -418,11 +422,13 @@ browse_setup() ->
         %% signature + doc, and `value` exercises the no-doc (null) path.
         method_signatures => #{
             'increment' => <<"increment -> Counter">>,
-            'value' => <<"value -> Integer">>
+            'value' => <<"value -> Integer">>,
+            'total' => <<"total -> Integer">>
         },
         method_docs => #{
             'increment' =>
-                <<"Increment the counter by its step.\n\n## Examples\n```beamtalk\nc increment\n```">>
+                <<"Increment the counter by its step.\n\n## Examples\n```beamtalk\nc increment\n```">>,
+            'total' => <<"The running total of the counter.\nDetail line ignored by the hover.">>
         },
         class_methods => #{
             'startingAt:' => #{block => fun(_, _, _) -> erlang:error(must_not_run) end, arity => 1}
@@ -476,6 +482,9 @@ browse_xref() ->
         method_row('describe', 98, indexed, extension),
         %% Synthetic compiler-generated accessor → "accessing" by construction.
         method_row('step', 100, synthetic, class_body),
+        %% BT-2735: a synthetic accessor registered as a real method (signature +
+        %% doc) so browse-protocols resolves its hover signature/doc.
+        method_row('total', 110, synthetic, class_body),
         %% camelCase word-boundary guard: `address` must NOT match the `add`
         %% prefix (no uppercase/`:` boundary), so it stays "as yet unclassified".
         method_row('address', 102, indexed, class_body),
@@ -727,6 +736,32 @@ browse_tests(#{class_name := Class}) ->
             IncRow = find_selector_row(Selectors, <<"increment">>),
             ?assertEqual(68, maps:get(<<"line">>, IncRow)),
             ?assertEqual(<<"indexed">>, maps:get(<<"source_status">>, IncRow))
+        end},
+        {"browse-protocols enriches a synthetic row with signature + doc (BT-2735)", fun() ->
+            %% A `synthetic` selector row carries the signature + doc resolved via
+            %% the same hierarchy walk `:help` uses, so the method-list hover can
+            %% show what the method is without a click.
+            Value = decode_value(
+                beamtalk_repl_ops_browse:handle(
+                    <<"browse-protocols">>,
+                    #{<<"class">> => Class, <<"side">> => <<"instance">>},
+                    make_msg(),
+                    self()
+                )
+            ),
+            Selectors = all_selector_rows(maps:get(<<"protocols">>, Value)),
+            TotalRow = find_selector_row(Selectors, <<"total">>),
+            ?assertEqual(<<"synthetic">>, maps:get(<<"source_status">>, TotalRow)),
+            ?assertEqual(<<"total -> Integer">>, maps:get(<<"signature">>, TotalRow)),
+            Doc = maps:get(<<"doc">>, TotalRow),
+            ?assert(is_binary(Doc)),
+            ?assertNotEqual(nomatch, binary:match(Doc, <<"The running total">>)),
+            %% Bounded cost (BT-2735): a hand-written `indexed` row is NOT resolved
+            %% — no per-method CompiledMethod read on the browse hot path — so its
+            %% signature/doc stay null and the hover falls back to the selector.
+            IncRow = find_selector_row(Selectors, <<"increment">>),
+            ?assertEqual(null, maps:get(<<"signature">>, IncRow)),
+            ?assertEqual(null, maps:get(<<"doc">>, IncRow))
         end},
         {"browse-protocols categorizes selectors by real protocol buckets", fun() ->
             %% BT-2506: protocol_for_selector decides pragma → xref-extension

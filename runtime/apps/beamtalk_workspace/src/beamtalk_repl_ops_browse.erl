@@ -262,8 +262,14 @@ browse_protocols(ClassName, ClassSide) ->
     %% badges match where the protocol actually lives (stdlib vs project).
     ModName = origin_module(ClassName, mod_name_for_class(ClassName)),
     SourceFile = source_file_of(ModName),
+    %% BT-2735: resolve the class pid once here (not per selector) so
+    %% `selector_row` can enrich each `synthetic` row with its resolved
+    %% signature + doc for a VS Code-style method-list hover. `undefined` when
+    %% the class is not live — rows then carry null signature/doc and the hover
+    %% falls back to the bare selector.
+    ClassPid = beamtalk_runtime_api:whereis_class(ClassName),
     SelectorRows = [
-        selector_row(ClassName, ClassSide, Sel, SourceFile, ModName)
+        selector_row(ClassName, ClassSide, Sel, SourceFile, ModName, ClassPid)
      || Sel <- Selectors
     ],
     %% BT-2615: a protocol class object (ADR 0068) carries no instance methods of
@@ -315,15 +321,22 @@ requirement_row(Selector, SourceFile, ModName) ->
         <<"origin">> => <<"runtime">>,
         <<"source_origin">> => SourceOrigin,
         <<"package">> => package_of(ModName, SourceOrigin),
+        %% BT-2735: a required member has no implemented method to resolve, so
+        %% its hover carries null signature/doc — the same shape as an
+        %% unenriched selector row (keeps the row shape uniform for the client).
+        <<"signature">> => null,
+        <<"doc">> => null,
         %% carried internally for grouping; stripped before emit
         '__protocol__' => <<"requirements">>
     }.
 
--spec selector_row(atom(), boolean(), atom(), binary() | null, atom()) -> map().
-selector_row(ClassName, ClassSide, Selector, SourceFile, ModName) ->
+-spec selector_row(atom(), boolean(), atom(), binary() | null, atom(), pid() | undefined) ->
+    map().
+selector_row(ClassName, ClassSide, Selector, SourceFile, ModName, ClassPid) ->
     Info = beamtalk_xref:method_info(ClassName, ClassSide, Selector),
     {Line, SourceStatus, Provenance} = info_fields(Info),
     SourceOrigin = source_origin_of(ModName, SourceFile),
+    {Doc, Signature} = row_doc_signature(ClassPid, ClassSide, Selector, SourceStatus),
     #{
         <<"selector">> => atom_to_binary(Selector, utf8),
         <<"line">> => Line,
@@ -331,9 +344,30 @@ selector_row(ClassName, ClassSide, Selector, SourceFile, ModName) ->
         <<"origin">> => origin_for_provenance(Provenance, SourceFile),
         <<"source_origin">> => SourceOrigin,
         <<"package">> => package_of(ModName, SourceOrigin),
+        %% BT-2735: signature + first-line-of-doc feed the method-row hover so a
+        %% hover conveys what the method is without a click. Resolved only for
+        %% `synthetic` rows (see `row_doc_signature/4`) — the client renders the
+        %% full doc's first line and falls back to the selector when both null.
+        <<"signature">> => Signature,
+        <<"doc">> => Doc,
         %% carried internally for grouping; stripped before emit
         '__protocol__' => protocol_for_selector(Selector, Info, Provenance, SourceStatus, ClassSide)
     }.
+
+%% BT-2735: a selector row's hover signature + doc, resolved via the same
+%% hierarchy walk `:help` uses (`beamtalk_repl_docs:method_doc_signature_resolved/3`,
+%% shipped in BT-2714) — so a compiler-derived `spawn` inherits `Actor`'s curated
+%% doc and a value accessor shows its generated signature. Bounded to `synthetic`
+%% rows: a small, known set of compiler-injected methods, the ones whose intent a
+%% bare selector conveys least. Non-synthetic rows (and a missing class pid) stay
+%% `{null, null}` so the browse hot path never does an unbounded per-method
+%% CompiledMethod read for every hand-written selector. Returns `{Doc, Signature}`.
+-spec row_doc_signature(pid() | undefined, boolean(), atom(), beamtalk_xref:source_status()) ->
+    {binary() | null, binary() | null}.
+row_doc_signature(ClassPid, ClassSide, Selector, synthetic) when is_pid(ClassPid) ->
+    beamtalk_repl_docs:method_doc_signature_resolved(ClassPid, ClassSide, Selector);
+row_doc_signature(_ClassPid, _ClassSide, _Selector, _SourceStatus) ->
+    {null, null}.
 
 -spec info_fields(beamtalk_xref:method_info() | undefined) ->
     {pos_integer() | null, beamtalk_xref:source_status(), beamtalk_xref:provenance()}.
