@@ -294,8 +294,14 @@ merge_native_caller_rows(FfiRows, DelegateRows) ->
         FfiRows ++ DelegateRows
     ),
     lists:sort(
-        fun(#{owner := O1, method := M1}, #{owner := O2, method := M2}) ->
-            {O1, M1} =< {O2, M2}
+        fun(
+            #{owner := O1, class_side := CS1, method := M1},
+            #{owner := O2, class_side := CS2, method := M2}
+        ) ->
+            %% Sort on the full de-dup key so rows sharing `{owner, method}` across
+            %% sides (instance delegate vs class-side FFI) keep a deterministic
+            %% order rather than relying on `lists:sort/2`'s tie handling.
+            {O1, CS1, M1} =< {O2, CS2, M2}
         end,
         maps:values(Folded)
     ).
