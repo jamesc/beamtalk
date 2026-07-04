@@ -1127,6 +1127,12 @@ sentinel), so a module with neither FFI callers nor delegating classes keeps the
 honest empty state.
 """.
 -spec delegate_callers_of_native_module(atom()) -> [beamtalk_xref:native_caller_row()].
+delegate_callers_of_native_module(none) ->
+    %% `none` is `meta_backing_module/1`'s "no backing module" sentinel, never a
+    %% real native module name. Guarding it here keeps a `module="none"` query
+    %% from match-binding against that sentinel in `delegate_rows_for_class/2` and
+    %% mis-attributing the delegates of a class that reports no backing module.
+    [];
 delegate_callers_of_native_module(Module) when is_atom(Module) ->
     ClassPids =
         try

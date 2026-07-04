@@ -323,6 +323,11 @@ delegate_tests(#{class_name := ClassName}) ->
                     bt_no_such_native_backing_module_xyz
                 )
             )
+        end},
+        {"the `none` backing-module sentinel is guarded (never matches)", fun() ->
+            %% `none` is `meta_backing_module/1`'s "no backing module" answer, so a
+            %% `module=none` query must NOT match classes that report no backing.
+            ?assertEqual([], beamtalk_repl_ops_browse:delegate_callers_of_native_module(none))
         end}
     ].
 
