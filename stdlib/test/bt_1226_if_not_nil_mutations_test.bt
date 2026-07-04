@@ -8,6 +8,7 @@
 // was never returned to the handle_call level.
 
 TestCase subclass: BT1226IfNotNilMutationsTest
+  field: a = nil
 
   setUp => self.a := IfNotNilMutActor spawn
 
