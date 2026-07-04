@@ -1528,6 +1528,7 @@ stale_dead_subscriber_test_() ->
                 after 1000 ->
                     ok
                 end,
+                ?assert(not is_process_alive(DeadPid)),
                 _SubRef = insert_subscription_row('StaleDeadAsyncEvent', DeadPid, h, false),
                 ok = beamtalk_announcements:announce('StaleDeadAsyncEvent', payload)
             end),
@@ -1539,6 +1540,7 @@ stale_dead_subscriber_test_() ->
                 after 1000 ->
                     ok
                 end,
+                ?assert(not is_process_alive(DeadPid2)),
                 _SubRef2 = insert_subscription_row('StaleDeadSyncEvent', DeadPid2, h, false),
                 ok = beamtalk_announcements:announceAndWait('StaleDeadSyncEvent', payload)
             end)
