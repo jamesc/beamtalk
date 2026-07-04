@@ -12,12 +12,14 @@
 //! - `supervision_validators` — OTP supervision policy checks
 //! - `match_validators` — pattern match exhaustiveness
 //! - `native_validators` — native actor validation
+//! - `reserved_name_validators` — reserved internal-namespace name checks
 
 mod class_validators;
 mod lint_validators;
 mod match_validators;
 mod native_validators;
 pub(crate) mod package_validators;
+mod reserved_name_validators;
 mod structural_validators;
 mod supervision_validators;
 mod visibility_validators;
@@ -41,6 +43,7 @@ pub(crate) use native_validators::{
     check_native_state_fields,
 };
 pub(crate) use package_validators::check_package_qualifiers;
+pub(crate) use reserved_name_validators::check_reserved_internal_names;
 pub(crate) use structural_validators::{
     check_ffi_arity, check_unresolved_classes, check_unresolved_ffi_modules,
     check_workspace_shadows,
