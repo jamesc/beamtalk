@@ -5482,7 +5482,6 @@ defmodule BtAttachWeb.WorkspaceLive do
     doc
     |> String.split("\n", parts: 2)
     |> hd()
-    |> String.trim()
     |> presence()
   end
 
