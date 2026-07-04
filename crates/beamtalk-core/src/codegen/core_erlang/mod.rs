@@ -1641,12 +1641,56 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-2710 follow-up: Clears instance-field type tracking. Call in contexts
-    /// that don't carry the current class's fields (e.g. extension method
-    /// bodies) so a prior class's field types never leak into the guard
-    /// decision — the absence simply restores the bare-BIF status quo.
-    pub(super) fn clear_class_field_types(&mut self) {
+    /// BT-2728: Populates instance-field type tracking for an **extension**
+    /// method from the *target* class's declared state types, resolved via the
+    /// class hierarchy. The target class is foreign (declared in another
+    /// module), so its AST `state` is unavailable at extension-codegen time, but
+    /// its [`ClassInfo`] carries the field-type strings. This lets an extension
+    /// method's `self.<field>` operator dispatch be type-aware, matching in-class
+    /// methods (which use [`Self::set_class_field_types`]).
+    ///
+    /// Mirrors `set_class_field_types`'s filtering: only *simple* named types are
+    /// recorded, so generic/union/singleton-typed fields keep the bare-BIF
+    /// status quo (parity with the in-class path, which records only
+    /// `TypeAnnotation::Simple`). When the target class is not in the hierarchy,
+    /// the map is cleared — the bare-BIF fallback, unchanged status quo.
+    ///
+    /// [`ClassInfo`]: crate::semantic_analysis::class_hierarchy::ClassInfo
+    pub(super) fn set_extension_target_field_types(&mut self, target_class: &str) {
+        let field_types: Vec<(String, String)> = self
+            .class_hierarchy
+            .as_ref()
+            .and_then(|h| h.get_class(target_class))
+            .map(|info| {
+                info.state_types
+                    .iter()
+                    .filter(|(_, ty)| Self::is_simple_type_name(ty))
+                    .map(|(name, ty)| (name.to_string(), ty.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
         self.current_class_field_types.clear();
+        for (name, ty) in field_types {
+            self.current_class_field_types.insert(name, ty);
+        }
+    }
+
+    /// Whether `ty` is a *simple* named type (a bare identifier such as `Money`
+    /// or `Integer`), as opposed to a generic (`List(Integer)`), union
+    /// (`Integer | String`), singleton (`#north`), or metatype (`Foo class`).
+    ///
+    /// [`ClassInfo::state_types`] flattens every annotation to its display string
+    /// via `TypeAnnotation::type_name`, losing the variant; this reconstructs the
+    /// `Simple`-only filter so extension-method field typing matches the in-class
+    /// path. Every non-`Simple` `type_name` rendering contains one of `(`, `|`,
+    /// `#`, or a space, none of which a simple identifier can contain.
+    ///
+    /// [`ClassInfo::state_types`]: crate::semantic_analysis::class_hierarchy::ClassInfo::state_types
+    fn is_simple_type_name(ty: &str) -> bool {
+        !ty.is_empty()
+            && !ty
+                .chars()
+                .any(|c| c == '(' || c == ')' || c == '|' || c == '#' || c == ' ' || c == ',')
     }
 
     /// BT-2710 follow-up: Whether `self.<name>` is known to hold a value with a

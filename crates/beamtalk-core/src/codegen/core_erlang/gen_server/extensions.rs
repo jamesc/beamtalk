@@ -239,14 +239,13 @@ impl CoreErlangGenerator {
         self.current_method_params.clear();
         // BT-2709: Reset arithmetic fast-path parameter-type tracking.
         self.clear_method_param_types();
-        // BT-2710 follow-up: extension bodies have no access to the target
-        // class's state declarations, so clear field types — `self.<field>`
-        // reads fall back to the bare BIF.
-        // Known limitation (BT-2710): an extension method comparing an
-        // object-typed field silently term-orders rather than dispatching
-        // (status quo, unchanged from pre-BT-2710). Threading the target
-        // class's state into extension codegen is tracked under BT-2708.
-        self.clear_class_field_types();
+        // BT-2728: Thread the TARGET class's declared state-field types (resolved
+        // via the class hierarchy — the target is foreign, so its AST state is
+        // unavailable here) so an object-typed `self.<field>` operator dispatches
+        // to the field type's operator, matching in-class methods. Primitive and
+        // untyped fields stay bare (no regression); an unknown target clears to
+        // the bare-BIF status quo.
+        self.set_extension_target_field_types(ext.class_name.name.as_str());
         let prev_selector = self.current_method_selector.take();
         self.current_method_selector = Some(method.selector.name().to_string());
 
@@ -319,14 +318,13 @@ impl CoreErlangGenerator {
         self.current_method_params.clear();
         // BT-2709: Reset arithmetic fast-path parameter-type tracking.
         self.clear_method_param_types();
-        // BT-2710 follow-up: extension bodies have no access to the target
-        // class's state declarations, so clear field types — `self.<field>`
-        // reads fall back to the bare BIF.
-        // Known limitation (BT-2710): an extension method comparing an
-        // object-typed field silently term-orders rather than dispatching
-        // (status quo, unchanged from pre-BT-2710). Threading the target
-        // class's state into extension codegen is tracked under BT-2708.
-        self.clear_class_field_types();
+        // BT-2728: Thread the TARGET class's declared state-field types (resolved
+        // via the class hierarchy — the target is foreign, so its AST state is
+        // unavailable here) so an object-typed `self.<field>` operator dispatches
+        // to the field type's operator, matching in-class methods. Primitive and
+        // untyped fields stay bare (no regression); an unknown target clears to
+        // the bare-BIF status quo.
+        self.set_extension_target_field_types(ext.class_name.name.as_str());
 
         let arg_prelude = self.bind_extension_params(method);
 
