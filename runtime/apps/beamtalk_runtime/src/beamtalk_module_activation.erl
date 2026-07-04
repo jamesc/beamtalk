@@ -110,15 +110,7 @@ activate_ebin(EbinDir, Opts) ->
             {ok, AppErrors} = load_app_from_ebin(EbinDir),
             Modules = find_bt_modules_in_dir(EbinDir),
             Sorted = sort_modules_by_dependency(EbinDir, Modules),
-            ModErrors = lists:filtermap(
-                fun(Mod) ->
-                    case activate_module(Mod, Opts) of
-                        ok -> false;
-                        {error, Reason} -> {true, {Mod, Reason}}
-                    end
-                end,
-                Sorted
-            ),
+            ModErrors = do_activate_all(Sorted, Opts),
             {ok, AppErrors ++ ModErrors}
     end.
 
@@ -217,16 +209,26 @@ Returns `{ok, Errors}` where `Errors` is a (possibly empty) list of
 -spec activate_modules([module()], opts()) -> {ok, [{module(), term()}]}.
 activate_modules(Modules, Opts) ->
     Sorted = sort_loaded_modules_by_dependency(Modules),
-    ModErrors = lists:filtermap(
+    {ok, do_activate_all(Sorted, Opts)}.
+
+%%% ============================================================================
+%%% Private helpers
+%%% ============================================================================
+
+%% Activate a pre-sorted module list, collecting {Mod, Reason} pairs for any
+%% that fail. Shared by activate_ebin/2 and activate_modules/2 so the error-
+%% collection logic lives in one place.
+-spec do_activate_all([module()], opts()) -> [{module(), term()}].
+do_activate_all(Modules, Opts) ->
+    lists:filtermap(
         fun(Mod) ->
             case activate_module(Mod, Opts) of
                 ok -> false;
                 {error, Reason} -> {true, {Mod, Reason}}
             end
         end,
-        Sorted
-    ),
-    {ok, ModErrors}.
+        Modules
+    ).
 
 -doc "Activate a single module with default options.".
 -spec activate_module(module()) -> ok | {error, term()}.
