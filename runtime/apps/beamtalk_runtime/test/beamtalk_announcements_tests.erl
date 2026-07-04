@@ -1453,6 +1453,128 @@ heir_rearm_with_remote_subscriber_impl() ->
         end)}.
 
 %%====================================================================
+%% Guard-fail clauses and stale-subscription deliver edge cases
+%%====================================================================
+
+%% Guard-fail (non-reference / non-atom / non-map) clauses in the public API.
+%% These match before any ETS or gen_server call, so no bus is required.
+%%
+%% Covers:
+%%   unsubscribe/1        line 317 — non-reference arg → ok
+%%   is_active/1          line 373 — non-reference arg → false
+%%   system_unsubscribe/2 line 359 — non-atom/non-pid args → ok
+%%   isActiveRef/1        line 1591 — non-subscription term → false
+guard_fail_clauses_test_() ->
+    [
+        ?_assertEqual(ok, beamtalk_announcements:unsubscribe(not_a_ref)),
+        ?_assertEqual(false, beamtalk_announcements:is_active(42)),
+        ?_assertEqual(ok, beamtalk_announcements:system_unsubscribe(42, 42)),
+        ?_assertEqual(false, beamtalk_announcements:'isActiveRef'(not_a_map))
+    ].
+
+%% `run_handler/2` arity-0 fun form on the synchronous path (line 707).
+%% Subscribes with a `fun/0` handler and drives `announceAndWait/2`; the
+%% transient handler process calls `Handler()` with no argument and acks back.
+run_handler_arity0_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                Sub = spawn_idle(),
+                try
+                    {ok, _SubRef} = beamtalk_announcements:subscribe(
+                        'Arity0HandlerEvent', Sub, fun() -> ok end, false
+                    ),
+                    ok = beamtalk_announcements:announceAndWait('Arity0HandlerEvent', payload)
+                after
+                    stop_idle(Sub)
+                end
+            end)
+        ]
+    end}.
+
+%% `run_handler/2` opaque / catch-all form on the synchronous path (lines 712–713).
+%% An opaque handler term that is neither a fun nor `{send, Sel, _}` is treated as
+%% a no-op success; the async path would deliver it as a raw message instead.
+run_handler_opaque_handler_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                Sub = spawn_idle(),
+                try
+                    {ok, _SubRef} = beamtalk_announcements:subscribe(
+                        'OpaqueHandlerEvent', Sub, opaque_term, false
+                    ),
+                    ok = beamtalk_announcements:announceAndWait('OpaqueHandlerEvent', payload)
+                after
+                    stop_idle(Sub)
+                end
+            end)
+        ]
+    end}.
+
+%% `deliver/3` and `do_announce_and_wait` with a stale ETS row whose subscriber
+%% pid is dead at delivery time. Rows are inserted directly (bypassing
+%% `subscribe/4`) so no monitor is armed and bus auto-prune cannot race with the
+%% dispatch call. Covers the `subscriber_alive → false` branch in both paths
+%% (async: line 603; sync: line 504).
+stale_dead_subscriber_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            %% Async path: announce/2 → deliver/3 → subscriber_alive false → ok
+            ?_test(begin
+                {DeadPid, Mon} = spawn_monitor(fun() -> ok end),
+                receive
+                    {'DOWN', Mon, process, DeadPid, _} -> ok
+                after 1000 ->
+                    ok
+                end,
+                ?assert(not is_process_alive(DeadPid)),
+                _SubRef = insert_subscription_row('StaleDeadAsyncEvent', DeadPid, h, false),
+                ok = beamtalk_announcements:announce('StaleDeadAsyncEvent', payload)
+            end),
+            %% Sync path: announceAndWait/2 → do_announce_and_wait → subscriber_alive false → skip
+            ?_test(begin
+                {DeadPid2, Mon2} = spawn_monitor(fun() -> ok end),
+                receive
+                    {'DOWN', Mon2, process, DeadPid2, _} -> ok
+                after 1000 ->
+                    ok
+                end,
+                ?assert(not is_process_alive(DeadPid2)),
+                _SubRef2 = insert_subscription_row('StaleDeadSyncEvent', DeadPid2, h, false),
+                ok = beamtalk_announcements:announceAndWait('StaleDeadSyncEvent', payload)
+            end)
+        ]
+    end}.
+
+%% `deliver/3` and `do_announce_and_wait` with an orphaned by-class index entry
+%% that has no matching primary subs row: `claim_row/1` returns `not_found`.
+%% Covers the not_found branch in both paths (async: line 606; sync: line 507).
+stale_orphan_index_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            %% Async path: announce/2 → deliver/3 → claim_row not_found → ok
+            ?_test(begin
+                SubRef = make_ref(),
+                true = ets:insert(
+                    beamtalk_announcement_by_class,
+                    {{beamtalk_system_announcer, 'OrphanAsyncEvent', SubRef}}
+                ),
+                ok = beamtalk_announcements:announce('OrphanAsyncEvent', payload)
+            end),
+            %% Sync path: announceAndWait/2 → do_announce_and_wait → claim_row not_found → skip
+            ?_test(begin
+                SubRef2 = make_ref(),
+                true = ets:insert(
+                    beamtalk_announcement_by_class,
+                    {{beamtalk_system_announcer, 'OrphanSyncEvent', SubRef2}}
+                ),
+                ok = beamtalk_announcements:announceAndWait('OrphanSyncEvent', payload)
+            end)
+        ]
+    end}.
+
+%%====================================================================
 %% Helpers
 %%====================================================================
 
