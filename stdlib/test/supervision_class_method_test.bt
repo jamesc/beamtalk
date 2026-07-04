@@ -9,6 +9,12 @@
 
 TestCase subclass: SupervisionClassMethodTest
 
+  // BT-2729: these tests share the globally-registered `ClassMethodSupervisor`
+  // singleton with SupervisorWhichTest. Run serially so a concurrent class
+  // cannot `stop` the shared supervisor (and its child) between this test's
+  // `which:` and the message it sends to the resolved child.
+  class serial -> Boolean => true
+
   // === childSpec encoding ===
   testChildSpecUsesClassMethodStartFn =>
     spec := (ClassMethodActor supervisionSpec withClassMethod: #create:value:) withArgs: #(#hello, 42)

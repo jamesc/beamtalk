@@ -12,6 +12,12 @@
 
 TestCase subclass: SupervisorWhichTest
 
+  // BT-2729: these tests share the globally-registered `ClassMethodSupervisor`
+  // singleton with SupervisionClassMethodTest. Run serially so a concurrent
+  // class cannot `stop` the shared supervisor (and its child) between this
+  // test's `which:` and the message it sends to the resolved child.
+  class serial -> Boolean => true
+
   // === ok with child — class has a running child ===
   testWhichReturnsOkWithChild =>
     sup := (ClassMethodSupervisor supervise) unwrap
