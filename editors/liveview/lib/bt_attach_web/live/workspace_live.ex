@@ -5460,6 +5460,44 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp synthetic?(%{"source_status" => "synthetic"}), do: true
   defp synthetic?(_), do: false
 
+  # BT-2735: the method-row hover (`title`). When the browse op enriched the row
+  # with a `signature` (and, for a compiler-derived method, a resolved `doc`,
+  # BT-2714) the hover reads VS Code-style — the rendered signature over the
+  # first line of the doc — so it conveys what the method is without a click.
+  # Rows the op left unenriched (hand-written selectors, kept off the browse hot
+  # path) fall back to the bare selector, the pre-BT-2735 behaviour.
+  defp method_row_title(m) do
+    case {presence(m["signature"]), first_doc_line(m["doc"])} do
+      {nil, nil} -> presence(m["selector"])
+      {sig, nil} -> sig
+      {nil, doc} -> "#{m["selector"]}\n#{doc}"
+      {sig, doc} -> "#{sig}\n#{doc}"
+    end
+  end
+
+  # The first non-blank line of a method's `///` doc, or nil when the doc is
+  # absent/blank. Keeps the hover to a single descriptive line (the full doc is
+  # a click away in the read-only pane).
+  defp first_doc_line(doc) when is_binary(doc) do
+    doc
+    |> String.split("\n", parts: 2)
+    |> hd()
+    |> presence()
+  end
+
+  defp first_doc_line(_), do: nil
+
+  # A binary trimmed to nil when blank, itself otherwise — so an empty
+  # signature/doc string reads the same as an absent one.
+  defp presence(s) when is_binary(s) do
+    case String.trim(s) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp presence(_), do: nil
+
   # BT-2714: whether the *active editor tab* was opened for a compiler-derived
   # method (its `browse-method-source` came back `source_status: synthetic`). Such
   # a tab has no editable body — it renders read-only (the doc block + a
@@ -8219,7 +8257,7 @@ defmodule BtAttachWeb.WorkspaceLive do
               phx-value-class={@selected_class}
               phx-value-side={@browser_side}
               phx-value-selector={m["selector"]}
-              title={m["selector"]}
+              title={method_row_title(m)}
             >
               <span class="twig" style="color: var(--accent);">m</span>
               <span class="mname mono">{m["selector"]}</span>
