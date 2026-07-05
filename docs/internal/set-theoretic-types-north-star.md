@@ -63,7 +63,8 @@ implementation-sharing — essentially **Strongtalk** (Bracha & Griswold, 1993,
 already cited in ADR 0068), a static structural type system for Smalltalk. The
 two things usually called "blockers" — (a) **`Self`/binary-method typing** and
 (b) **`doesNotUnderstand:`** — are better described as *constraints with known,
-mainstream solutions*; the two subsections below work each one out. This
+mainstream solutions*; the next two subsections work each one out, and a third
+sketches what would actually change if Beamtalk made the move. This
 document does **not** propose going structural; it records the option because
 "adopt full set-theoretic types" and "how nominal is Beamtalk" are the same
 question viewed from two sides.
@@ -165,6 +166,79 @@ restriction, not a system-wide blocker.
 (options 4–5); Ruby's Sorbet types `method_missing` via `T.untyped`/shims; Swift,
 Scala, Rust, and Haskell all resolve binary methods with `Self`/F-bounded
 constraints exactly as above.
+
+### What would change if Beamtalk went structural
+
+Perhaps surprisingly: **class definition *syntax* barely changes.** You would
+still write `Account subclass: SavingsAccount`, `field:`/`state:` declarations,
+and methods exactly as today. What changes is what a class name **means in type
+position**, and nearly all of that lives in the type checker.
+
+**The semantic pivot.** Today `deposit: (into :: Account)` means "an `Account`
+or a *declared* subclass" (`Known { class_name }` + `superclass_chain` walk).
+Structurally, the same annotation means "**anything exposing `Account`'s message
+interface**" — a class name in type position becomes shorthand for the *shape*
+its instances expose (TypeScript's reading of a class name). Crucially, that
+shape is the **method set only**: `field:`/`state:` declarations are private —
+stdlib-wide, fields are accessed via `self.field` internally and messages
+externally — so fields never enter the public type. Encapsulation is what makes
+class-as-shape well-defined here.
+
+**`subclass:` sheds its typing job — carefully stated.** Today `subclass:` does
+two jobs: implementation reuse *and* declaring a subtype. Structurally,
+subtyping is *derived from shape*, so the declaration stops being the source of
+truth. But this is **not** a licence to "inherit without conforming":
+Smalltalk-style inheritance only adds/overrides methods, so a subclass's method
+set is a superset of its superclass's, and inheritance still *produces*
+structural subtyping in the ordinary case. What decoupling actually changes:
+
+- the **converse** becomes possible — a class can be `Account`-shaped, and
+  usable as one, *without* inheriting from `Account`;
+- a **signature-incompatible override** (narrowing a parameter, changing a
+  return) now honestly breaks the subtype relation instead of being silently
+  blessed by the declaration — the binary-method situation (see *`Self` types
+  and binary methods*) surfacing as a checked fact rather than a soundness hole.
+
+**What concretely changes elsewhere:**
+
+| Aspect | Nominal (today) | Structural |
+|---|---|---|
+| Type identity | `Known { class_name }` — the name | a message-set; a class name abbreviates one |
+| Subtyping | declared `superclass_chain` walk | shape inclusion (methods ⊇, signatures compatible) |
+| Annotations | class / protocol names | names **plus anonymous inline shapes**, e.g. `:: < withdraw: Money; balance -> Money >` |
+| Fields | private, not part of the type | unchanged — only the message surface types |
+| Narrowing idiom | `isKindOf:` / `class =` central | **`respondsTo:`** becomes primary (already a rule); `class =` narrows to a shape |
+| Exhaustiveness | `sealed` nominal hierarchies (BT-1299) | shifts toward **atom/tagged unions** (ADR 0102's machinery); `sealed` survives as a nominal island |
+| Errors | "expected `Account`, got `String`" | shape diff: "`String` is missing `withdraw:`" |
+| Tooling | "find subtypes" = hierarchy walk | "find conformers" = method-set search; rename refactors lose declared links to follow |
+
+Three second-order points, double-checked against the codebase:
+
+1. **Beamtalk is already further along than "leaning".** Structural conformance
+   is *implemented*, not just specified: `protocol.rs`
+   (`check_protocol_conformance_in_module`, ADR 0068 Phase 2b) performs
+   shape-based checking at call sites today. "Going structural" is therefore
+   promoting an existing mechanism from protocols-only to class-names-in-type-
+   position — an extension of shipped code, not new theory.
+2. **`sealed` does not disappear.** The stdlib uses `sealed` pervasively
+   (`sealed typed Object subclass: Subscription`, sealed `Announcement`
+   subclasses, `Result`). Sealed hierarchies remain *nominal islands* —
+   closed-world sets where BT-1299-style exhaustiveness and identity semantics
+   stay exact. This lands on the hybrid every production system chose:
+   TypeScript (structural + brands), Scala (nominal + refinements), Pony
+   (nominal `trait` + structural `interface`).
+3. **Structure is the BEAM-native fit.** Erlang data *is* structural — maps,
+   tagged tuples, atoms carry no nominal identity. Class-as-shape composes
+   directly with §4 (structural products) and the unified interop story
+   (ADR 0101): an Erlang map that satisfies a shape *is* that type, no wrapper
+   blessing required.
+
+So the realistic "structural Beamtalk" is not a rewrite of class definitions —
+it is: keep classes and `sealed` for implementation and closed-world cases, let
+class names in type position denote shapes, lean on protocols and
+`respondsTo:` narrowing as the primary vocabulary, and let atoms/unions carry
+exhaustiveness. Which is, deliberately, the same destination the set-theoretic
+sections describe from the value-set side.
 
 ## What "full" adds beyond ADR 0102
 
