@@ -112,16 +112,19 @@ fn check_raw_name(name: &str, span: Span, kind: &str, diagnostics: &mut Vec<Diag
             Diagnostic::error(
                 format!(
                     "{kind} `{name}` uses the reserved `__` prefix, which the compiler \
-                     uses internally for actor/object state keys"
+                     uses internally for state keys and control-flow temporaries"
                 ),
                 span,
             )
             .with_hint(
                 "Rename it. Identifiers beginning with `__` (double underscore) are \
-                 reserved for compiler-internal state keys. A `__local__`-prefixed name \
-                 is silently stripped from persisted state on every dispatch commit; a \
-                 `__methods__` or `__class_mod__` collision would instead overwrite the \
-                 runtime's dispatch metadata and corrupt method lookup."
+                 reserved for the compiler. A field or class variable with this prefix \
+                 becomes a reserved state-map key: `__local__`-prefixed keys are silently \
+                 stripped from persisted state on every dispatch commit, and a \
+                 `__methods__` or `__class_mod__` collision would overwrite the runtime's \
+                 dispatch metadata and corrupt method lookup. A parameter, block \
+                 parameter, or local with this prefix collides with the compiler's \
+                 control-flow temporary names."
                     .to_string(),
             ),
         );
