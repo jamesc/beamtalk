@@ -24,6 +24,52 @@ the Castagna/Duboc/Valim design that Elixir (1.17+) adopted; Beamtalk's
 singleton-as-`Symbol` convention, `Union` type, and hand-rolled `union_without`
 are all partial, nominal approximations of it.
 
+## Nominal vs structural — and why it matters here
+
+This whole document hinges on one distinction, so it is worth stating plainly.
+
+- **Nominal typing:** a type's identity is its *name*, and subtyping is
+  *declared*. `Counter` is `Counter` because it is named so; `SavingsAccount <:
+  Account` because the class declaration says `Account subclass: SavingsAccount`.
+  Two classes with identical shape are still different types.
+- **Structural typing:** a type's identity is its *shape* (its set of
+  messages/fields), and subtyping is "has at least the required members" —
+  no declaration needed. Anything responding to `asString -> String` inhabits
+  `< asString -> String >`, whatever its class.
+
+**Beamtalk today leans nominal.** The evidence is in the representation:
+`InferredType::Known` carries a **`class_name`**, and subtyping is a walk of the
+*declared* hierarchy (`superclass_chain`). The class tower, the metaclass tower
+(ADR 0036), and the singleton-as-`Symbol` convention are all name-and-declaration
+based. The one structural exception is **protocols** (ADR 0068 Stage 2):
+conformance to `Printable` is automatic and shape-based — a structural layer
+grafted onto a nominal core.
+
+**The tension:** set-theoretic types are **structural at heart** — a type *is* a
+set of values and subtyping *is* inclusion computed on structure. So the nominal
+core is the single biggest impedance mismatch on the road to the north star.
+Adopting the full engine means embedding each nominal class as a **basic element**
+in the lattice and feeding its hierarchy in as **declared inclusion facts**
+(`#foo ⊆ Symbol ⊆ Object`) — i.e. *manufacturing* structure out of names, rather
+than reading it off the values.
+
+**Aside — could Beamtalk be structural instead?** Yes, and it would fit the
+set-theoretic model *more* naturally. Message-passing OO is structural by
+construction (dispatch is on the message, not a declared interface), so
+Smalltalk's duck typing is already structural-in-spirit; the nominal core is the
+pragmatic departure Beamtalk made for tooling. A structural Beamtalk would make
+message-sets (protocols) the type layer and demote classes to
+implementation-sharing — essentially **Strongtalk** (Bracha & Griswold, 1993,
+already cited in ADR 0068), a static structural type system for Smalltalk. The
+real blockers are not feasibility but (a) **`Self`/binary-method typing** —
+`Comparable` needs "compare me to *my own type*", which pure structural typing
+can only express with `Self`-types or F-bounded/row polymorphism — and (b)
+**`doesNotUnderstand:`**, which makes an overriding receiver respond to *every*
+message and therefore structurally satisfy *every* type, undercutting the check.
+This document does **not** propose going structural; it records the option
+because "adopt full set-theoretic types" and "how nominal is Beamtalk" are the
+same question viewed from two sides.
+
 ## What "full" adds beyond ADR 0102
 
 ADR 0102 gives us the *operators* and normalisation for the atom/nominal cases
@@ -123,11 +169,10 @@ detection, and the strong-arrow check total rather than atom-only.
 - **Cost.** A sound emptiness/BDD decision procedure plus normalisation is a
   substantial, subtle engine (Elixir's took years and a PhD). It is disjoint
   from Beamtalk's current nominal comparison.
-- **Nominal-core mismatch.** Beamtalk is deliberately nominal — classes, the
-  metaclass tower (ADR 0036), structural protocols layered on (ADR 0068 Stage 2).
-  Full semantic subtyping is structural; adopting it means embedding nominal
-  classes as *basic types* in the lattice with declared inclusions, and
-  reconciling the metaclass story.
+- **Nominal-core mismatch.** The big one, detailed in *Nominal vs structural*
+  above: Beamtalk's names-and-hierarchy core must be embedded as basic types
+  with declared inclusions before a structural, set-theoretic engine can decide
+  subtyping, plus the metaclass story has to be reconciled.
 - **Unspent benefit.** Arrow/intersection-function typing and a structural
   `dynamic()` buy the most when there is a large typed surface to check. Today
   the payoff is narrowing and atom exhaustiveness — exactly ADR 0102's scope.
