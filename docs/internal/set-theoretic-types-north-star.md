@@ -240,6 +240,61 @@ class names in type position denote shapes, lean on protocols and
 exhaustiveness. Which is, deliberately, the same destination the set-theoretic
 sections describe from the value-set side.
 
+### Recommendation: hybrid, structural by increments
+
+Should Beamtalk *move* to structural typing? **No — not as a project-level
+pivot. Yes — as a direction the existing roadmap already walks.** The
+reasoning, so it doesn't get re-litigated from scratch:
+
+**Against a wholesale move:**
+
+1. **Tooling is the value proposition, and nominal is better at tooling's
+   bread-and-butter.** Crisp errors ("expected `Account`, got `String`" beats a
+   method-set diff), O(depth) subtyping at LSP latency, declared links for
+   rename/find-subtypes. A pivot trades away strengths in exactly the dimension
+   Beamtalk competes on ("types serve the developer",
+   `type-system-design.md`).
+2. **The nominal machinery is deep and recent** — metaclass tower (ADR 0036),
+   metaclass-aware inference (ADR 0083), sealed exhaustiveness (BT-1299), the
+   singleton convention. A pivot strands that investment and reopens settled
+   decisions.
+3. **DNU + ADR 0100 cap the payoff.** The open-world policy forces the checker
+   to stay conservative regardless of conformance model; the soundness win
+   structural typing promises in a closed language mostly evaporates in an
+   open one.
+4. **Most code is unannotated** (gradual typing), and where annotations
+   concentrate — public API parameters — **protocols already provide structural
+   typing today** (`check_protocol_conformance_in_module`, shipped). The
+   marginal gain of also making class names structural is small relative to
+   the semantic rupture.
+
+**For continuing the structural lean** — message dispatch is structurally
+honest, BEAM data is structural (ADR 0101), and the set-theoretic north star
+delivers structural *semantics* incrementally with each step paying for
+itself. "Move to structural" and "walk the north star" are the same road; a
+separate pivot would just be the riskier way to travel it.
+
+**Sequence:**
+
+1. **Now:** ADR 0102 (atoms, unions, narrowing, advisory exhaustiveness).
+2. **Cheap, next:** make protocols the *recommended* annotation vocabulary for
+   public API parameters (docs/guidelines, possibly a lint) — more structural
+   typing using only shipped machinery.
+3. **Evidence-driven, later:** anonymous inline shapes
+   (`:: < withdraw: Money >`) *if* users demonstrably hit "I don't want to
+   name a protocol for one call site." Not before.
+4. **Only with the north-star engine:** the real pivot — class-name-in-type-
+   position denotes shape — because it needs set-inclusion subtyping anyway,
+   and doing it earlier means doing it twice.
+5. **Never:** removing nominal classes or `sealed` (the closed-world islands
+   do real exhaustiveness work).
+
+**Revisit triggers:** protocol annotations becoming the dominant annotation
+form in real code; interop typing demanding map-shapes; or a commitment to the
+north-star engine. Any of these makes step 4 timely. Absent them, the hybrid
+is the resting point — the same one TypeScript, Scala, and Pony converged on
+from both directions.
+
 ## What "full" adds beyond ADR 0102
 
 ADR 0102 gives us the *operators* and normalisation for the atom/nominal cases
