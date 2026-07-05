@@ -546,6 +546,9 @@ fn analyse_full_with_natives(
     validators::check_actor_new_usage(module, &result.class_hierarchy, &mut result.diagnostics);
     validators::check_object_new_usage(module, &result.class_hierarchy, &mut result.diagnostics);
     validators::check_new_field_names(module, &result.class_hierarchy, &mut result.diagnostics);
+    // BT-2718: Reject user names that collide with the reserved internal `__`
+    // state-key namespace (`__local__…`, `__methods__`, `__class_mod__`).
+    validators::check_reserved_internal_names(module, &mut result.diagnostics);
     validators::check_class_variable_access(
         module,
         &result.class_hierarchy,
