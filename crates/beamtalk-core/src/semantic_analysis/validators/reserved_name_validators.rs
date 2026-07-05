@@ -118,9 +118,10 @@ fn check_raw_name(name: &str, span: Span, kind: &str, diagnostics: &mut Vec<Diag
             )
             .with_hint(
                 "Rename it. Identifiers beginning with `__` (double underscore) are \
-                 reserved for compiler-internal state keys such as `__local__…`, \
-                 `__methods__`, and `__class_mod__`; a colliding name would be silently \
-                 dropped from persisted state."
+                 reserved for compiler-internal state keys. A `__local__`-prefixed name \
+                 is silently stripped from persisted state on every dispatch commit; a \
+                 `__methods__` or `__class_mod__` collision would instead overwrite the \
+                 runtime's dispatch metadata and corrupt method lookup."
                     .to_string(),
             ),
         );
