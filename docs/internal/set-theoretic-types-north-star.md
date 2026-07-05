@@ -466,7 +466,10 @@ invariants:
 - **Theory:** Giuseppe Castagna, Guillaume Duboc, José Valim — "The Design
   Principles of the Elixir Type System"; Castagna et al. semantic subtyping /
   CDuce line of work.
-- **Beamtalk:** [ADR 0102](../ADR/0102-set-theoretic-type-operators.md) (the
+- **Beamtalk:** [positioning.md](positioning.md) (where this type-system
+  strategy places Beamtalk in the BEAM ecosystem, plus the sendability /
+  typed-actor / types-×-reload ADR seeds) ·
+  [ADR 0102](../ADR/0102-set-theoretic-type-operators.md) (the
   first step) · [ADR 0068](../ADR/0068-parametric-types-and-protocols.md)
   (unions, narrowing, the noted difference-types gap) ·
   [ADR 0025](../ADR/0025-gradual-typing-and-protocols.md) ·
