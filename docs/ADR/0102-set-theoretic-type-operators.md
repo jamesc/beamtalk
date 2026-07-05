@@ -1,4 +1,4 @@
-# ADR 0102: Set-Theoretic Type Operators (Intersection and Negation) for Uniform Narrowing
+# ADR 0102: Set-Theoretic Type Operators (Intersection and Negation) for Narrowing and Atom Exhaustiveness
 
 ## Status
 Proposed (2026-07-05)
@@ -22,6 +22,10 @@ types by hand** — but only for the narrow cases each idiom needs:
   how to subtract a single `#name` singleton from a *flat* union. It is the
   engine behind the `x = #foo` false-branch (`Integer | #infinity` minus
   `#infinity` ⇒ `Integer`).
+- `non_nil_type` (`inference.rs:3306`) is a **second, independent set-difference**
+  — remove `UndefinedObject` from a union — whose own doc comment calls
+  `union_without` its "singleton counterpart". Two hand-rolled differences that
+  don't share code.
 - `type_admits_singleton` (`inference.rs:2425`) is a **membership / subtyping
   test** hand-written for the singleton-vs-`Symbol` case.
 - `InferredType::union_of` (`types.rs:442`) is the **union** operator, with
@@ -60,10 +64,11 @@ with structure.
 - **BEAM-native.** Singletons *are* Erlang atoms; the algebra must stay
   faithful to runtime atom semantics.
 - **Controlled regressions.** The seven existing narrowing rules (across six
-  detector files) split into: those refactored with *identical* results
-  (`singleton_eq`), those changed *deliberately* with updated tests
-  (`class_eq`/`is_kind_of` true branch), and those left untouched (`is_result`).
-  See §2 — this is not a uniform "refactor everything onto one core".
+  detector files, `narrowing/rules/mod.rs:49-57`) split into: those refactored
+  with near-identical results (`singleton_eq`, `is_nil`), those changed
+  *deliberately* with updated tests (`class_eq`/`is_kind_of` true branch), and
+  those left untouched (`is_result`, `responds_to`). See §2 — this is not a
+  uniform "refactor everything onto one core".
 
 ## Decision
 
@@ -86,31 +91,43 @@ The two operators are introduced primarily as **normalising functions** —
 variants (`Known` / `Union` / `Never`) wherever the result is representable.
 This is deliberate: `refine_singleton_narrowing` today already returns the bare
 `matched` singleton, never a wrapped intersection, so most narrowing never needs
-new storage. Subtyping remains **set inclusion**, consistent with how singletons
-already relate to `Symbol` (`A <: B` iff `difference(A, B) == Never`).
+new storage. Subtyping remains **set inclusion** as the *mental model*, but the
+equation `A <: B` iff `difference(A, B) == Never` holds only on the **atom
+fragment** this ADR defines (singletons, `Symbol`, unions of them) — it is the
+north-star invariant (contract #1), not a claim about these partial operators.
+Nominal subtyping (`Integer <: Number`) remains the hierarchy walk, and
+`difference(Dynamic, P) = Dynamic` deliberately says nothing about gradual
+subtyping.
 
-Only **irreducible** results need new stored variants, and there are exactly two:
+Only **irreducible** results need new stored variants — and in Phase 1 there is
+exactly **one**:
 
 ```rust
 enum InferredType {
     Known { class_name, type_args, provenance },
     Union { members, provenance },        // t1 | t2 | ...
-    // NEW — only when the result cannot collapse to the above:
-    Intersection { members, provenance },  // irreducible conjunction, e.g.
-                                           // class ∩ protocol (unifies ADR 0068's `&`)
+    // NEW (Phase 1) — only when the result cannot collapse to the above:
     Negation { base, excluded, provenance }, // co-finite complement, e.g. Symbol \ #foo
+    // NEW (Phase 2, with `&` syntax) — see below:
+    Intersection { members, provenance },  // irreducible conjunction: class ∩ protocol
     Meta { class_name, provenance },
     Dynamic(DynamicReason),                // unchanged: gradual hole
     Never,                                  // bottom / none()
 }
 ```
 
-`Intersection` is the representation for ADR 0068's `&` protocol composition
-(`Collection(Object) & Comparable`, 0068 §Protocol Composition) generalised to
-any type — a single stored form for both, rather than two mechanisms. (0068
-specifies `&` at the syntax level; `TypeAnnotation` does not yet carry an
-intersection variant, so this ADR adds it — see Implementation.) See §3 for the
-syntax reconciliation.
+**The stored `Intersection` variant is deferred to Phase 2**, by the same
+precedent that defers nominal-class difference: under single inheritance,
+class ∩ class always *reduces* (to the subclass, or to `Never` for unrelated
+sealed classes), so `intersect()` in Phase 1 is a pure function over existing
+variants. The only *irreducible* intersection is **class ∩ protocol**, and its
+only producers are ADR 0068's `&` protocol composition — which 0068 *specifies*
+(§Protocol Composition, `Collection(Object) & Comparable`) but which is **not
+yet implemented** (`TypeAnnotation` has no intersection variant) — and a future
+`responds_to`-narrowing refinement this ADR does not touch (§2). Storing
+`Intersection` before either producer exists would tax every exhaustive match
+for a variant nothing constructs. It lands in Phase 2 alongside the `&` surface
+syntax; see §3 for the reconciliation.
 
 Normalisation rules (`intersect` / `difference`; **not** a blind mirror of
 `union_of` — the `Dynamic` handling is deliberately different, see below):
@@ -133,7 +150,28 @@ Normalisation rules (`intersect` / `difference`; **not** a blind mirror of
   implementing "like `union_of`" here would silently stop narrowing the common
   case of unannotated (`Dynamic`) receivers. Regression test required.
 - `Meta` and `Dynamic` are opaque to `Negation`: `difference` leaves them
-  unchanged rather than fabricating a complement.
+  unchanged rather than fabricating a complement. Symmetrically,
+  `difference(T, Dynamic) = T` — we cannot prove the unknown removed anything.
+- **Union on the right-hand side folds member-wise**:
+  `difference(T, A | B) = difference(difference(T, A), B)` and
+  `intersect(T, A | B) = union_of(intersect(T, A), intersect(T, B))`. The fold
+  is required by both §4's residual computation
+  (`difference(scrutinee, covered)`) and this ADR's own syntax example
+  `Symbol \ (#reserved | #internal)`.
+- **Generics (`type_args`) compare exactly, or not at all.** A member is
+  subtracted / matched only under *exact equality including type args*; the same
+  class name with different (or unknown) args is conservatively left alone —
+  `difference(List(Integer) | List(Symbol), List(Integer))` removes exactly one
+  member, and `difference(List(Integer) | List(Symbol), List)` is a no-op.
+  Today's `union_without` compares by class *name only* (`as_known()`,
+  `inference.rs:2400`) — safe solely because singletons carry no args; a general
+  `difference` inheriting name-only comparison would wrongly subtract both
+  `List` members. Property tests required.
+- **`union_of` learns the new variant and its absorption law**:
+  `(Symbol \ #foo) | #foo` ⇒ `Symbol`. `union_of` (`types.rs:442`) matches
+  exactly the current five variants with no wildcard, so this is an algebra
+  decision, not a match-arm chore — and `Negation` equality needs a canonical
+  ordering of `excluded` so order-independent union dedup keeps working.
 
 ### 2. Narrowing expressed as intersect / difference — where it applies
 
@@ -144,18 +182,33 @@ type `T` is:
 - **false branch:** `difference(T, P)`
 
 **This is an honest generalisation of `singleton_eq`, not a free port of all
-seven narrowing rules.** The rules divide into three groups, and the ADR must
-not pretend otherwise:
+seven narrowing rules** (`narrowing/rules/mod.rs` lists seven: `is_nil`, two
+`is_result` rules, `responds_to`, `is_kind_of`, `class_eq`, `singleton_eq`).
+They divide into three groups, and the ADR must not pretend otherwise:
 
-1. **Already this shape — `singleton_eq`.** `refine_singleton_narrowing`
-   (`inference.rs:2316`) hand-picks `matched` for one branch and `union_without`
-   for the other; it becomes literally:
+1. **Already (nearly) this shape — `singleton_eq`, `is_nil`.**
+   `refine_singleton_narrowing` (`inference.rs:2316`) hand-picks `matched` for
+   one branch and `union_without` for the other; it becomes literally:
    ```rust
    info.true_type  = intersect(&current_ty, &matched);
    info.false_type = Some(difference(&current_ty, &matched));  // swapped if negated
    ```
-   `type_admits_singleton` becomes `intersect(T, #foo) != Never`. **Pure win, no
-   behaviour change.**
+   `type_admits_singleton` becomes `intersect(T, #foo) != Never`. One
+   deliberate corner changes: today the true branch is `matched`
+   *unconditionally* (`inference.rs:2326`), so `x :: Integer; x = #foo` types
+   the true branch `#foo`; under `intersect` it becomes `Never`. The
+   impossible-comparison diagnostic **already fires** for exactly this case
+   (`check_impossible_singleton_comparison`), so only the (unreachable)
+   branch's *type* changes — pin with a new test.
+   `is_nil` is the same shape with `P = UndefinedObject` — its difference
+   engine, `non_nil_type` (`inference.rs:3306`), is the second hand-rolled
+   subtraction this ADR unifies. One documented divergence: `non_nil_type`
+   turns a nil-*only* union into `Dynamic`, not `Never` (test
+   `non_nil_type_all_nil_becomes_dynamic`), a deliberate open-world softening.
+   The port **keeps** that behaviour (`difference` special-cases the
+   all-members-removed result for `is_nil` narrowing, or `is_nil` keeps its
+   wrapper) — porting it blindly "for uniformity" would be a silent behaviour
+   change.
 
 2. **Ported, but a genuine behaviour change — `class_eq`, `is_kind_of`.** Today
    these set `true_type = P` *unconditionally* and `false_type = None`
@@ -170,25 +223,34 @@ not pretend otherwise:
    negation semantics: membership, display, hover), tracked separately — not
    assumed done by this ADR.
 
-3. **Cannot be intersect/difference at all — `is_result` (`isOk`/`isError`).**
+3. **Not expressible as intersect/difference — `is_result`, `responds_to`.**
    `refine_result_narrowing` keeps the full, unchanged `Result(T, E)` on *both*
-   branches: it narrows a runtime tag that has no `InferredType` representation.
-   `difference(Result, Result)` would wrongly yield `Never`. This idiom stays a
-   bespoke rule; the algebra does not touch it.
+   branches: it narrows a runtime tag that has no `InferredType` representation
+   (`difference(Result, Result)` would wrongly yield `Never`). `responds_to`
+   narrows to *protocol conformance*, which today has its own representation
+   path; it is untouched by this ADR, but is the designated **first consumer of
+   the stored `Intersection` variant** in Phase 2 (`T & Protocol` is exactly
+   what a `respondsTo:` true branch means) — noted so the Phase 2 design has a
+   real producer, not just syntax.
 
-So the deliverable is: unify group 1 immediately, route group 2 through
-`intersect` for the true branch (with the false branch gated on nominal-difference
-design), and leave group 3 alone. The detectors in `narrowing/rules/` all stay —
-they still recognise AST *shape* and produce `P`.
+So the deliverable is: unify group 1 immediately (with the two documented
+corners), route group 2 through `intersect` for the true branch (false branch
+gated on nominal-difference design), and leave group 3 alone. The detectors in
+`narrowing/rules/` all stay — they still recognise AST *shape* and produce `P`.
 
 ### 3. Surface syntax — reuse `&`, add a difference operator
 
-**Intersection already has a spelling.** ADR 0068 §Protocol Composition ships
-`&` in type annotations (`sort: items :: Collection(Object) & Comparable`), which
-is semantically an intersection. This ADR therefore does **not** invent a second
-intersection keyword — it *generalises `&`* from protocol-only conjunction to any
-two types. Only **difference/complement** is new surface syntax, written `\`
-("T without U"):
+**Intersection already has a spelling — on paper.** ADR 0068 §Protocol
+Composition *specifies* `&` in type annotations
+(`sort: items :: Collection(Object) & Comparable`) — semantically an
+intersection — but it is **not yet implemented** (no `TypeAnnotation` variant,
+no `&` handling in type position). This ADR therefore does **not** invent a
+second intersection keyword — implementing 0068's `&` and generalising it
+beyond protocol conjunction is Phase 2 work here, where class ∩ class reduces
+via the hierarchy (subclass, or `Never` for unrelated sealed classes — so
+`Integer & String` *is* defined: it is `Never`) and class ∩ protocol is the
+irreducible stored case. Only **difference/complement** is new surface syntax,
+written `\` ("T without U"):
 
 ```beamtalk
 // "any symbol except the reserved ones"
@@ -218,12 +280,19 @@ mixed `&`/`\` at the same tier require parentheses. Using operator symbols (not
 *identifier* in type position is an implicit method-local type parameter — a
 type param spelled `and` would otherwise silently shadow the operator.
 
-`\` is **already a binary-operator character** in the lexer (`lexer.rs:436`,
-alongside `&`, `%`, `~`), and Beamtalk does *not* use `\\` for modulo, so no new
-token is introduced — like `|` and `&`, `\` simply gains a type-level meaning
-inside annotation context. (Inside a value expression `\` remains an ordinary
-binary selector; the two readings are disambiguated by grammar context, exactly
-as `|`/`&` already are.)
+**Lexing is not symmetric with `|`, and the ADR must not pretend it is.** `|`
+works in type position because it is a **dedicated token**
+(`TokenKind::Pipe`, `token.rs:122`), deliberately split from `BinarySelector`.
+`\` and `&` currently lex as ordinary `BinarySelector`s (`lexer.rs:436`), and
+both are *live expression operators* — `&`/`|` are boolean ops and `\\`
+(double backslash) is the Smalltalk **modulo** selector (see
+`is_pure_binary_op`, `lint_validators.rs`). So the annotation parser must
+either special-case `BinarySelector("\\")` / `BinarySelector("&")` in type
+position, or promote them to dedicated tokens (which touches expression
+lexing). Additionally, because the lexer greedily consumes selector characters,
+the near-certain typo `Symbol \\ #foo` lexes as the *modulo* selector — Phase 2
+must ship a targeted parse error for `\\` in type position ("did you mean
+`\`?").
 
 ### 4. Exhaustiveness
 
@@ -272,6 +341,13 @@ actually returns `#west`). Therefore:
 - Because it is additive and non-`Error`, it does **not** regress the "no meaning
   changes" migration claim: previously-clean code that is now *inferred* as a
   singleton-union scrutinee gets an advisory warning, not a new build failure.
+- **Known discoverability cliff:** the warning silently vanishes when inference
+  widens the scrutinee (one `Dynamic`-returning arm, a reassignment) — the user
+  cannot distinguish "exhaustive" from "checker gave up". An opt-in assertion
+  (a marker on `match:` requesting exhaustiveness, analogous to TypeScript's
+  `satisfies never` idiom, which would then diagnose "cannot verify: scrutinee
+  is Dynamic") is the natural follow-up; deliberately **out of scope** here and
+  left to a future issue so this ADR stays advisory-only.
 
 ### REPL session
 
@@ -280,9 +356,13 @@ bt> x := someUnionReturning   "x :: Integer | #infinity"
 bt> (x = #infinity) ifTrue: [x] ifFalse: [x + 1]
                                           ^^^^^
    in the false branch, x :: Integer  (#infinity removed) → x + 1 type-checks
-bt> :type (Symbol \ #foo)
-   Symbol \ #foo   "co-finite: every atom except #foo"
 ```
+
+Co-finite types surface through **LSP hover** (already in scope — hover
+rendering is listed under affected components), which displays
+`Symbol \ #foo` for a variable so narrowed. No new REPL command is added —
+a `:type`-style command would be its own surface-parity decision
+(`docs/development/surface-parity.md`) and is out of scope here.
 
 ### Error example
 
@@ -373,7 +453,20 @@ d = #west
 Every new narrowing shape stays a new file plus bespoke true/false logic, and
 false-branch complements remain impossible beyond the singleton case (ADR 0068's
 noted gap persists). Rejected: the idiom list grows unboundedly and duplicates
-set logic the codebase already contains three times.
+set logic the codebase already contains four times (`union_of`, `union_without`,
+`non_nil_type`, `type_admits_singleton`).
+
+### Functions only — no stored `Negation` either
+The true minimum between status quo and Alternative A: ship `intersect` /
+`difference` as normalising functions, and when a difference is co-finite
+(irreducible), fall back to today's behaviour (`false_type = None` — no
+narrowing). Zero new `InferredType` variants, zero new match arms. Rejected
+because the fallback silently discards exactly the new expressiveness: the
+`Symbol`-typed false branch of `x = #foo` stays un-narrowed, hover cannot
+display "everything except `#foo`", and Phase 2's `\` syntax and residual-based
+exhaustiveness both *need* a representable co-finite result. Priced honestly:
+this saves one variant's worth of match arms, at the cost of the feature's
+point.
 
 ### Internal algebra only
 Add `Intersection`/`Negation` internally, refactor `union_without` /
@@ -404,10 +497,17 @@ needs full arrow/intersection-function typing. Documented as the destination in
   of `intersect(T, s) == Never` rather than a special case.
 
 ### Negative
-- `InferredType` grows **two** variants (`Intersection`, `Negation`); every
-  exhaustive `match` on it (equality, display, provenance, hover) must handle
-  them — though `intersect`/`difference` are normalising functions, so most
-  results stay in existing variants (see §1).
+- `InferredType` grows one variant in Phase 1 (`Negation`) and a second in
+  Phase 2 (`Intersection`); every exhaustive `match` on it (equality, display,
+  provenance, hover, **and `union_of` itself** — which has no wildcard arm and
+  needs the `(Symbol \ #foo) | #foo ⇒ Symbol` absorption law) must handle them —
+  though `intersect`/`difference` are normalising functions, so most results
+  stay in existing variants (see §1).
+- **Live `Never` branches are new.** Group 2 true branches (and group 1's
+  impossible-comparison corner) will type reachable code regions as `Never` for
+  the first time. The policy for message sends on a `Never`-typed receiver
+  (silent-as-unreachable, per ADR 0100's conservatism, vs. an unreachable-code
+  hint) must be decided in Phase 1 — currently unstated.
 - **`TypeAnnotation` (`ast/expression.rs`) also grows variants** for `&`/`\`
   (the AST enum is already ad-hoc — `FalseOr`, `ClassOf`, `SelfType`); every
   exhaustive match over it and `type_resolver.rs` must be updated. This cost was
@@ -418,7 +518,10 @@ needs full arrow/intersection-function typing. Documented as the destination in
 - Normalisation (dedup, absorption, `Dynamic` asymmetry, `&`/`\`/`|`
   interaction) is fiddly and needs property tests. Termination must be argued
   (finite atom/class basis; no recursive blow-up).
-- Surface `\` adds parser surface and a new precedence tier.
+- Surface `\`/`&` are harder to parse than `|` was: `|` is a dedicated token
+  while `\`/`&` lex as live `BinarySelector`s (`\\` is modulo), requiring
+  type-position special-casing or token promotion, plus the `\\`-typo parse
+  error (see §3).
 
 ### Neutral
 - No runtime, codegen, or hot-reload change — edit/compile-time only.
@@ -430,19 +533,25 @@ needs full arrow/intersection-function typing. Documented as the destination in
 
 ## Implementation
 
-**Phase 1 — internal operators + `singleton_eq` unification (Alternative A core) — ~M:**
-1. Add `intersect` / `difference` normalising functions and the `Intersection` /
-   `Negation` variants to `InferredType` (`types.rs`). Encode the `Dynamic`
-   asymmetry (§1) explicitly with a regression test; do **not** mirror
-   `union_of`'s Dynamic-absorbs rule.
-2. Update all exhaustive matches: `PartialEq`, `display_for_diagnostic`,
-   provenance accessors, `as_known`, hover rendering.
-3. Rewrite `refine_singleton_narrowing` (group 1), delete `union_without`,
-   redefine `type_admits_singleton` as `intersect(T, s) != Never`. **No
-   behaviour change — pin with existing narrowing/union tests.**
+**Phase 1 — internal operators + group-1 unification (Alternative A core) — ~M:**
+1. Add `intersect` / `difference` normalising functions and the **`Negation`
+   variant only** to `InferredType` (`types.rs`) — the stored `Intersection`
+   is Phase 2 (§1). Encode the `Dynamic` asymmetry, the RHS-union fold, the
+   exact-`type_args` rule, and the `union_of` absorption law (§1), each with a
+   regression/property test; do **not** mirror `union_of`'s Dynamic-absorbs rule.
+2. Update all exhaustive matches: `PartialEq` (canonical `excluded` ordering),
+   `display_for_diagnostic`, provenance accessors, `as_known`, hover rendering,
+   **`union_of`**.
+3. Rewrite `refine_singleton_narrowing` and `is_nil`'s branch computation
+   (group 1), delete `union_without`, redefine `type_admits_singleton` as
+   `intersect(T, s) != Never`. Behaviour pinned by existing narrowing/union
+   tests **plus two new pins** for the documented corners: the impossible
+   singleton test's true branch becoming `Never`, and `is_nil`'s
+   nil-only-union → `Dynamic` softening being preserved.
 4. Route `class_eq` / `is_kind_of` true branch through `intersect(T, P)` (group
-   2, true branch only), wiring the impossible-comparison hint. Leave their
-   false branch and `is_result` (group 3) untouched.
+   2, true branch only), wiring the impossible-comparison hint, **and decide the
+   `Never`-receiver send policy** (silent-as-unreachable vs. hint). Leave their
+   false branch, `is_result`, and `responds_to` (group 3) untouched.
 
 **Phase 1b — nominal-class difference (prerequisite for the class false-branch) — ~M (new semantics, design-heavy):**
 5. Define `difference` over the class hierarchy (membership, display, hover for
@@ -450,10 +559,13 @@ needs full arrow/intersection-function typing. Documented as the destination in
    *false* branch. Sequenced separately because it is new semantics, not a port.
 
 **Phase 2 — surface syntax + advisory exhaustiveness — ~M (parser + validator):**
-6. Generalise ADR 0068's `&` to any-type intersection and add `\` (difference)
-   to the annotation grammar — **new `TypeAnnotation` variants**
+6. Implement ADR 0068's `&` (spec-only today) generalised to any-type
+   intersection, add the stored `Intersection` variant (§1), and add `\`
+   (difference) to the annotation grammar — **new `TypeAnnotation` variants**
    (`ast/expression.rs`) plus every exhaustive match and `type_resolver.rs`.
-   Add the precedence tier (§3).
+   Handle the token asymmetry (§3): special-case `BinarySelector("&")`/`("\\")`
+   in type position or promote to dedicated tokens; ship the `\\`-typo parse
+   error. Add the precedence tier (§3).
 7. Add a **type-based, advisory** singleton-union exhaustiveness check to
    `match:`: compute `difference(scrutinee, covered)`; if non-`Never`, emit a
    `Warning`/`Lint` (never `Error`) gated by ADR 0100 completeness. Distinct from
@@ -466,9 +578,11 @@ codegen, runtime, REPL output values.
 
 ## Migration Path
 
-Backward compatible. `singleton_eq` narrowing (Phase 1 group 1) produces
-identical *results*, now via the shared algebra (pinned by existing narrowing/
-union tests). `class_eq`/`is_kind_of` true-branch narrowing (group 2) is a
+Backward compatible. `singleton_eq`/`is_nil` narrowing (Phase 1 group 1)
+produces identical *results* except two documented corners — the impossible
+singleton test's (already-diagnosed, unreachable) true branch becomes `Never`,
+and `is_nil`'s nil-only-union → `Dynamic` softening is deliberately preserved —
+both pinned by new tests alongside the existing narrowing/union suites. `class_eq`/`is_kind_of` true-branch narrowing (group 2) is a
 *deliberate* refinement — it can newly report an impossible comparison where the
 old code silently kept `P`; this is the intended improvement, routed through the
 existing hint machinery, and any affected test is updated in the same change.
