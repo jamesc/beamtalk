@@ -63,10 +63,11 @@ open-world honest, tooling-fuel first, reload-surviving.
 ## Three type-system opportunities this opens (ADR seeds)
 
 These are differentiators available to Beamtalk *specifically because* of
-decisions already shipped. Each should graduate to its own ADR/Linear issue
-when timely.
+decisions already shipped. Each has been drafted as a Proposed ADR (0103–0105).
 
 ### Seed 1 — Sendability typing from class kinds
+
+*Drafted as [ADR 0103](../ADR/0103-sendability-typing-from-class-kinds.md).*
 
 The cheapest big win nobody on BEAM has. Beamtalk already declares the
 three-way split the BEAM cares about (ADR 0067, `beamtalk-language-features.md`
@@ -95,6 +96,8 @@ which are references, and which are handles — the checker just has to use it.
 
 ### Seed 2 — Typed actor protocols without a parallel messaging layer
 
+*Drafted as [ADR 0104](../ADR/0104-typed-actor-protocols.md).*
+
 Gleam's typed actors required inventing `Subject(msg)` — a non-OTP-standard
 actor layer — because bare functions-over-messages have no interface to type.
 Beamtalk's "actor = class, message = selector" means **the actor's class
@@ -106,6 +109,8 @@ path trivial) and what DNU means across a process boundary (see the DNU
 section of the north-star doc). Small ADR, distinctive capability.
 
 ### Seed 3 — Types × hot reload: the killer demo
+
+*Drafted as [ADR 0105](../ADR/0105-live-image-recheck-on-reload.md).*
 
 The unsolved question in the whole ecosystem: what happens to "checked" when a
 module is redefined live? ADR 0100's knowledge-graded severity is the
