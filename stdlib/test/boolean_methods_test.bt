@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Tests for Boolean predicate and logical methods:
+// isBoolean (Boolean), xor: (Boolean)
+
+TestCase subclass: BooleanMethodsTest
+
+  testIsBooleanOnTrue => self assert: true isBoolean
+
+  testIsBooleanOnFalse => self assert: false isBoolean
+
+  testXorTrueTrue => self deny: (true xor: true)
+
+  testXorTrueFalse => self assert: (true xor: false)
+
+  testXorFalseTrue => self assert: (false xor: true)
+
+  testXorFalseFalse => self deny: (false xor: false)
