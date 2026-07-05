@@ -68,11 +68,12 @@ with structure.
 ## Decision
 
 Adopt the two missing **set-theoretic operators as first-class members of
-`InferredType`** — intersection and negation/difference — and rebuild narrowing
-on top of them as a **uniform algebra** rather than per-idiom branch logic.
-Expose negation in surface type-annotation syntax, and use the algebra to drive
-**exhaustiveness checking** for `case`/multi-branch dispatch over singleton
-unions.
+`InferredType`** — intersection and negation/difference — and express narrowing
+through a shared `intersect`/`difference` core **where it applies** (unifying
+`singleton_eq` and giving `class`/`isKindOf:` a principled true branch; §2 is
+explicit that this is *not* a uniform rewrite of all seven rules). Expose
+difference in surface type-annotation syntax, and use the algebra to drive
+advisory **exhaustiveness checking** for `match:` over singleton unions.
 
 This is the middle of three possible commitments (see *Alternatives*): more
 than an internal-only refactor, less than a full CDuce-style semantic-subtyping
@@ -217,6 +218,13 @@ mixed `&`/`\` at the same tier require parentheses. Using operator symbols (not
 *identifier* in type position is an implicit method-local type parameter — a
 type param spelled `and` would otherwise silently shadow the operator.
 
+`\` is **already a binary-operator character** in the lexer (`lexer.rs:436`,
+alongside `&`, `%`, `~`), and Beamtalk does *not* use `\\` for modulo, so no new
+token is introduced — like `|` and `&`, `\` simply gains a type-level meaning
+inside annotation context. (Inside a value expression `\` remains an ordinary
+binary selector; the two readings are disambiguated by grammar context, exactly
+as `|`/`&` already are.)
+
 ### 4. Exhaustiveness
 
 Beamtalk has no Erlang-style multi-clause method heads — a selector maps to one
@@ -293,7 +301,7 @@ d = #west
 |---|---|---|
 | **Elixir (1.17+)** — gradual set-theoretic types (Castagna, Duboc, Valim) | Types *are* sets of values; closed under `or` / `and` / `not`. Atoms are singleton types (`:ok` is both value and type); `boolean() = true or false`; `nil`, `true`, `false` are atoms. `atom() and not (:foo or :bar)` expresses co-finite atom sets. `dynamic()` is a *range* of types kept "at the root", enabling gradual typing that still tracks structure. | **Adopt:** the three-operator algebra and singleton-as-set model — it is exactly what our `#foo`/`Symbol`/`union_without` code approximates. **Adapt:** we reuse ADR 0068's `&` for intersection and add `\` for difference as surface syntax (not Elixir's `and`/`not` keywords), with internal `intersect`/`difference` operators, without adopting the full semantic-subtyping decision procedure. **Leave (for now):** replacing `Dynamic(reason)` with a structural `dynamic()`; BDD emptiness checking. |
 | **CDuce / semantic subtyping** (the theory underneath Elixir) | Subtyping = set inclusion decided via emptiness of a Boolean combination of type constructors, implemented with BDDs. | The north-star. Rejected as the *implementation* today (XL, nominal-core mismatch); adopted as the *mental model* for our operators so a future upgrade is a deepening, not a rewrite. |
-| **TypeScript** | Discriminated unions + control-flow narrowing; literal (singleton) types; `Exclude<T, U>` at the *type-operator* level but **no first-class negation type** in values. | We go slightly further than TS values by making negation a real `InferredType`, which is what makes uniform false-branch narrowing and exhaustiveness fall out. |
+| **TypeScript** | Discriminated unions + control-flow narrowing; literal (singleton) types; `Exclude<T, U>` at the *type-operator* level but **no first-class negation type** in values. | We go slightly further than TS values by making negation a real `InferredType`, which is what makes *atom* false-branch narrowing and exhaustiveness fall out (nominal-class false-branch difference is deferred — §2). |
 | **Gleam** (BEAM, Rust-implemented, our closest typed-BEAM peer) | Sound nominal HM; **no** union/intersection/negation, exhaustiveness via nominal custom types. | Confirms exhaustiveness is table-stakes on BEAM, but Gleam gets it from closed nominal sum types; we get it from the atom-union algebra, which fits Beamtalk's open, atom-rich style better. |
 | **Dialyzer** (success typing) | Post-compilation, optimistic; has union/negation internally but no IDE-time narrowing. | Reaffirms why we compute this at edit time, not after codegen (`type-system-design.md`). |
 | **Smalltalk (Pharo/Squeak)** | No static types; `#foo` is just a Symbol, no singleton *type*. | No prior art to preserve — this is purely additive tooling that does not touch message-passing semantics. |
@@ -371,8 +379,10 @@ set logic the codebase already contains three times.
 Add `Intersection`/`Negation` internally, refactor `union_without` /
 `type_admits_singleton` / branch computation onto them, but expose no syntax and
 add no exhaustiveness. Rejected *as the terminal state* (adopted as phase 1):
-the operators are the expensive part; withholding the syntax + exhaustiveness
-that ride on them for free wastes the investment.
+the operators are the hard part, and the incremental cost of the surface syntax
+and exhaustiveness on top is small (chiefly `TypeAnnotation` variants and a
+residual check — see Implementation), so stopping short leaves most of the user
+value unrealised.
 
 ### Full semantic subtyping engine
 Replace nominal comparison with BDD-based emptiness checking and a structural
@@ -420,7 +430,7 @@ needs full arrow/intersection-function typing. Documented as the destination in
 
 ## Implementation
 
-**Phase 1 — internal operators + `singleton_eq` unification (Alternative A core):**
+**Phase 1 — internal operators + `singleton_eq` unification (Alternative A core) — ~M:**
 1. Add `intersect` / `difference` normalising functions and the `Intersection` /
    `Negation` variants to `InferredType` (`types.rs`). Encode the `Dynamic`
    asymmetry (§1) explicitly with a regression test; do **not** mirror
@@ -434,12 +444,12 @@ needs full arrow/intersection-function typing. Documented as the destination in
    2, true branch only), wiring the impossible-comparison hint. Leave their
    false branch and `is_result` (group 3) untouched.
 
-**Phase 1b — nominal-class difference (prerequisite for the class false-branch):**
+**Phase 1b — nominal-class difference (prerequisite for the class false-branch) — ~M (new semantics, design-heavy):**
 5. Define `difference` over the class hierarchy (membership, display, hover for
    `Negation` of a nominal base). Only then close the `class_eq`/`is_kind_of`
    *false* branch. Sequenced separately because it is new semantics, not a port.
 
-**Phase 2 — surface syntax + advisory exhaustiveness:**
+**Phase 2 — surface syntax + advisory exhaustiveness — ~M (parser + validator):**
 6. Generalise ADR 0068's `&` to any-type intersection and add `\` (difference)
    to the annotation grammar — **new `TypeAnnotation` variants**
    (`ast/expression.rs`) plus every exhaustive match and `type_resolver.rs`.
