@@ -77,21 +77,33 @@ off precisely where added.
 
 ### 3. Strong arrows and intersection function types
 
-Function types become first-class and **intersections of arrows** model
-multi-clause / overloaded methods directly:
+Function types become first-class. **Note the Beamtalk-specific caveat:** unlike
+Erlang/Elixir, Beamtalk has **no multi-clause method heads** — a selector maps
+to exactly one method body (the Smalltalk model), and case analysis happens
+*inside* the body via `match:` (see §5 / BT-1299 exhaustiveness). So arrow
+intersections here do **not** model overloaded clauses; they type a *single*
+method whose **result type covaries with its argument type**:
 
 ```
-// a method that is integer->integer AND float->float
-increment :: (Integer -> Integer) and (Float -> Float)
+// one method body; its result type depends on the input type
+abs :: (Integer -> Integer) and (Float -> Float)
 ```
+
+The intersection is the *signature*; a `match:` (or guard) in the body is what
+actually discriminates. This matters most for BEAM interop and numeric-tower
+methods, and less than it does in Erlang precisely because Beamtalk lacks clause
+heads.
 
 A **strong arrow** is a function statically provable to error on inputs outside
 its domain — checked by *negating the domain and type-checking*: if the body
 returns `none()` on out-of-domain input, the arrow is strong. Strong arrows are
 what let `dynamic()` cross the static/dynamic boundary without runtime checks
-(§2), because the underlying BEAM semantics already fail on invalid input. This
-is Elixir's "strong arrows" result and is the natural typing for Beamtalk's
-message-dispatch-heavy, multi-method style.
+(§2), because the underlying BEAM semantics already fail on invalid input.
+
+**Open tension (see Open Questions):** Beamtalk's `doesNotUnderstand:` can make
+*any* selector succeed at runtime, so "provably errors out of domain" needs a
+careful definition — DNU-overriding receivers may have *no* out-of-domain
+inputs at all.
 
 ### 4. Full structural products
 
@@ -151,9 +163,10 @@ invariants:
 - **`Dynamic(reason)` → `dynamic(t)`:** the reason-carrying hole becomes a
   bounded range; sites that today branch on `Dynamic` to "skip checking" instead
   intersect with `dynamic()` and continue.
-- **Methods → arrows:** method signatures become arrow types; multi-method /
-  overloaded selectors become arrow intersections; the strong-arrow check
-  gates dynamic-boundary inference.
+- **Methods → arrows:** method signatures become arrow types. Beamtalk has no
+  clause heads, so intersection arrows type a *single* method whose result
+  covaries with its argument type (the in-body `match:`/guard does the
+  discrimination); the strong-arrow check gates dynamic-boundary inference.
 - **Decision procedure:** introduce BDD-based emptiness under the existing
   `intersect`/`difference`/`union_of` API (contract invariant #2), swap the
   nominal shortcut for it incrementally, behind the same call sites.

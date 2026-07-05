@@ -142,22 +142,35 @@ rationale for parenthesis generics).
 
 ### 4. Exhaustiveness
 
-Because difference is now total, a multi-branch dispatch over a singleton union
-can compute its **residual type**. When the residual is `Never`, the dispatch is
-exhaustive; when it is non-`Never`, the checker warns with the uncovered
-members.
+Beamtalk has no Erlang-style multi-clause method heads — a selector maps to one
+method body, and case analysis happens *inside* it via the `match:` keyword
+message. `match:` **already performs exhaustiveness checking** (BT-1299) for
+sealed types with constructor patterns. This ADR *extends that same check to
+singleton-union scrutinees*, with the set-theoretic residual as its engine:
+because difference is now total, a `match:` over a singleton union can compute
+its **residual type** (`scrutinee_type and not (covered patterns)`). When the
+residual is `Never` the `match:` is exhaustive; when it is non-`Never` the
+checker warns with the uncovered members.
 
 ```beamtalk
 compass :: #north | #south | #east | #west := readHeading
 
-result := compass caseOf: {
-  [#north] -> "up".
-  [#south] -> "down".
-  [#east]  -> "right"
-}
-// ⚠️ non-exhaustive: `#west` is not handled
-//    (residual type: `#west`)
+result := compass match: [
+  #north -> "up";
+  #south -> "down";
+  #east  -> "right"
+]
+// ⚠️ non-exhaustive: `#west` is not handled  (residual type: `#west`)
+//    — either add a `#west ->` arm or a `_ ->` wildcard
 ```
+
+**Severity follows the open-world policy (ADR 0100).** A singleton-union
+annotation is a *closed* set, so this diagnostic is only emitted when the
+scrutinee's type is a known-closed singleton union — never when it is `Dynamic`,
+an open `Symbol`, or otherwise incompletely known. The same rule already governs
+`check_impossible_singleton_comparison`; ADR 0100 is the governing policy for
+*how severe* (Error / Warning / Lint) both diagnostics are, graded by the
+completeness of the checker's knowledge.
 
 ### REPL session
 
@@ -196,8 +209,8 @@ d = #west
 
 - **Newcomer (from Python/JS/TS):** `Symbol and not #foo` reads naturally to
   anyone who has met TypeScript's `Exclude`/discriminated unions. The main new
-  payoff they *feel* is the non-exhaustive-`caseOf:` warning catching a missed
-  atom — a bug class that is otherwise a runtime `does_not_understand`.
+  payoff they *feel* is the non-exhaustive-`match:` warning catching a missed
+  atom — a bug class that is otherwise a runtime error.
 - **Smalltalk developer:** Zero change to message-passing or runtime semantics.
   `#foo` is still a Symbol at runtime; this is edit-time tooling only. Purists
   who never annotate see no new obligations (gradual guarantee preserved).
@@ -213,7 +226,7 @@ d = #west
 ## Steelman Analysis
 
 ### Chosen: Internal operators + surface syntax + exhaustiveness
-- 🧑‍💻 **Newcomer:** "The `caseOf:` warning literally tells me which atom I
+- 🧑‍💻 **Newcomer:** "The `match:` warning literally tells me which atom I
   forgot — that's the feature I didn't know I wanted."
 - 🎩 **Smalltalk purist:** "It's opt-in annotation sugar; my un-annotated code
   is untouched and messages still dispatch dynamically."
@@ -312,8 +325,9 @@ needs full arrow/intersection-function typing. Documented as the destination in
 **Phase 2 — surface + exhaustiveness (this ADR's added scope):**
 5. Parse `and` / `not` inside type annotations (`source_analysis/parser`,
    `TypeAnnotation`), resolve in `type_resolver.rs`.
-6. Compute residual types for `caseOf:` / multi-branch singleton dispatch and
-   emit non-exhaustiveness diagnostics.
+6. Extend `match:` exhaustiveness (BT-1299) to singleton-union scrutinees:
+   compute the residual type (`scrutinee and not covered`) and emit a
+   non-exhaustiveness diagnostic when it is not `Never`.
 
 **Affected components:** type checker (`semantic_analysis/type_checker/*`),
 annotation parser + `TypeAnnotation` AST, hover/diagnostic rendering
@@ -330,10 +344,16 @@ purely additive; no existing `.bt` source changes meaning.
 
 ## References
 - Related issues: BT-XXX (to be filed via `/plan-adr`); builds on BT-2617,
-  BT-2624, BT-2631 (singleton narrowing / impossible-comparison diagnostics)
+  BT-2624, BT-2631 (singleton narrowing / impossible-comparison diagnostics) and
+  BT-1299 (`match:` exhaustiveness for sealed constructor patterns — extended
+  here to singleton-union scrutinees)
 - Related ADRs: ADR 0068 (Parametric Types and Protocols — unions, narrowing,
-  and the noted difference-types gap), ADR 0025 (Gradual Typing and Protocols),
-  ADR 0053 (`::` annotation syntax), ADR 0036 (Metaclass tower)
+  and the noted difference-types gap), ADR 0100 (Open-World Diagnostic Policy —
+  governs the severity of the exhaustiveness and impossible-comparison
+  diagnostics this ADR relies on), ADR 0025 (Gradual Typing and Protocols),
+  ADR 0053 (`::` annotation syntax), ADR 0036 (Metaclass tower), ADR 0083
+  (Metaclass-Aware Type Inference — the `Meta` variant these operators must
+  carry through)
 - Documentation: `docs/internal/set-theoretic-types-north-star.md` (the full
   vision + compatibility contract this ADR upholds);
   `docs/internal/type-system-design.md` (Union Types and
