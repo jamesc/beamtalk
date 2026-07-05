@@ -435,8 +435,8 @@ TestCase subclass: BinaryTest
   testPrintStringValidUtf8 =>
     bin := Binary fromBytes: #(104, 105)
     result := bin printString
-    self assert: (result includesSubstring: "hi")
+    self assert: result equals: """hi"""
 
   testPrintStringOnString =>
     result := "hello" printString
-    self assert: (result includesSubstring: "hello")
+    self assert: result equals: """hello"""
