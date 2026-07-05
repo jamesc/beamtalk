@@ -118,6 +118,7 @@ get_nonce() ->
 %%% gen_server callbacks
 
 init(Config) ->
+    logger:set_process_metadata(#{domain => [beamtalk, runtime]}),
     Port = maps:get(port, Config),
     WorkspaceId = maps:get(workspace_id, Config, undefined),
     BindAddr = maps:get(bind_addr, Config, {127, 0, 0, 1}),
