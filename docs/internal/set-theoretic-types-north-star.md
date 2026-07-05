@@ -61,14 +61,110 @@ pragmatic departure Beamtalk made for tooling. A structural Beamtalk would make
 message-sets (protocols) the type layer and demote classes to
 implementation-sharing — essentially **Strongtalk** (Bracha & Griswold, 1993,
 already cited in ADR 0068), a static structural type system for Smalltalk. The
-real blockers are not feasibility but (a) **`Self`/binary-method typing** —
-`Comparable` needs "compare me to *my own type*", which pure structural typing
-can only express with `Self`-types or F-bounded/row polymorphism — and (b)
-**`doesNotUnderstand:`**, which makes an overriding receiver respond to *every*
-message and therefore structurally satisfy *every* type, undercutting the check.
-This document does **not** propose going structural; it records the option
-because "adopt full set-theoretic types" and "how nominal is Beamtalk" are the
-same question viewed from two sides.
+two things usually called "blockers" — (a) **`Self`/binary-method typing** and
+(b) **`doesNotUnderstand:`** — are better described as *constraints with known,
+mainstream solutions*; the two subsections below work each one out. This
+document does **not** propose going structural; it records the option because
+"adopt full set-theoretic types" and "how nominal is Beamtalk" are the same
+question viewed from two sides.
+
+### `Self` types and binary methods
+
+The awkward case is a **binary method** whose argument should be "the same type
+as the receiver": `Comparable` wants `< other :: Self -> Boolean`, `Equatable`
+wants `= other :: Self -> Boolean`, and the numeric tower wants `+ other`. This
+is the classic *binary-method problem* (Bruce, Cardelli, Castagna, Leavens,
+Pierce, "On Binary Methods", 1995): binary methods and ordinary **width
+subtyping conflict**. If `ColorPoint <: Point` and `Point` has `= : Point ->
+Bool`, then a meaningful `ColorPoint` needs `= : ColorPoint -> Bool` — but the
+argument is *contravariant*, so `ColorPoint`'s method is **not** a subtype of
+`Point`'s. You cannot have both "`ColorPoint` is-a `Point`" and "`=` compares me
+to my own type." This is a theorem, not a Beamtalk gap.
+
+The mainstream fixes, in order of how well they fit Beamtalk:
+
+1. **`Self` type resolved at the call site — Beamtalk already has this.**
+   `TypeAnnotation::SelfType` (bare `Self`) resolves to `Dynamic(Unknown)` at
+   annotation time and to the *static receiver class* at each call site
+   (`type_resolver.rs:61`, `:152`). So `< other :: Self -> Boolean` on an
+   `Integer` receiver already means `Integer -> Boolean` there. This is Kim
+   Bruce's **matching** relation done pragmatically at the call site rather than
+   as a separate judgement — and it is the mechanism a structural Beamtalk uses
+   for binary methods.
+2. **F-bounded polymorphism for *use-site* generic code.** A method that is
+   generic over comparables carries the recursive bound: `sort: items ::
+   Collection(T) where T <: Comparable(T)` — "T is any type that compares against
+   itself." Structurally, "X conforms to `Comparable`" just *is* the
+   self-referential check "X responds to `< : X -> Boolean`". This is exactly
+   Swift `T: Comparable`, Scala `T <: Ordered[T]`, Rust `T: Ord`, Java
+   `<T extends Comparable<T>>`, Haskell `Ord a =>`. Nothing exotic.
+3. **Set-theoretic intersection arrows do better than F-bounds for the tower.**
+   The north-star engine can give `+` an intersection type
+   `(Integer -> Integer) & (Float -> Float)` and refine the argument per branch
+   via typecase — Castagna's set-theoretic treatment of covariance/contravariance
+   handles binary methods more precisely than F-bounds alone. So going
+   set-theoretic *helps* here rather than making it worse.
+
+The price is real but bounded: **`Self`-using protocols (`Comparable`,
+`Equatable`) do not get free width subtyping** — you interact with them through
+`Self`/F-bounded polymorphism, not by upcasting a `ColorPoint` to a `Point` that
+has a binary `=`. Every production structural/OO type system (Swift, Scala,
+Rust) accepts exactly this trade, so it is well-trodden, not experimental.
+
+### Working around `doesNotUnderstand:`
+
+`doesNotUnderstand:` (DNU) looks like it destroys structural typing — an
+overriding receiver responds to *every* message, so it would structurally
+satisfy *every* type. That conclusion comes entirely from a **wrong definition
+of conformance**, and dissolves once fixed. Removing DNU is not on the table (it
+is the metaprogramming that makes this a Smalltalk); the work is to type
+DNU-*overriding* objects honestly. Note first that *default* DNU (raise
+`does_not_understand`) is already type-friendly — such an object responds to
+exactly its declared methods. Only a DNU **override** is the wrinkle.
+
+1. **Conform on the *published* interface, not the runtime-possible one.**
+   Define "A conforms to B" as "A's statically published interface covers B", not
+   "A could respond at runtime." Then a `method_missing`-style object is **not** a
+   universal subtype — its static interface is what it declares/publishes, and the
+   messages its DNU handler also catches are simply *outside the typed contract*.
+   Beamtalk is already committed to this stance: **ADR 0100** treats an unresolved
+   send as *not* proof of a bug precisely because DNU/`perform:`/reflection exist,
+   and only speaks up under closed knowledge.
+2. **Model a DNU object as an open row, not "everything".** Structural theory
+   already has the encoding: OCaml's `< foo : T; .. >` row variable and
+   TypeScript's `[msg: string]: …` index signature both mean "responds to *at
+   least* these, and maybe more." The `..` **is** the typed presence of a DNU
+   handler — sound, because you may only *rely* on the listed messages; the rest
+   need a guard.
+3. **Let a DNU class publish a forwarded protocol → a typed proxy.** A remote/lazy
+   proxy declares "I dynamically handle everything `Account` handles" (hypothetical
+   `forwards :: Account`), and the checker types it structurally as `Account` —
+   fully checked. This is Objective-C's `methodSignatureForSelector:` lifted to
+   compile time.
+4. **Fall back to `dynamic()` when the surface is genuinely open.** Un-typeable
+   metaprogramming (a builder fabricating arbitrary accessors) is typed
+   `dynamic()` — Beamtalk's existing `proxy :: Dynamic` opt-out. Gradual typing
+   exists *for exactly this*, and (§2) `dynamic()` composes without spreading.
+   Beamtalk's current protocol design already ships the optimistic version of
+   this as conformance tier 3 ("DNU-overriding classes conform to every
+   protocol"); the structural refinement keeps it as the fallback and *adds*
+   options 1–3 for when a tighter interface is knowable.
+5. **Interact via `respondsTo:` narrowing — already in the language.**
+   `x respondsTo: #foo ifTrue: [x foo]` turns "might not understand" into a
+   *checked* branch, and it is already a narrowing rule
+   (`narrowing/rules/responds_to.rs`). Row polymorphism + `respondsTo:` narrowing
+   is the complete, sound way to talk to an open-row/dynamic object.
+
+The one genuine casualty is the **strong-arrow check** (§3): you cannot prove an
+arrow "provably errors out of domain" for a receiver that might override DNU to
+*handle* the out-of-domain input instead of erroring. So strong-arrow *soundness
+claims* must be gated on sealed / non-DNU receivers — a narrow, well-understood
+restriction, not a system-wide blocker.
+
+**Prior art for both:** Strongtalk kept DNU and used a dynamic type as the escape
+(options 4–5); Ruby's Sorbet types `method_missing` via `T.untyped`/shims; Swift,
+Scala, Rust, and Haskell all resolve binary methods with `Self`/F-bounded
+constraints exactly as above.
 
 ## What "full" adds beyond ADR 0102
 
@@ -223,9 +319,14 @@ invariants:
   subtyping, or do they stay a separate structural check?
 - Does the **metaclass tower** (`Meta`) embed cleanly as basic types, or does
   `C class` subtyping need bespoke inclusions?
-- What is Beamtalk's **gradual guarantee** statement precisely, and which
-  operations are "strong arrows" given DNU (`doesNotUnderstand:`) can make *any*
-  selector succeed at runtime?
+- What is Beamtalk's **gradual guarantee** statement precisely? (The
+  **`doesNotUnderstand:`** interaction — strong arrows gated on non-DNU
+  receivers, conformance on published interfaces — is worked out in *Working
+  around `doesNotUnderstand:`* above; what remains open is the formal guarantee
+  statement, not the strategy.)
+- Should `Self`-using protocols use call-site resolution (today's mechanism) or
+  explicit F-bounded quantification (`T <: Comparable(T)`) for *use-site* generic
+  code — or both? (See *`Self` types and binary methods*.)
 - Performance envelope of emptiness checking at REPL/LSP edit-time latency.
 
 ## References
