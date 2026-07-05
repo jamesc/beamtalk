@@ -238,8 +238,10 @@ d = #west
 - 🧑‍💻 **Newcomer:** "The type system would 'just know' every relationship."
 - **Why not chosen:** XL effort; a BDD emptiness engine and a structural
   `dynamic()` are a rewrite of the nominal core (`Known` + hierarchy walk) for
-  benefit Beamtalk cannot yet spend. Documented as the **north-star** the
-  operator design deliberately keeps compatible.
+  benefit Beamtalk cannot yet spend. Documented in full as the **north star**
+  this ADR is deliberately kept compatible with —
+  [`docs/internal/set-theoretic-types-north-star.md`](../internal/set-theoretic-types-north-star.md),
+  including the compatibility contract these operators must uphold.
 
 ### Tension points
 - Designers split between A (minimal, safe) and B (complete, sound); the chosen
@@ -267,7 +269,8 @@ that ride on them for free wastes the investment.
 ### Full semantic subtyping engine
 Replace nominal comparison with BDD-based emptiness checking and a structural
 `dynamic()`. Rejected as premature (see Steelman B); revisit if/when Beamtalk
-needs full arrow/intersection-function typing.
+needs full arrow/intersection-function typing. Documented as the destination in
+[`docs/internal/set-theoretic-types-north-star.md`](../internal/set-theoretic-types-north-star.md).
 
 ## Consequences
 
@@ -331,7 +334,9 @@ purely additive; no existing `.bt` source changes meaning.
 - Related ADRs: ADR 0068 (Parametric Types and Protocols — unions, narrowing,
   and the noted difference-types gap), ADR 0025 (Gradual Typing and Protocols),
   ADR 0053 (`::` annotation syntax), ADR 0036 (Metaclass tower)
-- Documentation: `docs/internal/type-system-design.md` (Union Types and
+- Documentation: `docs/internal/set-theoretic-types-north-star.md` (the full
+  vision + compatibility contract this ADR upholds);
+  `docs/internal/type-system-design.md` (Union Types and
   Narrowing); `crates/beamtalk-core/src/semantic_analysis/type_checker/`
   (`types.rs` `union_of`, `inference.rs` `union_without` /
   `type_admits_singleton` / `refine_singleton_narrowing`, `narrowing/rules/`)
