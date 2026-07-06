@@ -69,12 +69,15 @@ Unknown        — Dynamic, untyped FFI results (ADR 0075's
 is `Sendable`; a `Value` carrying a `HandleScoped` field inherits
 `HandleScoped` (the copy embeds the handle).
 
-Honest scoping note: **no diagnostic rule consumes `SendableRef` in v1** — it
-exists to classify `Pid`/Actor references correctly (they are neither plain
-data nor scoped handles) and to render truthfully in hover. If no rule ever
-reads it, collapsing to a three-tier lattice is a simplification the
-implementation is free to make; the tier is kept in the design because `Pid`'s
-behaviour genuinely differs from both neighbours.
+Honest scoping note: **no diagnostic rule consumes `SendableRef` in v1**, and
+rather than leave the tier's fate as an implementation choice (which would let
+hover behaviour diverge between implementations), its v1 contract is fixed:
+**hover displays `SendableRef` for `Pid`- and Actor-typed values** — a
+testable requirement, shipped with the Phase 0 builtin tier table. That is the
+tier's *only* v1 consumer; the first diagnostic rule that gates on it (if any)
+arrives with the deferred remote-grading work. It earns a stored tier (rather
+than collapsing to three) because `Pid`'s behaviour genuinely differs from
+both neighbours and hover must say so truthfully.
 
 **Builtins are classified directly, not via annotation.** The flagship hazard
 classes already exist in the stdlib as `sealed typed Object subclass:` with no
@@ -138,11 +141,15 @@ follows the existing FFI-wrapping pattern (ADR 0101 `native:` / delegate, as
 
 ```beamtalk
 port := (Erlang erlang) openPort: cmd     // :: Port — builtin tier table
-worker ! [port send: data]
+worker schedule: [port readLine]
 // ⚠️ block captures `port` (Port — process-bound handle) and is sent to
 //    another process — a port is only usable by its owning process.
 //    Consider passing data, or an Actor that owns the port.
 ```
+
+(The block crosses the boundary as an ordinary message argument; the same
+check applies when the send is a postfix cast — `worker schedule: [...]!`.
+There is no infix `!` send in Beamtalk — see ADR 0104 §2.)
 
 ### REPL session
 

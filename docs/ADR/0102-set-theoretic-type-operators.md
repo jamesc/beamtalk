@@ -125,6 +125,9 @@ enum InferredType {
     Known { class_name, type_args, provenance },
     Union { members, provenance },        // t1 | t2 | ...
     // NEW (Phase 1) — only when the result cannot collapse to the above:
+    // `excluded` is an InferredType (a singleton or a normalised union of
+    // singletons), NOT a raw atom name — `Symbol \ (#a | #b)` must be
+    // representable. See the union-excluded and flattening rules below.
     Negation { base, excluded, provenance }, // co-finite complement, e.g. Symbol \ #foo
     // NEW (Phase 2, with `&` syntax) — see below:
     Intersection { members, provenance },  // irreducible conjunction: class ∩ protocol
@@ -152,11 +155,25 @@ Normalisation rules (`intersect` / `difference`; **not** a blind mirror of
 
 - `intersect(T, T)` ⇒ `T`; `intersect(T, Never)` ⇒ `Never`;
   `intersect(T, Object)` ⇒ `T`.
+- **LHS-union distribution** (load-bearing for the `singleton_eq` port — §2
+  group 1's "no behaviour change" claim depends on it):
+  `intersect(Union[T1 .. Tn], P) = union_of(intersect(T1, P) .. intersect(Tn, P))`
+  — so `intersect(Integer | #infinity, #infinity)` normalises to the bare
+  `#infinity`, matching today's `matched` lookup, never a stored wrapper.
+- Boundary rules: `difference(Never, P) = Never`; `difference(T, Never) = T`.
 - `difference(Union[..], #foo)` drops the member — this is exactly today's
   `union_without`, which is deleted in favour of the general function.
 - `difference(Symbol, #foo)` ⇒ `Negation{ base: Symbol, excluded: #foo }` —
   "any Symbol except `#foo`", the **co-finite atom set** Beamtalk cannot express
-  today. Nominal-class difference beyond atoms (`difference(Object, Number)`) is
+  today. `excluded` is an `InferredType`:
+  `difference(Symbol, #a | #b)` ⇒ `Negation{ Symbol, #a | #b }` (union of
+  singletons, kept in `union_of` normal form).
+- **Same-base flattening** — nested negation must not escape normal form:
+  `difference(Negation{ Symbol, E }, #bar)` ⇒
+  `Negation{ Symbol, union_of(E, #bar) }`. Termination follows: `excluded`
+  only grows within the finite set of singletons appearing in the program, so
+  no chain of `difference` calls recurses or grows unboundedly.
+  Nominal-class difference beyond atoms (`difference(Object, Number)`) is
   *not* defined by this ADR — see §2 and Consequences.
 - **`Dynamic` is asymmetric and must be stated explicitly**:
   `intersect(Dynamic, P) = P` (a positive test refines an unknown value to `P`),
@@ -292,8 +309,14 @@ per ADR 0068):
 | `\` | difference | middle (left-assoc, same tier as `&`) |
 | _(atomic type / `(...)`)_ | grouping | highest |
 
-`Integer \| Symbol \ #foo` therefore parses as `Integer \| (Symbol \ #foo)`;
-mixed `&`/`\` at the same tier require parentheses. Using operator symbols (not
+`Integer \| Symbol \ #foo` therefore parses as `Integer \| (Symbol \ #foo)`.
+Within one operator the tier is left-associative (`A \ B \ C` = `(A \ B) \ C`).
+**Mixing `&` and `\` without explicit grouping is a deliberate parse error** —
+not left-associative resolution: `A & B \ C` is rejected with "parenthesise to
+disambiguate". This is a grammar rule (the "incompatible infix operators"
+pattern, as OCaml and Rust use for ambiguous operator mixes), chosen because
+`(A & B) \ C` and `A & (B \ C)` differ and neither reading is obviously
+dominant. Using operator symbols (not
 `and`/`not` identifiers) also sidesteps ADR 0068's rule that an unrecognised
 *identifier* in type position is an implicit method-local type parameter — a
 type param spelled `and` would otherwise silently shadow the operator.
@@ -610,7 +633,8 @@ a scrutinee is now *inferred* as a singleton union. No existing `.bt` source
 changes meaning.
 
 ## References
-- Related issues: BT-XXX (to be filed via `/plan-adr`); builds on BT-2617,
+- Related issues: Epic BT-2738 (implementation — see Implementation Tracking
+  above for BT-2739…BT-2746); builds on BT-2617,
   BT-2624, BT-2631 (singleton narrowing / impossible-comparison diagnostics) and
   BT-1299 (`match:` exhaustiveness for sealed constructor patterns — extended
   here to singleton-union scrutinees)

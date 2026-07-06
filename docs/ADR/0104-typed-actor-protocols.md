@@ -70,7 +70,10 @@ x := counter getCount!      // ✗ already a PARSE ERROR today:
 The grammar already enforces more than a warning could: casts are legal
 **only as bare statements** (`cast_in_expression_error`, enforced in the
 parser and pinned by parser tests — `x := foo bar!` and `^foo bar!` are
-rejected outright). So no "discarded reply" dataflow analysis is needed or
+rejected outright). For avoidance of doubt: the postfix statement-cast is the
+**only** `!` form — there is no infix `actor ! expr` in Beamtalk (raw Erlang
+`!` is not exposed as surface syntax), so there is exactly one async-send
+construct for the type rule and for ADR 0103's sendability checks to cover. So no "discarded reply" dataflow analysis is needed or
 possible — the only remaining rule is the *type*: a cast statement's value is
 `Nil` (today it is `Dynamic`).
 

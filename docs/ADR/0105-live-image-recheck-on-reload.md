@@ -113,12 +113,21 @@ as live diagnostics on all surfaces (LSP, workspace UI, REPL notification).
    the cutoff is the recorded refinement.
 4. **Publish.** Findings appear as diagnostics attributed to the caller's
    source location, tagged as reload-induced, on every surface
-   (surface-parity applies). Clearing: a finding clears when either side is
-   re-edited to agree, when the change is undone via
-   `Workspace changes revert:` (ADR 0082), or on workspace restart
-   (reload-induced findings are session state, never persisted). Site-level
-   `@expect` markers keep their ADR 0100 Rule 3 precedence — an expected DNU
-   stays silent even when reload-induced.
+   (surface-parity applies). **Clearing is replacement, not just agreement**:
+   every re-check of a caller **replaces all of that caller's reload-induced
+   findings with the new result — clean or different** — so findings can never
+   refer to a stale interface generation. This one rule covers the two
+   otherwise-missed paths: (a) *reload-fixes-reload* — reload B restores or
+   adapts the callee, the dependent re-check runs again (Mechanism steps 1–3
+   fire on every reload), and the caller's finding clears without anyone
+   editing the caller; (b) *supersession* — back-to-back reloads of the same
+   method re-check the caller against generation B and replace any
+   generation-A finding rather than accumulating contradictory diagnostics.
+   Findings also clear on `Workspace changes revert:` (ADR 0082) and on
+   workspace restart (session state, never persisted). The Phase 0 napkin
+   must validate the supersession case explicitly. Site-level `@expect`
+   markers keep their ADR 0100 Rule 3 precedence — an expected DNU stays
+   silent even when reload-induced.
 
 ### The demo (REPL/workspace session)
 
@@ -130,15 +139,16 @@ bt> counter getCount + 1          // => 1
 // ... in the editor: change `getCount -> Integer` to `getCount -> String`,
 //     save (method-level hot reload, ADR 0082) ...
 
-⚠ reload check: 2 callers of Counter>>getCount are now stale
+⚠ reload check: Counter>>getCount signature changed (Integer → String);
+   2 callers re-checked, 1 stale
    Dashboard>>refresh (dashboard.bt:14): `self counter getCount + 1`
      — `+ 1` expects a number, `getCount` now returns String
-   StatsView>>render (stats.bt:31): argument to `Transcript show:` — OK? no:
-     expects String — this caller is fine and is not reported
 ```
 
-Only genuinely-affected callers surface; agreeing callers re-check clean and
-stay silent.
+Only genuinely-affected callers surface. `StatsView>>render` was the second
+re-checked caller — it passes `getCount` to `Transcript show:`, which expects
+a `String`, so it re-checks *clean* against the new signature and is silently
+suppressed (the header's "2 re-checked, 1 stale" is the only trace of it).
 
 ### Error example (removal)
 
@@ -274,6 +284,15 @@ anti-liveness, and off-positioning.
   handling.
 - xref covers *compiled* call sites; workspace-defined bindings/snippets need
   their own dependent tracking (session bindings layer, ADR 0081).
+- **Proxy-routed calls are invisible to the dependent lookup.** A call through
+  a forwarding proxy (`counter withTimeout: 5000` then `getCount` — ADR 0104
+  §4) reaches `Counter` via the proxy's DNU forwarding, so xref records the
+  site under the proxy path, not `Counter>>getCount`; a signature change to
+  `Counter` can produce a false "no stale callers" for proxy-wrapped usage —
+  exactly the "files nobody has open" case this ADR exists for. Fix path:
+  either track proxies as meta-dependents of the wrapped class's interface in
+  xref, or (interim) accept and document the gap. The Phase 0 napkin must
+  probe the proxy case to establish the actual miss scope.
 - Interface deltas require previous-generation metadata retention — small but
   new state in the class registry.
 - Findings can be stale-about-staleness: a caller flagged after reload A may
