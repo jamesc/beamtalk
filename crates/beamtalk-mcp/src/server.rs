@@ -17,7 +17,7 @@ use beamtalk_core::unparse::escape_string_literal;
 use rmcp::{
     ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
-    model::{CallToolResult, Content, ServerCapabilities, ServerInfo},
+    model::{CallToolResult, ContentBlock, ServerCapabilities, ServerInfo},
     schemars, tool, tool_handler, tool_router,
 };
 use sha2::{Digest, Sha256};
@@ -143,7 +143,7 @@ fn discover_package_corpora() -> (
 
 /// Create an error `CallToolResult` with `is_error` set to true.
 fn error_result(msg: impl Into<String>) -> CallToolResult {
-    CallToolResult::error(vec![Content::text(msg.into())])
+    CallToolResult::error(vec![ContentBlock::text(msg.into())])
 }
 
 /// Validate that a string is a valid Beamtalk class name (uppercase-starting identifier).
@@ -731,28 +731,31 @@ impl BeamtalkMcp {
 
         if let Some(ref output) = response.output {
             if !output.is_empty() {
-                parts.push(Content::text(format!("Output: {output}")));
+                parts.push(ContentBlock::text(format!("Output: {output}")));
             }
         }
 
         if use_trace {
             let steps = response.steps.unwrap_or_default();
             if steps.is_empty() {
-                parts.push(Content::text("(no steps)"));
+                parts.push(ContentBlock::text("(no steps)"));
             } else {
                 for step in &steps {
-                    parts.push(Content::text(fmt::format_trace_step(step, MCP_OUTPUT_MODE)));
+                    parts.push(ContentBlock::text(fmt::format_trace_step(
+                        step,
+                        MCP_OUTPUT_MODE,
+                    )));
                 }
             }
         } else {
             let value = response.value_string();
             if !value.is_empty() {
-                parts.push(Content::text(value));
+                parts.push(ContentBlock::text(value));
             }
         }
 
         if parts.is_empty() {
-            parts.push(Content::text("nil"));
+            parts.push(ContentBlock::text("nil"));
         }
 
         timer.mark_ok();
@@ -790,7 +793,7 @@ impl BeamtalkMcp {
         };
 
         timer.mark_ok();
-        Ok(CallToolResult::success(vec![Content::text(text)]))
+        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
     }
 
     /// Load all `.bt` source files from a project in dependency order.
@@ -833,13 +836,13 @@ impl BeamtalkMcp {
             // Lead with failure summary so agents detect errors immediately.
             if failed_paths.is_empty() {
                 // Errors without structured path info — fall back to error count.
-                parts.push(Content::text(format!(
+                parts.push(ContentBlock::text(format!(
                     "Load completed with errors: {} classes loaded, {} error(s)",
                     classes.len(),
                     errors.len()
                 )));
             } else {
-                parts.push(Content::text(format!(
+                parts.push(ContentBlock::text(format!(
                     "Load completed with errors: {} classes loaded, {} file(s) failed [{}]",
                     classes.len(),
                     failed_paths.len(),
@@ -871,11 +874,11 @@ impl BeamtalkMcp {
                     serde_json::Value::String(s) => s.clone(),
                     _ => e.to_string(),
                 };
-                parts.push(Content::text(format!("FAILED: {msg}")));
+                parts.push(ContentBlock::text(format!("FAILED: {msg}")));
             }
 
             if !classes.is_empty() {
-                parts.push(Content::text(format!(
+                parts.push(ContentBlock::text(format!(
                     "Loaded classes: {}",
                     classes.join(", ")
                 )));
@@ -884,16 +887,16 @@ impl BeamtalkMcp {
             // BT-1855: Include incremental summary even when there are errors,
             // so agents know how many files were processed overall.
             if let Some(summary) = response.summary {
-                parts.push(Content::text(summary));
+                parts.push(ContentBlock::text(summary));
             }
 
             return Ok(CallToolResult::error(parts));
         }
 
         if classes.is_empty() {
-            parts.push(Content::text("No classes loaded"));
+            parts.push(ContentBlock::text("No classes loaded"));
         } else {
-            parts.push(Content::text(format!(
+            parts.push(ContentBlock::text(format!(
                 "Loaded classes: {}",
                 classes.join(", ")
             )));
@@ -901,7 +904,7 @@ impl BeamtalkMcp {
 
         // BT-1685: Include incremental summary if available.
         if let Some(summary) = response.summary {
-            parts.push(Content::text(summary));
+            parts.push(ContentBlock::text(summary));
         }
 
         timer.mark_ok();
@@ -940,12 +943,12 @@ impl BeamtalkMcp {
             }
         };
 
-        let mut parts = vec![Content::text(text)];
+        let mut parts = vec![ContentBlock::text(text)];
 
         // Include any warnings
         if let Some(warnings) = response.warnings {
             for w in warnings {
-                parts.push(Content::text(format!("Warning: {w}")));
+                parts.push(ContentBlock::text(format!("Warning: {w}")));
             }
         }
 
@@ -978,7 +981,7 @@ impl BeamtalkMcp {
         };
 
         timer.mark_ok();
-        Ok(CallToolResult::success(vec![Content::text(text)]))
+        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
     }
 
     /// List all running actors in the workspace.
@@ -1000,7 +1003,7 @@ impl BeamtalkMcp {
         let text = fmt::format_actor_list(&actors, MCP_OUTPUT_MODE);
 
         timer.mark_ok();
-        Ok(CallToolResult::success(vec![Content::text(text)]))
+        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
     }
 
     /// Snapshot the live supervision tree (ADR 0092).
@@ -1043,7 +1046,7 @@ impl BeamtalkMcp {
         let value = response.value_string();
 
         timer.mark_ok();
-        Ok(CallToolResult::success(vec![Content::text(value)]))
+        Ok(CallToolResult::success(vec![ContentBlock::text(value)]))
     }
 
     /// List all available Beamtalk classes with one-line descriptions (BT-1404).
@@ -1068,7 +1071,7 @@ impl BeamtalkMcp {
         let text = fmt::format_class_list(&classes, MCP_OUTPUT_MODE);
 
         timer.mark_ok();
-        Ok(CallToolResult::success(vec![Content::text(text)]))
+        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
     }
 
     /// Hot-reload a class, migrating running actors to the new code.
@@ -1102,7 +1105,7 @@ impl BeamtalkMcp {
         };
 
         timer.mark_ok();
-        Ok(CallToolResult::success(vec![Content::text(text)]))
+        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
     }
 
     /// Get documentation for a Beamtalk class or Erlang module.
@@ -1171,7 +1174,7 @@ impl BeamtalkMcp {
         };
 
         timer.mark_ok();
-        Ok(CallToolResult::success(vec![Content::text(text)]))
+        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
     }
 
     /// Unload a class from the workspace.
@@ -1194,7 +1197,7 @@ impl BeamtalkMcp {
         check_response!(response, "Failed to unload class");
 
         timer.mark_ok();
-        Ok(CallToolResult::success(vec![Content::text(format!(
+        Ok(CallToolResult::success(vec![ContentBlock::text(format!(
             "Class '{}' unloaded",
             params.class
         ))]))
@@ -1216,7 +1219,7 @@ impl BeamtalkMcp {
         check_response!(response, "Failed to send interrupt");
 
         timer.mark_ok();
-        Ok(CallToolResult::success(vec![Content::text(
+        Ok(CallToolResult::success(vec![ContentBlock::text(
             "Interrupt sent",
         )]))
     }
@@ -1263,14 +1266,14 @@ impl BeamtalkMcp {
         let mut parts = Vec::new();
 
         if let Some(core_erlang) = response.core_erlang {
-            parts.push(Content::text(core_erlang));
+            parts.push(ContentBlock::text(core_erlang));
         } else {
-            parts.push(Content::text("No Core Erlang output"));
+            parts.push(ContentBlock::text("No Core Erlang output"));
         }
 
         if let Some(warnings) = response.warnings {
             for w in warnings {
-                parts.push(Content::text(format!("Warning: {w}")));
+                parts.push(ContentBlock::text(format!("Warning: {w}")));
             }
         }
 
@@ -1314,7 +1317,7 @@ impl BeamtalkMcp {
         }
 
         timer.mark_ok();
-        Ok(CallToolResult::success(vec![Content::text(text)]))
+        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
     }
 
     /// Run lint checks on a `.bt` source file or directory.
@@ -1336,7 +1339,7 @@ impl BeamtalkMcp {
         let text = serde_json::to_string_pretty(&result).unwrap_or_else(|_| format!("{result:?}"));
         let structured = serde_json::to_value(&result).ok();
         let mut call_result = CallToolResult::default();
-        call_result.content = vec![Content::text(text)];
+        call_result.content = vec![ContentBlock::text(text)];
         call_result.structured_content = structured;
         if has_errors {
             call_result.is_error = Some(true);
@@ -1367,7 +1370,7 @@ impl BeamtalkMcp {
         let text = serde_json::to_string_pretty(&result).unwrap_or_else(|_| format!("{result:?}"));
         let structured = serde_json::to_value(&result).ok();
         let mut call_result = CallToolResult::default();
-        call_result.content = vec![Content::text(text)];
+        call_result.content = vec![ContentBlock::text(text)];
         call_result.structured_content = structured;
         timer.mark_ok();
         Ok(call_result)
@@ -1422,7 +1425,7 @@ impl BeamtalkMcp {
 
         if results.is_empty() {
             timer.mark_ok();
-            return Ok(CallToolResult::success(vec![Content::text(
+            return Ok(CallToolResult::success(vec![ContentBlock::text(
                 "No examples found for that query. Try different keywords — e.g. 'closures', 'actor state', 'collections'.",
             )]));
         }
@@ -1444,7 +1447,7 @@ impl BeamtalkMcp {
             .join("\n---\n\n");
 
         timer.mark_ok();
-        Ok(CallToolResult::success(vec![Content::text(text)]))
+        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
     }
 
     /// Search for Beamtalk classes by keyword or concept.
@@ -1501,7 +1504,7 @@ impl BeamtalkMcp {
 
         if results.is_empty() {
             timer.mark_ok();
-            return Ok(CallToolResult::success(vec![Content::text(
+            return Ok(CallToolResult::success(vec![ContentBlock::text(
                 "No classes found for that query. Try different keywords — e.g. 'http', 'collection', 'file', 'actor', 'subprocess'.",
             )]));
         }
@@ -1552,7 +1555,7 @@ impl BeamtalkMcp {
             .join("\n---\n\n");
 
         timer.mark_ok();
-        Ok(CallToolResult::success(vec![Content::text(text)]))
+        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
     }
 
     /// Enable actor trace event capture (ADR 0069).
@@ -1571,7 +1574,7 @@ impl BeamtalkMcp {
         check_response!(response, "Failed to enable tracing");
 
         timer.mark_ok();
-        Ok(CallToolResult::success(vec![Content::text(
+        Ok(CallToolResult::success(vec![ContentBlock::text(
             "Tracing enabled. Run actor code, then use get-traces or actor-stats to inspect results.",
         )]))
     }
@@ -1592,7 +1595,7 @@ impl BeamtalkMcp {
         check_response!(response, "Failed to disable tracing");
 
         timer.mark_ok();
-        Ok(CallToolResult::success(vec![Content::text(
+        Ok(CallToolResult::success(vec![ContentBlock::text(
             "Tracing disabled. Aggregate stats remain available via actor-stats.",
         )]))
     }
@@ -1641,7 +1644,7 @@ impl BeamtalkMcp {
         };
 
         timer.mark_ok();
-        Ok(CallToolResult::success(vec![Content::text(text)]))
+        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
     }
 
     /// Export trace events to a JSON file with optional filtering (ADR 0069).
@@ -1687,7 +1690,7 @@ impl BeamtalkMcp {
         };
 
         timer.mark_ok();
-        Ok(CallToolResult::success(vec![Content::text(text)]))
+        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
     }
 
     /// Get aggregate actor statistics (ADR 0069).
@@ -1715,7 +1718,7 @@ impl BeamtalkMcp {
         };
 
         timer.mark_ok();
-        Ok(CallToolResult::success(vec![Content::text(text)]))
+        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
     }
 
     /// Discover supported REPL operations and protocol version.
@@ -1736,20 +1739,20 @@ impl BeamtalkMcp {
         let mut parts = Vec::new();
 
         if let Some(ops) = response.ops {
-            parts.push(Content::text(format!(
+            parts.push(ContentBlock::text(format!(
                 "Supported operations:\n{}",
                 pretty_json(&ops)
             )));
         }
         if let Some(versions) = response.versions {
-            parts.push(Content::text(format!(
+            parts.push(ContentBlock::text(format!(
                 "Versions: {}",
                 pretty_json(&versions)
             )));
         }
 
         if parts.is_empty() {
-            parts.push(Content::text("No describe information available"));
+            parts.push(ContentBlock::text("No describe information available"));
         }
 
         timer.mark_ok();
@@ -1776,7 +1779,7 @@ impl BeamtalkMcp {
         let value = names_response.value_string();
         if value.is_empty() || value == "nil" {
             timer.mark_ok();
-            return Ok(CallToolResult::success(vec![Content::text(
+            return Ok(CallToolResult::success(vec![ContentBlock::text(
                 "No packages loaded",
             )]));
         }
@@ -1803,7 +1806,7 @@ impl BeamtalkMcp {
         };
 
         timer.mark_ok();
-        Ok(CallToolResult::success(vec![Content::text(text)]))
+        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
     }
 
     /// List all classes belonging to a named package.
@@ -1844,13 +1847,13 @@ impl BeamtalkMcp {
         let text = response.value_string();
         if text.is_empty() || text == "#()" || text == "nil" {
             timer.mark_ok();
-            return Ok(CallToolResult::success(vec![Content::text(format!(
+            return Ok(CallToolResult::success(vec![ContentBlock::text(format!(
                 "No classes found in package '{pkg}' (package may not be loaded)"
             ))]));
         }
 
         timer.mark_ok();
-        Ok(CallToolResult::success(vec![Content::text(text)]))
+        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
     }
 
     // --- ADR 0082 Phase 3 (BT-2288): ChangeLog + flush MCP tools ---
@@ -1910,7 +1913,7 @@ impl BeamtalkMcp {
         };
 
         timer.mark_ok();
-        Ok(CallToolResult::success(vec![Content::text(text)]))
+        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
     }
 
     /// Ephemerally install a method on a Beamtalk class (ADR 0082 Phase 3).
@@ -1964,7 +1967,7 @@ impl BeamtalkMcp {
         };
 
         timer.mark_ok();
-        Ok(CallToolResult::success(vec![Content::text(text)]))
+        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
     }
 
     /// Create a new Beamtalk class at a path (ADR 0082 Phase 3).
@@ -2018,7 +2021,7 @@ impl BeamtalkMcp {
         };
 
         timer.mark_ok();
-        Ok(CallToolResult::success(vec![Content::text(text)]))
+        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
     }
 
     /// Flush pending `ChangeLog` entries to disk (ADR 0082 Phase 3).
@@ -2107,7 +2110,7 @@ impl BeamtalkMcp {
         };
 
         timer.mark_ok();
-        Ok(CallToolResult::success(vec![Content::text(text)]))
+        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
     }
 
     /// List pending `ChangeLog` entries (ADR 0082 Phase 3).
@@ -2139,7 +2142,7 @@ impl BeamtalkMcp {
         };
 
         timer.mark_ok();
-        Ok(CallToolResult::success(vec![Content::text(text)]))
+        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
     }
 
     /// Per-class dirty selectors (ADR 0082 Phase 3).
@@ -2171,7 +2174,7 @@ impl BeamtalkMcp {
         };
 
         timer.mark_ok();
-        Ok(CallToolResult::success(vec![Content::text(text)]))
+        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
     }
 }
 
