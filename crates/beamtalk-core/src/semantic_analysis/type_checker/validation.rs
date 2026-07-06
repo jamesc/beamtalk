@@ -22,6 +22,7 @@ use crate::semantic_analysis::string_utils::edit_distance;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
 
+use super::sendability;
 use super::well_known::WellKnownClass;
 use super::{DynamicReason, InferredType, TypeChecker, TypeEnv};
 
@@ -833,6 +834,64 @@ impl TypeChecker {
             .all(|(e, a)| Self::type_args_compatible(e, a, hierarchy))
     }
 
+    /// ADR 0103 (Phase 0): warn when a process-bound handle
+    /// (`HandleScoped(#process)`) is passed as an argument in an actor message.
+    ///
+    /// Runs independently of whether the receiver's handler has typed
+    /// parameters — the hazard is about *what* is sent, not the declared
+    /// parameter type — so it is invoked before the method lookup in
+    /// [`check_argument_types`]. `#node`-scoped and `Unknown` arguments stay
+    /// silent in v1 (no static remoteness knowledge; advisory per ADR 0100).
+    ///
+    /// Class-side sends (`spawnWith:` maps, `new:`) are Phase 1 (BT-2755).
+    pub(super) fn check_arg_sendability(
+        &mut self,
+        arg_types: &[InferredType],
+        span: Span,
+        hierarchy: &ClassHierarchy,
+        is_class_side: bool,
+        receiver_is_actor: bool,
+        arg_exprs: Option<&[Expression]>,
+    ) {
+        // Boundary #1 (Phase 0): actor *instance* message arguments only.
+        if is_class_side || !receiver_is_actor {
+            return;
+        }
+        for (i, arg_ty) in arg_types.iter().enumerate() {
+            let sendability::Tier::HandleScoped(sendability::HandleScope::Process) =
+                sendability::tier_of(arg_ty, hierarchy)
+            else {
+                continue;
+            };
+            let arg_expr = arg_exprs.and_then(|exprs| exprs.get(i));
+            let arg_span = arg_expr.map_or(span, Expression::span);
+            let ty_name = arg_ty
+                .as_known()
+                .cloned()
+                .unwrap_or_else(|| EcoString::from("handle"));
+            // Prefer the variable name (`port`) for the message; fall back to
+            // the handle's type name for non-identifier arguments.
+            let label = match arg_expr {
+                Some(Expression::Identifier(ident)) => ident.name.clone(),
+                _ => ty_name.clone(),
+            };
+            self.diagnostics.push(
+                Diagnostic::warning(
+                    format!(
+                        "`{label}` ({ty_name} — process-bound handle) passed in an actor \
+                         message; it is only usable by its owning process"
+                    ),
+                    arg_span,
+                )
+                .with_hint(
+                    "A port-like handle is bound to its owning process. Consider passing \
+                     data, or an Actor that owns the handle",
+                )
+                .with_category(DiagnosticCategory::Sendability),
+            );
+        }
+    }
+
     /// Check argument types against declared parameter types for a message send.
     #[allow(clippy::too_many_arguments)] // BT-1588: arg_exprs + env needed for origin tracing
     #[allow(clippy::too_many_lines)] // BT-2038 adds class-literal subtyping arm
@@ -847,6 +906,18 @@ impl TypeChecker {
         arg_exprs: Option<&[Expression]>,
         env: Option<&super::TypeEnv>,
     ) {
+        // ADR 0103: sendability of actor message arguments. Independent of the
+        // handler's declared parameter types, so it runs before the method
+        // lookup / early returns below.
+        self.check_arg_sendability(
+            arg_types,
+            span,
+            hierarchy,
+            is_class_side,
+            hierarchy.is_actor_subclass(class_name),
+            arg_exprs,
+        );
+
         let method = if is_class_side {
             hierarchy.find_class_method(class_name, selector)
         } else {

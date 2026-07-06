@@ -652,14 +652,23 @@ fn find_hover_in_expr(
                     return Some(self_hover_info(ident.span, context));
                 }
                 // Show inferred type if available
-                let type_info = type_map
-                    .get(ident.span)
-                    .and_then(InferredType::display_for_diagnostic);
-                let contents = if let Some(ty) = type_info {
+                let inferred = type_map.get(ident.span);
+                let type_info = inferred.and_then(InferredType::display_for_diagnostic);
+                let mut contents = if let Some(ty) = type_info {
                     format!("Identifier: `{}` — Type: {ty}", ident.name)
                 } else {
                     format!("Identifier: `{}`", ident.name)
                 };
+                // ADR 0103: annotate Pid/Actor-typed values with their
+                // sendability tier (the tier's sole v1 consumer).
+                if let Some(tier) = inferred.and_then(|ty| {
+                    crate::semantic_analysis::type_checker::sendability::hover_tier_label(
+                        ty, hierarchy,
+                    )
+                }) {
+                    contents.push_str(" — Sendability: ");
+                    contents.push_str(tier);
+                }
                 Some(HoverInfo::new(contents, ident.span))
             } else {
                 None

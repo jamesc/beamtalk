@@ -574,6 +574,10 @@ pub enum DiagnosticCategory {
     /// Inheritance constraint violation (BT-2087) — subclassing a sealed class
     /// or overriding a sealed method.
     Inheritance,
+    /// Sendability advisory (ADR 0103) — a scoped handle crossing a process
+    /// boundary (actor message arg, `spawnWith:`, block capture, Announcement
+    /// payload), or an FFI-wrapping class with no declared `handleScope:`.
+    Sendability,
 }
 
 /// A secondary note attached to a diagnostic (BT-1588).

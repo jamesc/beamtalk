@@ -32,6 +32,7 @@ mod narrowing;
 pub mod native_type_registry;
 pub mod native_types;
 mod protocol;
+pub(crate) mod sendability;
 #[cfg(test)]
 mod tests;
 mod type_resolver;

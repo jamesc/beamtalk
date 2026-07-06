@@ -31,6 +31,7 @@ mod protocol;
 mod result_and_type_args;
 mod self_class;
 mod self_type;
+mod sendability_checking;
 mod set_operators;
 mod singleton_match_exhaustiveness;
 mod state_fields;
