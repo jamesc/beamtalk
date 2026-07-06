@@ -1806,6 +1806,38 @@ mod tests {
     }
 
     #[test]
+    fn hover_on_singleton_eq_false_branch_shows_negation() {
+        // BT-2746 / ADR 0102 §1/§4 ("REPL session"): the false branch of a
+        // singleton-eq test narrows via `difference` to a `Negation` — hover
+        // must render it as `Symbol \ #foo`, not fall back to the bare
+        // `Symbol` declared type.
+        //
+        // Uses `=:=` (strict equality) rather than bare `=`: the narrowing
+        // detector (`singleton_eq.rs`) recognises both identically, but only
+        // `=:=` has a binding power entry in the expression parser's Pratt
+        // table (`binary_binding_power`) — bare `=` is not currently wired
+        // into binary-expression parsing (it appears only as `field: x =
+        // default` syntax), so it cannot be used here.
+        let source = "x :: Symbol := #other\n(x =:= #foo) ifFalse: [x]";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        // Position at the `x` inside the `ifFalse:` block, not the
+        // declaration or the guard.
+        let offset = source.rfind("[x]").unwrap() + 1;
+        let pos = Position::from_offset(source, offset).unwrap();
+        let hover = compute_hover(&module, source, pos, &hierarchy, None);
+        assert!(hover.is_some(), "Should hover on narrowed `x`");
+        let hover = hover.unwrap();
+        assert!(
+            hover.contents.contains("Type: Symbol \\ #foo"),
+            "Should show narrowed Negation type `Symbol \\ #foo`, got: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
     fn hover_on_untyped_identifier_no_type_annotation() {
         // Variable not yet assigned — should show identifier without type
         let source = "x";

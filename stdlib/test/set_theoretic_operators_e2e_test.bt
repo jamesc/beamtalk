@@ -1,0 +1,87 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2746 / ADR 0102: end-to-end validation of the set-theoretic type
+// operators from the user level.
+//
+// Covers, at runtime + compile-time-without-a-spurious-warning:
+//   - singleton-eq narrowing through the shared intersect/difference core,
+//     including the false branch narrowing to a `Symbol \ #foo` `Negation`
+//     (ADR 0102 §1/§2 group 1);
+//   - the `\` difference and `&` intersection surface syntax (ADR 0102 §3,
+//     BT-2742/BT-2743) parsing and resolving end-to-end on a real method
+//     signature;
+//   - a `Negation`-typed value used as a `match:` scrutinee.
+//
+// Uses `=:=` (strict equality) rather than `=` for the singleton-eq guard:
+// both are recognised identically by the narrowing detector
+// (`singleton_eq.rs`: `"=" | "=:=" => negated=false`), but `=:=` is the form
+// actually used throughout the stdlib test suite — see
+// `docs/beamtalk-language-features.md` ("Equality" — `=` is a legacy alias,
+// `=:=` is preferred).
+//
+// `just test-bunit` compiles with --warnings-as-errors and Type-category
+// warnings are promoted to errors, so every case below doubles as a
+// regression pin: if narrowing or annotation resolution wrongly produced a
+// spurious type/DNU warning, this file would fail to *compile* and the whole
+// suite would go red, exactly like `singleton_match_exhaustiveness_test.bt`
+// (BT-2745) already does for the exhaustiveness silence cases. This file
+// complements that one rather than duplicating it — it does not re-test
+// match: exhaustiveness silence on singleton unions, only a `Negation`
+// scrutinee, which that file does not cover.
+
+TestCase subclass: SetTheoreticOperatorsE2eTest
+
+  // True branch of `tag =:= #ok` narrows via `intersect(Symbol, #ok)` to the
+  // bare singleton `#ok` (ADR 0102 §2 group 1) — calling a Symbol-only method
+  // in the true branch must type-check.
+  testSingletonEqTrueBranchNarrowsToMatchedSingleton =>
+    tag :: Symbol := #ok
+    result := (tag =:= #ok) ifTrue: [tag asString] ifFalse: ["unreachable"]
+    self assert: result equals: "ok"
+
+  // False branch of `tag =:= #ok` narrows via `difference(Symbol, #ok)` to
+  // the co-finite `Negation` `Symbol \ #ok` (ADR 0102 §1) — still a Symbol,
+  // so calling a Symbol-only method (`asString`) in the false branch must
+  // not raise a spurious type warning.
+  testSingletonEqFalseBranchNarrowsToNegation =>
+    tag :: Symbol := #other
+    result := (tag =:= #ok) ifTrue: ["unreachable"] ifFalse: [tag asString]
+    self assert: result equals: "other"
+
+  // `\` difference annotation on a method return type (BT-2742): parses,
+  // resolves through `difference` to a stored `Negation`, and the concrete
+  // returned value (`#bar`, not the excluded `#foo`) runs correctly. A
+  // `Negation` declared return type is checked conservatively (skipped, like
+  // `Dynamic` — see `check_return_type`), so this pins "resolves without
+  // crashing or false-warning", not full return-type verification.
+  testDifferenceAnnotationReturnType =>
+    result := self bt2746TagWithoutFoo
+    self assert: result asString equals: "bar"
+
+  // `&` intersection annotation on a method parameter (BT-2743): `Integer &
+  // Printable` is the irreducible class-∩-protocol case (ADR 0102 §1).
+  // Integer conforms to Printable structurally (`asString`/`printString`), so
+  // calling a Printable-required method on the parameter must not raise a
+  // spurious DNU/type warning.
+  testIntersectionAnnotationParameterType =>
+    result := self bt2746Describe: 42
+    self assert: result equals: "42"
+
+  // A `Negation`-typed value (the false branch of a singleton-eq test) used
+  // as a `match:` scrutinee. `Negation` is not a closed singleton `Union`, so
+  // the ADR 0102 §4 exhaustiveness check stays silent regardless of arm
+  // coverage (`is_closed_singleton_union` only fires on `Union` scrutinees) —
+  // exercising narrowing and `match:` together end-to-end.
+  testNarrowedNegationAsMatchScrutinee =>
+    tag :: Symbol := #b
+    result := (tag =:= #a) ifTrue: ["unreachable"] ifFalse: [
+      tag match: [
+        #b -> "matched-b";
+        _ -> "fallthrough"
+      ]
+    ]
+    self assert: result equals: "matched-b"
+
+Object >> bt2746TagWithoutFoo -> Symbol \ #foo => #bar
+Object >> bt2746Describe: n :: Integer & Printable -> String => n asString

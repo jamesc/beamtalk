@@ -1,0 +1,74 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Token { kind: Identifier("Object"), span: Span { start: 1066, end: 1072 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// BT-2746 / ADR 0102 §3/§4: `\\` difference and `&` intersection type"), Whitespace("\n"), LineComment("// annotations, plus advisory `match:` exhaustiveness for singleton unions."), Whitespace("\n"), LineComment("//"), Whitespace("\n"), LineComment("// Pins, across the parser/semantic snapshots:"), Whitespace("\n"), LineComment("//   - a valid `\\` difference annotation (BT-2742);"), Whitespace("\n"), LineComment("//   - a valid `&` intersection annotation (BT-2743);"), Whitespace("\n"), LineComment("//   - a non-exhaustive `match:` over a closed singleton union — an advisory"), Whitespace("\n"), LineComment("//     Warning, never an Error (ADR 0102 §4). This is the ONE place the"), Whitespace("\n"), LineComment("//     warning-*appearing* case is pinned end-to-end through the compiler"), Whitespace("\n"), LineComment("//     pipeline, per BT-2745's finding that BUnit cannot observe warnings."), Whitespace("\n"), LineComment("//   - the `\\\\`-typo targeted parse error (did-you-mean `\\`);"), Whitespace("\n"), LineComment("//   - the deliberate parse error for mixing `&`/`\\` without parentheses."), Whitespace("\n"), LineComment("//"), Whitespace("\n"), LineComment("// The two error cases below are recoverable parse errors — the parser"), Whitespace("\n"), LineComment("// continues past them (error-node recovery), so the remaining, well-formed"), Whitespace("\n"), LineComment("// class still parses, type-checks and codegens; only the parser snapshot"), Whitespace("\n"), LineComment("// records the diagnostics."), Whitespace("\n\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("subclass:"), span: Span { start: 1073, end: 1082 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("SetTheoreticOperatorsCase"), span: Span { start: 1083, end: 1108 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("tagWithoutFoo"), span: Span { start: 1204, end: 1217 }, leading_trivia: [Whitespace("\n\n  "), LineComment("// Valid `\\` difference annotation (BT-2742/ADR 0102 §3): \"any Symbol"), Whitespace("\n  "), LineComment("// except #foo\"."), Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Arrow, span: Span { start: 1218, end: 1220 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("Symbol"), span: Span { start: 1221, end: 1227 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("\\"), span: Span { start: 1228, end: 1229 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Symbol("foo"), span: Span { start: 1230, end: 1234 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 1235, end: 1237 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Symbol("bar"), span: Span { start: 1238, end: 1242 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Keyword("describe:"), span: Span { start: 1373, end: 1382 }, leading_trivia: [Whitespace("\n\n  "), LineComment("// Valid `&` intersection annotation (BT-2743/ADR 0102 §3): class ∩"), Whitespace("\n  "), LineComment("// protocol — the irreducible case, ADR 0102 §1."), Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("value"), span: Span { start: 1383, end: 1388 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: DoubleColon, span: Span { start: 1389, end: 1391 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("Integer"), span: Span { start: 1392, end: 1399 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("&"), span: Span { start: 1400, end: 1401 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("Printable"), span: Span { start: 1402, end: 1411 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Arrow, span: Span { start: 1412, end: 1414 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("String"), span: Span { start: 1415, end: 1421 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 1422, end: 1424 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("value"), span: Span { start: 1425, end: 1430 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("asString"), span: Span { start: 1431, end: 1439 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Keyword("classify:"), span: Span { start: 1678, end: 1687 }, leading_trivia: [Whitespace("\n\n  "), LineComment("// Non-exhaustive `match:` over a closed singleton-union scrutinee — `#west`"), Whitespace("\n  "), LineComment("// is not handled and there is no wildcard arm, so the type checker emits"), Whitespace("\n  "), LineComment("// an advisory Warning (never an Error) naming the residual (ADR 0102 §4)."), Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("heading"), span: Span { start: 1688, end: 1695 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: DoubleColon, span: Span { start: 1696, end: 1698 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Symbol("north"), span: Span { start: 1699, end: 1705 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Pipe, span: Span { start: 1706, end: 1707 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Symbol("south"), span: Span { start: 1708, end: 1714 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Pipe, span: Span { start: 1715, end: 1716 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Symbol("east"), span: Span { start: 1717, end: 1722 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Pipe, span: Span { start: 1723, end: 1724 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Symbol("west"), span: Span { start: 1725, end: 1730 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Arrow, span: Span { start: 1731, end: 1733 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("String"), span: Span { start: 1734, end: 1740 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 1741, end: 1743 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("heading"), span: Span { start: 1748, end: 1755 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("match:"), span: Span { start: 1756, end: 1762 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: LeftBracket, span: Span { start: 1763, end: 1764 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Symbol("north"), span: Span { start: 1771, end: 1777 }, leading_trivia: [Whitespace("\n      ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Arrow, span: Span { start: 1778, end: 1780 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("up"), span: Span { start: 1781, end: 1785 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Semicolon, span: Span { start: 1785, end: 1786 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Symbol("south"), span: Span { start: 1793, end: 1799 }, leading_trivia: [Whitespace("\n      ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Arrow, span: Span { start: 1800, end: 1802 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("down"), span: Span { start: 1803, end: 1809 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Semicolon, span: Span { start: 1809, end: 1810 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Symbol("east"), span: Span { start: 1817, end: 1822 }, leading_trivia: [Whitespace("\n      ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Arrow, span: Span { start: 1823, end: 1825 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: String("right"), span: Span { start: 1826, end: 1833 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightBracket, span: Span { start: 1838, end: 1839 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [] }
+Token { kind: Identifier("Object"), span: Span { start: 2347, end: 2353 }, leading_trivia: [Whitespace("\n\n"), LineComment("// The two error cases below are standalone (Tonel-style `Class >> method`)"), Whitespace("\n"), LineComment("// extension methods rather than new `subclass:` definitions, so they do not"), Whitespace("\n"), LineComment("// trip the unrelated one-class-per-file check (BT-1666) — only the class"), Whitespace("\n"), LineComment("// above counts toward `module.classes`."), Whitespace("\n\n"), LineComment("// The lexer greedily merges `\\\\` into the modulo selector; in type position"), Whitespace("\n"), LineComment("// this is almost certainly a typo for the difference operator `\\`, so it gets"), Whitespace("\n"), LineComment("// a targeted \"did you mean `\\`\" diagnostic rather than a generic parse error."), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: GtGt, span: Span { start: 2354, end: 2356 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("bt2746DoubleBackslashTypo"), span: Span { start: 2357, end: 2382 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Arrow, span: Span { start: 2383, end: 2385 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("Symbol"), span: Span { start: 2386, end: 2392 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("\\\\"), span: Span { start: 2393, end: 2395 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Symbol("foo"), span: Span { start: 2396, end: 2400 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 2401, end: 2403 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Symbol("bar"), span: Span { start: 2404, end: 2408 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("Object"), span: Span { start: 3333, end: 3339 }, leading_trivia: [Whitespace("\n\n"), LineComment("// Mixing `&` and `\\` in one type-annotation chain without explicit grouping"), Whitespace("\n"), LineComment("// is a deliberate parse error (ADR 0102 §3) — `(Printable & Comparable) \\"), Whitespace("\n"), LineComment("// #foo` and `Printable & (Comparable \\ #foo)` differ and neither reading is"), Whitespace("\n"), LineComment("// obviously dominant. Grouping parentheses do not exist in type-annotation"), Whitespace("\n"), LineComment("// position today, so there is currently no way to write either reading"), Whitespace("\n"), LineComment("// explicitly; this is a documented limitation, not an oversight in this test."), Whitespace("\n"), LineComment("//"), Whitespace("\n"), LineComment("// Recovery keeps building using the first-committed operator (`&`), so the"), Whitespace("\n"), LineComment("// annotation still resolves — to `Intersection{Printable, Comparable} & #foo`,"), Whitespace("\n"), LineComment("// which normalises to `Never` (a protocol intersection has no member in"), Whitespace("\n"), LineComment("// common with an unrelated singleton). That produces a *second*, knock-on"), Whitespace("\n"), LineComment("// semantic warning (\"declares return type Never, but body returns Object\") —"), Whitespace("\n"), LineComment("// an honest consequence of parse-error recovery, not a second bug to fix."), Whitespace("\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: GtGt, span: Span { start: 3340, end: 3342 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("bt2746MixedOperators"), span: Span { start: 3343, end: 3363 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Arrow, span: Span { start: 3364, end: 3366 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("Printable"), span: Span { start: 3367, end: 3376 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("&"), span: Span { start: 3377, end: 3378 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("Comparable"), span: Span { start: 3379, end: 3389 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("\\"), span: Span { start: 3390, end: 3391 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Symbol("foo"), span: Span { start: 3392, end: 3396 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 3397, end: 3399 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("self"), span: Span { start: 3400, end: 3404 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 3405, end: 3405 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }
