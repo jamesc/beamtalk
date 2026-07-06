@@ -190,6 +190,16 @@ Normalisation rules (`intersect` / `difference`; **not** a blind mirror of
   `#bar`), `s ∈ E` ⇒ `Never`. Without this rule a `Negation` LHS hits an
   unhandled arm and every conservative fallback (panic, `Dynamic`, keep the
   `Negation`) is a wrong narrowing outcome.
+- **Negation on the RHS (symmetric complement)**:
+  `intersect(A, Negation{B, E}) = difference(intersect(A, B), E)` —
+  set-theoretically `A ∩ (B \ E) = (A ∩ B) \ E`. Dormant in Phase 1 (narrowing
+  pattern types are always `Known`/`Union`) but **fires in Phase 2**, when the
+  `\` surface syntax puts a `Negation` in pattern position — a `match` on the
+  first operand's variant would otherwise miss `(Known, Negation)` and fall
+  through, with the same wrong-outcome consequences as the LHS case.
+  Implementations may instead canonicalise (swap the `Negation` to the LHS and
+  apply the single rule — intersection is commutative), provided they do so
+  explicitly rather than by fall-through.
 - **Nominal base case** (required by the complement rule above *and* by
   LHS-union distribution — `intersect(Integer | #infinity, #infinity)` only
   reduces because `intersect(Integer, #infinity) = Never`):
