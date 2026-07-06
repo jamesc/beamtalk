@@ -2404,7 +2404,7 @@ impl TypeChecker {
     /// The false branch is left untouched (`None`) — nominal-class
     /// difference (`difference(current, C)` over the hierarchy) is out of
     /// scope here and tracked separately (BT-2744).
-    fn refine_class_narrowing(
+    pub(super) fn refine_class_narrowing(
         &mut self,
         mut info: NarrowingInfo,
         env: &TypeEnv,
@@ -2428,11 +2428,22 @@ impl TypeChecker {
     /// decidable impossible — `C` is hierarchy-unrelated to `current_ty`, so
     /// `intersect(current_ty, C)` is `Never`.
     ///
-    /// Parallels `check_impossible_singleton_comparison`'s gating exactly:
-    /// silent on `Dynamic` (unknown) and `Never` (already-unreachable)
-    /// receivers, silent whenever the intersect result is not `Never`. Unlike
-    /// the singleton case, there is no "always true" counterpart —
-    /// `isKindOf:`/`class =` have no negated form to swap the message for.
+    /// Parallels `check_impossible_singleton_comparison`'s gating (silent on
+    /// `Dynamic` and `Never` receivers, silent whenever the intersect result
+    /// is not `Never`) with one deliberate extra gate: **provenance**. The
+    /// hint fires only when the receiver's type was *inferred* from actual
+    /// value flow (`x := 42. x isKindOf: String`). A *declared* annotation
+    /// (`aClass :: Behaviour`) is an unverified promise under gradual typing,
+    /// and `isKindOf:` is precisely how code verifies it at runtime — stdlib
+    /// defensive guards like `SystemNavigation referencesTo:`'s
+    /// `(aClass isKindOf: Symbol)` check are legitimate and must stay silent.
+    /// Conservative rule: only provably-`Inferred` provenance fires;
+    /// `Declared`, `Substituted`, `Extracted`, or absent provenance is
+    /// silent. (The true-branch narrowing to `Never` is *not* gated — sends
+    /// in the unreachable branch are silent per the `Never`-receiver policy,
+    /// so it stays harmless.) Unlike the singleton case, there is no "always
+    /// true" counterpart — `isKindOf:`/`class =` have no negated form to
+    /// swap the message for.
     fn check_impossible_class_comparison(
         &mut self,
         current_ty: &InferredType,
@@ -2443,6 +2454,15 @@ impl TypeChecker {
         if matches!(current_ty, InferredType::Dynamic(_) | InferredType::Never)
             || !matches!(refined_ty, InferredType::Never)
         {
+            return;
+        }
+        // Provenance gate (see doc comment): declared annotations are
+        // runtime-unverified promises — a defensive `isKindOf:` guard against
+        // them is legitimate, so only value-flow-inferred types fire.
+        if !matches!(
+            current_ty.provenance(),
+            Some(super::TypeProvenance::Inferred(_))
+        ) {
             return;
         }
         let ty_display = current_ty.display_for_diagnostic().unwrap_or_default();

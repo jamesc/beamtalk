@@ -314,7 +314,18 @@ They divide into three groups, and the ADR must not pretend otherwise:
    branch to `intersect(T, P)` is *new* logic: `x class = Bar` where `T` and
    `Bar` are unrelated sealed classes would now yield `Never` and should route
    through the same impossible-comparison hint the singleton path already has
-   (`check_impossible_singleton_comparison`, `inference.rs:2354`). Computing the
+   (`check_impossible_singleton_comparison`, `inference.rs:2354`). One
+   refinement, learned in implementation (BT-2741): the class hint is
+   **provenance-gated** — it fires only when the receiver's type was
+   *inferred* from value flow, and stays silent when it came from a declared
+   annotation. Under gradual typing an annotation is an unverified promise,
+   and `isKindOf:` is precisely how code verifies it at runtime, so a
+   defensive guard against a declared type (stdlib `SystemNavigation
+   referencesTo:`'s `(aClass isKindOf: Symbol)` check) is legitimate and must
+   not warn; the true-branch narrowing to `Never` is *not* gated (sends there
+   are silent per the `Never`-receiver policy, so it stays harmless). The
+   singleton hint's behaviour (fires on declared types too, pinned by
+   BT-2740) is unchanged precedent. Computing the
    *false* branch requires **nominal-class difference** (`difference(T, Bar)`
    over the class hierarchy), which §1 explicitly does *not* define. So closing
    the class/`isKindOf:` false-branch gap is its own design step (nominal
