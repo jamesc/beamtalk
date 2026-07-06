@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc cb64d47a76c6b512354922188ba90728f16fa644bd359f877e975030a9a87a94 # shrinks to a = Union[#a, Symbol], b = Union[Negation{Symbol, #a}, Object] — union_of's singleton-under-Symbol subsumption was negation-gated, so intersect lost commutativity (BT-2741)

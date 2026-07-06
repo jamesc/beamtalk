@@ -2417,7 +2417,11 @@ impl TypeChecker {
         let current_ty = Self::resolve_narrowing_variable_type(&info.variable, env, hierarchy);
         let pattern = InferredType::known(class_name.clone());
         let provenance = super::TypeProvenance::Inferred(Span::default());
-        let refined = InferredType::intersect(&current_ty, &pattern, provenance, Some(hierarchy));
+        // No protocol registry: a `class = C` / `isKindOf: C` pattern is always
+        // a nominal class, never a protocol intersection (matches the other
+        // narrowing call sites).
+        let refined =
+            InferredType::intersect(&current_ty, &pattern, provenance, Some(hierarchy), None);
         self.check_impossible_class_comparison(&current_ty, &class_name, &refined, test_span);
         info.true_type = refined;
         info

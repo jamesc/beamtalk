@@ -607,8 +607,11 @@ impl InferredType {
                 Self::Never => { /* identity element — skip */ }
             }
         }
-        // Apply the negation absorption law (`(Symbol \ #foo) | #foo ⇒ Symbol`)
-        // and drop singletons subsumed by a `Symbol`-based negation.
+        // Apply the negation absorption law (`(Symbol \ #foo) | #foo ⇒ Symbol`),
+        // drop singletons subsumed by a `Symbol`-based negation, and collapse
+        // bare singletons under a bare `Symbol` (`#a | Symbol ⇒ Symbol` — this
+        // fires with or without a negation present, keeping one normal form
+        // per set so `intersect` stays commutative; BT-2741).
         Self::absorb_negations(&mut flat);
         match flat.len() {
             0 if members.iter().all(|m| matches!(m, Self::Never)) && !members.is_empty() => {
@@ -715,7 +718,14 @@ impl InferredType {
     /// members are left untouched.
     ///
     /// - **Bare-base subsumption:** `(Symbol \ E) | Symbol = Symbol` — a bare
-    ///   `Symbol` swallows every symbol-based negation and singleton.
+    ///   `Symbol` swallows every symbol-based negation and singleton. This law
+    ///   applies **even with no `Negation` present** (`#a | Symbol = Symbol`):
+    ///   the singleton is a subtype of `Symbol`, so the collapsed form admits
+    ///   exactly the same values. Gating it on negation presence gave the same
+    ///   set two normal forms depending on evaluation order, breaking
+    ///   `intersect` commutativity (BT-2741 Windows CI counterexample:
+    ///   `intersect(#a | Symbol, (Symbol \ #a) | Object)` vs the swapped
+    ///   order).
     /// - **Full / partial singleton absorption:** a bare singleton `#s` is
     ///   redundant beside a `Symbol`-based negation, so it is dropped, and when
     ///   it appears in the negation's `excluded` set it is added back by removing
@@ -728,7 +738,13 @@ impl InferredType {
         let has_symbol_negation = flat
             .iter()
             .any(|m| matches!(m, Self::Negation { base, .. } if Self::is_symbol_base(base)));
-        if !has_symbol_negation {
+        // Bare-singleton-under-bare-`Symbol` subsumption fires without any
+        // negation too (see doc comment) — same pass, one code path.
+        let has_bare_symbol_and_singleton = flat.iter().any(Self::is_symbol_base)
+            && flat.iter().any(
+                |m| matches!(m, Self::Known { class_name, .. } if Self::is_symbol_singleton(class_name)),
+            );
+        if !has_symbol_negation && !has_bare_symbol_and_singleton {
             return;
         }
 
