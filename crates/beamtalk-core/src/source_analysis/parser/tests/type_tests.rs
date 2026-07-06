@@ -1628,3 +1628,150 @@ fn value_position_backslash_is_unchanged() {
         "value-position `\\` must parse as before (unchanged), got: {diagnostics:?}"
     );
 }
+
+// ==========================================================================
+// Intersection type annotations (`&`) — ADR 0068 §Protocol Composition,
+// ADR 0102 §1/§3, BT-2743
+// ==========================================================================
+
+#[test]
+fn parse_intersection_return_type() {
+    // `Collection(Object) & Comparable` parses as
+    // Intersection { left: Generic(Collection, [Object]), right: Comparable }.
+    let module = parse_ok(
+        "Object subclass: Foo
+  narrow -> Collection(Object) & Comparable => self",
+    );
+    let ret_ty = module.classes[0].methods[0].return_type.as_ref().unwrap();
+    let TypeAnnotation::Intersection { left, right, .. } = ret_ty else {
+        panic!("expected Intersection, got {ret_ty:?}");
+    };
+    assert!(
+        matches!(left.as_ref(), TypeAnnotation::Generic { base, .. } if base.name == "Collection")
+    );
+    assert!(matches!(right.as_ref(), TypeAnnotation::Simple(id) if id.name == "Comparable"));
+}
+
+#[test]
+fn parse_intersection_state_field() {
+    // `field: tag :: Printable & Comparable = nil` in a typed class.
+    let module = parse_ok(
+        "typed Value subclass: Spec
+  field: tag :: Printable & Comparable = nil",
+    );
+    let ann = module.classes[0].state[0].type_annotation.as_ref().unwrap();
+    assert!(
+        matches!(ann, TypeAnnotation::Intersection { .. }),
+        "expected Intersection, got {ann:?}"
+    );
+}
+
+#[test]
+fn parse_intersection_binds_tighter_than_union() {
+    // ADR 0102 §3: `Integer | Printable & Comparable` parses as
+    // `Integer | (Printable & Comparable)` — `&` binds tighter than `|`.
+    let module = parse_ok(
+        "Object subclass: Foo
+  narrow -> Integer | Printable & Comparable => 1",
+    );
+    let ret_ty = module.classes[0].methods[0].return_type.as_ref().unwrap();
+    let TypeAnnotation::Union { types, .. } = ret_ty else {
+        panic!("expected Union, got {ret_ty:?}");
+    };
+    assert_eq!(types.len(), 2, "union has two members: {types:?}");
+    assert!(
+        matches!(&types[0], TypeAnnotation::Simple(id) if id.name == "Integer"),
+        "first member is Integer, got {:?}",
+        types[0]
+    );
+    let TypeAnnotation::Intersection { left, right, .. } = &types[1] else {
+        panic!("second member must be an Intersection, got {:?}", types[1]);
+    };
+    assert!(matches!(left.as_ref(), TypeAnnotation::Simple(id) if id.name == "Printable"));
+    assert!(matches!(right.as_ref(), TypeAnnotation::Simple(id) if id.name == "Comparable"));
+}
+
+#[test]
+fn parse_intersection_is_left_associative() {
+    // ADR 0102 §3: `A & B & C` parses as `(A & B) & C`.
+    let module = parse_ok(
+        "Object subclass: Foo
+  narrow -> A & B & C => self",
+    );
+    let ret_ty = module.classes[0].methods[0].return_type.as_ref().unwrap();
+    let TypeAnnotation::Intersection { left, right, .. } = ret_ty else {
+        panic!("expected outer Intersection, got {ret_ty:?}");
+    };
+    // Outer right is C; the outer left is the inner `A & B`.
+    assert!(matches!(right.as_ref(), TypeAnnotation::Simple(id) if id.name == "C"));
+    let TypeAnnotation::Intersection {
+        left: inner_left,
+        right: inner_right,
+        ..
+    } = left.as_ref()
+    else {
+        panic!("expected inner Intersection in left, got {left:?}");
+    };
+    assert!(matches!(inner_left.as_ref(), TypeAnnotation::Simple(id) if id.name == "A"));
+    assert!(matches!(inner_right.as_ref(), TypeAnnotation::Simple(id) if id.name == "B"));
+}
+
+#[test]
+fn parse_intersection_type_name_round_trips() {
+    let module = parse_ok(
+        "Object subclass: Foo
+  narrow -> Printable & Comparable => self",
+    );
+    let ret_ty = module.classes[0].methods[0].return_type.as_ref().unwrap();
+    assert_eq!(ret_ty.type_name().as_str(), "Printable & Comparable");
+}
+
+#[test]
+fn parse_mixed_intersection_and_difference_without_parens_is_error() {
+    // ADR 0102 §3: mixing `&` and `\` in the same chain without explicit
+    // grouping is a deliberate parse error — `(A & B) \ C` and `A & (B \ C)`
+    // differ and neither reading is obviously dominant.
+    let diagnostics = parse_err(
+        "Object subclass: Foo
+  narrow -> A & B \\ #c => self",
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("Cannot mix") && d.message.contains('&')),
+        "expected a mixed-operator diagnostic, got: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn parse_mixed_difference_and_intersection_without_parens_is_error() {
+    // Same rule, opposite order: `A \ #b & C` also requires parens.
+    let diagnostics = parse_err(
+        "Object subclass: Foo
+  narrow -> A \\ #b & C => self",
+    );
+    assert!(
+        diagnostics.iter().any(|d| d.message.contains("Cannot mix")),
+        "expected a mixed-operator diagnostic, got: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn value_position_ampersand_is_unchanged() {
+    // The `&` intersection operator is special-cased *only* in type-annotation
+    // position (BT-2743), mirroring `\` (BT-2742). In a value expression `&`
+    // has no binding power (like `\`), so `x & x` parses exactly as it did
+    // before this change — an "expected expression" error, never a silent
+    // type-intersection. The method header `combine: x =>` is still detected,
+    // proving the type-chain lookahead did not leak into value position.
+    let diagnostics = parse_err(
+        "Object subclass: Foo
+  combine: x => x & x",
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("expected expression")),
+        "value-position `&` must parse as before (unchanged), got: {diagnostics:?}"
+    );
+}

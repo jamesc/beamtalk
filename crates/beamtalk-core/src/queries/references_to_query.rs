@@ -361,6 +361,10 @@ fn collect_all_type_refs(annotation: &TypeAnnotation, source: &str, hits: &mut V
             collect_all_type_refs(base, source, hits);
             collect_all_type_refs(excluded, source, hits);
         }
+        TypeAnnotation::Intersection { left, right, .. } => {
+            collect_all_type_refs(left, source, hits);
+            collect_all_type_refs(right, source, hits);
+        }
         TypeAnnotation::ClassOf {
             class_name: class_id,
             ..
@@ -569,6 +573,10 @@ fn collect_type_lines(
         TypeAnnotation::Difference { base, excluded, .. } => {
             collect_type_lines(base, class_name, source, lines);
             collect_type_lines(excluded, class_name, source, lines);
+        }
+        TypeAnnotation::Intersection { left, right, .. } => {
+            collect_type_lines(left, class_name, source, lines);
+            collect_type_lines(right, class_name, source, lines);
         }
         TypeAnnotation::ClassOf {
             class_name: class_id,

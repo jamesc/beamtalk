@@ -70,6 +70,10 @@ fn collect_type_annotation_class_names(annotation: &TypeAnnotation, out: &mut Ve
             collect_type_annotation_class_names(base, out);
             collect_type_annotation_class_names(excluded, out);
         }
+        TypeAnnotation::Intersection { left, right, .. } => {
+            collect_type_annotation_class_names(left, out);
+            collect_type_annotation_class_names(right, out);
+        }
         TypeAnnotation::ClassOf { class_name, .. } => out.push(class_name.name.to_string()),
         TypeAnnotation::Singleton { .. }
         | TypeAnnotation::SelfType { .. }

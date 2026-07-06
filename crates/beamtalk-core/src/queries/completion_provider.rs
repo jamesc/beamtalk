@@ -746,7 +746,10 @@ fn receiver_side_of_type(ty: &InferredType) -> Option<ReceiverSide> {
         | InferredType::Dynamic(_)
         | InferredType::Never
         // A `Negation` (`Symbol \ #foo`) has no single receiver side (ADR 0102).
-        | InferredType::Negation { .. } => None,
+        | InferredType::Negation { .. }
+        // Nor does an `Intersection` (`P1 & P2`, ADR 0102/BT-2743) — it has no
+        // single class name to dispatch instance/class-side completions from.
+        | InferredType::Intersection { .. } => None,
     }
 }
 

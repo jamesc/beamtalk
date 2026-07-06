@@ -27,6 +27,7 @@ use ecow::{EcoString, eco_format};
 
 use crate::ast::TypeAnnotation;
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
+use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 
 use super::well_known::WellKnownClass;
 use super::{DynamicReason, InferredType, TypeProvenance};
@@ -60,6 +61,16 @@ pub(in crate::semantic_analysis) type SubstitutionMap = HashMap<EcoString, Infer
 ///   machinery.
 /// * [`TypeAnnotation::Difference`] — `base \ excluded`, resolved through
 ///   [`InferredType::difference`] (ADR 0102 §1). Reducible cases normalise.
+/// * [`TypeAnnotation::Intersection`] — `left & right`, resolved through
+///   [`InferredType::intersect`] (ADR 0102 §1/§3, BT-2743) with `hierarchy =
+///   None` (this resolver does not consult the class hierarchy — see below)
+///   and the `protocol_registry` parameter passed through unchanged. Class ∩
+///   protocol resolves correctly whenever a registry is supplied (protocol
+///   names are recognised without needing the hierarchy — protocols and
+///   classes share one namespace). Class ∩ class only reduces via nominal
+///   subtyping when a *future* caller threads a hierarchy in; without one, two
+///   distinct, non-protocol class names conservatively fall to `Never` (same
+///   structural-only default `intersect` already uses elsewhere).
 /// * [`TypeAnnotation::SelfType`] — returns `Dynamic(Unknown)`. Bare `Self`
 ///   is resolved at the *call site* where the static receiver class is known;
 ///   the annotation-resolution pass does not have that context.
@@ -79,9 +90,17 @@ pub(in crate::semantic_analysis) type SubstitutionMap = HashMap<EcoString, Infer
 /// "does this class exist?" is a call-site decision that happens *after* the
 /// annotation resolves, not during. A future evolution may thread one in for
 /// type-alias resolution; no current caller needs it.
+///
+/// `protocol_registry` (ADR 0102 §1/§3, BT-2743) is threaded through purely
+/// for [`TypeAnnotation::Intersection`] resolution — every other variant
+/// ignores it. Pass `None` when no registry is available (the annotation
+/// still resolves; `&`-typed protocol intersections just won't recognise a
+/// protocol name and will conservatively fall to `Never`, matching
+/// [`InferredType::intersect`]'s documented `None` behaviour).
 pub(in crate::semantic_analysis) fn resolve_type_annotation(
     ann: &TypeAnnotation,
     subst: &SubstitutionMap,
+    protocol_registry: Option<&ProtocolRegistry>,
 ) -> InferredType {
     match ann {
         TypeAnnotation::Simple(type_id) => {
@@ -107,7 +126,7 @@ pub(in crate::semantic_analysis) fn resolve_type_annotation(
         } => {
             let type_args: Vec<InferredType> = parameters
                 .iter()
-                .map(|p| resolve_type_annotation(p, subst))
+                .map(|p| resolve_type_annotation(p, subst, protocol_registry))
                 .collect();
             InferredType::Known {
                 class_name: base.name.clone(),
@@ -118,12 +137,12 @@ pub(in crate::semantic_analysis) fn resolve_type_annotation(
         TypeAnnotation::Union { types, .. } => {
             let members: Vec<InferredType> = types
                 .iter()
-                .map(|t| resolve_type_annotation(t, subst))
+                .map(|t| resolve_type_annotation(t, subst, protocol_registry))
                 .collect();
             InferredType::union_of(&members)
         }
         TypeAnnotation::FalseOr { inner, .. } => {
-            let inner_ty = resolve_type_annotation(inner, subst);
+            let inner_ty = resolve_type_annotation(inner, subst, protocol_registry);
             InferredType::union_of(&[inner_ty, InferredType::known("False")])
         }
         TypeAnnotation::Difference { base, excluded, .. } => {
@@ -131,9 +150,25 @@ pub(in crate::semantic_analysis) fn resolve_type_annotation(
             // `difference` set operation (BT-2739). Reducible cases normalise —
             // e.g. an excluded member that drops a union member, or `T \ T`
             // collapsing to `Never`.
-            let base_ty = resolve_type_annotation(base, subst);
-            let excluded_ty = resolve_type_annotation(excluded, subst);
+            let base_ty = resolve_type_annotation(base, subst, protocol_registry);
+            let excluded_ty = resolve_type_annotation(excluded, subst, protocol_registry);
             InferredType::difference(&base_ty, &excluded_ty, TypeProvenance::Declared(ann.span()))
+        }
+        TypeAnnotation::Intersection { left, right, .. } => {
+            // ADR 0102 §1/§3, BT-2743: `left & right` resolves through the
+            // shared `intersect` set operation. `hierarchy` is `None` (this
+            // resolver never consults it); `protocol_registry` is passed
+            // through so class ∩ protocol resolves to the stored
+            // `Intersection` instead of falling through to `Never`.
+            let left_ty = resolve_type_annotation(left, subst, protocol_registry);
+            let right_ty = resolve_type_annotation(right, subst, protocol_registry);
+            InferredType::intersect(
+                &left_ty,
+                &right_ty,
+                TypeProvenance::Declared(ann.span()),
+                None,
+                protocol_registry,
+            )
         }
         TypeAnnotation::ClassOf { class_name, .. } => {
             // ADR 0083: `<ClassName> class` is the metatype of the named class.
@@ -377,14 +412,14 @@ mod tests {
     #[test]
     fn simple_class_name_resolves_to_known() {
         let ann = TypeAnnotation::Simple(ident("Integer"));
-        let result = resolve_type_annotation(&ann, &empty_subst());
+        let result = resolve_type_annotation(&ann, &empty_subst(), None);
         assert_eq!(result, InferredType::known("Integer"));
     }
 
     #[test]
     fn simple_nil_keyword_resolves_to_undefined_object() {
         let ann = TypeAnnotation::Simple(ident("nil"));
-        let result = resolve_type_annotation(&ann, &empty_subst());
+        let result = resolve_type_annotation(&ann, &empty_subst(), None);
         assert_eq!(result, InferredType::known("UndefinedObject"));
     }
 
@@ -394,7 +429,7 @@ mod tests {
         // canonicalize to the same class as lowercase `nil` so narrowing under
         // `isNil` works regardless of which the user typed.
         let ann = TypeAnnotation::Simple(ident("Nil"));
-        let result = resolve_type_annotation(&ann, &empty_subst());
+        let result = resolve_type_annotation(&ann, &empty_subst(), None);
         assert_eq!(result, InferredType::known("UndefinedObject"));
     }
 
@@ -403,11 +438,11 @@ mod tests {
         let true_ann = TypeAnnotation::Simple(ident("true"));
         let false_ann = TypeAnnotation::Simple(ident("false"));
         assert_eq!(
-            resolve_type_annotation(&true_ann, &empty_subst()),
+            resolve_type_annotation(&true_ann, &empty_subst(), None),
             InferredType::known("True")
         );
         assert_eq!(
-            resolve_type_annotation(&false_ann, &empty_subst()),
+            resolve_type_annotation(&false_ann, &empty_subst(), None),
             InferredType::known("False")
         );
     }
@@ -415,7 +450,7 @@ mod tests {
     #[test]
     fn simple_never_keyword_resolves_to_never() {
         let ann = TypeAnnotation::Simple(ident("Never"));
-        let result = resolve_type_annotation(&ann, &empty_subst());
+        let result = resolve_type_annotation(&ann, &empty_subst(), None);
         assert_eq!(result, InferredType::Never);
     }
 
@@ -426,7 +461,7 @@ mod tests {
         let ann = TypeAnnotation::Simple(ident("T"));
         let mut subst = SubstitutionMap::new();
         subst.insert("T".into(), InferredType::known("Integer"));
-        let result = resolve_type_annotation(&ann, &subst);
+        let result = resolve_type_annotation(&ann, &subst, None);
         assert_eq!(result, InferredType::known("Integer"));
     }
 
@@ -436,7 +471,7 @@ mod tests {
         // downstream code (e.g. `is_generic_type_param`-aware call sites) can
         // decide whether to fall back to Dynamic.
         let ann = TypeAnnotation::Simple(ident("T"));
-        let result = resolve_type_annotation(&ann, &empty_subst());
+        let result = resolve_type_annotation(&ann, &empty_subst(), None);
         assert_eq!(result, InferredType::known("T"));
     }
 
@@ -452,7 +487,7 @@ mod tests {
             ],
             span: span(),
         };
-        let result = resolve_type_annotation(&ann, &empty_subst());
+        let result = resolve_type_annotation(&ann, &empty_subst(), None);
         match result {
             InferredType::Known {
                 class_name,
@@ -484,7 +519,7 @@ mod tests {
             parameters: vec![inner],
             span: span(),
         };
-        let result = resolve_type_annotation(&ann, &empty_subst());
+        let result = resolve_type_annotation(&ann, &empty_subst(), None);
         let InferredType::Known {
             class_name,
             type_args,
@@ -523,7 +558,7 @@ mod tests {
         let mut subst = SubstitutionMap::new();
         subst.insert("T".into(), InferredType::known("Integer"));
         subst.insert("E".into(), InferredType::known("String"));
-        let result = resolve_type_annotation(&ann, &subst);
+        let result = resolve_type_annotation(&ann, &subst, None);
         let InferredType::Known {
             class_name,
             type_args,
@@ -549,7 +584,7 @@ mod tests {
             ],
             span: span(),
         };
-        let result = resolve_type_annotation(&ann, &empty_subst());
+        let result = resolve_type_annotation(&ann, &empty_subst(), None);
         let InferredType::Union { members, .. } = result else {
             panic!("expected Union");
         };
@@ -575,7 +610,7 @@ mod tests {
             ],
             span: span(),
         };
-        let result = resolve_type_annotation(&ann, &empty_subst());
+        let result = resolve_type_annotation(&ann, &empty_subst(), None);
         let InferredType::Union { members, .. } = result else {
             panic!("expected Union");
         };
@@ -601,7 +636,7 @@ mod tests {
             inner: Box::new(TypeAnnotation::Simple(ident("Integer"))),
             span: span(),
         };
-        let result = resolve_type_annotation(&ann, &empty_subst());
+        let result = resolve_type_annotation(&ann, &empty_subst(), None);
         let InferredType::Union { members, .. } = result else {
             panic!("expected Union, got {result:?}");
         };
@@ -623,7 +658,7 @@ mod tests {
             },
             span(),
         );
-        let result = resolve_type_annotation(&ann, &empty_subst());
+        let result = resolve_type_annotation(&ann, &empty_subst(), None);
         let InferredType::Negation { base, excluded, .. } = result else {
             panic!("expected Negation, got {result:?}");
         };
@@ -639,7 +674,7 @@ mod tests {
             TypeAnnotation::Simple(ident("Integer")),
             span(),
         );
-        let result = resolve_type_annotation(&ann, &empty_subst());
+        let result = resolve_type_annotation(&ann, &empty_subst(), None);
         assert_eq!(result, InferredType::Never);
     }
 
@@ -658,8 +693,118 @@ mod tests {
             TypeAnnotation::Simple(ident("String")),
             span(),
         );
-        let result = resolve_type_annotation(&ann, &empty_subst());
+        let result = resolve_type_annotation(&ann, &empty_subst(), None);
         assert_eq!(result, InferredType::known("Integer"));
+    }
+
+    // ---- resolve_type_annotation: intersection ----
+
+    /// Builds a minimal `ProtocolRegistry` containing empty (no required
+    /// method) protocols under the given names — enough for `has_protocol`
+    /// checks without needing a full conformance fixture.
+    fn protocol_registry_with(names: &[&str]) -> ProtocolRegistry {
+        use crate::ast::{CommentAttachment, Module, ProtocolDefinition};
+
+        let hierarchy = builtin_hierarchy();
+        let proto_module = Module {
+            protocols: names
+                .iter()
+                .map(|name| ProtocolDefinition {
+                    name: ident(name),
+                    type_params: vec![],
+                    extending: None,
+                    method_signatures: vec![],
+                    class_method_signatures: vec![],
+                    comments: CommentAttachment::default(),
+                    doc_comment: None,
+                    span: span(),
+                })
+                .collect(),
+            ..Module::new(vec![], span())
+        };
+        let mut registry = ProtocolRegistry::new();
+        let diags = registry.register_module(&proto_module, &hierarchy);
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        registry
+    }
+
+    #[test]
+    fn intersection_of_identical_types_collapses_to_known() {
+        // `Integer & Integer` = Integer (identity, reducible).
+        let ann = TypeAnnotation::intersection(
+            TypeAnnotation::Simple(ident("Integer")),
+            TypeAnnotation::Simple(ident("Integer")),
+            span(),
+        );
+        let result = resolve_type_annotation(&ann, &empty_subst(), None);
+        assert_eq!(result, InferredType::known("Integer"));
+    }
+
+    #[test]
+    fn intersection_unrelated_classes_is_never() {
+        // `Integer & String` = Never — ADR 0102 §1's example: unrelated
+        // classes are disjoint under single inheritance. No protocol registry
+        // needed since neither side is a protocol.
+        let ann = TypeAnnotation::intersection(
+            TypeAnnotation::Simple(ident("Integer")),
+            TypeAnnotation::Simple(ident("String")),
+            span(),
+        );
+        let result = resolve_type_annotation(&ann, &empty_subst(), None);
+        assert_eq!(result, InferredType::Never);
+    }
+
+    #[test]
+    fn intersection_class_and_protocol_produces_stored_intersection() {
+        // `Collection & Comparable` (class ∩ protocol) is the irreducible case
+        // ADR 0102 §1/§3 stores — the flagship `&` example from ADR 0068's
+        // Protocol Composition section. Requires the protocol registry to
+        // recognise `Comparable` as a protocol rather than an unrelated class.
+        let registry = protocol_registry_with(&["Comparable"]);
+        let ann = TypeAnnotation::intersection(
+            TypeAnnotation::Simple(ident("Collection")),
+            TypeAnnotation::Simple(ident("Comparable")),
+            span(),
+        );
+        let result = resolve_type_annotation(&ann, &empty_subst(), Some(&registry));
+        let InferredType::Intersection { members, .. } = result else {
+            panic!("expected Intersection, got {result:?}");
+        };
+        assert_eq!(members.len(), 2);
+        assert!(members.contains(&InferredType::known("Collection")));
+        assert!(members.contains(&InferredType::known("Comparable")));
+    }
+
+    #[test]
+    fn intersection_without_protocol_registry_falls_back_to_never() {
+        // Without a registry, `Collection & Comparable` cannot be distinguished
+        // from two unrelated classes and conservatively resolves to `Never` —
+        // a documented limitation (see `resolve_type_annotation`'s doc
+        // comment): callers that need class ∩ protocol reduction must
+        // thread a `ProtocolRegistry` through.
+        let ann = TypeAnnotation::intersection(
+            TypeAnnotation::Simple(ident("Collection")),
+            TypeAnnotation::Simple(ident("Comparable")),
+            span(),
+        );
+        let result = resolve_type_annotation(&ann, &empty_subst(), None);
+        assert_eq!(result, InferredType::Never);
+    }
+
+    #[test]
+    fn intersection_of_two_protocols_produces_stored_intersection() {
+        // Protocol ∩ protocol is likewise irreducible.
+        let registry = protocol_registry_with(&["Printable", "Comparable"]);
+        let ann = TypeAnnotation::intersection(
+            TypeAnnotation::Simple(ident("Printable")),
+            TypeAnnotation::Simple(ident("Comparable")),
+            span(),
+        );
+        let result = resolve_type_annotation(&ann, &empty_subst(), Some(&registry));
+        assert!(
+            matches!(result, InferredType::Intersection { .. }),
+            "expected Intersection, got {result:?}"
+        );
     }
 
     // ---- resolve_type_annotation: Self / Self class ----
@@ -667,7 +812,7 @@ mod tests {
     #[test]
     fn self_type_resolves_to_dynamic() {
         let ann = TypeAnnotation::SelfType { span: span() };
-        let result = resolve_type_annotation(&ann, &empty_subst());
+        let result = resolve_type_annotation(&ann, &empty_subst(), None);
         assert!(matches!(result, InferredType::Dynamic(_)));
     }
 
@@ -677,7 +822,7 @@ mod tests {
         // reserved `Self` subst key. Without it (the free-function default),
         // it still falls back to Dynamic so existing patterns keep working.
         let ann = TypeAnnotation::SelfClass { span: span() };
-        let result = resolve_type_annotation(&ann, &empty_subst());
+        let result = resolve_type_annotation(&ann, &empty_subst(), None);
         assert!(matches!(result, InferredType::Dynamic(_)));
     }
 
@@ -688,7 +833,7 @@ mod tests {
         let ann = TypeAnnotation::SelfClass { span: span() };
         let mut subst = SubstitutionMap::new();
         subst.insert("Self".into(), InferredType::known("Counter"));
-        let result = resolve_type_annotation(&ann, &subst);
+        let result = resolve_type_annotation(&ann, &subst, None);
         assert_eq!(result.as_meta().map(EcoString::as_str), Some("Counter"));
     }
 
@@ -701,7 +846,7 @@ mod tests {
             class_name: ident("Actor"),
             span: span(),
         };
-        let result = resolve_type_annotation(&ann, &empty_subst());
+        let result = resolve_type_annotation(&ann, &empty_subst(), None);
         assert_eq!(result.as_meta().map(EcoString::as_str), Some("Actor"));
     }
 
@@ -713,7 +858,7 @@ mod tests {
             name: "ok".into(),
             span: span(),
         };
-        let result = resolve_type_annotation(&ann, &empty_subst());
+        let result = resolve_type_annotation(&ann, &empty_subst(), None);
         assert_eq!(result, InferredType::known("#ok"));
     }
 

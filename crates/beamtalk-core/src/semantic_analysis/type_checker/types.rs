@@ -6,6 +6,7 @@
 //! **DDD Context:** Semantic Analysis
 
 use crate::semantic_analysis::ClassHierarchy;
+use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::source_analysis::Span;
 use ecow::EcoString;
 
@@ -189,6 +190,28 @@ pub enum InferredType {
         /// Where this negation came from.
         provenance: TypeProvenance,
     },
+    /// An irreducible intersection type `A ∩ B ∩ …` (ADR 0102 §1/§3).
+    ///
+    /// Produced by [`intersect`](InferredType::intersect) only for the one
+    /// case that cannot collapse to an existing variant: **class ∩
+    /// protocol** (e.g. `Collection(Object) & Comparable`, ADR 0068 §Protocol
+    /// Composition). Class ∩ class always reduces via the nominal hierarchy
+    /// (to the subclass, or `Never` for hierarchy-unrelated sealed classes),
+    /// so a stored `Intersection` never contains two classes related by
+    /// inheritance — every member is either a protocol, or a class that does
+    /// not (as far as the checker can prove) reduce against its co-members.
+    ///
+    /// **Normal form.** `members` has at least two entries, is **flattened**
+    /// (a nested `Intersection` is never a member — constructing one merges
+    /// the nested members into the parent), and is **deduplicated** by
+    /// structural equality. **Equality is order-independent** (mirrors
+    /// [`Union`](Self::Union)).
+    Intersection {
+        /// The intersected member types (≥2, flattened, deduplicated).
+        members: Vec<InferredType>,
+        /// Where this intersection came from.
+        provenance: TypeProvenance,
+    },
 }
 
 impl PartialEq for InferredType {
@@ -225,6 +248,9 @@ impl PartialEq for InferredType {
                     ..
                 },
             ) => base_a == base_b && excluded_a == excluded_b,
+            (Self::Intersection { members: a, .. }, Self::Intersection { members: b, .. }) => {
+                a.len() == b.len() && a.iter().all(|m| b.contains(m))
+            }
             (Self::Dynamic(_), Self::Dynamic(_)) | (Self::Never, Self::Never) => true,
             _ => false,
         }
@@ -332,7 +358,10 @@ impl InferredType {
             | Self::Never
             // A negation (`Symbol \ #foo`) is not a single known class — callers
             // must handle it structurally, not as a bare class name.
-            | Self::Negation { .. } => None,
+            | Self::Negation { .. }
+            // An intersection (`A & B`) is not a single known class either —
+            // callers must handle it structurally (ADR 0102 §1).
+            | Self::Intersection { .. } => None,
         }
     }
 
@@ -347,7 +376,8 @@ impl InferredType {
             Self::Known { provenance, .. }
             | Self::Union { provenance, .. }
             | Self::Meta { provenance, .. }
-            | Self::Negation { provenance, .. } => Some(*provenance),
+            | Self::Negation { provenance, .. }
+            | Self::Intersection { provenance, .. } => Some(*provenance),
             Self::Dynamic(_) | Self::Never => None,
         }
     }
@@ -499,6 +529,25 @@ impl InferredType {
                     EcoString::from(format!("{base_str} \\ {excluded_str}"))
                 }
             }
+            Self::Intersection { members, .. } => {
+                let mut result = EcoString::new();
+                for (i, m) in members.iter().enumerate() {
+                    if i > 0 {
+                        result.push_str(" & ");
+                    }
+                    // `&` binds tighter than `|`; a union member is only
+                    // reachable via explicit grouping, so parenthesise to
+                    // preserve meaning.
+                    if matches!(m, Self::Union { .. }) {
+                        result.push('(');
+                        result.push_str(&m.display_with_options(opts));
+                        result.push(')');
+                    } else {
+                        result.push_str(&m.display_with_options(opts));
+                    }
+                }
+                result
+            }
         }
     }
 
@@ -517,7 +566,12 @@ impl InferredType {
             match m {
                 Self::Known { provenance, .. }
                 | Self::Meta { provenance, .. }
-                | Self::Negation { provenance, .. } => {
+                | Self::Negation { provenance, .. }
+                // `Intersection` is opaque to `union_of` (ADR 0102 §1) — treated
+                // like any other opaque member: kept as-is and deduplicated by
+                // structural equality, with no absorption/flattening law of its
+                // own (unlike `Negation`, which `union_of` actively simplifies).
+                | Self::Intersection { provenance, .. } => {
                     if matches!(best_provenance, TypeProvenance::Inferred(_))
                         && !matches!(provenance, TypeProvenance::Inferred(_))
                     {
@@ -716,9 +770,9 @@ impl InferredType {
             // intersection (`E1 ∩ E2 ∩ …`).
             let mut merged = neg_excludeds[0].clone();
             for e in &neg_excludeds[1..] {
-                // Structural singleton merge only — no hierarchy needed (and
-                // none is threaded through `union_of`).
-                merged = Self::intersect(&merged, e, provenance, None);
+                // Structural singleton merge only — no hierarchy or protocol
+                // registry needed (and neither is threaded through `union_of`).
+                merged = Self::intersect(&merged, e, provenance, None, None);
             }
             // Add back any excluded singleton that also appears bare (absorption).
             let remaining: Vec<Self> = if matches!(merged, Self::Never) {
@@ -775,6 +829,14 @@ impl InferredType {
     /// behaviour). Narrowing call sites pass `Some(hierarchy)` so class narrowing
     /// reduces correctly.
     ///
+    /// The `protocol_registry` argument is likewise **optional**
+    /// (ADR 0102 §1/§3, BT-2743): supplying it lets `intersect` recognise a
+    /// protocol name and route class ∩ protocol / protocol ∩ protocol to the
+    /// stored [`Intersection`](Self::Intersection) instead of falling through
+    /// to the disjoint default. `None` preserves the pre-BT-2743 structural
+    /// behaviour (two distinct-named `Known` types with no proven relation
+    /// are `Never`).
+    ///
     /// Rules:
     /// - **Dynamic first:** `intersect(Dynamic, P) = P` (Dynamic acts as the top
     ///   type for intersection — *not* union's "Dynamic absorbs" rule). Checked
@@ -787,6 +849,15 @@ impl InferredType {
     ///   difference(intersect(P, B), E)` — a `Negation` never reaches the
     ///   disjoint default (needed for chained narrowing / Phase 2 `\` syntax).
     /// - **Symbol-singleton membership:** `intersect(Symbol, #foo) = #foo`.
+    /// - **Class ∩ protocol / protocol ∩ protocol** (`protocol_registry =
+    ///   Some`, ADR 0102 §1/§3): when the two distinct-named `Known` operands
+    ///   include at least one protocol name, the result is the normalised,
+    ///   irreducible [`Intersection`](Self::Intersection) — e.g.
+    ///   `Collection(Object) ∩ Comparable`. Checked before the nominal-class
+    ///   base case because a protocol is never an entry in the class
+    ///   hierarchy's subtype lattice, and protocols/classes share one
+    ///   namespace (collisions are compile errors), so `has_protocol(name)`
+    ///   alone identifies a protocol without consulting the hierarchy.
     /// - **Nominal-class base case** (`hierarchy = Some`): `B <: A ⇒ B`,
     ///   `A <: B ⇒ A`, unrelated ⇒ `Never`.
     /// - **LHS-union distribution:** `intersect(T1 | … | Tn, P) =
@@ -803,6 +874,7 @@ impl InferredType {
         b: &Self,
         provenance: TypeProvenance,
         hierarchy: Option<&ClassHierarchy>,
+        protocol_registry: Option<&ProtocolRegistry>,
     ) -> Self {
         match (a, b) {
             // Dynamic FIRST (before identity/Object): `intersect(Dynamic, P) = P`
@@ -819,12 +891,12 @@ impl InferredType {
             // default (the `(Known, Negation)` case fires in Phase 2's `\`
             // syntax; missing it silently loses narrowing).
             (Self::Negation { base, excluded, .. }, _) => Self::difference(
-                &Self::intersect(base, b, provenance, hierarchy),
+                &Self::intersect(base, b, provenance, hierarchy, protocol_registry),
                 excluded,
                 provenance,
             ),
             (_, Self::Negation { base, excluded, .. }) => Self::difference(
-                &Self::intersect(a, base, provenance, hierarchy),
+                &Self::intersect(a, base, provenance, hierarchy, protocol_registry),
                 excluded,
                 provenance,
             ),
@@ -832,7 +904,7 @@ impl InferredType {
             (Self::Union { members, .. }, _) => {
                 let parts: Vec<Self> = members
                     .iter()
-                    .map(|m| Self::intersect(m, b, provenance, hierarchy))
+                    .map(|m| Self::intersect(m, b, provenance, hierarchy, protocol_registry))
                     .collect();
                 Self::union_of(&parts)
             }
@@ -840,9 +912,47 @@ impl InferredType {
             (_, Self::Union { members, .. }) => {
                 let parts: Vec<Self> = members
                     .iter()
-                    .map(|m| Self::intersect(a, m, provenance, hierarchy))
+                    .map(|m| Self::intersect(a, m, provenance, hierarchy, protocol_registry))
                     .collect();
                 Self::union_of(&parts)
+            }
+            // Intersect through an existing stored Intersection (both
+            // orders) — flatten rather than falling through to the disjoint
+            // default (ADR 0102 §1/§3, BT-2743). Needed so a 3+-way `&`
+            // chain (`A & B & C`, parsed left-associatively as `(A & B) &
+            // C`) reduces through repeated pairwise `intersect` calls to a
+            // single flat, deduplicated `Intersection` instead of silently
+            // losing a member. Checked after the `Union` arms above so
+            // `intersect(Intersection{..}, T1 | T2)` still distributes over
+            // the union first — by this point neither operand is a `Union`
+            // (those arms already matched), `Dynamic`/`Never`/`Object`
+            // (matched even earlier), or a `Negation` (matched above too).
+            (Self::Intersection { members, .. }, _) => {
+                // Re-check pairwise disjointness before appending: without
+                // this, `Printable & Integer & String` would flatten to
+                // `Intersection{Integer, Printable, String}` instead of
+                // reducing to `Never` (`Integer ∩ String = Never`), violating
+                // the stored-intersection invariant.
+                for m in members {
+                    let pair = Self::intersect(m, b, provenance, hierarchy, protocol_registry);
+                    if matches!(pair, Self::Never) {
+                        return Self::Never;
+                    }
+                }
+                let mut merged = members.clone();
+                merged.push(b.clone());
+                Self::normalize_intersection(merged, provenance)
+            }
+            (_, Self::Intersection { members, .. }) => {
+                for m in members {
+                    let pair = Self::intersect(a, m, provenance, hierarchy, protocol_registry);
+                    if matches!(pair, Self::Never) {
+                        return Self::Never;
+                    }
+                }
+                let mut merged = members.clone();
+                merged.push(a.clone());
+                Self::normalize_intersection(merged, provenance)
             }
             // Symbol-singleton membership: `#foo <: Symbol`, so the narrower
             // singleton is kept in both orders. Checked before the general
@@ -859,6 +969,17 @@ impl InferredType {
             }
             // `T ∩ T = T` (exact structural equality, generics included).
             _ if a == b => a.clone(),
+            // Class ∩ protocol / protocol ∩ protocol (ADR 0102 §1/§3, BT-2743):
+            // the irreducible intersection. Must be checked before the nominal
+            // arm below — a protocol name is never a hierarchy entry, so
+            // without this arm it would silently fall through to `Never`.
+            (Self::Known { class_name: an, .. }, Self::Known { class_name: bn, .. })
+                if an != bn
+                    && protocol_registry
+                        .is_some_and(|r| r.has_protocol(an) || r.has_protocol(bn)) =>
+            {
+                Self::normalize_intersection(vec![a.clone(), b.clone()], provenance)
+            }
             // Nominal-class base case (ADR 0102 §1): with a hierarchy, two
             // distinct-named `Known` classes relate via subtyping — the subclass
             // wins (`Number ∩ Integer = Integer`), and hierarchy-unrelated
@@ -883,6 +1004,56 @@ impl InferredType {
             // Distinct concrete types with no structural relationship (including
             // distinct singletons, `#foo ∩ #bar`) are disjoint.
             _ => Self::Never,
+        }
+    }
+
+    /// Builds a normalised [`Intersection`](Self::Intersection) — the sole
+    /// construction path (ADR 0102 §1), analogous to
+    /// [`make_negation`](Self::make_negation).
+    ///
+    /// - **Flattens** nested `Intersection` members into the parent (an
+    ///   `Intersection` never contains another `Intersection`).
+    /// - **Deduplicates** by structural equality.
+    /// - **Degenerate case:** if flattening/dedup leaves a single member, it
+    ///   is returned bare rather than wrapped (mirrors `union_of`'s
+    ///   single-member collapse).
+    /// - Sorted by display name so independent constructions of the same
+    ///   logical intersection produce the same stored order (equality is
+    ///   already order-independent; this makes serialisation/output
+    ///   deterministic too, mirroring `Negation`'s canonical `excluded`
+    ///   ordering).
+    fn normalize_intersection(raw: Vec<Self>, provenance: TypeProvenance) -> Self {
+        let mut flat: Vec<Self> = Vec::with_capacity(raw.len());
+        for m in raw {
+            match m {
+                Self::Intersection { members, .. } => {
+                    for inner in members {
+                        if !flat.contains(&inner) {
+                            flat.push(inner);
+                        }
+                    }
+                }
+                other => {
+                    if !flat.contains(&other) {
+                        flat.push(other);
+                    }
+                }
+            }
+        }
+        flat.sort_by(|x, y| {
+            x.display_name()
+                .unwrap_or_default()
+                .cmp(&y.display_name().unwrap_or_default())
+        });
+        match flat.len() {
+            // Unreachable from `intersect`'s call site (which always passes two
+            // distinct members), kept for a total/defensive standalone helper.
+            0 => Self::Never,
+            1 => flat.into_iter().next().unwrap_or(Self::Never),
+            _ => Self::Intersection {
+                members: flat,
+                provenance,
+            },
         }
     }
 

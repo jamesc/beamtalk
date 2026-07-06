@@ -283,6 +283,10 @@ fn collect_type_annotation_refs(
             collect_type_annotation_refs(base, name, file_path, results);
             collect_type_annotation_refs(excluded, name, file_path, results);
         }
+        TypeAnnotation::Intersection { left, right, .. } => {
+            collect_type_annotation_refs(left, name, file_path, results);
+            collect_type_annotation_refs(right, name, file_path, results);
+        }
         TypeAnnotation::ClassOf { class_name, .. } => {
             if class_name.name == name {
                 results.push(Location::new(file_path.clone(), class_name.span));

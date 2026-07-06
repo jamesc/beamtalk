@@ -823,6 +823,28 @@ pub enum TypeAnnotation {
         /// Source location of the entire difference type.
         span: Span,
     },
+    /// An intersection type (e.g., `Collection(Object) & Comparable`) — ADR
+    /// 0068 §Protocol Composition, ADR 0102 §1/§3.
+    ///
+    /// Denotes the values that are members of *both* `left` and `right`. The
+    /// `&` operator binds tighter than `|` and shares a precedence tier with
+    /// `\` (left-associative), so `Integer | Collection(Object) & Comparable`
+    /// parses as `Integer | (Collection(Object) & Comparable)` (ADR 0102 §3).
+    /// Resolves through [`InferredType::intersect`] during type resolution —
+    /// class ∩ class reduces via the hierarchy (subclass, or `Never`), while
+    /// class ∩ protocol is the irreducible case stored as
+    /// [`InferredType::Intersection`].
+    ///
+    /// [`InferredType::intersect`]: crate::semantic_analysis::type_checker::types
+    /// [`InferredType::Intersection`]: crate::semantic_analysis::type_checker::types
+    Intersection {
+        /// The left-hand operand.
+        left: Box<TypeAnnotation>,
+        /// The right-hand operand.
+        right: Box<TypeAnnotation>,
+        /// Source location of the entire intersection type.
+        span: Span,
+    },
     /// The `Self` return type — resolves to the static receiver class at call sites.
     ///
     /// Only valid in return position. Placing `Self` in parameter position is an error.
@@ -870,6 +892,7 @@ impl TypeAnnotation {
             | Self::Generic { span, .. }
             | Self::FalseOr { span, .. }
             | Self::Difference { span, .. }
+            | Self::Intersection { span, .. }
             | Self::SelfType { span }
             | Self::SelfClass { span }
             | Self::ClassOf { span, .. } => *span,
@@ -926,6 +949,17 @@ impl TypeAnnotation {
         }
     }
 
+    /// Creates an intersection type annotation (`left & right`, ADR 0068
+    /// §Protocol Composition, ADR 0102 §1/§3).
+    #[must_use]
+    pub fn intersection(left: TypeAnnotation, right: TypeAnnotation, span: Span) -> Self {
+        Self::Intersection {
+            left: Box::new(left),
+            right: Box::new(right),
+            span,
+        }
+    }
+
     /// Returns a human-readable name for this type annotation.
     ///
     /// Used by the class hierarchy to store declared state field types
@@ -968,15 +1002,28 @@ impl TypeAnnotation {
                 eco_format!("{inner_name} | False")
             }
             Self::Difference { base, excluded, .. } => {
-                // `\` binds tighter than `|`, so a union operand (only reachable
-                // via explicit grouping) is parenthesised to preserve meaning.
+                // `\` binds tighter than `|` and shares a tier with `&`, so a
+                // union or intersection operand (only reachable via explicit
+                // grouping) is parenthesised to preserve meaning.
                 let paren = |ty: &TypeAnnotation| match ty {
-                    Self::Union { .. } | Self::FalseOr { .. } => {
+                    Self::Union { .. } | Self::FalseOr { .. } | Self::Intersection { .. } => {
                         eco_format!("({})", ty.type_name())
                     }
                     _ => ty.type_name(),
                 };
                 eco_format!("{} \\ {}", paren(base), paren(excluded))
+            }
+            Self::Intersection { left, right, .. } => {
+                // `&` binds tighter than `|` and shares a tier with `\`; a
+                // union or difference operand (only reachable via explicit
+                // grouping) is parenthesised to preserve meaning.
+                let paren = |ty: &TypeAnnotation| match ty {
+                    Self::Union { .. } | Self::FalseOr { .. } | Self::Difference { .. } => {
+                        eco_format!("({})", ty.type_name())
+                    }
+                    _ => ty.type_name(),
+                };
+                eco_format!("{} & {}", paren(left), paren(right))
             }
             Self::SelfType { .. } => "Self".into(),
             Self::SelfClass { .. } => "Self class".into(),

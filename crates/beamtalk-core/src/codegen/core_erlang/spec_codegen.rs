@@ -87,6 +87,12 @@ fn type_annotation_to_spec(annotation: &TypeAnnotation) -> Document<'static> {
         // excluded set only narrows `base`, so the base spec is a sound (if
         // wider) over-approximation for the generated `-spec`.
         TypeAnnotation::Difference { base, .. } => type_annotation_to_spec(base),
+        // Intersection (`left & right`, ADR 0102 §1/§3) has no Erlang spec
+        // form either (Erlang `-spec` has no intersection-type constructor).
+        // Any single member's spec is a sound (if wider) over-approximation —
+        // a value of the intersection type is, in particular, a value of
+        // `left` — so pick the left operand, mirroring `Difference` above.
+        TypeAnnotation::Intersection { left, .. } => type_annotation_to_spec(left),
         // Self / Self class / <Name> class resolve to a receiver class at call
         // sites; in specs, treat as any()
         TypeAnnotation::SelfType { .. }

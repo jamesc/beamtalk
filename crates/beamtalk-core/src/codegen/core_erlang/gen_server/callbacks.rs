@@ -640,6 +640,13 @@ impl CoreErlangGenerator {
                     Self::type_annotation_display(excluded)
                 )
             }
+            TypeAnnotation::Intersection { left, right, .. } => {
+                format!(
+                    "{} & {}",
+                    Self::type_annotation_display(left),
+                    Self::type_annotation_display(right)
+                )
+            }
             TypeAnnotation::SelfType { .. } => "Self".to_string(),
             TypeAnnotation::SelfClass { .. } => "Self class".to_string(),
             TypeAnnotation::ClassOf { class_name, .. } => format!("{} class", class_name.name),

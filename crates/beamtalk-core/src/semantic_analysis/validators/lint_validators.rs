@@ -567,12 +567,14 @@ pub(crate) fn check_redundant_local_type_annotation(
             return;
         }
         // Widening annotations are load-bearing: keep them. A difference
-        // (`Symbol \ #foo`) narrows the RHS type, so it is load-bearing too.
+        // (`Symbol \ #foo`) or intersection (`P1 & P2`) narrows/composes the
+        // RHS type, so both are load-bearing too.
         if matches!(
             annotation,
             TypeAnnotation::Union { .. }
                 | TypeAnnotation::FalseOr { .. }
                 | TypeAnnotation::Difference { .. }
+                | TypeAnnotation::Intersection { .. }
         ) {
             return;
         }
@@ -595,6 +597,7 @@ pub(crate) fn check_redundant_local_type_annotation(
         let resolved = crate::semantic_analysis::type_checker::resolve_type_annotation(
             annotation,
             &empty_subst,
+            None,
         );
         let InferredType::Known {
             class_name: ann_class,

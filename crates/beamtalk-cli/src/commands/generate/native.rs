@@ -354,6 +354,13 @@ fn format_type_annotation(ty: &TypeAnnotation) -> String {
                 format_type_annotation(excluded)
             )
         }
+        TypeAnnotation::Intersection { left, right, .. } => {
+            format!(
+                "{} & {}",
+                format_type_annotation(left),
+                format_type_annotation(right)
+            )
+        }
         // For other variants, just produce a placeholder
         _ => "Object".to_string(),
     }

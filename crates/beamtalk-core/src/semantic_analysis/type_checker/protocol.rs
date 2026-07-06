@@ -86,20 +86,49 @@ impl TypeChecker {
                         if let Some(method) = method {
                             for (i, arg) in arguments.iter().enumerate() {
                                 if let Some(Some(expected_ty)) = method.param_types.get(i) {
-                                    if Self::is_protocol_type(
+                                    let Some(arg_type) = self.type_map.get(arg.span()) else {
+                                        continue;
+                                    };
+                                    let arg_type = arg_type.clone();
+                                    // ADR 0068 §Protocol Composition / ADR 0102
+                                    // §1/§3 (BT-2743): a parameter declared
+                                    // `:: P1 & P2` requires conformance to
+                                    // *every* protocol part. `type_name()`
+                                    // renders the annotation as `"P1 & P2"`;
+                                    // split it and check each protocol part
+                                    // independently instead of treating the
+                                    // whole compound string as one (unregistered)
+                                    // name.
+                                    if let Some(parts) =
+                                        Self::split_intersection_type_string(expected_ty)
+                                    {
+                                        for part in parts {
+                                            if Self::is_protocol_type(
+                                                part,
+                                                hierarchy,
+                                                protocol_registry,
+                                            ) {
+                                                self.check_protocol_argument_conformance(
+                                                    &arg_type,
+                                                    part,
+                                                    *span,
+                                                    hierarchy,
+                                                    protocol_registry,
+                                                );
+                                            }
+                                        }
+                                    } else if Self::is_protocol_type(
                                         expected_ty,
                                         hierarchy,
                                         protocol_registry,
                                     ) {
-                                        if let Some(arg_type) = self.type_map.get(arg.span()) {
-                                            self.check_protocol_argument_conformance(
-                                                &arg_type.clone(),
-                                                expected_ty,
-                                                *span,
-                                                hierarchy,
-                                                protocol_registry,
-                                            );
-                                        }
+                                        self.check_protocol_argument_conformance(
+                                            &arg_type,
+                                            expected_ty,
+                                            *span,
+                                            hierarchy,
+                                            protocol_registry,
+                                        );
                                     }
                                 }
                             }
@@ -333,6 +362,10 @@ impl TypeChecker {
                 self.check_bounds_in_type_annotation(base, hierarchy, protocol_registry);
                 self.check_bounds_in_type_annotation(excluded, hierarchy, protocol_registry);
             }
+            TypeAnnotation::Intersection { left, right, .. } => {
+                self.check_bounds_in_type_annotation(left, hierarchy, protocol_registry);
+                self.check_bounds_in_type_annotation(right, hierarchy, protocol_registry);
+            }
             // Simple, SelfType, Singleton — no nested generics to check
             _ => {}
         }
@@ -481,6 +514,23 @@ impl TypeChecker {
                     EcoString::from(format!("{base_str} \\ {excl_str}"))
                 }
             }
+            // Intersection renders as `A & B & …` (ADR 0102/BT-2743), matching
+            // `InferredType::display_*`. A union member is only reachable via
+            // explicit grouping; parenthesise to preserve meaning.
+            InferredType::Intersection { members, .. } => EcoString::from(
+                members
+                    .iter()
+                    .map(|m| {
+                        let rendered = Self::inferred_type_to_string(m);
+                        if matches!(m, InferredType::Union { .. }) {
+                            format!("({rendered})")
+                        } else {
+                            rendered.to_string()
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" & "),
+            ),
         }
     }
 

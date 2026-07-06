@@ -1022,8 +1022,15 @@ impl TypeChecker {
                         .push(diag.with_category(DiagnosticCategory::Type));
                 }
                 // A `Negation` (`Symbol \ #foo`) is a narrowed `Symbol`; skip
-                // conservatively like `Dynamic`/`Never` (ADR 0102).
-                InferredType::Dynamic(_) | InferredType::Never | InferredType::Negation { .. } => {}
+                // conservatively like `Dynamic`/`Never` (ADR 0102). An
+                // `Intersection` (`P1 & P2`, ADR 0102/BT-2743) as the
+                // *argument's own* inferred type is likewise skipped — see
+                // `check_protocol_argument_conformance` for the flagship
+                // "parameter declared `P1 & P2`" conformance check.
+                InferredType::Dynamic(_)
+                | InferredType::Never
+                | InferredType::Negation { .. }
+                | InferredType::Intersection { .. } => {}
             }
         }
     }
@@ -1179,10 +1186,13 @@ impl TypeChecker {
             // `Meta` is unreachable in practice; skip checking (like `Dynamic`)
             // to stay safe should a future annotation resolve to a metatype.
             // A `Negation` (`Symbol \ #foo`) is a narrowed `Symbol`; skip like
-            // `Meta`/`Dynamic` (ADR 0102).
+            // `Meta`/`Dynamic` (ADR 0102). An `Intersection` (`P1 & P2`, ADR
+            // 0102/BT-2743) declared return type has no single `Known` body
+            // shape to compare against here; skip conservatively too.
             InferredType::Meta { .. }
             | InferredType::Dynamic(_)
-            | InferredType::Negation { .. } => {}
+            | InferredType::Negation { .. }
+            | InferredType::Intersection { .. } => {}
         }
     }
 
@@ -1498,8 +1508,13 @@ impl TypeChecker {
                 }
             }
             // A `Negation` (`Symbol \ #foo`) is a narrowed `Symbol`; skip
-            // conservatively like `Dynamic`/`Never` (ADR 0102).
-            InferredType::Dynamic(_) | InferredType::Never | InferredType::Negation { .. } => {}
+            // conservatively like `Dynamic`/`Never` (ADR 0102). Likewise an
+            // `Intersection` (`P1 & P2`, ADR 0102/BT-2743) as the value's own
+            // inferred type — skip conservatively.
+            InferredType::Dynamic(_)
+            | InferredType::Never
+            | InferredType::Negation { .. }
+            | InferredType::Intersection { .. } => {}
         }
     }
 
@@ -1925,8 +1940,17 @@ impl TypeChecker {
             // protocol is out of scope for Slice 1 — skip the metatype rather
             // than emit a false positive (same as `Never`, which diverges).
             // A `Negation` (`Symbol \ #foo`) is a narrowed `Symbol`; skip like
-            // `Meta`/`Never` (ADR 0102).
-            InferredType::Meta { .. } | InferredType::Never | InferredType::Negation { .. } => {}
+            // `Meta`/`Never` (ADR 0102). An `Intersection` (`P1 & P2`, ADR
+            // 0102/BT-2743) as the *argument's own* inferred type is a rarer,
+            // deeper case (the value's declared type is itself a stored
+            // intersection) — skip conservatively rather than guess which
+            // member to check; the flagship "parameter declared `P1 & P2`"
+            // case is handled by splitting `expected_protocol` in
+            // `check_protocol_conformance_in_expr`, not here.
+            InferredType::Meta { .. }
+            | InferredType::Never
+            | InferredType::Negation { .. }
+            | InferredType::Intersection { .. } => {}
         }
     }
 
@@ -1946,6 +1970,42 @@ impl TypeChecker {
         // or only present as a synthetic protocol class entry (added by register_protocol_classes)
         protocol_registry.has_protocol(base_name)
             && (!hierarchy.has_class(base_name) || hierarchy.is_protocol_class(base_name))
+    }
+
+    /// Splits a `type_name()`-rendered intersection string (`"P1 & P2 & …"`,
+    /// ADR 0068 §Protocol Composition / ADR 0102 §1/§3, BT-2743) into its
+    /// top-level `&`-joined parts.
+    ///
+    /// Respects parenthesis nesting so a generic type argument's own
+    /// annotation (which may itself contain `(`/`)`) is never mistaken for a
+    /// top-level split point. Returns `None` when the string has no
+    /// top-level `&` — i.e. it isn't an intersection annotation, and callers
+    /// should fall back to single-type handling (`is_protocol_type` /
+    /// `check_protocol_argument_conformance`).
+    ///
+    /// Used by [`check_protocol_conformance_in_expr`](super::protocol::TypeChecker::check_protocol_conformance_in_expr)
+    /// so a parameter declared `:: P1 & P2` is checked for conformance to
+    /// **both** protocol parts, per ADR 0068's protocol-composition use case.
+    pub(super) fn split_intersection_type_string(type_name: &str) -> Option<Vec<&str>> {
+        let mut depth: usize = 0;
+        let mut parts = Vec::new();
+        let mut start = 0usize;
+        for (i, byte) in type_name.bytes().enumerate() {
+            match byte {
+                b'(' => depth += 1,
+                b')' => depth = depth.saturating_sub(1),
+                b'&' if depth == 0 => {
+                    parts.push(type_name[start..i].trim());
+                    start = i + 1;
+                }
+                _ => {}
+            }
+        }
+        if parts.is_empty() {
+            return None;
+        }
+        parts.push(type_name[start..].trim());
+        Some(parts)
     }
 
     /// Check type parameter bounds for a generic type application (ADR 0068 Phase 2d).
@@ -2075,11 +2135,16 @@ impl TypeChecker {
                 // its class-side bound conformance is out of scope here — skip.
                 // Dynamic/Never values: can't verify bounds (skip silently).
                 // A `Negation` (`Symbol \ #foo`) is a narrowed `Symbol`; skip
-                // like `Meta`/`Dynamic`/`Never` (ADR 0102).
+                // like `Meta`/`Dynamic`/`Never` (ADR 0102). An `Intersection`
+                // (`P1 & P2`, ADR 0102/BT-2743) as a type argument is likewise
+                // skipped — a bound is a single protocol name, and checking
+                // it against one member of the intersection risks a false
+                // positive when a *different* member is the one that conforms.
                 InferredType::Meta { .. }
                 | InferredType::Dynamic(_)
                 | InferredType::Never
-                | InferredType::Negation { .. } => {}
+                | InferredType::Negation { .. }
+                | InferredType::Intersection { .. } => {}
             }
         }
     }

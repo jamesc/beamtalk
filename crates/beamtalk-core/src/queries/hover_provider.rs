@@ -450,6 +450,13 @@ fn type_annotation_label(type_annotation: &crate::ast::TypeAnnotation) -> String
                 type_annotation_label(excluded)
             )
         }
+        crate::ast::TypeAnnotation::Intersection { left, right, .. } => {
+            format!(
+                "{} & {}",
+                type_annotation_label(left),
+                type_annotation_label(right)
+            )
+        }
         crate::ast::TypeAnnotation::SelfType { .. } => "Self".to_string(),
         crate::ast::TypeAnnotation::SelfClass { .. } => "Self class".to_string(),
         crate::ast::TypeAnnotation::ClassOf { class_name, .. } => {

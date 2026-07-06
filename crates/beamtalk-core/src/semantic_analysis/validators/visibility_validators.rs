@@ -314,6 +314,10 @@ fn check_type_annotation_cross_package(
             check_type_annotation_cross_package(base, current_pkg, hierarchy, diagnostics);
             check_type_annotation_cross_package(excluded, current_pkg, hierarchy, diagnostics);
         }
+        TypeAnnotation::Intersection { left, right, .. } => {
+            check_type_annotation_cross_package(left, current_pkg, hierarchy, diagnostics);
+            check_type_annotation_cross_package(right, current_pkg, hierarchy, diagnostics);
+        }
         TypeAnnotation::ClassOf { class_name, .. } => {
             check_cross_package_ref(
                 &class_name.name,
@@ -389,6 +393,7 @@ fn check_leaked_visibility_class(
 ///
 /// An internal class from the *same* package appearing in the public signature
 /// of a public class is a leaked-visibility error.
+#[allow(clippy::too_many_lines)] // ADR 0102/BT-2743 added an `Intersection` recursion arm
 fn check_type_annotation_leaked(
     ty: &TypeAnnotation,
     class_name: &ecow::EcoString,
@@ -465,6 +470,24 @@ fn check_type_annotation_leaked(
             );
             check_type_annotation_leaked(
                 excluded,
+                class_name,
+                method_selector,
+                current_pkg,
+                hierarchy,
+                diagnostics,
+            );
+        }
+        TypeAnnotation::Intersection { left, right, .. } => {
+            check_type_annotation_leaked(
+                left,
+                class_name,
+                method_selector,
+                current_pkg,
+                hierarchy,
+                diagnostics,
+            );
+            check_type_annotation_leaked(
+                right,
                 class_name,
                 method_selector,
                 current_pkg,

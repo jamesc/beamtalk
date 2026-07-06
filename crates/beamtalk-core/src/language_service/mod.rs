@@ -1023,6 +1023,10 @@ impl SimpleLanguageService {
                 Self::find_identifier_in_type_annotation(base, offset_val)
                     .or_else(|| Self::find_identifier_in_type_annotation(excluded, offset_val))
             }
+            TypeAnnotation::Intersection { left, right, .. } => {
+                Self::find_identifier_in_type_annotation(left, offset_val)
+                    .or_else(|| Self::find_identifier_in_type_annotation(right, offset_val))
+            }
             TypeAnnotation::ClassOf { class_name, .. } => {
                 if offset_val >= class_name.span.start() && offset_val < class_name.span.end() {
                     Some((class_name.clone(), class_name.span))
