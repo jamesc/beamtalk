@@ -532,36 +532,50 @@ cache_canonical(Other) -> Other.
 
 %% git_diff/1 with a binary path goes through the full stack and returns a
 %% #{worktree, staged} map. An unstaged modification produces a non-empty
-%% worktree diff and an empty staged diff.
+%% worktree diff and an empty staged diff; the diff must name the file.
 git_diff_returns_worktree_diff_test() ->
     with_repo_root_project(fun(Top, RelFile) ->
         with_workspace_meta(Top, <<"git_diff_test">>, fun() ->
             {ok, Diff} = beamtalk_git:git_diff(RelFile),
             ?assertNotEqual(<<>>, maps:get(worktree, Diff)),
-            ?assertEqual(<<>>, maps:get(staged, Diff))
+            ?assertEqual(<<>>, maps:get(staged, Diff)),
+            ?assertNotEqual(nomatch, binary:match(maps:get(worktree, Diff), RelFile))
+        end)
+    end).
+
+%% git_diff/1 after staging: staged diff is non-empty and names the file; the
+%% worktree diff is empty because the staged and working-tree versions match.
+git_diff_returns_staged_diff_test() ->
+    with_repo_root_project(fun(Top, RelFile) ->
+        with_workspace_meta(Top, <<"git_diff_staged_test">>, fun() ->
+            {ok, nil} = beamtalk_git:git_stage(RelFile),
+            {ok, Diff} = beamtalk_git:git_diff(RelFile),
+            ?assertEqual(<<>>, maps:get(worktree, Diff)),
+            ?assertNotEqual(<<>>, maps:get(staged, Diff)),
+            ?assertNotEqual(nomatch, binary:match(maps:get(staged, Diff), RelFile))
         end)
     end).
 
 %% git_log/1 with a positive integer runs through the full stack and returns a
-%% list of commit maps with the expected keys.
+%% list of commit maps with the expected keys and non-empty values.
 git_log_returns_commits_test() ->
     with_repo_root_project(fun(Top, _RelFile) ->
         with_workspace_meta(Top, <<"git_log_test">>, fun() ->
             {ok, Commits} = beamtalk_git:git_log(1),
             ?assertEqual(1, length(Commits)),
             [Commit] = Commits,
-            ?assert(is_map(Commit)),
-            ?assert(maps:is_key(sha, Commit)),
-            ?assert(maps:is_key(short_sha, Commit)),
-            ?assert(maps:is_key(subject, Commit)),
-            ?assert(maps:is_key(author, Commit)),
-            ?assert(maps:is_key(ts, Commit))
+            ?assertEqual(<<"init">>, maps:get(subject, Commit)),
+            ?assertEqual(<<"Test">>, maps:get(author, Commit)),
+            ?assertEqual(40, byte_size(maps:get(sha, Commit))),
+            ?assert(byte_size(maps:get(short_sha, Commit)) >= 7),
+            ?assert(byte_size(maps:get(ts, Commit)) > 0)
         end)
     end).
 
 %% git_stage/1 then git_unstage/1 exercise the mutate/3 helper through the full
 %% stack. After staging the modified file appears in the index column; after
-%% unstaging it returns to unmodified index.
+%% unstaging the file returns to unmodified index but the worktree change is
+%% preserved (so the file is still present in status with worktree =/= unmodified).
 git_stage_and_unstage_via_workspace_meta_test() ->
     with_repo_root_project(fun(Top, RelFile) ->
         with_workspace_meta(Top, <<"git_stage_test">>, fun() ->
@@ -578,9 +592,16 @@ git_stage_and_unstage_via_workspace_meta_test() ->
             ),
             ?assertEqual({ok, nil}, beamtalk_git:git_unstage(RelFile)),
             {ok, Status2} = beamtalk_git:git_status(),
+            %% File must still be present (worktree change preserved) with an
+            %% unmodified index (no longer staged). A vacuous lists:all on an
+            %% empty list would give a false positive — use lists:any instead.
             ?assert(
-                lists:all(
-                    fun(F) -> maps:get(index, F) =:= unmodified end,
+                lists:any(
+                    fun(F) ->
+                        maps:get(path, F) =:= RelFile andalso
+                            maps:get(index, F) =:= unmodified andalso
+                            maps:get(worktree, F) =/= unmodified
+                    end,
                     maps:get(files, Status2)
                 )
             )
