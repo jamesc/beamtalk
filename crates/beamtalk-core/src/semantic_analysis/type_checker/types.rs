@@ -5,6 +5,7 @@
 //!
 //! **DDD Context:** Semantic Analysis
 
+use crate::semantic_analysis::ClassHierarchy;
 use crate::source_analysis::Span;
 use ecow::EcoString;
 
@@ -599,6 +600,51 @@ impl InferredType {
         matches!(ty, Self::Known { class_name, .. } if class_name == "Symbol")
     }
 
+    /// Builds a canonical [`Negation`](Self::Negation) — the sole construction
+    /// path, so every `Negation` in the system carries a **canonically ordered**
+    /// `excluded` set (ADR 0102 §1: members sorted ascending by `class_name`).
+    ///
+    /// Order-independent `PartialEq` already treats `Symbol \ (#a | #b)` and
+    /// `Symbol \ (#b | #a)` as equal; canonical ordering additionally makes the
+    /// stored form *deterministic* across serialisation round-trips and
+    /// independent implementations, so `Union` dedup and diagnostic output are
+    /// stable.
+    fn make_negation(base: Self, excluded: Self, provenance: TypeProvenance) -> Self {
+        Self::Negation {
+            base: Box::new(base),
+            excluded: Box::new(Self::canonical_excluded(excluded)),
+            provenance,
+        }
+    }
+
+    /// Sorts a `Negation`'s `excluded` union members ascending by `class_name`
+    /// (ADR 0102 §1). A lone singleton (or any non-`Union`) is already canonical.
+    fn canonical_excluded(excluded: Self) -> Self {
+        match excluded {
+            Self::Union {
+                mut members,
+                provenance,
+            } => {
+                members.sort_by(|x, y| Self::excluded_sort_key(x).cmp(&Self::excluded_sort_key(y)));
+                Self::Union {
+                    members,
+                    provenance,
+                }
+            }
+            other => other,
+        }
+    }
+
+    /// Sort key for a canonical `excluded` member — the singleton's
+    /// `class_name` (e.g. `#foo`). Non-`Known` members fall back to their
+    /// display name so ordering is still total.
+    fn excluded_sort_key(member: &Self) -> EcoString {
+        match member {
+            Self::Known { class_name, .. } => class_name.clone(),
+            other => other.display_name().unwrap_or_default(),
+        }
+    }
+
     /// Flattens `excluded` (a singleton or a normalised union of singletons)
     /// into its constituent members.
     fn excluded_members(excluded: &Self) -> Vec<Self> {
@@ -670,7 +716,9 @@ impl InferredType {
             // intersection (`E1 ∩ E2 ∩ …`).
             let mut merged = neg_excludeds[0].clone();
             for e in &neg_excludeds[1..] {
-                merged = Self::intersect(&merged, e, provenance);
+                // Structural singleton merge only — no hierarchy needed (and
+                // none is threaded through `union_of`).
+                merged = Self::intersect(&merged, e, provenance, None);
             }
             // Add back any excluded singleton that also appears bare (absorption).
             let remaining: Vec<Self> = if matches!(merged, Self::Never) {
@@ -688,11 +736,11 @@ impl InferredType {
                 // `Symbol \ {} = Symbol`.
                 Self::known("Symbol")
             } else {
-                Self::Negation {
-                    base: Box::new(Self::known("Symbol")),
-                    excluded: Box::new(Self::union_of(&remaining)),
+                Self::make_negation(
+                    Self::known("Symbol"),
+                    Self::union_of(&remaining),
                     provenance,
-                }
+                )
             }
         };
 
@@ -710,10 +758,22 @@ impl InferredType {
     /// Normalising **intersection** `A ∩ B` (ADR 0102 §1).
     ///
     /// Symbol-singleton membership IS modelled — a singleton `#foo` is a subtype
-    /// of `Symbol`, so `Symbol ∩ #foo = #foo`. Only the *general* nominal class
-    /// hierarchy (e.g. `Number ∩ Integer`) is out of scope: two ordinary
-    /// distinct `Known` classes are treated as disjoint (`Integer ∩ #infinity =
-    /// Never`, `Integer ∩ String = Never`).
+    /// of `Symbol`, so `Symbol ∩ #foo = #foo`. The general **nominal-class base
+    /// case** is also modelled *when a [`ClassHierarchy`] is supplied*
+    /// (`hierarchy = Some(_)`): `intersect(A, B) = B` when `B <: A`
+    /// (e.g. `Number ∩ Integer = Integer`), `= A` when `A <: B`, and `= Never`
+    /// when `A` and `B` are hierarchy-unrelated (single inheritance ⇒ unrelated
+    /// classes are disjoint, so `Integer ∩ String = Never`). Only nominal
+    /// *difference* (`Object \ Number`) stays out of scope (see
+    /// [`difference`](Self::difference)).
+    ///
+    /// The `hierarchy` argument is **optional** so the internal structural
+    /// callers (`union_of`'s complement-merge in
+    /// [`absorb_negations`](Self::absorb_negations)) can pass `None` — they only
+    /// merge singletons, which never need the hierarchy. When `None`, two
+    /// distinct non-symbol `Known` classes fall through to `Never` (the previous
+    /// behaviour). Narrowing call sites pass `Some(hierarchy)` so class narrowing
+    /// reduces correctly.
     ///
     /// Rules:
     /// - **Dynamic first:** `intersect(Dynamic, P) = P` (Dynamic acts as the top
@@ -721,10 +781,14 @@ impl InferredType {
     ///   before identity/Object so `intersect(Dynamic, Object) = Object`.
     /// - `intersect(T, T) = T`; `intersect(T, Never) = Never`;
     ///   `intersect(T, Object) = T`.
-    /// - **Intersect through a complement:** `intersect(Negation{B, E}, P) =
-    ///   difference(intersect(B, P), E)` — a `Negation` never reaches the
-    ///   disjoint default (needed for chained narrowing).
+    /// - **Intersect through a complement (both orders):**
+    ///   `intersect(Negation{B, E}, P) = difference(intersect(B, P), E)` and
+    ///   symmetrically `intersect(P, Negation{B, E}) =
+    ///   difference(intersect(P, B), E)` — a `Negation` never reaches the
+    ///   disjoint default (needed for chained narrowing / Phase 2 `\` syntax).
     /// - **Symbol-singleton membership:** `intersect(Symbol, #foo) = #foo`.
+    /// - **Nominal-class base case** (`hierarchy = Some`): `B <: A ⇒ B`,
+    ///   `A <: B ⇒ A`, unrelated ⇒ `Never`.
     /// - **LHS-union distribution:** `intersect(T1 | … | Tn, P) =
     ///   (T1 ∩ P) | … | (Tn ∩ P)`, e.g. `intersect(Integer | #infinity,
     ///   #infinity)` normalises to the bare singleton `#infinity`.
@@ -734,7 +798,12 @@ impl InferredType {
     /// The result is re-normalised through [`union_of`](Self::union_of).
     // Consumed by the narrowing rules landing later in ADR 0102's epic (BT-2738).
     #[allow(dead_code)]
-    pub(crate) fn intersect(a: &Self, b: &Self, provenance: TypeProvenance) -> Self {
+    pub(crate) fn intersect(
+        a: &Self,
+        b: &Self,
+        provenance: TypeProvenance,
+        hierarchy: Option<&ClassHierarchy>,
+    ) -> Self {
         match (a, b) {
             // Dynamic FIRST (before identity/Object): `intersect(Dynamic, P) = P`
             // refines the unknown, so `intersect(Dynamic, Object) = Object`.
@@ -745,19 +814,25 @@ impl InferredType {
             // Object (top) is the identity: `T ∩ Object = T`.
             (_, other) if Self::is_object(other) => a.clone(),
             (other, _) if Self::is_object(other) => b.clone(),
-            // Intersect through a complement: `(B \ E) ∩ P = (B ∩ P) \ E`.
-            // A `Negation` must never fall through to the disjoint default.
-            (Self::Negation { base, excluded, .. }, _) => {
-                Self::difference(&Self::intersect(base, b, provenance), excluded, provenance)
-            }
-            (_, Self::Negation { base, excluded, .. }) => {
-                Self::difference(&Self::intersect(a, base, provenance), excluded, provenance)
-            }
+            // Intersect through a complement (both orders): `(B \ E) ∩ P =
+            // (B ∩ P) \ E`. A `Negation` must never fall through to the disjoint
+            // default (the `(Known, Negation)` case fires in Phase 2's `\`
+            // syntax; missing it silently loses narrowing).
+            (Self::Negation { base, excluded, .. }, _) => Self::difference(
+                &Self::intersect(base, b, provenance, hierarchy),
+                excluded,
+                provenance,
+            ),
+            (_, Self::Negation { base, excluded, .. }) => Self::difference(
+                &Self::intersect(a, base, provenance, hierarchy),
+                excluded,
+                provenance,
+            ),
             // LHS-union distribution.
             (Self::Union { members, .. }, _) => {
                 let parts: Vec<Self> = members
                     .iter()
-                    .map(|m| Self::intersect(m, b, provenance))
+                    .map(|m| Self::intersect(m, b, provenance, hierarchy))
                     .collect();
                 Self::union_of(&parts)
             }
@@ -765,12 +840,13 @@ impl InferredType {
             (_, Self::Union { members, .. }) => {
                 let parts: Vec<Self> = members
                     .iter()
-                    .map(|m| Self::intersect(a, m, provenance))
+                    .map(|m| Self::intersect(a, m, provenance, hierarchy))
                     .collect();
                 Self::union_of(&parts)
             }
             // Symbol-singleton membership: `#foo <: Symbol`, so the narrower
-            // singleton is kept in both orders.
+            // singleton is kept in both orders. Checked before the general
+            // nominal case because singletons are not entries in the hierarchy.
             (Self::Known { .. }, Self::Known { class_name: s, .. })
                 if Self::is_symbol_base(a) && Self::is_symbol_singleton(s) =>
             {
@@ -783,10 +859,40 @@ impl InferredType {
             }
             // `T ∩ T = T` (exact structural equality, generics included).
             _ if a == b => a.clone(),
+            // Nominal-class base case (ADR 0102 §1): with a hierarchy, two
+            // distinct-named `Known` classes relate via subtyping — the subclass
+            // wins (`Number ∩ Integer = Integer`), and hierarchy-unrelated
+            // classes are disjoint (`Integer ∩ String = Never`). Without a
+            // hierarchy, or when the names match but generics differ (invariant
+            // args ⇒ disjoint), fall through to `Never` — the previous
+            // structural-only behaviour.
+            (Self::Known { class_name: an, .. }, Self::Known { class_name: bn, .. }) => {
+                match hierarchy {
+                    Some(h) if an != bn => {
+                        if Self::is_nominal_subtype(h, bn, an) {
+                            b.clone()
+                        } else if Self::is_nominal_subtype(h, an, bn) {
+                            a.clone()
+                        } else {
+                            Self::Never
+                        }
+                    }
+                    _ => Self::Never,
+                }
+            }
             // Distinct concrete types with no structural relationship (including
             // distinct singletons, `#foo ∩ #bar`) are disjoint.
             _ => Self::Never,
         }
+    }
+
+    /// Returns `true` if `sub` is `sup` or a (transitive) subclass of `sup` in
+    /// the nominal class hierarchy. Symbol singletons (`#foo`) are not entries in
+    /// the hierarchy, so this returns `false` for them (their membership is
+    /// handled by the explicit `Symbol`-singleton arms in
+    /// [`intersect`](Self::intersect)).
+    fn is_nominal_subtype(hierarchy: &ClassHierarchy, sub: &str, sup: &str) -> bool {
+        sub == sup || hierarchy.superclass_chain(sub).iter().any(|c| c == sup)
     }
 
     /// Normalising **difference** `A \ B` (ADR 0102 §1).
@@ -842,11 +948,11 @@ impl InferredType {
                 },
                 Self::Known { class_name, .. },
             ) if Self::is_symbol_base(base) && Self::is_symbol_singleton(class_name) => {
-                Self::Negation {
-                    base: base.clone(),
-                    excluded: Box::new(Self::union_of(&[(**excluded).clone(), b.clone()])),
-                    provenance: *neg_prov,
-                }
+                Self::make_negation(
+                    (**base).clone(),
+                    Self::union_of(&[(**excluded).clone(), b.clone()]),
+                    *neg_prov,
+                )
             }
             // `Symbol \ #foo = Negation{Symbol, #foo}`.
             (
@@ -854,11 +960,9 @@ impl InferredType {
                 Self::Known {
                     class_name: sym, ..
                 },
-            ) if class_name == "Symbol" && Self::is_symbol_singleton(sym) => Self::Negation {
-                base: Box::new(a.clone()),
-                excluded: Box::new(b.clone()),
-                provenance,
-            },
+            ) if class_name == "Symbol" && Self::is_symbol_singleton(sym) => {
+                Self::make_negation(a.clone(), b.clone(), provenance)
+            }
             // `T \ T = Never` (exact structural equality, generics included).
             _ if a == b => Self::Never,
             // Nothing structurally removable — no-op (nominal-class differences

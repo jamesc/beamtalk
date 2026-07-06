@@ -7,12 +7,14 @@
 //! Covers ADR 0102 §1 exactly: dedup, the full absorption-law set (restoration,
 //! partial, same-base complement union), LHS/RHS distribution and fold,
 //! same-base flattening, exact-generics matching, symbol-singleton membership,
-//! intersect-through-a-complement, the Dynamic asymmetry / rule-priority
-//! regression, and termination on arbitrary inputs.
+//! the nominal-class base case (via the class hierarchy), canonical `excluded`
+//! ordering, intersect-through-a-complement, the Dynamic asymmetry / rule-priority
+//! regression, commutativity, and termination on arbitrary inputs.
 
 use super::super::*;
 use super::common::*;
 
+use crate::semantic_analysis::ClassHierarchy;
 use proptest::prelude::*;
 
 // ── Fixtures ────────────────────────────────────────────────────────────
@@ -52,23 +54,29 @@ fn negation(excluded: InferredType) -> InferredType {
     }
 }
 
+/// The built-in class hierarchy — carries `Integer <: Number`, `String`, etc.,
+/// so the nominal-class base case of `intersect` can be exercised.
+fn hierarchy() -> ClassHierarchy {
+    ClassHierarchy::with_builtins()
+}
+
 // ── intersect: base rules ───────────────────────────────────────────────
 
 #[test]
 fn intersect_same_type_is_identity() {
     let t = InferredType::known("Integer");
-    assert_eq!(InferredType::intersect(&t, &t, prov()), t);
+    assert_eq!(InferredType::intersect(&t, &t, prov(), None), t);
 }
 
 #[test]
 fn intersect_with_never_is_never() {
     let t = InferredType::known("Integer");
     assert_eq!(
-        InferredType::intersect(&t, &InferredType::Never, prov()),
+        InferredType::intersect(&t, &InferredType::Never, prov(), None),
         InferredType::Never
     );
     assert_eq!(
-        InferredType::intersect(&InferredType::Never, &t, prov()),
+        InferredType::intersect(&InferredType::Never, &t, prov(), None),
         InferredType::Never
     );
 }
@@ -76,8 +84,8 @@ fn intersect_with_never_is_never() {
 #[test]
 fn intersect_with_object_is_identity() {
     let t = InferredType::known("Integer");
-    assert_eq!(InferredType::intersect(&t, &object(), prov()), t);
-    assert_eq!(InferredType::intersect(&object(), &t, prov()), t);
+    assert_eq!(InferredType::intersect(&t, &object(), prov(), None), t);
+    assert_eq!(InferredType::intersect(&object(), &t, prov(), None), t);
 }
 
 #[test]
@@ -87,7 +95,8 @@ fn intersect_distinct_concrete_types_are_disjoint() {
         InferredType::intersect(
             &InferredType::known("Integer"),
             &singleton("#infinity"),
-            prov()
+            prov(),
+            None
         ),
         InferredType::Never
     );
@@ -98,7 +107,7 @@ fn intersect_lhs_union_distributes_to_bare_singleton() {
     // ADR 0102 §1: `intersect(Integer | #infinity, #infinity)` normalises to
     // the *bare* singleton `#infinity`, never a stored wrapper.
     let lhs = InferredType::union_of(&[InferredType::known("Integer"), singleton("#infinity")]);
-    let result = InferredType::intersect(&lhs, &singleton("#infinity"), prov());
+    let result = InferredType::intersect(&lhs, &singleton("#infinity"), prov(), None);
     assert_eq!(result, singleton("#infinity"));
     assert!(
         matches!(result, InferredType::Known { .. }),
@@ -111,9 +120,72 @@ fn intersect_rhs_union_folds() {
     // `intersect(T, A | B) = union_of(intersect(T,A), intersect(T,B))`.
     let t = InferredType::union_of(&[InferredType::known("Integer"), singleton("#a")]);
     let rhs = InferredType::union_of(&[singleton("#a"), singleton("#b")]);
-    let result = InferredType::intersect(&t, &rhs, prov());
+    let result = InferredType::intersect(&t, &rhs, prov(), None);
     // `#a` survives (present on both sides); `#b`/`Integer` are disjoint → gone.
     assert_eq!(result, singleton("#a"));
+}
+
+// ── intersect: nominal-class base case (GAP 1, ADR 0102 §1) ──────────────
+
+#[test]
+fn intersect_nominal_subclass_reduces_to_subclass() {
+    // `Number ∩ Integer = Integer` (B <: A ⇒ B), symmetrically A <: B ⇒ A.
+    // Requires a hierarchy — `Integer <: Number` in the builtins.
+    let h = hierarchy();
+    let number = InferredType::known("Number");
+    let integer = InferredType::known("Integer");
+    assert_eq!(
+        InferredType::intersect(&number, &integer, prov(), Some(&h)),
+        integer
+    );
+    assert_eq!(
+        InferredType::intersect(&integer, &number, prov(), Some(&h)),
+        integer
+    );
+}
+
+#[test]
+fn intersect_nominal_unrelated_is_never() {
+    // Hierarchy-unrelated classes are disjoint (single inheritance):
+    // `Integer ∩ String = Never`, `Integer ∩ #foo = Never`.
+    let h = hierarchy();
+    let integer = InferredType::known("Integer");
+    let string = InferredType::known("String");
+    assert_eq!(
+        InferredType::intersect(&integer, &string, prov(), Some(&h)),
+        InferredType::Never
+    );
+    assert_eq!(
+        InferredType::intersect(&integer, &singleton("#foo"), prov(), Some(&h)),
+        InferredType::Never
+    );
+}
+
+#[test]
+fn intersect_symbol_singleton_preserved_with_hierarchy() {
+    // The `Symbol ∩ #foo = #foo` behaviour survives the nominal path —
+    // singletons are not hierarchy entries, so the explicit symbol arms win.
+    let h = hierarchy();
+    assert_eq!(
+        InferredType::intersect(&symbol(), &singleton("#foo"), prov(), Some(&h)),
+        singleton("#foo")
+    );
+    assert_eq!(
+        InferredType::intersect(&singleton("#foo"), &symbol(), prov(), Some(&h)),
+        singleton("#foo")
+    );
+}
+
+#[test]
+fn intersect_without_hierarchy_keeps_distinct_classes_disjoint() {
+    // GAP 1: `None` preserves the old structural-only behaviour — even a real
+    // subclass relation is invisible without a hierarchy.
+    let number = InferredType::known("Number");
+    let integer = InferredType::known("Integer");
+    assert_eq!(
+        InferredType::intersect(&number, &integer, prov(), None),
+        InferredType::Never
+    );
 }
 
 // ── intersect: rule priority (Dynamic first) ────────────────────────────
@@ -123,11 +195,11 @@ fn intersect_dynamic_is_checked_before_object() {
     // Gap 1: the `Dynamic` arm must win over the generic `T ∩ Object = T`
     // identity — `intersect(Dynamic, Object)` refines to `Object`, not `Dynamic`.
     assert_eq!(
-        InferredType::intersect(&dynamic(), &object(), prov()),
+        InferredType::intersect(&dynamic(), &object(), prov(), None),
         object()
     );
     assert_eq!(
-        InferredType::intersect(&object(), &dynamic(), prov()),
+        InferredType::intersect(&object(), &dynamic(), prov(), None),
         object()
     );
 }
@@ -139,11 +211,11 @@ fn intersect_symbol_with_singleton_keeps_singleton() {
     // A symbol singleton is a subtype of `Symbol`, so the narrower singleton
     // is kept in both orders.
     assert_eq!(
-        InferredType::intersect(&symbol(), &singleton("#foo"), prov()),
+        InferredType::intersect(&symbol(), &singleton("#foo"), prov(), None),
         singleton("#foo")
     );
     assert_eq!(
-        InferredType::intersect(&singleton("#foo"), &symbol(), prov()),
+        InferredType::intersect(&singleton("#foo"), &symbol(), prov(), None),
         singleton("#foo")
     );
 }
@@ -152,7 +224,7 @@ fn intersect_symbol_with_singleton_keeps_singleton() {
 fn intersect_distinct_singletons_are_disjoint() {
     // Distinct singleton disjointness is preserved.
     assert_eq!(
-        InferredType::intersect(&singleton("#foo"), &singleton("#bar"), prov()),
+        InferredType::intersect(&singleton("#foo"), &singleton("#bar"), prov(), None),
         InferredType::Never
     );
 }
@@ -164,7 +236,7 @@ fn intersect_complement_keeps_unexcluded_singleton() {
     // `intersect(Symbol \ #foo, #bar) = #bar` (#bar is a symbol, not excluded).
     let neg = negation(singleton("#foo"));
     assert_eq!(
-        InferredType::intersect(&neg, &singleton("#bar"), prov()),
+        InferredType::intersect(&neg, &singleton("#bar"), prov(), None),
         singleton("#bar")
     );
 }
@@ -174,7 +246,7 @@ fn intersect_complement_excludes_matching_singleton() {
     // `intersect(Symbol \ #foo, #foo) = Never` (#foo is excluded).
     let neg = negation(singleton("#foo"));
     assert_eq!(
-        InferredType::intersect(&neg, &singleton("#foo"), prov()),
+        InferredType::intersect(&neg, &singleton("#foo"), prov(), None),
         InferredType::Never
     );
 }
@@ -184,7 +256,7 @@ fn intersect_complement_with_union() {
     // `intersect(Symbol \ #foo, #foo | #bar | #baz) = #bar | #baz`.
     let neg = negation(singleton("#foo"));
     let rhs = InferredType::union_of(&[singleton("#foo"), singleton("#bar"), singleton("#baz")]);
-    let result = InferredType::intersect(&neg, &rhs, prov());
+    let result = InferredType::intersect(&neg, &rhs, prov(), None);
     assert_eq!(
         result,
         InferredType::union_of(&[singleton("#bar"), singleton("#baz")])
@@ -196,7 +268,7 @@ fn intersect_complement_lhs_is_symmetric() {
     // `intersect(#bar, Symbol \ #foo) = #bar` — Negation on the RHS too.
     let neg = negation(singleton("#foo"));
     assert_eq!(
-        InferredType::intersect(&singleton("#bar"), &neg, prov()),
+        InferredType::intersect(&singleton("#bar"), &neg, prov(), None),
         singleton("#bar")
     );
 }
@@ -208,6 +280,7 @@ fn intersect_two_complements_same_base() {
         &negation(singleton("#a")),
         &negation(singleton("#b")),
         prov(),
+        None,
     );
     let expected = negation(InferredType::union_of(&[singleton("#a"), singleton("#b")]));
     assert_eq!(result, expected);
@@ -235,18 +308,28 @@ fn difference_by_never_is_identity() {
 #[test]
 fn dynamic_asymmetry_regression() {
     // ADR 0102 §1, explicitly NOT union_of's Dynamic-absorbs rule:
-    //   intersect(Dynamic, P) = P
+    //   intersect(Dynamic, P) = P     (both orders)
     //   difference(Dynamic, P) = Dynamic
     //   difference(T, Dynamic) = T
     let p = InferredType::known("Integer");
-    assert_eq!(InferredType::intersect(&dynamic(), &p, prov()), p);
-    assert_eq!(InferredType::intersect(&p, &dynamic(), prov()), p);
+    assert_eq!(InferredType::intersect(&dynamic(), &p, prov(), None), p);
+    assert_eq!(InferredType::intersect(&p, &dynamic(), prov(), None), p);
     assert_eq!(
         InferredType::difference(&dynamic(), &p, prov()),
         dynamic(),
         "Dynamic never narrows under difference"
     );
     assert_eq!(InferredType::difference(&p, &dynamic(), prov()), p);
+}
+
+#[test]
+fn intersect_dynamic_identity_both_sides_with_hierarchy() {
+    // GAP 4: `intersect(P, Dynamic) = P` AND `intersect(Dynamic, P) = P`, and
+    // the Dynamic arm still wins even when a hierarchy is present.
+    let h = hierarchy();
+    let p = InferredType::known("Integer");
+    assert_eq!(InferredType::intersect(&dynamic(), &p, prov(), Some(&h)), p);
+    assert_eq!(InferredType::intersect(&p, &dynamic(), prov(), Some(&h)), p);
 }
 
 // ── difference: union member drop + generics ────────────────────────────
@@ -340,6 +423,35 @@ fn difference_rhs_union_folds_left() {
     );
     let direct = InferredType::difference(&symbol(), &removed, prov());
     assert_eq!(direct, folded);
+}
+
+// ── canonical `excluded` ordering (GAP 2, ADR 0102 §1) ──────────────────
+
+#[test]
+fn negation_excluded_is_canonically_sorted_ascending() {
+    // GAP 2: however the exclusions are built up, the stored `excluded` union
+    // is sorted ascending by `class_name` — deterministic serialisation.
+    // Build in reverse order (#b then #a) and assert the stored order is #a,#b.
+    let neg = InferredType::difference(
+        &InferredType::difference(&symbol(), &singleton("#b"), prov()),
+        &singleton("#a"),
+        prov(),
+    );
+    let InferredType::Negation { excluded, .. } = &neg else {
+        panic!("expected a Negation, got {neg:?}");
+    };
+    let InferredType::Union { members, .. } = excluded.as_ref() else {
+        panic!("expected a union of exclusions, got {excluded:?}");
+    };
+    let names: Vec<String> = members
+        .iter()
+        .filter_map(|m| m.as_known().map(ToString::to_string))
+        .collect();
+    assert_eq!(
+        names,
+        vec!["#a".to_string(), "#b".to_string()],
+        "excluded members must be sorted ascending by class_name"
+    );
 }
 
 // ── union_of: absorption law ────────────────────────────────────────────
@@ -500,10 +612,10 @@ proptest! {
         b in concrete_leaf(),
         p in concrete_leaf(),
     ) {
-        let lhs = InferredType::intersect(&InferredType::union_of(&[a.clone(), b.clone()]), &p, prov());
+        let lhs = InferredType::intersect(&InferredType::union_of(&[a.clone(), b.clone()]), &p, prov(), None);
         let rhs = InferredType::union_of(&[
-            InferredType::intersect(&a, &p, prov()),
-            InferredType::intersect(&b, &p, prov()),
+            InferredType::intersect(&a, &p, prov(), None),
+            InferredType::intersect(&b, &p, prov(), None),
         ]);
         prop_assert_eq!(lhs, rhs);
     }
@@ -552,17 +664,32 @@ proptest! {
         }
     }
 
-    /// Termination / no-panic: both operators return on arbitrary inputs.
+    /// Termination / no-panic: both operators return on arbitrary inputs
+    /// (with and without a hierarchy).
     #[test]
     fn prop_operators_terminate(a in any_type(), b in any_type()) {
-        let _ = InferredType::intersect(&a, &b, prov());
+        let h = hierarchy();
+        let _ = InferredType::intersect(&a, &b, prov(), Some(&h));
+        let _ = InferredType::intersect(&a, &b, prov(), None);
         let _ = InferredType::difference(&a, &b, prov());
+    }
+
+    /// GAP 3: commutativity — `intersect(a, b) == intersect(b, a)` across the
+    /// Phase-1 type fragment (Known classes, singletons, Symbol, unions,
+    /// negations, Dynamic, Never, Object), with the nominal hierarchy engaged.
+    #[test]
+    fn prop_intersect_commutes(a in any_type(), b in any_type()) {
+        let h = hierarchy();
+        prop_assert_eq!(
+            InferredType::intersect(&a, &b, prov(), Some(&h)),
+            InferredType::intersect(&b, &a, prov(), Some(&h)),
+        );
     }
 
     /// Dynamic asymmetry holds for any concrete `P`.
     #[test]
     fn prop_dynamic_asymmetry(p in concrete_leaf()) {
-        prop_assert_eq!(InferredType::intersect(&dynamic(), &p, prov()), p.clone());
+        prop_assert_eq!(InferredType::intersect(&dynamic(), &p, prov(), None), p.clone());
         prop_assert_eq!(InferredType::difference(&dynamic(), &p, prov()), dynamic());
         prop_assert_eq!(InferredType::difference(&p, &dynamic(), prov()), p);
     }
@@ -573,7 +700,7 @@ proptest! {
     #[test]
     fn prop_intersect_complement(s in singleton_strat(), p in singleton_strat()) {
         let neg = negation(s.clone());
-        let result = InferredType::intersect(&neg, &p, prov());
+        let result = InferredType::intersect(&neg, &p, prov(), None);
         if p == s {
             prop_assert_eq!(result, InferredType::Never);
         } else {

@@ -2332,7 +2332,7 @@ impl TypeChecker {
         // yields `intersect = Never` for the unreachable branch — the diagnostic
         // for that case is emitted separately by
         // `check_impossible_singleton_comparison`.
-        let holds = InferredType::intersect(&current_ty, &matched, provenance);
+        let holds = InferredType::intersect(&current_ty, &matched, provenance, Some(hierarchy));
         let removed = InferredType::difference(&current_ty, &matched, provenance);
         if eq.negated {
             // `x /= #foo`: the true branch removes the singleton; the false
@@ -2395,8 +2395,13 @@ impl TypeChecker {
     fn type_admits_singleton(ty: &InferredType, singleton: &EcoString) -> bool {
         let matched = InferredType::known(singleton.clone());
         let provenance = super::TypeProvenance::Inferred(Span::default());
+        // The pattern is always a bare *singleton*, which is never an entry in
+        // the class hierarchy, so the nominal-class base case of `intersect` is
+        // unreachable here — `None` is provably equivalent to threading a real
+        // hierarchy (a singleton relates only to `Symbol`/itself, handled by the
+        // explicit symbol arms).
         !matches!(
-            InferredType::intersect(ty, &matched, provenance),
+            InferredType::intersect(ty, &matched, provenance, None),
             InferredType::Never
         )
     }
