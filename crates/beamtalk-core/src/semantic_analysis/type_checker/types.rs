@@ -928,11 +928,28 @@ impl InferredType {
             // (those arms already matched), `Dynamic`/`Never`/`Object`
             // (matched even earlier), or a `Negation` (matched above too).
             (Self::Intersection { members, .. }, _) => {
+                // Re-check pairwise disjointness before appending: without
+                // this, `Printable & Integer & String` would flatten to
+                // `Intersection{Integer, Printable, String}` instead of
+                // reducing to `Never` (`Integer ∩ String = Never`), violating
+                // the stored-intersection invariant.
+                for m in members {
+                    let pair = Self::intersect(m, b, provenance, hierarchy, protocol_registry);
+                    if matches!(pair, Self::Never) {
+                        return Self::Never;
+                    }
+                }
                 let mut merged = members.clone();
                 merged.push(b.clone());
                 Self::normalize_intersection(merged, provenance)
             }
             (_, Self::Intersection { members, .. }) => {
+                for m in members {
+                    let pair = Self::intersect(a, m, provenance, hierarchy, protocol_registry);
+                    if matches!(pair, Self::Never) {
+                        return Self::Never;
+                    }
+                }
                 let mut merged = members.clone();
                 merged.push(a.clone());
                 Self::normalize_intersection(merged, provenance)

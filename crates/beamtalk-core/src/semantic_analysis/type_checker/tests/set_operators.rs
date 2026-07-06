@@ -996,3 +996,40 @@ proptest! {
         }
     }
 }
+
+#[test]
+fn intersect_intersection_with_disjoint_class_reduces_to_never() {
+    // `Printable & Integer & String`: the flatten arms must re-check pairwise
+    // disjointness — `Integer ∩ String = Never` under single inheritance, so
+    // the chain reduces to `Never` rather than storing a three-member
+    // Intersection that violates its own invariant. Both operand orders.
+    let registry = protocol_registry_with(&["Printable"]);
+    let h = hierarchy();
+    let step1 = InferredType::intersect(
+        &InferredType::known("Printable"),
+        &InferredType::known("Integer"),
+        prov(),
+        Some(&h),
+        Some(&registry),
+    );
+    assert!(
+        matches!(step1, InferredType::Intersection { .. }),
+        "expected stored Intersection, got {step1:?}"
+    );
+    let left = InferredType::intersect(
+        &step1,
+        &InferredType::known("String"),
+        prov(),
+        Some(&h),
+        Some(&registry),
+    );
+    assert_eq!(left, InferredType::Never);
+    let right = InferredType::intersect(
+        &InferredType::known("String"),
+        &step1,
+        prov(),
+        Some(&h),
+        Some(&registry),
+    );
+    assert_eq!(right, InferredType::Never);
+}
