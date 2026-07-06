@@ -153,8 +153,15 @@ syntax; see §3 for the reconciliation.
 Normalisation rules (`intersect` / `difference`; **not** a blind mirror of
 `union_of` — the `Dynamic` handling is deliberately different, see below):
 
+- **Rule priority: the `Dynamic` rules are checked first**; the general rules
+  below apply only to non-`Dynamic` operands. This matters concretely for
+  `intersect(Dynamic, Object)`: the Dynamic rule gives `Object` (a positive
+  `x class = Object` test *refines* an unannotated variable), while the
+  general identity rule would wrongly give `Dynamic` (no narrowing). An
+  implementation that checks `intersect(T, Object) = T` first gets the wrong
+  answer silently.
 - `intersect(T, T)` ⇒ `T`; `intersect(T, Never)` ⇒ `Never`;
-  `intersect(T, Object)` ⇒ `T`.
+  `intersect(T, Object)` ⇒ `T` (non-`Dynamic` `T` — see priority above).
 - **LHS-union distribution** (load-bearing for the `singleton_eq` port — §2
   group 1's "no behaviour change" claim depends on it):
   `intersect(Union[T1 .. Tn], P) = union_of(intersect(T1, P) .. intersect(Tn, P))`
@@ -173,6 +180,16 @@ Normalisation rules (`intersect` / `difference`; **not** a blind mirror of
   `Negation{ Symbol, union_of(E, #bar) }`. Termination follows: `excluded`
   only grows within the finite set of singletons appearing in the program, so
   no chain of `difference` calls recurses or grows unboundedly.
+- **Intersect through a complement** — required the moment narrowing *chains*
+  (the false branch of `x = #foo` leaves `x :: Symbol \ #foo`; a later
+  `x = #bar` in the same method computes
+  `intersect(Negation{Symbol, #foo}, #bar)`). The general law:
+  `intersect(Negation{B, E}, P) = difference(intersect(B, P), E)` —
+  set-theoretically `(B \ E) ∩ P = (B ∩ P) \ E` — which reduces via the rules
+  already given. For a singleton `s`: `s ∉ E` ⇒ `intersect(B, s)` (so
+  `#bar`), `s ∈ E` ⇒ `Never`. Without this rule a `Negation` LHS hits an
+  unhandled arm and every conservative fallback (panic, `Dynamic`, keep the
+  `Negation`) is a wrong narrowing outcome.
   Nominal-class difference beyond atoms (`difference(Object, Number)`) is
   *not* defined by this ADR — see §2 and Consequences.
 - **`Dynamic` is asymmetric and must be stated explicitly**:
@@ -202,11 +219,21 @@ Normalisation rules (`intersect` / `difference`; **not** a blind mirror of
   `inference.rs:2400`) — safe solely because singletons carry no args; a general
   `difference` inheriting name-only comparison would wrongly subtract both
   `List` members. Property tests required.
-- **`union_of` learns the new variant and its absorption law**:
-  `(Symbol \ #foo) | #foo` ⇒ `Symbol`. `union_of` (`types.rs:442`) matches
-  exactly the current five variants with no wildcard, so this is an algebra
-  decision, not a match-arm chore — and `Negation` equality needs a canonical
-  ordering of `excluded` so order-independent union dedup keeps working.
+- **`union_of` learns the new variant and its full absorption-law set**
+  (`union_of` at `types.rs:442` matches exactly the current five variants with
+  no wildcard, so this is an algebra decision, not a match-arm chore):
+  - **Full restoration** — `(Symbol \ #foo) | #foo` ⇒ `Symbol`.
+  - **Partial absorption** — adding back *one* of several exclusions removes
+    it from `excluded`: `(Symbol \ (#foo | #bar)) | #foo` ⇒ `Symbol \ #bar`;
+    an emptied `excluded` yields the bare base.
+  - **Complement union (same base)** —
+    `Negation{B, E1} | Negation{B, E2}` ⇒ `Negation{B, intersect(E1, E2)}`
+    (set-theoretically `(B \ E1) ∪ (B \ E2) = B \ (E1 ∩ E2)`: "any Symbol
+    except {#a,#b}" or "any Symbol except {#b,#c}" = "any Symbol except #b").
+  - `Negation` equality needs a canonical ordering of `excluded` so
+    order-independent union dedup keeps working. Without the two laws above,
+    logically-equal `Negation` members inside a `Union` escape `PartialEq`
+    dedup and unions grow across repeated narrowing/widening passes.
 
 ### 2. Narrowing expressed as intersect / difference — where it applies
 
