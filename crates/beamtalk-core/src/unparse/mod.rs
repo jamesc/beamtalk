@@ -1726,6 +1726,13 @@ fn unparse_type_annotation(ty: &TypeAnnotation) -> Document<'static> {
                 unparse_type_annotation(excluded)
             ]
         }
+        TypeAnnotation::Intersection { left, right, .. } => {
+            docvec![
+                unparse_type_annotation(left),
+                " & ",
+                unparse_type_annotation(right)
+            ]
+        }
         TypeAnnotation::SelfType { .. } => Document::Str("Self"),
         TypeAnnotation::SelfClass { .. } => Document::Str("Self class"),
         TypeAnnotation::ClassOf { class_name, .. } => {
@@ -1897,6 +1904,35 @@ mod tests {
         assert!(
             formatted.contains("Symbol \\ #foo"),
             "difference type must survive round-trip, got: {formatted}"
+        );
+    }
+
+    // --- Intersection type annotation unparsing (ADR 0068 §Protocol
+    // Composition, ADR 0102 §1/§3, BT-2743) ---
+
+    #[test]
+    fn intersection_type_annotation_unparses() {
+        // `Printable & Comparable` unparses back to `Printable & Comparable`.
+        let ann = crate::ast::TypeAnnotation::intersection(
+            crate::ast::TypeAnnotation::simple("Printable", span()),
+            crate::ast::TypeAnnotation::simple("Comparable", span()),
+            span(),
+        );
+        assert_eq!(
+            unparse_type_annotation(&ann).to_pretty_string(),
+            "Printable & Comparable"
+        );
+    }
+
+    #[test]
+    fn intersection_return_type_round_trips_through_format_source() {
+        // Parse → unparse must preserve `Collection(Object) & Comparable` in a
+        // method return type.
+        let source = "Object subclass: Foo\n  narrow -> Collection(Object) & Comparable => self\n";
+        let formatted = format_source(source).expect("should format");
+        assert!(
+            formatted.contains("Collection(Object) & Comparable"),
+            "intersection type must survive round-trip, got: {formatted}"
         );
     }
 

@@ -118,7 +118,11 @@ impl TypeChecker {
                     "self",
                     super::type_resolver::receiver_type_for_class(&class.name.name, hierarchy),
                 );
-                Self::set_param_types(&mut method_env, &method.parameters);
+                Self::set_param_types(
+                    &mut method_env,
+                    &method.parameters,
+                    self.protocol_registry.as_ref(),
+                );
                 let body_type =
                     self.infer_stmts(&method.body, hierarchy, &mut method_env, is_abstract);
                 self.check_return_type(method, &body_type, &class.name.name, hierarchy);
@@ -155,7 +159,11 @@ impl TypeChecker {
                     "self",
                     super::type_resolver::receiver_type_for_class(&class.name.name, hierarchy),
                 );
-                Self::set_param_types(&mut method_env, &method.parameters);
+                Self::set_param_types(
+                    &mut method_env,
+                    &method.parameters,
+                    self.protocol_registry.as_ref(),
+                );
                 let body_type =
                     self.infer_stmts(&method.body, hierarchy, &mut method_env, is_abstract);
                 self.check_return_type(method, &body_type, &class.name.name, hierarchy);
@@ -210,7 +218,11 @@ impl TypeChecker {
                 "self",
                 super::type_resolver::receiver_type_for_class(class_name, hierarchy),
             );
-            Self::set_param_types(&mut method_env, &standalone.method.parameters);
+            Self::set_param_types(
+                &mut method_env,
+                &standalone.method.parameters,
+                self.protocol_registry.as_ref(),
+            );
             let body_type = self.infer_stmts(
                 &standalone.method.body,
                 hierarchy,
@@ -254,21 +266,30 @@ impl TypeChecker {
     /// Sets parameter types in the type environment from annotations.
     ///
     /// All parameters are always registered. Typed parameters are resolved
-    /// via [`resolve_type_annotation`]; untyped parameters are registered as
-    /// `Dynamic`. Generic annotations (e.g., `:: Result(Integer, Error)`) are
-    /// resolved to `Known` with `type_args`. Type parameters of enclosing
-    /// generic classes (e.g., `T` in `Result(T, E)`) resolve to `Dynamic` when
-    /// no substitution context is available.
+    /// via [`super::type_resolver::resolve_type_annotation`]; untyped
+    /// parameters are registered as `Dynamic`. Generic annotations (e.g.,
+    /// `:: Result(Integer, Error)`) are resolved to `Known` with `type_args`.
+    /// Type parameters of enclosing generic classes (e.g., `T` in
+    /// `Result(T, E)`) resolve to `Dynamic` when no substitution context is
+    /// available.
     /// Registering untyped params is necessary to prevent the bare-identifier
     /// state-field fallback in `infer_expr` from mis-inferring an untyped param
     /// as `self.<field>` when the parameter name shadows a state field name.
+    ///
+    /// `protocol_registry` (ADR 0102 §1/§3, BT-2743) is passed straight
+    /// through to the resolver so a parameter typed `:: P1 & P2` resolves
+    /// class ∩ protocol correctly; pass `None` when no registry is available.
     pub(super) fn set_param_types(
         env: &mut TypeEnv,
         parameters: &[crate::ast::ParameterDefinition],
+        protocol_registry: Option<&crate::semantic_analysis::protocol_registry::ProtocolRegistry>,
     ) {
+        let subst = super::type_resolver::SubstitutionMap::new();
         for param in parameters {
             let ty = match &param.type_annotation {
-                Some(ann) => Self::resolve_type_annotation(ann),
+                Some(ann) => {
+                    super::type_resolver::resolve_type_annotation(ann, &subst, protocol_registry)
+                }
                 None => InferredType::Dynamic(DynamicReason::UnannotatedParam), // preserve parameter shadowing of state fields
             };
             env.set_local(param.name.name.clone(), ty);
@@ -279,14 +300,16 @@ impl TypeChecker {
     ///
     /// Thin wrapper around
     /// [`super::type_resolver::resolve_type_annotation`] that supplies an
-    /// empty substitution map. Call sites that need method-local /
-    /// class-level type-parameter substitution should call the resolver
-    /// function directly with a populated [`super::type_resolver::SubstitutionMap`].
+    /// empty substitution map and no protocol registry. Call sites that need
+    /// method-local / class-level type-parameter substitution, or correct
+    /// resolution of `&`-typed protocol intersections (ADR 0102 §1/§3,
+    /// BT-2743), should call the resolver function directly with a populated
+    /// [`super::type_resolver::SubstitutionMap`] / protocol registry.
     ///
     /// **References:** BT-2025 — centralised parametric type resolution.
     pub(super) fn resolve_type_annotation(ann: &TypeAnnotation) -> InferredType {
         let subst = super::type_resolver::SubstitutionMap::new();
-        super::type_resolver::resolve_type_annotation(ann, &subst)
+        super::type_resolver::resolve_type_annotation(ann, &subst, None)
     }
 
     /// Resolves type-position keywords to their class names.
@@ -495,7 +518,14 @@ impl TypeChecker {
                 // of the inferred type. Emit a warning if the RHS has a known
                 // (non-Dynamic) type that is incompatible with the annotation.
                 let ty = if let Some(ann) = type_annotation {
-                    let declared = Self::resolve_type_annotation(ann);
+                    // ADR 0102 §1/§3 (BT-2743): thread the protocol registry
+                    // through so a local `x :: P1 & P2` annotation resolves
+                    // class ∩ protocol correctly rather than falling to `Never`.
+                    let declared = super::type_resolver::resolve_type_annotation(
+                        ann,
+                        &super::type_resolver::SubstitutionMap::new(),
+                        self.protocol_registry.as_ref(),
+                    );
                     // Check for type mismatch: known RHS that doesn't match declared type.
                     // Dynamic RHS (the primary use case for annotations) is accepted silently.
                     // Never RHS (diverging expressions like `self error:`) is compatible
@@ -2332,7 +2362,10 @@ impl TypeChecker {
         // yields `intersect = Never` for the unreachable branch — the diagnostic
         // for that case is emitted separately by
         // `check_impossible_singleton_comparison`.
-        let holds = InferredType::intersect(&current_ty, &matched, provenance, Some(hierarchy));
+        // Out of scope for narrowing (ADR 0102 §2 group 3 / BT-2743): singleton
+        // narrowing never intersects with a protocol name, so `None` here.
+        let holds =
+            InferredType::intersect(&current_ty, &matched, provenance, Some(hierarchy), None);
         let removed = InferredType::difference(&current_ty, &matched, provenance);
         if eq.negated {
             // `x /= #foo`: the true branch removes the singleton; the false
@@ -2406,7 +2439,9 @@ impl TypeChecker {
              not a nominal class — the `None` hierarchy below relies on it"
         );
         !matches!(
-            InferredType::intersect(ty, &matched, provenance, None),
+            // Likewise no protocol registry needed — a bare singleton is
+            // never a protocol name.
+            InferredType::intersect(ty, &matched, provenance, None, None),
             InferredType::Never
         )
     }
@@ -4928,7 +4963,7 @@ mod tests {
     fn set_param_types_untyped() {
         let params = vec![ParameterDefinition::new(ident("x"))];
         let mut env = TypeEnv::new();
-        TypeChecker::set_param_types(&mut env, &params);
+        TypeChecker::set_param_types(&mut env, &params, None);
         assert_eq!(
             env.get_local("x"),
             Some(InferredType::Dynamic(DynamicReason::Unknown))
@@ -4942,7 +4977,7 @@ mod tests {
             type_annotation: Some(TypeAnnotation::Simple(ident("Integer"))),
         }];
         let mut env = TypeEnv::new();
-        TypeChecker::set_param_types(&mut env, &params);
+        TypeChecker::set_param_types(&mut env, &params, None);
         assert_eq!(env.get_local("x"), Some(InferredType::known("Integer")));
     }
 
@@ -4956,7 +4991,7 @@ mod tests {
             ParameterDefinition::new(ident("y")),
         ];
         let mut env = TypeEnv::new();
-        TypeChecker::set_param_types(&mut env, &params);
+        TypeChecker::set_param_types(&mut env, &params, None);
         assert_eq!(env.get_local("x"), Some(InferredType::known("String")));
         assert_eq!(
             env.get_local("y"),

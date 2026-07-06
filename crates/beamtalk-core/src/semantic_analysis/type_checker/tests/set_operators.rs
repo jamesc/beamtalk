@@ -65,18 +65,18 @@ fn hierarchy() -> ClassHierarchy {
 #[test]
 fn intersect_same_type_is_identity() {
     let t = InferredType::known("Integer");
-    assert_eq!(InferredType::intersect(&t, &t, prov(), None), t);
+    assert_eq!(InferredType::intersect(&t, &t, prov(), None, None), t);
 }
 
 #[test]
 fn intersect_with_never_is_never() {
     let t = InferredType::known("Integer");
     assert_eq!(
-        InferredType::intersect(&t, &InferredType::Never, prov(), None),
+        InferredType::intersect(&t, &InferredType::Never, prov(), None, None),
         InferredType::Never
     );
     assert_eq!(
-        InferredType::intersect(&InferredType::Never, &t, prov(), None),
+        InferredType::intersect(&InferredType::Never, &t, prov(), None, None),
         InferredType::Never
     );
 }
@@ -84,8 +84,14 @@ fn intersect_with_never_is_never() {
 #[test]
 fn intersect_with_object_is_identity() {
     let t = InferredType::known("Integer");
-    assert_eq!(InferredType::intersect(&t, &object(), prov(), None), t);
-    assert_eq!(InferredType::intersect(&object(), &t, prov(), None), t);
+    assert_eq!(
+        InferredType::intersect(&t, &object(), prov(), None, None),
+        t
+    );
+    assert_eq!(
+        InferredType::intersect(&object(), &t, prov(), None, None),
+        t
+    );
 }
 
 #[test]
@@ -96,6 +102,7 @@ fn intersect_distinct_concrete_types_are_disjoint() {
             &InferredType::known("Integer"),
             &singleton("#infinity"),
             prov(),
+            None,
             None
         ),
         InferredType::Never
@@ -107,7 +114,7 @@ fn intersect_lhs_union_distributes_to_bare_singleton() {
     // ADR 0102 §1: `intersect(Integer | #infinity, #infinity)` normalises to
     // the *bare* singleton `#infinity`, never a stored wrapper.
     let lhs = InferredType::union_of(&[InferredType::known("Integer"), singleton("#infinity")]);
-    let result = InferredType::intersect(&lhs, &singleton("#infinity"), prov(), None);
+    let result = InferredType::intersect(&lhs, &singleton("#infinity"), prov(), None, None);
     assert_eq!(result, singleton("#infinity"));
     assert!(
         matches!(result, InferredType::Known { .. }),
@@ -120,7 +127,7 @@ fn intersect_rhs_union_folds() {
     // `intersect(T, A | B) = union_of(intersect(T,A), intersect(T,B))`.
     let t = InferredType::union_of(&[InferredType::known("Integer"), singleton("#a")]);
     let rhs = InferredType::union_of(&[singleton("#a"), singleton("#b")]);
-    let result = InferredType::intersect(&t, &rhs, prov(), None);
+    let result = InferredType::intersect(&t, &rhs, prov(), None, None);
     // `#a` survives (present on both sides); `#b`/`Integer` are disjoint → gone.
     assert_eq!(result, singleton("#a"));
 }
@@ -135,11 +142,11 @@ fn intersect_nominal_subclass_reduces_to_subclass() {
     let number = InferredType::known("Number");
     let integer = InferredType::known("Integer");
     assert_eq!(
-        InferredType::intersect(&number, &integer, prov(), Some(&h)),
+        InferredType::intersect(&number, &integer, prov(), Some(&h), None),
         integer
     );
     assert_eq!(
-        InferredType::intersect(&integer, &number, prov(), Some(&h)),
+        InferredType::intersect(&integer, &number, prov(), Some(&h), None),
         integer
     );
 }
@@ -152,11 +159,11 @@ fn intersect_nominal_unrelated_is_never() {
     let integer = InferredType::known("Integer");
     let string = InferredType::known("String");
     assert_eq!(
-        InferredType::intersect(&integer, &string, prov(), Some(&h)),
+        InferredType::intersect(&integer, &string, prov(), Some(&h), None),
         InferredType::Never
     );
     assert_eq!(
-        InferredType::intersect(&integer, &singleton("#foo"), prov(), Some(&h)),
+        InferredType::intersect(&integer, &singleton("#foo"), prov(), Some(&h), None),
         InferredType::Never
     );
 }
@@ -167,11 +174,11 @@ fn intersect_symbol_singleton_preserved_with_hierarchy() {
     // singletons are not hierarchy entries, so the explicit symbol arms win.
     let h = hierarchy();
     assert_eq!(
-        InferredType::intersect(&symbol(), &singleton("#foo"), prov(), Some(&h)),
+        InferredType::intersect(&symbol(), &singleton("#foo"), prov(), Some(&h), None),
         singleton("#foo")
     );
     assert_eq!(
-        InferredType::intersect(&singleton("#foo"), &symbol(), prov(), Some(&h)),
+        InferredType::intersect(&singleton("#foo"), &symbol(), prov(), Some(&h), None),
         singleton("#foo")
     );
 }
@@ -183,7 +190,7 @@ fn intersect_without_hierarchy_keeps_distinct_classes_disjoint() {
     let number = InferredType::known("Number");
     let integer = InferredType::known("Integer");
     assert_eq!(
-        InferredType::intersect(&number, &integer, prov(), None),
+        InferredType::intersect(&number, &integer, prov(), None, None),
         InferredType::Never
     );
 }
@@ -195,11 +202,11 @@ fn intersect_dynamic_is_checked_before_object() {
     // Gap 1: the `Dynamic` arm must win over the generic `T ∩ Object = T`
     // identity — `intersect(Dynamic, Object)` refines to `Object`, not `Dynamic`.
     assert_eq!(
-        InferredType::intersect(&dynamic(), &object(), prov(), None),
+        InferredType::intersect(&dynamic(), &object(), prov(), None, None),
         object()
     );
     assert_eq!(
-        InferredType::intersect(&object(), &dynamic(), prov(), None),
+        InferredType::intersect(&object(), &dynamic(), prov(), None, None),
         object()
     );
 }
@@ -211,11 +218,11 @@ fn intersect_symbol_with_singleton_keeps_singleton() {
     // A symbol singleton is a subtype of `Symbol`, so the narrower singleton
     // is kept in both orders.
     assert_eq!(
-        InferredType::intersect(&symbol(), &singleton("#foo"), prov(), None),
+        InferredType::intersect(&symbol(), &singleton("#foo"), prov(), None, None),
         singleton("#foo")
     );
     assert_eq!(
-        InferredType::intersect(&singleton("#foo"), &symbol(), prov(), None),
+        InferredType::intersect(&singleton("#foo"), &symbol(), prov(), None, None),
         singleton("#foo")
     );
 }
@@ -224,7 +231,7 @@ fn intersect_symbol_with_singleton_keeps_singleton() {
 fn intersect_distinct_singletons_are_disjoint() {
     // Distinct singleton disjointness is preserved.
     assert_eq!(
-        InferredType::intersect(&singleton("#foo"), &singleton("#bar"), prov(), None),
+        InferredType::intersect(&singleton("#foo"), &singleton("#bar"), prov(), None, None),
         InferredType::Never
     );
 }
@@ -236,7 +243,7 @@ fn intersect_complement_keeps_unexcluded_singleton() {
     // `intersect(Symbol \ #foo, #bar) = #bar` (#bar is a symbol, not excluded).
     let neg = negation(singleton("#foo"));
     assert_eq!(
-        InferredType::intersect(&neg, &singleton("#bar"), prov(), None),
+        InferredType::intersect(&neg, &singleton("#bar"), prov(), None, None),
         singleton("#bar")
     );
 }
@@ -246,7 +253,7 @@ fn intersect_complement_excludes_matching_singleton() {
     // `intersect(Symbol \ #foo, #foo) = Never` (#foo is excluded).
     let neg = negation(singleton("#foo"));
     assert_eq!(
-        InferredType::intersect(&neg, &singleton("#foo"), prov(), None),
+        InferredType::intersect(&neg, &singleton("#foo"), prov(), None, None),
         InferredType::Never
     );
 }
@@ -256,7 +263,7 @@ fn intersect_complement_with_union() {
     // `intersect(Symbol \ #foo, #foo | #bar | #baz) = #bar | #baz`.
     let neg = negation(singleton("#foo"));
     let rhs = InferredType::union_of(&[singleton("#foo"), singleton("#bar"), singleton("#baz")]);
-    let result = InferredType::intersect(&neg, &rhs, prov(), None);
+    let result = InferredType::intersect(&neg, &rhs, prov(), None, None);
     assert_eq!(
         result,
         InferredType::union_of(&[singleton("#bar"), singleton("#baz")])
@@ -268,7 +275,7 @@ fn intersect_complement_lhs_is_symmetric() {
     // `intersect(#bar, Symbol \ #foo) = #bar` — Negation on the RHS too.
     let neg = negation(singleton("#foo"));
     assert_eq!(
-        InferredType::intersect(&singleton("#bar"), &neg, prov(), None),
+        InferredType::intersect(&singleton("#bar"), &neg, prov(), None, None),
         singleton("#bar")
     );
 }
@@ -280,6 +287,7 @@ fn intersect_two_complements_same_base() {
         &negation(singleton("#a")),
         &negation(singleton("#b")),
         prov(),
+        None,
         None,
     );
     let expected = negation(InferredType::union_of(&[singleton("#a"), singleton("#b")]));
@@ -312,8 +320,14 @@ fn dynamic_asymmetry_regression() {
     //   difference(Dynamic, P) = Dynamic
     //   difference(T, Dynamic) = T
     let p = InferredType::known("Integer");
-    assert_eq!(InferredType::intersect(&dynamic(), &p, prov(), None), p);
-    assert_eq!(InferredType::intersect(&p, &dynamic(), prov(), None), p);
+    assert_eq!(
+        InferredType::intersect(&dynamic(), &p, prov(), None, None),
+        p
+    );
+    assert_eq!(
+        InferredType::intersect(&p, &dynamic(), prov(), None, None),
+        p
+    );
     assert_eq!(
         InferredType::difference(&dynamic(), &p, prov()),
         dynamic(),
@@ -328,8 +342,14 @@ fn intersect_dynamic_identity_both_sides_with_hierarchy() {
     // the Dynamic arm still wins even when a hierarchy is present.
     let h = hierarchy();
     let p = InferredType::known("Integer");
-    assert_eq!(InferredType::intersect(&dynamic(), &p, prov(), Some(&h)), p);
-    assert_eq!(InferredType::intersect(&p, &dynamic(), prov(), Some(&h)), p);
+    assert_eq!(
+        InferredType::intersect(&dynamic(), &p, prov(), Some(&h), None),
+        p
+    );
+    assert_eq!(
+        InferredType::intersect(&p, &dynamic(), prov(), Some(&h), None),
+        p
+    );
 }
 
 // ── difference: union member drop + generics ────────────────────────────
@@ -552,6 +572,274 @@ fn negation_is_not_known() {
     assert!(negation(singleton("#a")).as_known().is_none());
 }
 
+// ── Intersection (ADR 0102 §1/§3, BT-2743) ──────────────────────────────
+
+/// Builds a minimal `ProtocolRegistry` containing empty (no required method)
+/// protocols under the given names — enough for `has_protocol` checks.
+fn protocol_registry_with(
+    names: &[&str],
+) -> crate::semantic_analysis::protocol_registry::ProtocolRegistry {
+    use crate::ast::{CommentAttachment, Module, ProtocolDefinition};
+    use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
+
+    let h = hierarchy();
+    let proto_module = Module {
+        protocols: names
+            .iter()
+            .map(|name| ProtocolDefinition {
+                name: crate::ast::Identifier::new(*name, Span::default()),
+                type_params: vec![],
+                extending: None,
+                method_signatures: vec![],
+                class_method_signatures: vec![],
+                comments: CommentAttachment::default(),
+                doc_comment: None,
+                span: Span::default(),
+            })
+            .collect(),
+        ..Module::new(vec![], Span::default())
+    };
+    let mut registry = ProtocolRegistry::new();
+    let diags = registry.register_module(&proto_module, &h);
+    assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+    registry
+}
+
+#[test]
+fn intersect_class_and_protocol_produces_stored_intersection() {
+    // `Collection & Comparable` (class ∩ protocol) is the irreducible case —
+    // ADR 0068's flagship `&` example. Requires the protocol registry so
+    // `Comparable` is recognised as a protocol rather than an unrelated class.
+    let registry = protocol_registry_with(&["Comparable"]);
+    let result = InferredType::intersect(
+        &InferredType::known("Collection"),
+        &InferredType::known("Comparable"),
+        prov(),
+        None,
+        Some(&registry),
+    );
+    let InferredType::Intersection { members, .. } = result else {
+        panic!("expected Intersection, got {result:?}");
+    };
+    assert_eq!(members.len(), 2);
+    assert!(members.contains(&InferredType::known("Collection")));
+    assert!(members.contains(&InferredType::known("Comparable")));
+}
+
+#[test]
+fn intersect_protocol_and_protocol_produces_stored_intersection() {
+    // Protocol ∩ protocol is likewise irreducible.
+    let registry = protocol_registry_with(&["Printable", "Comparable"]);
+    let result = InferredType::intersect(
+        &InferredType::known("Printable"),
+        &InferredType::known("Comparable"),
+        prov(),
+        None,
+        Some(&registry),
+    );
+    assert!(matches!(result, InferredType::Intersection { .. }));
+}
+
+#[test]
+fn intersect_class_and_protocol_without_registry_falls_back_to_never() {
+    // Without a registry, `intersect` cannot distinguish a protocol name from
+    // an unrelated class — conservatively `Never` (documented `None` fallback).
+    let result = InferredType::intersect(
+        &InferredType::known("Collection"),
+        &InferredType::known("Comparable"),
+        prov(),
+        None,
+        None,
+    );
+    assert_eq!(result, InferredType::Never);
+}
+
+#[test]
+fn intersect_class_and_class_still_reduces_with_hierarchy_even_with_registry() {
+    // GAP 1 must not regress (BT-2743 task instruction): class ∩ class still
+    // reduces via the nominal hierarchy — `Number ∩ Integer = Integer` — even
+    // when a (empty, unrelated) protocol registry is also supplied.
+    let registry = protocol_registry_with(&["Comparable"]);
+    let h = hierarchy();
+    let number = InferredType::known("Number");
+    let integer = InferredType::known("Integer");
+    assert_eq!(
+        InferredType::intersect(&number, &integer, prov(), Some(&h), Some(&registry)),
+        integer
+    );
+}
+
+#[test]
+fn intersect_unrelated_classes_is_never_the_adr_headline_example() {
+    // ADR 0102 §1: "`Integer & String` *is* defined: it is `Never`" — holds
+    // even with a protocol registry present (neither name is a protocol).
+    let registry = protocol_registry_with(&["Comparable"]);
+    let result = InferredType::intersect(
+        &InferredType::known("Integer"),
+        &InferredType::known("String"),
+        prov(),
+        None,
+        Some(&registry),
+    );
+    assert_eq!(result, InferredType::Never);
+}
+
+#[test]
+fn intersect_equality_is_order_independent() {
+    let registry = protocol_registry_with(&["Printable", "Comparable"]);
+    let ab = InferredType::intersect(
+        &InferredType::known("Printable"),
+        &InferredType::known("Comparable"),
+        prov(),
+        None,
+        Some(&registry),
+    );
+    let ba = InferredType::intersect(
+        &InferredType::known("Comparable"),
+        &InferredType::known("Printable"),
+        prov(),
+        None,
+        Some(&registry),
+    );
+    assert_eq!(ab, ba);
+}
+
+#[test]
+fn intersect_flattens_three_way_chain() {
+    // `A & B & C` parses left-associatively as `(A & B) & C` (ADR 0102 §3),
+    // and resolving that through repeated pairwise `intersect` calls must
+    // flatten to a single 3-member `Intersection{A, B, C}` — never a nested
+    // `Intersection{Intersection{A,B}, C}` (which would break exhaustive
+    // matches / display / equality elsewhere expecting a flat `members`).
+    let registry = protocol_registry_with(&["A", "B", "C"]);
+    let ab = InferredType::intersect(
+        &InferredType::known("A"),
+        &InferredType::known("B"),
+        prov(),
+        None,
+        Some(&registry),
+    );
+    let abc = InferredType::intersect(
+        &ab,
+        &InferredType::known("C"),
+        prov(),
+        None,
+        Some(&registry),
+    );
+    let InferredType::Intersection { members, .. } = &abc else {
+        panic!("expected Intersection, got {abc:?}");
+    };
+    assert_eq!(
+        members.len(),
+        3,
+        "expected a flat 3-member Intersection, got {members:?}"
+    );
+    assert!(
+        !members
+            .iter()
+            .any(|m| matches!(m, InferredType::Intersection { .. })),
+        "Intersection must not nest another Intersection, got {members:?}"
+    );
+    assert!(members.contains(&InferredType::known("A")));
+    assert!(members.contains(&InferredType::known("B")));
+    assert!(members.contains(&InferredType::known("C")));
+}
+
+#[test]
+fn intersect_flattening_dedups_repeated_member() {
+    // `(A & B) & B` must flatten and dedup to the 2-member `{A, B}`, not a
+    // 3-member `{A, B, B}`.
+    let registry = protocol_registry_with(&["A", "B"]);
+    let ab = InferredType::intersect(
+        &InferredType::known("A"),
+        &InferredType::known("B"),
+        prov(),
+        None,
+        Some(&registry),
+    );
+    let result = InferredType::intersect(
+        &ab,
+        &InferredType::known("B"),
+        prov(),
+        None,
+        Some(&registry),
+    );
+    let InferredType::Intersection { members, .. } = &result else {
+        panic!("expected Intersection, got {result:?}");
+    };
+    assert_eq!(
+        members.len(),
+        2,
+        "expected dedup to 2 members, got {members:?}"
+    );
+}
+
+#[test]
+fn intersect_display_renders_ampersand() {
+    let registry = protocol_registry_with(&["Printable", "Comparable"]);
+    let result = InferredType::intersect(
+        &InferredType::known("Printable"),
+        &InferredType::known("Comparable"),
+        prov(),
+        None,
+        Some(&registry),
+    );
+    let rendered = result.display_for_diagnostic().unwrap();
+    assert!(
+        rendered == "Printable & Comparable" || rendered == "Comparable & Printable",
+        "unexpected render: {rendered}"
+    );
+}
+
+#[test]
+fn intersection_is_not_known() {
+    let registry = protocol_registry_with(&["Printable", "Comparable"]);
+    let result = InferredType::intersect(
+        &InferredType::known("Printable"),
+        &InferredType::known("Comparable"),
+        prov(),
+        None,
+        Some(&registry),
+    );
+    assert!(result.as_known().is_none());
+}
+
+#[test]
+fn intersection_provenance_accessor() {
+    let registry = protocol_registry_with(&["Printable", "Comparable"]);
+    let declared = TypeProvenance::Declared(Span::new(3, 9));
+    let result = InferredType::intersect(
+        &InferredType::known("Printable"),
+        &InferredType::known("Comparable"),
+        declared,
+        None,
+        Some(&registry),
+    );
+    assert_eq!(result.provenance(), Some(declared));
+}
+
+#[test]
+fn union_of_treats_intersection_as_opaque_member() {
+    // `union_of` dedups an `Intersection` by structural equality but applies
+    // no absorption law to it (unlike `Negation`) — ADR 0102 §1, BT-2743.
+    let registry = protocol_registry_with(&["Printable", "Comparable"]);
+    let inter = InferredType::intersect(
+        &InferredType::known("Printable"),
+        &InferredType::known("Comparable"),
+        prov(),
+        None,
+        Some(&registry),
+    );
+    // Dedup: unioning with itself yields the same Intersection, not a Union.
+    assert_eq!(
+        InferredType::union_of(&[inter.clone(), inter.clone()]),
+        inter
+    );
+    // Distinct from an unrelated member: produces a genuine Union.
+    let union = InferredType::union_of(&[inter.clone(), InferredType::known("Integer")]);
+    assert!(matches!(union, InferredType::Union { .. }));
+}
+
 // ── Property tests ──────────────────────────────────────────────────────
 
 /// Concrete, non-`Dynamic`/`Never` leaf types (safe for the algebraic laws).
@@ -612,10 +900,10 @@ proptest! {
         b in concrete_leaf(),
         p in concrete_leaf(),
     ) {
-        let lhs = InferredType::intersect(&InferredType::union_of(&[a.clone(), b.clone()]), &p, prov(), None);
+        let lhs = InferredType::intersect(&InferredType::union_of(&[a.clone(), b.clone()]), &p, prov(), None, None);
         let rhs = InferredType::union_of(&[
-            InferredType::intersect(&a, &p, prov(), None),
-            InferredType::intersect(&b, &p, prov(), None),
+            InferredType::intersect(&a, &p, prov(), None, None),
+            InferredType::intersect(&b, &p, prov(), None, None),
         ]);
         prop_assert_eq!(lhs, rhs);
     }
@@ -669,8 +957,8 @@ proptest! {
     #[test]
     fn prop_operators_terminate(a in any_type(), b in any_type()) {
         let h = hierarchy();
-        let _ = InferredType::intersect(&a, &b, prov(), Some(&h));
-        let _ = InferredType::intersect(&a, &b, prov(), None);
+        let _ = InferredType::intersect(&a, &b, prov(), Some(&h), None);
+        let _ = InferredType::intersect(&a, &b, prov(), None, None);
         let _ = InferredType::difference(&a, &b, prov());
     }
 
@@ -681,15 +969,15 @@ proptest! {
     fn prop_intersect_commutes(a in any_type(), b in any_type()) {
         let h = hierarchy();
         prop_assert_eq!(
-            InferredType::intersect(&a, &b, prov(), Some(&h)),
-            InferredType::intersect(&b, &a, prov(), Some(&h)),
+            InferredType::intersect(&a, &b, prov(), Some(&h), None),
+            InferredType::intersect(&b, &a, prov(), Some(&h), None),
         );
     }
 
     /// Dynamic asymmetry holds for any concrete `P`.
     #[test]
     fn prop_dynamic_asymmetry(p in concrete_leaf()) {
-        prop_assert_eq!(InferredType::intersect(&dynamic(), &p, prov(), None), p.clone());
+        prop_assert_eq!(InferredType::intersect(&dynamic(), &p, prov(), None, None), p.clone());
         prop_assert_eq!(InferredType::difference(&dynamic(), &p, prov()), dynamic());
         prop_assert_eq!(InferredType::difference(&p, &dynamic(), prov()), p);
     }
@@ -700,7 +988,7 @@ proptest! {
     #[test]
     fn prop_intersect_complement(s in singleton_strat(), p in singleton_strat()) {
         let neg = negation(s.clone());
-        let result = InferredType::intersect(&neg, &p, prov(), None);
+        let result = InferredType::intersect(&neg, &p, prov(), None, None);
         if p == s {
             prop_assert_eq!(result, InferredType::Never);
         } else {

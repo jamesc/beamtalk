@@ -487,3 +487,296 @@ fn test_protocol_typed_param_non_conforming_still_warns() {
         conformance_warnings[0].message
     );
 }
+
+// --- `&` intersection parameter types require conformance to BOTH protocol
+// parts (ADR 0068 §Protocol Composition, ADR 0102 §1/§3, BT-2743) ---
+
+/// Builds a `Zzyzx >> process:` **instance** method whose parameter is
+/// annotated `Printable & Serializable` (as `type_name()` would render the
+/// parsed `TypeAnnotation::Intersection`), plus the two protocols it
+/// references. Returns `(hierarchy, registry)` with both protocols and
+/// their classes registered, and the `Zzyzx` instance-method table installed.
+///
+/// Deliberately an *instance*-side method: `check_protocol_conformance_in_expr`
+/// only looks up `hierarchy.find_method` (instance methods) for a `Known`
+/// receiver type — a `ClassReference` receiver (`Zzyzx foo:`) infers as
+/// `InferredType::Meta`, which that check does not (yet) handle, so a
+/// class-side fixture would never reach the conformance check at all.
+fn setup_intersection_param_fixture() -> (
+    ClassHierarchy,
+    crate::semantic_analysis::protocol_registry::ProtocolRegistry,
+) {
+    use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
+    use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
+
+    let mut hierarchy = ClassHierarchy::with_builtins();
+
+    let proto_module = Module {
+        protocols: vec![
+            ProtocolDefinition {
+                name: Identifier::new("Printable", span()),
+                type_params: vec![],
+                extending: None,
+                method_signatures: vec![ProtocolMethodSignature {
+                    selector: MessageSelector::Unary("asString".into()),
+                    parameters: vec![],
+                    return_type: Some(TypeAnnotation::simple("String", span())),
+                    comments: CommentAttachment::default(),
+                    doc_comment: None,
+                    span: span(),
+                }],
+                class_method_signatures: vec![],
+                comments: CommentAttachment::default(),
+                doc_comment: None,
+                span: span(),
+            },
+            ProtocolDefinition {
+                name: Identifier::new("Serializable", span()),
+                type_params: vec![],
+                extending: None,
+                method_signatures: vec![ProtocolMethodSignature {
+                    selector: MessageSelector::Unary("serialize".into()),
+                    parameters: vec![],
+                    return_type: Some(TypeAnnotation::simple("String", span())),
+                    comments: CommentAttachment::default(),
+                    doc_comment: None,
+                    span: span(),
+                }],
+                class_method_signatures: vec![],
+                comments: CommentAttachment::default(),
+                doc_comment: None,
+                span: span(),
+            },
+        ],
+        ..Module::new(vec![], span())
+    };
+
+    let mut registry = ProtocolRegistry::new();
+    let diags = registry.register_module(&proto_module, &hierarchy);
+    assert!(diags.is_empty());
+    hierarchy.register_protocol_classes(&proto_module);
+
+    let zzyzx_info = ClassInfo {
+        name: "Zzyzx".into(),
+        superclass: Some("Object".into()),
+        is_sealed: false,
+        is_abstract: false,
+        is_typed: false,
+        is_internal: false,
+        package: None,
+        is_value: true,
+        is_native: false,
+        state: vec![],
+        state_types: std::collections::HashMap::new(),
+        state_has_default: std::collections::HashMap::new(),
+        methods: vec![MethodInfo {
+            selector: "process:".into(),
+            arity: 1,
+            kind: MethodKind::Primary,
+            defined_in: "Zzyzx".into(),
+            is_sealed: false,
+            is_internal: false,
+            spawns_block: false,
+            return_type: Some("String".into()),
+            // `type_name()` for `TypeAnnotation::Intersection` renders as
+            // `"Printable & Serializable"` — this is exactly what
+            // `class_info.rs` stores for a real `:: Printable & Serializable`
+            // parameter annotation.
+            param_types: vec![Some("Printable & Serializable".into())],
+            doc: None,
+        }],
+        class_methods: vec![],
+        class_variables: vec![],
+        type_params: vec![],
+        type_param_bounds: vec![],
+        superclass_type_args: vec![],
+    };
+    hierarchy.add_from_beam_meta(vec![zzyzx_info]);
+
+    (hierarchy, registry)
+}
+
+#[test]
+fn test_intersection_param_missing_one_protocol_warns() {
+    // `Integer` has `asString` (conforms to Printable) but no `serialize`
+    // (does not conform to Serializable) — `Printable & Serializable`
+    // requires BOTH, so exactly one "does not conform" warning (mentioning
+    // Serializable) is expected.
+    let (hierarchy, registry) = setup_intersection_param_fixture();
+
+    // BT-2743 regression note: every synthetic node built by the `common`
+    // helpers (`var`, `msg_send`, …) shares the single fixed `span()`
+    // (`Span::new(0, 1)`), and `check_protocol_conformance_in_expr` looks up
+    // the receiver/argument types by span in the checker's `TypeMap`. With a
+    // shared span, the receiver's and argument's type_map entries collide and
+    // clobber each other — so this test gives the receiver and argument
+    // *distinct* spans (unlike the pre-existing class-side fixtures, which
+    // only ever asserted "no warning" and so never observed the collision).
+    let zzyzx_ident = Identifier::new("zzyzx", Span::new(10, 14));
+    let n_ident = Identifier::new("n", Span::new(20, 21));
+    let test_method = make_keyword_method(
+        &["run:", "with:"],
+        vec![("zzyzx", Some("Zzyzx")), ("n", Some("Integer"))],
+        vec![msg_send(
+            Expression::Identifier(zzyzx_ident),
+            MessageSelector::Keyword(vec![KeywordPart::new("process:", span())]),
+            vec![Expression::Identifier(n_ident)],
+        )],
+    );
+    let test_class = ClassDefinition::new(
+        ident("TestRunner"),
+        ident("Object"),
+        vec![],
+        vec![test_method],
+        span(),
+    );
+    let module = make_module_with_classes(vec![], vec![test_class]);
+
+    let mut checker = TypeChecker::new();
+    checker.check_module_with_protocols(&module, &hierarchy, &registry);
+
+    let conformance_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not conform"))
+        .collect();
+    assert_eq!(
+        conformance_warnings.len(),
+        1,
+        "Integer conforms to Printable but not Serializable — expected exactly 1 warning, got: {:?}",
+        conformance_warnings
+            .iter()
+            .map(|d| &d.message)
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        conformance_warnings[0].message.contains("Serializable"),
+        "Warning should mention the missing protocol Serializable, got: {}",
+        conformance_warnings[0].message
+    );
+    assert!(
+        !conformance_warnings[0].message.contains("Printable"),
+        "Integer conforms to Printable — it should not be named in the warning, got: {}",
+        conformance_warnings[0].message
+    );
+}
+
+#[test]
+fn test_intersection_param_conforms_to_both_no_warning() {
+    // A class implementing both `asString` and `serialize` conforms to
+    // `Printable & Serializable` — no warning expected.
+    use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
+
+    let (mut hierarchy, registry) = setup_intersection_param_fixture();
+
+    let report_info = ClassInfo {
+        name: "Report".into(),
+        superclass: Some("Object".into()),
+        is_sealed: false,
+        is_abstract: false,
+        is_typed: false,
+        is_internal: false,
+        package: None,
+        is_value: true,
+        is_native: false,
+        state: vec![],
+        state_types: std::collections::HashMap::new(),
+        state_has_default: std::collections::HashMap::new(),
+        methods: vec![
+            MethodInfo {
+                selector: "asString".into(),
+                arity: 0,
+                kind: MethodKind::Primary,
+                defined_in: "Report".into(),
+                is_sealed: false,
+                is_internal: false,
+                spawns_block: false,
+                return_type: Some("String".into()),
+                param_types: vec![],
+                doc: None,
+            },
+            MethodInfo {
+                selector: "serialize".into(),
+                arity: 0,
+                kind: MethodKind::Primary,
+                defined_in: "Report".into(),
+                is_sealed: false,
+                is_internal: false,
+                spawns_block: false,
+                return_type: Some("String".into()),
+                param_types: vec![],
+                doc: None,
+            },
+        ],
+        class_methods: vec![],
+        class_variables: vec![],
+        type_params: vec![],
+        type_param_bounds: vec![],
+        superclass_type_args: vec![],
+    };
+    hierarchy.add_from_beam_meta(vec![report_info]);
+
+    // See the BT-2743 regression note in `test_intersection_param_missing_one_protocol_warns`
+    // — the receiver and argument need distinct spans so their `TypeMap`
+    // entries don't collide.
+    let zzyzx_ident = Identifier::new("zzyzx", Span::new(10, 14));
+    let r_ident = Identifier::new("r", Span::new(20, 21));
+    let test_method = make_keyword_method(
+        &["run:", "with:"],
+        vec![("zzyzx", Some("Zzyzx")), ("r", Some("Report"))],
+        vec![msg_send(
+            Expression::Identifier(zzyzx_ident),
+            MessageSelector::Keyword(vec![KeywordPart::new("process:", span())]),
+            vec![Expression::Identifier(r_ident)],
+        )],
+    );
+    let test_class = ClassDefinition::new(
+        ident("TestRunner"),
+        ident("Object"),
+        vec![],
+        vec![test_method],
+        span(),
+    );
+    let module = make_module_with_classes(vec![], vec![test_class]);
+
+    let mut checker = TypeChecker::new();
+    checker.check_module_with_protocols(&module, &hierarchy, &registry);
+
+    let conformance_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not conform"))
+        .collect();
+    assert!(
+        conformance_warnings.is_empty(),
+        "Report conforms to both Printable and Serializable — no warning expected, got: {:?}",
+        conformance_warnings
+            .iter()
+            .map(|d| &d.message)
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_split_intersection_type_string() {
+    assert_eq!(
+        TypeChecker::split_intersection_type_string("Printable & Serializable"),
+        Some(vec!["Printable", "Serializable"])
+    );
+    // Chained `&` (left-associative AST, flat `type_name()` rendering).
+    assert_eq!(
+        TypeChecker::split_intersection_type_string("A & B & C"),
+        Some(vec!["A", "B", "C"])
+    );
+    // No top-level `&` — not an intersection annotation.
+    assert_eq!(
+        TypeChecker::split_intersection_type_string("Printable"),
+        None
+    );
+    // A `&` nested inside a generic type argument's own parens must not be
+    // mistaken for a top-level split point.
+    assert_eq!(
+        TypeChecker::split_intersection_type_string("Collection(A & B)"),
+        None
+    );
+}

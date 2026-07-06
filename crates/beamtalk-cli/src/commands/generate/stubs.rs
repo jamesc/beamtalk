@@ -332,6 +332,22 @@ fn format_type(ty: &beamtalk_core::semantic_analysis::type_checker::InferredType
                 format!("{} \\ {}", format_type(base), format_type(excluded))
             }
         }
+        // ADR 0102/BT-2743: render an intersection as `A & B & …`. A union
+        // member is only reachable via explicit grouping; parenthesise to
+        // preserve meaning, matching `InferredType::display_with_options`.
+        InferredType::Intersection { members, .. } => {
+            let parts: Vec<String> = members
+                .iter()
+                .map(|m| {
+                    if matches!(m, InferredType::Union { .. }) {
+                        format!("({})", format_type(m))
+                    } else {
+                        format_type(m)
+                    }
+                })
+                .collect();
+            parts.join(" & ")
+        }
     }
 }
 
