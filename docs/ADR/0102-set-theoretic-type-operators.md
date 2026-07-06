@@ -608,14 +608,16 @@ needs full arrow/intersection-function typing. Documented as the destination in
   though `intersect`/`difference` are normalising functions, so most results
   stay in existing variants (see §1).
 - **Live `Never` branches are new.** Group 2 true branches (and group 1's
-  impossible-comparison corner) will type reachable code regions as `Never` for
-  the first time. **Provisional default, committed here: sends on a
-  `Never`-typed receiver are silent** (silent-as-unreachable, per ADR 0100's
-  conservatism — the branch is already flagged by the impossible-comparison
-  hint at its source, so a second diagnostic per send inside it would be
-  noise). BT-2741 implements this default and may propose an
-  unreachable-code hint *as a revision* if implementation experience argues
-  for it — but ships the default, not an open question.
+  impossible-comparison corner) type reachable code regions as `Never` for
+  the first time. **Implemented (BT-2741): sends on a `Never`-typed receiver
+  are silent** (silent-as-unreachable, per ADR 0100's conservatism — the
+  branch is already flagged by the impossible-comparison hint at its source,
+  so a second diagnostic per send inside it would be noise). This falls out
+  of validation's existing structure (`check_instance_selector` is only
+  reached for a `Known` receiver, so a `Never` receiver already produced no
+  diagnostics before this ADR) and is now pinned by a regression test. A
+  future unreachable-code hint remains a possible revision if implementation
+  experience argues for it, but is not proposed here.
 - **`TypeAnnotation` (`ast/expression.rs`) also grows variants** for `&`/`\`
   (the AST enum is already ad-hoc — `FalseOr`, `ClassOf`, `SelfType`); every
   exhaustive match over it and `type_resolver.rs` must be updated. This cost was

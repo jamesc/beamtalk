@@ -79,5 +79,6 @@ fn build_info(inner_recv: &Expression, is_error: bool) -> Option<NarrowingInfo> 
         is_result_error_check: is_error,
         responded_selector: None,
         singleton_eq: None,
+        class_test: None,
     })
 }
