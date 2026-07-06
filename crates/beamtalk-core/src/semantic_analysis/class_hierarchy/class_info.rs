@@ -303,7 +303,7 @@ impl ClassInfo {
 ///
 /// Only handles simple literal values (integer, float, string, boolean, nil).
 /// Complex expressions fall back to `"..."`.
-pub(super) fn format_default_value(expr: &Expression) -> String {
+pub fn format_default_value(expr: &Expression) -> String {
     match expr {
         Expression::Literal(lit, _) => match lit {
             Literal::Integer(n) => n.to_string(),

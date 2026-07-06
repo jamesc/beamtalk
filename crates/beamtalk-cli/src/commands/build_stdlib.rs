@@ -565,10 +565,10 @@ fn synthesize_value_auto_methods(
 
         // Auto getter: `fieldName` → slot type (or Object if unannotated)
         if !user_selectors.contains(slot_name) {
-            let default_str = slot
-                .default_value
-                .as_ref()
-                .map_or_else(|| "nil".to_string(), fmt_default);
+            let default_str = slot.default_value.as_ref().map_or_else(
+                || "nil".to_string(),
+                beamtalk_core::semantic_analysis::class_hierarchy::format_default_value,
+            );
             let getter_doc = format!(
                 "Returns the `{slot_name}` field value. Default: `{default_str}`.\n\n*(compiler-generated)*"
             );
@@ -642,10 +642,10 @@ fn synthesize_value_auto_methods(
             .state
             .iter()
             .map(|s| {
-                let dv = s
-                    .default_value
-                    .as_ref()
-                    .map_or_else(|| "nil".to_string(), fmt_default);
+                let dv = s.default_value.as_ref().map_or_else(
+                    || "nil".to_string(),
+                    beamtalk_core::semantic_analysis::class_hierarchy::format_default_value,
+                );
                 format!("{} (default: {})", s.name.name, dv)
             })
             .collect::<Vec<_>>()
@@ -693,34 +693,6 @@ fn mark_timer_spawns(class_methods: &mut [MethodMeta]) -> Result<()> {
         );
     }
     Ok(())
-}
-
-/// Format a default-value expression as a short string for doc generation.
-///
-/// Mirrors `format_default_value` in `beamtalk-core/class_hierarchy/mod.rs`.
-fn fmt_default(expr: &beamtalk_core::ast::Expression) -> String {
-    use beamtalk_core::ast::{Expression, Literal};
-    match expr {
-        Expression::Literal(lit, _) => match lit {
-            Literal::Integer(n) => n.to_string(),
-            Literal::Float(f) => {
-                let rendered = f.to_string();
-                if rendered.contains('.') || rendered.contains('e') || rendered.contains('E') {
-                    rendered
-                } else {
-                    format!("{rendered}.0")
-                }
-            }
-            Literal::String(s) => format!("{s:?}"),
-            Literal::Symbol(s) => format!("#{s}"),
-            Literal::Character(c) => format!("${}", c.escape_default()),
-            Literal::List(_) => "...".to_string(),
-        },
-        Expression::Identifier(ident) if ident.name == "nil" => "nil".to_string(),
-        Expression::Identifier(ident) if ident.name == "true" => "true".to_string(),
-        Expression::Identifier(ident) if ident.name == "false" => "false".to_string(),
-        _ => "...".to_string(),
-    }
 }
 
 /// Check whether a `.bt` file contains only protocol definitions (no classes).
