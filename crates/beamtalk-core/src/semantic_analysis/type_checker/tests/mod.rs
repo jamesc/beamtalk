@@ -10,6 +10,7 @@ mod common;
 
 mod arg_return_checking;
 mod basic_inference;
+mod cast_and_sync_send;
 mod destructure_and_extension;
 mod dynamic_and_blocks;
 mod dynamic_iterable;

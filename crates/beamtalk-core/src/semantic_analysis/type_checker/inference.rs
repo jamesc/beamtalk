@@ -483,9 +483,15 @@ impl TypeChecker {
             Expression::Primitive { .. }
             | Expression::Error { .. }
             | Expression::ExpectDirective { .. }
-            | Expression::Spread { .. }
-            | Expression::MessageSend { is_cast: true, .. } => {
-                InferredType::Dynamic(DynamicReason::Unknown)
+            | Expression::Spread { .. } => InferredType::Dynamic(DynamicReason::Unknown),
+
+            // Cast / async send (`receiver selector!`) — the postfix `!` form is
+            // fire-and-forget: it enqueues the message and evaluates to `nil`
+            // rather than the (asynchronous) reply. Type it as `Nil`
+            // (`UndefinedObject`) so a bare cast statement is `Nil`-valued
+            // (ADR 0104 Phase 1, BT-2749).
+            Expression::MessageSend { is_cast: true, .. } => {
+                InferredType::known(WellKnownClass::UndefinedObject.as_str())
             }
 
             // Message sends — the core of type checking
