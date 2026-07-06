@@ -2400,6 +2400,11 @@ impl TypeChecker {
         // unreachable here — `None` is provably equivalent to threading a real
         // hierarchy (a singleton relates only to `Symbol`/itself, handled by the
         // explicit symbol arms).
+        debug_assert!(
+            singleton.starts_with('#'),
+            "type_admits_singleton: `singleton` must be a bare symbol (`#foo`), \
+             not a nominal class — the `None` hierarchy below relies on it"
+        );
         !matches!(
             InferredType::intersect(ty, &matched, provenance, None),
             InferredType::Never

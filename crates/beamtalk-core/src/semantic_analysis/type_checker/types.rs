@@ -891,6 +891,10 @@ impl InferredType {
     /// the hierarchy, so this returns `false` for them (their membership is
     /// handled by the explicit `Symbol`-singleton arms in
     /// [`intersect`](Self::intersect)).
+    ///
+    /// The reflexive `sub == sup` short-circuit is unreachable from `intersect`
+    /// (its match arm guards on differing names) but kept so the predicate is
+    /// correct standalone for future callers.
     fn is_nominal_subtype(hierarchy: &ClassHierarchy, sub: &str, sup: &str) -> bool {
         sub == sup || hierarchy.superclass_chain(sub).iter().any(|c| c == sup)
     }
