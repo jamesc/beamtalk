@@ -461,6 +461,32 @@ Rejected. Functional style fights the "actors are objects" mental model we want.
 
 Rejected. LFE already exists for BEAM. We're explicitly targeting the Smalltalk aesthetic.
 
+### Erlang-style Multi-Clause Method Heads
+
+Rejected. Erlang's multiple function heads do two jobs, and Beamtalk covers both
+without them:
+
+- **Message dispatch** — Erlang needs N `handle_call` clauses because OTP funnels
+  every message through one function. Smalltalk selector dispatch *is* that
+  mechanism: each message is its own method, individually browsable,
+  documentable, and hot-reloadable.
+- **Data-shape dispatch** — discriminating on argument structure is `match:`
+  inside the body (see `Server >> handleInfo:` in the stdlib for the canonical
+  `handle_info` translation), with `when:` guards and exhaustiveness checking
+  (BT-1299, extended to singleton unions by ADR 0102).
+
+Adding heads would fragment the method as Beamtalk's unit of everything
+(method-level edit/save per ADR 0082, per-method hot reload, browser model),
+smuggle Erlang's ordered-clause semantics into an unordered method dictionary,
+and create a third failure mode between `function_clause` and DNU — for zero
+runtime benefit (BEAM lowers heads and in-body `case` to the same
+pattern-matching trees). Gleam reached the same conclusion on the same VM.
+
+*Door left ajar:* if `msg match:` boilerplate ever becomes a demonstrated pain
+point, the acceptable design is pattern-parameter **sugar that desugars to one
+method with a `match:` body** — typing, guards, and exhaustiveness then inherit
+for free. To be earned with evidence, not built speculatively.
+
 ---
 
 ## References

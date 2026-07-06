@@ -1863,8 +1863,12 @@ For fire-and-forget scenarios, use the `!` (bang) operator, which uses `gen_serv
 
 ```beamtalk
 // Fire-and-forget — does not block, returns nil
-c ! increment
+c increment!
 ```
+
+The `!` is **postfix** — it terminates the send it applies to. A cast is only
+legal as a bare statement: using its (always-`nil`) value in an assignment,
+return, or argument is a parse error (`cast_in_expression_error`).
 
 Use `!` when you intentionally don't need the result and don't want to block.
 

@@ -128,6 +128,10 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0099](0099-cli-application-story.md) | CLI Application Story — Console, Arguments, Exit, and Packaging | Accepted | 2026-06-26 |
 | [0100](0100-open-world-diagnostic-policy.md) | Open-World Diagnostic Policy for Unresolved Selectors and Classes | Proposed | 2026-06-27 |
 | [0101](0101-unified-erlang-interop-native-objects.md) | Unified Erlang Interop — `native:` for Stateless Objects, Wrap-by-Default FFI, Clean `@primitive`/`@intrinsic`/`native:` Split | Accepted | 2026-06-28 |
+| [0102](0102-set-theoretic-type-operators.md) | Set-Theoretic Type Operators (Intersection and Negation) for Narrowing and Atom Exhaustiveness | Accepted | 2026-07-06 |
+| [0103](0103-sendability-typing-from-class-kinds.md) | Sendability Typing from Class Kinds | Proposed | 2026-07-05 |
+| [0104](0104-typed-actor-protocols.md) | Typed Actor Protocols — the Class Interface Is the Protocol | Proposed | 2026-07-05 |
+| [0105](0105-live-image-recheck-on-reload.md) | Live Image Re-Checking on Hot Reload | Proposed | 2026-07-05 |
 
 > ADR 0086 was originally numbered 0069 (a collision with *Actor Observability and Tracing*) and was renumbered on 2026-05-25.
 
