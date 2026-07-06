@@ -671,12 +671,14 @@ with_subdir_repo(Fun) ->
 %% concurrent test setups in diagnostic output.
 with_workspace_meta(ProjectPath, WorkspaceId, Fun) ->
     stop_meta_if_running(),
-    case beamtalk_workspace_meta:start_link(#{
-        workspace_id => WorkspaceId,
-        project_path => ProjectPath,
-        created_at => erlang:system_time(second),
-        repl => false
-    }) of
+    case
+        beamtalk_workspace_meta:start_link(#{
+            workspace_id => WorkspaceId,
+            project_path => ProjectPath,
+            created_at => erlang:system_time(second),
+            repl => false
+        })
+    of
         {ok, Pid} ->
             try
                 Fun()
