@@ -466,12 +466,17 @@ impl TypeChecker {
                     .join(" | "),
             ),
             // Negation renders as `base \ excluded` (ADR 0102), matching
-            // `InferredType::display_*`.
-            InferredType::Negation { base, excluded, .. } => EcoString::from(format!(
-                "{} \\ {}",
-                Self::inferred_type_to_string(base),
-                Self::inferred_type_to_string(excluded)
-            )),
+            // `InferredType::display_*`. Parenthesise a union excluded so
+            // `\` vs `|` precedence is unambiguous (`Symbol \ (#a | #b)`).
+            InferredType::Negation { base, excluded, .. } => {
+                let base_str = Self::inferred_type_to_string(base);
+                let excl_str = Self::inferred_type_to_string(excluded);
+                if matches!(excluded.as_ref(), InferredType::Union { .. }) {
+                    EcoString::from(format!("{base_str} \\ ({excl_str})"))
+                } else {
+                    EcoString::from(format!("{base_str} \\ {excl_str}"))
+                }
+            }
         }
     }
 

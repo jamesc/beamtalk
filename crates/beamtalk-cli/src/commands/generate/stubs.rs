@@ -323,8 +323,14 @@ fn format_type(ty: &beamtalk_core::semantic_analysis::type_checker::InferredType
         // ADR 0083: render a metatype as the source annotation spelling `C class`.
         InferredType::Meta { class_name, .. } => format!("{class_name} class"),
         // ADR 0102: render a negation as `base \ excluded`, e.g. `Symbol \ #foo`.
+        // Parenthesise a union excluded (`Symbol \ (#a | #b)`) so `\` vs `|`
+        // precedence is unambiguous, matching `InferredType::display_with_options`.
         InferredType::Negation { base, excluded, .. } => {
-            format!("{} \\ {}", format_type(base), format_type(excluded))
+            if matches!(excluded.as_ref(), InferredType::Union { .. }) {
+                format!("{} \\ ({})", format_type(base), format_type(excluded))
+            } else {
+                format!("{} \\ {}", format_type(base), format_type(excluded))
+            }
         }
     }
 }
