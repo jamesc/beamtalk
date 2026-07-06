@@ -574,8 +574,8 @@ fn test_refine_singleton_eq_all_removed_is_never() {
 #[test]
 fn test_refine_singleton_eq_dynamic_variable_keeps_false_dynamic() {
     // An unbound variable resolves to Dynamic; `x = #foo` narrows the true
-    // branch to #foo and leaves the false branch Dynamic — there is no union to
-    // subtract from (exercises the `_ => ty.clone()` arm of `union_without`).
+    // branch to #foo and leaves the false branch Dynamic — `difference(Dynamic,
+    // #foo) = Dynamic` (Dynamic is opaque to subtraction, ADR 0102 §1).
     let hierarchy = ClassHierarchy::with_builtins();
     let env = TypeEnv::new(); // `x` is absent → Dynamic
     let expr = msg_send(
@@ -609,6 +609,56 @@ fn test_refine_singleton_symbol_left_inequality_swaps_branches() {
     let refined = TypeChecker::refine_singleton_narrowing(info, &env, &hierarchy);
     assert_eq!(refined.true_type, InferredType::known("Integer"));
     assert_eq!(refined.false_type, Some(InferredType::known("#infinity")));
+}
+
+/// BT-2740 / ADR 0102 §2 (pinned corner 1): an impossible singleton test
+/// (`x :: Integer; x = #foo`) now narrows the *true* branch to `Never` via
+/// `intersect(Integer, #foo) = Never`. Previously `union_without` returned the
+/// singleton (`#foo`) unconditionally for the true branch even though it is
+/// unreachable. The "can never be true" diagnostic still fires elsewhere
+/// (`check_impossible_singleton_comparison`); only the branch type changed.
+#[test]
+fn test_refine_singleton_eq_impossible_true_branch_is_never() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut env = TypeEnv::new();
+    env.set_local("x", InferredType::known("Integer"));
+    let expr = msg_send(
+        var("x"),
+        MessageSelector::Binary("=".into()),
+        vec![symbol_lit("foo")],
+    );
+    let info = TypeChecker::detect_narrowing(&expr).unwrap();
+    let refined = TypeChecker::refine_singleton_narrowing(info, &env, &hierarchy);
+    // True branch is unreachable — the value can never be `#foo`.
+    assert_eq!(refined.true_type, InferredType::Never);
+    // False branch keeps the full `Integer` type (nothing removable).
+    assert_eq!(refined.false_type, Some(InferredType::known("Integer")));
+}
+
+/// BT-2740 / ADR 0102 §2 (new capability): the false branch of `x = #foo` on a
+/// bare `Symbol` receiver narrows to the negation `Symbol \ #foo` (every symbol
+/// except `#foo`) and renders as `Symbol \ #foo` in hover.
+#[test]
+fn test_refine_singleton_eq_symbol_false_branch_is_negation() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut env = TypeEnv::new();
+    env.set_local("s", InferredType::known("Symbol"));
+    let expr = msg_send(
+        var("s"),
+        MessageSelector::Binary("=".into()),
+        vec![symbol_lit("foo")],
+    );
+    let info = TypeChecker::detect_narrowing(&expr).unwrap();
+    let refined = TypeChecker::refine_singleton_narrowing(info, &env, &hierarchy);
+    // True branch narrows to the singleton itself.
+    assert_eq!(refined.true_type, InferredType::known("#foo"));
+    // False branch is the complement `Symbol \ #foo`.
+    let false_ty = refined.false_type.expect("false branch present");
+    assert!(
+        matches!(false_ty, InferredType::Negation { .. }),
+        "expected a Negation, got: {false_ty:?}"
+    );
+    assert_eq!(false_ty.display_for_diagnostic().unwrap(), "Symbol \\ #foo");
 }
 
 /// BT-2624 (item 1) / BT-2631: testing a variable against a singleton it can
