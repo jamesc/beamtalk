@@ -342,3 +342,24 @@ fn result_constructor_match_is_not_touched_by_singleton_check() {
          scrutinee, got: {non_exhaustive:?}"
     );
 }
+
+#[test]
+fn unguarded_variable_binding_arm_silences_check() {
+    // An unguarded variable-binding arm (`direction -> ...`) always matches —
+    // coverage-equivalent to `_ ->` — so no warning even with members uncovered.
+    let warnings = exhaustiveness_warnings(
+        compass_type(),
+        vec![
+            sym_arm("north", str_lit("up")),
+            MatchArm::new(
+                Pattern::Variable(crate::ast::Identifier::new("direction", span())),
+                str_lit("other"),
+                span(),
+            ),
+        ],
+    );
+    assert!(
+        warnings.is_empty(),
+        "expected variable-binding catch-all to silence the check, got: {warnings:?}"
+    );
+}

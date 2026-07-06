@@ -2438,7 +2438,7 @@ impl TypeChecker {
     ///   downgrades the whole union to `Open`".
     fn is_closed_singleton_union(ty: &InferredType) -> bool {
         matches!(ty, InferredType::Union { members, .. }
-        if members.iter().all(|m| matches!(
+        if !members.is_empty() && members.iter().all(|m| matches!(
             m,
             InferredType::Known { class_name, type_args, .. }
                 if type_args.is_empty() && class_name.starts_with('#')
@@ -2484,12 +2484,14 @@ impl TypeChecker {
         }
 
         // An unguarded wildcard arm is full coverage — mirrors BT-1299's
-        // suppression rule. A *guarded* wildcard (`_ when: [cond] -> ...`) does
-        // NOT guarantee coverage of the remaining cases.
-        if arms
-            .iter()
-            .any(|arm| arm.guard.is_none() && matches!(arm.pattern, Pattern::Wildcard(_)))
-        {
+        // suppression rule. An unguarded variable-binding arm (`x -> ...`)
+        // always matches too, so it counts the same. A *guarded* catch-all
+        // (`_ when: [cond] -> ...`) does NOT guarantee coverage of the
+        // remaining cases.
+        if arms.iter().any(|arm| {
+            arm.guard.is_none()
+                && matches!(arm.pattern, Pattern::Wildcard(_) | Pattern::Variable(_))
+        }) {
             return;
         }
 
