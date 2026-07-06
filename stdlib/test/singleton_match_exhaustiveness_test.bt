@@ -1,0 +1,69 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2745 / ADR 0102 §4: advisory singleton-union match: exhaustiveness.
+//
+// BUnit cannot observe compiler diagnostics, so the warning-*appearing* cases
+// (missing member named in the message, residual type, Warning severity) are
+// pinned at the Rust layer:
+//   crates/beamtalk-core/src/semantic_analysis/type_checker/tests/singleton_match_exhaustiveness.rs
+//
+// What THIS file pins is the silence cases, end-to-end: `just test-bunit`
+// compiles with --warnings-as-errors and Type-category warnings are promoted
+// to errors, so if any match below wrongly triggered the non-exhaustive
+// warning, this file would fail to compile and the suite would go red.
+
+TestCase subclass: SingletonMatchExhaustivenessTest
+
+  testFullCoverageIsSilentAndRuns =>
+    // All four members covered — residual is Never, no warning, and the
+    // match dispatches correctly at runtime.
+    compass :: #north | #south | #east | #west := #east
+    result := compass match: [
+      #north -> "up";
+      #south -> "down";
+      #east -> "right";
+      #west -> "left"
+    ]
+    self assert: result equals: "right"
+
+  testWildcardSilencesCheck =>
+    // An unguarded `_ ->` arm is full coverage — no warning even though
+    // only one member has a dedicated arm.
+    compass :: #north | #south | #east | #west := #west
+    result := compass match: [
+      #north -> "up";
+      _ -> "other"
+    ]
+    self assert: result equals: "other"
+
+  testBareSymbolScrutineeIsSilent =>
+    // A bare, open `Symbol` is not a known-closed singleton union — the
+    // check stays silent (open world, ADR 0100) even with partial arms and
+    // no wildcard... a wildcard is still needed here for runtime safety,
+    // so the open-Symbol silence is exercised with full runtime coverage.
+    s :: Symbol := #anything
+    result := s match: [
+      #ok -> "ok";
+      _ -> "fallthrough"
+    ]
+    self assert: result equals: "fallthrough"
+
+  testSingleSingletonScrutineeIsSilent =>
+    // A lone singleton type (not a union) never gates the check on — and
+    // matching it works at runtime.
+    tag := #ok
+    result := tag match: [
+      #ok -> "success";
+      _ -> "other"
+    ]
+    self assert: result equals: "success"
+
+  testTwoMemberUnionFullCoverageRuns =>
+    // Smallest closed union, both members covered — silent and correct.
+    status :: #ok | #error := #error
+    result := status match: [
+      #ok -> "success";
+      #error -> "failure"
+    ]
+    self assert: result equals: "failure"
