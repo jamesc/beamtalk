@@ -108,6 +108,24 @@ fn check_declared_name(id: &Identifier, kind: &str, diagnostics: &mut Vec<Diagno
 /// Emits a diagnostic if `name` is in the reserved namespace, anchored at `span`.
 fn check_raw_name(name: &str, span: Span, kind: &str, diagnostics: &mut Vec<Diagnostic>) {
     if is_reserved_internal_name(name) {
+        // The hazard depends on where the name appears. Fields and class
+        // variables land as keys in the actor/object state map; parameters,
+        // block parameters, and locals become codegen-generated variables.
+        // Emit only the paragraph relevant to this declaration kind.
+        let hint = match kind {
+            "field" | "class variable" => {
+                "Rename it. A field or class variable beginning with `__` (double \
+                 underscore) becomes a reserved state-map key: `__local__`-prefixed keys \
+                 are silently stripped from persisted state on every dispatch commit, and \
+                 a `__methods__` or `__class_mod__` collision would overwrite the \
+                 runtime's dispatch metadata and corrupt method lookup."
+            }
+            _ => {
+                "Rename it. A parameter, block parameter, or local beginning with `__` \
+                 (double underscore) collides with the names the compiler generates for \
+                 control-flow temporaries."
+            }
+        };
         diagnostics.push(
             Diagnostic::error(
                 format!(
@@ -116,17 +134,7 @@ fn check_raw_name(name: &str, span: Span, kind: &str, diagnostics: &mut Vec<Diag
                 ),
                 span,
             )
-            .with_hint(
-                "Rename it. Identifiers beginning with `__` (double underscore) are \
-                 reserved for the compiler. A field or class variable with this prefix \
-                 becomes a reserved state-map key: `__local__`-prefixed keys are silently \
-                 stripped from persisted state on every dispatch commit, and a \
-                 `__methods__` or `__class_mod__` collision would overwrite the runtime's \
-                 dispatch metadata and corrupt method lookup. A parameter, block \
-                 parameter, or local with this prefix collides with the compiler's \
-                 control-flow temporary names."
-                    .to_string(),
-            ),
+            .with_hint(hint.to_string()),
         );
     }
 }
