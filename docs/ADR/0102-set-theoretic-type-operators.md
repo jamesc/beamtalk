@@ -26,8 +26,8 @@ Accepted (2026-07-06)
 ### Problem statement
 
 Beamtalk's type checker narrows types by pattern-matching a **fixed, growing
-list of AST idioms**. Each recognised shape (`isNil`, `class = Foo`,
-`isKindOf:`, `respondsTo:`, `x = #foo`, `isOk`/`isError`) is a separate
+list of AST idioms**. Each recognised shape (`isNil`, `class =:= Foo`,
+`isKindOf:`, `respondsTo:`, `x =:= #foo`, `isOk`/`isError`) is a separate
 detector file under `type_checker/narrowing/rules/`, and the true/false branch
 types are computed by bespoke, per-idiom logic. Adding a new form of narrowing
 means adding a new file and a new entry in the `RULES` table
@@ -38,7 +38,7 @@ types by hand** — but only for the narrow cases each idiom needs:
 
 - `union_without` (`inference.rs:2388`) is a **set-difference** that only knows
   how to subtract a single `#name` singleton from a *flat* union. It is the
-  engine behind the `x = #foo` false-branch (`Integer | #infinity` minus
+  engine behind the `x =:= #foo` false-branch (`Integer | #infinity` minus
   `#infinity` ⇒ `Integer`).
 - `non_nil_type` (`inference.rs:3306`) is a **second, independent set-difference**
   — remove `UndefinedObject` from a union — whose own doc comment calls
@@ -156,7 +156,7 @@ Normalisation rules (`intersect` / `difference`; **not** a blind mirror of
 - **Rule priority: the `Dynamic` rules are checked first**; the general rules
   below apply only to non-`Dynamic` operands. This matters concretely for
   `intersect(Dynamic, Object)`: the Dynamic rule gives `Object` (a positive
-  `x class = Object` test *refines* an unannotated variable), while the
+  `x class =:= Object` test *refines* an unannotated variable), while the
   general identity rule would wrongly give `Dynamic` (no narrowing). An
   implementation that checks `intersect(T, Object) = T` first gets the wrong
   answer silently.
@@ -181,8 +181,8 @@ Normalisation rules (`intersect` / `difference`; **not** a blind mirror of
   only grows within the finite set of singletons appearing in the program, so
   no chain of `difference` calls recurses or grows unboundedly.
 - **Intersect through a complement** — required the moment narrowing *chains*
-  (the false branch of `x = #foo` leaves `x :: Symbol \ #foo`; a later
-  `x = #bar` in the same method computes
+  (the false branch of `x =:= #foo` leaves `x :: Symbol \ #foo`; a later
+  `x =:= #bar` in the same method computes
   `intersect(Negation{Symbol, #foo}, #bar)`). The general law:
   `intersect(Negation{B, E}, P) = difference(intersect(B, P), E)` —
   set-theoretically `(B \ E) ∩ P = (B ∩ P) \ E` — which reduces via the rules
@@ -287,7 +287,7 @@ They divide into three groups, and the ADR must not pretend otherwise:
    ```
    `type_admits_singleton` becomes `intersect(T, #foo) != Never`. One
    deliberate corner changes: today the true branch is `matched`
-   *unconditionally* (`inference.rs:2326`), so `x :: Integer; x = #foo` types
+   *unconditionally* (`inference.rs:2326`), so `x :: Integer; x =:= #foo` types
    the true branch `#foo`; under `intersect` it becomes `Never`. The
    impossible-comparison diagnostic **already fires** for exactly this case
    (`check_impossible_singleton_comparison`), so only the (unreachable)
@@ -311,7 +311,7 @@ They divide into three groups, and the ADR must not pretend otherwise:
 2. **Ported, but a genuine behaviour change — `class_eq`, `is_kind_of`.** Today
    these set `true_type = P` *unconditionally* and `false_type = None`
    (`class_eq.rs`: `true_type: Known(name), false_type: None`). Moving the true
-   branch to `intersect(T, P)` is *new* logic: `x class = Bar` where `T` and
+   branch to `intersect(T, P)` is *new* logic: `x class =:= Bar` where `T` and
    `Bar` are unrelated sealed classes would now yield `Never` and should route
    through the same impossible-comparison hint the singleton path already has
    (`check_impossible_singleton_comparison`, `inference.rs:2354`). One
@@ -468,7 +468,7 @@ actually returns `#west`). Therefore:
 
 ```
 bt> x := someUnionReturning   "x :: Integer | #infinity"
-bt> (x = #infinity) ifTrue: [x] ifFalse: [x + 1]
+bt> (x =:= #infinity) ifTrue: [x] ifFalse: [x + 1]
                                           ^^^^^
    in the false branch, x :: Integer  (#infinity removed) → x + 1 type-checks
 ```
@@ -483,7 +483,7 @@ a `:type`-style command would be its own surface-parity decision
 
 ```beamtalk
 d :: #north | #south := heading
-d = #west
+d =:= #west
 // ⚠️ comparison can never be true: `#west` is not a value of `#north | #south`
 //    (this diagnostic already exists via check_impossible_singleton_comparison;
 //     it is now a direct consequence of `intersect(T, #west) == Never`, not a
@@ -577,7 +577,7 @@ The true minimum between status quo and Alternative A: ship `intersect` /
 (irreducible), fall back to today's behaviour (`false_type = None` — no
 narrowing). Zero new `InferredType` variants, zero new match arms. Rejected
 because the fallback silently discards exactly the new expressiveness: the
-`Symbol`-typed false branch of `x = #foo` stays un-narrowed, hover cannot
+`Symbol`-typed false branch of `x =:= #foo` stays un-narrowed, hover cannot
 display "everything except `#foo`", and Phase 2's `\` syntax and residual-based
 exhaustiveness both *need* a representable co-finite result. Priced honestly:
 this saves one variant's worth of match arms, at the cost of the feature's
