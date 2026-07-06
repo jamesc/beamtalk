@@ -357,6 +357,10 @@ fn collect_all_type_refs(annotation: &TypeAnnotation, source: &str, hits: &mut V
         TypeAnnotation::FalseOr { inner, .. } => {
             collect_all_type_refs(inner, source, hits);
         }
+        TypeAnnotation::Difference { base, excluded, .. } => {
+            collect_all_type_refs(base, source, hits);
+            collect_all_type_refs(excluded, source, hits);
+        }
         TypeAnnotation::ClassOf {
             class_name: class_id,
             ..
@@ -561,6 +565,10 @@ fn collect_type_lines(
         }
         TypeAnnotation::FalseOr { inner, .. } => {
             collect_type_lines(inner, class_name, source, lines);
+        }
+        TypeAnnotation::Difference { base, excluded, .. } => {
+            collect_type_lines(base, class_name, source, lines);
+            collect_type_lines(excluded, class_name, source, lines);
         }
         TypeAnnotation::ClassOf {
             class_name: class_id,

@@ -329,6 +329,10 @@ impl TypeChecker {
             TypeAnnotation::FalseOr { inner, .. } => {
                 self.check_bounds_in_type_annotation(inner, hierarchy, protocol_registry);
             }
+            TypeAnnotation::Difference { base, excluded, .. } => {
+                self.check_bounds_in_type_annotation(base, hierarchy, protocol_registry);
+                self.check_bounds_in_type_annotation(excluded, hierarchy, protocol_registry);
+            }
             // Simple, SelfType, Singleton — no nested generics to check
             _ => {}
         }

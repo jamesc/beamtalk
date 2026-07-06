@@ -58,6 +58,8 @@ pub(in crate::semantic_analysis) type SubstitutionMap = HashMap<EcoString, Infer
 ///   [`InferredType::union_of`] which handles flattening and deduplication.
 /// * [`TypeAnnotation::FalseOr`] — `inner | False`, using the same union
 ///   machinery.
+/// * [`TypeAnnotation::Difference`] — `base \ excluded`, resolved through
+///   [`InferredType::difference`] (ADR 0102 §1). Reducible cases normalise.
 /// * [`TypeAnnotation::SelfType`] — returns `Dynamic(Unknown)`. Bare `Self`
 ///   is resolved at the *call site* where the static receiver class is known;
 ///   the annotation-resolution pass does not have that context.
@@ -123,6 +125,15 @@ pub(in crate::semantic_analysis) fn resolve_type_annotation(
         TypeAnnotation::FalseOr { inner, .. } => {
             let inner_ty = resolve_type_annotation(inner, subst);
             InferredType::union_of(&[inner_ty, InferredType::known("False")])
+        }
+        TypeAnnotation::Difference { base, excluded, .. } => {
+            // ADR 0102 §1: `base \ excluded` resolves through the shared
+            // `difference` set operation (BT-2739). Reducible cases normalise —
+            // e.g. an excluded member that drops a union member, or `T \ T`
+            // collapsing to `Never`.
+            let base_ty = resolve_type_annotation(base, subst);
+            let excluded_ty = resolve_type_annotation(excluded, subst);
+            InferredType::difference(&base_ty, &excluded_ty, TypeProvenance::Declared(ann.span()))
         }
         TypeAnnotation::ClassOf { class_name, .. } => {
             // ADR 0083: `<ClassName> class` is the metatype of the named class.
@@ -597,6 +608,58 @@ mod tests {
         assert_eq!(members.len(), 2);
         assert!(members.contains(&InferredType::known("Integer")));
         assert!(members.contains(&InferredType::known("False")));
+    }
+
+    // ---- resolve_type_annotation: difference ----
+
+    #[test]
+    fn difference_symbol_minus_singleton_produces_negation() {
+        // `Symbol \ #foo` → Negation { base: Symbol, excluded: #foo }.
+        let ann = TypeAnnotation::difference(
+            TypeAnnotation::Simple(ident("Symbol")),
+            TypeAnnotation::Singleton {
+                name: "foo".into(),
+                span: span(),
+            },
+            span(),
+        );
+        let result = resolve_type_annotation(&ann, &empty_subst());
+        let InferredType::Negation { base, excluded, .. } = result else {
+            panic!("expected Negation, got {result:?}");
+        };
+        assert_eq!(*base, InferredType::known("Symbol"));
+        assert_eq!(*excluded, InferredType::known("#foo"));
+    }
+
+    #[test]
+    fn difference_of_identical_types_collapses_to_never() {
+        // `Integer \ Integer` = Never (reducible case, normalised by `difference`).
+        let ann = TypeAnnotation::difference(
+            TypeAnnotation::Simple(ident("Integer")),
+            TypeAnnotation::Simple(ident("Integer")),
+            span(),
+        );
+        let result = resolve_type_annotation(&ann, &empty_subst());
+        assert_eq!(result, InferredType::Never);
+    }
+
+    #[test]
+    fn difference_dropping_union_member_normalises() {
+        // `(Integer | String) \ String` drops the `String` member, leaving
+        // `Integer` (LHS-union distribution in `difference`).
+        let ann = TypeAnnotation::difference(
+            TypeAnnotation::Union {
+                types: vec![
+                    TypeAnnotation::Simple(ident("Integer")),
+                    TypeAnnotation::Simple(ident("String")),
+                ],
+                span: span(),
+            },
+            TypeAnnotation::Simple(ident("String")),
+            span(),
+        );
+        let result = resolve_type_annotation(&ann, &empty_subst());
+        assert_eq!(result, InferredType::known("Integer"));
     }
 
     // ---- resolve_type_annotation: Self / Self class ----

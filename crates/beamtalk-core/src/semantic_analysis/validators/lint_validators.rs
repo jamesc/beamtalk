@@ -566,10 +566,13 @@ pub(crate) fn check_redundant_local_type_annotation(
         if !matches!(target.as_ref(), Expression::Identifier(_)) {
             return;
         }
-        // Widening annotations are load-bearing: keep them.
+        // Widening annotations are load-bearing: keep them. A difference
+        // (`Symbol \ #foo`) narrows the RHS type, so it is load-bearing too.
         if matches!(
             annotation,
-            TypeAnnotation::Union { .. } | TypeAnnotation::FalseOr { .. }
+            TypeAnnotation::Union { .. }
+                | TypeAnnotation::FalseOr { .. }
+                | TypeAnnotation::Difference { .. }
         ) {
             return;
         }

@@ -806,6 +806,23 @@ pub enum TypeAnnotation {
         /// Source location of the entire false-or type.
         span: Span,
     },
+    /// A difference/negation type (e.g., `Symbol \ #foo`) — ADR 0102 §1.
+    ///
+    /// Denotes the values of `base` that are *not* values of `excluded`.
+    /// The `\` operator binds tighter than `|` and shares a precedence tier
+    /// with `&` (left-associative), so `Integer | Symbol \ #foo` parses as
+    /// `Integer | (Symbol \ #foo)` (ADR 0102 §3). Resolves through
+    /// [`InferredType::difference`] during type resolution.
+    ///
+    /// [`InferredType::difference`]: crate::semantic_analysis::type_checker::types
+    Difference {
+        /// The base type being narrowed.
+        base: Box<TypeAnnotation>,
+        /// The type removed from `base`.
+        excluded: Box<TypeAnnotation>,
+        /// Source location of the entire difference type.
+        span: Span,
+    },
     /// The `Self` return type — resolves to the static receiver class at call sites.
     ///
     /// Only valid in return position. Placing `Self` in parameter position is an error.
@@ -852,6 +869,7 @@ impl TypeAnnotation {
             | Self::Singleton { span, .. }
             | Self::Generic { span, .. }
             | Self::FalseOr { span, .. }
+            | Self::Difference { span, .. }
             | Self::SelfType { span }
             | Self::SelfClass { span }
             | Self::ClassOf { span, .. } => *span,
@@ -898,6 +916,16 @@ impl TypeAnnotation {
         }
     }
 
+    /// Creates a difference type annotation (`base \ excluded`, ADR 0102 §1).
+    #[must_use]
+    pub fn difference(base: TypeAnnotation, excluded: TypeAnnotation, span: Span) -> Self {
+        Self::Difference {
+            base: Box::new(base),
+            excluded: Box::new(excluded),
+            span,
+        }
+    }
+
     /// Returns a human-readable name for this type annotation.
     ///
     /// Used by the class hierarchy to store declared state field types
@@ -938,6 +966,17 @@ impl TypeAnnotation {
                     _ => inner.type_name(),
                 };
                 eco_format!("{inner_name} | False")
+            }
+            Self::Difference { base, excluded, .. } => {
+                // `\` binds tighter than `|`, so a union operand (only reachable
+                // via explicit grouping) is parenthesised to preserve meaning.
+                let paren = |ty: &TypeAnnotation| match ty {
+                    Self::Union { .. } | Self::FalseOr { .. } => {
+                        eco_format!("({})", ty.type_name())
+                    }
+                    _ => ty.type_name(),
+                };
+                eco_format!("{} \\ {}", paren(base), paren(excluded))
             }
             Self::SelfType { .. } => "Self".into(),
             Self::SelfClass { .. } => "Self class".into(),
