@@ -75,13 +75,14 @@ TestCase subclass: SetTheoreticOperatorsE2eTest
   // exercising narrowing and `match:` together end-to-end.
   testNarrowedNegationAsMatchScrutinee =>
     tag :: Symbol := #b
-    result := (tag =:= #a) ifTrue: ["unreachable"] ifFalse: [
-      tag match: [
-        #b -> "matched-b";
-        _ -> "fallthrough"
+    result := (tag =:= #a)
+      ifTrue: ["unreachable"]
+      ifFalse: [
+        tag match: [
+          #b -> "matched-b";
+          _ -> "fallthrough"
+        ]
       ]
-    ]
     self assert: result equals: "matched-b"
-
 Object >> bt2746TagWithoutFoo -> Symbol \ #foo => #bar
 Object >> bt2746Describe: n :: Integer & Printable -> String => n asString
