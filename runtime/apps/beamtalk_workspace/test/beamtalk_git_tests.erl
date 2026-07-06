@@ -548,7 +548,7 @@ git_diff_returns_worktree_diff_test() ->
 git_diff_returns_staged_diff_test() ->
     with_repo_root_project(fun(Top, RelFile) ->
         with_workspace_meta(Top, <<"git_diff_staged_test">>, fun() ->
-            {ok, nil} = beamtalk_git:git_stage(RelFile),
+            ?assertEqual({ok, nil}, beamtalk_git:git_stage(RelFile)),
             {ok, Diff} = beamtalk_git:git_diff(RelFile),
             ?assertEqual(<<>>, maps:get(worktree, Diff)),
             ?assertNotEqual(<<>>, maps:get(staged, Diff)),
