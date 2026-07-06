@@ -24,7 +24,7 @@ mod hierarchy_queries;
 mod method_resolution;
 #[cfg(test)]
 mod tests;
-pub use class_info::{ClassInfo, MethodInfo, SuperclassTypeArg};
+pub use class_info::{ClassInfo, MethodInfo, SuperclassTypeArg, format_default_value};
 /// Per-class selector index: maps class name → (selector → method vec position).
 type SelectorIndexMap = HashMap<EcoString, HashMap<EcoString, usize>>;
 /// Static class hierarchy built during semantic analysis.
