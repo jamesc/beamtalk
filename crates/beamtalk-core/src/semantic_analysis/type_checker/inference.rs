@@ -1518,7 +1518,6 @@ impl TypeChecker {
                         union_ty,
                         &eq.info.singleton,
                         eq.info.negated,
-                        hierarchy,
                         span,
                     );
                 }
@@ -2324,17 +2323,27 @@ impl TypeChecker {
         let current_ty = Self::resolve_narrowing_variable_type(&info.variable, env, hierarchy);
 
         let matched = InferredType::known(eq.singleton.clone());
-        let remainder = Self::union_without(&current_ty, &eq.singleton);
+        let provenance = super::TypeProvenance::Inferred(Span::default());
+        // ADR 0102 §2: the equality branches are the set-theoretic intersection
+        // and difference of the variable's current type with the tested
+        // singleton. `intersect(T, #foo)` is the "test holds" type (the values of
+        // `T` that could be `#foo`); `difference(T, #foo)` is the complementary
+        // type with `#foo` removed. An impossible test (`x :: Integer; x = #foo`)
+        // yields `intersect = Never` for the unreachable branch — the diagnostic
+        // for that case is emitted separately by
+        // `check_impossible_singleton_comparison`.
+        let holds = InferredType::intersect(&current_ty, &matched, provenance);
+        let removed = InferredType::difference(&current_ty, &matched, provenance);
         if eq.negated {
             // `x /= #foo`: the true branch removes the singleton; the false
             // branch is the singleton.
-            info.true_type = remainder;
-            info.false_type = Some(matched);
+            info.true_type = removed;
+            info.false_type = Some(holds);
         } else {
             // `x = #foo`: the true branch is the singleton; the false branch
             // removes it.
-            info.true_type = matched;
-            info.false_type = Some(remainder);
+            info.true_type = holds;
+            info.false_type = Some(removed);
         }
         info
     }
@@ -2356,11 +2365,10 @@ impl TypeChecker {
         current_ty: &InferredType,
         singleton: &EcoString,
         negated: bool,
-        hierarchy: &ClassHierarchy,
         test_span: Span,
     ) {
         if matches!(current_ty, InferredType::Dynamic(_) | InferredType::Never)
-            || Self::type_admits_singleton(current_ty, singleton, hierarchy)
+            || Self::type_admits_singleton(current_ty, singleton)
         {
             return;
         }
@@ -2376,75 +2384,21 @@ impl TypeChecker {
         );
     }
 
-    /// Removes every union member equal to the singleton named `removed` from
-    /// `ty` (BT-2617). The singleton counterpart of [`non_nil_type`].
+    /// BT-2624 / ADR 0102 §2: whether the singleton `singleton` (`#foo`) could
+    /// be a runtime value of `ty` — defined as `intersect(ty, #foo) != Never`.
     ///
-    /// - A union collapses to its single remaining member, or to `Never` when
-    ///   the singleton was its only member (the complementary branch is then
-    ///   unreachable).
-    /// - A non-union type that *is* the singleton yields `Never`; any other
-    ///   non-union type (including `Dynamic`) is returned unchanged, since
-    ///   there is no union to subtract from.
-    fn union_without(ty: &InferredType, removed: &EcoString) -> InferredType {
-        match ty {
-            InferredType::Union {
-                members,
-                provenance,
-            } => {
-                debug_assert!(
-                    members
-                        .iter()
-                        .all(|m| !matches!(m, InferredType::Union { .. })),
-                    "union members are kept flat by `union_of`, so a single subtraction pass suffices"
-                );
-                let kept: Vec<InferredType> = members
-                    .iter()
-                    .filter(|m| m.as_known().is_none_or(|n| n != removed))
-                    .cloned()
-                    .collect();
-                match kept.len() {
-                    0 => InferredType::Never,
-                    1 => kept.into_iter().next().unwrap(),
-                    _ => InferredType::Union {
-                        members: kept,
-                        provenance: *provenance,
-                    },
-                }
-            }
-            InferredType::Known { class_name, .. } if class_name == removed => InferredType::Never,
-            _ => ty.clone(),
-        }
-    }
-
-    /// BT-2624: Whether the singleton `singleton` (`#foo`) could be a runtime
-    /// value of `ty`. A member admits the singleton when it *is* that singleton,
-    /// or when it is a supertype of every singleton — `Symbol` or one of its
-    /// ancestors (`Object`, `ProtoObject`). Other concrete members (`Integer`, a
-    /// *different* singleton, …) do not admit it. `Dynamic` admits anything, so
-    /// callers stay conservative when the type is unknown.
-    fn type_admits_singleton(
-        ty: &InferredType,
-        singleton: &EcoString,
-        hierarchy: &ClassHierarchy,
-    ) -> bool {
-        match ty {
-            InferredType::Dynamic(_) => true,
-            InferredType::Union { members, .. } => members
-                .iter()
-                .any(|m| Self::type_admits_singleton(m, singleton, hierarchy)),
-            InferredType::Known { class_name, .. } => {
-                class_name == singleton
-                    || class_name == "Symbol"
-                    || hierarchy
-                        .superclass_chain("Symbol")
-                        .iter()
-                        .any(|c| c == class_name)
-            }
-            // `Meta`, `Never`, etc. do not admit a singleton: a class object or
-            // a divergent value can never equal a symbol literal, so a
-            // `metaVar = #foo` test is correctly flagged "can never be true".
-            _ => false,
-        }
+    /// Intersection already models singleton membership (`Symbol ∩ #foo = #foo`,
+    /// `Object ∩ #foo = #foo`, `Integer ∩ #foo = Never`, and it distributes over
+    /// unions), so this is the single source of truth for "the test could hold".
+    /// `Dynamic` intersects to the singleton (non-`Never`), so callers stay
+    /// conservative when the type is unknown.
+    fn type_admits_singleton(ty: &InferredType, singleton: &EcoString) -> bool {
+        let matched = InferredType::known(singleton.clone());
+        let provenance = super::TypeProvenance::Inferred(Span::default());
+        !matches!(
+            InferredType::intersect(ty, &matched, provenance),
+            InferredType::Never
+        )
     }
 
     /// BT-2045: Infer argument types for `on:do:` with exception class propagation.
@@ -3298,43 +3252,34 @@ impl TypeChecker {
     }
 
     /// Remove `UndefinedObject` (nil) from a union type or convert a known type
-    /// to itself if it is non-nil.
+    /// to itself if it is non-nil — the `isNil ifFalse:` branch type.
     ///
-    /// BT-2016: Also matches `"Nil"` as a defensive measure — `resolve_type_keyword`
-    /// should canonicalize to `"UndefinedObject"`, but downstream callers may
-    /// encounter `"Nil"` from BEAM metadata or return-type strings.
+    /// ADR 0102 §2: for a union receiver this routes through the set-theoretic
+    /// `difference` operator with `P = UndefinedObject` (nil's type). `"Nil"` is
+    /// subtracted alongside the canonical `UndefinedObject` as a defensive alias
+    /// (BT-2016) — `resolve_type_keyword` should canonicalize to
+    /// `"UndefinedObject"`, but downstream callers may encounter `"Nil"` from
+    /// BEAM metadata or return-type strings.
+    ///
+    /// Two behaviours are preserved from the pre-operator implementation:
+    /// - **Nil-only-union → `Dynamic` softening.** A union whose members are all
+    ///   nil would collapse to `Never` under `difference`; instead it softens to
+    ///   `Dynamic(Unknown)` so an unreachable `ifNotNil:` body still compiles.
+    /// - **Non-union pass-through.** A non-union type is returned unchanged (we
+    ///   cannot make a non-union "more non-nil"), rather than subtracting nil —
+    ///   which would turn a bare `UndefinedObject` receiver into `Never`.
     pub(super) fn non_nil_type(ty: &InferredType) -> InferredType {
         match ty {
-            InferredType::Union {
-                members,
-                provenance,
-            } => {
-                // Fast path: if no member is UndefinedObject/Nil, return unchanged.
-                let has_nil = members.iter().any(|m| {
-                    m.as_known().is_some_and(|n| {
-                        WellKnownClass::from_str(n).is_some_and(WellKnownClass::is_nil_class)
-                    })
-                });
-                if !has_nil {
-                    return ty.clone();
-                }
-                let non_nil: Vec<InferredType> = members
-                    .iter()
-                    .filter(|m| {
-                        m.as_known().is_none_or(|name| {
-                            !WellKnownClass::from_str(name)
-                                .is_some_and(WellKnownClass::is_nil_class)
-                        })
-                    })
-                    .cloned()
-                    .collect();
-                match non_nil.len() {
-                    0 => InferredType::Dynamic(DynamicReason::Unknown),
-                    1 => non_nil.into_iter().next().unwrap(),
-                    _ => InferredType::Union {
-                        members: non_nil,
-                        provenance: *provenance,
-                    },
+            InferredType::Union { .. } => {
+                let provenance = super::TypeProvenance::Inferred(Span::default());
+                // `P = UndefinedObject | Nil` (both nil spellings, BT-2016).
+                let nil = InferredType::simple_union(&["nil", "Nil"]);
+                let stripped = InferredType::difference(ty, &nil, provenance);
+                // Nil-only union collapses to `Never`; soften to `Dynamic`.
+                if matches!(stripped, InferredType::Never) {
+                    InferredType::Dynamic(DynamicReason::Unknown)
+                } else {
+                    stripped
                 }
             }
             // If the variable is not a union, narrowing away nil for a non-union
