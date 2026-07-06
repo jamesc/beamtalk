@@ -190,6 +190,17 @@ Normalisation rules (`intersect` / `difference`; **not** a blind mirror of
   `#bar`), `s ∈ E` ⇒ `Never`. Without this rule a `Negation` LHS hits an
   unhandled arm and every conservative fallback (panic, `Dynamic`, keep the
   `Negation`) is a wrong narrowing outcome.
+- **Nominal base case** (required by the complement rule above *and* by
+  LHS-union distribution — `intersect(Integer | #infinity, #infinity)` only
+  reduces because `intersect(Integer, #infinity) = Never`):
+  `intersect(A, B) = B` when `B <: A` in the nominal hierarchy (e.g.
+  `intersect(Symbol, #foo) = #foo`), symmetrically `= A` when `A <: B`; and
+  `intersect(A, B) = Never` when `A` and `B` are hierarchy-unrelated (under
+  single inheritance an instance's class would have to sit below both, which
+  forces a chain relation — so unrelated classes are disjoint; e.g.
+  `intersect(Integer, #foo) = Never`). This follows from set inclusion;
+  stating it prevents implementations from silently falling through to a
+  conservative default on the most common call of all.
   Nominal-class difference beyond atoms (`difference(Object, Number)`) is
   *not* defined by this ADR — see §2 and Consequences.
 - **`Dynamic` is asymmetric and must be stated explicitly**:
@@ -231,9 +242,12 @@ Normalisation rules (`intersect` / `difference`; **not** a blind mirror of
     (set-theoretically `(B \ E1) ∪ (B \ E2) = B \ (E1 ∩ E2)`: "any Symbol
     except {#a,#b}" or "any Symbol except {#b,#c}" = "any Symbol except #b").
   - `Negation` equality needs a canonical ordering of `excluded` so
-    order-independent union dedup keeps working. Without the two laws above,
-    logically-equal `Negation` members inside a `Union` escape `PartialEq`
-    dedup and unions grow across repeated narrowing/widening passes.
+    order-independent union dedup keeps working — **specified: members sorted
+    ascending by `class_name`**, so the form is deterministic across
+    serialisation round-trips and independent implementations. Without the
+    two laws above, logically-equal `Negation` members inside a `Union`
+    escape `PartialEq` dedup and unions grow across repeated
+    narrowing/widening passes.
 
 ### 2. Narrowing expressed as intersect / difference — where it applies
 
