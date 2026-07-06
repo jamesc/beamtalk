@@ -1019,6 +1019,10 @@ impl SimpleLanguageService {
             TypeAnnotation::FalseOr { inner, .. } => {
                 Self::find_identifier_in_type_annotation(inner, offset_val)
             }
+            TypeAnnotation::Difference { base, excluded, .. } => {
+                Self::find_identifier_in_type_annotation(base, offset_val)
+                    .or_else(|| Self::find_identifier_in_type_annotation(excluded, offset_val))
+            }
             TypeAnnotation::ClassOf { class_name, .. } => {
                 if offset_val >= class_name.span.start() && offset_val < class_name.span.end() {
                     Some((class_name.clone(), class_name.span))

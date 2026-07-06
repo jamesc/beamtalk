@@ -519,7 +519,7 @@ impl Parser {
             }
         }
         // Skip union types: `| Type`
-        while matches!(self.peek_at(o), Some(TokenKind::Pipe)) {
+        while self.is_type_chain_operator(o) {
             o += 1;
             if !is_type_name_token(self.peek_at(o)) {
                 return DoubleColonSkip::Malformed(o);
@@ -563,7 +563,7 @@ impl Parser {
             o = self.skip_paren_type_params(o)?;
         }
         // Union in type param position: `Type | Type`
-        while matches!(self.peek_at(o), Some(TokenKind::Pipe)) {
+        while self.is_type_chain_operator(o) {
             o += 1;
             if !is_type_name_token(self.peek_at(o)) {
                 return None;
@@ -587,7 +587,7 @@ impl Parser {
                 o = self.skip_paren_type_params(o)?;
             }
             // Union
-            while matches!(self.peek_at(o), Some(TokenKind::Pipe)) {
+            while self.is_type_chain_operator(o) {
                 o += 1;
                 if !is_type_name_token(self.peek_at(o)) {
                     return None;
@@ -679,7 +679,7 @@ impl Parser {
             }
         }
         // Skip union types: `| Type`
-        while matches!(self.peek_at(o), Some(TokenKind::Pipe)) {
+        while self.is_type_chain_operator(o) {
             o += 1;
             if !is_type_name_token(self.peek_at(o)) {
                 return false;
@@ -720,6 +720,25 @@ impl Parser {
             o + 2
         } else {
             o + 1
+        }
+    }
+
+    /// Returns `true` if the token at `offset` continues a type annotation with
+    /// a binary type operator: union `|`, difference `\`, or the `\\` typo for
+    /// `\` (ADR 0102 §3, BT-2742).
+    ///
+    /// Used by the lookahead helpers to skip over a type-operator chain when
+    /// deciding whether a `-> Type =>` / `:: Type` sequence is a method header.
+    /// The precedence distinction between `\` and `|` is irrelevant here — these
+    /// helpers only confirm the chain terminates at a `=>`/`)`; the parser
+    /// enforces precedence in [`parse_difference_type`](Self::parse_difference_type).
+    /// The `\\` typo is treated as a chain operator so the method is still
+    /// recognised and the parser can emit the targeted "did you mean `\`?" error.
+    pub(super) fn is_type_chain_operator(&self, offset: usize) -> bool {
+        match self.peek_at(offset) {
+            Some(TokenKind::Pipe) => true,
+            Some(TokenKind::BinarySelector(s)) => s.as_str() == "\\" || s.as_str() == "\\\\",
+            _ => false,
         }
     }
 
@@ -926,9 +945,15 @@ impl Parser {
         })
     }
 
-    /// Parses a type annotation, including union types (`Integer | String`).
+    /// Parses a type annotation, including union types (`Integer | String`)
+    /// and difference types (`Symbol \ #foo`).
+    ///
+    /// Precedence (ADR 0102 §3): `|` (union) is the loosest tier; `\`
+    /// (difference) binds tighter, so `Integer | Symbol \ #foo` parses as
+    /// `Integer | (Symbol \ #foo)`. The `\` tier is handled by
+    /// [`parse_difference_type`](Self::parse_difference_type).
     pub(super) fn parse_type_annotation(&mut self) -> TypeAnnotation {
-        let first = self.parse_single_type_annotation();
+        let first = self.parse_difference_type();
 
         // Check for union type: `Type | Type | ...`
         if !matches!(self.current_kind(), TokenKind::Pipe) {
@@ -940,7 +965,7 @@ impl Parser {
 
         while matches!(self.current_kind(), TokenKind::Pipe) {
             self.advance(); // consume `|`
-            types.push(self.parse_single_type_annotation());
+            types.push(self.parse_difference_type());
         }
 
         let end_span = types.last().map_or(start_span, TypeAnnotation::span);
@@ -948,6 +973,51 @@ impl Parser {
             types,
             span: start_span.merge(end_span),
         }
+    }
+
+    /// Parses a difference type (`Type \ Type`), the precedence tier between
+    /// unions (`|`) and single type atoms (ADR 0102 §3).
+    ///
+    /// `\` binds tighter than `|` and is left-associative, so `A \ B \ C`
+    /// parses as `(A \ B) \ C`. This tier is shared with the intersection
+    /// operator `&` (BT-2743), which slots in here at the same precedence.
+    ///
+    /// The `\` operator lexes as `BinarySelector("\")` (a single backslash);
+    /// it is special-cased *only* in type-annotation position — in a value
+    /// expression `\` remains an ordinary binary selector, untouched. The
+    /// modulo selector `\\` (two backslashes, which the lexer greedily merges)
+    /// is almost certainly a typo for `\` here and gets a targeted diagnostic.
+    fn parse_difference_type(&mut self) -> TypeAnnotation {
+        let mut ty = self.parse_single_type_annotation();
+
+        loop {
+            let TokenKind::BinarySelector(op) = self.current_kind() else {
+                break;
+            };
+            match op.as_str() {
+                // `\` — the difference operator.
+                "\\" => {
+                    self.advance(); // consume `\`
+                    let excluded = self.parse_single_type_annotation();
+                    let span = ty.span().merge(excluded.span());
+                    ty = TypeAnnotation::difference(ty, excluded, span);
+                }
+                // `\\` — the modulo selector, greedily lexed from `\\`. In type
+                // position this is a typo for the difference operator `\`.
+                "\\\\" => {
+                    self.error(
+                        "Unexpected `\\\\` in type annotation; did you mean `\\` (type difference)?",
+                    );
+                    self.advance(); // consume `\\` to recover
+                    let excluded = self.parse_single_type_annotation();
+                    let span = ty.span().merge(excluded.span());
+                    ty = TypeAnnotation::difference(ty, excluded, span);
+                }
+                _ => break,
+            }
+        }
+
+        ty
     }
 
     /// Parses a single type annotation (no unions).

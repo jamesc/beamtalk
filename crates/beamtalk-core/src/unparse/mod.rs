@@ -1719,6 +1719,13 @@ fn unparse_type_annotation(ty: &TypeAnnotation) -> Document<'static> {
         TypeAnnotation::FalseOr { inner, .. } => {
             docvec![unparse_type_annotation(inner), " | False"]
         }
+        TypeAnnotation::Difference { base, excluded, .. } => {
+            docvec![
+                unparse_type_annotation(base),
+                " \\ ",
+                unparse_type_annotation(excluded)
+            ]
+        }
         TypeAnnotation::SelfType { .. } => Document::Str("Self"),
         TypeAnnotation::SelfClass { .. } => Document::Str("Self class"),
         TypeAnnotation::ClassOf { class_name, .. } => {
@@ -1864,6 +1871,33 @@ mod tests {
         let pass1 = format_source(source).expect("pass1 should succeed");
         let pass2 = format_source(&pass1).expect("pass2 should succeed");
         assert_eq!(pass1, pass2, "format_source must be idempotent");
+    }
+
+    // --- Difference type annotation unparsing (BT-2742) ---
+
+    #[test]
+    fn difference_type_annotation_unparses() {
+        // `Symbol \ #foo` unparses back to `Symbol \ #foo`.
+        let ann = crate::ast::TypeAnnotation::difference(
+            crate::ast::TypeAnnotation::simple("Symbol", span()),
+            crate::ast::TypeAnnotation::singleton("foo", span()),
+            span(),
+        );
+        assert_eq!(
+            unparse_type_annotation(&ann).to_pretty_string(),
+            "Symbol \\ #foo"
+        );
+    }
+
+    #[test]
+    fn difference_return_type_round_trips_through_format_source() {
+        // Parse → unparse must preserve `Symbol \ #foo` in a method return type.
+        let source = "Object subclass: Foo\n  narrow -> Symbol \\ #foo => #bar\n";
+        let formatted = format_source(source).expect("should format");
+        assert!(
+            formatted.contains("Symbol \\ #foo"),
+            "difference type must survive round-trip, got: {formatted}"
+        );
     }
 
     // --- Comment unparsing ---

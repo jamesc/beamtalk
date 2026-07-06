@@ -1496,3 +1496,135 @@ fn parse_class_metatype_as_later_union_member_in_generic_arg() {
         types[1]
     );
 }
+
+// ==========================================================================
+// Difference type annotations (`\`) — ADR 0102 §1/§3, BT-2742
+// ==========================================================================
+
+#[test]
+fn parse_difference_return_type() {
+    // `Symbol \ #foo` parses as Difference { base: Symbol, excluded: #foo }.
+    let module = parse_ok(
+        "Object subclass: Foo
+  narrow -> Symbol \\ #foo => #bar",
+    );
+    let ret_ty = module.classes[0].methods[0].return_type.as_ref().unwrap();
+    let TypeAnnotation::Difference { base, excluded, .. } = ret_ty else {
+        panic!("expected Difference, got {ret_ty:?}");
+    };
+    assert!(matches!(base.as_ref(), TypeAnnotation::Simple(id) if id.name == "Symbol"));
+    assert!(matches!(excluded.as_ref(), TypeAnnotation::Singleton { name, .. } if name == "foo"));
+}
+
+#[test]
+fn parse_difference_state_field() {
+    // `field: x :: Symbol \ #foo = nil` in a typed class.
+    let module = parse_ok(
+        "typed Value subclass: Spec
+  field: tag :: Symbol \\ #foo = #bar",
+    );
+    let ann = module.classes[0].state[0].type_annotation.as_ref().unwrap();
+    assert!(
+        matches!(ann, TypeAnnotation::Difference { .. }),
+        "expected Difference, got {ann:?}"
+    );
+}
+
+#[test]
+fn parse_difference_binds_tighter_than_union() {
+    // ADR 0102 §3: `Integer | Symbol \ #foo` parses as
+    // `Integer | (Symbol \ #foo)` — `\` binds tighter than `|`.
+    let module = parse_ok(
+        "Object subclass: Foo
+  narrow -> Integer | Symbol \\ #foo => 1",
+    );
+    let ret_ty = module.classes[0].methods[0].return_type.as_ref().unwrap();
+    let TypeAnnotation::Union { types, .. } = ret_ty else {
+        panic!("expected Union, got {ret_ty:?}");
+    };
+    assert_eq!(types.len(), 2, "union has two members: {types:?}");
+    assert!(
+        matches!(&types[0], TypeAnnotation::Simple(id) if id.name == "Integer"),
+        "first member is Integer, got {:?}",
+        types[0]
+    );
+    let TypeAnnotation::Difference { base, excluded, .. } = &types[1] else {
+        panic!("second member must be a Difference, got {:?}", types[1]);
+    };
+    assert!(matches!(base.as_ref(), TypeAnnotation::Simple(id) if id.name == "Symbol"));
+    assert!(matches!(excluded.as_ref(), TypeAnnotation::Singleton { name, .. } if name == "foo"));
+}
+
+#[test]
+fn parse_difference_is_left_associative() {
+    // ADR 0102 §3: `Symbol \ #a \ #b` parses as `(Symbol \ #a) \ #b`.
+    let module = parse_ok(
+        "Object subclass: Foo
+  narrow -> Symbol \\ #a \\ #b => #c",
+    );
+    let ret_ty = module.classes[0].methods[0].return_type.as_ref().unwrap();
+    let TypeAnnotation::Difference { base, excluded, .. } = ret_ty else {
+        panic!("expected outer Difference, got {ret_ty:?}");
+    };
+    // Outer excluded is #b; the outer base is the inner `Symbol \ #a`.
+    assert!(matches!(excluded.as_ref(), TypeAnnotation::Singleton { name, .. } if name == "b"));
+    let TypeAnnotation::Difference {
+        base: inner_base,
+        excluded: inner_excluded,
+        ..
+    } = base.as_ref()
+    else {
+        panic!("expected inner Difference in base, got {base:?}");
+    };
+    assert!(matches!(inner_base.as_ref(), TypeAnnotation::Simple(id) if id.name == "Symbol"));
+    assert!(
+        matches!(inner_excluded.as_ref(), TypeAnnotation::Singleton { name, .. } if name == "a")
+    );
+}
+
+#[test]
+fn parse_difference_type_name_round_trips() {
+    let module = parse_ok(
+        "Object subclass: Foo
+  narrow -> Symbol \\ #foo => #bar",
+    );
+    let ret_ty = module.classes[0].methods[0].return_type.as_ref().unwrap();
+    assert_eq!(ret_ty.type_name().as_str(), "Symbol \\ #foo");
+}
+
+#[test]
+fn parse_double_backslash_in_type_position_is_typo_error() {
+    // The lexer greedily merges `\\` into the modulo selector. In type position
+    // that is almost certainly a typo for the difference operator `\`, so we
+    // emit a targeted diagnostic pointing at `\`.
+    let diagnostics = parse_err(
+        "Object subclass: Foo
+  narrow -> Symbol \\\\ #foo => #bar",
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("did you mean") && d.message.contains('\\')),
+        "expected a `did you mean \\` diagnostic, got: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn value_position_backslash_is_unchanged() {
+    // The `\` difference operator is special-cased *only* in type-annotation
+    // position (BT-2742). In a value expression `\` remains an ordinary binary
+    // selector with no binding power, so `x \ x` parses exactly as it did
+    // before this change — an "expected expression" error, never a silent
+    // type-difference. The method header `combine: x =>` is still detected,
+    // proving the type-chain lookahead did not leak into value position.
+    let diagnostics = parse_err(
+        "Object subclass: Foo
+  combine: x => x \\ x",
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("expected expression")),
+        "value-position `\\` must parse as before (unchanged), got: {diagnostics:?}"
+    );
+}

@@ -1448,7 +1448,7 @@ impl Parser {
                     }
                 }
                 // Skip union tail: `| Type | Type ...`
-                while matches!(self.peek_at(offset), Some(TokenKind::Pipe)) {
+                while self.is_type_chain_operator(offset) {
                     offset += 1;
                     if !matches!(self.peek_at(offset), Some(TokenKind::Identifier(_))) {
                         return false;
@@ -1510,7 +1510,7 @@ impl Parser {
                         }
                     }
                     // Skip union tail: `| Type | Type ...`
-                    while matches!(self.peek_at(offset), Some(TokenKind::Pipe)) {
+                    while self.is_type_chain_operator(offset) {
                         offset += 1;
                         if !matches!(self.peek_at(offset), Some(TokenKind::Identifier(_))) {
                             return false;
