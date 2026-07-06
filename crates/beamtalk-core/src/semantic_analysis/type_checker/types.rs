@@ -608,18 +608,22 @@ impl InferredType {
         }
     }
 
-    /// Applies the negation absorption law (ADR 0102 §1) in place:
-    /// `(Symbol \ #foo) | #foo ⇒ Symbol`.
+    /// Applies the full negation absorption-law set (ADR 0102 §1) in place.
     ///
-    /// A singleton is a subtype of `Symbol`, so any bare singleton member of a
-    /// union that also contains a `Symbol`-based negation is redundant: it is
-    /// dropped, and — when it appears in the negation's `excluded` set — it is
-    /// added back by removing it from `excluded`. When `excluded` empties, the
-    /// negation collapses to its base `Symbol`; when a bare `Symbol` is present
-    /// it subsumes the negation entirely.
+    /// All laws below hold because a symbol singleton is a subtype of `Symbol`
+    /// (the only supertype-of-singleton relationship modelled here); other
+    /// members are left untouched.
     ///
-    /// Only `Symbol`-based negations participate (the only supertype-of-singleton
-    /// relationship modelled here); other members are left untouched.
+    /// - **Bare-base subsumption:** `(Symbol \ E) | Symbol = Symbol` — a bare
+    ///   `Symbol` swallows every symbol-based negation and singleton.
+    /// - **Full / partial singleton absorption:** a bare singleton `#s` is
+    ///   redundant beside a `Symbol`-based negation, so it is dropped, and when
+    ///   it appears in the negation's `excluded` set it is added back by removing
+    ///   it from `excluded` (`(Symbol \ (#a | #b)) | #a = Symbol \ #b`). When
+    ///   `excluded` empties, the negation collapses to bare `Symbol`.
+    /// - **Same-base complement union:** `(Symbol \ E1) | (Symbol \ E2) =
+    ///   Symbol \ (E1 ∩ E2)`, so logically-equal negations never escape dedup and
+    ///   unions do not grow across repeated narrowing/widening passes.
     fn absorb_negations(flat: &mut Vec<Self>) {
         let has_symbol_negation = flat
             .iter()
@@ -627,61 +631,75 @@ impl InferredType {
         if !has_symbol_negation {
             return;
         }
-        let has_bare_symbol = flat
-            .iter()
-            .any(|m| matches!(m, Self::Known { class_name, .. } if class_name == "Symbol"));
-        // Bare singletons subsumed by the negation — collected so their names
-        // can be removed from `excluded` sets before they are dropped.
-        let bare_singletons: Vec<EcoString> = flat
-            .iter()
-            .filter_map(|m| match m {
-                Self::Known { class_name, .. } if Self::is_symbol_singleton(class_name) => {
-                    Some(class_name.clone())
-                }
-                _ => None,
-            })
-            .collect();
 
-        let mut result: Vec<Self> = Vec::with_capacity(flat.len());
+        // Partition members into the symbol-ish parts (which collapse into a
+        // single result) and everything else (untouched).
+        let mut bare_symbol: Option<Self> = None;
+        let mut neg_excludeds: Vec<Self> = Vec::new();
+        let mut neg_provenance: Option<TypeProvenance> = None;
+        let mut bare_singletons: Vec<EcoString> = Vec::new();
+        let mut others: Vec<Self> = Vec::new();
+
         for m in flat.drain(..) {
             match m {
-                // Bare singletons are subtypes of `Symbol`, so a `Symbol`-based
-                // negation (or a bare `Symbol`) makes them redundant — drop.
-                Self::Known { ref class_name, .. } if Self::is_symbol_singleton(class_name) => {}
                 Self::Negation {
                     base,
                     excluded,
                     provenance,
                 } if Self::is_symbol_base(&base) => {
-                    if has_bare_symbol {
-                        // `(Symbol \ E) | Symbol = Symbol` — drop the negation.
-                        continue;
-                    }
-                    let remaining: Vec<Self> = Self::excluded_members(&excluded)
-                        .into_iter()
-                        .filter(|e| match e {
-                            Self::Known { class_name, .. } => !bare_singletons.contains(class_name),
-                            _ => true,
-                        })
-                        .collect();
-                    if remaining.is_empty() {
-                        // `Symbol \ {} = Symbol`.
-                        result.push(*base);
-                    } else {
-                        result.push(Self::Negation {
-                            base,
-                            excluded: Box::new(Self::union_of(&remaining)),
-                            provenance,
-                        });
-                    }
+                    neg_provenance.get_or_insert(provenance);
+                    neg_excludeds.push(*excluded);
                 }
-                other => result.push(other),
+                Self::Known { ref class_name, .. } if class_name == "Symbol" => {
+                    bare_symbol.get_or_insert(m);
+                }
+                Self::Known { ref class_name, .. } if Self::is_symbol_singleton(class_name) => {
+                    bare_singletons.push(class_name.clone());
+                }
+                other => others.push(other),
             }
         }
-        // Re-deduplicate: a negation collapsing to `Symbol` may now duplicate a
-        // sibling `Symbol`, and dropped singletons may leave repeats.
-        let mut deduped: Vec<Self> = Vec::with_capacity(result.len());
-        for m in result {
+
+        let provenance = neg_provenance.unwrap_or(TypeProvenance::Inferred(Span::default()));
+
+        let symbol_part = if let Some(sym) = bare_symbol {
+            // Bare-base subsumption: `Symbol` swallows the negations/singletons.
+            sym
+        } else {
+            // Same-base complement union: merge every negation's `excluded` via
+            // intersection (`E1 ∩ E2 ∩ …`).
+            let mut merged = neg_excludeds[0].clone();
+            for e in &neg_excludeds[1..] {
+                merged = Self::intersect(&merged, e, provenance);
+            }
+            // Add back any excluded singleton that also appears bare (absorption).
+            let remaining: Vec<Self> = if matches!(merged, Self::Never) {
+                Vec::new()
+            } else {
+                Self::excluded_members(&merged)
+                    .into_iter()
+                    .filter(|e| match e {
+                        Self::Known { class_name, .. } => !bare_singletons.contains(class_name),
+                        _ => true,
+                    })
+                    .collect()
+            };
+            if remaining.is_empty() {
+                // `Symbol \ {} = Symbol`.
+                Self::known("Symbol")
+            } else {
+                Self::Negation {
+                    base: Box::new(Self::known("Symbol")),
+                    excluded: Box::new(Self::union_of(&remaining)),
+                    provenance,
+                }
+            }
+        };
+
+        // Reassemble (symbol part first), deduplicating the untouched members.
+        let mut deduped: Vec<Self> = Vec::with_capacity(others.len() + 1);
+        deduped.push(symbol_part);
+        for m in others {
             if !deduped.contains(&m) {
                 deduped.push(m);
             }
@@ -691,33 +709,35 @@ impl InferredType {
 
     /// Normalising **intersection** `A ∩ B` (ADR 0102 §1).
     ///
-    /// Structural only — there is no class hierarchy here, so two distinct
-    /// concrete types are treated as disjoint (`Integer ∩ #infinity = Never`).
-    /// Nominal subtype relationships (e.g. `Symbol ∩ #foo`) are out of scope.
+    /// Symbol-singleton membership IS modelled — a singleton `#foo` is a subtype
+    /// of `Symbol`, so `Symbol ∩ #foo = #foo`. Only the *general* nominal class
+    /// hierarchy (e.g. `Number ∩ Integer`) is out of scope: two ordinary
+    /// distinct `Known` classes are treated as disjoint (`Integer ∩ #infinity =
+    /// Never`, `Integer ∩ String = Never`).
     ///
     /// Rules:
+    /// - **Dynamic first:** `intersect(Dynamic, P) = P` (Dynamic acts as the top
+    ///   type for intersection — *not* union's "Dynamic absorbs" rule). Checked
+    ///   before identity/Object so `intersect(Dynamic, Object) = Object`.
     /// - `intersect(T, T) = T`; `intersect(T, Never) = Never`;
     ///   `intersect(T, Object) = T`.
-    /// - **Dynamic asymmetry:** `intersect(Dynamic, P) = P` (Dynamic acts as the
-    ///   top type for intersection — *not* union's "Dynamic absorbs" rule).
+    /// - **Intersect through a complement:** `intersect(Negation{B, E}, P) =
+    ///   difference(intersect(B, P), E)` — a `Negation` never reaches the
+    ///   disjoint default (needed for chained narrowing).
+    /// - **Symbol-singleton membership:** `intersect(Symbol, #foo) = #foo`.
     /// - **LHS-union distribution:** `intersect(T1 | … | Tn, P) =
     ///   (T1 ∩ P) | … | (Tn ∩ P)`, e.g. `intersect(Integer | #infinity,
     ///   #infinity)` normalises to the bare singleton `#infinity`.
     /// - **RHS-union fold:** `intersect(T, A | B) = (T ∩ A) | (T ∩ B)`.
     /// - Generics compare exactly, including `type_args`.
     ///
-    /// `provenance` is threaded through for API symmetry with
-    /// [`difference`](Self::difference); the result is re-normalised through
-    /// [`union_of`](Self::union_of), which derives provenance from its members.
+    /// The result is re-normalised through [`union_of`](Self::union_of).
     // Consumed by the narrowing rules landing later in ADR 0102's epic (BT-2738).
     #[allow(dead_code)]
-    // `provenance` is threaded through recursion for symmetry with `difference`
-    // (which builds `Negation` values that carry it); `intersect` constructs
-    // nothing provenance-bearing itself.
-    #[allow(clippy::only_used_in_recursion)]
     pub(crate) fn intersect(a: &Self, b: &Self, provenance: TypeProvenance) -> Self {
         match (a, b) {
-            // Dynamic asymmetry — Dynamic is the top type for intersection.
+            // Dynamic FIRST (before identity/Object): `intersect(Dynamic, P) = P`
+            // refines the unknown, so `intersect(Dynamic, Object) = Object`.
             (Self::Dynamic(_), _) => b.clone(),
             (_, Self::Dynamic(_)) => a.clone(),
             // Never annihilates.
@@ -725,6 +745,14 @@ impl InferredType {
             // Object (top) is the identity: `T ∩ Object = T`.
             (_, other) if Self::is_object(other) => a.clone(),
             (other, _) if Self::is_object(other) => b.clone(),
+            // Intersect through a complement: `(B \ E) ∩ P = (B ∩ P) \ E`.
+            // A `Negation` must never fall through to the disjoint default.
+            (Self::Negation { base, excluded, .. }, _) => {
+                Self::difference(&Self::intersect(base, b, provenance), excluded, provenance)
+            }
+            (_, Self::Negation { base, excluded, .. }) => {
+                Self::difference(&Self::intersect(a, base, provenance), excluded, provenance)
+            }
             // LHS-union distribution.
             (Self::Union { members, .. }, _) => {
                 let parts: Vec<Self> = members
@@ -741,10 +769,22 @@ impl InferredType {
                     .collect();
                 Self::union_of(&parts)
             }
+            // Symbol-singleton membership: `#foo <: Symbol`, so the narrower
+            // singleton is kept in both orders.
+            (Self::Known { .. }, Self::Known { class_name: s, .. })
+                if Self::is_symbol_base(a) && Self::is_symbol_singleton(s) =>
+            {
+                b.clone()
+            }
+            (Self::Known { class_name: s, .. }, Self::Known { .. })
+                if Self::is_symbol_base(b) && Self::is_symbol_singleton(s) =>
+            {
+                a.clone()
+            }
             // `T ∩ T = T` (exact structural equality, generics included).
             _ if a == b => a.clone(),
-            // Distinct concrete types with no structural relationship are
-            // disjoint under the structural reading (see the doc comment).
+            // Distinct concrete types with no structural relationship (including
+            // distinct singletons, `#foo ∩ #bar`) are disjoint.
             _ => Self::Never,
         }
     }

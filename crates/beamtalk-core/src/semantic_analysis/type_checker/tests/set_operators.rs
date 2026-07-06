@@ -4,8 +4,10 @@
 //! Normalisation tests for the set-theoretic type operators `intersect` and
 //! `difference`, plus the `Negation` variant and `union_of`'s absorption law.
 //!
-//! Covers ADR 0102 §1 exactly: dedup, absorption, LHS/RHS distribution and
-//! fold, same-base flattening, exact-generics matching, the Dynamic asymmetry
+//! Covers ADR 0102 §1 exactly: dedup, the full absorption-law set (restoration,
+//! partial, same-base complement union), LHS/RHS distribution and fold,
+//! same-base flattening, exact-generics matching, symbol-singleton membership,
+//! intersect-through-a-complement, the Dynamic asymmetry / rule-priority
 //! regression, and termination on arbitrary inputs.
 
 use super::super::*;
@@ -112,6 +114,103 @@ fn intersect_rhs_union_folds() {
     let result = InferredType::intersect(&t, &rhs, prov());
     // `#a` survives (present on both sides); `#b`/`Integer` are disjoint → gone.
     assert_eq!(result, singleton("#a"));
+}
+
+// ── intersect: rule priority (Dynamic first) ────────────────────────────
+
+#[test]
+fn intersect_dynamic_is_checked_before_object() {
+    // Gap 1: the `Dynamic` arm must win over the generic `T ∩ Object = T`
+    // identity — `intersect(Dynamic, Object)` refines to `Object`, not `Dynamic`.
+    assert_eq!(
+        InferredType::intersect(&dynamic(), &object(), prov()),
+        object()
+    );
+    assert_eq!(
+        InferredType::intersect(&object(), &dynamic(), prov()),
+        object()
+    );
+}
+
+// ── intersect: symbol-singleton membership (#foo <: Symbol) ─────────────
+
+#[test]
+fn intersect_symbol_with_singleton_keeps_singleton() {
+    // A symbol singleton is a subtype of `Symbol`, so the narrower singleton
+    // is kept in both orders.
+    assert_eq!(
+        InferredType::intersect(&symbol(), &singleton("#foo"), prov()),
+        singleton("#foo")
+    );
+    assert_eq!(
+        InferredType::intersect(&singleton("#foo"), &symbol(), prov()),
+        singleton("#foo")
+    );
+}
+
+#[test]
+fn intersect_distinct_singletons_are_disjoint() {
+    // Distinct singleton disjointness is preserved.
+    assert_eq!(
+        InferredType::intersect(&singleton("#foo"), &singleton("#bar"), prov()),
+        InferredType::Never
+    );
+}
+
+// ── intersect: through a complement ─────────────────────────────────────
+
+#[test]
+fn intersect_complement_keeps_unexcluded_singleton() {
+    // `intersect(Symbol \ #foo, #bar) = #bar` (#bar is a symbol, not excluded).
+    let neg = negation(singleton("#foo"));
+    assert_eq!(
+        InferredType::intersect(&neg, &singleton("#bar"), prov()),
+        singleton("#bar")
+    );
+}
+
+#[test]
+fn intersect_complement_excludes_matching_singleton() {
+    // `intersect(Symbol \ #foo, #foo) = Never` (#foo is excluded).
+    let neg = negation(singleton("#foo"));
+    assert_eq!(
+        InferredType::intersect(&neg, &singleton("#foo"), prov()),
+        InferredType::Never
+    );
+}
+
+#[test]
+fn intersect_complement_with_union() {
+    // `intersect(Symbol \ #foo, #foo | #bar | #baz) = #bar | #baz`.
+    let neg = negation(singleton("#foo"));
+    let rhs = InferredType::union_of(&[singleton("#foo"), singleton("#bar"), singleton("#baz")]);
+    let result = InferredType::intersect(&neg, &rhs, prov());
+    assert_eq!(
+        result,
+        InferredType::union_of(&[singleton("#bar"), singleton("#baz")])
+    );
+}
+
+#[test]
+fn intersect_complement_lhs_is_symmetric() {
+    // `intersect(#bar, Symbol \ #foo) = #bar` — Negation on the RHS too.
+    let neg = negation(singleton("#foo"));
+    assert_eq!(
+        InferredType::intersect(&singleton("#bar"), &neg, prov()),
+        singleton("#bar")
+    );
+}
+
+#[test]
+fn intersect_two_complements_same_base() {
+    // `intersect(Symbol \ #a, Symbol \ #b) = Symbol \ (#a | #b)`.
+    let result = InferredType::intersect(
+        &negation(singleton("#a")),
+        &negation(singleton("#b")),
+        prov(),
+    );
+    let expected = negation(InferredType::union_of(&[singleton("#a"), singleton("#b")]));
+    assert_eq!(result, expected);
 }
 
 // ── difference: boundary + Dynamic asymmetry ────────────────────────────
@@ -270,6 +369,34 @@ fn union_bare_symbol_subsumes_negation() {
     // `(Symbol \ #a) | Symbol = Symbol`.
     let neg = negation(singleton("#a"));
     assert_eq!(InferredType::union_of(&[neg, symbol()]), symbol());
+}
+
+#[test]
+fn union_merges_disjoint_complements_to_base() {
+    // Same-base complement union: `(Symbol \ #a) | (Symbol \ #b) = Symbol`
+    // (excludeds intersect to nothing, so nothing is removed).
+    let result = InferredType::union_of(&[negation(singleton("#a")), negation(singleton("#b"))]);
+    assert_eq!(result, symbol());
+}
+
+#[test]
+fn union_merges_overlapping_complements() {
+    // `(Symbol \ (#a | #b)) | (Symbol \ (#b | #c)) = Symbol \ #b`
+    // (only `#b` is excluded from *both* sides).
+    let neg_ab = negation(InferredType::union_of(&[singleton("#a"), singleton("#b")]));
+    let neg_bc = negation(InferredType::union_of(&[singleton("#b"), singleton("#c")]));
+    let result = InferredType::union_of(&[neg_ab, neg_bc]);
+    assert_eq!(result, negation(singleton("#b")));
+}
+
+#[test]
+fn union_dedups_equal_complements() {
+    // Logically-equal negations collapse to one (dedup), never grow the union.
+    let neg = negation(singleton("#a"));
+    assert_eq!(
+        InferredType::union_of(&[neg.clone(), neg.clone()]),
+        negation(singleton("#a"))
+    );
 }
 
 // ── display + provenance ────────────────────────────────────────────────
@@ -438,5 +565,19 @@ proptest! {
         prop_assert_eq!(InferredType::intersect(&dynamic(), &p, prov()), p.clone());
         prop_assert_eq!(InferredType::difference(&dynamic(), &p, prov()), dynamic());
         prop_assert_eq!(InferredType::difference(&p, &dynamic(), prov()), p);
+    }
+
+    /// Intersect-through-a-complement singleton case:
+    /// `intersect(Symbol \ s, p) = Never` when `p == s`, else the probed
+    /// singleton `p`.
+    #[test]
+    fn prop_intersect_complement(s in singleton_strat(), p in singleton_strat()) {
+        let neg = negation(s.clone());
+        let result = InferredType::intersect(&neg, &p, prov());
+        if p == s {
+            prop_assert_eq!(result, InferredType::Never);
+        } else {
+            prop_assert_eq!(result, p);
+        }
     }
 }
