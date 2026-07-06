@@ -65,9 +65,13 @@ Unknown        — Dynamic, untyped FFI results (ADR 0075's
                  classification (silent, per ADR 0100)
 ```
 
-`Value` composes structurally: a `Value` whose field types are all `Sendable`
-is `Sendable`; a `Value` carrying a `HandleScoped` field inherits
-`HandleScoped` (the copy embeds the handle).
+`Value` composes structurally, taking the **weakest** field tier: a `Value`
+whose field types are all `Sendable` is `Sendable`; a `Value` carrying a
+`SendableRef` field (and no `HandleScoped` field) inherits `SendableRef` (the
+copy embeds a Pid — reference semantics travel with it, and hover must say
+so); a `Value` carrying a `HandleScoped` field inherits `HandleScoped` (the
+copy embeds the handle). Ordering: `Sendable < SendableRef < HandleScoped`,
+with `Unknown` fields making the composite `Unknown`.
 
 Honest scoping note: **no diagnostic rule consumes `SendableRef` in v1**, and
 rather than leave the tier's fate as an implementation choice (which would let

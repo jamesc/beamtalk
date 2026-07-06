@@ -214,8 +214,12 @@ Normalisation rules (`intersect` / `difference`; **not** a blind mirror of
   Nominal-class difference beyond atoms (`difference(Object, Number)`) is
   *not* defined by this ADR — see §2 and Consequences.
 - **`Dynamic` is asymmetric and must be stated explicitly**:
-  `intersect(Dynamic, P) = P` (a positive test refines an unknown value to `P`),
-  but `difference(Dynamic, P) = Dynamic` (we cannot subtract from the unknown).
+  `intersect(Dynamic, P) = P` **and symmetrically `intersect(P, Dynamic) = P`**
+  (a positive test refines an unknown value to `P`; `Dynamic` on *either* side
+  acts as the identity for intersect — a match that handles only
+  `(Dynamic, _)` and falls through on `(Known, Dynamic)` silently loses
+  narrowing), but `difference(Dynamic, P) = Dynamic` (we cannot subtract from
+  the unknown).
   This mirrors today's behaviour — `is_nil` sets the true branch to
   `UndefinedObject` regardless of receiver type, while `non_nil_type`
   (`inference.rs:3306`) leaves `Dynamic` unchanged on the false branch. It is the
@@ -243,10 +247,12 @@ Normalisation rules (`intersect` / `difference`; **not** a blind mirror of
 - **`union_of` learns the new variant and its full absorption-law set**
   (`union_of` at `types.rs:442` matches exactly the current five variants with
   no wildcard, so this is an algebra decision, not a match-arm chore):
-  - **Full restoration** — `(Symbol \ #foo) | #foo` ⇒ `Symbol`.
-  - **Partial absorption** — adding back *one* of several exclusions removes
-    it from `excluded`: `(Symbol \ (#foo | #bar)) | #foo` ⇒ `Symbol \ #bar`;
-    an emptied `excluded` yields the bare base.
+  - **Partial absorption** — adding back an exclusion removes it from
+    `excluded`: `(Symbol \ (#foo | #bar)) | #foo` ⇒ `Symbol \ #bar`; an
+    emptied `excluded` yields the bare base.
+  - **Full restoration** — `(Symbol \ #foo) | #foo` ⇒ `Symbol` — is the
+    *degenerate case* of partial absorption (`excluded` empties), **not a
+    separate code path**: one rule implements both.
   - **Complement union (same base)** —
     `Negation{B, E1} | Negation{B, E2}` ⇒ `Negation{B, intersect(E1, E2)}`
     (set-theoretically `(B \ E1) ∪ (B \ E2) = B \ (E1 ∩ E2)`: "any Symbol
@@ -291,10 +297,16 @@ They divide into three groups, and the ADR must not pretend otherwise:
    subtraction this ADR unifies. One documented divergence: `non_nil_type`
    turns a nil-*only* union into `Dynamic`, not `Never` (test
    `non_nil_type_all_nil_becomes_dynamic`), a deliberate open-world softening.
-   The port **keeps** that behaviour (`difference` special-cases the
-   all-members-removed result for `is_nil` narrowing, or `is_nil` keeps its
-   wrapper) — porting it blindly "for uniformity" would be a silent behaviour
-   change.
+   The port **keeps** that behaviour, and the mechanism is **committed** (not
+   an implementation choice): `difference` itself stays **pure** —
+   `difference(Union[Nil], UndefinedObject)` is `Never`, because §4's
+   exhaustiveness residual *requires* all-members-removed to mean `Never` —
+   and the **`is_nil` narrowing call-site maps `Never` → `Dynamic`** as its
+   own open-world policy. Softening is a narrowing decision, not algebra; a
+   `difference`-internal special case would corrupt residuals, and a private
+   `is_nil` wrapper would keep a second hand-rolled subtraction alive,
+   defeating the unification. Porting blindly "for uniformity" would be a
+   silent behaviour change.
 
 2. **Ported, but a genuine behaviour change — `class_eq`, `is_kind_of`.** Today
    these set `true_type = P` *unconditionally* and `false_type = None`
@@ -597,9 +609,13 @@ needs full arrow/intersection-function typing. Documented as the destination in
   stay in existing variants (see §1).
 - **Live `Never` branches are new.** Group 2 true branches (and group 1's
   impossible-comparison corner) will type reachable code regions as `Never` for
-  the first time. The policy for message sends on a `Never`-typed receiver
-  (silent-as-unreachable, per ADR 0100's conservatism, vs. an unreachable-code
-  hint) must be decided in Phase 1 — currently unstated.
+  the first time. **Provisional default, committed here: sends on a
+  `Never`-typed receiver are silent** (silent-as-unreachable, per ADR 0100's
+  conservatism — the branch is already flagged by the impossible-comparison
+  hint at its source, so a second diagnostic per send inside it would be
+  noise). BT-2741 implements this default and may propose an
+  unreachable-code hint *as a revision* if implementation experience argues
+  for it — but ships the default, not an open question.
 - **`TypeAnnotation` (`ast/expression.rs`) also grows variants** for `&`/`\`
   (the AST enum is already ad-hoc — `FalseOr`, `ClassOf`, `SelfType`); every
   exhaustive match over it and `type_resolver.rs` must be updated. This cost was

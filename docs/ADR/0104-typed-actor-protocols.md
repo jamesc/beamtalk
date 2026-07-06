@@ -230,10 +230,10 @@ grade, poor fit with hot reload; per-message typing delivers most value.
 ## Implementation
 
 1. **Phase 1 (~S):** ratify sync-send typing with tests (it works today —
-   pin it); `!` retypes as `Nil` **behind the migration audit** (below); fix
-   the `beamtalk-language-features.md` cast-syntax inconsistency (its §Explicit
-   Async Cast shows a prefix `c ! increment` example the grammar does not
-   accept — real usage and the parser are postfix `c increment!`).
+   pin it); `!` retypes as `Nil` **behind the migration audit** (below). (The
+   `beamtalk-language-features.md` cast-syntax fix — prefix `c ! increment` →
+   postfix `c increment!` — is **already landed** in the PR that carries this
+   ADR; no Phase 1 work remains for it.)
 2. **Phase 2 (~M):** `spawnWith:` key checking — AST-level `MapLiteral` pair
    inspection at the call site, unknown-key `Warning` (provably-failing tier),
    typo suggestions; slot-value checking where ADR 0102's algebra permits.
