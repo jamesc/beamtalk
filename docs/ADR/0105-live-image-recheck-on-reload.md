@@ -22,14 +22,26 @@ construction. **Nobody can demo: change a running method's signature and watch
 the stale callers light up.** The infrastructure to do it is unusually cheap
 for Beamtalk, because the hard part already shipped:
 
-- **ADR 0087 (Implemented):** `beamtalk_xref` maintains a selector→call-sites
-  index in the runtime, kept correct across hot reload (purge + new-generation
-  install) and ClassBuilder lifecycle hooks. That *is* the dependency graph
-  incremental re-checking needs.
+- **ADR 0087 (Implemented):** `beamtalk_xref` maintains a **selector-keyed**
+  call-sites index in the runtime (`{Selector, Site}` bag; sites carry owner,
+  method, line, `recv_kind` — *not* a static receiver class), kept correct
+  across hot reload and ClassBuilder lifecycle hooks. That is *most of* the
+  dependency graph incremental re-checking needs — see Mechanism step 2 for
+  what it is not.
 - **Principle 12:** the compiler is the language service — the same
-  `beamtalk-core` that compiled the edit can re-check its dependents.
+  `beamtalk-core` that compiled the edit can re-check its dependents (via the
+  compiler port, ADR 0022 — a separate OS process, so round-trips must batch).
 - **ADR 0100:** the severity ladder for "how certain is the checker" already
-  exists; reload-induced findings slot straight into it.
+  exists; reload-induced findings slot into it (see Severity — including one
+  place where this ADR must *not* silently escalate).
+
+One honest caveat up front: **hot-patching currently *discards* type
+metadata.** `put_method/4` deliberately clears the patched selector's
+signature and return type (`beamtalk_object_class.erl` — "return types are
+cleared for hot-patched methods; the compiler treats them as dynamic",
+confirmed by ADR 0050), and `__beamtalk_meta/0` is stale after live patches by
+design. So the interface delta this ADR needs is **new plumbing captured at
+patch time**, not a read of existing state — see Mechanism step 1.
 
 ### What "stale" means
 
@@ -62,23 +74,51 @@ as live diagnostics on all surfaces (LSP, workspace UI, REPL notification).
 
 ### Mechanism
 
-1. **Signature diff.** When the workspace compiler (`beamtalk_repl_compiler` /
-   ClassBuilder path) installs a redefinition, compute the *interface delta*
-   against the previous generation: per selector — added / removed /
-   signature-changed (using the same method metadata codegen already emits in
-   `__beamtalk_meta`).
-2. **Dependent lookup.** For each removed or signature-changed selector, query
-   `beamtalk_xref` (ADR 0087) for its call sites: `(module, selector, arity) →
-   [caller methods]`.
-3. **Targeted re-check.** Re-run the type checker on exactly those caller
-   methods against the *new* interface. One level only — a caller whose own
-   interface is unchanged by the finding does not trigger further fan-out
-   (its diagnostic is enough; its callers' relationship to *it* didn't
-   change).
+1. **Signature diff — captured at patch time, not read back.** The compiler
+   already computes the new method's signature when it compiles the edit; the
+   *compile response* must carry it, and the workspace must record it per
+   selector **before** `put_method/4` installs the patch (which clears type
+   metadata — see Context caveat). The previous generation's signature is
+   whatever was recorded at the *last* patch (or the original
+   `__beamtalk_meta` for never-patched methods). Capturing at every patch is
+   what keeps diffs working across repeated edits to the same method —
+   read-back from class state cannot, because the pre-patch type is wiped on
+   install. This is **new plumbing** through the compile-request/response
+   protocol and a small new signature-generation store in the workspace.
+2. **Dependent lookup — selector query, then receiver filter.**
+   `beamtalk_xref` is keyed by **selector only** (ADR 0087's schema has no
+   receiver-class component; `recv_kind` is self/super/ffi/other). So the
+   lookup is: query sites for the changed selector, then **filter candidates
+   by inferred receiver type** during re-check — a site calling `size` on a
+   `List` is not a dependent of `Counter>>size`. For common selectors this
+   filter is what keeps fan-out bounded; a **numeric cap on re-checked callers
+   per reload** (with a "N more not checked" note) is part of the design, and
+   extending the xref schema with a receiver-type key is the recorded
+   follow-up if fan-out proves hot (see Alternatives).
+3. **Re-check at file granularity, batched.** The checker's entry points are
+   whole-`Module` (`check_module` / `infer_types`); there is no
+   single-method check today. The unit of re-check is therefore the caller's
+   **enclosing compilation unit**, batched into **one compiler-port request**
+   per reload (the port is a separate OS process, ADR 0022 — ~2ms overhead
+   plus compile time per request; per-caller round-trips would not meet the
+   latency constraint). Sources come from the **live image**, never disk:
+   ADR 0082 makes in-memory `method_source` authoritative until
+   `Workspace flush`, and a flagged caller may itself carry unflushed edits.
+   A single-method check API is a possible later optimisation, not a
+   prerequisite. One level of fan-out only — with an honest caveat: the
+   cutoff is exact for callers with *declared* signatures, but a caller whose
+   *inferred* return type silently shifts (it delegates to the changed
+   method, no annotation) can propagate breakage to *its* callers unchecked.
+   That gap is **accepted** in this ADR; comparing re-inferred signatures at
+   the cutoff is the recorded refinement.
 4. **Publish.** Findings appear as diagnostics attributed to the caller's
    source location, tagged as reload-induced, on every surface
-   (surface-parity applies). They clear automatically when either side is
-   edited to agree.
+   (surface-parity applies). Clearing: a finding clears when either side is
+   re-edited to agree, when the change is undone via
+   `Workspace changes revert:` (ADR 0082), or on workspace restart
+   (reload-induced findings are session state, never persisted). Site-level
+   `@expect` markers keep their ADR 0100 Rule 3 precedence — an expected DNU
+   stays silent even when reload-induced.
 
 ### The demo (REPL/workspace session)
 
@@ -103,18 +143,36 @@ stay silent.
 ### Error example (removal)
 
 ```
-⚠ reload check: Counter>>reset was removed; 1 caller remains
+ℹ reload check: Counter>>reset was removed; 1 caller remains
    AdminPanel>>onClick (admin.bt:9): `counter reset` will raise
    does_not_understand at runtime
+   (Hint severity per ADR 0100 Rule 1 — single closed receiver)
 ```
 
 ### Severity
 
-Per ADR 0100's ladder: signature-mismatch and removed-selector findings on
-statically-known receivers are `Warning`; anything reached through `Dynamic`,
-`perform:`, or DNU-overriding receivers is silent or `Lint`. Reload-induced
-findings never block the reload (it already happened) and never fail a build
-(they live in the workspace session, not the artifact).
+ADR 0100 governs — and it must not be silently escalated. Its Rule 1 caps an
+unresolved selector on a single closed-complete receiver at **`Hint`** (its
+steelman explicitly rejects `Warning` there to avoid converting quiet hints
+into warnings overnight). Accordingly:
+
+- **Removed-selector findings** on a single statically-known receiver are
+  `Hint` — same as any other unresolved selector under Rule 1. Reload adds
+  attribution ("removed by the reload of X"), not severity.
+- **Signature-mismatch findings** (`+ 1` on a now-`String` return) are type
+  mismatches, not unresolved selectors — they take whatever severity the
+  ordinary type checker gives that mismatch. Reload changes *when* they're
+  discovered, not *how severe* they are.
+- Anything reached through `Dynamic`, `perform:`, or DNU-overriding receivers
+  is silent, as always. Site-level `@expect` (Rule 3) wins over reload
+  attribution.
+- If experience shows reload-induced findings deserve more prominence than
+  their static equivalents, that is an explicit ADR 0100 Rule 3 carve-out to
+  propose *there* (with the argument that post-reload certainty differs from
+  static certainty) — not a default this ADR smuggles in.
+
+Reload-induced findings never block the reload (it already happened) and
+never fail a build (they live in the workspace session, not the artifact).
 
 ## Prior Art
 
@@ -169,6 +227,22 @@ one-level; measure; ADR 0087's benchmarking precedent (BT-2299) applies.
 Simple and complete; unbounded latency as images grow. Rejected as the
 default; may become an explicit command (`:recheck image`).
 
+### Per-caller (single-method) re-check
+The ideal granularity — but no single-method check API exists (the checker's
+entry points are whole-`Module`). Building one is real infrastructure.
+**Adopted middle ground instead:** re-check the affected caller's whole
+enclosing compilation unit, batched into one port request (Mechanism step 3).
+Per-file is coarser than per-method but bounded, and reuses `check_module`
+unchanged; the single-method API is a later optimisation if file-granularity
+latency disappoints.
+
+### Extend xref with a receiver-type key
+Would make dependent lookup precise instead of selector-wide (Mechanism step
+2's filter). Not chosen now — it changes ADR 0087's shipped schema and
+generation lifecycle for a cost that only matters if common-selector fan-out
+proves hot in practice. Recorded as the follow-up, with the per-reload caller
+cap as the interim guard.
+
 ### Static-only (no runtime trigger)
 Let the LSP re-check open files on edit, ignore the live image. Rejected: the
 whole point is the *image* — callers in files nobody has open are exactly the
@@ -183,11 +257,15 @@ anti-liveness, and off-positioning.
 ### Positive
 - The thirty-second demo no BEAM language can give: live signature change →
   stale callers flagged with locations, from the running image.
-- Reuses shipped infrastructure (xref, language-service compiler, severity
-  policy, LSP publishing) — the novel code is a diff + a trigger + a targeted
-  re-check loop.
-- Makes ADR 0104's actor typing durable under liveness (actor interface
-  changes re-check senders).
+- Builds on shipped infrastructure (xref, compiler port, severity policy, LSP
+  publishing) — but honestly: the **new** code is real, not glue. Signature
+  capture at patch time (because hot-patch *clears* type metadata),
+  receiver-type filtering over selector-keyed xref results, and batched
+  whole-file re-checks are all net-new plumbing (see Mechanism). What's
+  reused is the checker itself, the index, and the diagnostic channels.
+- Would make ADR 0104's actor typing durable under liveness (actor interface
+  changes re-check senders) — noting 0104 is itself Proposed, so this is a
+  benefit contingent on an unbuilt dependency.
 
 ### Negative
 - The workspace runtime must call back into the Rust compiler for re-checks —
@@ -207,16 +285,23 @@ anti-liveness, and off-positioning.
 
 ## Implementation
 
-1. **Phase 0 (napkin, ~S):** hard-code one case end-to-end — method signature
-   change via workspace save → xref lookup → re-check one caller → one LSP
-   diagnostic. Proves the runtime→compiler round-trip, which is the risky
-   part.
-2. **Phase 1 (~M):** interface-delta computation from `__beamtalk_meta`
-   generations; removed-selector and signature-change findings; surface-parity
-   plumbing (LSP + workspace UI + REPL notice).
+1. **Phase 0 (napkin, ~M — this is the risky part, not an ~S):** one case
+   end-to-end, proving the three assumptions the reviewers flagged: (a)
+   signature captured from the **compile response at patch time** (before
+   `put_method/4` clears type metadata) and retained across generations; (b)
+   selector-keyed xref lookup + receiver-type filter finds the right caller;
+   (c) a batched whole-file re-check through the compiler port returns a
+   diagnostic within interactive latency. One method, one caller, one LSP
+   diagnostic — reading the caller's **live** `method_source`, not disk.
+2. **Phase 1 (~M):** generalise: per-selector signature store with generation
+   handling (incl. repeated edits to the same method); removed-selector and
+   signature-change findings at ADR 0100 severities; caller cap + "N more not
+   checked" note; surface-parity plumbing (LSP + workspace UI + REPL notice);
+   clearing on re-edit / `Workspace changes revert:` / restart.
 3. **Phase 2 (~M):** shape changes (`state:`/`field:`) integrated with ADR
-   0104's `spawnWith:`/accessor checking; clearing logic; benchmarks per the
-   BT-2299 precedent.
+   0104's `spawnWith:`/accessor checking (once 0104 lands); benchmarks per
+   the BT-2299 precedent — including the common-selector fan-out case that
+   decides whether the xref receiver-key extension is needed.
 4. **Phase 3 (~S):** pre-save advisory in the editor (check before install);
    explicit `:recheck image` command (surface-parity entry required).
 

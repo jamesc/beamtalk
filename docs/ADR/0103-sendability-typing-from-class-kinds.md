@@ -53,64 +53,105 @@ warn when a value's tier is too weak for the boundary it crosses.
 
 ```text
 Sendable       — Value kinds, primitives (Integer, String, …), Symbol,
-                 unions/collections of Sendable
-SendableRef    — Actor kinds (Pid-backed): reference semantics survive the
-                 send; validity tied to process lifetime
-HandleScoped   — Object kinds wrapping runtime-backed state (declared, see
-                 below): valid within a scope (node-global or process-bound)
-Unknown        — Dynamic, or Object kinds with no declaration (silent, per
-                 ADR 0100)
+                 unions/collections of Sendable; also opaque tokens with no
+                 owner (e.g. Reference — a raw make_ref() is hazard-free)
+SendableRef    — Pid-backed references: Actor kinds and the builtin `Pid`
+                 itself; reference semantics survive the send, validity tied
+                 to the process lifetime
+HandleScoped   — Object kinds wrapping runtime-backed state whose validity
+                 has a scope (see below)
+Unknown        — Dynamic, untyped FFI results (ADR 0075's
+                 Dynamic(DynamicSpec)), or Object kinds with no
+                 classification (silent, per ADR 0100)
 ```
 
 `Value` composes structurally: a `Value` whose field types are all `Sendable`
 is `Sendable`; a `Value` carrying a `HandleScoped` field inherits
 `HandleScoped` (the copy embeds the handle).
 
+Honest scoping note: **no diagnostic rule consumes `SendableRef` in v1** — it
+exists to classify `Pid`/Actor references correctly (they are neither plain
+data nor scoped handles) and to render truthfully in hover. If no rule ever
+reads it, collapsing to a three-tier lattice is a simplification the
+implementation is free to make; the tier is kept in the design because `Pid`'s
+behaviour genuinely differs from both neighbours.
+
+**Builtins are classified directly, not via annotation.** The flagship hazard
+classes already exist in the stdlib as `sealed typed Object subclass:` with no
+kind distinction — and one of them breaks a naive kind→tier rule: `Pid` is
+Object-kind but *behaves* as `SendableRef` (a live cross-node-valid process
+reference). Tier assignments for builtins ship as a table in the checker, not
+as source annotations:
+
+| Builtin | Tier | Why |
+|---|---|---|
+| `Pid` | `SendableRef` | live process reference; valid across nodes |
+| `Port` | `HandleScoped(#process)` | port dies with / is bound to its owner |
+| `Reference` | `Sendable` | opaque comparison token, no owner, no hazard |
+| `Subscription` | `HandleScoped(#node)` | wraps a node-local ETS row |
+| `FileHandle` | `HandleScoped(#process)` *(approximation)* | documented as "must not escape" its `open:do:` block — its true scope is *dynamic extent*, tighter than any process; `#process` is the conservative expressible bound (see Consequences) |
+
+This table **is the Phase 0 deliverable** — it makes the canonical hazards
+(`Port` in an actor message) warn on day one with zero user annotations.
+
 ### Declaring handle scope (the one new annotation)
 
-`Object subclass:` classes that wrap runtime state may declare their scope;
-undeclared Object kinds stay `Unknown` (silent):
+User-defined `Object subclass:` classes that wrap runtime state may declare
+their scope; undeclared Object kinds stay `Unknown` (silent):
 
 ```beamtalk
 // node-global handle: fine to send within the node, not across nodes
-sealed typed Object subclass: Subscription
+sealed typed Object subclass: MetricsTable
   handleScope: #node
-
-// process-bound handle (e.g. wraps a port): only meaningful in the owner
-sealed typed Object subclass: SocketHandle
-  handleScope: #process
 ```
+
+The scope is symbol-valued and the set is deliberately **open** — `#node` and
+`#process` ship first; a `#dynamicExtent` value (the `FileHandle` case) is a
+plausible later addition rather than a redesign. Construction of such classes
+follows the existing FFI-wrapping pattern (ADR 0101 `native:` / delegate, as
+`Ets` and `Subscription` do today).
 
 ### Checked boundaries
 
 1. **Actor message arguments and `spawnWith:` maps** — warn when a
-   `HandleScoped(#process)` value is passed; info-level note for
-   `#node`-scoped values only when the receiver is known to be remote
-   (named-actor registration on another node, ADR 0079).
+   `HandleScoped(#process)` value is passed. `#node`-scoped values are
+   **silent in v1**: warning usefully requires static knowledge that the
+   receiver is remote, and no such knowledge exists — ADR 0079 is explicitly
+   *local* (per-node) registration; cluster-wide registration is a deferred
+   future ADR. When that ADR lands, `#node`-scoped sends to known-remote
+   receivers gain an info-level note. Recorded as blocked, not designed here.
 2. **Blocks sent to actors** (including `Timer every:do:`, `!` casts) — warn
-   when the block's *captured environment* (already computed for closure
-   conversion) includes a `HandleScoped(#process)` value.
+   when the block captures a `HandleScoped(#process)` value. **This is new
+   analysis, not reuse**: the compiler has no closure-conversion pass (Core
+   Erlang funs capture natively), and the two existing capture datasets are
+   both name-only and invisible to the type checker —
+   `BlockMutationAnalysis.captured_reads` is computed at codegen time, and
+   the semantic-analysis `Analyser::collect_captures_and_mutations`
+   (`CapturedVar{name, defined_at}`) runs in Phase 3, *after* type checking.
+   The check therefore lives in a Phase 3 validator that joins
+   `CapturedVar`s with the type checker's `type_map` — budgeted as real work
+   in Implementation, with a tier-derivation function shared between it and
+   the Phase 2 message-argument checks.
 3. **Announcement payloads** — same rule as message arguments.
 
 ### Error example
 
 ```beamtalk
-sock := SocketHandle open: 8080
-worker ! [sock readLine]
-// ⚠️ block captures `sock` (SocketHandle, handleScope: #process) and is sent
-//    to another process — the handle is only valid in the owning process.
-//    Consider passing data, or an Actor that owns the socket.
+port := (Erlang erlang) openPort: cmd     // :: Port — builtin tier table
+worker ! [port send: data]
+// ⚠️ block captures `port` (Port — process-bound handle) and is sent to
+//    another process — a port is only usable by its owning process.
+//    Consider passing data, or an Actor that owns the port.
 ```
 
 ### REPL session
 
 ```
-bt> p := Point x: 1 y: 2        // Value — Sendable
-bt> counter ! (p)                // fine, no diagnostic
-bt> sub := announcer when: Tick do: [:e | e]
-bt> remoteWorker register: sub   // remote receiver + #node handle
-   ℹ️ `sub` (Subscription, handleScope: #node) sent to a remote node — the
-      handle will not be valid there
+bt> p := Point x: 1 y: 2         // Value — Sendable
+bt> counter add: p               // fine, no diagnostic
+bt> worker consume: port
+   ⚠️ `port` (Port — process-bound handle) passed in an actor message; it is
+      only usable by its owning process
 ```
 
 ## Prior Art
@@ -152,8 +193,11 @@ bt> remoteWorker register: sub   // remote receiver + #node handle
 ### Tension point
 Whether `#node`-scoped sends to *possibly*-remote receivers warn or stay
 silent: veterans want silence (distribution is deliberate), newcomers want the
-note. Resolved by grading on *knowledge*: warn only when remoteness is
-statically known (ADR 0079 registration), otherwise silent.
+note. Resolved by grading on *knowledge* — and today the checker has **none**:
+there is no static source of receiver remoteness (ADR 0079 is local-only
+registration; cluster registration is a future ADR). So `#node` findings are
+silent in v1, becoming info-level only when a cluster-registration ADR gives
+the checker something to grade on.
 
 ## Alternatives Considered
 
@@ -174,38 +218,71 @@ under-shoots.
 
 ### Positive
 - The first BEAM language where "will this value survive the send?" is a
-  typed, hover-visible property — at near-zero annotation cost.
-- Block-capture checking reuses closure-conversion data; no new analysis pass.
+  typed, hover-visible property — with the canonical hazards (`Port`) covered
+  by the builtin tier table at **zero** annotation cost.
 
 ### Negative
-- `handleScope:` is a new class-side keyword (parser + ClassHierarchy +
-  codegen metadata).
+- **This wires class-kind data into the type checker for the first time.**
+  `ClassHierarchy::resolve_class_kind` exists and is reachable, but nothing in
+  `inference.rs`/`validation.rs` consumes kind today (only downstream Phase 5
+  validators do) — this is net-new checker logic, not a refactor.
+- **Block-capture checking is genuinely new analysis** (see Checked
+  boundaries #2): a Phase 3 validator joining name-only `CapturedVar` data
+  with the type checker's `type_map`, plus a tier-derivation function shared
+  with the Phase 2 message-argument checks. Two phases, one shared core —
+  the split must be kept explicit or the tiers will drift.
+- `handleScope:` is a new class-side keyword — and ADR 0067's precedent says
+  such keywords are not cheap (its comparable keyword change took 11 tracked
+  issues across parser, ClassHierarchy, codegen metadata, and docs).
+- **Perverse incentive:** declaring `handleScope:` is what turns silence into
+  (advisory) findings, so authors of handle-wrapping classes are mildly
+  incentivised *not* to declare. Mitigation: a companion lint nudging
+  FFI-wrapping `Object` classes with no classification toward declaring, and
+  the builtin table covering the stdlib regardless.
+- The two-value scope enum is a knowing approximation: `FileHandle`'s true
+  scope is *dynamic extent* (must not escape `open:do:`), tighter than
+  `#process`. The open symbol set leaves room; the approximation is accepted
+  for v1.
 - Tier derivation for generic collections needs care
-  (`List(SocketHandle)` is `HandleScoped`); interacts with ADR 0102's
-  `type_args` rules.
+  (`List(Port)` is `HandleScoped`); interacts with ADR 0102's `type_args`
+  rules.
 - False silence is guaranteed under `Dynamic` — must be documented as
   advisory, not a guarantee.
 
 ### Neutral
 - No runtime or codegen behaviour change; metadata only.
+- Remote-node grading of `#node`-scoped sends is **blocked on a future
+  cluster-registration ADR** (ADR 0079 is local-only); nothing in v1 claims
+  remoteness knowledge.
 
 ## Implementation
 
-1. **Phase 0 (napkin):** derive tiers from class kinds only (no
-   `handleScope:`), warn on the single clearest case — `#process`-scoped
-   stdlib types (ports) passed in actor messages. Validates the plumbing.
-2. **Phase 1:** `handleScope:` keyword (parser, `ClassDefinition`,
-   `ClassHierarchy`, `__beamtalk_meta`), tier derivation incl. `Value`
-   composition, message-argument + `spawnWith:` checks. ~M.
-3. **Phase 2:** block-capture checking; Announcement payloads; remote-receiver
-   grading via ADR 0079 registration data. ~M.
+1. **Phase 0 (napkin, ~S):** builtin tier table (`Pid`, `Port`, `Reference`,
+   `Subscription`, `FileHandle`) + the message-argument check for
+   `HandleScoped(#process)`, wired into the type checker (first consumer of
+   class-kind data there). Proves the value with zero new syntax — `Port` in
+   an actor message warns.
+2. **Phase 1 (~M):** `handleScope:` keyword (parser, `ClassDefinition`,
+   `ClassHierarchy`, `__beamtalk_meta` — budget per the ADR 0067 precedent),
+   tier derivation incl. `Value` composition and `type_args`, `spawnWith:`
+   checks, hover rendering, stdlib inventory audit (Ets, Announcer, …).
+3. **Phase 2 (~M):** block-capture checking (Phase 3 validator + `type_map`
+   join + shared tier-derivation core); Announcement payloads; the
+   undeclared-handle-class companion lint.
+4. **Deferred (blocked):** remote-receiver grading of `#node` scopes — needs
+   the future cluster-registration ADR first.
 
-**Affected:** parser/AST, class hierarchy, type checker, hover; **not**
-codegen output semantics or runtime dispatch.
+**Affected:** parser/AST, class hierarchy, type checker (first kind-aware
+logic), a Phase 3 validator, hover; **not** codegen output semantics or
+runtime dispatch.
 
 ## References
 - Seed: `docs/internal/positioning.md` (Seed 1)
-- Related ADRs: ADR 0067 (class kinds), ADR 0042 (value types), ADR 0100
-  (advisory severity), ADR 0079 (named/remote actors), ADR 0102 (type
-  operators, `type_args` rules), ADR 0093 (Announcements)
+- Related ADRs: ADR 0067 (class kinds — incl. the keyword-cost precedent),
+  ADR 0042 (value types), ADR 0100 (advisory severity), ADR 0079 (named actor
+  registration — **local-only**; cluster registration deferred), ADR 0075
+  (FFI type definitions — untyped FFI results are `Dynamic(DynamicSpec)`,
+  hence tier `Unknown`), ADR 0101 (`native:` FFI-wrapping construction
+  pattern), ADR 0102 (type operators, `type_args` rules), ADR 0093
+  (Announcements)
 - Prior art: Pony reference capabilities; Rust `Send`/`Sync`
