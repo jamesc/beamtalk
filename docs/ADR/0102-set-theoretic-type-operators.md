@@ -1,7 +1,25 @@
 # ADR 0102: Set-Theoretic Type Operators (Intersection and Negation) for Narrowing and Atom Exhaustiveness
 
 ## Status
-Proposed (2026-07-05)
+Accepted (2026-07-06)
+
+## Implementation Tracking
+
+**Epic:** [BT-2738](https://linear.app/beamtalk/issue/BT-2738)
+**Issues:**
+
+| Phase | Issue | Title | Size | Blocked by |
+|---|---|---|---|---|
+| 1 | [BT-2739](https://linear.app/beamtalk/issue/BT-2739) | intersect/difference operators + `Negation` variant | M | – |
+| 2 | [BT-2740](https://linear.app/beamtalk/issue/BT-2740) | Unify `singleton_eq`/`is_nil` narrowing; delete `union_without` | M | BT-2739 |
+| 2 | [BT-2741](https://linear.app/beamtalk/issue/BT-2741) | `class_eq`/`is_kind_of` true branch + `Never`-receiver policy | S | BT-2739 |
+| 1b | [BT-2744](https://linear.app/beamtalk/issue/BT-2744) | Nominal-class difference + class false branch (needs-spec) | M | BT-2741 |
+| 4 | [BT-2742](https://linear.app/beamtalk/issue/BT-2742) | `\` difference annotation syntax | M | BT-2739 |
+| 4 | [BT-2743](https://linear.app/beamtalk/issue/BT-2743) | `&` intersection syntax + stored `Intersection` variant | M | BT-2739 |
+| 5 | [BT-2745](https://linear.app/beamtalk/issue/BT-2745) | Advisory singleton-union `match:` exhaustiveness | M | BT-2740 |
+| 6 | [BT-2746](https://linear.app/beamtalk/issue/BT-2746) | E2E + docs + status flip | S | BT-2742, BT-2743, BT-2745 |
+
+**Status:** Planned
 
 ## Context
 
