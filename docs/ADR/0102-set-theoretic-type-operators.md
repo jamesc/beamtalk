@@ -1,7 +1,9 @@
 # ADR 0102: Set-Theoretic Type Operators (Intersection and Negation) for Narrowing and Atom Exhaustiveness
 
 ## Status
-Accepted (2026-07-06)
+Implemented (Phases 1, 2, 4, 5, 2026-07-06) — Phase 1b (BT-2744, nominal-class
+difference + the `class`/`isKindOf:` false branch) deliberately deferred as
+needs-spec; not part of this implementation.
 
 ## Implementation Tracking
 
@@ -19,7 +21,11 @@ Accepted (2026-07-06)
 | 5 | [BT-2745](https://linear.app/beamtalk/issue/BT-2745) | Advisory singleton-union `match:` exhaustiveness | M | BT-2740 |
 | 6 | [BT-2746](https://linear.app/beamtalk/issue/BT-2746) | E2E + docs + status flip | S | BT-2742, BT-2743, BT-2745 |
 
-**Status:** Planned
+**Status:** Implemented — Phases 1, 2, 4, 5, and 6 (this issue) landed.
+Phase 1b (BT-2744) remains deferred pending its own design work on nominal-class
+difference semantics; it is not required for `\`/`&` surface syntax or the
+advisory `match:` exhaustiveness check, which only need atom-level
+(singleton) difference.
 
 ## Context
 

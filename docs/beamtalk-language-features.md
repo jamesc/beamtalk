@@ -1580,6 +1580,51 @@ A singleton receiver resolves methods against `Symbol`'s protocol — `#infinity
 
 Discriminate a singleton union with `=:=` (identity) and the branches narrow — see [Control Flow Narrowing](#control-flow-narrowing).
 
+### Difference and Intersection Types (`\` / `&`)
+
+Beyond `|` (union), type annotations support two more set-theoretic operators ([ADR 0102](ADR/0102-set-theoretic-type-operators.md)):
+
+- **`\` (difference)** — "T without U". Written `Base \ Excluded`, it expresses a co-finite set: every value of `Base` except the named ones. Today this is only meaningful for symbol singletons subtracted from `Symbol` (or from a smaller `\`-chain) — nominal-class difference (e.g. `Object \ Number`) is not yet defined.
+- **`&` (intersection)** — the general form of the class/protocol composition ADR 0068 already specified (`Collection(Object) & Comparable`). Class ∩ class reduces via the hierarchy (the narrower class, or `Never` for unrelated sealed classes); class ∩ protocol is the interesting, irreducible case.
+
+```beamtalk
+// "any Symbol except #north" — a co-finite atom set
+tag :: Symbol \ #north := #south
+
+// chained difference — left-associative, same as subtracting a union:
+// equivalent to "any Symbol except {#north, #south}"
+heading :: Symbol \ #north \ #south := #east
+
+// union binds looser than difference: `Integer | Symbol \ #foo` is
+// `Integer | (Symbol \ #foo)`, not `(Integer | Symbol) \ #foo`
+withSentinel: ms :: Integer | Symbol \ #infinity => ...
+
+// intersection: class ∩ protocol (ADR 0068's operator, now general)
+describe: value :: Integer & Printable -> String => value asString
+
+// chained intersection — left-associative, same tier as `\`
+requires: value :: A & B & C => ...
+```
+
+**Precedence** (lowest-binding to highest), all only inside a type annotation — `&` and `\` remain ordinary binary message selectors in value position, unaffected:
+
+| Operator | Meaning | Binding |
+|---|---|---|
+| `\|` | union | lowest |
+| `&` | intersection | middle |
+| `\` | difference | middle (left-assoc, same tier as `&`) |
+| _(atomic type)_ | class name / singleton / generic | highest |
+
+So `Integer | Symbol \ #foo` parses as `Integer | (Symbol \ #foo)` — `\` binds tighter than `|`. Within one operator, chains are left-associative: `Symbol \ #a \ #b` parses as `(Symbol \ #a) \ #b`, and `A & B & C` parses as `(A & B) & C`.
+
+**Known limitation: no grouping parentheses in type position (yet).** Unlike value expressions, `(...)` is not a grouping operator inside a type annotation — parentheses there are only used for generic type arguments (`Result(T, E)`). So there is currently no way to write, say, "any Symbol except one of a union of exclusions" with an explicit parenthesised group (`Symbol \ (#a | #b)` does **not** parse) — write it as a chain of subtractions instead, which the algebra normalises to the same result: `Symbol \ #a \ #b`.
+
+This same limitation is why **mixing `&` and `\` in the same chain without parentheses is a deliberate parse error**, not a left-associative fallback — `A & B \ C` is rejected with "Cannot mix `&` and `\` in a type annotation without parentheses; parenthesise to disambiguate", because `(A & B) \ C` and `A & (B \ C)` differ and neither reading is obviously the intended one. Since grouping parens don't exist in type position today, there is currently no way to write *either* explicitly — don't mix the two operators in one annotation; if you need both, split the narrowing into two steps (e.g. an intermediate local variable annotation).
+
+The lexer also greedily merges `\\` (two backslashes) into the Smalltalk modulo selector, so a doubled backslash in type position — the natural typo for `\` — gets a targeted diagnostic ("did you mean `\`?") instead of a confusing generic parse error.
+
+Difference types show up in [Control Flow Narrowing](#control-flow-narrowing) too: the false branch of a singleton equality test (`x =:= #foo`) narrows `x` to `Symbol \ #foo`, and hover displays that co-finite type directly.
+
 ### Control Flow Narrowing
 
 When the type checker recognises a type-testing pattern followed by `ifTrue:` / `ifFalse:`, it narrows the variable's type inside the block scope:
