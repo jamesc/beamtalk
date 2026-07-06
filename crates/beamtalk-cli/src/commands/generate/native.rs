@@ -347,6 +347,13 @@ fn format_type_annotation(ty: &TypeAnnotation) -> String {
             let params: Vec<String> = parameters.iter().map(format_type_annotation).collect();
             format!("{}({})", base.name, params.join(", "))
         }
+        TypeAnnotation::Difference { base, excluded, .. } => {
+            format!(
+                "{} \\ {}",
+                format_type_annotation(base),
+                format_type_annotation(excluded)
+            )
+        }
         // For other variants, just produce a placeholder
         _ => "Object".to_string(),
     }

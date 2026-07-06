@@ -633,6 +633,13 @@ impl CoreErlangGenerator {
             TypeAnnotation::FalseOr { inner, .. } => {
                 format!("{} | False", Self::type_annotation_display(inner))
             }
+            TypeAnnotation::Difference { base, excluded, .. } => {
+                format!(
+                    "{} \\ {}",
+                    Self::type_annotation_display(base),
+                    Self::type_annotation_display(excluded)
+                )
+            }
             TypeAnnotation::SelfType { .. } => "Self".to_string(),
             TypeAnnotation::SelfClass { .. } => "Self class".to_string(),
             TypeAnnotation::ClassOf { class_name, .. } => format!("{} class", class_name.name),

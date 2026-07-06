@@ -443,6 +443,13 @@ fn type_annotation_label(type_annotation: &crate::ast::TypeAnnotation) -> String
         crate::ast::TypeAnnotation::FalseOr { inner, .. } => {
             format!("{}?", type_annotation_label(inner))
         }
+        crate::ast::TypeAnnotation::Difference { base, excluded, .. } => {
+            format!(
+                "{} \\ {}",
+                type_annotation_label(base),
+                type_annotation_label(excluded)
+            )
+        }
         crate::ast::TypeAnnotation::SelfType { .. } => "Self".to_string(),
         crate::ast::TypeAnnotation::SelfClass { .. } => "Self class".to_string(),
         crate::ast::TypeAnnotation::ClassOf { class_name, .. } => {

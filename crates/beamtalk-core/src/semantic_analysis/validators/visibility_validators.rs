@@ -310,6 +310,10 @@ fn check_type_annotation_cross_package(
         TypeAnnotation::FalseOr { inner, .. } => {
             check_type_annotation_cross_package(inner, current_pkg, hierarchy, diagnostics);
         }
+        TypeAnnotation::Difference { base, excluded, .. } => {
+            check_type_annotation_cross_package(base, current_pkg, hierarchy, diagnostics);
+            check_type_annotation_cross_package(excluded, current_pkg, hierarchy, diagnostics);
+        }
         TypeAnnotation::ClassOf { class_name, .. } => {
             check_cross_package_ref(
                 &class_name.name,
@@ -443,6 +447,24 @@ fn check_type_annotation_leaked(
         TypeAnnotation::FalseOr { inner, .. } => {
             check_type_annotation_leaked(
                 inner,
+                class_name,
+                method_selector,
+                current_pkg,
+                hierarchy,
+                diagnostics,
+            );
+        }
+        TypeAnnotation::Difference { base, excluded, .. } => {
+            check_type_annotation_leaked(
+                base,
+                class_name,
+                method_selector,
+                current_pkg,
+                hierarchy,
+                diagnostics,
+            );
+            check_type_annotation_leaked(
+                excluded,
                 class_name,
                 method_selector,
                 current_pkg,

@@ -83,6 +83,10 @@ fn type_annotation_to_spec(annotation: &TypeAnnotation) -> Document<'static> {
                 ", {'atom', 0, 'false'}]}"
             ]
         }
+        // Difference (`base \ excluded`) has no precise Erlang spec form; the
+        // excluded set only narrows `base`, so the base spec is a sound (if
+        // wider) over-approximation for the generated `-spec`.
+        TypeAnnotation::Difference { base, .. } => type_annotation_to_spec(base),
         // Self / Self class / <Name> class resolve to a receiver class at call
         // sites; in specs, treat as any()
         TypeAnnotation::SelfType { .. }

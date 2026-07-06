@@ -279,6 +279,10 @@ fn collect_type_annotation_refs(
         TypeAnnotation::FalseOr { inner, .. } => {
             collect_type_annotation_refs(inner, name, file_path, results);
         }
+        TypeAnnotation::Difference { base, excluded, .. } => {
+            collect_type_annotation_refs(base, name, file_path, results);
+            collect_type_annotation_refs(excluded, name, file_path, results);
+        }
         TypeAnnotation::ClassOf { class_name, .. } => {
             if class_name.name == name {
                 results.push(Location::new(file_path.clone(), class_name.span));
