@@ -120,10 +120,18 @@ fn check_raw_name(name: &str, span: Span, kind: &str, diagnostics: &mut Vec<Diag
                  a `__methods__` or `__class_mod__` collision would overwrite the \
                  runtime's dispatch metadata and corrupt method lookup."
             }
-            _ => {
+            "parameter" | "block parameter" | "local variable" => {
                 "Rename it. A parameter, block parameter, or local beginning with `__` \
                  (double underscore) collides with the names the compiler generates for \
                  control-flow temporaries."
+            }
+            // Defensive fallback for any future declaration kind: describe both
+            // hazards rather than silently mis-routing to one of the specific
+            // paragraphs above.
+            _ => {
+                "Rename it. Identifiers beginning with `__` (double underscore) are \
+                 reserved for the compiler — they collide with reserved state-map keys \
+                 or with generated control-flow temporary names."
             }
         };
         diagnostics.push(
@@ -234,6 +242,46 @@ mod tests {
         assert!(
             diagnostics.is_empty(),
             "unexpected diagnostics: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn field_hint_describes_state_map_path() {
+        let diagnostics =
+            diagnostics_for("Actor subclass: Counter\n  state: __local__balance :: Integer = 0\n");
+        let hint = diagnostics[0]
+            .hint
+            .as_ref()
+            .expect("field diagnostic should carry a hint");
+        assert!(
+            hint.contains("state-map key"),
+            "field hint should describe the state-map path: {hint}"
+        );
+        assert!(
+            !hint.contains("control-flow temporaries"),
+            "field hint should not describe the control-flow path: {hint}"
+        );
+    }
+
+    #[test]
+    fn parameter_hint_describes_control_flow_path() {
+        let diagnostics =
+            diagnostics_for("Object subclass: Widget\n  set: __class_mod__ => ^__class_mod__\n");
+        let param = diagnostics
+            .iter()
+            .find(|d| d.message.contains("parameter"))
+            .expect("expected a parameter diagnostic");
+        let hint = param
+            .hint
+            .as_ref()
+            .expect("parameter diagnostic should carry a hint");
+        assert!(
+            hint.contains("control-flow temporaries"),
+            "parameter hint should describe the control-flow path: {hint}"
+        );
+        assert!(
+            !hint.contains("state-map key"),
+            "parameter hint should not describe the state-map path: {hint}"
         );
     }
 }
