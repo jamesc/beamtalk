@@ -50,3 +50,13 @@ TestCase subclass: StringNewMethodsTest
     self assert: "hello" isAlpha
     self deny: "hello1" isAlpha
     self deny: "" isAlpha
+    // isNotEmpty
+    self assert: "hello" isNotEmpty
+    self assert: " " isNotEmpty
+    self deny: "" isNotEmpty
+
+  testLines =>
+    nl := $\n asString
+    self assert: ("hello" ++ nl ++ "world") lines equals: #("hello", "world")
+    self assert: "hello" lines equals: #("hello")
+    self assert: ("a" ++ nl ++ "b" ++ nl ++ "c") lines equals: #("a", "b", "c")

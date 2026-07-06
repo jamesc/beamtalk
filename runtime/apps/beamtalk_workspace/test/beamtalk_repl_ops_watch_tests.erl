@@ -71,6 +71,18 @@ handle_pid_stats_unknown_actor_returns_error_test() ->
     ?assert(maps:is_key(<<"error">>, Decoded)).
 
 %%====================================================================
+%% describe_ops/0
+%%====================================================================
+
+describe_ops_returns_pid_stats_descriptor_test() ->
+    Ops = beamtalk_repl_ops_watch:describe_ops(),
+    ?assert(is_map(Ops)),
+    ?assert(maps:is_key(<<"pid-stats">>, Ops)),
+    PidStats = maps:get(<<"pid-stats">>, Ops),
+    ?assert(maps:is_key(<<"params">>, PidStats)),
+    ?assert(maps:is_key(<<"notes">>, PidStats)).
+
+%%====================================================================
 %% handle_term/4 — live registered actor returns a stats map
 %%====================================================================
 
