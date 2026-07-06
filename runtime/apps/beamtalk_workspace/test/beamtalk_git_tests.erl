@@ -613,7 +613,7 @@ git_stage_and_unstage_via_workspace_meta_test() ->
 git_commit_commits_staged_change_test() ->
     with_repo_root_project(fun(Top, RelFile) ->
         with_workspace_meta(Top, <<"git_commit_test">>, fun() ->
-            {ok, nil} = beamtalk_git:git_stage(RelFile),
+            ?assertEqual({ok, nil}, beamtalk_git:git_stage(RelFile)),
             ?assertEqual({ok, nil}, beamtalk_git:git_commit(<<"add test file">>)),
             {ok, Status} = beamtalk_git:git_status(),
             ?assertEqual([], maps:get(files, Status))
@@ -671,16 +671,20 @@ with_subdir_repo(Fun) ->
 %% concurrent test setups in diagnostic output.
 with_workspace_meta(ProjectPath, WorkspaceId, Fun) ->
     stop_meta_if_running(),
-    {ok, Pid} = beamtalk_workspace_meta:start_link(#{
+    case beamtalk_workspace_meta:start_link(#{
         workspace_id => WorkspaceId,
         project_path => ProjectPath,
         created_at => erlang:system_time(second),
         repl => false
-    }),
-    try
-        Fun()
-    after
-        gen_server:stop(Pid)
+    }) of
+        {ok, Pid} ->
+            try
+                Fun()
+            after
+                gen_server:stop(Pid)
+            end;
+        {error, Reason} ->
+            error({workspace_meta_start_failed, Reason})
     end.
 
 %% As above but the project root *is* the repo toplevel (no subdir).
