@@ -742,7 +742,11 @@ fn receiver_side_of_type(ty: &InferredType) -> Option<ReceiverSide> {
     match ty {
         InferredType::Known { class_name: n, .. } => Some(ReceiverSide::Instance(n.clone())),
         InferredType::Meta { class_name: n, .. } => Some(ReceiverSide::Class(n.clone())),
-        InferredType::Union { .. } | InferredType::Dynamic(_) | InferredType::Never => None,
+        InferredType::Union { .. }
+        | InferredType::Dynamic(_)
+        | InferredType::Never
+        // A `Negation` (`Symbol \ #foo`) has no single receiver side (ADR 0102).
+        | InferredType::Negation { .. } => None,
     }
 }
 

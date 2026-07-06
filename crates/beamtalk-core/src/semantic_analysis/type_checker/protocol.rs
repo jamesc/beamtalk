@@ -465,6 +465,13 @@ impl TypeChecker {
                     .collect::<Vec<_>>()
                     .join(" | "),
             ),
+            // Negation renders as `base \ excluded` (ADR 0102), matching
+            // `InferredType::display_*`.
+            InferredType::Negation { base, excluded, .. } => EcoString::from(format!(
+                "{} \\ {}",
+                Self::inferred_type_to_string(base),
+                Self::inferred_type_to_string(excluded)
+            )),
         }
     }
 

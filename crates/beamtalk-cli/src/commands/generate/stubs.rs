@@ -322,6 +322,10 @@ fn format_type(ty: &beamtalk_core::semantic_analysis::type_checker::InferredType
         }
         // ADR 0083: render a metatype as the source annotation spelling `C class`.
         InferredType::Meta { class_name, .. } => format!("{class_name} class"),
+        // ADR 0102: render a negation as `base \ excluded`, e.g. `Symbol \ #foo`.
+        InferredType::Negation { base, excluded, .. } => {
+            format!("{} \\ {}", format_type(base), format_type(excluded))
+        }
     }
 }
 

@@ -164,6 +164,30 @@ pub enum InferredType {
     /// `Never` is the identity element for union: `T | Never = T`.
     /// It is a subtype of every type (bottom of the lattice).
     Never,
+    /// A negation type `base \ excluded` — the values of `base` that are *not*
+    /// values of `excluded` (ADR 0102 §1).
+    ///
+    /// Produced by [`difference`](InferredType::difference) when a proper
+    /// subtype is subtracted that cannot be expressed by dropping a union
+    /// member — canonically `Symbol \ #foo` (all symbols except `#foo`).
+    ///
+    /// **Normal form.** `excluded` is always a singleton (`Known("#foo")`) or a
+    /// normalised union of singletons — never another `Negation` and never a
+    /// `Union` containing a `Negation`. Nested negation is flattened at
+    /// construction (`(Symbol \ #a) \ #b = Symbol \ (#a | #b)`), so a
+    /// `Negation` never appears inside its own `excluded` or `base`.
+    ///
+    /// **Equality** is order-independent in `excluded` (it delegates to the
+    /// order-independent `Union` equality), so `Symbol \ (#a | #b)` equals
+    /// `Symbol \ (#b | #a)`.
+    Negation {
+        /// The type being narrowed (canonically `Symbol`).
+        base: Box<InferredType>,
+        /// The removed values — a singleton or a normalised union of singletons.
+        excluded: Box<InferredType>,
+        /// Where this negation came from.
+        provenance: TypeProvenance,
+    },
 }
 
 impl PartialEq for InferredType {
@@ -188,6 +212,18 @@ impl PartialEq for InferredType {
                 a.len() == b.len() && a.iter().all(|m| b.contains(m))
             }
             (Self::Meta { class_name: a, .. }, Self::Meta { class_name: b, .. }) => a == b,
+            (
+                Self::Negation {
+                    base: base_a,
+                    excluded: excluded_a,
+                    ..
+                },
+                Self::Negation {
+                    base: base_b,
+                    excluded: excluded_b,
+                    ..
+                },
+            ) => base_a == base_b && excluded_a == excluded_b,
             (Self::Dynamic(_), Self::Dynamic(_)) | (Self::Never, Self::Never) => true,
             _ => false,
         }
@@ -289,7 +325,29 @@ impl InferredType {
             // A metatype is *not* its instance class — `Meta{C}.as_known()`
             // must be `None` so callers don't mistake the class object for an
             // instance of `C`. Use [`as_meta`](Self::as_meta) instead.
-            Self::Meta { .. } | Self::Dynamic(_) | Self::Union { .. } | Self::Never => None,
+            Self::Meta { .. }
+            | Self::Dynamic(_)
+            | Self::Union { .. }
+            | Self::Never
+            // A negation (`Symbol \ #foo`) is not a single known class — callers
+            // must handle it structurally, not as a bare class name.
+            | Self::Negation { .. } => None,
+        }
+    }
+
+    /// Returns the [`TypeProvenance`] attached to this type, or `None` for the
+    /// provenance-free variants ([`Dynamic`](Self::Dynamic) and
+    /// [`Never`](Self::Never), which carry no source location).
+    // Consumed by the narrowing rules landing later in ADR 0102's epic (BT-2738).
+    #[allow(dead_code)]
+    #[must_use]
+    pub(crate) fn provenance(&self) -> Option<TypeProvenance> {
+        match self {
+            Self::Known { provenance, .. }
+            | Self::Union { provenance, .. }
+            | Self::Meta { provenance, .. }
+            | Self::Negation { provenance, .. } => Some(*provenance),
+            Self::Dynamic(_) | Self::Never => None,
         }
     }
 
@@ -428,6 +486,18 @@ impl InferredType {
                 }
             }
             Self::Never => EcoString::from("Never"),
+            Self::Negation { base, excluded, .. } => {
+                let base_str = base.display_with_options(opts);
+                let excluded_str = excluded.display_with_options(opts);
+                // Parenthesise a union of removed singletons so the `\` binds
+                // clearly, e.g. `Symbol \ (#a | #b)`. A lone singleton needs no
+                // parens: `Symbol \ #foo`.
+                if matches!(excluded.as_ref(), Self::Union { .. }) {
+                    EcoString::from(format!("{base_str} \\ ({excluded_str})"))
+                } else {
+                    EcoString::from(format!("{base_str} \\ {excluded_str}"))
+                }
+            }
         }
     }
 
@@ -444,7 +514,9 @@ impl InferredType {
         let mut best_provenance = TypeProvenance::Inferred(Span::default());
         for m in members {
             match m {
-                Self::Known { provenance, .. } | Self::Meta { provenance, .. } => {
+                Self::Known { provenance, .. }
+                | Self::Meta { provenance, .. }
+                | Self::Negation { provenance, .. } => {
                     if matches!(best_provenance, TypeProvenance::Inferred(_))
                         && !matches!(provenance, TypeProvenance::Inferred(_))
                     {
@@ -480,6 +552,9 @@ impl InferredType {
                 Self::Never => { /* identity element — skip */ }
             }
         }
+        // Apply the negation absorption law (`(Symbol \ #foo) | #foo ⇒ Symbol`)
+        // and drop singletons subsumed by a `Symbol`-based negation.
+        Self::absorb_negations(&mut flat);
         match flat.len() {
             0 if members.iter().all(|m| matches!(m, Self::Never)) && !members.is_empty() => {
                 Self::Never
@@ -506,6 +581,258 @@ impl InferredType {
                 provenance: best_provenance,
             },
         }
+    }
+
+    /// Returns `true` if `name` is a symbol singleton (`#foo`) — a subtype of
+    /// `Symbol` in the type checker's singleton convention.
+    fn is_symbol_singleton(name: &str) -> bool {
+        name.starts_with('#')
+    }
+
+    /// Returns `true` if `ty` is the base of a well-formed [`Negation`] — i.e.
+    /// `Known("Symbol")`. `Symbol` is the sole supertype of singletons the type
+    /// checker models, so it is the only base for which singleton subtraction
+    /// and absorption are sound.
+    ///
+    /// [`Negation`]: InferredType::Negation
+    fn is_symbol_base(ty: &Self) -> bool {
+        matches!(ty, Self::Known { class_name, .. } if class_name == "Symbol")
+    }
+
+    /// Flattens `excluded` (a singleton or a normalised union of singletons)
+    /// into its constituent members.
+    fn excluded_members(excluded: &Self) -> Vec<Self> {
+        match excluded {
+            Self::Union { members, .. } => members.clone(),
+            other => vec![other.clone()],
+        }
+    }
+
+    /// Applies the negation absorption law (ADR 0102 §1) in place:
+    /// `(Symbol \ #foo) | #foo ⇒ Symbol`.
+    ///
+    /// A singleton is a subtype of `Symbol`, so any bare singleton member of a
+    /// union that also contains a `Symbol`-based negation is redundant: it is
+    /// dropped, and — when it appears in the negation's `excluded` set — it is
+    /// added back by removing it from `excluded`. When `excluded` empties, the
+    /// negation collapses to its base `Symbol`; when a bare `Symbol` is present
+    /// it subsumes the negation entirely.
+    ///
+    /// Only `Symbol`-based negations participate (the only supertype-of-singleton
+    /// relationship modelled here); other members are left untouched.
+    fn absorb_negations(flat: &mut Vec<Self>) {
+        let has_symbol_negation = flat
+            .iter()
+            .any(|m| matches!(m, Self::Negation { base, .. } if Self::is_symbol_base(base)));
+        if !has_symbol_negation {
+            return;
+        }
+        let has_bare_symbol = flat
+            .iter()
+            .any(|m| matches!(m, Self::Known { class_name, .. } if class_name == "Symbol"));
+        // Bare singletons subsumed by the negation — collected so their names
+        // can be removed from `excluded` sets before they are dropped.
+        let bare_singletons: Vec<EcoString> = flat
+            .iter()
+            .filter_map(|m| match m {
+                Self::Known { class_name, .. } if Self::is_symbol_singleton(class_name) => {
+                    Some(class_name.clone())
+                }
+                _ => None,
+            })
+            .collect();
+
+        let mut result: Vec<Self> = Vec::with_capacity(flat.len());
+        for m in flat.drain(..) {
+            match m {
+                // Bare singletons are subtypes of `Symbol`, so a `Symbol`-based
+                // negation (or a bare `Symbol`) makes them redundant — drop.
+                Self::Known { ref class_name, .. } if Self::is_symbol_singleton(class_name) => {}
+                Self::Negation {
+                    base,
+                    excluded,
+                    provenance,
+                } if Self::is_symbol_base(&base) => {
+                    if has_bare_symbol {
+                        // `(Symbol \ E) | Symbol = Symbol` — drop the negation.
+                        continue;
+                    }
+                    let remaining: Vec<Self> = Self::excluded_members(&excluded)
+                        .into_iter()
+                        .filter(|e| match e {
+                            Self::Known { class_name, .. } => !bare_singletons.contains(class_name),
+                            _ => true,
+                        })
+                        .collect();
+                    if remaining.is_empty() {
+                        // `Symbol \ {} = Symbol`.
+                        result.push(*base);
+                    } else {
+                        result.push(Self::Negation {
+                            base,
+                            excluded: Box::new(Self::union_of(&remaining)),
+                            provenance,
+                        });
+                    }
+                }
+                other => result.push(other),
+            }
+        }
+        // Re-deduplicate: a negation collapsing to `Symbol` may now duplicate a
+        // sibling `Symbol`, and dropped singletons may leave repeats.
+        let mut deduped: Vec<Self> = Vec::with_capacity(result.len());
+        for m in result {
+            if !deduped.contains(&m) {
+                deduped.push(m);
+            }
+        }
+        *flat = deduped;
+    }
+
+    /// Normalising **intersection** `A ∩ B` (ADR 0102 §1).
+    ///
+    /// Structural only — there is no class hierarchy here, so two distinct
+    /// concrete types are treated as disjoint (`Integer ∩ #infinity = Never`).
+    /// Nominal subtype relationships (e.g. `Symbol ∩ #foo`) are out of scope.
+    ///
+    /// Rules:
+    /// - `intersect(T, T) = T`; `intersect(T, Never) = Never`;
+    ///   `intersect(T, Object) = T`.
+    /// - **Dynamic asymmetry:** `intersect(Dynamic, P) = P` (Dynamic acts as the
+    ///   top type for intersection — *not* union's "Dynamic absorbs" rule).
+    /// - **LHS-union distribution:** `intersect(T1 | … | Tn, P) =
+    ///   (T1 ∩ P) | … | (Tn ∩ P)`, e.g. `intersect(Integer | #infinity,
+    ///   #infinity)` normalises to the bare singleton `#infinity`.
+    /// - **RHS-union fold:** `intersect(T, A | B) = (T ∩ A) | (T ∩ B)`.
+    /// - Generics compare exactly, including `type_args`.
+    ///
+    /// `provenance` is threaded through for API symmetry with
+    /// [`difference`](Self::difference); the result is re-normalised through
+    /// [`union_of`](Self::union_of), which derives provenance from its members.
+    // Consumed by the narrowing rules landing later in ADR 0102's epic (BT-2738).
+    #[allow(dead_code)]
+    // `provenance` is threaded through recursion for symmetry with `difference`
+    // (which builds `Negation` values that carry it); `intersect` constructs
+    // nothing provenance-bearing itself.
+    #[allow(clippy::only_used_in_recursion)]
+    pub(crate) fn intersect(a: &Self, b: &Self, provenance: TypeProvenance) -> Self {
+        match (a, b) {
+            // Dynamic asymmetry — Dynamic is the top type for intersection.
+            (Self::Dynamic(_), _) => b.clone(),
+            (_, Self::Dynamic(_)) => a.clone(),
+            // Never annihilates.
+            (Self::Never, _) | (_, Self::Never) => Self::Never,
+            // Object (top) is the identity: `T ∩ Object = T`.
+            (_, other) if Self::is_object(other) => a.clone(),
+            (other, _) if Self::is_object(other) => b.clone(),
+            // LHS-union distribution.
+            (Self::Union { members, .. }, _) => {
+                let parts: Vec<Self> = members
+                    .iter()
+                    .map(|m| Self::intersect(m, b, provenance))
+                    .collect();
+                Self::union_of(&parts)
+            }
+            // RHS-union fold.
+            (_, Self::Union { members, .. }) => {
+                let parts: Vec<Self> = members
+                    .iter()
+                    .map(|m| Self::intersect(a, m, provenance))
+                    .collect();
+                Self::union_of(&parts)
+            }
+            // `T ∩ T = T` (exact structural equality, generics included).
+            _ if a == b => a.clone(),
+            // Distinct concrete types with no structural relationship are
+            // disjoint under the structural reading (see the doc comment).
+            _ => Self::Never,
+        }
+    }
+
+    /// Normalising **difference** `A \ B` (ADR 0102 §1).
+    ///
+    /// Rules:
+    /// - Boundary: `difference(Never, P) = Never`; `difference(T, Never) = T`.
+    /// - **Dynamic asymmetry:** `difference(Dynamic, P) = Dynamic` and
+    ///   `difference(T, Dynamic) = T` (Dynamic is opaque — *not* union's
+    ///   "Dynamic absorbs" rule).
+    /// - **RHS-union fold:** `difference(T, A | B) =
+    ///   difference(difference(T, A), B)`.
+    /// - **LHS-union distribution:** `difference(T1 | … | Tn, P) =
+    ///   (T1 \ P) | … | (Tn \ P)`, which drops any member exactly equal to `P`.
+    /// - `difference(Symbol, #foo) = Negation{Symbol, #foo}`; the removed set is
+    ///   an [`InferredType`] (a singleton or normalised union of singletons),
+    ///   so `difference(Symbol, #a | #b) = Negation{Symbol, #a | #b}`.
+    /// - **Same-base flattening:** `difference(Negation{Symbol, E}, #bar) =
+    ///   Negation{Symbol, union_of(E, #bar)}` — nested negation never escapes
+    ///   normal form.
+    /// - `Meta` and `Dynamic` are opaque to `Negation`.
+    /// - Generics compare exactly, including `type_args`.
+    // Consumed by the narrowing rules landing later in ADR 0102's epic (BT-2738).
+    #[allow(dead_code)]
+    pub(crate) fn difference(a: &Self, b: &Self, provenance: TypeProvenance) -> Self {
+        match (a, b) {
+            // `T \ Dynamic = T` and `T \ Never = T` (subtracting these removes
+            // nothing), plus `Dynamic \ P = Dynamic` — here `a` *is* `Dynamic`,
+            // so `a.clone()` is correct. That last case is the asymmetry vs
+            // union's "Dynamic absorbs" rule (ADR 0102 §1).
+            (Self::Dynamic(_), _) | (_, Self::Dynamic(_) | Self::Never) => a.clone(),
+            // Boundary: `Never \ P = Never`.
+            (Self::Never, _) => Self::Never,
+            // RHS-union fold: subtract each removed member in turn.
+            (_, Self::Union { members, .. }) => members
+                .iter()
+                .fold(a.clone(), |acc, m| Self::difference(&acc, m, provenance)),
+            // LHS-union distribution: `(A | B) \ P = (A \ P) | (B \ P)`.
+            (Self::Union { members, .. }, _) => {
+                let parts: Vec<Self> = members
+                    .iter()
+                    .map(|m| Self::difference(m, b, provenance))
+                    .collect();
+                Self::union_of(&parts)
+            }
+            // Same-base flattening: fold the newly removed singleton into the
+            // existing negation. Only well-formed `Symbol`-based negations and
+            // singleton subtractions apply.
+            (
+                Self::Negation {
+                    base,
+                    excluded,
+                    provenance: neg_prov,
+                },
+                Self::Known { class_name, .. },
+            ) if Self::is_symbol_base(base) && Self::is_symbol_singleton(class_name) => {
+                Self::Negation {
+                    base: base.clone(),
+                    excluded: Box::new(Self::union_of(&[(**excluded).clone(), b.clone()])),
+                    provenance: *neg_prov,
+                }
+            }
+            // `Symbol \ #foo = Negation{Symbol, #foo}`.
+            (
+                Self::Known { class_name, .. },
+                Self::Known {
+                    class_name: sym, ..
+                },
+            ) if class_name == "Symbol" && Self::is_symbol_singleton(sym) => Self::Negation {
+                base: Box::new(a.clone()),
+                excluded: Box::new(b.clone()),
+                provenance,
+            },
+            // `T \ T = Never` (exact structural equality, generics included).
+            _ if a == b => Self::Never,
+            // Nothing structurally removable — no-op (nominal-class differences
+            // like `Object \ Number` are out of scope; `Meta`/`Dynamic` are
+            // opaque to `Negation`).
+            _ => a.clone(),
+        }
+    }
+
+    /// Returns `true` if `ty` is the `Object` root class — the top type for
+    /// [`intersect`](Self::intersect) (`T ∩ Object = T`).
+    fn is_object(ty: &Self) -> bool {
+        matches!(ty, Self::Known { class_name, type_args, .. }
+            if class_name == "Object" && type_args.is_empty())
     }
 }
 

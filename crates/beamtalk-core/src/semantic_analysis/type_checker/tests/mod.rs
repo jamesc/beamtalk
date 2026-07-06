@@ -31,6 +31,7 @@ mod protocol;
 mod result_and_type_args;
 mod self_class;
 mod self_type;
+mod set_operators;
 mod state_fields;
 mod super_and_binary;
 mod typed_class;
