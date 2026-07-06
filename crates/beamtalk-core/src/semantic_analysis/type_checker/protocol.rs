@@ -465,6 +465,18 @@ impl TypeChecker {
                     .collect::<Vec<_>>()
                     .join(" | "),
             ),
+            // Negation renders as `base \ excluded` (ADR 0102), matching
+            // `InferredType::display_*`. Parenthesise a union excluded so
+            // `\` vs `|` precedence is unambiguous (`Symbol \ (#a | #b)`).
+            InferredType::Negation { base, excluded, .. } => {
+                let base_str = Self::inferred_type_to_string(base);
+                let excl_str = Self::inferred_type_to_string(excluded);
+                if matches!(excluded.as_ref(), InferredType::Union { .. }) {
+                    EcoString::from(format!("{base_str} \\ ({excl_str})"))
+                } else {
+                    EcoString::from(format!("{base_str} \\ {excl_str}"))
+                }
+            }
         }
     }
 

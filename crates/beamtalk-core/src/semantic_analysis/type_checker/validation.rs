@@ -1021,7 +1021,9 @@ impl TypeChecker {
                     self.diagnostics
                         .push(diag.with_category(DiagnosticCategory::Type));
                 }
-                InferredType::Dynamic(_) | InferredType::Never => {} // Dynamic/Never — skip
+                // A `Negation` (`Symbol \ #foo`) is a narrowed `Symbol`; skip
+                // conservatively like `Dynamic`/`Never` (ADR 0102).
+                InferredType::Dynamic(_) | InferredType::Never | InferredType::Negation { .. } => {}
             }
         }
     }
@@ -1176,7 +1178,11 @@ impl TypeChecker {
             // already short-circuits via the `SelfClass`/`ClassOf` arm above, so
             // `Meta` is unreachable in practice; skip checking (like `Dynamic`)
             // to stay safe should a future annotation resolve to a metatype.
-            InferredType::Meta { .. } | InferredType::Dynamic(_) => {}
+            // A `Negation` (`Symbol \ #foo`) is a narrowed `Symbol`; skip like
+            // `Meta`/`Dynamic` (ADR 0102).
+            InferredType::Meta { .. }
+            | InferredType::Dynamic(_)
+            | InferredType::Negation { .. } => {}
         }
     }
 
@@ -1491,7 +1497,9 @@ impl TypeChecker {
                     );
                 }
             }
-            InferredType::Dynamic(_) | InferredType::Never => {} // Dynamic/Never — skip
+            // A `Negation` (`Symbol \ #foo`) is a narrowed `Symbol`; skip
+            // conservatively like `Dynamic`/`Never` (ADR 0102).
+            InferredType::Dynamic(_) | InferredType::Never | InferredType::Negation { .. } => {}
         }
     }
 
@@ -1916,7 +1924,9 @@ impl TypeChecker {
             // ADR 0083: structural conformance of a class object's *class-side*
             // protocol is out of scope for Slice 1 — skip the metatype rather
             // than emit a false positive (same as `Never`, which diverges).
-            InferredType::Meta { .. } | InferredType::Never => {}
+            // A `Negation` (`Symbol \ #foo`) is a narrowed `Symbol`; skip like
+            // `Meta`/`Never` (ADR 0102).
+            InferredType::Meta { .. } | InferredType::Never | InferredType::Negation { .. } => {}
         }
     }
 
@@ -1947,6 +1957,7 @@ impl TypeChecker {
     /// but `Logger(SomeOpaqueType)` would warn if `SomeOpaqueType` does not.
     ///
     /// Only emits warnings (not errors) per ADR 0025 gradual typing philosophy.
+    #[allow(clippy::too_many_lines)] // ADR 0102 added a `Negation` skip arm
     pub(super) fn check_type_param_bounds(
         &mut self,
         class_name: &EcoString,
@@ -2063,7 +2074,12 @@ impl TypeChecker {
                 // ADR 0083: a metatype as a type argument is unparameterized and
                 // its class-side bound conformance is out of scope here — skip.
                 // Dynamic/Never values: can't verify bounds (skip silently).
-                InferredType::Meta { .. } | InferredType::Dynamic(_) | InferredType::Never => {}
+                // A `Negation` (`Symbol \ #foo`) is a narrowed `Symbol`; skip
+                // like `Meta`/`Dynamic`/`Never` (ADR 0102).
+                InferredType::Meta { .. }
+                | InferredType::Dynamic(_)
+                | InferredType::Never
+                | InferredType::Negation { .. } => {}
             }
         }
     }
