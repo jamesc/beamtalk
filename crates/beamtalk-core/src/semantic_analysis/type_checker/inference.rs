@@ -1056,6 +1056,7 @@ impl TypeChecker {
                 .map(|info| self.refine_responds_to_narrowing(info))
                 .map(|info| Self::refine_result_narrowing(info, env, hierarchy))
                 .map(|info| Self::refine_singleton_narrowing(info, env, hierarchy))
+                .map(|info| self.refine_class_narrowing(info, env, hierarchy, span))
         } else {
             None
         };
@@ -2385,6 +2386,96 @@ impl TypeChecker {
             info.false_type = Some(removed);
         }
         info
+    }
+
+    /// Refines a `class = C` / `isKindOf: C` narrowing true branch (ADR 0102
+    /// §2 group 2, BT-2741).
+    ///
+    /// `detect` only sees the AST, so it records the tested class name in
+    /// `class_test` and leaves `true_type` provisional. Here we resolve the
+    /// variable's current type and route the true branch through the
+    /// hierarchy-aware set-theoretic intersect: `intersect(current, C)`. This
+    /// is a deliberate refinement over the previous unconditional `true_type =
+    /// C` — a subclass test now narrows precisely (`x :: Number; x isKindOf:
+    /// Integer` true branch is `Integer`, not `Number`), and a test against a
+    /// hierarchy-unrelated class types the (unreachable) true branch `Never`,
+    /// reported via `check_impossible_class_comparison`.
+    ///
+    /// The false branch is left untouched (`None`) — nominal-class
+    /// difference (`difference(current, C)` over the hierarchy) is out of
+    /// scope here and tracked separately (BT-2744).
+    pub(super) fn refine_class_narrowing(
+        &mut self,
+        mut info: NarrowingInfo,
+        env: &TypeEnv,
+        hierarchy: &ClassHierarchy,
+        test_span: Span,
+    ) -> NarrowingInfo {
+        let Some(class_name) = info.class_test.clone() else {
+            return info;
+        };
+        let current_ty = Self::resolve_narrowing_variable_type(&info.variable, env, hierarchy);
+        let pattern = InferredType::known(class_name.clone());
+        let provenance = super::TypeProvenance::Inferred(Span::default());
+        // No protocol registry: a `class = C` / `isKindOf: C` pattern is always
+        // a nominal class, never a protocol intersection (matches the other
+        // narrowing call sites).
+        let refined =
+            InferredType::intersect(&current_ty, &pattern, provenance, Some(hierarchy), None);
+        self.check_impossible_class_comparison(&current_ty, &class_name, &refined, test_span);
+        info.true_type = refined;
+        info
+    }
+
+    /// ADR 0102 §2 group 2 / BT-2741: emits the "comparison can never be
+    /// true" hint when a `class = C` / `isKindOf: C` test is statically
+    /// decidable impossible — `C` is hierarchy-unrelated to `current_ty`, so
+    /// `intersect(current_ty, C)` is `Never`.
+    ///
+    /// Parallels `check_impossible_singleton_comparison`'s gating (silent on
+    /// `Dynamic` and `Never` receivers, silent whenever the intersect result
+    /// is not `Never`) with one deliberate extra gate: **provenance**. The
+    /// hint fires only when the receiver's type was *inferred* from actual
+    /// value flow (`x := 42. x isKindOf: String`). A *declared* annotation
+    /// (`aClass :: Behaviour`) is an unverified promise under gradual typing,
+    /// and `isKindOf:` is precisely how code verifies it at runtime — stdlib
+    /// defensive guards like `SystemNavigation referencesTo:`'s
+    /// `(aClass isKindOf: Symbol)` check are legitimate and must stay silent.
+    /// Conservative rule: only provably-`Inferred` provenance fires;
+    /// `Declared`, `Substituted`, `Extracted`, or absent provenance is
+    /// silent. (The true-branch narrowing to `Never` is *not* gated — sends
+    /// in the unreachable branch are silent per the `Never`-receiver policy,
+    /// so it stays harmless.) Unlike the singleton case, there is no "always
+    /// true" counterpart — `isKindOf:`/`class =` have no negated form to
+    /// swap the message for.
+    fn check_impossible_class_comparison(
+        &mut self,
+        current_ty: &InferredType,
+        class_name: &EcoString,
+        refined_ty: &InferredType,
+        test_span: Span,
+    ) {
+        if matches!(current_ty, InferredType::Dynamic(_) | InferredType::Never)
+            || !matches!(refined_ty, InferredType::Never)
+        {
+            return;
+        }
+        // Provenance gate (see doc comment): declared annotations are
+        // runtime-unverified promises — a defensive `isKindOf:` guard against
+        // them is legitimate, so only value-flow-inferred types fire.
+        if !matches!(
+            current_ty.provenance(),
+            Some(super::TypeProvenance::Inferred(_))
+        ) {
+            return;
+        }
+        let ty_display = current_ty.display_for_diagnostic().unwrap_or_default();
+        let message =
+            format!("comparison can never be true: `{ty_display}` is never a `{class_name}`");
+        self.diagnostics.push(
+            Diagnostic::hint(message, test_span)
+                .with_category(crate::source_analysis::DiagnosticCategory::Type),
+        );
     }
 
     /// BT-2624 / BT-2631: emits the "comparison can never be true" / "always
@@ -4496,7 +4587,14 @@ mod tests {
         };
         let info = TypeChecker::detect_narrowing(&expr).expect("should detect isKindOf:");
         assert_eq!(info.variable, EnvKey::local("x"));
-        assert_eq!(info.true_type, InferredType::known("Integer"));
+        // ADR 0102 §2 group 2: `detect` leaves `true_type` provisional and
+        // records the tested class in `class_test`; `refine_class_narrowing`
+        // resolves the actual narrowed type later.
+        assert_eq!(
+            info.true_type,
+            InferredType::Dynamic(DynamicReason::Unknown)
+        );
+        assert_eq!(info.class_test.as_deref(), Some("Integer"));
         assert!(!info.is_nil_check);
     }
 
@@ -4519,7 +4617,11 @@ mod tests {
         };
         let info = TypeChecker::detect_narrowing(&expr).expect("should detect class =");
         assert_eq!(info.variable, EnvKey::local("x"));
-        assert_eq!(info.true_type, InferredType::known("String"));
+        assert_eq!(
+            info.true_type,
+            InferredType::Dynamic(DynamicReason::Unknown)
+        );
+        assert_eq!(info.class_test.as_deref(), Some("String"));
         assert!(!info.is_nil_check);
     }
 
@@ -4542,7 +4644,11 @@ mod tests {
         };
         let info = TypeChecker::detect_narrowing(&expr).expect("should detect class =:=");
         assert_eq!(info.variable, EnvKey::local("x"));
-        assert_eq!(info.true_type, InferredType::known("Float"));
+        assert_eq!(
+            info.true_type,
+            InferredType::Dynamic(DynamicReason::Unknown)
+        );
+        assert_eq!(info.class_test.as_deref(), Some("Float"));
     }
 
     #[test]
@@ -4623,7 +4729,11 @@ mod tests {
         };
         let info = TypeChecker::detect_narrowing(&expr).expect("should detect (x class) = Type");
         assert_eq!(info.variable, EnvKey::local("x"));
-        assert_eq!(info.true_type, InferredType::known("Integer"));
+        assert_eq!(
+            info.true_type,
+            InferredType::Dynamic(DynamicReason::Unknown)
+        );
+        assert_eq!(info.class_test.as_deref(), Some("Integer"));
     }
 
     // ---- detect_narrowing: isOk / ok / isError (BT-1859) ----
@@ -4699,6 +4809,7 @@ mod tests {
             is_result_error_check: false,
             responded_selector: None,
             singleton_eq: None,
+            class_test: None,
         };
         let hierarchy = ClassHierarchy::with_builtins();
         let refined = TypeChecker::refine_result_narrowing(info, &env, &hierarchy);
@@ -4722,6 +4833,7 @@ mod tests {
             is_result_error_check: false,
             responded_selector: None,
             singleton_eq: None,
+            class_test: None,
         };
         let hierarchy = ClassHierarchy::with_builtins();
         let refined = TypeChecker::refine_result_narrowing(info, &env, &hierarchy);

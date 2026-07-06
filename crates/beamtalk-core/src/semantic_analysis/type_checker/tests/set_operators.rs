@@ -840,6 +840,49 @@ fn union_of_treats_intersection_as_opaque_member() {
     assert!(matches!(union, InferredType::Union { .. }));
 }
 
+#[test]
+fn union_of_singleton_with_bare_symbol_collapses_to_symbol() {
+    // BT-2741 (Windows CI): bare-singleton-under-bare-`Symbol` subsumption
+    // must apply in `union_of` regardless of whether a `Negation` is present —
+    // `#a | Symbol = Symbol` always (a singleton is a subtype of `Symbol`;
+    // the collapsed form admits exactly the same values). Previously this
+    // subsumption only ran inside the negation-gated absorption pass, so the
+    // same set had two normal forms depending on evaluation order.
+    assert_eq!(
+        InferredType::union_of(&[singleton("#a"), symbol()]),
+        symbol()
+    );
+    assert_eq!(
+        InferredType::union_of(&[symbol(), singleton("#a")]),
+        symbol()
+    );
+    // Non-symbol members are untouched.
+    assert_eq!(
+        InferredType::union_of(&[singleton("#a"), symbol(), InferredType::known("Integer")]),
+        InferredType::union_of(&[symbol(), InferredType::known("Integer")])
+    );
+    // A union of singletons alone (no bare Symbol) must NOT collapse.
+    let sing_union = InferredType::union_of(&[singleton("#a"), singleton("#b")]);
+    assert!(matches!(&sing_union, InferredType::Union { members, .. } if members.len() == 2));
+}
+
+#[test]
+fn intersect_commutes_on_windows_ci_counterexample() {
+    // BT-2741: deterministic pin of the Windows CI proptest counterexample
+    // (seed cc cb64d47a…). Before the `union_of` subsumption fix:
+    //   intersect(#a | Symbol, (Symbol \ #a) | Object) = #a | Symbol
+    //   intersect((Symbol \ #a) | Object, #a | Symbol) = Symbol
+    // — two normal forms for the same set. Both orders must agree, and equal
+    // the collapsed form `Symbol`.
+    let h = hierarchy();
+    let a = InferredType::union_of(&[singleton("#a"), symbol()]);
+    let b = InferredType::union_of(&[negation(singleton("#a")), object()]);
+    let ab = InferredType::intersect(&a, &b, prov(), Some(&h), None);
+    let ba = InferredType::intersect(&b, &a, prov(), Some(&h), None);
+    assert_eq!(ab, ba, "intersect must commute: {ab:?} vs {ba:?}");
+    assert_eq!(ab, symbol());
+}
+
 // ── Property tests ──────────────────────────────────────────────────────
 
 /// Concrete, non-`Dynamic`/`Never` leaf types (safe for the algebraic laws).

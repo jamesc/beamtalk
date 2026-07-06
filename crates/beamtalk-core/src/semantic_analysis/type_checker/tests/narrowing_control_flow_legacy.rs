@@ -210,6 +210,213 @@ fn test_narrowing_is_kind_of_in_true_block() {
     );
 }
 
+/// ADR 0102 §2 group 2 / BT-2741: `x :: Number; x isKindOf: Integer` narrows
+/// the true branch precisely to `Integer` — not `Number` — via
+/// `intersect(Number, Integer, Some(hierarchy)) = Integer` (subclass wins).
+/// `isEven` is an Integer-only selector (not on `Number`), so it resolving
+/// without a DNU inside the true block confirms the tighter narrowing fired.
+#[test]
+fn bt2741_is_kind_of_subclass_narrows_true_branch_to_subclass() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let class = {
+        // process: x :: Number =>
+        //   (x isKindOf: Integer) ifTrue: [x isEven]
+        let process_method = make_keyword_method(
+            &["process:"],
+            vec![("x", Some("Number"))],
+            vec![if_true(
+                is_kind_of("x", "Integer"),
+                block_expr(vec![msg_send(
+                    var("x"),
+                    MessageSelector::Unary("isEven".into()),
+                    vec![],
+                )]),
+            )],
+        );
+        ClassDefinition::new(
+            ident("TestClass"),
+            ident("Object"),
+            vec![],
+            vec![process_method],
+            span(),
+        )
+    };
+    let module = make_module_with_classes(vec![], vec![class]);
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    let dnu: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    assert!(
+        dnu.is_empty(),
+        "x isEven inside `x isKindOf: Integer` ifTrue: should not DNU — x should \
+         narrow to Integer, got: {:?}",
+        dnu.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+/// ADR 0102 §2 group 2 / BT-2741: `x class = Bar` against a hierarchy-unrelated
+/// sealed class types the (unreachable) true branch `Never` and fires the
+/// impossible-class-comparison hint, mirroring
+/// `check_impossible_singleton_comparison`'s "can never be true" wording.
+/// The receiver's type must be *inferred* from value flow (here `x := 42`) —
+/// the hint is provenance-gated and stays silent for declared annotations
+/// (see `bt2741_declared_annotation_receiver_no_hint_true_branch_still_never`).
+#[test]
+fn bt2741_class_eq_unrelated_class_true_branch_never_emits_hint() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut env = TypeEnv::new();
+    let mut checker = TypeChecker::new();
+    // `x := 42` — x's Integer type is inferred from actual value flow.
+    // Integer and String are both sealed and hierarchy-unrelated.
+    let assignment = assign("x", int_lit(42));
+    let _ = checker.infer_expr(&assignment, &hierarchy, &mut env, false);
+    // `(x class = String) ifTrue: [nil]`
+    let guard = class_eq("x", "String");
+    let expr = if_true(guard, block_expr(vec![var("nil")]));
+    let _ = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+
+    let hints: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("can never be true"))
+        .collect();
+    assert_eq!(
+        hints.len(),
+        1,
+        "expected exactly one impossibility hint for an unrelated-class test, got: {:?}",
+        checker.diagnostics()
+    );
+    assert!(
+        hints[0].message.contains("Integer") && hints[0].message.contains("String"),
+        "hint should name both the current type and the tested class: {}",
+        hints[0].message
+    );
+}
+
+/// ADR 0102 §2 group 2 / BT-2741 (provenance gate): a *declared* annotation is
+/// an unverified promise under gradual typing, and `isKindOf:` is precisely how
+/// code verifies it at runtime — modelled on stdlib `SystemNavigation
+/// referencesTo:`, where `aClass :: Behaviour` is defensively guarded by
+/// `(aClass isKindOf: Symbol) ifTrue: [self error: ...]`. The
+/// impossible-class hint must stay SILENT for a declared receiver, while the
+/// true branch still narrows to `Never` (harmless — sends in the unreachable
+/// branch are silent per the pinned `Never`-receiver policy).
+#[test]
+fn bt2741_declared_annotation_receiver_no_hint_true_branch_still_never() {
+    let hierarchy = ClassHierarchy::with_builtins();
+
+    // Part 1 (refine-level): declared-provenance receiver → true branch is
+    // Never, but no hint.
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set_local(
+        "x",
+        InferredType::Known {
+            class_name: "Integer".into(),
+            type_args: vec![],
+            provenance: TypeProvenance::Declared(span()),
+        },
+    );
+    let guard = is_kind_of("x", "String");
+    let info = TypeChecker::detect_narrowing(&guard).expect("should detect isKindOf:");
+    let refined = checker.refine_class_narrowing(info, &env, &hierarchy, span());
+    assert_eq!(
+        refined.true_type,
+        InferredType::Never,
+        "declared Integer vs unrelated String must still narrow the true branch to Never"
+    );
+    assert!(
+        !checker
+            .diagnostics()
+            .iter()
+            .any(|d| d.message.contains("can never be true")),
+        "declared-annotation receiver must not fire the impossible-class hint, got: {:?}",
+        checker.diagnostics()
+    );
+
+    // Part 2 (end-to-end, SystemNavigation shape): declared param + guard +
+    // send inside the unreachable branch → no hint and no DNU.
+    let class = {
+        // process: x :: Integer =>
+        //   (x isKindOf: String) ifTrue: [x someDefensiveError]
+        let process_method = make_keyword_method(
+            &["process:"],
+            vec![("x", Some("Integer"))],
+            vec![if_true(
+                is_kind_of("x", "String"),
+                block_expr(vec![msg_send(
+                    var("x"),
+                    MessageSelector::Unary("someDefensiveError".into()),
+                    vec![],
+                )]),
+            )],
+        );
+        ClassDefinition::new(
+            ident("TestClass"),
+            ident("Object"),
+            vec![],
+            vec![process_method],
+            span(),
+        )
+    };
+    let module = make_module_with_classes(vec![], vec![class]);
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let noisy: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| {
+            d.message.contains("can never be true") || d.message.contains("does not understand")
+        })
+        .collect();
+    assert!(
+        noisy.is_empty(),
+        "declared-param defensive guard must produce no hint and no DNU, got: {:?}",
+        noisy.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+/// ADR 0102 §2 group 2 / BT-2741 (Never-receiver send policy): a message send
+/// on a `Never`-typed receiver — the unreachable true branch of an impossible
+/// class test — must NOT itself emit a diagnostic. The impossible-comparison
+/// hint at the guard already flags the branch; a per-send diagnostic inside
+/// it would be noise (ADR 0102 Consequences, "Live `Never` branches").
+#[test]
+fn bt2741_send_on_never_receiver_is_silent() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut env = TypeEnv::new();
+    env.set_local("x", InferredType::known("Integer"));
+    // `(x class = String) ifTrue: [x totallyBogusSelector]` — inside the
+    // (unreachable, Never-typed) true branch, an otherwise-unknown selector
+    // send must not add a second diagnostic beyond the guard's own hint.
+    let guard = class_eq("x", "String");
+    let expr = if_true(
+        guard,
+        block_expr(vec![msg_send(
+            var("x"),
+            MessageSelector::Unary("totallyBogusSelector".into()),
+            vec![],
+        )]),
+    );
+    let mut checker = TypeChecker::new();
+    let _ = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+
+    let dnu: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    assert!(
+        dnu.is_empty(),
+        "sends on a Never-typed (unreachable) receiver must not DNU, got: {:?}",
+        dnu.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
 #[test]
 fn test_narrowing_is_nil_early_return() {
     // validate: x :: Object =>
@@ -376,13 +583,20 @@ fn test_union_deduplication() {
 
 #[test]
 fn test_detect_narrowing_class_eq_pattern() {
-    // (x class = Integer) → should detect narrowing for x to Integer
+    // (x class = Integer) → should detect narrowing for x, tested against
+    // Integer. ADR 0102 §2 group 2: `detect` leaves `true_type` provisional
+    // (`Dynamic`) and records the tested class in `class_test`;
+    // `refine_class_narrowing` resolves the actual narrowed type later.
     let expr = class_eq("x", "Integer");
     let info = TypeChecker::detect_narrowing(&expr);
     assert!(info.is_some(), "Should detect class = narrowing");
     let info = info.unwrap();
     assert_eq!(info.variable, EnvKey::local("x"));
-    assert_eq!(info.true_type, InferredType::known("Integer"));
+    assert_eq!(
+        info.true_type,
+        InferredType::Dynamic(DynamicReason::Unknown)
+    );
+    assert_eq!(info.class_test.as_deref(), Some("Integer"));
     assert!(!info.is_nil_check);
 }
 
@@ -393,7 +607,11 @@ fn test_detect_narrowing_is_kind_of_pattern() {
     assert!(info.is_some(), "Should detect isKindOf: narrowing");
     let info = info.unwrap();
     assert_eq!(info.variable, EnvKey::local("x"));
-    assert_eq!(info.true_type, InferredType::known("Number"));
+    assert_eq!(
+        info.true_type,
+        InferredType::Dynamic(DynamicReason::Unknown)
+    );
+    assert_eq!(info.class_test.as_deref(), Some("Number"));
     assert!(!info.is_nil_check);
 }
 

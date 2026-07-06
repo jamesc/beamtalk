@@ -314,7 +314,18 @@ They divide into three groups, and the ADR must not pretend otherwise:
    branch to `intersect(T, P)` is *new* logic: `x class = Bar` where `T` and
    `Bar` are unrelated sealed classes would now yield `Never` and should route
    through the same impossible-comparison hint the singleton path already has
-   (`check_impossible_singleton_comparison`, `inference.rs:2354`). Computing the
+   (`check_impossible_singleton_comparison`, `inference.rs:2354`). One
+   refinement, learned in implementation (BT-2741): the class hint is
+   **provenance-gated** — it fires only when the receiver's type was
+   *inferred* from value flow, and stays silent when it came from a declared
+   annotation. Under gradual typing an annotation is an unverified promise,
+   and `isKindOf:` is precisely how code verifies it at runtime, so a
+   defensive guard against a declared type (stdlib `SystemNavigation
+   referencesTo:`'s `(aClass isKindOf: Symbol)` check) is legitimate and must
+   not warn; the true-branch narrowing to `Never` is *not* gated (sends there
+   are silent per the `Never`-receiver policy, so it stays harmless). The
+   singleton hint's behaviour (fires on declared types too, pinned by
+   BT-2740) is unchanged precedent. Computing the
    *false* branch requires **nominal-class difference** (`difference(T, Bar)`
    over the class hierarchy), which §1 explicitly does *not* define. So closing
    the class/`isKindOf:` false-branch gap is its own design step (nominal
@@ -608,14 +619,16 @@ needs full arrow/intersection-function typing. Documented as the destination in
   though `intersect`/`difference` are normalising functions, so most results
   stay in existing variants (see §1).
 - **Live `Never` branches are new.** Group 2 true branches (and group 1's
-  impossible-comparison corner) will type reachable code regions as `Never` for
-  the first time. **Provisional default, committed here: sends on a
-  `Never`-typed receiver are silent** (silent-as-unreachable, per ADR 0100's
-  conservatism — the branch is already flagged by the impossible-comparison
-  hint at its source, so a second diagnostic per send inside it would be
-  noise). BT-2741 implements this default and may propose an
-  unreachable-code hint *as a revision* if implementation experience argues
-  for it — but ships the default, not an open question.
+  impossible-comparison corner) type reachable code regions as `Never` for
+  the first time. **Implemented (BT-2741): sends on a `Never`-typed receiver
+  are silent** (silent-as-unreachable, per ADR 0100's conservatism — the
+  branch is already flagged by the impossible-comparison hint at its source,
+  so a second diagnostic per send inside it would be noise). This falls out
+  of validation's existing structure (`check_instance_selector` is only
+  reached for a `Known` receiver, so a `Never` receiver already produced no
+  diagnostics before this ADR) and is now pinned by a regression test. A
+  future unreachable-code hint remains a possible revision if implementation
+  experience argues for it, but is not proposed here.
 - **`TypeAnnotation` (`ast/expression.rs`) also grows variants** for `&`/`\`
   (the AST enum is already ad-hoc — `FalseOr`, `ClassOf`, `SelfType`); every
   exhaustive match over it and `type_resolver.rs` must be updated. This cost was

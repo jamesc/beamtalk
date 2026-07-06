@@ -44,6 +44,7 @@ fn detect(receiver: &Expression) -> Option<NarrowingInfo> {
         is_result_error_check: false,
         responded_selector: None,
         singleton_eq: Some(eq.info),
+        class_test: None,
     })
 }
 

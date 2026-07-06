@@ -6,7 +6,7 @@
 //! Also handles `(x class) = ClassName` via a parenthesized-unwrap.
 
 use crate::ast::{Expression, MessageSelector, WellKnownSelector};
-use crate::semantic_analysis::type_checker::InferredType;
+use crate::semantic_analysis::type_checker::{DynamicReason, InferredType};
 
 use super::super::extract::extract_variable_name;
 use super::super::info::NarrowingInfo;
@@ -49,12 +49,16 @@ fn detect(receiver: &Expression) -> Option<NarrowingInfo> {
     };
     Some(NarrowingInfo {
         variable: var_name,
-        true_type: InferredType::known(name.name.clone()),
+        // Provisional — `refine_class_narrowing` overwrites `true_type` with
+        // `intersect(current, name)` once the variable's current type is
+        // known (ADR 0102 §2 group 2).
+        true_type: InferredType::Dynamic(DynamicReason::Unknown),
         false_type: None,
         is_nil_check: false,
         is_result_ok_check: false,
         is_result_error_check: false,
         responded_selector: None,
         singleton_eq: None,
+        class_test: Some(name.name.clone()),
     })
 }

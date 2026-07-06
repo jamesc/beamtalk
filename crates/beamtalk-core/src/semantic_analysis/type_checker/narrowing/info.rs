@@ -67,6 +67,20 @@ pub(crate) struct NarrowingInfo {
     /// type, sets the matching branch to the singleton, and subtracts the
     /// singleton from the union for the complementary branch.
     pub(crate) singleton_eq: Option<SingletonEqInfo>,
+    /// The class name tested in a `x class = ClassName` / `x isKindOf:
+    /// ClassName` narrowing (ADR 0102 §2 group 2, BT-2741).
+    ///
+    /// When set, `detect` cannot know the variable's current type, so
+    /// `true_type` is left provisional (`Dynamic`) and
+    /// `refine_class_narrowing` in `inference.rs` resolves the variable's
+    /// current type and narrows the true branch to
+    /// `intersect(current, ClassName)` (hierarchy-aware): a subclass test
+    /// narrows precisely (`x :: Number; x isKindOf: Integer` true branch is
+    /// `Integer`), and a hierarchy-unrelated class test types the
+    /// (unreachable) true branch `Never`, reported via
+    /// `check_impossible_class_comparison`. The false branch stays `None` —
+    /// nominal-class difference is out of scope here (BT-2744).
+    pub(crate) class_test: Option<EcoString>,
 }
 
 /// Details of a singleton (in)equality narrowing (`x = #foo`, BT-2617).
