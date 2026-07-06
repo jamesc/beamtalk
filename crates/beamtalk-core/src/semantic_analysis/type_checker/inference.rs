@@ -14,7 +14,8 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::ast::{
-    Expression, ExpressionStatement, Literal, MessageSelector, Module, Pattern, TypeAnnotation,
+    Expression, ExpressionStatement, Literal, MatchArm, MessageSelector, Module, Pattern,
+    TypeAnnotation,
 };
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
@@ -741,8 +742,13 @@ impl TypeChecker {
             }
 
             // Match — union of arm body types (Never arms are eliminated)
-            Expression::Match { value, arms, .. } => {
-                self.infer_expr(value, hierarchy, env, in_abstract_method);
+            Expression::Match { value, arms, span } => {
+                let scrutinee_ty = self.infer_expr(value, hierarchy, env, in_abstract_method);
+                // BT-2745 / ADR 0102 §4: advisory exhaustiveness for
+                // singleton-union scrutinees. Distinct from (and does not
+                // replace) BT-1299's pattern-based sealed-constructor check,
+                // which still runs separately in `validators::match_validators`.
+                self.check_singleton_match_exhaustiveness(&scrutinee_ty, arms, *span);
                 let arm_types: Vec<InferredType> = arms
                     .iter()
                     .map(|arm| {
@@ -2409,6 +2415,145 @@ impl TypeChecker {
             InferredType::intersect(ty, &matched, provenance, None),
             InferredType::Never
         )
+    }
+
+    /// BT-2745 / ADR 0102 §4: `true` when `ty` is a *known-closed* singleton
+    /// union — an `InferredType::Union` whose every member is a bare
+    /// `#symbol` singleton (`Known` with a `#`-prefixed name and no type
+    /// args).
+    ///
+    /// This single structural condition is the entire gate for
+    /// [`check_singleton_match_exhaustiveness`](Self::check_singleton_match_exhaustiveness),
+    /// and it is what keeps the check silent under every open-world case
+    /// ADR 0100 requires (mirroring `check_impossible_singleton_comparison`'s
+    /// conservatism):
+    /// - `Dynamic` is not a `Union` at all — silent.
+    /// - A bare/open `Symbol` (`Known("Symbol")`) is not a `Union` — silent.
+    /// - `Negation` (`Symbol \ #foo`, a co-finite set) is not a `Union` — silent.
+    /// - A `perform:`-typed or DNU-overriding receiver types as `Dynamic`
+    ///   upstream, so it never reaches here as a singleton union — silent.
+    /// - A union with *any* non-singleton member — including a single
+    ///   `Dynamic` arm — fails the `all()` check, so the *whole* union stays
+    ///   silent, matching ADR 0100 Rule 1's "any `Dynamic` in a union
+    ///   downgrades the whole union to `Open`".
+    fn is_closed_singleton_union(ty: &InferredType) -> bool {
+        matches!(ty, InferredType::Union { members, .. }
+        if !members.is_empty() && members.iter().all(|m| matches!(
+            m,
+            InferredType::Known { class_name, type_args, .. }
+                if type_args.is_empty() && class_name.starts_with('#')
+        )))
+    }
+
+    /// BT-2745 / ADR 0102 §4: advisory `match:` exhaustiveness for
+    /// singleton-union scrutinees.
+    ///
+    /// **Distinct from BT-1299.** `validators::match_validators::check_match_exhaustiveness`
+    /// is *pattern-based* — it keys on `Result ok:`/`Result error:` constructor
+    /// patterns in the arms and emits a hard `Diagnostic::error()`, because
+    /// (per its own doc comment) "there is no resolved scrutinee type available
+    /// at compile time" for sealed constructor types. This check is the
+    /// opposite: it is *type-based*, consulting the scrutinee's **inferred**
+    /// type and computing the residual via `difference` (ADR 0102 §1) —
+    /// `difference(scrutinee_type, covered)`. The two checks run independently,
+    /// side by side, and neither suppresses the other.
+    ///
+    /// **Severity is `Warning`, never `Error`** (ADR 0102 §4 / ADR 0100):
+    /// gradual-typing annotations are not runtime-enforced, so a "provably
+    /// exhaustive" static claim can never be a soundness guarantee — an FFI
+    /// call typed `#north | #south` can still return `#west` at runtime.
+    ///
+    /// **Gating:** see [`is_closed_singleton_union`](Self::is_closed_singleton_union).
+    ///
+    /// **Known discoverability cliff** (ADR 0102 §4, documented here rather
+    /// than fixed): this warning silently disappears the moment inference
+    /// *widens* the scrutinee — one `Dynamic`-returning arm upstream, a
+    /// reassignment to a wider type, or annotating the variable as bare
+    /// `Symbol` — and the user has no way to distinguish "provably exhaustive"
+    /// from "the checker gave up". An opt-in `match:` assertion (analogous to
+    /// TypeScript's `satisfies never` idiom) is the natural follow-up; it is
+    /// deliberately out of scope for this ADR so the check stays advisory-only.
+    pub(super) fn check_singleton_match_exhaustiveness(
+        &mut self,
+        scrutinee_ty: &InferredType,
+        arms: &[MatchArm],
+        match_span: Span,
+    ) {
+        if !Self::is_closed_singleton_union(scrutinee_ty) {
+            return;
+        }
+
+        // An unguarded wildcard arm is full coverage — mirrors BT-1299's
+        // suppression rule. An unguarded variable-binding arm (`x -> ...`)
+        // always matches too, so it counts the same. A *guarded* catch-all
+        // (`_ when: [cond] -> ...`) does NOT guarantee coverage of the
+        // remaining cases.
+        if arms.iter().any(|arm| {
+            arm.guard.is_none()
+                && matches!(arm.pattern, Pattern::Wildcard(_) | Pattern::Variable(_))
+        }) {
+            return;
+        }
+
+        // Collect covered singletons from unguarded symbol-literal arms only —
+        // a guarded arm (`#north when: [cond] -> ...`) does not guarantee
+        // coverage of that variant, same rule as BT-1299's constructor-arm
+        // coverage.
+        let mut covered: Vec<InferredType> = Vec::new();
+        for arm in arms {
+            if arm.guard.is_some() {
+                continue;
+            }
+            if let Pattern::Literal(Literal::Symbol(name), _) = &arm.pattern {
+                covered.push(InferredType::known(eco_format!("#{name}")));
+            }
+        }
+
+        let provenance = super::TypeProvenance::Inferred(Span::default());
+        let covered_ty = InferredType::union_of(&covered);
+        let residual = InferredType::difference(scrutinee_ty, &covered_ty, provenance);
+
+        // `Never` residual ⇒ every member is covered ⇒ exhaustive.
+        if matches!(residual, InferredType::Never) {
+            return;
+        }
+
+        let residual_display = residual.display_for_diagnostic().unwrap_or_default();
+        let missing: Vec<EcoString> = match &residual {
+            InferredType::Union { members, .. } => members
+                .iter()
+                .filter_map(InferredType::as_known)
+                .cloned()
+                .collect(),
+            InferredType::Known { class_name, .. } => vec![class_name.clone()],
+            // Not reachable in practice: `difference` over a union of bare
+            // singletons only ever normalises to `Never`, a single `Known`,
+            // or a `Union` of `Known`s — but stay conservative rather than
+            // panicking if the algebra's normal form ever changes.
+            _ => vec![],
+        };
+        let missing_str = missing
+            .iter()
+            .map(|m| format!("`{m}`"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let verb = if missing.len() == 1 { "is" } else { "are" };
+
+        self.diagnostics.push(
+            Diagnostic::warning(
+                format!(
+                    "non-exhaustive match: {missing_str} {verb} not handled \
+                     (residual type: `{residual_display}`)"
+                ),
+                match_span,
+            )
+            .with_hint(
+                "Add an arm for the remaining case(s), or a `_ ->` wildcard \
+                 to handle them."
+                    .to_string(),
+            )
+            .with_category(DiagnosticCategory::Type),
+        );
     }
 
     /// BT-2045: Infer argument types for `on:do:` with exception class propagation.
