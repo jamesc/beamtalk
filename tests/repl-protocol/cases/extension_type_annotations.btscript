@@ -22,10 +22,10 @@ Value subclass: Greeter
 // ===========================================================================
 
 Greeter >> shout :: -> String => self greet uppercase
-// => _
+// => Greeter>>shout
 
 g := Greeter new
-// => _
+// => Greeter(name: "World")
 
 g shout
 // => HELLO, WORLD
@@ -35,7 +35,7 @@ g shout
 // ===========================================================================
 
 Greeter >> greetWith: prefix :: String :: -> String => prefix ++ self.name
-// => _
+// => Greeter>>greetWith:
 
 g greetWith: "Hi, "
 // => Hi, World
@@ -45,7 +45,7 @@ g greetWith: "Hi, "
 // ===========================================================================
 
 Greeter >> reversed -> String => self greet reverse
-// => _
+// => Greeter>>reversed
 
 g reversed
 // => dlroW ,olleH
