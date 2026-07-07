@@ -165,6 +165,7 @@ Module {
                                         },
                                     },
                                 ],
+                                exhaustive: false,
                                 span: Span {
                                     start: 233,
                                     end: 267,
