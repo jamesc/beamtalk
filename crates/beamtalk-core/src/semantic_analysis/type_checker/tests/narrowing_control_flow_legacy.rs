@@ -546,7 +546,7 @@ fn test_union_with_generic_members() {
     let union = InferredType::union_of(&[result_ty.clone(), nil_ty]);
 
     // display_name should render generics
-    let display = union.display_name().unwrap();
+    let display = union.display_name();
     assert!(
         display.contains("Result(Integer, String)"),
         "Union display should include generic args, got: {display}"
@@ -1115,6 +1115,69 @@ fn bt2631_standalone_singleton_eq_admitted_no_hint() {
         "satisfiable comparisons must not warn, got: {:?}",
         checker.diagnostics()
     );
+}
+
+/// BT-2764: a nominal *supertype* of `Symbol` other than `Object`
+/// (`ProtoObject` in the builtin hierarchy) admits every singleton, so a
+/// union containing it must stay silent for a non-member singleton test —
+/// the pre-ADR-0102 hierarchy walk was silent here, and the hierarchy-aware
+/// `intersect` now reduces `ProtoObject ∩ #foo` to `#foo` rather than
+/// `Never`.
+#[test]
+fn bt2764_singleton_eq_symbol_supertype_union_member_no_hint() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut env = TypeEnv::new();
+    // `x :: ProtoObject | Integer` — the ProtoObject member could hold any
+    // symbol value, so `x = #foo` is satisfiable.
+    env.set_local("x", InferredType::simple_union(&["ProtoObject", "Integer"]));
+    let mut checker = TypeChecker::new();
+
+    // Guarded form: `(x = #foo) ifTrue: [nil]`.
+    let guard = msg_send(
+        var("x"),
+        MessageSelector::Binary("=".into()),
+        vec![symbol_lit("foo")],
+    );
+    let guarded = if_true(guard, block_expr(vec![var("nil")]));
+    let _ = checker.infer_expr(&guarded, &hierarchy, &mut env, false);
+
+    // Standalone form: `x =:= #foo`.
+    let standalone = msg_send(
+        var("x"),
+        MessageSelector::Binary("=:=".into()),
+        vec![symbol_lit("foo")],
+    );
+    let _ = checker.infer_expr(&standalone, &hierarchy, &mut env, false);
+
+    assert!(
+        !checker.diagnostics().iter().any(|d| {
+            d.message.contains("can never be true") || d.message.contains("always true")
+        }),
+        "a ProtoObject union member admits every singleton — no impossibility \
+         hint expected, got: {:?}",
+        checker.diagnostics()
+    );
+}
+
+/// BT-2764: `refine_singleton_narrowing` on a bare `ProtoObject`-typed
+/// variable — the true branch of `x = #foo` narrows to the singleton (via the
+/// hierarchy-aware `intersect`), not to a spurious `Never`; the false branch
+/// keeps `ProtoObject` (nominal-class difference is out of scope, so nothing
+/// is removable).
+#[test]
+fn bt2764_refine_singleton_eq_symbol_supertype_true_branch_is_singleton() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut env = TypeEnv::new();
+    env.set_local("x", InferredType::known("ProtoObject"));
+    let expr = msg_send(
+        var("x"),
+        MessageSelector::Binary("=".into()),
+        vec![symbol_lit("foo")],
+    );
+    let info = TypeChecker::detect_narrowing(&expr).unwrap();
+    let refined = TypeChecker::refine_singleton_narrowing(info, &env, &hierarchy);
+    assert_eq!(refined.true_type, InferredType::known("#foo"));
+    assert_eq!(refined.false_type, Some(InferredType::known("ProtoObject")));
 }
 
 #[test]

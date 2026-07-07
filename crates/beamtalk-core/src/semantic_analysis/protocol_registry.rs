@@ -492,6 +492,85 @@ impl ProtocolRegistry {
         }
     }
 
+    /// Check if the *class side* of a class conforms to a protocol (BT-2761).
+    ///
+    /// This is the metatype counterpart of [`check_conformance`]: it asks
+    /// whether the class *object* `C` — a value of type `C class`, inferred as
+    /// `Meta{C}` (ADR 0083) — satisfies the protocol, rather than whether
+    /// *instances* of `C` do.
+    ///
+    /// A callee holding a `:: P`-typed parameter sends `P`'s required
+    /// *instance-side* selectors to the argument. When the argument is a class
+    /// object, those sends dispatch to:
+    /// - `C`'s class-side methods (including inherited class methods), or
+    /// - the metaclass tower's instance protocol
+    ///   (`Metaclass → Class → Behaviour → Object → ProtoObject`), which every
+    ///   class object responds to at runtime (e.g. `printString`, `name`).
+    ///
+    /// So the rule is: each required instance-side selector of `P` (including
+    /// those inherited from extended protocols) must resolve either on `C`'s
+    /// class side or on the `Metaclass` tower.
+    ///
+    /// `P`'s *class-side* requirements (`class` signatures) are NOT checked
+    /// here: for a class-object argument they would constrain the argument's
+    /// own class — the metaclass of `C` — which the static hierarchy does not
+    /// model per-class. They are conservatively assumed satisfied (open-world),
+    /// matching the checker's warnings-not-errors philosophy (ADR 0025).
+    ///
+    /// Same open-world gating as [`check_conformance`]: unknown classes,
+    /// cross-file parents, and class-side `doesNotUnderstand:args:` overrides
+    /// all conform.
+    ///
+    /// [`check_conformance`]: Self::check_conformance
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err(Vec<EcoString>)` listing the required selectors that the
+    /// class side does not resolve.
+    pub fn check_class_side_conformance(
+        &self,
+        class_name: &str,
+        protocol_name: &str,
+        hierarchy: &ClassHierarchy,
+    ) -> Result<(), Vec<EcoString>> {
+        let Some(protocol) = self.get(protocol_name) else {
+            // Unknown protocol — can't check, assume conformance
+            return Ok(());
+        };
+
+        // Tier 3: DNU bypass — a class overriding `doesNotUnderstand:args:`
+        // on the class side accepts any class-side message.
+        if hierarchy.has_class_dnu_override(class_name) {
+            return Ok(());
+        }
+
+        // If the class isn't known to the hierarchy, we can't verify — assume ok
+        if !hierarchy.has_class(class_name) {
+            return Ok(());
+        }
+
+        // Cross-file inheritance: if the parent class is not in the hierarchy,
+        // we can't know the full class-side method set — assume conformance
+        if hierarchy.has_cross_file_parent(class_name) {
+            return Ok(());
+        }
+
+        let mut missing = Vec::new();
+        for selector in protocol.all_required_selectors(self) {
+            if !hierarchy.resolves_class_selector(class_name, selector)
+                && !hierarchy.resolves_selector("Metaclass", selector)
+            {
+                missing.push(selector.clone());
+            }
+        }
+
+        if missing.is_empty() {
+            Ok(())
+        } else {
+            Err(missing)
+        }
+    }
+
     /// Check conformance for a generic protocol with concrete type arguments.
     ///
     /// For `Collection(Integer)`, substitutes `E → Integer` in the required
@@ -1028,6 +1107,194 @@ mod tests {
         // Unknown class — should not error (conservative)
         let result = registry.check_conformance("NotAClass", "Printable", &hierarchy);
         assert!(result.is_ok());
+    }
+
+    // ---- BT-2761: Class-Side (Metatype) Conformance Tests ----
+
+    /// Builds a hierarchy containing a `Gadget` class whose class side has
+    /// the given selectors (arity 0), on top of the builtins.
+    fn hierarchy_with_gadget_class_methods(selectors: Vec<&str>) -> ClassHierarchy {
+        use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
+
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        let gadget = ClassInfo {
+            name: "Gadget".into(),
+            superclass: Some("Object".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_internal: false,
+            package: None,
+            is_value: true,
+            is_native: false,
+            state: vec![],
+            state_types: std::collections::HashMap::new(),
+            state_has_default: std::collections::HashMap::new(),
+            methods: vec![],
+            class_methods: selectors
+                .into_iter()
+                .map(|sel| MethodInfo {
+                    selector: sel.into(),
+                    arity: 0,
+                    kind: MethodKind::Primary,
+                    defined_in: "Gadget".into(),
+                    is_sealed: false,
+                    is_internal: false,
+                    spawns_block: false,
+                    return_type: None,
+                    param_types: vec![],
+                    doc: None,
+                })
+                .collect(),
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        };
+        hierarchy.add_from_beam_meta(vec![gadget]);
+        hierarchy
+    }
+
+    #[test]
+    fn class_side_conformance_via_class_method() {
+        let module = Module {
+            protocols: vec![make_protocol("Serializable", vec![("serialize", 0, None)])],
+            ..empty_module()
+        };
+        let hierarchy = hierarchy_with_gadget_class_methods(vec!["serialize"]);
+        let mut registry = ProtocolRegistry::new();
+        registry.register_module(&module, &hierarchy);
+
+        let result = registry.check_class_side_conformance("Gadget", "Serializable", &hierarchy);
+        assert!(
+            result.is_ok(),
+            "Gadget's class side has `serialize` — the class object should conform"
+        );
+    }
+
+    #[test]
+    fn class_side_non_conformance_missing_selector() {
+        let module = Module {
+            protocols: vec![make_protocol("Serializable", vec![("serialize", 0, None)])],
+            ..empty_module()
+        };
+        let hierarchy = hierarchy_with_gadget_class_methods(vec![]);
+        let mut registry = ProtocolRegistry::new();
+        registry.register_module(&module, &hierarchy);
+
+        let result = registry.check_class_side_conformance("Gadget", "Serializable", &hierarchy);
+        assert!(result.is_err(), "Gadget's class side lacks `serialize`");
+        assert!(result.unwrap_err().contains(&EcoString::from("serialize")));
+
+        // ...even though *instances* of Gadget wouldn't conform either, the
+        // instance-side and class-side checks are asking different questions:
+        // a Gadget with an instance-side `serialize` still fails class-side.
+        let hierarchy2 = {
+            use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
+            let mut h = ClassHierarchy::with_builtins();
+            h.add_from_beam_meta(vec![ClassInfo {
+                name: "Gadget".into(),
+                superclass: Some("Object".into()),
+                is_sealed: false,
+                is_abstract: false,
+                is_typed: false,
+                is_internal: false,
+                package: None,
+                is_value: true,
+                is_native: false,
+                state: vec![],
+                state_types: std::collections::HashMap::new(),
+                state_has_default: std::collections::HashMap::new(),
+                methods: vec![MethodInfo {
+                    selector: "serialize".into(),
+                    arity: 0,
+                    kind: MethodKind::Primary,
+                    defined_in: "Gadget".into(),
+                    is_sealed: false,
+                    is_internal: false,
+                    spawns_block: false,
+                    return_type: None,
+                    param_types: vec![],
+                    doc: None,
+                }],
+                class_methods: vec![],
+                class_variables: vec![],
+                type_params: vec![],
+                type_param_bounds: vec![],
+                superclass_type_args: vec![],
+            }]);
+            h
+        };
+        assert!(
+            registry
+                .check_conformance("Gadget", "Serializable", &hierarchy2)
+                .is_ok(),
+            "instance side conforms"
+        );
+        assert!(
+            registry
+                .check_class_side_conformance("Gadget", "Serializable", &hierarchy2)
+                .is_err(),
+            "class side must NOT inherit instance-side conformance"
+        );
+    }
+
+    #[test]
+    fn class_side_conformance_via_metaclass_tower() {
+        // Every class object responds to `printString` via the metaclass tower
+        // (Metaclass → Class → Behaviour → Object), even with an empty class side.
+        let module = Module {
+            protocols: vec![make_protocol(
+                "Describable",
+                vec![("printString", 0, Some("String"))],
+            )],
+            ..empty_module()
+        };
+        let hierarchy = hierarchy_with_gadget_class_methods(vec![]);
+        let mut registry = ProtocolRegistry::new();
+        registry.register_module(&module, &hierarchy);
+
+        let result = registry.check_class_side_conformance("Gadget", "Describable", &hierarchy);
+        assert!(
+            result.is_ok(),
+            "class objects respond to printString via the metaclass tower: {result:?}"
+        );
+    }
+
+    #[test]
+    fn class_side_conformance_unknown_class_assumed_ok() {
+        // Open-world gating: an unknown class can't be verified — assume ok.
+        let module = Module {
+            protocols: vec![make_protocol("Serializable", vec![("serialize", 0, None)])],
+            ..empty_module()
+        };
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut registry = ProtocolRegistry::new();
+        registry.register_module(&module, &hierarchy);
+
+        let result =
+            registry.check_class_side_conformance("NoSuchClass", "Serializable", &hierarchy);
+        assert!(result.is_ok(), "unknown class must be assumed conforming");
+    }
+
+    #[test]
+    fn class_side_conformance_includes_extended_protocol_requirements() {
+        // Sortable extends Comparable — the class side must satisfy both
+        // protocols' instance-side requirements.
+        let module = Module {
+            protocols: vec![
+                make_protocol("Comparable", vec![("compareTo:", 1, Some("Integer"))]),
+                make_extending_protocol("Sortable", "Comparable", vec![("sortKey", 0, None)]),
+            ],
+            ..empty_module()
+        };
+        let hierarchy = hierarchy_with_gadget_class_methods(vec!["sortKey"]);
+        let mut registry = ProtocolRegistry::new();
+        registry.register_module(&module, &hierarchy);
+
+        let result = registry.check_class_side_conformance("Gadget", "Sortable", &hierarchy);
+        assert!(result.is_err(), "class side lacks inherited `compareTo:`");
+        assert!(result.unwrap_err().contains(&EcoString::from("compareTo:")));
     }
 
     // ---- BT-1611: Class Method Protocol Tests ----

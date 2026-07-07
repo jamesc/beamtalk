@@ -61,6 +61,17 @@ impl TypeChecker {
     }
 
     /// Recursively check protocol conformance in expressions.
+    ///
+    /// **Receiver resolution (BT-2761):** the target method whose parameter
+    /// annotations drive the check is resolved from the receiver's inferred
+    /// type:
+    /// - `Known{C}` (instance-side receiver) → `C`'s *instance* methods;
+    /// - `Meta{C}` (class-object receiver, ADR 0083 — e.g. `Json generate: x`)
+    ///   → `C`'s *class-side* methods, so protocol-typed parameters of class
+    ///   methods are conformance-checked too.
+    ///
+    /// Other receiver types (`Dynamic`, `Union`, …) are skipped conservatively
+    /// per the checker's open-world gating conventions.
     #[allow(clippy::too_many_lines)] // match over all Expression variants
     fn check_protocol_conformance_in_expr(
         &mut self,
@@ -78,59 +89,60 @@ impl TypeChecker {
                 span,
                 ..
             } => {
-                // Check if the receiver's method has protocol-typed params
-                if let Some(receiver_type) = self.type_map.get(receiver.span()) {
-                    if let InferredType::Known { class_name, .. } = receiver_type.clone() {
-                        let sel_name = selector.name();
-                        let method = hierarchy.find_method(&class_name, &sel_name);
-                        if let Some(method) = method {
-                            for (i, arg) in arguments.iter().enumerate() {
-                                if let Some(Some(expected_ty)) = method.param_types.get(i) {
-                                    let Some(arg_type) = self.type_map.get(arg.span()) else {
-                                        continue;
-                                    };
-                                    let arg_type = arg_type.clone();
-                                    // ADR 0068 §Protocol Composition / ADR 0102
-                                    // §1/§3 (BT-2743): a parameter declared
-                                    // `:: P1 & P2` requires conformance to
-                                    // *every* protocol part. `type_name()`
-                                    // renders the annotation as `"P1 & P2"`;
-                                    // split it and check each protocol part
-                                    // independently instead of treating the
-                                    // whole compound string as one (unregistered)
-                                    // name.
-                                    if let Some(parts) =
-                                        Self::split_intersection_type_string(expected_ty)
-                                    {
-                                        for part in parts {
-                                            if Self::is_protocol_type(
-                                                part,
-                                                hierarchy,
-                                                protocol_registry,
-                                            ) {
-                                                self.check_protocol_argument_conformance(
-                                                    &arg_type,
-                                                    part,
-                                                    *span,
-                                                    hierarchy,
-                                                    protocol_registry,
-                                                );
-                                            }
-                                        }
-                                    } else if Self::is_protocol_type(
-                                        expected_ty,
-                                        hierarchy,
-                                        protocol_registry,
-                                    ) {
+                // Check if the receiver's method has protocol-typed params.
+                // Instance-side receivers resolve against instance methods;
+                // Meta (class object) receivers against class-side methods
+                // (BT-2761).
+                let sel_name = selector.name();
+                let method = match self.type_map.get(receiver.span()) {
+                    Some(InferredType::Known { class_name, .. }) => {
+                        hierarchy.find_method(class_name, &sel_name)
+                    }
+                    Some(InferredType::Meta { class_name, .. }) => {
+                        hierarchy.find_class_method(class_name, &sel_name)
+                    }
+                    _ => None,
+                };
+                if let Some(method) = method {
+                    for (i, arg) in arguments.iter().enumerate() {
+                        if let Some(Some(expected_ty)) = method.param_types.get(i) {
+                            let Some(arg_type) = self.type_map.get(arg.span()) else {
+                                continue;
+                            };
+                            let arg_type = arg_type.clone();
+                            // ADR 0068 §Protocol Composition / ADR 0102
+                            // §1/§3 (BT-2743): a parameter declared
+                            // `:: P1 & P2` requires conformance to
+                            // *every* protocol part. `type_name()`
+                            // renders the annotation as `"P1 & P2"`;
+                            // split it and check each protocol part
+                            // independently instead of treating the
+                            // whole compound string as one (unregistered)
+                            // name.
+                            if let Some(parts) = Self::split_intersection_type_string(expected_ty) {
+                                for part in parts {
+                                    if Self::is_protocol_type(part, hierarchy, protocol_registry) {
                                         self.check_protocol_argument_conformance(
                                             &arg_type,
-                                            expected_ty,
+                                            part,
                                             *span,
                                             hierarchy,
                                             protocol_registry,
                                         );
                                     }
                                 }
+                            } else if Self::is_protocol_type(
+                                expected_ty,
+                                hierarchy,
+                                protocol_registry,
+                            ) {
+                                self.check_protocol_argument_conformance(
+                                    &arg_type,
+                                    expected_ty,
+                                    *span,
+                                    hierarchy,
+                                    protocol_registry,
+                                );
                             }
                         }
                     }

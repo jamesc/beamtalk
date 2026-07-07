@@ -2181,6 +2181,18 @@ impl TypeChecker {
     /// class, checks structural conformance. Emits a warning if the class does
     /// not conform to the protocol.
     ///
+    /// **Metatype arguments (BT-2761):** a class-object argument `Meta{C}`
+    /// (ADR 0083) satisfies a protocol-typed parameter `:: P` iff the *class
+    /// side* of `C` conforms to `P` — see
+    /// [`ProtocolRegistry::check_class_side_conformance`] for the full rule.
+    /// This composes with the metaclass-tower subtyping
+    /// `Meta{C} <: Class <: Behaviour <: Object`: parameters declared
+    /// `:: Class` / `:: Behaviour` / `:: Object` are *classes*, not protocols,
+    /// so they never reach this function — `check_argument_types` accepts any
+    /// metatype for them via nominal subtyping. Only genuine protocol
+    /// annotations trigger the structural class-side check. Unknown classes
+    /// stay silent (open-world gating inside the registry check).
+    ///
     /// **References:** ADR 0068 Phase 2b — "Type checker: protocol name in type
     /// annotation → structural conformance check"
     pub(super) fn check_protocol_argument_conformance(
@@ -2234,75 +2246,149 @@ impl TypeChecker {
                 }
             }
             InferredType::Union { members, .. } => {
-                if protocol_registry.get(base_protocol).is_none() {
-                    return; // Not a protocol — handled by normal type checking
-                }
-                let Some((compat, total, non_conforming)) =
-                    Self::classify_union_members(members, |m| {
-                        // BT-2623: members now carry type args (e.g. `Array(Integer)`);
-                        // conformance is a property of the base class, so strip them.
-                        let base = super::type_resolver::base_name_of_string(m);
-                        protocol_registry
-                            .check_conformance(base, base_protocol, hierarchy)
-                            .is_ok()
-                    })
-                else {
-                    return; // Contains Dynamic — skip
-                };
-                if compat == total {
-                    return; // All conform → pass
-                }
-                // BT-2066: Render `UndefinedObject` as `Nil` in user-facing messages.
-                let union_display = arg_type
-                    .display_for_diagnostic()
-                    .unwrap_or_else(|| EcoString::from("Dynamic"));
-                let diag = if compat == 0 {
-                    // Collect missing methods across all members
-                    let all_missing = Self::collect_missing_protocol_methods(
-                        members,
-                        base_protocol,
-                        hierarchy,
-                        protocol_registry,
-                    );
-                    Diagnostic::warning(
-                        format!("{union_display} does not conform to protocol {base_protocol}"),
-                        span,
-                    )
-                    .with_hint(format!(
-                        "No member conforms — missing required method(s): {all_missing}"
-                    ))
-                } else {
-                    let list = non_conforming
-                        .iter()
-                        .map(|m| InferredType::class_name_for_diagnostic(m.as_str()))
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    Diagnostic::hint(
-                        format!(
-                            "Not all members of {union_display} conform to protocol {base_protocol}"
-                        ),
-                        span,
-                    )
-                    .with_hint(format!("Non-conforming member(s): {list}"))
-                };
-                self.diagnostics
-                    .push(diag.with_category(DiagnosticCategory::Type));
+                self.check_union_argument_conformance(
+                    arg_type,
+                    members,
+                    base_protocol,
+                    span,
+                    hierarchy,
+                    protocol_registry,
+                );
             }
-            // ADR 0083: structural conformance of a class object's *class-side*
-            // protocol is out of scope for Slice 1 — skip the metatype rather
-            // than emit a false positive (same as `Never`, which diverges).
+            // ADR 0083 / BT-2761: a class-object argument `Meta{C}` satisfies
+            // `:: P` iff the *class side* of `C` conforms to `P` (the callee
+            // will send `P`'s required selectors to the class object, which
+            // dispatch to `C`'s class methods or the metaclass tower — see
+            // `check_class_side_conformance`). Unknown classes / cross-file
+            // parents / class-side DNU overrides stay silent inside the
+            // registry check (open-world gating).
+            InferredType::Meta { class_name, .. } => {
+                self.check_meta_argument_conformance(
+                    class_name,
+                    base_protocol,
+                    span,
+                    hierarchy,
+                    protocol_registry,
+                );
+            }
             // A `Negation` (`Symbol \ #foo`) is a narrowed `Symbol`; skip like
-            // `Meta`/`Never` (ADR 0102). An `Intersection` (`P1 & P2`, ADR
+            // `Never` (ADR 0102). An `Intersection` (`P1 & P2`, ADR
             // 0102/BT-2743) as the *argument's own* inferred type is a rarer,
             // deeper case (the value's declared type is itself a stored
             // intersection) — skip conservatively rather than guess which
             // member to check; the flagship "parameter declared `P1 & P2`"
             // case is handled by splitting `expected_protocol` in
             // `check_protocol_conformance_in_expr`, not here.
-            InferredType::Meta { .. }
-            | InferredType::Never
+            InferredType::Never
             | InferredType::Negation { .. }
             | InferredType::Intersection { .. } => {}
+        }
+    }
+
+    /// Check protocol conformance for a union-typed call-site argument —
+    /// the `Union` arm of
+    /// [`check_protocol_argument_conformance`](Self::check_protocol_argument_conformance).
+    ///
+    /// All members conforming → pass; none → warning listing missing methods
+    /// across members; some → hint listing the non-conforming members
+    /// (BT-1832). Unions containing `Dynamic` are skipped.
+    fn check_union_argument_conformance(
+        &mut self,
+        arg_type: &InferredType,
+        members: &[InferredType],
+        base_protocol: &str,
+        span: Span,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: &ProtocolRegistry,
+    ) {
+        if protocol_registry.get(base_protocol).is_none() {
+            return; // Not a protocol — handled by normal type checking
+        }
+        let Some((compat, total, non_conforming)) = Self::classify_union_members(members, |m| {
+            // BT-2623: members now carry type args (e.g. `Array(Integer)`);
+            // conformance is a property of the base class, so strip them.
+            let base = super::type_resolver::base_name_of_string(m);
+            protocol_registry
+                .check_conformance(base, base_protocol, hierarchy)
+                .is_ok()
+        }) else {
+            return; // Contains Dynamic — skip
+        };
+        if compat == total {
+            return; // All conform → pass
+        }
+        // BT-2066: Render `UndefinedObject` as `Nil` in user-facing messages.
+        let union_display = arg_type
+            .display_for_diagnostic()
+            .unwrap_or_else(|| EcoString::from("Dynamic"));
+        let diag = if compat == 0 {
+            // Collect missing methods across all members
+            let all_missing = Self::collect_missing_protocol_methods(
+                members,
+                base_protocol,
+                hierarchy,
+                protocol_registry,
+            );
+            Diagnostic::warning(
+                format!("{union_display} does not conform to protocol {base_protocol}"),
+                span,
+            )
+            .with_hint(format!(
+                "No member conforms — missing required method(s): {all_missing}"
+            ))
+        } else {
+            let list = non_conforming
+                .iter()
+                .map(|m| InferredType::class_name_for_diagnostic(m.as_str()))
+                .collect::<Vec<_>>()
+                .join(", ");
+            Diagnostic::hint(
+                format!("Not all members of {union_display} conform to protocol {base_protocol}"),
+                span,
+            )
+            .with_hint(format!("Non-conforming member(s): {list}"))
+        };
+        self.diagnostics
+            .push(diag.with_category(DiagnosticCategory::Type));
+    }
+
+    /// Check class-side protocol conformance for a metatype (`Meta{C}`)
+    /// call-site argument (BT-2761) — the `Meta` arm of
+    /// [`check_protocol_argument_conformance`](Self::check_protocol_argument_conformance).
+    ///
+    /// Emits a warning naming the *class side* (`C class`) when it does not
+    /// conform to `base_protocol` per
+    /// [`ProtocolRegistry::check_class_side_conformance`].
+    fn check_meta_argument_conformance(
+        &mut self,
+        class_name: &EcoString,
+        base_protocol: &str,
+        span: Span,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: &ProtocolRegistry,
+    ) {
+        if protocol_registry.get(base_protocol).is_none() {
+            return; // Not a protocol — handled by normal type checking
+        }
+        match protocol_registry.check_class_side_conformance(class_name, base_protocol, hierarchy) {
+            Ok(()) => {} // Class side conforms — no warning
+            Err(missing) => {
+                let missing_list = missing
+                    .iter()
+                    .map(|s| format!("'{s}'"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                self.diagnostics.push(
+                    Diagnostic::warning(
+                        format!("{class_name} class does not conform to protocol {base_protocol}"),
+                        span,
+                    )
+                    .with_category(DiagnosticCategory::Type)
+                    .with_hint(format!(
+                        "Missing required class-side method(s): {missing_list}"
+                    )),
+                );
+            }
         }
     }
 

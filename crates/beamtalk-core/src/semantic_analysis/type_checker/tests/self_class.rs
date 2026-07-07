@@ -81,7 +81,7 @@ fn meta_variant_is_name_only_and_displays_as_class() {
     assert_eq!(m.as_meta().map(EcoString::as_str), Some("List"));
     // `as_known` must be None — a metatype is NOT its instance class.
     assert!(m.as_known().is_none());
-    assert_eq!(m.display_name().unwrap(), "List class");
+    assert_eq!(m.display_name(), "List class");
 }
 
 #[test]
@@ -594,7 +594,7 @@ fn metatype_renders_as_source_spelling_in_diagnostics() {
     let nil_meta = InferredType::meta("UndefinedObject");
     assert_eq!(nil_meta.display_for_diagnostic().unwrap(), "Nil class");
     // canonical (internal) keeps UndefinedObject.
-    assert_eq!(nil_meta.display_name().unwrap(), "UndefinedObject class");
+    assert_eq!(nil_meta.display_name(), "UndefinedObject class");
 }
 
 // ---------------------------------------------------------------------------

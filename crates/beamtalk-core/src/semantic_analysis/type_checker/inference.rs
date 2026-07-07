@@ -540,41 +540,33 @@ impl TypeChecker {
                     // A narrowing assignment (declared type is a subtype of RHS type, e.g.
                     // `Dictionary := <Object>`) is the type-erasure escape hatch the annotation
                     // is designed for — the user is asserting the runtime type is more specific.
-                    if let Some(inferred_name) = inferred_ty.display_name() {
-                        if !matches!(inferred_ty, InferredType::Dynamic(_) | InferredType::Never) {
-                            if let Some(declared_name) = declared.display_name() {
-                                let rhs_assignable_to_declared = Self::is_assignable_to(
-                                    &inferred_name,
-                                    &declared_name,
-                                    hierarchy,
-                                );
-                                let declared_assignable_to_rhs = Self::is_assignable_to(
-                                    &declared_name,
-                                    &inferred_name,
-                                    hierarchy,
-                                );
-                                if !rhs_assignable_to_declared && !declared_assignable_to_rhs {
-                                    // BT-2066: Use source-sympathetic spelling (`Nil`) for user-facing messages.
-                                    let inferred_display = inferred_ty
-                                        .display_for_diagnostic()
-                                        .unwrap_or_else(|| inferred_name.clone());
-                                    let declared_display = declared
-                                        .display_for_diagnostic()
-                                        .unwrap_or_else(|| declared_name.clone());
-                                    self.diagnostics.push(
-                                        Diagnostic::warning(
-                                            format!(
-                                                "Type mismatch: declared as {declared_display}, got {inferred_display}"
-                                            ),
-                                            *span,
-                                        )
-                                        .with_category(DiagnosticCategory::Type)
-                                        .with_hint(format!(
-                                            "The right-hand side has type {inferred_display} which is not assignable to {declared_display}"
-                                        )),
-                                    );
-                                }
-                            }
+                    if !matches!(inferred_ty, InferredType::Dynamic(_) | InferredType::Never) {
+                        let inferred_name = inferred_ty.display_name();
+                        let declared_name = declared.display_name();
+                        let rhs_assignable_to_declared =
+                            Self::is_assignable_to(&inferred_name, &declared_name, hierarchy);
+                        let declared_assignable_to_rhs =
+                            Self::is_assignable_to(&declared_name, &inferred_name, hierarchy);
+                        if !rhs_assignable_to_declared && !declared_assignable_to_rhs {
+                            // BT-2066: Use source-sympathetic spelling (`Nil`) for user-facing messages.
+                            let inferred_display = inferred_ty
+                                .display_for_diagnostic()
+                                .unwrap_or_else(|| inferred_name.clone());
+                            let declared_display = declared
+                                .display_for_diagnostic()
+                                .unwrap_or_else(|| declared_name.clone());
+                            self.diagnostics.push(
+                                Diagnostic::warning(
+                                    format!(
+                                        "Type mismatch: declared as {declared_display}, got {inferred_display}"
+                                    ),
+                                    *span,
+                                )
+                                .with_category(DiagnosticCategory::Type)
+                                .with_hint(format!(
+                                    "The right-hand side has type {inferred_display} which is not assignable to {declared_display}"
+                                )),
+                            );
                         }
                     }
                     declared
@@ -1593,6 +1585,7 @@ impl TypeChecker {
                         &eq.info.singleton,
                         eq.info.negated,
                         span,
+                        hierarchy,
                     );
                 }
             }
@@ -2396,7 +2389,7 @@ impl TypeChecker {
         };
         let current_ty = Self::resolve_narrowing_variable_type(&info.variable, env, hierarchy);
 
-        let matched = InferredType::known(eq.singleton.clone());
+        let matched = InferredType::known(eq.singleton.as_type_name().clone());
         let provenance = super::TypeProvenance::Inferred(Span::default());
         // ADR 0102 §2: the equality branches are the set-theoretic intersection
         // and difference of the variable's current type with the tested
@@ -2530,12 +2523,13 @@ impl TypeChecker {
     pub(super) fn check_impossible_singleton_comparison(
         &mut self,
         current_ty: &InferredType,
-        singleton: &EcoString,
+        singleton: &narrowing::SingletonName,
         negated: bool,
         test_span: Span,
+        hierarchy: &ClassHierarchy,
     ) {
         if matches!(current_ty, InferredType::Dynamic(_) | InferredType::Never)
-            || Self::type_admits_singleton(current_ty, singleton)
+            || Self::type_admits_singleton(current_ty, singleton, hierarchy)
         {
             return;
         }
@@ -2552,30 +2546,36 @@ impl TypeChecker {
     }
 
     /// BT-2624 / ADR 0102 §2: whether the singleton `singleton` (`#foo`) could
-    /// be a runtime value of `ty` — defined as `intersect(ty, #foo) != Never`.
+    /// be a runtime value of `ty` — defined as
+    /// `intersect(ty, #foo, hierarchy) != Never`.
     ///
     /// Intersection already models singleton membership (`Symbol ∩ #foo = #foo`,
     /// `Object ∩ #foo = #foo`, `Integer ∩ #foo = Never`, and it distributes over
     /// unions), so this is the single source of truth for "the test could hold".
     /// `Dynamic` intersects to the singleton (non-`Never`), so callers stay
     /// conservative when the type is unknown.
-    fn type_admits_singleton(ty: &InferredType, singleton: &EcoString) -> bool {
-        let matched = InferredType::known(singleton.clone());
+    ///
+    /// The [`narrowing::SingletonName`] parameter guarantees at the type level
+    /// (BT-2764) that the pattern is a bare `#foo` singleton, never a nominal
+    /// class name — singletons are not hierarchy entries, so a nominal name
+    /// here would silently mis-answer membership.
+    ///
+    /// The hierarchy is threaded through so *supertypes* of `Symbol` other
+    /// than `Object` (e.g. an abstract `ProtoObject`-typed receiver) also
+    /// admit singletons (BT-2764): `intersect`'s symbol-singleton arms consult
+    /// the hierarchy to reduce `ProtoObject ∩ #foo` to `#foo` rather than
+    /// falling through to `Never`, matching the pre-ADR-0102 hierarchy walk.
+    fn type_admits_singleton(
+        ty: &InferredType,
+        singleton: &narrowing::SingletonName,
+        hierarchy: &ClassHierarchy,
+    ) -> bool {
+        let matched = InferredType::known(singleton.as_type_name().clone());
         let provenance = super::TypeProvenance::Inferred(Span::default());
-        // The pattern is always a bare *singleton*, which is never an entry in
-        // the class hierarchy, so the nominal-class base case of `intersect` is
-        // unreachable here — `None` is provably equivalent to threading a real
-        // hierarchy (a singleton relates only to `Symbol`/itself, handled by the
-        // explicit symbol arms).
-        debug_assert!(
-            singleton.starts_with('#'),
-            "type_admits_singleton: `singleton` must be a bare symbol (`#foo`), \
-             not a nominal class — the `None` hierarchy below relies on it"
-        );
         !matches!(
-            // Likewise no protocol registry needed — a bare singleton is
-            // never a protocol name.
-            InferredType::intersect(ty, &matched, provenance, None, None),
+            // No protocol registry needed — a bare singleton is never a
+            // protocol name.
+            InferredType::intersect(ty, &matched, provenance, Some(hierarchy), None),
             InferredType::Never
         )
     }
