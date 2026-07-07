@@ -532,6 +532,16 @@ fn analyse_full_with_natives(
     let mut analyser = Analyser::with_scope(scope, type_map);
 
     analyser.analyse_module(module);
+    // ADR 0103 Phase 2 (BT-2756): block-capture sendability. Runs here where
+    // both the type_map (owned by the analyser) and the computed block captures
+    // are live.
+    validators::check_block_capture_sendability(
+        module,
+        &result.class_hierarchy,
+        analyser.type_map(),
+        &analyser.result.block_info,
+        &mut result.diagnostics,
+    );
     result.diagnostics.extend(analyser.result.diagnostics);
     result.block_info = analyser.result.block_info;
 

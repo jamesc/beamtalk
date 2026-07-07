@@ -3752,6 +3752,65 @@ fn handle_scope_on_value_class_warns() {
     );
 }
 
+// --- ADR 0103: block-capture sendability (BT-2756) ---
+
+fn sendability_diags(src: &str) -> Vec<Diagnostic> {
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    analyse(&module)
+        .diagnostics
+        .into_iter()
+        .filter(|d| d.category == Some(crate::source_analysis::DiagnosticCategory::Sendability))
+        .collect()
+}
+
+#[test]
+fn block_captures_port_sent_to_actor_warns() {
+    let src = "Actor subclass: Worker\n  \
+        schedule: aBlock => aBlock value\n\n\
+        Object subclass: Main\n  \
+        run: port :: Port with: worker :: Worker =>\n    \
+        worker schedule: [port asString]\n";
+    let diags = sendability_diags(src);
+    assert_eq!(
+        diags.len(),
+        1,
+        "expected one block-capture warning: {diags:?}"
+    );
+    assert!(
+        diags[0].message.contains("block captures `port`") && diags[0].message.contains("sent to"),
+        "unexpected message: {}",
+        diags[0].message
+    );
+}
+
+#[test]
+fn block_captures_port_in_local_do_is_silent() {
+    // `do:` is a state-threading selector — the block stays in this process.
+    let src = "Object subclass: Main\n  \
+        run: port :: Port =>\n    \
+        #(1, 2) do: [:each | port asString]\n";
+    let diags = sendability_diags(src);
+    assert!(
+        diags.is_empty(),
+        "block in a local do: must not warn: {diags:?}"
+    );
+}
+
+#[test]
+fn block_captures_sendable_value_is_silent() {
+    let src = "Actor subclass: Worker\n  \
+        schedule: aBlock => aBlock value\n\n\
+        Object subclass: Main\n  \
+        run: count :: Integer with: worker :: Worker =>\n    \
+        worker schedule: [count printString]\n";
+    let diags = sendability_diags(src);
+    assert!(
+        diags.is_empty(),
+        "capturing a Sendable value must not warn: {diags:?}"
+    );
+}
+
 // --- Extension method integration with type checker (BT-1518) ---
 
 #[test]
