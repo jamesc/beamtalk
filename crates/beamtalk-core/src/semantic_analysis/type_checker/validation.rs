@@ -1687,6 +1687,15 @@ impl TypeChecker {
                     .map(|m| InferredType::class_name_for_diagnostic(m.as_str()))
                     .collect::<Vec<_>>()
                     .join(", ");
+                // Mirror `check_field_assignment_type`: when no member is
+                // compatible, say so plainly rather than "some members".
+                let hint = if compat == 0 {
+                    format!("No member of {union_display} is compatible with {declared_display}")
+                } else {
+                    format!(
+                        "Some members of {union_display} are not compatible with {declared_display}: {list}"
+                    )
+                };
                 self.diagnostics.push(
                     Diagnostic::warning(
                         format!(
@@ -1695,9 +1704,7 @@ impl TypeChecker {
                         value_expr.span(),
                     )
                     .with_category(DiagnosticCategory::Type)
-                    .with_hint(format!(
-                        "Some members of {union_display} are not compatible with {declared_display}: {list}"
-                    )),
+                    .with_hint(hint),
                 );
             }
             // Dynamic / Never / Meta / Negation / Intersection value — skip.
