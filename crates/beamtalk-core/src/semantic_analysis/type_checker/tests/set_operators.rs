@@ -588,7 +588,7 @@ fn union_dedups_equal_complements() {
 fn negation_display_renders_backslash() {
     let neg = negation(singleton("#foo"));
     assert_eq!(neg.display_for_diagnostic().unwrap(), "Symbol \\ #foo");
-    assert_eq!(neg.display_name().unwrap(), "Symbol \\ #foo");
+    assert_eq!(neg.display_name(), "Symbol \\ #foo");
 }
 
 #[test]

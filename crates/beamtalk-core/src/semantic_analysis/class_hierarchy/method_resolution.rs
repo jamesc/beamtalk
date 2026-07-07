@@ -397,7 +397,7 @@ impl ClassHierarchy {
             // Extract display name: "List(String)" for Known with type_args,
             // "Integer" for Known without, "Never" for Never.
             let return_type_name = match inferred_ty {
-                InferredType::Known { .. } => inferred_ty.display_name(),
+                InferredType::Known { .. } => Some(inferred_ty.display_name()),
                 InferredType::Never => Some(EcoString::from("Never")),
                 _ => None,
             };

@@ -583,7 +583,7 @@ fn never_union_all_never() {
 
 #[test]
 fn never_display_name() {
-    assert_eq!(InferredType::Never.display_name(), Some("Never".into()));
+    assert_eq!(InferredType::Never.display_name(), "Never");
 }
 
 #[test]

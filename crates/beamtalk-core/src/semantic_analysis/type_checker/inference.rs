@@ -540,41 +540,33 @@ impl TypeChecker {
                     // A narrowing assignment (declared type is a subtype of RHS type, e.g.
                     // `Dictionary := <Object>`) is the type-erasure escape hatch the annotation
                     // is designed for — the user is asserting the runtime type is more specific.
-                    if let Some(inferred_name) = inferred_ty.display_name() {
-                        if !matches!(inferred_ty, InferredType::Dynamic(_) | InferredType::Never) {
-                            if let Some(declared_name) = declared.display_name() {
-                                let rhs_assignable_to_declared = Self::is_assignable_to(
-                                    &inferred_name,
-                                    &declared_name,
-                                    hierarchy,
-                                );
-                                let declared_assignable_to_rhs = Self::is_assignable_to(
-                                    &declared_name,
-                                    &inferred_name,
-                                    hierarchy,
-                                );
-                                if !rhs_assignable_to_declared && !declared_assignable_to_rhs {
-                                    // BT-2066: Use source-sympathetic spelling (`Nil`) for user-facing messages.
-                                    let inferred_display = inferred_ty
-                                        .display_for_diagnostic()
-                                        .unwrap_or_else(|| inferred_name.clone());
-                                    let declared_display = declared
-                                        .display_for_diagnostic()
-                                        .unwrap_or_else(|| declared_name.clone());
-                                    self.diagnostics.push(
-                                        Diagnostic::warning(
-                                            format!(
-                                                "Type mismatch: declared as {declared_display}, got {inferred_display}"
-                                            ),
-                                            *span,
-                                        )
-                                        .with_category(DiagnosticCategory::Type)
-                                        .with_hint(format!(
-                                            "The right-hand side has type {inferred_display} which is not assignable to {declared_display}"
-                                        )),
-                                    );
-                                }
-                            }
+                    if !matches!(inferred_ty, InferredType::Dynamic(_) | InferredType::Never) {
+                        let inferred_name = inferred_ty.display_name();
+                        let declared_name = declared.display_name();
+                        let rhs_assignable_to_declared =
+                            Self::is_assignable_to(&inferred_name, &declared_name, hierarchy);
+                        let declared_assignable_to_rhs =
+                            Self::is_assignable_to(&declared_name, &inferred_name, hierarchy);
+                        if !rhs_assignable_to_declared && !declared_assignable_to_rhs {
+                            // BT-2066: Use source-sympathetic spelling (`Nil`) for user-facing messages.
+                            let inferred_display = inferred_ty
+                                .display_for_diagnostic()
+                                .unwrap_or_else(|| inferred_name.clone());
+                            let declared_display = declared
+                                .display_for_diagnostic()
+                                .unwrap_or_else(|| declared_name.clone());
+                            self.diagnostics.push(
+                                Diagnostic::warning(
+                                    format!(
+                                        "Type mismatch: declared as {declared_display}, got {inferred_display}"
+                                    ),
+                                    *span,
+                                )
+                                .with_category(DiagnosticCategory::Type)
+                                .with_hint(format!(
+                                    "The right-hand side has type {inferred_display} which is not assignable to {declared_display}"
+                                )),
+                            );
                         }
                     }
                     declared

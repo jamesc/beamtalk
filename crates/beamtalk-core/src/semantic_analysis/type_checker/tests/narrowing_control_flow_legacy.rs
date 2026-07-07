@@ -546,7 +546,7 @@ fn test_union_with_generic_members() {
     let union = InferredType::union_of(&[result_ty.clone(), nil_ty]);
 
     // display_name should render generics
-    let display = union.display_name().unwrap();
+    let display = union.display_name();
     assert!(
         display.contains("Result(Integer, String)"),
         "Union display should include generic args, got: {display}"

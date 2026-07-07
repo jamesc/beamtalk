@@ -397,8 +397,8 @@ impl InferredType {
     /// help, and code actions, prefer [`display_for_diagnostic`](Self::display_for_diagnostic),
     /// which renders the source-sympathetic `Nil` spelling instead.
     #[must_use]
-    pub fn display_name(&self) -> Option<EcoString> {
-        Some(self.display_with_options(DisplayOptions::CANONICAL))
+    pub fn display_name(&self) -> EcoString {
+        self.display_with_options(DisplayOptions::CANONICAL)
     }
 
     /// Maps a raw class-name string to its user-facing diagnostic spelling.
@@ -728,9 +728,7 @@ impl InferredType {
     fn excluded_sort_key(member: &Self) -> EcoString {
         match member {
             Self::Known { class_name, .. } => class_name.clone(),
-            other => other
-                .display_name()
-                .expect("display_name() always returns Some; the Option wrapper is legacy"),
+            other => other.display_name(),
         }
     }
 
@@ -1094,11 +1092,7 @@ impl InferredType {
                 }
             }
         }
-        flat.sort_by(|x, y| {
-            x.display_name()
-                .unwrap_or_default()
-                .cmp(&y.display_name().unwrap_or_default())
-        });
+        flat.sort_by_key(Self::display_name);
         match flat.len() {
             // Unreachable from `intersect`'s call site (which always passes two
             // distinct members), kept for a total/defensive standalone helper.
@@ -1233,7 +1227,7 @@ mod display_tests {
     #[test]
     fn display_name_keeps_canonical_undefined_object() {
         let ty = InferredType::known("UndefinedObject");
-        assert_eq!(ty.display_name().unwrap(), "UndefinedObject");
+        assert_eq!(ty.display_name(), "UndefinedObject");
     }
 
     #[test]
@@ -1259,7 +1253,7 @@ mod display_tests {
     #[test]
     fn display_name_union_keeps_canonical_undefined_object() {
         let ty = InferredType::simple_union(&["Integer", "UndefinedObject"]);
-        let rendered = ty.display_name().unwrap();
+        let rendered = ty.display_name();
         assert!(
             rendered.contains("UndefinedObject"),
             "display_name must keep canonical spelling for internal use, got: {rendered}"

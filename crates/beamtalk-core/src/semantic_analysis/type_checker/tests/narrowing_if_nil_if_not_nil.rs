@@ -139,7 +139,7 @@ typed Object subclass: Repro
         checker
             .type_map()
             .iter()
-            .filter_map(|(_, ty)| ty.display_name())
+            .map(|(_, ty)| ty.display_name())
             .collect::<Vec<_>>()
     );
 }
@@ -177,7 +177,7 @@ typed Object subclass: Repro
         checker
             .type_map()
             .iter()
-            .filter_map(|(_, ty)| ty.display_name())
+            .map(|(_, ty)| ty.display_name())
             .collect::<Vec<_>>()
     );
 }
