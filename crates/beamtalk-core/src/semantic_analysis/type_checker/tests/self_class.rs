@@ -202,20 +202,21 @@ fn class_value_through_variable_resolves_class_side() {
 
 #[test]
 fn binary_compare_on_class_value_is_boolean_not_dnu() {
-    // `cls = Foo` / `x class = Integer` — binary comparisons on a class object
-    // must NOT route to class-side DNU lookup (that broke `x class = Integer`
-    // narrowing). They are universal value comparisons → Boolean.
+    // `cls =:= Foo` / `x class =:= Integer` — binary comparisons on a class
+    // object must NOT route to class-side DNU lookup (that broke
+    // `x class =:= Integer` narrowing). They are universal value comparisons
+    // → Boolean.
     let hierarchy = ClassHierarchy::with_builtins();
     let send = msg_send(
         var("cls"),
-        MessageSelector::Binary("=".into()),
+        MessageSelector::Binary("=:=".into()),
         vec![class_ref("Integer")],
     );
     let ty = infer_send_on_local("cls", InferredType::meta("Integer"), &send, &hierarchy);
     assert_eq!(
         ty.as_known().map(EcoString::as_str),
         Some("Boolean"),
-        "`cls = Integer` on a metatype should be Boolean; got {ty:?}"
+        "`cls =:= Integer` on a metatype should be Boolean; got {ty:?}"
     );
 }
 
@@ -658,7 +659,7 @@ fn equality_binary_on_class_value_still_boolean() {
     // infers Boolean via the (now-restricted) fast-path. Covers every
     // equality/identity operator in the canonical set.
     let hierarchy = ClassHierarchy::with_builtins();
-    for op in ["=", "==", "=:=", "/=", "=/="] {
+    for op in ["==", "=:=", "/=", "=/="] {
         let send = msg_send(
             var("cls"),
             MessageSelector::Binary(op.into()),
@@ -907,23 +908,23 @@ fn syntactic_class_literal_new_still_works() {
 
 #[test]
 fn class_eq_literal_narrowing_not_regressed() {
-    // REGRESSION (critical): `x class = Foo` narrowing must still narrow `x` to a
-    // `Foo` instance in the true branch, even though `Foo` is now Meta{Foo} and
-    // the `= Foo` comparison receiver `x class` is Meta{X}. The narrowing rule is
-    // AST-driven (class_eq.rs), so it builds Known(Foo) from the literal node —
-    // and the `Meta{X} = ...` comparison must stay Boolean (no DNU on the guard).
+    // REGRESSION (critical): `x class =:= Foo` narrowing must still narrow `x`
+    // to a `Foo` instance in the true branch, even though `Foo` is now
+    // Meta{Foo} and the `=:= Foo` comparison receiver `x class` is Meta{X}.
+    // The narrowing rule is AST-driven (class_eq.rs), so it builds Known(Foo)
+    // from the literal node — and the `Meta{X} =:= ...` comparison must stay
+    // Boolean (no DNU on the guard).
     //
     // Built as AST (mirrors the pinned narrowing tests) so the guard
-    // `x class = Integer` is exercised — the parser does not accept the inline
-    // `(x class = Integer)` paren-spelling, so source-level isn't an option here.
+    // `x class =:= Integer` is exercised.
     let hierarchy = ClassHierarchy::with_builtins();
     // process: x :: Object =>
-    //   (x class = Integer) ifTrue: [x isEven] ifFalse: [x printString]
+    //   (x class =:= Integer) ifTrue: [x isEven] ifFalse: [x printString]
     // `isEven` is an Integer-only selector — it must resolve in the true branch
     // (x narrowed to Integer), confirming the literal-eq narrowing still fires.
     let guard = msg_send(
         msg_send(var("x"), MessageSelector::Unary("class".into()), vec![]),
-        MessageSelector::Binary("=".into()),
+        MessageSelector::Binary("=:=".into()),
         vec![class_ref("Integer")],
     );
     let process_method = make_keyword_method(
@@ -961,7 +962,7 @@ fn class_eq_literal_narrowing_not_regressed() {
         .collect();
     assert!(
         dnu.is_empty(),
-        "`x class = Integer` literal-eq narrowing must still narrow x to Integer \
+        "`x class =:= Integer` literal-eq narrowing must still narrow x to Integer \
          (so `x isEven` resolves) and the guard must not DNU; got {dnu:?}"
     );
 }

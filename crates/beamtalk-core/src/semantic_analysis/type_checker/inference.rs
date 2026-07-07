@@ -1241,13 +1241,13 @@ impl TypeChecker {
             ..
         } = receiver_ty
         {
-            // The equality/identity comparison operators (`=`, `==`, `=:=`,
+            // The equality/identity comparison operators (`==`, `=:=`,
             // `/=`, `=/=`) are value/identity comparisons every object —
             // including a class object — supports at runtime via the universal
             // `Object`/`ProtoObject` protocol, but they are not modelled as
             // hierarchy methods. Routing them through class-side DNU lookup
-            // would emit a false `C class does not understand '='` (it broke
-            // `x class = Foo` narrowing). Treat ONLY these comparison
+            // would emit a false `C class does not understand '=:='` (it broke
+            // `x class =:= Foo` narrowing). Treat ONLY these comparison
             // selectors as Boolean-returning without a class-side check —
             // matching the pre-0083 behaviour where `Self class` was Dynamic.
             // Other binary selectors (e.g. `+`) must fall through to normal
@@ -2038,9 +2038,9 @@ impl TypeChecker {
     /// - SOME non-nil members respond → DNU hint naming the non-responding members.
     /// - NO non-nil members respond → existing DNU warning.
     ///
-    /// Note: the equality / identity comparison operators (`=`, `==`, `=:=`,
+    /// Note: the equality / identity comparison operators (`==`, `=:=`,
     /// `/=`, `=/=`) short-circuit to `Boolean` without per-member resolution
-    /// (see the inline note). A member class that overrides `=` to return
+    /// (see the inline note). A member class that overrides `=:=` to return
     /// something other than `Boolean` would therefore still infer `Boolean`
     /// here — an intentional tradeoff matching the non-union `Meta` path, since
     /// these operators are part of the universal `Object`/`ProtoObject`
@@ -2069,17 +2069,17 @@ impl TypeChecker {
             return InferredType::Dynamic(DynamicReason::DynamicReceiver);
         }
 
-        // BT-2624: The equality / identity comparison operators (`=`, `==`,
+        // BT-2624: The equality / identity comparison operators (`==`,
         // `=:=`, `/=`, `=/=`) are universal value/identity comparisons every
         // object supports at runtime via the `Object`/`ProtoObject` protocol,
-        // but they are not modelled as per-class hierarchy methods (bare `=` is
-        // a codegen alias for `=:=`, BT-952). The non-union `Meta` receiver path
-        // already special-cases them for exactly this reason — mirror it here so
-        // a union receiver does not spuriously report that a concrete member
-        // (e.g. `Integer does not understand '='`) or a singleton member fails
-        // to understand the operator. This also keeps the idiomatic
-        // `unionVar = #singleton` narrowing guard (BT-2617) warning-free. These
-        // selectors always return `Boolean`.
+        // but they are not modelled as per-class hierarchy methods. The
+        // non-union `Meta` receiver path already special-cases them for
+        // exactly this reason — mirror it here so a union receiver does not
+        // spuriously report that a concrete member (e.g. `Integer does not
+        // understand '=:='`) or a singleton member fails to understand the
+        // operator. This also keeps the idiomatic `unionVar =:= #singleton`
+        // narrowing guard (BT-2617) warning-free. These selectors always
+        // return `Boolean`.
         if is_equality_comparison_op(selector) {
             return InferredType::known("Boolean");
         }
@@ -4246,13 +4246,12 @@ fn is_class_protocol_selector(selector: &str) -> bool {
 /// object) supports via `Object` / `ProtoObject`.
 ///
 /// These mirror the equality operators in the parser's binding-power table
-/// (`==`, `/=`, `=:=`, `=/=` at precedence 10) plus the legacy `=` strict-
-/// equality alias (BT-952, see `codegen/core_erlang/operators.rs`). They are
-/// the same comparison forms `x class = Foo` narrowing recognises
+/// (`==`, `/=`, `=:=`, `=/=` at precedence 10). They are the same comparison
+/// forms `x class =:= Foo` narrowing recognises
 /// (`narrowing/rules/class_eq.rs`). All other binary selectors are NOT
 /// comparisons and must fall through to normal class-side / tower lookup.
 fn is_equality_comparison_op(op: &str) -> bool {
-    matches!(op, "=" | "==" | "=:=" | "/=" | "=/=")
+    matches!(op, "==" | "=:=" | "/=" | "=/=")
 }
 
 #[cfg(test)]
@@ -4636,33 +4635,6 @@ mod tests {
     }
 
     #[test]
-    fn detect_narrowing_class_eq() {
-        // x class = String
-        let class_send = Expression::MessageSend {
-            receiver: Box::new(var("x")),
-            selector: MessageSelector::Unary("class".into()),
-            arguments: vec![],
-            is_cast: false,
-            span: span(),
-        };
-        let expr = Expression::MessageSend {
-            receiver: Box::new(class_send),
-            selector: MessageSelector::Binary("=".into()),
-            arguments: vec![class_ref("String")],
-            is_cast: false,
-            span: span(),
-        };
-        let info = TypeChecker::detect_narrowing(&expr).expect("should detect class =");
-        assert_eq!(info.variable, EnvKey::local("x"));
-        assert_eq!(
-            info.true_type,
-            InferredType::Dynamic(DynamicReason::Unknown)
-        );
-        assert_eq!(info.class_test.as_deref(), Some("String"));
-        assert!(!info.is_nil_check);
-    }
-
-    #[test]
     fn detect_narrowing_class_identity_eq() {
         // x class =:= Float
         let class_send = Expression::MessageSend {
@@ -4745,7 +4717,7 @@ mod tests {
 
     #[test]
     fn detect_narrowing_parenthesized_class_eq() {
-        // (x class) = Integer
+        // (x class) =:= Integer
         let class_send = Expression::MessageSend {
             receiver: Box::new(var("x")),
             selector: MessageSelector::Unary("class".into()),
@@ -4759,12 +4731,12 @@ mod tests {
         };
         let expr = Expression::MessageSend {
             receiver: Box::new(parens),
-            selector: MessageSelector::Binary("=".into()),
+            selector: MessageSelector::Binary("=:=".into()),
             arguments: vec![class_ref("Integer")],
             is_cast: false,
             span: span(),
         };
-        let info = TypeChecker::detect_narrowing(&expr).expect("should detect (x class) = Type");
+        let info = TypeChecker::detect_narrowing(&expr).expect("should detect (x class) =:= Type");
         assert_eq!(info.variable, EnvKey::local("x"));
         assert_eq!(
             info.true_type,

@@ -324,7 +324,7 @@ Protocol define: Stack<T>
   requiring: [push: <T>, pop -> <T>, isEmpty -> Boolean]
 
 // Type narrowing in control flow
-x class = Integer ifTrue: [
+x class =:= Integer ifTrue: [
   x + 1       // Compiler knows x is Integer here
 ]
 ```

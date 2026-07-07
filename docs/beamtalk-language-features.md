@@ -527,7 +527,8 @@ Binary operators follow standard math precedence (highest to lowest):
 - `==` - Loose equality (Erlang `==`): `5 == 5.0` → `true`
 - `/=` - Loose inequality (Erlang `/=`): `5 /= 6` → `true`
 - `=/=` - Strict inequality (Erlang `=/=`): `5 =/= 6` → `true`
-- `=` - Legacy alias for `=:=` (strict equality). Prefer `=:=` instead. `beamtalk lint` warns on `x = true` / `x = false`.
+
+Note: bare `=` is **not** a valid Beamtalk operator — it has no entry in the parser's precedence table, so `x = y` fails to parse. Use `=:=` for value equality or `==` for reference equality.
 
 #### Short-circuit boolean operators (`and:`/`or:`)
 
@@ -1695,7 +1696,7 @@ When the type checker recognises a type-testing pattern followed by `ifTrue:` / 
 ```beamtalk
 // class identity check — narrows to exact class
 process: x :: Object =>
-  x class = Integer ifTrue: [
+  x class =:= Integer ifTrue: [
     x + 1          // x is Integer here — has '+'
   ]
   x + 1            // x is Object here — no narrowing outside the block
@@ -1716,7 +1717,7 @@ validate: x :: Object =>
 
 | Pattern | Narrows to | Scope |
 |---|---|---|
-| `x class = Foo ifTrue: [...]` | `x` is `Foo` in true block | True block only |
+| `x class =:= Foo ifTrue: [...]` | `x` is `Foo` in true block | True block only |
 | `x isKindOf: Foo ifTrue: [...]` | `x` is `Foo` in true block | True block only |
 | `x isNil ifTrue: [^...]` | `x` is non-nil after the statement | Rest of method |
 | `x isNil ifTrue: [self error: "..."]` | `x` is non-nil after the statement | Rest of method |
