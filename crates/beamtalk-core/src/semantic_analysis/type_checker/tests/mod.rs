@@ -41,3 +41,4 @@ mod super_and_binary;
 mod typed_class;
 mod union_types;
 mod unions_checking;
+mod with_timeout_transparency;
