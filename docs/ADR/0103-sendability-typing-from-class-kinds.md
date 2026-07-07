@@ -19,7 +19,7 @@ Accepted (2026-07-07)
 
 Sibling epic **[BT-2747](https://linear.app/beamtalk/issue/BT-2747)** (ADR 0104): BT-2755 shares the `spawnWith:` `MapLiteral` call-site inspection with BT-2750 (`related-to`, either order). Deferred: remote-node grading of `#node` scopes (blocked on a future cluster-registration ADR).
 
-**Status:** Planned
+**Status:** Implemented (Phases 0–3).
 
 ## Context
 
@@ -325,26 +325,6 @@ under-shoots.
 **Affected:** parser/AST, class hierarchy, type checker (first kind-aware
 logic), a Phase 3 validator, hover; **not** codegen output semantics or
 runtime dispatch.
-
-## Implementation Tracking
-
-**Epic:** [BT-2748](https://linear.app/beamtalk/issue/BT-2748)
-**Issues:**
-
-| Phase | Issue | Title | Size | Blocked by |
-|---|---|---|---|---|
-| 0 | [BT-2753](https://linear.app/beamtalk/issue/BT-2753) | Builtin tier table + tier-derivation core + `HandleScoped(#process)` message-arg check | M | – |
-| 1 | [BT-2754](https://linear.app/beamtalk/issue/BT-2754) | Parser + class hierarchy: `handleScope:` class-side keyword | M | – |
-| 1 | [BT-2755](https://linear.app/beamtalk/issue/BT-2755) | Full tier derivation (`Value` composition + `type_args`) + `spawnWith:` check + hover + stdlib audit | M | BT-2753, BT-2754 |
-| 2 | [BT-2756](https://linear.app/beamtalk/issue/BT-2756) | Block-capture sendability check (Phase 3 validator × `type_map`) | M | BT-2753, BT-2755 |
-| 2 | [BT-2757](https://linear.app/beamtalk/issue/BT-2757) | Announcement payload sendability + undeclared-handle companion lint | S | BT-2755 |
-| 3 | [BT-2758](https://linear.app/beamtalk/issue/BT-2758) | Diagnostic integration tests + docs + status flip | S | BT-2756, BT-2757 |
-
-**Deferred (blocked):** remote-receiver grading of `#node` scopes — needs a
-future cluster-registration ADR (ADR 0079 is local-only). Until then,
-`#node`-scoped sends are silent in v1.
-
-**Status:** Implemented (Phases 0–3).
 
 ## References
 - Seed: `docs/internal/positioning.md` (Seed 1)

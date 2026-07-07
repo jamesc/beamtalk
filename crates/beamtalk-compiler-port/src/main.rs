@@ -251,7 +251,12 @@ fn parse_class_info_from_meta_term(
         package,
         is_value,
         is_native: false, // BEAM cache doesn't carry native flag; re-derived at parse time
-        handle_scope: None, // BEAM cache doesn't carry handle scope; re-derived at parse time
+        // ADR 0103: handle scope is a declaration, not structurally re-derivable,
+        // so read it back from the meta map — a binary-only dependency that
+        // declares `handleScope:` must keep its tier across package boundaries.
+        handle_scope: map_get(m, "handle_scope")
+            .and_then(term_to_atom)
+            .map(ecow::EcoString::from),
         is_typed,
         state,
         state_types,
