@@ -842,6 +842,11 @@ fn format_stdlib_class_entry(m: &ClassMeta) -> String {
                 .join(", ")
         )
     };
+    // ADR 0103: `handle_scope` is intentionally omitted from this lightweight
+    // `.app.src` registry (like `is_native`, `fields`, and `methods`). The
+    // authoritative tier channel is `__beamtalk_meta/0` in the compiled `.beam`
+    // (read back by the compiler-port), which does carry it. No stdlib class
+    // declares `handleScope:` today, so there is no divergence to reconcile.
     format!(
         "#{{name => '{class}', module => '{module}', parent => '{super}', \
          package => 'stdlib', kind => {kind}, type_params => {type_params}}}",
@@ -1493,6 +1498,8 @@ mod tests {
         assert!(code.contains("selector: \"add:\".into()"));
         assert!(code.contains("arity: 1"));
         assert!(code.contains("selector: \"default\".into()"));
+        // ADR 0103: the generated ClassInfo carries the handle_scope field.
+        assert!(code.contains("handle_scope: None"));
     }
 
     #[test]

@@ -142,17 +142,6 @@ impl Tier {
             },
         }
     }
-
-    /// Combine two tiers taking the **strongest** (most-known) — used for
-    /// intersections, where the value satisfies every member at once, so the
-    /// least hazardous member describes it best and avoids false warnings.
-    fn meet(self, other: Tier) -> Tier {
-        if other.rank() < self.rank() {
-            other
-        } else {
-            self
-        }
-    }
 }
 
 /// Builtin tier table (ADR 0103) — classified directly in the checker, not via
@@ -237,12 +226,14 @@ fn tier_of_depth(ty: &InferredType, hierarchy: &ClassHierarchy, depth: u8) -> Ti
             .map(|m| tier_of_depth(m, hierarchy, depth + 1))
             .reduce(Tier::join)
             .unwrap_or(Tier::Unknown),
-        // An intersection value satisfies *every* member — the most-known
-        // member describes it best.
+        // An intersection value satisfies *every* member at once, so its
+        // runtime representation embeds every member's hazard — one
+        // `HandleScoped` facet must pull the whole type up, not be masked by a
+        // safer co-member. Same weakest-wins rule as a union.
         InferredType::Intersection { members, .. } => members
             .iter()
             .map(|m| tier_of_depth(m, hierarchy, depth + 1))
-            .reduce(Tier::meet)
+            .reduce(Tier::join)
             .unwrap_or(Tier::Unknown),
         // `A \ B` is still an `A`.
         InferredType::Negation { base, .. } => tier_of_depth(base, hierarchy, depth),
@@ -270,18 +261,22 @@ fn tier_of_known(
     if is_primitive_sendable(name) {
         return Tier::Sendable;
     }
-    // A user `Object subclass:` may declare its handle scope (BT-2754). A
-    // declared scope classifies the otherwise-`Unknown` Object.
-    if let Some(scope) = hierarchy.handle_scope(name) {
-        return Tier::HandleScoped(HandleScope::from_symbol(scope.as_str()));
-    }
 
-    // Base tier from the class kind, then compose structurally.
-    let mut tier = match hierarchy.resolve_class_kind(name) {
+    // Base tier from the class kind, then compose structurally. A user
+    // `handleScope:` declaration classifies an otherwise-`Unknown` Object
+    // (BT-2754); it is a no-op on Value/Actor kinds (see
+    // `check_handle_scope_on_object`), which keep their structural tier — so
+    // the scope is consulted only inside the `Object` arm, and an `Actor` with
+    // a stray `handleScope:` stays `SendableRef`, not `HandleScoped`.
+    let kind = hierarchy.resolve_class_kind(name);
+    let mut tier = match kind {
         ClassKind::Value => Tier::Sendable,
         ClassKind::Actor => Tier::SendableRef,
-        // Unclassified Object with no declaration stays silent.
-        ClassKind::Object => Tier::Unknown,
+        ClassKind::Object => match hierarchy.handle_scope(name) {
+            Some(scope) => Tier::HandleScoped(HandleScope::from_symbol(scope.as_str())),
+            // Unclassified Object with no declaration stays silent.
+            None => Tier::Unknown,
+        },
     };
 
     // Generic composition (ADR 0102 `type_args`): a container is as weak as its
@@ -294,7 +289,7 @@ fn tier_of_known(
     // declared fields — a `SendableRef` field makes it `SendableRef`, a
     // `HandleScoped` field makes it `HandleScoped`, an untyped/`Unknown` field
     // makes the composite `Unknown` (ADR 0103 §Tiers).
-    if hierarchy.resolve_class_kind(name) == ClassKind::Value {
+    if kind == ClassKind::Value {
         for field in hierarchy.all_state(name) {
             let field_tier = match hierarchy.state_field_type(name, &field) {
                 Some(field_ty) => {
@@ -446,6 +441,33 @@ mod tests {
         let h = ClassHierarchy::build(&module).0.unwrap();
         assert_eq!(
             tier_of(&known("PortBox"), &h),
+            Tier::HandleScoped(HandleScope::Process)
+        );
+    }
+
+    #[test]
+    fn actor_ignores_stray_handle_scope() {
+        // A `handleScope:` on an Actor class is a no-op (advisory elsewhere);
+        // the tier stays SendableRef, not HandleScoped.
+        let tokens = crate::source_analysis::lex_with_eof(
+            "Actor subclass: MyActor\n  handleScope: #process",
+        );
+        let (module, _) = crate::source_analysis::parse(tokens);
+        let h = ClassHierarchy::build(&module).0.unwrap();
+        assert_eq!(tier_of(&known("MyActor"), &h), Tier::SendableRef);
+    }
+
+    #[test]
+    fn intersection_takes_most_hazardous_member() {
+        let h = hierarchy();
+        // Pid & Port: the value embeds a process-bound handle, so the whole
+        // intersection is HandleScoped(#process), not masked to SendableRef.
+        let intersection = InferredType::Intersection {
+            members: vec![known("Pid"), known("Port")],
+            provenance: super::super::TypeProvenance::Extracted,
+        };
+        assert_eq!(
+            tier_of(&intersection, &h),
             Tier::HandleScoped(HandleScope::Process)
         );
     }

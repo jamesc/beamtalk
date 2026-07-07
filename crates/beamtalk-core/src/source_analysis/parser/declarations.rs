@@ -252,6 +252,11 @@ impl Parser {
             Some(Identifier::new(name, span))
         } else {
             self.error("Expected a symbol (e.g. #process or #node) after 'handleScope:'");
+            // Consume the offending token so class-body parsing recovers cleanly
+            // instead of cascading on it (mirrors the `native:` error path).
+            if !self.current_token().has_leading_newline() && !self.is_at_end() {
+                self.advance();
+            }
             None
         }
     }
