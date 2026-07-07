@@ -1569,6 +1569,13 @@ impl TypeChecker {
         let Some(pairs) = Self::spawn_with_map_pairs(selector, arguments) else {
             return;
         };
+        // `spawnWith:` is an Actor protocol (ADR 0104). A non-Actor class with
+        // `state:` slots that receives a `spawnWith:` send is already a terminal
+        // DNU — key-checking on top of that is noise. Guard on the class kind so
+        // the diagnostic only fires where `spawnWith:` is a real constructor.
+        if !hierarchy.is_actor_subclass(class_name) {
+            return;
+        }
         // Declared state slot names, including inherited slots. An empty set
         // means the class declares no state (e.g. a builtin, or one whose slots
         // are not in the hierarchy) — bail rather than flag every key.
@@ -1698,7 +1705,11 @@ impl TypeChecker {
         let mut best: Option<(EcoString, usize)> = None;
         for slot in slots {
             let dist = edit_distance(target, slot.as_str());
-            if dist <= 3
+            // `dist > 0` documents the invariant that exact matches are already
+            // filtered by the caller (`continue`d before this is called) — and
+            // keeps the function correct if ever reused without that pre-filter.
+            if dist > 0
+                && dist <= 3
                 && dist < target.len() / 2 + 1
                 && best.as_ref().is_none_or(|(_, d)| dist < *d)
             {
