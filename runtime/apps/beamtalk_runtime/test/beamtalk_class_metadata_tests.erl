@@ -301,6 +301,27 @@ with_no_main_table(Fun) ->
         ets:insert(?FUN_TABLE, SavedFuns)
     end.
 
+%% Helper: delete the fun table, run Fun, restore state.
+%% Used by delete_class_method_funs_when_fun_table_absent_test below.
+%% Fun must not invoke new/0 (directly or via set_runtime_class_methods/2),
+%% as that would recreate ?FUN_TABLE and defeat the test.  Tests that need
+%% pre-deletion table setup (e.g. lookup_class_method_fun_when_fun_table_absent_test)
+%% must handle the two-phase setup-then-delete inline instead.
+with_no_fun_table(Fun) ->
+    beamtalk_class_metadata:new(),
+    SavedMeta = ets:tab2list(?TABLE),
+    SavedFuns = ets:tab2list(?FUN_TABLE),
+    ets:delete(?FUN_TABLE),
+    try
+        Fun()
+    after
+        beamtalk_class_metadata:new(),
+        ets:delete_all_objects(?TABLE),
+        ets:delete_all_objects(?FUN_TABLE),
+        ets:insert(?TABLE, SavedMeta),
+        ets:insert(?FUN_TABLE, SavedFuns)
+    end.
+
 %% match_subclasses/1 returns [] when the metadata table does not exist.
 match_subclasses_when_table_absent_test() ->
     with_no_main_table(fun() ->
@@ -352,16 +373,6 @@ lookup_class_method_fun_when_fun_table_absent_test() ->
 %% delete_class_method_funs/1 returns ok when the fun table does not exist.
 %% Exercises the ets:info(?FUN_TABLE) =:= undefined branch (line ~430).
 delete_class_method_funs_when_fun_table_absent_test() ->
-    beamtalk_class_metadata:new(),
-    SavedMeta = ets:tab2list(?TABLE),
-    SavedFuns = ets:tab2list(?FUN_TABLE),
-    ets:delete(?FUN_TABLE),
-    try
+    with_no_fun_table(fun() ->
         ?assertEqual(ok, beamtalk_class_metadata:delete_class_method_funs('AnyClass'))
-    after
-        beamtalk_class_metadata:new(),
-        ets:delete_all_objects(?TABLE),
-        ets:delete_all_objects(?FUN_TABLE),
-        ets:insert(?TABLE, SavedMeta),
-        ets:insert(?FUN_TABLE, SavedFuns)
-    end.
+    end).
