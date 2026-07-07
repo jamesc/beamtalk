@@ -34,6 +34,7 @@ fn counter_actor(state: Vec<StateDeclaration>) -> ClassDefinition {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: span(),
     }
 }
@@ -60,6 +61,7 @@ fn widget_value(state: Vec<StateDeclaration>) -> ClassDefinition {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: span(),
     }
 }

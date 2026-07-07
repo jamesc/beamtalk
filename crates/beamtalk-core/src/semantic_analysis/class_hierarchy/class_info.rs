@@ -130,6 +130,13 @@ pub struct ClassInfo {
     /// Native actors delegate to a backing Erlang module and cannot declare
     /// `state:` fields (state is owned by the Erlang `gen_server`).
     pub is_native: bool,
+    /// Declared sendability handle scope (ADR 0103, `handleScope: #symbol`).
+    ///
+    /// The bare symbol text (e.g. `"process"`, `"node"`) declared via a
+    /// class-side `handleScope:` clause. `None` for classes with no
+    /// declaration. Inherited via [`ClassHierarchy::handle_scope`], which walks
+    /// the superclass chain. Only meaningful on `Object`-kind classes.
+    pub handle_scope: Option<EcoString>,
     /// State (instance variable) names.
     pub state: Vec<EcoString>,
     /// Declared type annotations for state fields (field name → type name).
@@ -244,6 +251,7 @@ impl ClassInfo {
             package: None, // Populated later by the build pipeline or BEAM metadata
             is_value: class.class_kind == ClassKind::Value,
             is_native: class.backing_module.is_some(),
+            handle_scope: class.handle_scope.as_ref().map(|s| s.name.clone()),
             state: class.state.iter().map(|s| s.name.name.clone()).collect(),
             state_types: class
                 .state

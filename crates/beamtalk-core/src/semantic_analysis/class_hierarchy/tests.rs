@@ -420,6 +420,7 @@ fn make_user_class(name: &str, superclass: &str) -> ClassDefinition {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     }
 }
@@ -694,6 +695,7 @@ fn make_class_with_sealed_method(
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     }
 }
@@ -735,6 +737,7 @@ fn make_class_with_sealed_class_method(
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     }
 }
@@ -888,6 +891,7 @@ fn cycle_detection_in_superclass_chain() {
             package: None,
             is_value: false,
             is_native: false,
+            handle_scope: None,
             state: vec![],
             state_types: HashMap::new(),
             state_has_default: HashMap::new(),
@@ -911,6 +915,7 @@ fn cycle_detection_in_superclass_chain() {
             package: None,
             is_value: false,
             is_native: false,
+            handle_scope: None,
             state: vec![],
             state_types: HashMap::new(),
             state_has_default: HashMap::new(),
@@ -964,6 +969,7 @@ fn multiple_user_classes_in_module() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
     let derived = ClassDefinition {
@@ -998,6 +1004,7 @@ fn multiple_user_classes_in_module() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
     let module = Module {
@@ -1098,6 +1105,7 @@ fn duplicate_instance_method_detected() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
     let module = Module {
@@ -1167,6 +1175,7 @@ fn duplicate_class_method_detected() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
     let module = Module {
@@ -1233,6 +1242,7 @@ fn no_duplicate_for_different_selectors() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
     let module = Module {
@@ -1389,6 +1399,7 @@ fn user_class_return_type_propagated() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
     let module = Module {
@@ -1446,6 +1457,7 @@ fn user_class_param_types_propagated() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
     let module = Module {
@@ -1492,6 +1504,7 @@ fn make_typed_state_class(name: &str, superclass: &str) -> ClassDefinition {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     }
 }
@@ -1573,6 +1586,7 @@ fn state_field_type_inherited_from_parent() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
     let module = Module {
@@ -1634,6 +1648,7 @@ fn state_field_type_shadowed_untyped_field() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
     let module = Module {
@@ -1791,6 +1806,7 @@ fn value_subclass_sets_is_value_flag() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
     let module = Module::new(vec![], test_span());
@@ -1827,6 +1843,7 @@ fn value_subclass_auto_generates_slot_methods() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
     let module = Module {
@@ -1898,6 +1915,7 @@ fn value_subclass_auto_methods_have_generated_docs() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
     let module = Module {
@@ -1988,6 +2006,7 @@ fn value_subclass_auto_methods_respect_user_overrides() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
     let module = Module {
@@ -2070,6 +2089,7 @@ fn sealed_override_checks_with_external_superclasses() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
     // ClassC (in module) inherits from UnknownClass (external)
@@ -2106,6 +2126,7 @@ fn sealed_override_checks_with_external_superclasses() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
     let module = Module {
@@ -2154,6 +2175,7 @@ fn add_from_beam_meta_inserts_non_builtin_class() {
         package: None,
         is_value: false,
         is_native: false,
+        handle_scope: None,
         state: vec![EcoString::from("count")],
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),
@@ -2196,6 +2218,7 @@ fn add_from_beam_meta_preserves_existing_entries() {
         package: None,
         is_value: false,
         is_native: false,
+        handle_scope: None,
         state: vec![EcoString::from("count")],
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),
@@ -2229,6 +2252,7 @@ fn add_from_beam_meta_preserves_existing_entries() {
         package: None,
         is_value: false,
         is_native: false,
+        handle_scope: None,
         state: vec![],
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),
@@ -2270,6 +2294,7 @@ fn add_from_beam_meta_skips_builtins() {
         package: None,
         is_value: false,
         is_native: false,
+        handle_scope: None,
         state: vec![],
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),
@@ -2351,6 +2376,7 @@ fn stamp_package_does_not_overwrite_existing_package() {
         package: Some(EcoString::from("other_pkg")),
         is_value: false,
         is_native: false,
+        handle_scope: None,
         state: vec![],
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),
@@ -2383,6 +2409,7 @@ fn add_from_beam_meta_preserves_is_internal_and_package() {
         package: Some(EcoString::from("mylib")),
         is_value: false,
         is_native: false,
+        handle_scope: None,
         state: vec![],
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),
@@ -2664,6 +2691,46 @@ fn resolve_class_kind_supervisor_stays_object() {
     let h = ClassHierarchy::with_builtins();
     assert_eq!(h.resolve_class_kind("Supervisor"), ClassKind::Object);
 }
+
+// --- ADR 0103: handleScope accessor (BT-2754) ---
+#[test]
+fn handle_scope_stored_and_read() {
+    let tokens = crate::source_analysis::lex_with_eof(
+        "typed Object subclass: MetricsTable native: metrics
+  handleScope: #node",
+    );
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let h = ClassHierarchy::build(&module).0.unwrap();
+    assert_eq!(
+        h.handle_scope("MetricsTable").map(EcoString::as_str),
+        Some("node")
+    );
+}
+
+#[test]
+fn handle_scope_none_when_undeclared() {
+    let tokens = crate::source_analysis::lex_with_eof("Object subclass: Plain");
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let h = ClassHierarchy::build(&module).0.unwrap();
+    assert_eq!(h.handle_scope("Plain"), None);
+}
+
+#[test]
+fn handle_scope_inherited_from_ancestor() {
+    // A subclass with no declaration of its own inherits the ancestor's scope.
+    let tokens = crate::source_analysis::lex_with_eof(
+        "typed Object subclass: HandleBase native: hb
+  handleScope: #process
+
+HandleBase subclass: HandleChild",
+    );
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let h = ClassHierarchy::build(&module).0.unwrap();
+    assert_eq!(
+        h.handle_scope("HandleChild").map(EcoString::as_str),
+        Some("process")
+    );
+}
 #[test]
 fn indirect_value_subclass_sets_is_value_in_hierarchy() {
     // MyValueBase inherits from Value, MyValueChild inherits from MyValueBase.
@@ -2898,6 +2965,7 @@ fn cross_file_value_sub_subclass_finds_new() {
         package: None,
         is_value: true,
         is_native: false,
+        handle_scope: None,
         state: vec![EcoString::from("x")],
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),

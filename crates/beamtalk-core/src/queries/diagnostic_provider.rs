@@ -394,6 +394,10 @@ fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCateg
                     ExpectCategory::Inheritance,
                     Some(DiagnosticCategory::Inheritance)
                 )
+                | (
+                    ExpectCategory::Sendability,
+                    Some(DiagnosticCategory::Sendability)
+                )
         )
 }
 

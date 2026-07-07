@@ -41,6 +41,9 @@ pub enum ExpectCategory {
     TypeAnnotation,
     /// Suppress inheritance constraint errors — sealed subclass/method (BT-2087).
     Inheritance,
+    /// Suppress sendability advisories — scoped handle crossing a process
+    /// boundary or undeclared handle-wrapping class (ADR 0103).
+    Sendability,
     /// Suppress any diagnostic on the following expression.
     All,
 }
@@ -63,6 +66,7 @@ impl ExpectCategory {
             "shadowed_class" => Some(Self::ShadowedClass),
             "type_annotation" => Some(Self::TypeAnnotation),
             "inheritance" => Some(Self::Inheritance),
+            "sendability" => Some(Self::Sendability),
             "all" => Some(Self::All),
             _ => None,
         }
@@ -85,6 +89,7 @@ impl ExpectCategory {
             Self::ShadowedClass => "shadowed_class",
             Self::TypeAnnotation => "type_annotation",
             Self::Inheritance => "inheritance",
+            Self::Sendability => "sendability",
             Self::All => "all",
         }
     }
@@ -106,6 +111,7 @@ impl ExpectCategory {
             "shadowed_class",
             "type_annotation",
             "inheritance",
+            "sendability",
             "all",
         ]
     }

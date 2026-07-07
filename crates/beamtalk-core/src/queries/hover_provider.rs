@@ -652,14 +652,23 @@ fn find_hover_in_expr(
                     return Some(self_hover_info(ident.span, context));
                 }
                 // Show inferred type if available
-                let type_info = type_map
-                    .get(ident.span)
-                    .and_then(InferredType::display_for_diagnostic);
-                let contents = if let Some(ty) = type_info {
+                let inferred = type_map.get(ident.span);
+                let type_info = inferred.and_then(InferredType::display_for_diagnostic);
+                let mut contents = if let Some(ty) = type_info {
                     format!("Identifier: `{}` — Type: {ty}", ident.name)
                 } else {
                     format!("Identifier: `{}`", ident.name)
                 };
+                // ADR 0103: annotate reference/handle-typed values with their
+                // sendability tier (the tier's sole v1 consumer).
+                if let Some(tier) = inferred.and_then(|ty| {
+                    crate::semantic_analysis::type_checker::sendability::hover_tier_label(
+                        ty, hierarchy,
+                    )
+                }) {
+                    contents.push_str(" — Sendability: ");
+                    contents.push_str(&tier);
+                }
                 Some(HoverInfo::new(contents, ident.span))
             } else {
                 None
@@ -1464,6 +1473,48 @@ mod tests {
         // Position 100 is way out of bounds
         let hover = hover_at("x := 42", Position::new(10, 0));
         assert!(hover.is_none());
+    }
+
+    // --- ADR 0103: sendability tier hover (BT-2758) ---
+
+    #[test]
+    fn hover_shows_sendableref_for_pid() {
+        let src = "Object subclass: M\n  run: p :: Pid =>\n    p printString\n";
+        // Line 2, col 4 is the `p` use in the body.
+        let hover = hover_at(src, Position::new(2, 4)).expect("hover");
+        assert!(
+            hover.contents.contains("Sendability: SendableRef"),
+            "expected SendableRef tier, got: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_shows_composed_handle_scope_for_value() {
+        // Wrapper is a Value carrying a Port field — it inherits
+        // HandleScoped(#process) structurally, and hover must say so.
+        let src = "typed Value subclass: Wrapper\n  field: p :: Port = nil\n\n\
+                   Object subclass: M\n  run: w :: Wrapper =>\n    w printString\n";
+        // Line 5, col 4 is the `w` use in the body.
+        let hover = hover_at(src, Position::new(5, 4)).expect("hover");
+        assert!(
+            hover
+                .contents
+                .contains("Sendability: HandleScoped(#process)"),
+            "expected composed HandleScoped(#process) tier, got: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_omits_tier_for_sendable() {
+        let src = "Object subclass: M\n  run: n :: Integer =>\n    n printString\n";
+        let hover = hover_at(src, Position::new(2, 4)).expect("hover");
+        assert!(
+            !hover.contents.contains("Sendability:"),
+            "Sendable values must not show a tier line, got: {}",
+            hover.contents
+        );
     }
 
     #[test]

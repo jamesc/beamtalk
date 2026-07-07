@@ -39,6 +39,12 @@ impl Analyser {
         }
     }
 
+    /// Borrow the `TypeMap` the analyser was constructed with (ADR 0103: the
+    /// block-capture sendability validator joins it with the computed captures).
+    pub(super) fn type_map(&self) -> &TypeMap {
+        &self.type_map
+    }
+
     pub(super) fn analyse_module(&mut self, module: &Module) {
         // Scope is now received from NameResolver, already populated with:
         // - Built-in identifiers (true, false, nil)

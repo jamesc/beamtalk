@@ -153,6 +153,7 @@ fn category_label(cat: DiagnosticCategory) -> &'static str {
         DiagnosticCategory::ShadowedClass => "ShadowedClass",
         DiagnosticCategory::TypeAnnotation => "TypeAnnotation",
         DiagnosticCategory::Inheritance => "Inheritance",
+        DiagnosticCategory::Sendability => "Sendability",
     }
 }
 

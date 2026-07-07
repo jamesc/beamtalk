@@ -355,6 +355,7 @@ fn test_bt897_subdirectory_module_name_consistency() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: Span::new(0, 50),
     };
 

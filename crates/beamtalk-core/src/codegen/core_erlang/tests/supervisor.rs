@@ -26,6 +26,7 @@ fn make_static_supervisor_module() -> Module {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: Span::new(0, 0),
     };
     Module {
@@ -60,6 +61,7 @@ fn make_dynamic_supervisor_module() -> Module {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: Span::new(0, 0),
     };
     Module {
@@ -315,6 +317,7 @@ fn test_static_supervisor_with_user_class_method_exports_it() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: Span::new(0, 0),
     };
     let module = Module {
