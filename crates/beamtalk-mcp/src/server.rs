@@ -2292,7 +2292,7 @@ fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
             // summary. BT-2056: Unreadable package-only files produce a softer
             // warning since cross-file class extraction may be incomplete but
             // the targets themselves were still checked.
-            let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.clone());
+            let canonical = canonicalize_or_clone(file);
             if target_set.contains(&canonical) {
                 unreadable_target_files.push(file.to_string_lossy().into_owned());
             } else {
@@ -2305,7 +2305,7 @@ fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
         let (module, parse_diags) = parse(tokens);
         all_class_infos.extend(ClassHierarchy::extract_class_infos(&module));
 
-        let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.clone());
+        let canonical = canonicalize_or_clone(file);
         if target_set.contains(&canonical) {
             parsed_files.push((file_str, source, module, parse_diags));
         }
@@ -2398,6 +2398,13 @@ fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
         result["error"] = serde_json::json!(format!("Failed to read target file(s): {joined}"));
     }
     result
+}
+
+/// Canonicalize `path`, falling back to a plain clone when the path cannot be
+/// resolved (e.g. it does not yet exist or permissions are denied). Used as a
+/// normalized key for path-based deduplication in the two-pass lint pipeline.
+fn canonicalize_or_clone(path: &std::path::Path) -> std::path::PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 /// Resolve `path` to a list of `.bt` source files, or return a `LintResult`
@@ -2494,7 +2501,7 @@ fn run_lint_structured(path: &str) -> LintResult {
 
     for file in &extraction_files {
         let Ok(source) = std::fs::read_to_string(file) else {
-            let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.clone());
+            let canonical = canonicalize_or_clone(file);
             if target_set.contains(&canonical) {
                 errors.push(LintDiagnostic {
                     file: file.to_string_lossy().into_owned(),
@@ -2526,7 +2533,7 @@ fn run_lint_structured(path: &str) -> LintResult {
 
         all_class_infos.extend(ClassHierarchy::extract_class_infos(&module));
 
-        let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.clone());
+        let canonical = canonicalize_or_clone(file);
         if target_set.contains(&canonical) {
             parsed_targets.push((file.clone(), source, module, parse_diags));
         }
