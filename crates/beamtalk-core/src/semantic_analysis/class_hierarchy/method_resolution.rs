@@ -398,7 +398,7 @@ impl ClassHierarchy {
             // "Integer" for Known without, "Never" for Never.
             let return_type_name = match inferred_ty {
                 InferredType::Known { .. } => Some(inferred_ty.display_name()),
-                InferredType::Never => Some(EcoString::from("Never")),
+                InferredType::Known { .. } | InferredType::Never => Some(inferred_ty.display_name()),
                 _ => None,
             };
             let Some(return_type) = return_type_name else {
