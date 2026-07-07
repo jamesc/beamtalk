@@ -11,13 +11,13 @@
 //! complementary branch to the union with that singleton removed
 //! (`Integer | #infinity` minus `#infinity` ⇒ `Integer`).
 
-use ecow::{EcoString, eco_format};
+use ecow::EcoString;
 
 use crate::ast::{Expression, Literal, MessageSelector};
 use crate::semantic_analysis::type_checker::{DynamicReason, EnvKey, InferredType};
 
 use super::super::extract::{extract_variable_name, unwrap_parens};
-use super::super::info::{NarrowingInfo, SingletonEqInfo};
+use super::super::info::{NarrowingInfo, SingletonEqInfo, SingletonName};
 use super::NarrowingRule;
 
 pub(super) const RULE: NarrowingRule = NarrowingRule { detect };
@@ -83,7 +83,7 @@ pub(crate) fn detect_binary(
     Some(SingletonEqDetection {
         variable,
         info: SingletonEqInfo {
-            singleton: eco_format!("#{symbol_name}"),
+            singleton: SingletonName::from_symbol_identifier(symbol_name),
             negated,
         },
     })

@@ -41,20 +41,20 @@ fn union_of_returns_dynamic_if_any_dynamic() {
 #[test]
 fn union_display_name() {
     let ty = InferredType::simple_union(&["String", "UndefinedObject"]);
-    assert_eq!(ty.display_name(), Some("String | UndefinedObject".into()));
+    assert_eq!(ty.display_name(), "String | UndefinedObject");
 }
 
 #[test]
 fn known_display_name() {
     let ty = InferredType::known("Integer");
-    assert_eq!(ty.display_name(), Some("Integer".into()));
+    assert_eq!(ty.display_name(), "Integer");
 }
 
 #[test]
 fn dynamic_display_name_unknown() {
     assert_eq!(
         InferredType::Dynamic(DynamicReason::Unknown).display_name(),
-        Some(ecow::EcoString::from("Dynamic"))
+        "Dynamic"
     );
 }
 
@@ -62,7 +62,7 @@ fn dynamic_display_name_unknown() {
 fn dynamic_display_name_unannotated_param() {
     assert_eq!(
         InferredType::Dynamic(DynamicReason::UnannotatedParam).display_name(),
-        Some(ecow::EcoString::from("Dynamic (unannotated parameter)"))
+        "Dynamic (unannotated parameter)"
     );
 }
 
@@ -70,7 +70,7 @@ fn dynamic_display_name_unannotated_param() {
 fn dynamic_display_name_unannotated_return() {
     assert_eq!(
         InferredType::Dynamic(DynamicReason::UnannotatedReturn).display_name(),
-        Some(ecow::EcoString::from("Dynamic (unannotated return)"))
+        "Dynamic (unannotated return)"
     );
 }
 
@@ -78,7 +78,7 @@ fn dynamic_display_name_unannotated_return() {
 fn dynamic_display_name_dynamic_receiver() {
     assert_eq!(
         InferredType::Dynamic(DynamicReason::DynamicReceiver).display_name(),
-        Some(ecow::EcoString::from("Dynamic (dynamic receiver)"))
+        "Dynamic (dynamic receiver)"
     );
 }
 
@@ -86,7 +86,7 @@ fn dynamic_display_name_dynamic_receiver() {
 fn dynamic_display_name_ambiguous_control_flow() {
     assert_eq!(
         InferredType::Dynamic(DynamicReason::AmbiguousControlFlow).display_name(),
-        Some(ecow::EcoString::from("Dynamic (ambiguous control flow)"))
+        "Dynamic (ambiguous control flow)"
     );
 }
 
@@ -94,7 +94,7 @@ fn dynamic_display_name_ambiguous_control_flow() {
 fn dynamic_display_name_untyped_ffi() {
     assert_eq!(
         InferredType::Dynamic(DynamicReason::UntypedFfi).display_name(),
-        Some(ecow::EcoString::from("Dynamic (untyped FFI)"))
+        "Dynamic (untyped FFI)"
     );
 }
 
@@ -102,7 +102,7 @@ fn dynamic_display_name_untyped_ffi() {
 fn dynamic_display_name_dynamic_spec() {
     assert_eq!(
         InferredType::Dynamic(DynamicReason::DynamicSpec).display_name(),
-        Some(ecow::EcoString::from("Dynamic (FFI spec is Dynamic)"))
+        "Dynamic (FFI spec is Dynamic)"
     );
 }
 

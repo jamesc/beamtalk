@@ -8,7 +8,9 @@
 //!
 //! Extracted from `inference.rs` under BT-2050.
 
-use ecow::EcoString;
+use std::fmt;
+
+use ecow::{EcoString, eco_format};
 
 use crate::semantic_analysis::type_checker::{EnvKey, InferredType};
 
@@ -86,12 +88,56 @@ pub(crate) struct NarrowingInfo {
 /// Details of a singleton (in)equality narrowing (`x = #foo`, BT-2617).
 #[derive(Debug, Clone)]
 pub(crate) struct SingletonEqInfo {
-    /// The singleton type name, including the leading `#` (e.g. `#infinity`).
-    /// Matches the `InferredType::Known { class_name }` spelling produced by
-    /// `type_resolver` for `TypeAnnotation::Singleton`.
-    pub(crate) singleton: EcoString,
+    /// The singleton type name tested against (e.g. `#infinity`).
+    pub(crate) singleton: SingletonName,
     /// Whether the test was an *inequality* (`/=`, `=/=`).  When true the
     /// true/false branches are swapped relative to an equality test: the true
     /// branch removes the singleton and the false branch narrows to it.
     pub(crate) negated: bool,
+}
+
+/// A bare-symbol singleton type name (`#foo`) — the leading `#` is guaranteed
+/// **by construction** (BT-2764).
+///
+/// The narrowing paths (`refine_singleton_narrowing`,
+/// `check_impossible_singleton_comparison` → `type_admits_singleton`) rely on
+/// the tested name being a singleton, never a nominal class: singletons are
+/// not entries in the class hierarchy, so a nominal name smuggled through
+/// would silently mis-answer membership checks in release builds. This
+/// newtype enforces that precondition at the type level instead of a
+/// `debug_assert!`.
+///
+/// The stored spelling includes the leading `#` (e.g. `#infinity`), matching
+/// the `InferredType::Known { class_name }` spelling produced by
+/// `type_resolver` for `TypeAnnotation::Singleton`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SingletonName(EcoString);
+
+impl SingletonName {
+    /// Builds a singleton name from a bare symbol identifier *without* the
+    /// leading `#` (the spelling stored in `Literal::Symbol`), prefixing `#`
+    /// so the invariant holds by construction.
+    pub(crate) fn from_symbol_identifier(name: &str) -> Self {
+        Self(eco_format!("#{name}"))
+    }
+
+    /// The singleton's `InferredType::Known { class_name }` spelling,
+    /// including the leading `#`.
+    pub(crate) fn as_type_name(&self) -> &EcoString {
+        &self.0
+    }
+
+    /// The singleton's spelling as a `&str`, including the leading `#`.
+    /// Production code goes through [`as_type_name`](Self::as_type_name) or
+    /// `Display`; this exists for test assertions.
+    #[cfg(test)]
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for SingletonName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
 }
