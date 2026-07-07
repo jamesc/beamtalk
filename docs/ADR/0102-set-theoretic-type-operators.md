@@ -470,6 +470,13 @@ actually returns `#west`). Therefore:
   is Dynamic") is the natural follow-up; deliberately **out of scope** here and
   left to a future issue so this ADR stays advisory-only.
 
+  > **Amendment (2026-07-07, BT-2763):** implemented as `matchExhaustive:`, a
+  > keyword variant of `match:` that asserts exhaustiveness at `Error`
+  > severity and fails loudly (`Error`, naming the inferred scrutinee type)
+  > when it cannot be verified. This advisory check (`match:`) is completely
+  > unchanged by that follow-up. See
+  > [ADR 0106](0106-opt-in-match-exhaustiveness-assertion.md).
+
 ### REPL session
 
 ```
