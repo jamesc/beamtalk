@@ -38,6 +38,32 @@ fn counter_actor(state: Vec<StateDeclaration>) -> ClassDefinition {
     }
 }
 
+/// Build a non-Actor class `Widget` (Value kind, superclass `Object`) that
+/// nonetheless carries state slots — used to exercise the Actor-kind guard.
+fn widget_value(state: Vec<StateDeclaration>) -> ClassDefinition {
+    ClassDefinition {
+        name: ident("Widget"),
+        superclass: Some(ident("Object")),
+        superclass_package: None,
+        class_kind: ClassKind::Value,
+        is_abstract: false,
+        is_sealed: false,
+        is_typed: false,
+        is_internal: false,
+        supervisor_kind: None,
+        state,
+        methods: vec![],
+        class_methods: vec![],
+        class_variables: vec![],
+        type_params: vec![],
+        superclass_type_args: vec![],
+        comments: CommentAttachment::default(),
+        doc_comment: None,
+        backing_module: None,
+        span: span(),
+    }
+}
+
 /// `count :: Integer = 0`
 fn count_slot() -> StateDeclaration {
     StateDeclaration::with_type_and_default(
@@ -331,6 +357,30 @@ fn spawn_with_on_class_reference_infers_known_instance() {
     assert!(
         key_diags(&checker).is_empty(),
         "known key must not warn on the pin: {:?}",
+        checker.diagnostics()
+    );
+}
+
+#[test]
+fn non_actor_class_with_state_slots_is_not_key_checked() {
+    // `spawnWith:` is an Actor protocol (ADR 0104). A non-Actor class with
+    // `state:` slots that receives `spawnWith:` with a bogus key must NOT get a
+    // key-check warning — the send is already a terminal DNU, and stacking a
+    // key-check on top is noise. Guards `check_spawn_with_map_keys` via
+    // `is_actor_subclass`.
+    let class = widget_value(vec![count_slot()]);
+    let module = make_module(vec![msg_send(
+        class_ref("Widget"),
+        MessageSelector::Keyword(vec![KeywordPart::new("spawnWith:", span())]),
+        vec![map_lit(vec![(key("cuont"), int_val(0, 100))])],
+    )]);
+    let hierarchy = ClassHierarchy::build(&make_module_with_classes(vec![], vec![class]))
+        .0
+        .unwrap();
+    let checker = check(&module, &hierarchy);
+    assert!(
+        key_diags(&checker).is_empty(),
+        "a non-Actor class must not be spawnWith: key-checked: {:?}",
         checker.diagnostics()
     );
 }

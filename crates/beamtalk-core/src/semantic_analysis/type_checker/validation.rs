@@ -1573,6 +1573,13 @@ impl TypeChecker {
         // `state:` slots that receives a `spawnWith:` send is already a terminal
         // DNU — key-checking on top of that is noise. Guard on the class kind so
         // the diagnostic only fires where `spawnWith:` is a real constructor.
+        //
+        // Scoping note: `is_actor_subclass` returns `false` when any link in the
+        // superclass chain is absent from the hierarchy, so key-checking is
+        // silently skipped for a partially-unresolved chain — a false negative,
+        // never a false positive. This is consistent with `all_state` /
+        // `state_field_type` / `superclass_chain`, which all break at the same
+        // unknown ancestor.
         if !hierarchy.is_actor_subclass(class_name) {
             return;
         }
@@ -1604,9 +1611,9 @@ impl TypeChecker {
             }
             // Unknown key → Warning + typo suggestion.
             let message = match Self::closest_state_slot(key_name, &slots) {
-                Some(suggestion) => {
-                    format!("unknown state key `{key_name}` — did you mean `{suggestion}`?")
-                }
+                Some(suggestion) => format!(
+                    "unknown state key `{key_name}` for `{class_name}` — did you mean `{suggestion}`?"
+                ),
                 None => format!("unknown state key `{key_name}` for `{class_name}`"),
             };
             self.diagnostics.push(
