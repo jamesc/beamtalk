@@ -292,6 +292,51 @@ abstract Object subclass: Supervisor
   class children => self subclassResponsibility
 ```
 
+### Sendability Tiers (ADR 0103)
+
+Because a BEAM send *copies* the term, whether a value survives crossing a
+process boundary depends on its class kind. The type checker derives a
+**sendability tier** for every inferred type and warns (advisory only, per ADR
+0100) when a value's tier is too weak for the boundary it crosses. No new
+annotations are required for the common case — the class kind *is* the
+annotation.
+
+| Tier | What it is | Boundary behaviour |
+|---|---|---|
+| `Sendable` | Value kinds, primitives, symbols, `Reference` | copies perfectly — always fine |
+| `SendableRef` | Actor kinds and the builtin `Pid` | copies the reference; identity preserved (hover-visible; no v1 diagnostic) |
+| `HandleScoped(#scope)` | Object kinds wrapping a scoped runtime handle | `#process` handles warn when sent; `#node` handles are silent in v1 |
+| `Unknown` | `Dynamic` / untyped FFI / unclassified Object | silent (nothing to grade on) |
+
+A `Value` composes structurally, inheriting the **weakest** tier of its fields,
+and generic collections inherit their element tier (`List(Port)` is
+`HandleScoped`). The builtin table classifies the canonical hazards directly:
+`Pid` → `SendableRef`, `Port`/`FileHandle` → `HandleScoped(#process)`,
+`Reference` → `Sendable`, `Subscription` → `HandleScoped(#node)`.
+
+**Checked boundaries** (a `HandleScoped(#process)` value warns): actor message
+arguments, `spawnWith:` initial-state maps, blocks sent to actors (including
+`Timer every:do:` and postfix `!` casts), and Announcement payloads. Local
+blocks (`do:`, `collect:`, `ifTrue:`) and self-sends do not warn.
+
+#### Declaring handle scope
+
+A user `Object subclass:` that wraps runtime state may declare its scope with a
+class-side `handleScope:` clause. The value is symbol-valued and the set is
+open (`#process` and `#node` ship first); undeclared Object kinds stay
+`Unknown` (silent).
+
+```beamtalk
+// node-global handle: fine to send within the node, not across nodes
+sealed typed Object subclass: MetricsTable
+  handleScope: #node
+```
+
+`handleScope:` is only meaningful on `Object`-kind classes (a `Value`/`Actor`
+declaration is an advisory no-op). A companion lint nudges FFI-wrapping
+(`native:`) Object classes that carry instance behaviour but declare no scope.
+Suppress a sendability finding with `@expect sendability`.
+
 ### Wrong Keyword Errors
 
 The compiler enforces keyword/class-kind rules with clear error messages:

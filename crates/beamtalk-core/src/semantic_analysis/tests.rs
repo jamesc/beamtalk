@@ -3817,6 +3817,45 @@ fn sendability_diags(src: &str) -> Vec<Diagnostic> {
         .collect()
 }
 
+// --- ADR 0103: end-to-end diagnostic integration (BT-2758) ---
+// User-declared handleScope crossing a boundary, and #node silence.
+
+#[test]
+fn e2e_user_process_handle_in_actor_message_warns() {
+    let src = "typed Object subclass: DbConn native: db\n  \
+        handleScope: #process\n  \
+        query -> Integer => 0\n\n\
+        Actor subclass: Worker\n  \
+        use: conn => conn query\n\n\
+        Object subclass: Main\n  \
+        run: conn :: DbConn with: worker :: Worker =>\n    \
+        worker use: conn\n";
+    let diags = sendability_diags(src);
+    assert!(
+        diags.iter().any(|d| {
+            d.message.contains("`conn`") && d.message.contains("passed in an actor message")
+        }),
+        "user handleScope: #process value in an actor message must warn, got: {diags:?}"
+    );
+}
+
+#[test]
+fn e2e_node_scoped_handle_in_actor_message_silent() {
+    let src = "typed Object subclass: Cache native: c\n  \
+        handleScope: #node\n  \
+        get -> Integer => 0\n\n\
+        Actor subclass: Worker\n  \
+        use: cache => cache get\n\n\
+        Object subclass: Main\n  \
+        run: cache :: Cache with: worker :: Worker =>\n    \
+        worker use: cache\n";
+    let diags = sendability_diags(src);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("`cache`")),
+        "#node-scoped value in an actor message must be silent in v1, got: {diags:?}"
+    );
+}
+
 #[test]
 fn block_captures_port_sent_to_actor_warns() {
     let src = "Actor subclass: Worker\n  \
