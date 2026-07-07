@@ -186,16 +186,16 @@ jobs:
       - name: Gate on verdict
         if: always()
         run: |
-          # BT-2765: this check is advisory (reviews post as comments/inline threads,
-          # not commits), so an infra failure here must not produce a hard BLOCK on an
-          # otherwise-green PR. After two attempts (see the review + retry steps above),
-          # a still-missing verdict means the agent died before writing one — most likely
-          # infra/API rate-limit, not "nothing to report" — so exit NEUTRAL (0) with a
-          # loud warning instead of failing the job. A genuine verdict (PASS or BLOCK)
-          # is gated exactly as before.
+          # BT-2765: the review agent occasionally dies before writing .claude-verdict
+          # (infra/API rate-limit). The retry step above absorbs one such failure; if
+          # the verdict is STILL missing after both attempts, the gate stays
+          # FAIL-CLOSED (deliberate decision, 2026-07-06): a missing verdict blocks,
+          # because passing silently would let an unreviewed PR through the gate.
+          # The error message distinguishes the infra case from a genuine BLOCK so a
+          # human can re-run the job rather than hunt for phantom findings.
           if [ ! -f .claude-verdict ]; then
-            echo "::warning::Review agent produced no verdict after retry — treating as SKIPPED (infra), not BLOCK"
-            exit 0
+            echo "::error::No verdict after review + retry — agent infra failure; re-run this job (gate is fail-closed)"
+            exit 1
           fi
           verdict=$(tr -d '[:space:]' < .claude-verdict)
           echo "Claude verdict: $verdict"
