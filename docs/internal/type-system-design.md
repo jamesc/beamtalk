@@ -3,7 +3,7 @@
 This document describes the type system design for Beamtalk, including implementation strategy and technical decisions.
 
 **Status**: Implementation Phase (ADR 0068 accepted)
-**Related Docs**: [semantic-analysis.md](semantic-analysis.md), [beamtalk-language-features.md](../beamtalk-language-features.md), [ADR 0068](../ADR/0068-parametric-types-and-protocols.md)
+**Related Docs**: [semantic-analysis.md](semantic-analysis.md), [beamtalk-language-features.md](../beamtalk-language-features.md), [ADR 0068](../ADR/0068-parametric-types-and-protocols.md), [ADR 0102](../ADR/0102-set-theoretic-type-operators.md)
 
 ---
 
@@ -221,16 +221,48 @@ Protocol definitions compile into module attributes for runtime queries (`confor
 
 A message send on a union-typed receiver warns unless all union members respond to the selector. Return type is the union of member return types (simplified if all agree).
 
+### Set-Theoretic Operators ([ADR 0102](../ADR/0102-set-theoretic-type-operators.md))
+
+Narrowing used to be four independent hand-rolled set operations (`union_without`, `non_nil_type`, `type_admits_singleton`, and `union_of`'s own flattening) with no algebra tying them together — the true branch of a test was computed one way, the false branch another, and every new idiom re-derived both. ADR 0102 replaces the false-branch half of that with two normalising operators on `InferredType`:
+
+- **`intersect(A, B)`** — the "test holds" type. Reduces to an existing variant wherever possible: identity/`Never`/`Object` boundary cases, `Dynamic` as an identity element on *either* side (the opposite of `union_of`'s absorption rule — `Dynamic` never widens a positive test away), nominal subtyping via the class hierarchy (`Integer ∩ Number = Integer`, unrelated classes ⇒ `Never`), and singleton membership (`Symbol ∩ #foo = #foo`). Distributes over a union on either side.
+- **`difference(A, B)`** — the "test fails" type. Reduces to an existing variant when possible (dropping a union member, `Never`/`Object` boundaries), and produces the one genuinely new stored variant, `Negation { base, excluded }`, when the result is an irreducible co-finite set — "any `Symbol` except `#foo`". `Dynamic` is asymmetric here too: you cannot subtract *from* the unknown (`difference(Dynamic, P) = Dynamic`), but subtracting an unknown from something concrete is a no-op (`difference(T, Dynamic) = T`).
+
+Both operators are pure, normalising functions — most results collapse back into `Known`/`Union`/`Never`, so only the genuinely irreducible cases need new storage. `Negation` (Phase 1) covers singleton co-finite sets; the class/protocol composition ADR 0068 already specified (`Collection(Object) & Comparable`) is generalized into a second stored variant, `Intersection { members }` (Phase 2, driven by the `&` surface syntax below) — the irreducible case is class ∩ protocol, since class ∩ class always reduces via the hierarchy. `union_of` gained the matching absorption laws: adding an excluded member back to a `Negation` shrinks or clears `excluded` (`(Symbol \ #foo) | #foo ⇒ Symbol`), and two same-base negations union by *intersecting* their exclusions.
+
+**Narrowing built on the algebra.** For a type-testing guard on current type `T` against pattern `P`, the two branches are simply `intersect(T, P)` (true) and `difference(T, P)` (false) — this is an *honest* generalisation, not a uniform rewrite of every idiom:
+
+- **`singleton_eq` (`x =:= #foo`) and `is_nil`** port onto the shared core near-losslessly — `refine_singleton_narrowing` now just calls `intersect`/`difference` instead of hand-picking a `matched` value and a bespoke `union_without`. One deliberate corner: an already-impossible singleton comparison (`x :: Integer; x =:= #foo`) now types the (already-diagnosed, unreachable) true branch as `Never` instead of the old `#foo`. `is_nil`'s false-branch softening (an all-nil union collapses to `Dynamic`, not `Never`, for a nil-only receiver) is preserved as the narrowing call site's own open-world policy layered on top of a `difference` that stays pure.
+- **`class =` / `isKindOf:`** get a principled *true* branch through `intersect` — a test against a hierarchy-unrelated class now narrows to `Never` and routes through the same impossible-comparison hint the singleton path already had (gated on inferred, not declared, provenance — a defensive `isKindOf:` guard against an unverified annotation stays silent). The *false* branch is untouched: nominal-class difference (`difference(Object, Number)`) is a deliberately separate, not-yet-designed piece of work.
+- **`is_result` and `responds_to`** are untouched — they narrow a runtime tag or protocol conformance that has no clean `intersect`/`difference` shape.
+
+The detector files under `narrowing/rules/` keep their job unchanged: recognise an AST shape, produce a pattern type `P`. Only what happens to `P` and the current type changed.
+
+### `\` / `&` Surface Syntax (ADR 0102 §3)
+
+`\` (difference, "T without U") is new surface syntax; `&` (intersection) implements ADR 0068's already-specified but previously-unimplemented operator, generalized beyond protocol composition. Both are parsed only inside type-annotation position, at one shared precedence tier between `|` (looser) and a bare type atom (tighter), left-associative, with mixing the two operators in one chain (without parentheses — which don't exist as a grouping construct in type position) rejected as a deliberate parse error rather than guessed at.
+
+### Advisory `match:` Exhaustiveness (ADR 0102 §4)
+
+Because `difference` is now total, a `match:` over a singleton-union scrutinee can compute a residual: `difference(scrutinee_type, covered_patterns)`. A `Never` residual means every member is handled; anything else names the missing member(s) in a warning. This is deliberately **narrower and weaker** than the existing BT-1299 pattern-based exhaustiveness check on sealed constructor types (which is a hard `Diagnostic::error()`):
+
+- It only fires when the scrutinee is a *known-closed* union of bare singletons — silent under `Dynamic`, a bare open `Symbol`, or anything the checker isn't confident about (ADR 0100's open-world policy).
+- It is always a `Warning`, never an `Error` — gradual-typing annotations aren't runtime-enforced, so "provably exhaustive" is advisory, not a soundness guarantee.
+- An unguarded wildcard (`_ -> ...`) or variable-binding arm silences it, mirroring BT-1299's own suppression rule.
+
+The two checks run side by side and neither suppresses the other.
+
 ### Control Flow Narrowing
 
 The type checker pattern-matches on known AST shapes to narrow types:
 
-- `x class = Foo ifTrue: [...]` — narrows `x` to `Foo` in true block
+- `x class = Foo ifTrue: [...]` — narrows `x` to `Foo` in true block (via `intersect`)
 - `x isKindOf: Foo ifTrue: [...]` — same
+- `x =:= #foo ifTrue: [...] ifFalse: [...]` — narrows to `#foo` (true) / `Symbol \ #foo` (false), via `intersect`/`difference`
 - `x isNil ifTrue: [^...]` — narrows `x` to non-nil for rest of method
 - `x respondsTo: #selector ifTrue: [...]` — narrows to protocol conformance (Stage 2)
 
-This is not a general narrowing framework but a fixed set of recognized idioms, each added as a new case in the AST pattern matcher.
+Each pattern is still its own AST detector (there's no way around recognising the shape), but as of ADR 0102 the true/false branch *types* for the shapes above are no longer bespoke per-idiom logic — they're `intersect`/`difference` calls into one shared core.
 
 ---
 

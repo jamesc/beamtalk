@@ -1625,6 +1625,69 @@ A singleton receiver resolves methods against `Symbol`'s protocol — `#infinity
 
 Discriminate a singleton union with `=:=` (identity) and the branches narrow — see [Control Flow Narrowing](#control-flow-narrowing).
 
+### Difference and Intersection Types (`\` / `&`)
+
+Beyond `|` (union), type annotations support two more set-theoretic operators ([ADR 0102](ADR/0102-set-theoretic-type-operators.md)):
+
+- **`\` (difference)** — "T without U". Written `Base \ Excluded`, it expresses a co-finite set: every value of `Base` except the named ones. Today this is only meaningful for symbol singletons subtracted from `Symbol` (or from a smaller `\`-chain) — nominal-class difference (e.g. `Object \ Number`) is not yet defined.
+- **`&` (intersection)** — the general form of the class/protocol composition ADR 0068 already specified (`Collection(Object) & Comparable`). Class ∩ class reduces via the hierarchy (the narrower class, or `Never` for unrelated sealed classes); class ∩ protocol is the interesting, irreducible case.
+
+```beamtalk
+// "any Symbol except #north" — a co-finite atom set
+tag :: Symbol \ #north := #south
+
+// chained difference — left-associative, same as subtracting a union:
+// equivalent to "any Symbol except {#north, #south}"
+heading :: Symbol \ #north \ #south := #east
+
+// union binds looser than difference: `Integer | Symbol \ #foo` is
+// `Integer | (Symbol \ #foo)`, not `(Integer | Symbol) \ #foo`
+withSentinel: ms :: Integer | Symbol \ #infinity => ...
+
+// intersection: class ∩ protocol (ADR 0068's operator, now general)
+describe: value :: Integer & Printable -> String => value asString
+
+// chained intersection — left-associative, same tier as `\`
+requires: value :: A & B & C => ...
+```
+
+**Precedence** (lowest-binding to highest), all only inside a type annotation — `&` and `\` remain ordinary binary message selectors in value position, unaffected:
+
+| Operator | Meaning | Binding |
+|---|---|---|
+| `\|` | union | lowest |
+| `&` | intersection | middle |
+| `\` | difference | middle (left-assoc, same tier as `&`) |
+| _(atomic type)_ | class name / singleton / generic | highest |
+
+So `Integer | Symbol \ #foo` parses as `Integer | (Symbol \ #foo)` — `\` binds tighter than `|`. Within one operator, chains are left-associative: `Symbol \ #a \ #b` parses as `(Symbol \ #a) \ #b`, and `A & B & C` parses as `(A & B) & C`.
+
+**Grouping parentheses.** `(...)` is a grouping operator inside a type annotation, just as in value expressions (in addition to its generic-argument use, `Result(T, E)`). A group wraps any annotation — unions, `&`/`\` chains, generics — and groups nest. Grouping is purely syntactic: the parenthesised annotation is the same annotation, so `(Integer)` means `Integer`, and `(A | B) | C` is the same flat three-member union as `A | B | C`.
+
+```beamtalk
+// subtract a whole union in one step — equivalent to the chain
+// `Symbol \ #a \ #b`, which the algebra normalises to the same result
+tag :: Symbol \ (#a | #b) := #c
+
+// a grouped difference as a union member (parens redundant here — `\`
+// already binds tighter than `|` — but allowed)
+withSentinel: ms :: Integer | (Symbol \ #infinity) => ...
+```
+
+Grouping is also how you mix `&` and `\` in one annotation: **mixing them in the same chain without parentheses is a deliberate parse error**, not a left-associative fallback — `A & B \ #c` is rejected with "Cannot mix `&` and `\` in a type annotation without parentheses; parenthesise to disambiguate", because `(A & B) \ #c` and `A & (B \ #c)` differ and neither reading is obviously the intended one. Parenthesise the reading you mean:
+
+```beamtalk
+// intersect first, then subtract
+narrow -> (A & B) \ #c => ...
+
+// subtract first, then intersect
+narrow -> A & (B \ #c) => ...
+```
+
+The lexer also greedily merges `\\` (two backslashes) into the Smalltalk modulo selector, so a doubled backslash in type position — the natural typo for `\` — gets a targeted diagnostic ("did you mean `\`?") instead of a confusing generic parse error.
+
+Difference types show up in [Control Flow Narrowing](#control-flow-narrowing) too: the false branch of a singleton equality test (`x =:= #foo`) narrows `x` to `Symbol \ #foo`, and hover displays that co-finite type directly.
+
 ### Control Flow Narrowing
 
 When the type checker recognises a type-testing pattern followed by `ifTrue:` / `ifFalse:`, it narrows the variable's type inside the block scope:
@@ -2670,6 +2733,20 @@ r match: [Result ok: v -> v + 1; Result error: _ -> 0]
 // Fine: wildcard suppresses the check
 r match: [Result ok: v -> v + 1; _ -> 0]
 ```
+
+**Advisory singleton-union exhaustiveness (BT-2745, ADR 0102):** when the type checker knows a `match:` scrutinee is a closed union of `#symbol` singletons, it emits a **warning** (never an error) for any uncovered members:
+
+```beamtalk
+// direction :: #north | #south | #east | #west
+direction match: [
+  #north -> 0;
+  #south -> 180;
+  #east  -> 90
+]
+// ⚠ Warning: non-exhaustive match: `#west` is not handled (residual type: `#west`)
+```
+
+This check is advisory — it fires only when the scrutinee type is a union of pure `#symbol` singletons (not `Dynamic`, open `Symbol`, or mixed unions). An unguarded `_ ->` wildcard silences the warning; guarded arms do not count as coverage.
 
 **Guard expressions** support: `>`, `<`, `>=`, `<=`, `=:=`, `=/=`, `/=`, `+`, `-`, `*`, `/`
 

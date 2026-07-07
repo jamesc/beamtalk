@@ -10,56 +10,62 @@
 // BT-1168: Variable (symbol) arguments to respondsTo:, fieldAt:, fieldAt:put:
 
 TestCase subclass: ReflectionBasicTest
+  field: c = nil
+  field: a = nil
+
+  setUp =>
+    self.c := Counter spawn
+    self.a := ReflectionSelfMutateActor spawn
+
+  tearDown =>
+    self.c isNil ifFalse: [self.c stop]
+    self.a isNil ifFalse: [self.a stop]
 
   testDynamicRespondsTo =>
     // BT-1168: variable holding a symbol should work with respondsTo:
-    c := Counter spawn
     sel := #increment
-    self assert: (c respondsTo: sel)
+    self assert: (self.c respondsTo: sel)
     unknownSel := #nonExistent
-    self deny: (c respondsTo: unknownSel)
+    self deny: (self.c respondsTo: unknownSel)
 
   testDynamicFieldAt =>
     // BT-1168: variable holding a field name should work with fieldAt:
-    c := Counter spawn
     fieldName := #value
-    self assert: (c fieldAt: fieldName) equals: 0
-    c increment
-    self assert: (c fieldAt: fieldName) equals: 1
+    self assert: (self.c fieldAt: fieldName) equals: 0
+    self.c increment
+    self assert: (self.c fieldAt: fieldName) equals: 1
 
   testDynamicFieldAtPut =>
     // BT-1168: variable holding a field name should work with fieldAt:put:
-    c := Counter spawn
     fieldName := #value
-    c fieldAt: fieldName put: 99
-    self assert: c getValue equals: 99
+    self.c fieldAt: fieldName put: 99
+    self assert: self.c getValue equals: 99
 
   testActorReflectionApi =>
-    c := Counter spawn
     // Test class reflection
-    self assert: c class equals: Counter
+    self assert: self.c class equals: Counter
     // Test respondsTo: with symbol literal
-    self assert: (c respondsTo: #increment)
+    self assert: (self.c respondsTo: #increment)
     // Test respondsTo: with non-existent method
-    self deny: (c respondsTo: #nonExistent)
+    self deny: (self.c respondsTo: #nonExistent)
     // Test fieldNames
-    self assert: c fieldNames equals: #(#value)
+    self assert: self.c fieldNames equals: #(#value)
     // Test fieldAt: - read field value
-    self assert: (c fieldAt: #value) equals: 0
+    self assert: (self.c fieldAt: #value) equals: 0
     // Increment to change state
-    self assert: c increment equals: 1
+    self assert: self.c increment equals: 1
     // Test fieldAt: after state change
-    self assert: (c fieldAt: #value) equals: 1
+    self assert: (self.c fieldAt: #value) equals: 1
     // Test fieldAt:put: - set field value
-    self assert: (c fieldAt: #value put: 42) equals: 42
+    self assert: (self.c fieldAt: #value put: 42) equals: 42
     // Verify field was set
-    self assert: c getValue equals: 42
+    self assert: self.c getValue equals: 42
     // Test perform: - dynamic dispatch (zero-arity method)
-    self assert: (c perform: #getValue) equals: 42
+    self assert: (self.c perform: #getValue) equals: 42
     // Test perform: with another method
-    self assert: (c perform: #increment) equals: 43
+    self assert: (self.c perform: #increment) equals: 43
     // Verify increment worked via getValue
-    self assert: c getValue equals: 43
+    self assert: self.c getValue equals: 43
     // BT-359: fieldAt: on primitive value types (integers) raises immutable_value
     // Note: user-defined Value subclass: objects support fieldAt: for reading (BT-924)
     self should: [42 fieldAt: #x] raise: #immutable_value
@@ -71,17 +77,12 @@ TestCase subclass: ReflectionBasicTest
 
   // BT-1324: self fieldAt:put: must thread state so subsequent reads see the update
   testSelfFieldAtPutThreadsState =>
-    a := ReflectionSelfMutateActor spawn
-    self assert: a mutateAndReadReflective equals: 42
+    self assert: self.a mutateAndReadReflective equals: 42
 
   testSelfFieldAtPutThreadsStateDirect =>
-    a := ReflectionSelfMutateActor spawn
-    self assert: a mutateAndReadDirect equals: 99
+    self assert: self.a mutateAndReadDirect equals: 99
 
-  testSelfFieldAtPutTwoFields =>
-    a := ReflectionSelfMutateActor spawn
-    self assert: a mutateTwoFields equals: 30
+  testSelfFieldAtPutTwoFields => self assert: self.a mutateTwoFields equals: 30
 
   testAssignThenReflectiveRead =>
-    a := ReflectionSelfMutateActor spawn
-    self assert: a assignAndReadReflective equals: 77
+    self assert: self.a assignAndReadReflective equals: 77

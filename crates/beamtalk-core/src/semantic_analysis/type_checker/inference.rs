@@ -483,9 +483,15 @@ impl TypeChecker {
             Expression::Primitive { .. }
             | Expression::Error { .. }
             | Expression::ExpectDirective { .. }
-            | Expression::Spread { .. }
-            | Expression::MessageSend { is_cast: true, .. } => {
-                InferredType::Dynamic(DynamicReason::Unknown)
+            | Expression::Spread { .. } => InferredType::Dynamic(DynamicReason::Unknown),
+
+            // Cast / async send (`receiver selector!`) — the postfix `!` form is
+            // fire-and-forget: it enqueues the message and evaluates to `nil`
+            // rather than the (asynchronous) reply. Type it as `Nil`
+            // (`UndefinedObject`) so a bare cast statement is `Nil`-valued
+            // (ADR 0104 Phase 1, BT-2749).
+            Expression::MessageSend { is_cast: true, .. } => {
+                InferredType::known(WellKnownClass::UndefinedObject.as_str())
             }
 
             // Message sends — the core of type checking
@@ -1220,6 +1226,8 @@ impl TypeChecker {
                 Some(arguments),
                 Some(env),
             );
+            // ADR 0104 Phase 2 (BT-2750): `C spawnWith: #{...}` literal-map key check.
+            self.check_spawn_with_map_keys(class_name, &selector_name, arguments, hierarchy);
             return self.check_class_side_send(
                 class_name,
                 &selector_name,
@@ -1274,6 +1282,9 @@ impl TypeChecker {
                 Some(arguments),
                 Some(env),
             );
+            // ADR 0104 Phase 2 (BT-2750): type-driven `cls spawnWith: #{...}`
+            // (receiver typed `Meta{C}`) literal-map key check.
+            self.check_spawn_with_map_keys(meta_class, &selector_name, arguments, hierarchy);
             let class_side =
                 self.check_class_side_send(meta_class, &selector_name, span, hierarchy, &arg_types);
             // ADR 0083: when no class-side method on `C` defined the result, a

@@ -1,0 +1,1020 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [
+        ClassDefinition {
+            name: Identifier {
+                name: "SetTheoreticOperatorsCase",
+                span: Span {
+                    start: 1083,
+                    end: 1108,
+                },
+            },
+            superclass: Some(
+                Identifier {
+                    name: "Object",
+                    span: Span {
+                        start: 1066,
+                        end: 1072,
+                    },
+                },
+            ),
+            superclass_package: None,
+            class_kind: Object,
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            is_internal: false,
+            supervisor_kind: None,
+            state: [],
+            methods: [
+                MethodDefinition {
+                    selector: Unary(
+                        "tagWithoutFoo",
+                    ),
+                    parameters: [],
+                    body: [
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Literal(
+                                Symbol(
+                                    "bar",
+                                ),
+                                Span {
+                                    start: 1238,
+                                    end: 1242,
+                                },
+                            ),
+                            preceding_blank_line: false,
+                        },
+                    ],
+                    return_type: Some(
+                        Difference {
+                            base: Simple(
+                                Identifier {
+                                    name: "Symbol",
+                                    span: Span {
+                                        start: 1221,
+                                        end: 1227,
+                                    },
+                                },
+                            ),
+                            excluded: Singleton {
+                                name: "foo",
+                                span: Span {
+                                    start: 1230,
+                                    end: 1234,
+                                },
+                            },
+                            span: Span {
+                                start: 1221,
+                                end: 1234,
+                            },
+                        },
+                    ),
+                    is_sealed: false,
+                    is_internal: false,
+                    is_class_method: false,
+                    kind: Primary,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [
+                            Comment {
+                                content: "Valid `\\` difference annotation (BT-2742/ADR 0102 §3): \"any Symbol",
+                                span: Span {
+                                    start: 1204,
+                                    end: 1217,
+                                },
+                                kind: Line,
+                                preceding_blank_line: true,
+                            },
+                            Comment {
+                                content: "except #foo\".",
+                                span: Span {
+                                    start: 1204,
+                                    end: 1217,
+                                },
+                                kind: Line,
+                                preceding_blank_line: false,
+                            },
+                        ],
+                        trailing: None,
+                    },
+                    doc_comment: None,
+                    span: Span {
+                        start: 1204,
+                        end: 1242,
+                    },
+                },
+                MethodDefinition {
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "describe:",
+                                span: Span {
+                                    start: 1373,
+                                    end: 1382,
+                                },
+                            },
+                        ],
+                    ),
+                    parameters: [
+                        ParameterDefinition {
+                            name: Identifier {
+                                name: "value",
+                                span: Span {
+                                    start: 1383,
+                                    end: 1388,
+                                },
+                            },
+                            type_annotation: Some(
+                                Intersection {
+                                    left: Simple(
+                                        Identifier {
+                                            name: "Integer",
+                                            span: Span {
+                                                start: 1392,
+                                                end: 1399,
+                                            },
+                                        },
+                                    ),
+                                    right: Simple(
+                                        Identifier {
+                                            name: "Printable",
+                                            span: Span {
+                                                start: 1402,
+                                                end: 1411,
+                                            },
+                                        },
+                                    ),
+                                    span: Span {
+                                        start: 1392,
+                                        end: 1411,
+                                    },
+                                },
+                            ),
+                        },
+                    ],
+                    body: [
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: MessageSend {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "value",
+                                        span: Span {
+                                            start: 1425,
+                                            end: 1430,
+                                        },
+                                    },
+                                ),
+                                selector: Unary(
+                                    "asString",
+                                ),
+                                arguments: [],
+                                is_cast: false,
+                                span: Span {
+                                    start: 1425,
+                                    end: 1439,
+                                },
+                            },
+                            preceding_blank_line: false,
+                        },
+                    ],
+                    return_type: Some(
+                        Simple(
+                            Identifier {
+                                name: "String",
+                                span: Span {
+                                    start: 1415,
+                                    end: 1421,
+                                },
+                            },
+                        ),
+                    ),
+                    is_sealed: false,
+                    is_internal: false,
+                    is_class_method: false,
+                    kind: Primary,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [
+                            Comment {
+                                content: "Valid `&` intersection annotation (BT-2743/ADR 0102 §3): class ∩",
+                                span: Span {
+                                    start: 1373,
+                                    end: 1382,
+                                },
+                                kind: Line,
+                                preceding_blank_line: true,
+                            },
+                            Comment {
+                                content: "protocol — the irreducible case, ADR 0102 §1.",
+                                span: Span {
+                                    start: 1373,
+                                    end: 1382,
+                                },
+                                kind: Line,
+                                preceding_blank_line: false,
+                            },
+                        ],
+                        trailing: None,
+                    },
+                    doc_comment: None,
+                    span: Span {
+                        start: 1373,
+                        end: 1439,
+                    },
+                },
+                MethodDefinition {
+                    selector: Keyword(
+                        [
+                            KeywordPart {
+                                keyword: "classify:",
+                                span: Span {
+                                    start: 1678,
+                                    end: 1687,
+                                },
+                            },
+                        ],
+                    ),
+                    parameters: [
+                        ParameterDefinition {
+                            name: Identifier {
+                                name: "heading",
+                                span: Span {
+                                    start: 1688,
+                                    end: 1695,
+                                },
+                            },
+                            type_annotation: Some(
+                                Union {
+                                    types: [
+                                        Singleton {
+                                            name: "north",
+                                            span: Span {
+                                                start: 1699,
+                                                end: 1705,
+                                            },
+                                        },
+                                        Singleton {
+                                            name: "south",
+                                            span: Span {
+                                                start: 1708,
+                                                end: 1714,
+                                            },
+                                        },
+                                        Singleton {
+                                            name: "east",
+                                            span: Span {
+                                                start: 1717,
+                                                end: 1722,
+                                            },
+                                        },
+                                        Singleton {
+                                            name: "west",
+                                            span: Span {
+                                                start: 1725,
+                                                end: 1730,
+                                            },
+                                        },
+                                    ],
+                                    span: Span {
+                                        start: 1699,
+                                        end: 1730,
+                                    },
+                                },
+                            ),
+                        },
+                    ],
+                    body: [
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Match {
+                                value: Identifier(
+                                    Identifier {
+                                        name: "heading",
+                                        span: Span {
+                                            start: 1748,
+                                            end: 1755,
+                                        },
+                                    },
+                                ),
+                                arms: [
+                                    MatchArm {
+                                        pattern: Literal(
+                                            Symbol(
+                                                "north",
+                                            ),
+                                            Span {
+                                                start: 1771,
+                                                end: 1777,
+                                            },
+                                        ),
+                                        guard: None,
+                                        body: Literal(
+                                            String(
+                                                "up",
+                                            ),
+                                            Span {
+                                                start: 1781,
+                                                end: 1785,
+                                            },
+                                        ),
+                                        comments: CommentAttachment {
+                                            leading: [],
+                                            trailing: None,
+                                        },
+                                        span: Span {
+                                            start: 1771,
+                                            end: 1785,
+                                        },
+                                    },
+                                    MatchArm {
+                                        pattern: Literal(
+                                            Symbol(
+                                                "south",
+                                            ),
+                                            Span {
+                                                start: 1793,
+                                                end: 1799,
+                                            },
+                                        ),
+                                        guard: None,
+                                        body: Literal(
+                                            String(
+                                                "down",
+                                            ),
+                                            Span {
+                                                start: 1803,
+                                                end: 1809,
+                                            },
+                                        ),
+                                        comments: CommentAttachment {
+                                            leading: [],
+                                            trailing: None,
+                                        },
+                                        span: Span {
+                                            start: 1793,
+                                            end: 1809,
+                                        },
+                                    },
+                                    MatchArm {
+                                        pattern: Literal(
+                                            Symbol(
+                                                "east",
+                                            ),
+                                            Span {
+                                                start: 1817,
+                                                end: 1822,
+                                            },
+                                        ),
+                                        guard: None,
+                                        body: Literal(
+                                            String(
+                                                "right",
+                                            ),
+                                            Span {
+                                                start: 1826,
+                                                end: 1833,
+                                            },
+                                        ),
+                                        comments: CommentAttachment {
+                                            leading: [],
+                                            trailing: None,
+                                        },
+                                        span: Span {
+                                            start: 1817,
+                                            end: 1833,
+                                        },
+                                    },
+                                ],
+                                span: Span {
+                                    start: 1748,
+                                    end: 1839,
+                                },
+                            },
+                            preceding_blank_line: false,
+                        },
+                    ],
+                    return_type: Some(
+                        Simple(
+                            Identifier {
+                                name: "String",
+                                span: Span {
+                                    start: 1734,
+                                    end: 1740,
+                                },
+                            },
+                        ),
+                    ),
+                    is_sealed: false,
+                    is_internal: false,
+                    is_class_method: false,
+                    kind: Primary,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [
+                            Comment {
+                                content: "Non-exhaustive `match:` over a closed singleton-union scrutinee — `#west`",
+                                span: Span {
+                                    start: 1678,
+                                    end: 1687,
+                                },
+                                kind: Line,
+                                preceding_blank_line: true,
+                            },
+                            Comment {
+                                content: "is not handled and there is no wildcard arm, so the type checker emits",
+                                span: Span {
+                                    start: 1678,
+                                    end: 1687,
+                                },
+                                kind: Line,
+                                preceding_blank_line: false,
+                            },
+                            Comment {
+                                content: "an advisory Warning (never an Error) naming the residual (ADR 0102 §4).",
+                                span: Span {
+                                    start: 1678,
+                                    end: 1687,
+                                },
+                                kind: Line,
+                                preceding_blank_line: false,
+                            },
+                        ],
+                        trailing: None,
+                    },
+                    doc_comment: None,
+                    span: Span {
+                        start: 1678,
+                        end: 1839,
+                    },
+                },
+            ],
+            class_methods: [],
+            class_variables: [],
+            comments: CommentAttachment {
+                leading: [
+                    Comment {
+                        content: "Copyright 2026 James Casey",
+                        span: Span {
+                            start: 1066,
+                            end: 1072,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 1066,
+                            end: 1072,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "BT-2746 / ADR 0102 §3/§4: `\\` difference and `&` intersection type",
+                        span: Span {
+                            start: 1066,
+                            end: 1072,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                    Comment {
+                        content: "annotations, plus advisory `match:` exhaustiveness for singleton unions.",
+                        span: Span {
+                            start: 1066,
+                            end: 1072,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "",
+                        span: Span {
+                            start: 1066,
+                            end: 1072,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "Pins, across the parser/semantic snapshots:",
+                        span: Span {
+                            start: 1066,
+                            end: 1072,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "  - a valid `\\` difference annotation (BT-2742);",
+                        span: Span {
+                            start: 1066,
+                            end: 1072,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "  - a valid `&` intersection annotation (BT-2743);",
+                        span: Span {
+                            start: 1066,
+                            end: 1072,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "  - a non-exhaustive `match:` over a closed singleton union — an advisory",
+                        span: Span {
+                            start: 1066,
+                            end: 1072,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "    Warning, never an Error (ADR 0102 §4). This is the ONE place the",
+                        span: Span {
+                            start: 1066,
+                            end: 1072,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "    warning-*appearing* case is pinned end-to-end through the compiler",
+                        span: Span {
+                            start: 1066,
+                            end: 1072,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "    pipeline, per BT-2745's finding that BUnit cannot observe warnings.",
+                        span: Span {
+                            start: 1066,
+                            end: 1072,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "  - the `\\\\`-typo targeted parse error (did-you-mean `\\`);",
+                        span: Span {
+                            start: 1066,
+                            end: 1072,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "  - the deliberate parse error for mixing `&`/`\\` without parentheses.",
+                        span: Span {
+                            start: 1066,
+                            end: 1072,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "",
+                        span: Span {
+                            start: 1066,
+                            end: 1072,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "The two error cases below are recoverable parse errors — the parser",
+                        span: Span {
+                            start: 1066,
+                            end: 1072,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "continues past them (error-node recovery), so the remaining, well-formed",
+                        span: Span {
+                            start: 1066,
+                            end: 1072,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "class still parses, type-checks and codegens; only the parser snapshot",
+                        span: Span {
+                            start: 1066,
+                            end: 1072,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "records the diagnostics.",
+                        span: Span {
+                            start: 1066,
+                            end: 1072,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                ],
+                trailing: None,
+            },
+            doc_comment: None,
+            backing_module: None,
+            type_params: [],
+            superclass_type_args: [],
+            span: Span {
+                start: 1066,
+                end: 1839,
+            },
+        },
+    ],
+    method_definitions: [
+        StandaloneMethodDefinition {
+            class_name: Identifier {
+                name: "Object",
+                span: Span {
+                    start: 2347,
+                    end: 2353,
+                },
+            },
+            package: None,
+            is_class_method: false,
+            method: MethodDefinition {
+                selector: Unary(
+                    "bt2746DoubleBackslashTypo",
+                ),
+                parameters: [],
+                body: [
+                    ExpressionStatement {
+                        comments: CommentAttachment {
+                            leading: [],
+                            trailing: None,
+                        },
+                        expression: Literal(
+                            Symbol(
+                                "bar",
+                            ),
+                            Span {
+                                start: 2404,
+                                end: 2408,
+                            },
+                        ),
+                        preceding_blank_line: false,
+                    },
+                ],
+                return_type: Some(
+                    Difference {
+                        base: Simple(
+                            Identifier {
+                                name: "Symbol",
+                                span: Span {
+                                    start: 2386,
+                                    end: 2392,
+                                },
+                            },
+                        ),
+                        excluded: Singleton {
+                            name: "foo",
+                            span: Span {
+                                start: 2396,
+                                end: 2400,
+                            },
+                        },
+                        span: Span {
+                            start: 2386,
+                            end: 2400,
+                        },
+                    },
+                ),
+                is_sealed: false,
+                is_internal: false,
+                is_class_method: false,
+                kind: Primary,
+                expect: None,
+                comments: CommentAttachment {
+                    leading: [
+                        Comment {
+                            content: "The two error cases below are standalone (Tonel-style `Class >> method`)",
+                            span: Span {
+                                start: 2347,
+                                end: 2353,
+                            },
+                            kind: Line,
+                            preceding_blank_line: true,
+                        },
+                        Comment {
+                            content: "extension methods rather than new `subclass:` definitions, so they do not",
+                            span: Span {
+                                start: 2347,
+                                end: 2353,
+                            },
+                            kind: Line,
+                            preceding_blank_line: false,
+                        },
+                        Comment {
+                            content: "trip the unrelated one-class-per-file check (BT-1666) — only the class",
+                            span: Span {
+                                start: 2347,
+                                end: 2353,
+                            },
+                            kind: Line,
+                            preceding_blank_line: false,
+                        },
+                        Comment {
+                            content: "above counts toward `module.classes`.",
+                            span: Span {
+                                start: 2347,
+                                end: 2353,
+                            },
+                            kind: Line,
+                            preceding_blank_line: false,
+                        },
+                        Comment {
+                            content: "The lexer greedily merges `\\\\` into the modulo selector; in type position",
+                            span: Span {
+                                start: 2347,
+                                end: 2353,
+                            },
+                            kind: Line,
+                            preceding_blank_line: true,
+                        },
+                        Comment {
+                            content: "this is almost certainly a typo for the difference operator `\\`, so it gets",
+                            span: Span {
+                                start: 2347,
+                                end: 2353,
+                            },
+                            kind: Line,
+                            preceding_blank_line: false,
+                        },
+                        Comment {
+                            content: "a targeted \"did you mean `\\`\" diagnostic rather than a generic parse error.",
+                            span: Span {
+                                start: 2347,
+                                end: 2353,
+                            },
+                            kind: Line,
+                            preceding_blank_line: false,
+                        },
+                    ],
+                    trailing: None,
+                },
+                doc_comment: None,
+                span: Span {
+                    start: 2357,
+                    end: 2408,
+                },
+            },
+            span: Span {
+                start: 2347,
+                end: 2408,
+            },
+        },
+        StandaloneMethodDefinition {
+            class_name: Identifier {
+                name: "Object",
+                span: Span {
+                    start: 3333,
+                    end: 3339,
+                },
+            },
+            package: None,
+            is_class_method: false,
+            method: MethodDefinition {
+                selector: Unary(
+                    "bt2746MixedOperators",
+                ),
+                parameters: [],
+                body: [
+                    ExpressionStatement {
+                        comments: CommentAttachment {
+                            leading: [],
+                            trailing: None,
+                        },
+                        expression: Identifier(
+                            Identifier {
+                                name: "self",
+                                span: Span {
+                                    start: 3400,
+                                    end: 3404,
+                                },
+                            },
+                        ),
+                        preceding_blank_line: false,
+                    },
+                ],
+                return_type: Some(
+                    Intersection {
+                        left: Intersection {
+                            left: Simple(
+                                Identifier {
+                                    name: "Printable",
+                                    span: Span {
+                                        start: 3367,
+                                        end: 3376,
+                                    },
+                                },
+                            ),
+                            right: Simple(
+                                Identifier {
+                                    name: "Comparable",
+                                    span: Span {
+                                        start: 3379,
+                                        end: 3389,
+                                    },
+                                },
+                            ),
+                            span: Span {
+                                start: 3367,
+                                end: 3389,
+                            },
+                        },
+                        right: Singleton {
+                            name: "foo",
+                            span: Span {
+                                start: 3392,
+                                end: 3396,
+                            },
+                        },
+                        span: Span {
+                            start: 3367,
+                            end: 3396,
+                        },
+                    },
+                ),
+                is_sealed: false,
+                is_internal: false,
+                is_class_method: false,
+                kind: Primary,
+                expect: None,
+                comments: CommentAttachment {
+                    leading: [
+                        Comment {
+                            content: "Mixing `&` and `\\` in one type-annotation chain without explicit grouping",
+                            span: Span {
+                                start: 3333,
+                                end: 3339,
+                            },
+                            kind: Line,
+                            preceding_blank_line: true,
+                        },
+                        Comment {
+                            content: "is a deliberate parse error (ADR 0102 §3) — `(Printable & Comparable) \\",
+                            span: Span {
+                                start: 3333,
+                                end: 3339,
+                            },
+                            kind: Line,
+                            preceding_blank_line: false,
+                        },
+                        Comment {
+                            content: "#foo` and `Printable & (Comparable \\ #foo)` differ and neither reading is",
+                            span: Span {
+                                start: 3333,
+                                end: 3339,
+                            },
+                            kind: Line,
+                            preceding_blank_line: false,
+                        },
+                        Comment {
+                            content: "obviously dominant. Grouping parentheses do not exist in type-annotation",
+                            span: Span {
+                                start: 3333,
+                                end: 3339,
+                            },
+                            kind: Line,
+                            preceding_blank_line: false,
+                        },
+                        Comment {
+                            content: "position today, so there is currently no way to write either reading",
+                            span: Span {
+                                start: 3333,
+                                end: 3339,
+                            },
+                            kind: Line,
+                            preceding_blank_line: false,
+                        },
+                        Comment {
+                            content: "explicitly; this is a documented limitation, not an oversight in this test.",
+                            span: Span {
+                                start: 3333,
+                                end: 3339,
+                            },
+                            kind: Line,
+                            preceding_blank_line: false,
+                        },
+                        Comment {
+                            content: "",
+                            span: Span {
+                                start: 3333,
+                                end: 3339,
+                            },
+                            kind: Line,
+                            preceding_blank_line: false,
+                        },
+                        Comment {
+                            content: "Recovery keeps building using the first-committed operator (`&`), so the",
+                            span: Span {
+                                start: 3333,
+                                end: 3339,
+                            },
+                            kind: Line,
+                            preceding_blank_line: false,
+                        },
+                        Comment {
+                            content: "annotation still resolves — to `Intersection{Printable, Comparable} & #foo`,",
+                            span: Span {
+                                start: 3333,
+                                end: 3339,
+                            },
+                            kind: Line,
+                            preceding_blank_line: false,
+                        },
+                        Comment {
+                            content: "which normalises to `Never` (a protocol intersection has no member in",
+                            span: Span {
+                                start: 3333,
+                                end: 3339,
+                            },
+                            kind: Line,
+                            preceding_blank_line: false,
+                        },
+                        Comment {
+                            content: "common with an unrelated singleton). That produces a *second*, knock-on",
+                            span: Span {
+                                start: 3333,
+                                end: 3339,
+                            },
+                            kind: Line,
+                            preceding_blank_line: false,
+                        },
+                        Comment {
+                            content: "semantic warning (\"declares return type Never, but body returns Object\") —",
+                            span: Span {
+                                start: 3333,
+                                end: 3339,
+                            },
+                            kind: Line,
+                            preceding_blank_line: false,
+                        },
+                        Comment {
+                            content: "an honest consequence of parse-error recovery, not a second bug to fix.",
+                            span: Span {
+                                start: 3333,
+                                end: 3339,
+                            },
+                            kind: Line,
+                            preceding_blank_line: false,
+                        },
+                    ],
+                    trailing: None,
+                },
+                doc_comment: None,
+                span: Span {
+                    start: 3343,
+                    end: 3404,
+                },
+            },
+            span: Span {
+                start: 3333,
+                end: 3404,
+            },
+        },
+    ],
+    protocols: [],
+    expressions: [],
+    span: Span {
+        start: 1066,
+        end: 3404,
+    },
+    file_leading_comments: [],
+    file_trailing_comments: [],
+}
+
+Diagnostics:
+Diagnostic { severity: Error, message: "Unexpected `\\\\` in type annotation; did you mean `\\` (type difference)?", span: Span { start: 2393, end: 2395 }, hint: None, category: None, notes: [] }
+Diagnostic { severity: Error, message: "Cannot mix `&` and `\\` in a type annotation without parentheses; parenthesise to disambiguate", span: Span { start: 3390, end: 3391 }, hint: None, category: None, notes: [] }

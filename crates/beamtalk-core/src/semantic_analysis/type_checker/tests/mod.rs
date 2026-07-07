@@ -10,6 +10,7 @@ mod common;
 
 mod arg_return_checking;
 mod basic_inference;
+mod cast_and_sync_send;
 mod destructure_and_extension;
 mod dynamic_and_blocks;
 mod dynamic_iterable;
@@ -34,6 +35,7 @@ mod self_type;
 mod sendability_checking;
 mod set_operators;
 mod singleton_match_exhaustiveness;
+mod spawn_with_keys;
 mod state_fields;
 mod super_and_binary;
 mod typed_class;

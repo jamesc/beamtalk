@@ -275,3 +275,15 @@ fn test_workspace_binding_compiles_as_normal_class() {
 fn test_typed_class_warnings_warnings() {
     test_warnings_snapshot("typed_class_warnings");
 }
+
+/// BT-2746 / ADR 0102 §4: the advisory, non-exhaustive `match:` warning over
+/// a closed singleton union is pinned end-to-end through the compiler
+/// pipeline here — BUnit cannot observe compiler warnings (BT-2745's
+/// finding), so this is the one place the warning-*appearing* case (as
+/// opposed to the silence cases, pinned in
+/// `stdlib/test/singleton_match_exhaustiveness_test.bt` and
+/// `stdlib/test/set_theoretic_operators_e2e_test.bt`) is verified.
+#[test]
+fn test_set_theoretic_operators_warnings() {
+    test_warnings_snapshot("set_theoretic_operators");
+}

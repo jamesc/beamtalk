@@ -533,34 +533,67 @@ impl Parser {
             return DoubleColonSkip::NotPresent;
         }
         let mut o = offset + 1;
-        if !is_type_name_token(self.peek_at(o)) {
+        let Some(after) = self.skip_type_operand(o) else {
             return DoubleColonSkip::Malformed(o);
+        };
+        o = after;
+        // Skip the type-operator chain: `| Type`, `\ Type`, `& Type`
+        while self.is_type_chain_operator(o) {
+            o += 1;
+            let Some(after) = self.skip_type_operand(o) else {
+                return DoubleColonSkip::Malformed(o);
+            };
+            o = after;
         }
-        // Advance past the type name, consuming a trailing `class` metatype
-        // suffix on the same line (BT-1952 / BT-2034). This lets binary method
-        // headers like `+ other :: Actor class => ...` be recognized.
-        o = self.skip_type_name_with_metatype(o);
+        DoubleColonSkip::Valid(o)
+    }
+
+    /// Skips a single type operand in lookahead context: a type name (with
+    /// optional `class` metatype suffix and generic parameter list) or a
+    /// parenthesised type group `( ... )` (BT-2760).
+    ///
+    /// Returns the offset after the operand, or `None` if no type operand
+    /// starts at `offset`. A malformed generic parameter list after a valid
+    /// type name is tolerated (the offset stops at the `(`) so the parser can
+    /// emit the specific diagnostic — matching the pre-existing lookahead
+    /// behaviour.
+    fn skip_type_operand(&self, offset: usize) -> Option<usize> {
+        if matches!(self.peek_at(offset), Some(TokenKind::LeftParen)) {
+            return self.skip_grouped_type(offset);
+        }
+        if !is_type_name_token(self.peek_at(offset)) {
+            return None;
+        }
+        let mut o = self.skip_type_name_with_metatype(offset);
         // Skip generic type parameters: `Name(Type, Type, ...)`
         if matches!(self.peek_at(o), Some(TokenKind::LeftParen)) {
             if let Some(after) = self.skip_paren_type_params(o) {
                 o = after;
             }
         }
-        // Skip union types: `| Type`
+        Some(o)
+    }
+
+    /// Skips a parenthesised type group `( Type (op Type)* )` in lookahead
+    /// context (BT-2760), keeping lookahead in lock-step with
+    /// `parse_single_type_annotation`'s grouping-paren branch.
+    ///
+    /// Starting at the `(` token, advances past the matching `)` and returns
+    /// the offset after it. Returns `None` if the contents are not a type
+    /// chain or the closing `)` is missing.
+    fn skip_grouped_type(&self, offset: usize) -> Option<usize> {
+        debug_assert!(matches!(self.peek_at(offset), Some(TokenKind::LeftParen)));
+        let mut o = offset + 1; // past `(`
+        o = self.skip_type_operand(o)?;
         while self.is_type_chain_operator(o) {
             o += 1;
-            if !is_type_name_token(self.peek_at(o)) {
-                return DoubleColonSkip::Malformed(o);
-            }
-            o = self.skip_type_name_with_metatype(o);
-            // Skip generic type parameters on union member
-            if matches!(self.peek_at(o), Some(TokenKind::LeftParen)) {
-                if let Some(after) = self.skip_paren_type_params(o) {
-                    o = after;
-                }
-            }
+            o = self.skip_type_operand(o)?;
         }
-        DoubleColonSkip::Valid(o)
+        if matches!(self.peek_at(o), Some(TokenKind::RightParen)) {
+            Some(o + 1)
+        } else {
+            None
+        }
     }
 
     /// Skips a parenthesized type parameter list in lookahead context.
@@ -580,57 +613,40 @@ impl Parser {
             return Some(o + 1);
         }
         // First type param
-        if !is_type_name_token(self.peek_at(o)) {
-            return None;
-        }
-        o = self.skip_type_name_with_metatype(o);
-        // Skip optional bound: `:: Protocol`
-        o = self.skip_optional_type_param_bound(o);
-        // Nested generic: `Name(Type(...))`
-        if matches!(self.peek_at(o), Some(TokenKind::LeftParen)) {
-            o = self.skip_paren_type_params(o)?;
-        }
-        // Union in type param position: `Type | Type`
-        while self.is_type_chain_operator(o) {
-            o += 1;
-            if !is_type_name_token(self.peek_at(o)) {
-                return None;
-            }
-            o = self.skip_type_name_with_metatype(o);
-            if matches!(self.peek_at(o), Some(TokenKind::LeftParen)) {
-                o = self.skip_paren_type_params(o)?;
-            }
-        }
+        o = self.skip_type_param(o)?;
         // Additional type params: `, Type`
         while is_comma_opt(self.peek_at(o)) {
             o += 1;
-            if !is_type_name_token(self.peek_at(o)) {
-                return None;
-            }
-            o = self.skip_type_name_with_metatype(o);
-            // Skip optional bound: `:: Protocol`
-            o = self.skip_optional_type_param_bound(o);
-            // Nested generic
-            if matches!(self.peek_at(o), Some(TokenKind::LeftParen)) {
-                o = self.skip_paren_type_params(o)?;
-            }
-            // Union
-            while self.is_type_chain_operator(o) {
-                o += 1;
-                if !is_type_name_token(self.peek_at(o)) {
-                    return None;
-                }
-                o = self.skip_type_name_with_metatype(o);
-                if matches!(self.peek_at(o), Some(TokenKind::LeftParen)) {
-                    o = self.skip_paren_type_params(o)?;
-                }
-            }
+            o = self.skip_type_param(o)?;
         }
         if matches!(self.peek_at(o), Some(TokenKind::RightParen)) {
             Some(o + 1)
         } else {
             None
         }
+    }
+
+    /// Skips one type parameter/argument in lookahead context: a type
+    /// operand (name with optional metatype/generics, or a parenthesised
+    /// group — see [`skip_type_operand`](Self::skip_type_operand)), an
+    /// optional `:: Bound` (ADR 0068 Phase 2d), a nested generic parameter
+    /// list after the bound, and any trailing `|`/`\`/`&` operator chain.
+    ///
+    /// Returns the offset after the parameter, or `None` if malformed.
+    fn skip_type_param(&self, offset: usize) -> Option<usize> {
+        let mut o = self.skip_type_operand(offset)?;
+        // Skip optional bound: `:: Protocol`
+        o = self.skip_optional_type_param_bound(o);
+        // Nested generic after a bound: `T :: Printable(X)`
+        if matches!(self.peek_at(o), Some(TokenKind::LeftParen)) {
+            o = self.skip_paren_type_params(o)?;
+        }
+        // Operator chain in type param position: `Type | Type`, `Type \ #a`
+        while self.is_type_chain_operator(o) {
+            o += 1;
+            o = self.skip_type_operand(o)?;
+        }
+        Some(o)
     }
 
     /// Skips an optional `:: Identifier` bound in lookahead context.
@@ -686,39 +702,27 @@ impl Parser {
         if !matches!(self.peek_at(offset), Some(TokenKind::Arrow)) {
             return false;
         }
-        // Skip -> Type (and possible | Type unions, generic params)
+        // Skip -> Type (and possible | Type unions, generic params, groups)
         let mut o = offset + 1;
         // Allow `-> =>` (missing type) for error recovery
         if matches!(self.peek_at(o), Some(TokenKind::FatArrow)) {
             return true;
         }
-        // Must have at least one type name
-        if !is_type_name_token(self.peek_at(o)) {
+        // Must have at least one type operand: a type name (BT-1952 /
+        // BT-2034: including a trailing `class` metatype token, so `-> Self
+        // class =>` and `-> Actor class | Nil =>` are recognized) or a
+        // parenthesised group (BT-2760: `-> (A & B) \ #c =>`).
+        let Some(after) = self.skip_type_operand(o) else {
             return false;
-        }
-        // BT-1952 / BT-2034: advance past the first type name, consuming a
-        // trailing `class` metatype token if present so that forms like
-        // `-> Self class =>` and `-> Actor class | Nil =>` are also recognized.
-        o = self.skip_type_name_with_metatype(o);
-        // Skip generic type parameters: `Type(T, E)`
-        if matches!(self.peek_at(o), Some(TokenKind::LeftParen)) {
-            if let Some(after) = self.skip_paren_type_params(o) {
-                o = after;
-            }
-        }
-        // Skip union types: `| Type`
+        };
+        o = after;
+        // Skip the type-operator chain: `| Type`, `\ Type`, `& Type`
         while self.is_type_chain_operator(o) {
             o += 1;
-            if !is_type_name_token(self.peek_at(o)) {
+            let Some(after) = self.skip_type_operand(o) else {
                 return false;
-            }
-            o = self.skip_type_name_with_metatype(o);
-            // Skip generic params on union member
-            if matches!(self.peek_at(o), Some(TokenKind::LeftParen)) {
-                if let Some(after) = self.skip_paren_type_params(o) {
-                    o = after;
-                }
-            }
+            };
+            o = after;
         }
         matches!(self.peek_at(o), Some(TokenKind::FatArrow))
     }
@@ -985,6 +989,19 @@ impl Parser {
     /// `\`/`&` tier is handled by
     /// [`parse_difference_type`](Self::parse_difference_type).
     pub(super) fn parse_type_annotation(&mut self) -> TypeAnnotation {
+        // Unions are n-ary and associative, so a grouped union member —
+        // `(A | B) | C`, only reachable via grouping parens (BT-2760) — is
+        // spliced into the enclosing union rather than nested. This keeps
+        // the AST canonical: `(A | B) | C` and `A | B | C` are the same
+        // annotation, and unparsing (`type_name`) round-trips.
+        fn push_union_member(types: &mut Vec<TypeAnnotation>, ty: TypeAnnotation) {
+            if let TypeAnnotation::Union { types: inner, .. } = ty {
+                types.extend(inner);
+            } else {
+                types.push(ty);
+            }
+        }
+
         let first = self.parse_difference_type();
 
         // Check for union type: `Type | Type | ...`
@@ -993,11 +1010,12 @@ impl Parser {
         }
 
         let start_span = first.span();
-        let mut types = vec![first];
+        let mut types = Vec::new();
+        push_union_member(&mut types, first);
 
         while matches!(self.current_kind(), TokenKind::Pipe) {
             self.advance(); // consume `|`
-            types.push(self.parse_difference_type());
+            push_union_member(&mut types, self.parse_difference_type());
         }
 
         let end_span = types.last().map_or(start_span, TypeAnnotation::span);
@@ -1096,7 +1114,43 @@ impl Parser {
     /// - Self type: `Self`
     /// - Self class metatype: `Self class`
     /// - Singleton types: `#foo` (a subtype of `Symbol`, ADR 0068)
+    /// - Grouping parentheses: `(Type)` (BT-2760, see below)
     pub(super) fn parse_single_type_annotation(&mut self) -> TypeAnnotation {
+        if matches!(self.current_kind(), TokenKind::LeftParen) {
+            // Grouping parentheses in type-annotation position (BT-2760,
+            // unblocking ADR 0102 §3's mixed `&`/`\` disambiguation). Parsed
+            // *transparently*: the parenthesised annotation is returned with
+            // its original shape — only the span widens to cover the parens
+            // — rather than wrapping it in a new AST node. This is enough
+            // because:
+            // - the resolver (`type_resolver.rs`) matches on the existing
+            //   variants and never needs to know grouping parens were there;
+            // - `TypeAnnotation::type_name()` (the unparser) already
+            //   re-derives parens where precedence demands them — the
+            //   `Difference`/`Intersection` arms parenthesise a nested
+            //   `Union`/`FalseOr`/opposite-operator operand — so a group that
+            //   changed the parse (e.g. `(A & B) \ C`) round-trips, while a
+            //   redundant group (e.g. `(Integer)`) collapses away, which is
+            //   fine since it doesn't change the AST shape.
+            // Recursing into `parse_type_annotation` (not
+            // `parse_single_type_annotation`/`parse_difference_type`) allows
+            // full unions and fresh `&`/`\` chains inside the group — the
+            // mixed-operator diagnostic's `chain_is_and` state is local to
+            // each `parse_difference_type` call, so a new chain started
+            // inside the parens is independent of the chain outside it.
+            let start = self.current_token().span();
+            self.advance(); // consume `(`
+            let inner = self.parse_type_annotation();
+            let end = if matches!(self.current_kind(), TokenKind::RightParen) {
+                let end = self.current_token().span();
+                self.advance(); // consume `)`
+                end
+            } else {
+                self.error("Expected ')' to close grouping parentheses in type annotation");
+                inner.span()
+            };
+            return inner.with_span(start.merge(end));
+        }
         if let TokenKind::Identifier(name) = self.current_kind() {
             let span = self.current_token().span();
             if name.as_str() == "Self" {

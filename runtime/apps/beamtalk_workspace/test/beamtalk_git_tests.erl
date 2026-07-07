@@ -521,6 +521,118 @@ cache_canonical({ok, Top}) -> {ok, canonical(Top)};
 cache_canonical(Other) -> Other.
 
 %%% ============================================================================
+%%% Public API via workspace_meta — full-stack integration
+%%%
+%%% git_diff/1, git_log/1, git_stage/1, git_unstage/1, git_commit/1, and
+%%% git_revert_file/1 all route through run_git/2, which calls project_dir/0 →
+%%% cached_repo_toplevel/2 → repo_toplevel/2 → run_git_in/3. The tests above
+%%% either exercise argument-validation guards (bad types) or call run_git_in
+%%% directly, leaving the full stack uncovered for these six functions.
+%%% ============================================================================
+
+%% git_diff/1 with a binary path goes through the full stack and returns a
+%% #{worktree, staged} map. An unstaged modification produces a non-empty
+%% worktree diff and an empty staged diff; the diff must name the file.
+git_diff_returns_worktree_diff_test() ->
+    with_repo_root_project(fun(Top, RelFile) ->
+        with_workspace_meta(Top, <<"git_diff_test">>, fun() ->
+            {ok, Diff} = beamtalk_git:git_diff(RelFile),
+            ?assertNotEqual(<<>>, maps:get(worktree, Diff)),
+            ?assertEqual(<<>>, maps:get(staged, Diff)),
+            ?assertNotEqual(nomatch, binary:match(maps:get(worktree, Diff), RelFile))
+        end)
+    end).
+
+%% git_diff/1 after staging: staged diff is non-empty and names the file; the
+%% worktree diff is empty because the staged and working-tree versions match.
+git_diff_returns_staged_diff_test() ->
+    with_repo_root_project(fun(Top, RelFile) ->
+        with_workspace_meta(Top, <<"git_diff_staged_test">>, fun() ->
+            ?assertEqual({ok, nil}, beamtalk_git:git_stage(RelFile)),
+            {ok, Diff} = beamtalk_git:git_diff(RelFile),
+            ?assertEqual(<<>>, maps:get(worktree, Diff)),
+            ?assertNotEqual(<<>>, maps:get(staged, Diff)),
+            ?assertNotEqual(nomatch, binary:match(maps:get(staged, Diff), RelFile))
+        end)
+    end).
+
+%% git_log/1 with a positive integer runs through the full stack and returns a
+%% list of commit maps with the expected keys and non-empty values.
+git_log_returns_commits_test() ->
+    with_repo_root_project(fun(Top, _RelFile) ->
+        with_workspace_meta(Top, <<"git_log_test">>, fun() ->
+            {ok, Commits} = beamtalk_git:git_log(1),
+            ?assertEqual(1, length(Commits)),
+            [Commit] = Commits,
+            ?assertEqual(<<"init">>, maps:get(subject, Commit)),
+            ?assertEqual(<<"Test">>, maps:get(author, Commit)),
+            ?assertEqual(40, byte_size(maps:get(sha, Commit))),
+            ?assert(byte_size(maps:get(short_sha, Commit)) >= 7),
+            ?assert(byte_size(maps:get(ts, Commit)) > 0)
+        end)
+    end).
+
+%% git_stage/1 then git_unstage/1 exercise the mutate/3 helper through the full
+%% stack. After staging the modified file appears in the index column; after
+%% unstaging the file returns to unmodified index but the worktree change is
+%% preserved (so the file is still present in status with worktree =/= unmodified).
+git_stage_and_unstage_via_workspace_meta_test() ->
+    with_repo_root_project(fun(Top, RelFile) ->
+        with_workspace_meta(Top, <<"git_stage_test">>, fun() ->
+            ?assertEqual({ok, nil}, beamtalk_git:git_stage(RelFile)),
+            {ok, Status1} = beamtalk_git:git_status(),
+            ?assert(
+                lists:any(
+                    fun(F) ->
+                        maps:get(path, F) =:= RelFile andalso
+                            maps:get(index, F) =/= unmodified
+                    end,
+                    maps:get(files, Status1)
+                )
+            ),
+            ?assertEqual({ok, nil}, beamtalk_git:git_unstage(RelFile)),
+            {ok, Status2} = beamtalk_git:git_status(),
+            %% File must still be present (worktree change preserved) with an
+            %% unmodified index (no longer staged). A vacuous lists:all on an
+            %% empty list would give a false positive — use lists:any instead.
+            ?assert(
+                lists:any(
+                    fun(F) ->
+                        maps:get(path, F) =:= RelFile andalso
+                            maps:get(index, F) =:= unmodified andalso
+                            maps:get(worktree, F) =/= unmodified
+                    end,
+                    maps:get(files, Status2)
+                )
+            )
+        end)
+    end).
+
+%% git_commit/1 stages a change then commits it; the working tree is clean
+%% afterwards.
+git_commit_commits_staged_change_test() ->
+    with_repo_root_project(fun(Top, RelFile) ->
+        with_workspace_meta(Top, <<"git_commit_test">>, fun() ->
+            ?assertEqual({ok, nil}, beamtalk_git:git_stage(RelFile)),
+            ?assertEqual({ok, nil}, beamtalk_git:git_commit(<<"add test file">>)),
+            {ok, Status} = beamtalk_git:git_status(),
+            ?assertEqual([], maps:get(files, Status))
+        end)
+    end).
+
+%% git_revert_file/1 discards an unstaged worktree change; the file no longer
+%% appears in status afterwards.
+git_revert_file_discards_change_test() ->
+    with_repo_root_project(fun(Top, RelFile) ->
+        with_workspace_meta(Top, <<"git_revert_test">>, fun() ->
+            ?assertEqual({ok, nil}, beamtalk_git:git_revert_file(RelFile)),
+            {ok, Status} = beamtalk_git:git_status(),
+            Paths = [maps:get(path, F) || F <- maps:get(files, Status)],
+            ?assertNot(lists:member(RelFile, Paths))
+        end)
+    end).
+
+%%% ============================================================================
 %%% Helpers
 %%% ============================================================================
 
@@ -552,6 +664,29 @@ with_subdir_repo(Fun) ->
         )
     after
         rm_rf(Top)
+    end.
+
+%% Start beamtalk_workspace_meta with ProjectPath as the project path, run Fun(),
+%% then stop the gen_server regardless of outcome. WorkspaceId distinguishes
+%% concurrent test setups in diagnostic output.
+with_workspace_meta(ProjectPath, WorkspaceId, Fun) ->
+    stop_meta_if_running(),
+    case
+        beamtalk_workspace_meta:start_link(#{
+            workspace_id => WorkspaceId,
+            project_path => ProjectPath,
+            created_at => erlang:system_time(second),
+            repl => false
+        })
+    of
+        {ok, Pid} ->
+            try
+                Fun()
+            after
+                gen_server:stop(Pid)
+            end;
+        {error, Reason} ->
+            error({workspace_meta_start_failed, Reason})
     end.
 
 %% As above but the project root *is* the repo toplevel (no subdir).

@@ -3,6 +3,22 @@
 ## Status
 Proposed (2026-07-05)
 
+## Implementation Tracking
+
+**Epic:** [BT-2747](https://linear.app/beamtalk/issue/BT-2747)
+**Issues:**
+
+| Phase | Issue | Title | Size | Blocked by |
+|---|---|---|---|---|
+| 1 | [BT-2749](https://linear.app/beamtalk/issue/BT-2749) | Pin sync-send typing + retype cast `!` as `Nil` + migration audit | S | – |
+| 2 | [BT-2750](https://linear.app/beamtalk/issue/BT-2750) | `spawnWith:` key checking via `MapLiteral` inspection + typo suggestions | M | – |
+| 3 | [BT-2751](https://linear.app/beamtalk/issue/BT-2751) | `withTimeout:` return-type transparency + cross-process DNU wording | S | – |
+| 4 | [BT-2752](https://linear.app/beamtalk/issue/BT-2752) | Diagnostic integration tests + docs + status flip | S | BT-2749, BT-2750, BT-2751 |
+
+Sibling epic **[BT-2748](https://linear.app/beamtalk/issue/BT-2748)** (ADR 0103): BT-2750 shares the `spawnWith:` `MapLiteral` call-site inspection with BT-2755 (`related-to`, either order).
+
+**Status:** Planned
+
 ## Context
 
 ### Problem statement

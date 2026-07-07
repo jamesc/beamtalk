@@ -1,0 +1,65 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2746 / ADR 0102 §3/§4: `\` difference and `&` intersection type
+// annotations, plus advisory `match:` exhaustiveness for singleton unions.
+//
+// Pins, across the parser/semantic snapshots:
+//   - a valid `\` difference annotation (BT-2742);
+//   - a valid `&` intersection annotation (BT-2743);
+//   - a non-exhaustive `match:` over a closed singleton union — an advisory
+//     Warning, never an Error (ADR 0102 §4). This is the ONE place the
+//     warning-*appearing* case is pinned end-to-end through the compiler
+//     pipeline, per BT-2745's finding that BUnit cannot observe warnings.
+//   - the `\\`-typo targeted parse error (did-you-mean `\`);
+//   - the deliberate parse error for mixing `&`/`\` without parentheses.
+//
+// The two error cases below are recoverable parse errors — the parser
+// continues past them (error-node recovery), so the remaining, well-formed
+// class still parses, type-checks and codegens; only the parser snapshot
+// records the diagnostics.
+
+Object subclass: SetTheoreticOperatorsCase
+
+  // Valid `\` difference annotation (BT-2742/ADR 0102 §3): "any Symbol
+  // except #foo".
+  tagWithoutFoo -> Symbol \ #foo => #bar
+
+  // Valid `&` intersection annotation (BT-2743/ADR 0102 §3): class ∩
+  // protocol — the irreducible case, ADR 0102 §1.
+  describe: value :: Integer & Printable -> String => value asString
+
+  // Non-exhaustive `match:` over a closed singleton-union scrutinee — `#west`
+  // is not handled and there is no wildcard arm, so the type checker emits
+  // an advisory Warning (never an Error) naming the residual (ADR 0102 §4).
+  classify: heading :: #north | #south | #east | #west -> String =>
+    heading match: [
+      #north -> "up";
+      #south -> "down";
+      #east -> "right"
+    ]
+
+// The two error cases below are standalone (Tonel-style `Class >> method`)
+// extension methods rather than new `subclass:` definitions, so they do not
+// trip the unrelated one-class-per-file check (BT-1666) — only the class
+// above counts toward `module.classes`.
+
+// The lexer greedily merges `\\` into the modulo selector; in type position
+// this is almost certainly a typo for the difference operator `\`, so it gets
+// a targeted "did you mean `\`" diagnostic rather than a generic parse error.
+Object >> bt2746DoubleBackslashTypo -> Symbol \\ #foo => #bar
+
+// Mixing `&` and `\` in one type-annotation chain without explicit grouping
+// is a deliberate parse error (ADR 0102 §3) — `(Printable & Comparable) \
+// #foo` and `Printable & (Comparable \ #foo)` differ and neither reading is
+// obviously dominant. Grouping parentheses do not exist in type-annotation
+// position today, so there is currently no way to write either reading
+// explicitly; this is a documented limitation, not an oversight in this test.
+//
+// Recovery keeps building using the first-committed operator (`&`), so the
+// annotation still resolves — to `Intersection{Printable, Comparable} & #foo`,
+// which normalises to `Never` (a protocol intersection has no member in
+// common with an unrelated singleton). That produces a *second*, knock-on
+// semantic warning ("declares return type Never, but body returns Object") —
+// an honest consequence of parse-error recovery, not a second bug to fix.
+Object >> bt2746MixedOperators -> Printable & Comparable \ #foo => self
