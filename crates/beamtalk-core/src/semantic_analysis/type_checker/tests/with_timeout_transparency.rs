@@ -68,6 +68,47 @@ fn add_slow_db_actor(hierarchy: &mut ClassHierarchy) {
     hierarchy.add_from_beam_meta(vec![info]);
 }
 
+/// Register a non-Actor `Object` subclass `FakeProxy` that declares its own
+/// `withTimeout: :: Integer -> TimeoutProxy` method — used to pin that the
+/// transparency rule is guarded on Actor-kind and does NOT fire here.
+fn add_fake_proxy_object(hierarchy: &mut ClassHierarchy) {
+    use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
+
+    let info = ClassInfo {
+        name: eco_string("FakeProxy"),
+        superclass: Some(eco_string("Object")),
+        is_sealed: false,
+        is_abstract: false,
+        is_typed: false,
+        is_internal: false,
+        package: None,
+        is_value: false,
+        is_native: false,
+        state: vec![],
+        state_types: std::collections::HashMap::new(),
+        state_has_default: std::collections::HashMap::new(),
+        methods: vec![MethodInfo {
+            selector: eco_string("withTimeout:"),
+            arity: 1,
+            kind: MethodKind::Primary,
+            defined_in: eco_string("FakeProxy"),
+            is_sealed: false,
+            is_internal: false,
+            spawns_block: false,
+            return_type: Some(eco_string("TimeoutProxy")),
+            param_types: vec![Some(eco_string("Integer"))],
+            doc: None,
+        }],
+        class_methods: vec![],
+        class_variables: vec![],
+        type_params: vec![],
+        type_param_bounds: vec![],
+        superclass_type_args: vec![],
+    };
+
+    hierarchy.add_from_beam_meta(vec![info]);
+}
+
 /// Build `receiver withTimeout: <ms>`.
 fn with_timeout(receiver: Expression, ms: i64) -> Expression {
     msg_send(
@@ -135,6 +176,30 @@ fn forwarded_call_on_proxy_infers_wrapped_return_type() {
             .iter()
             .all(|d| d.category != Some(DiagnosticCategory::Dnu)),
         "a real forwarded method must not warn as an unknown selector"
+    );
+}
+
+/// Guard invariant: the transparency rule fires only for `Actor`-kind
+/// receivers. A non-Actor class with its own `withTimeout: -> TimeoutProxy`
+/// method must keep the declared `TimeoutProxy` return, NOT be retyped as the
+/// receiver — otherwise a user type wrapping `withTimeout:` would be silently
+/// mis-typed. Pins the `is_actor_subclass` guard at inference.rs.
+#[test]
+fn non_actor_with_timeout_is_not_retyped() {
+    let mut hierarchy = ClassHierarchy::with_builtins();
+    add_fake_proxy_object(&mut hierarchy);
+
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set_local("fp", InferredType::known("FakeProxy"));
+
+    let ty = checker.infer_expr(&with_timeout(var("fp"), 5000), &hierarchy, &mut env, false);
+
+    assert_eq!(
+        ty,
+        InferredType::known("TimeoutProxy"),
+        "a non-Actor class's own `withTimeout: -> TimeoutProxy` must keep its \
+         declared return, not be retyped as the receiver (guard is Actor-only)"
     );
 }
 
