@@ -2671,6 +2671,20 @@ r match: [Result ok: v -> v + 1; Result error: _ -> 0]
 r match: [Result ok: v -> v + 1; _ -> 0]
 ```
 
+**Advisory singleton-union exhaustiveness (BT-2745, ADR 0102):** when the type checker knows a `match:` scrutinee is a closed union of `#symbol` singletons, it emits a **warning** (never an error) for any uncovered members:
+
+```beamtalk
+// direction :: #north | #south | #east | #west
+direction match: [
+  #north -> 0;
+  #south -> 180;
+  #east  -> 90
+]
+// ⚠ Warning: non-exhaustive match: `#west` is not handled (residual type: `#west`)
+```
+
+This check is advisory — it fires only when the scrutinee type is a union of pure `#symbol` singletons (not `Dynamic`, open `Symbol`, or mixed unions). An unguarded `_ ->` wildcard silences the warning; guarded arms do not count as coverage.
+
 **Guard expressions** support: `>`, `<`, `>=`, `<=`, `=:=`, `=/=`, `/=`, `+`, `-`, `*`, `/`
 
 ### Destructuring in Match Arms
