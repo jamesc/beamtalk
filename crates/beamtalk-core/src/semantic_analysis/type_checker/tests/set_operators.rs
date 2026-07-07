@@ -236,6 +236,57 @@ fn intersect_distinct_singletons_are_disjoint() {
     );
 }
 
+/// BT-2764: with a hierarchy, a nominal *supertype* of `Symbol` other than
+/// `Object` (in the builtin hierarchy: `ProtoObject`) also admits singletons —
+/// `ProtoObject ∩ #foo = #foo` in both orders, matching the pre-ADR-0102
+/// hierarchy walk. Without this, the nominal arm would answer `Never`
+/// (`is_nominal_subtype(h, "#foo", "ProtoObject")` is false — singletons are
+/// never hierarchy entries).
+#[test]
+fn intersect_symbol_supertype_with_singleton_keeps_singleton() {
+    let h = hierarchy();
+    let proto = InferredType::known("ProtoObject");
+    assert_eq!(
+        InferredType::intersect(&proto, &singleton("#foo"), prov(), Some(&h), None),
+        singleton("#foo")
+    );
+    assert_eq!(
+        InferredType::intersect(&singleton("#foo"), &proto, prov(), Some(&h), None),
+        singleton("#foo")
+    );
+}
+
+/// BT-2764: without a hierarchy there is no way to know `ProtoObject` sits
+/// above `Symbol`, so the pre-existing conservative fallback (`Never`) is
+/// pinned — only bare `Symbol` (and top `Object`) admit singletons
+/// hierarchy-free.
+#[test]
+fn intersect_symbol_supertype_with_singleton_without_hierarchy_is_never() {
+    let proto = InferredType::known("ProtoObject");
+    assert_eq!(
+        InferredType::intersect(&proto, &singleton("#foo"), prov(), None, None),
+        InferredType::Never
+    );
+}
+
+/// BT-2764: the hierarchy-aware singleton arm must not leak to classes that
+/// are *not* supertypes of `Symbol` — `Integer ∩ #foo` stays `Never` with the
+/// hierarchy threaded.
+#[test]
+fn intersect_non_symbol_supertype_with_singleton_stays_never() {
+    let h = hierarchy();
+    assert_eq!(
+        InferredType::intersect(
+            &InferredType::known("Integer"),
+            &singleton("#foo"),
+            prov(),
+            Some(&h),
+            None
+        ),
+        InferredType::Never
+    );
+}
+
 // ── intersect: through a complement ─────────────────────────────────────
 
 #[test]

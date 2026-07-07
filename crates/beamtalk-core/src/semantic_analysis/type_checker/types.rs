@@ -657,6 +657,36 @@ impl InferredType {
         matches!(ty, Self::Known { class_name, .. } if class_name == "Symbol")
     }
 
+    /// Returns `true` if every symbol singleton (`#foo`) is a member of `ty`'s
+    /// value set — i.e. `ty` is `Symbol` itself, or (with a hierarchy) a
+    /// nominal *supertype* of `Symbol` such as `ProtoObject` (BT-2764).
+    ///
+    /// Used by the symbol-singleton arms of [`intersect`](Self::intersect) so
+    /// `ProtoObject ∩ #foo` reduces to `#foo` instead of falling through to
+    /// the nominal arm (where `is_nominal_subtype(h, "#foo", "ProtoObject")`
+    /// is `false` — singletons are never hierarchy entries) and yielding a
+    /// spurious `Never`. `Object` is already absorbed by the top-identity
+    /// arms, so in practice the hierarchy case only fires for supertypes
+    /// *above* `Object` (`ProtoObject` in the builtin hierarchy). Without a
+    /// hierarchy this is exactly [`is_symbol_base`](Self::is_symbol_base) —
+    /// the previous, conservative behaviour.
+    ///
+    /// Note this deliberately does **not** widen [`Negation`]
+    /// well-formedness: `is_symbol_base` (exactly `Symbol`) remains the only
+    /// valid `Negation` base, so `difference(ProtoObject, #foo)` stays a
+    /// no-op rather than fabricating a `ProtoObject \ #foo` complement.
+    ///
+    /// [`Negation`]: InferredType::Negation
+    fn admits_symbol_singletons(ty: &Self, hierarchy: Option<&ClassHierarchy>) -> bool {
+        match ty {
+            Self::Known { class_name, .. } => {
+                class_name == "Symbol"
+                    || hierarchy.is_some_and(|h| Self::is_nominal_subtype(h, "Symbol", class_name))
+            }
+            _ => false,
+        }
+    }
+
     /// Builds a canonical [`Negation`](Self::Negation) — the sole construction
     /// path, so every `Negation` in the system carries a **canonically ordered**
     /// `excluded` set (ADR 0102 §1: members sorted ascending by `class_name`).
@@ -698,7 +728,9 @@ impl InferredType {
     fn excluded_sort_key(member: &Self) -> EcoString {
         match member {
             Self::Known { class_name, .. } => class_name.clone(),
-            other => other.display_name().unwrap_or_default(),
+            other => other
+                .display_name()
+                .expect("display_name() always returns Some; the Option wrapper is legacy"),
         }
     }
 
@@ -972,14 +1004,20 @@ impl InferredType {
             }
             // Symbol-singleton membership: `#foo <: Symbol`, so the narrower
             // singleton is kept in both orders. Checked before the general
-            // nominal case because singletons are not entries in the hierarchy.
+            // nominal case because singletons are not entries in the hierarchy
+            // — the nominal arm's `is_nominal_subtype(h, "#foo", …)` would
+            // always answer `false`. With a hierarchy, the same rule extends
+            // to every nominal *supertype* of `Symbol` (e.g. `ProtoObject`,
+            // BT-2764): `ProtoObject ∩ #foo = #foo`, matching the
+            // pre-ADR-0102 hierarchy walk. (`Object` never reaches here — the
+            // top-identity arms above already handled it.)
             (Self::Known { .. }, Self::Known { class_name: s, .. })
-                if Self::is_symbol_base(a) && Self::is_symbol_singleton(s) =>
+                if Self::admits_symbol_singletons(a, hierarchy) && Self::is_symbol_singleton(s) =>
             {
                 b.clone()
             }
             (Self::Known { class_name: s, .. }, Self::Known { .. })
-                if Self::is_symbol_base(b) && Self::is_symbol_singleton(s) =>
+                if Self::admits_symbol_singletons(b, hierarchy) && Self::is_symbol_singleton(s) =>
             {
                 a.clone()
             }
