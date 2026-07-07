@@ -310,6 +310,70 @@ Object subclass: Client
     );
 }
 
+/// Transparency preserves the receiver's **type args** for a *generic* actor:
+/// `b :: Boxed(Integer)`, and `(b withTimeout: t) echo: n` (where `echo:` is
+/// `x :: E -> E`) resolves `E = Integer`. A method declaring `-> Integer` over
+/// that body is clean. (Unlike the hand-built unit hierarchy in
+/// `with_timeout_transparency.rs`, the full compile pipeline exercised here
+/// reproduces the generic actor's method inheritance, so the proxy result is a
+/// concrete `Integer`, not `Dynamic`.)
+#[test]
+fn generic_actor_through_proxy_preserves_type_arg() {
+    let source = "\
+Actor subclass: Boxed(E)
+  echo: x :: E -> E => x
+
+Object subclass: Client
+  run: n :: Integer -> Integer =>
+    b :: Boxed(Integer) := Boxed spawn
+    (b withTimeout: 5000) echo: n
+";
+    let module = parse_source(source);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let diags = run_with_expect(&module, &hierarchy);
+    assert!(
+        return_type_diags(&diags).is_empty(),
+        "the generic forwarded `echo:` resolves E=Integer through the proxy: {diags:?}"
+    );
+    assert!(
+        diags
+            .iter()
+            .all(|d| d.category != Some(DiagnosticCategory::Dnu)),
+        "a real forwarded method on a generic actor must not warn as unknown: {diags:?}"
+    );
+}
+
+/// Return-type control for the generic case: declaring `-> String` over the
+/// same generic forwarded `echo: n` (n :: Integer) body warns "body returns
+/// Integer" — proving the type arg survives the proxy (result is concrete
+/// `Integer`, not `Dynamic`, which would produce no warning at all).
+#[test]
+fn generic_actor_through_proxy_wrong_return_warns_proving_integer() {
+    let source = "\
+Actor subclass: Boxed(E)
+  echo: x :: E -> E => x
+
+Object subclass: Client
+  run: n :: Integer -> String =>
+    b :: Boxed(Integer) := Boxed spawn
+    (b withTimeout: 5000) echo: n
+";
+    let module = parse_source(source);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let diags = run_with_expect(&module, &hierarchy);
+    let mismatches = return_type_diags(&diags);
+    assert_eq!(
+        mismatches.len(),
+        1,
+        "expected one return-type mismatch for the generic forwarded call: {diags:?}"
+    );
+    assert!(
+        mismatches[0].message.contains("body returns Integer"),
+        "the generic proxy call must be inferred as Integer (type arg preserved): {}",
+        mismatches[0].message
+    );
+}
+
 /// Cross-process DNU: an unknown selector on a statically-known Actor
 /// (`logger logg: "hi"`) warns with the *same wording as a local send* — the
 /// process boundary is invisible to the diagnostic (ADR 0100). Matches the
