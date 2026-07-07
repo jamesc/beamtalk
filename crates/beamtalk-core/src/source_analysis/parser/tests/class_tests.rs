@@ -106,6 +106,21 @@ fn parse_handle_scope_accepts_open_symbol_set() {
 }
 
 #[test]
+fn parse_handle_scope_misplaced_after_state_emits_error() {
+    let diagnostics = parse_err(
+        "Object subclass: Bad
+  state: x :: Integer = 0
+  handleScope: #process",
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("must appear in the class header")),
+        "Expected a targeted error for misplaced handleScope:, got: {diagnostics:?}"
+    );
+}
+
+#[test]
 fn parse_handle_scope_missing_symbol_emits_error() {
     let diagnostics = parse_err(
         "Object subclass: Bad

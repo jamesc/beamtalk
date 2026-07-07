@@ -195,8 +195,9 @@ pub(crate) fn check_undeclared_handle_class(
         if class.backing_module.is_none() {
             continue;
         }
-        // Already classified — nothing to nudge.
-        if class.handle_scope.is_some() {
+        // Already classified — nothing to nudge. Uses the inherited accessor so
+        // a subclass that inherits a scope from a parent is not nudged either.
+        if hierarchy.handle_scope(&class.name.name).is_some() {
             continue;
         }
         // Only Object-kind instances can carry a scoped handle.

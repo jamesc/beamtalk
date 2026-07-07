@@ -194,6 +194,12 @@ impl Parser {
         if let Some(ref bm) = backing_module {
             end = end.merge(bm.span);
         }
+        // ADR 0103: include the `handleScope:` clause so a scope-only class body
+        // (no state/methods) still spans its declaration — hover/diagnostic
+        // ranges must cover it.
+        if let Some(ref hs) = handle_scope {
+            end = end.merge(hs.span);
+        }
         if let Some(s) = state.last() {
             end = end.merge(s.span);
         }
@@ -444,6 +450,21 @@ impl Parser {
                     } else {
                         methods.push(method);
                     }
+                }
+            } else if matches!(self.current_kind(), TokenKind::Keyword(k) if k == "handleScope:") {
+                // ADR 0103: `handleScope:` is a header clause parsed *before* the
+                // body (see `parse_optional_handle_scope`). Reaching it here means
+                // it was misplaced after state/method declarations — emit a
+                // targeted error and consume the clause so parsing recovers
+                // instead of treating it as a stray keyword message.
+                self.error(
+                    "'handleScope:' must appear in the class header, before state or method declarations",
+                );
+                self.advance(); // consume `handleScope:`
+                if !self.current_token().has_leading_newline()
+                    && matches!(self.current_kind(), TokenKind::Symbol(_))
+                {
+                    self.advance(); // consume the symbol argument to recover
                 }
             } else {
                 // BT-1856: @expect before an invalid position (e.g., end of class body)
