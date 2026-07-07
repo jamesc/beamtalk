@@ -82,8 +82,7 @@ TestCase subclass: ReflectionBasicTest
   testSelfFieldAtPutThreadsStateDirect =>
     self assert: self.a mutateAndReadDirect equals: 99
 
-  testSelfFieldAtPutTwoFields =>
-    self assert: self.a mutateTwoFields equals: 30
+  testSelfFieldAtPutTwoFields => self assert: self.a mutateTwoFields equals: 30
 
   testAssignThenReflectiveRead =>
     self assert: self.a assignAndReadReflective equals: 77
