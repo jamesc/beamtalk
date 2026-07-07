@@ -576,6 +576,15 @@ fn analyse_full_with_natives(
         &result.class_hierarchy,
         &mut result.diagnostics,
     );
+    // ADR 0103: nudge undeclared FFI-wrapping handle classes. Suppressed for
+    // stdlib compilation — the builtin tier table already covers the stdlib.
+    if !stdlib_mode {
+        validators::check_undeclared_handle_class(
+            module,
+            &result.class_hierarchy,
+            &mut result.diagnostics,
+        );
+    }
     // BT-919: Reject cast (!) on value types
     validators::check_cast_on_value_type(module, &result.class_hierarchy, &mut result.diagnostics);
     // BT-1793: Reject actor state mutation inside non-state-threading block closures

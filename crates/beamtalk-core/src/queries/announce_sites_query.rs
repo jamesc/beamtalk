@@ -126,7 +126,7 @@ pub fn find_announce_sites_in_source(method_source: &str) -> Vec<AnnounceHit> {
 }
 
 /// Whether `selector_name` is one of the recognised announce selectors.
-fn is_announce_selector(selector_name: &str) -> bool {
+pub(crate) fn is_announce_selector(selector_name: &str) -> bool {
     ANNOUNCE_SELECTORS.contains(&selector_name)
 }
 

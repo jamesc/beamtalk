@@ -896,8 +896,10 @@ impl TypeChecker {
         }
     }
 
+    #[allow(clippy::too_many_arguments)] // boundary context: selector + receiver flags + arg spans
     pub(super) fn check_arg_sendability(
         &mut self,
+        selector: &str,
         arg_types: &[InferredType],
         span: Span,
         hierarchy: &ClassHierarchy,
@@ -905,8 +907,12 @@ impl TypeChecker {
         receiver_is_actor: bool,
         arg_exprs: Option<&[Expression]>,
     ) {
-        // Boundary #1 (Phase 0): actor *instance* message arguments only.
-        if is_class_side || !receiver_is_actor {
+        // Two boundaries share this check (ADR 0103): actor *instance* message
+        // arguments (#1) and Announcement payloads (#3) — both copy the term
+        // across a process boundary. The wording differs; the tier rule does not.
+        let is_announce = crate::queries::announce_sites_query::is_announce_selector(selector);
+        let is_actor_message = !is_class_side && receiver_is_actor;
+        if !is_announce && !is_actor_message {
             return;
         }
         for (i, arg_ty) in arg_types.iter().enumerate() {
@@ -927,11 +933,16 @@ impl TypeChecker {
                 Some(Expression::Identifier(ident)) => ident.name.clone(),
                 _ => ty_name.clone(),
             };
+            let boundary = if is_announce {
+                "used as an Announcement payload"
+            } else {
+                "passed in an actor message"
+            };
             self.diagnostics.push(
                 Diagnostic::warning(
                     format!(
-                        "`{label}` ({ty_name} — process-bound handle) passed in an actor \
-                         message; it is only usable by its owning process"
+                        "`{label}` ({ty_name} — process-bound handle) {boundary}; it is only \
+                         usable by its owning process"
                     ),
                     arg_span,
                 )
@@ -963,6 +974,7 @@ impl TypeChecker {
         // they run before the method lookup / early returns below.
         let receiver_is_actor = hierarchy.is_actor_subclass(class_name);
         self.check_arg_sendability(
+            selector,
             arg_types,
             span,
             hierarchy,

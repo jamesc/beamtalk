@@ -3752,6 +3752,59 @@ fn handle_scope_on_value_class_warns() {
     );
 }
 
+// --- ADR 0103: Announcement payload sendability + companion lint (BT-2757) ---
+
+#[test]
+fn announcement_payload_port_warns() {
+    let src = "Object subclass: Main\n  \
+        fire: port :: Port =>\n    \
+        Announcer new announce: port\n";
+    let diags = sendability_diags(src);
+    assert!(
+        diags.iter().any(|d| {
+            d.message.contains("Announcement payload") && d.message.contains("process-bound")
+        }),
+        "Port announcement payload must warn, got: {diags:?}"
+    );
+}
+
+#[test]
+fn undeclared_handle_class_nudged() {
+    let src = "typed Object subclass: MyHandle native: my_backing\n  \
+        read -> Integer => 0\n";
+    let diags = sendability_diags(src);
+    assert!(
+        diags
+            .iter()
+            .any(|d| { d.message.contains("MyHandle") && d.message.contains("handleScope:") }),
+        "undeclared FFI-wrapping handle class must be nudged, got: {diags:?}"
+    );
+}
+
+#[test]
+fn declared_handle_class_not_nudged() {
+    let src = "typed Object subclass: MyHandle native: my_backing\n  \
+        handleScope: #process\n  \
+        read -> Integer => 0\n";
+    let diags = sendability_diags(src);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("declares no")),
+        "a class with handleScope: must not be nudged, got: {diags:?}"
+    );
+}
+
+#[test]
+fn plain_object_class_not_nudged() {
+    // No `native:` — not an FFI-wrapping class; must not be nudged.
+    let src = "Object subclass: Plain\n  \
+        doThing -> Integer => 0\n";
+    let diags = sendability_diags(src);
+    assert!(
+        diags.is_empty(),
+        "a plain Object class must not be nudged, got: {diags:?}"
+    );
+}
+
 // --- ADR 0103: block-capture sendability (BT-2756) ---
 
 fn sendability_diags(src: &str) -> Vec<Diagnostic> {

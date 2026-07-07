@@ -22,7 +22,7 @@ use std::collections::HashMap;
 
 use ecow::EcoString;
 
-use crate::ast::{Block, Expression, Module};
+use crate::ast::{Block, ClassKind, Expression, Module};
 use crate::ast_walker::walk_expression;
 use crate::semantic_analysis::type_checker::TypeMap;
 use crate::semantic_analysis::type_checker::sendability::{self, HandleScope, Tier};
@@ -166,6 +166,61 @@ fn check_block_captures(
                 block.span,
             )
             .with_hint("Capture data instead, or have an Actor that owns the handle do the work")
+            .with_category(DiagnosticCategory::Sendability),
+        );
+    }
+}
+
+/// ADR 0103 (Phase 2): nudge FFI-wrapping `Object` classes to declare a
+/// `handleScope:`.
+///
+/// Declaring `handleScope:` is what turns silence into (advisory) findings, so
+/// authors of handle-wrapping classes are mildly incentivised *not* to declare
+/// (ADR 0103 Negative consequences). This companion lint offsets that: an
+/// `Object subclass:` constructed via the FFI-wrapping `native:` pattern
+/// (ADR 0101) that has instance behaviour but **no** classification — neither a
+/// builtin-table entry nor a `handleScope:` — gets an advisory hint.
+///
+/// Scoped to the FFI-wrapping pattern with instance methods so it does not fire
+/// on ordinary Object classes (which wrap no runtime handle) or stateless
+/// `native:` facades (class-method-only APIs like `Console`/`System`).
+/// Suppressed under `stdlib_mode` — the builtin table already covers the stdlib.
+pub(crate) fn check_undeclared_handle_class(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for class in &module.classes {
+        // FFI-wrapping construction pattern (ADR 0101 `native:` / delegate).
+        if class.backing_module.is_none() {
+            continue;
+        }
+        // Already classified — nothing to nudge.
+        if class.handle_scope.is_some() {
+            continue;
+        }
+        // Only Object-kind instances can carry a scoped handle.
+        if hierarchy.resolve_class_kind(&class.name.name) != ClassKind::Object {
+            continue;
+        }
+        // Stateless facades expose only class-side methods — no per-instance
+        // handle to scope. Require instance behaviour before nudging.
+        if class.methods.is_empty() {
+            continue;
+        }
+        diagnostics.push(
+            Diagnostic::hint(
+                format!(
+                    "FFI-wrapping class `{}` declares no `handleScope:` — its instances may \
+                     wrap a runtime handle whose validity is scoped",
+                    class.name.name
+                ),
+                class.name.span,
+            )
+            .with_hint(
+                "Add a class-side `handleScope: #process` or `handleScope: #node` so sends of \
+                 this handle across a process boundary are checked (ADR 0103)",
+            )
             .with_category(DiagnosticCategory::Sendability),
         );
     }
