@@ -1966,6 +1966,46 @@ infDb stop
 
 **Lifecycle:** The proxy is a separate actor process. Capture the reference and call `stop` when finished to avoid leaking processes.
 
+### Static Typing of Actor Protocols (ADR 0104)
+
+An `Actor subclass:`'s public method set *is* its message protocol — the checker types actor sends exactly as ordinary method sends, with no parallel channel type and no new syntax. Four typing rules apply (all advisory per [ADR 0100](ADR/0100-diagnostic-severity-open-world.md), and static-only — no runtime, codegen, or wire change):
+
+1. **A sync send types as the method's return.** `c increment` on a `Counter` whose `increment` declares (or infers) `-> Integer` types as `Integer`, and forwards its declared/inferred return to callers:
+
+   ```beamtalk
+   c := Counter spawn
+   c increment          // :: Integer — the method's declared/inferred return
+   ```
+
+2. **A bare cast (`!`) types as `Nil`.** The fire-and-forget `gen_server:cast` has no synchronous reply, so a cast *statement* evaluates to `Nil` regardless of the target method's return type. (Using a cast's value in an assignment, return, or argument is already a parse error — see **Explicit Async Cast** above). One consequence: a method declaring a non-`Nil` return whose body *ends* in a bare cast now warns "body returns Nil" — usually a genuine bug where a mutator returns nothing:
+
+   ```beamtalk
+   c increment!         // :: Nil — no reply is awaited
+
+   // ⚠️ Method 'bump' declares return type Integer, but body returns Nil
+   bump -> Integer => c increment!
+   ```
+
+3. **`spawnWith:` keys are checked against `state:` slots.** The keys of a literal init-state map are validated against the actor's declared `state:` slots; an unknown key is a Warning (a provably-failing construction, not merely an unresolved selector) with a typo suggestion naming the nearest slot. When a slot is typed, the literal value's type is checked against it too:
+
+   ```beamtalk
+   Counter spawnWith: #{#count => 0}     // :: Counter — key `count` is a declared slot
+   Counter spawnWith: #{#cuont => 0}     // ⚠️ unknown state key `cuont` — did you mean `count`?
+   ```
+
+   Only a *literal* map is inspected; a `spawnWith:` argument flowing in through a variable is not key-checked. The rule fires only for `Actor subclass:` receivers.
+
+4. **`withTimeout:` is transparent; cross-process DNU grades like a local send.** `withTimeout:` returns a value typed as the *wrapped* actor (not the opaque `TimeoutProxy`), so forwarded calls resolve the wrapped class's real return types. A timeout raises rather than returning, so method return types are unchanged. An unknown selector on a statically-known actor gets the same knowledge-graded [ADR 0100](ADR/0100-diagnostic-severity-open-world.md) diagnostic as a local send — the process boundary is invisible to the checker:
+
+   ```beamtalk
+   (db withTimeout: 30000) query: sql    // resolves query:'s real return, not Dynamic
+
+   logger := Logger spawn
+   logger logg: "hi"                     // ⚠️ Logger does not understand 'logg:' — did you mean 'log:'?
+   ```
+
+See [ADR 0104](ADR/0104-typed-actor-protocols.md) for the full rationale, prior art, and the metaclass-aware constructor inference (ADR 0083) that types `spawn` / `spawnWith:`.
+
 ### BEAM Mapping
 
 | Beamtalk | BEAM |

@@ -8,6 +8,7 @@
 
 mod common;
 
+mod adr_0104_integration;
 mod arg_return_checking;
 mod basic_inference;
 mod cast_and_sync_send;
