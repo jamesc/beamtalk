@@ -1,9 +1,9 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! `x class = ClassName` / `x class =:= ClassName` narrowing (BT-1573 Phase 1g).
+//! `x class =:= ClassName` narrowing (BT-1573 Phase 1g).
 //!
-//! Also handles `(x class) = ClassName` via a parenthesized-unwrap.
+//! Also handles `(x class) =:= ClassName` via a parenthesized-unwrap.
 
 use crate::ast::{Expression, MessageSelector, WellKnownSelector};
 use crate::semantic_analysis::type_checker::{DynamicReason, InferredType};
@@ -24,7 +24,7 @@ fn detect(receiver: &Expression) -> Option<NarrowingInfo> {
     else {
         return None;
     };
-    if !(op.as_str() == "=" || op.as_str() == "=:=") {
+    if op.as_str() != "=:=" {
         return None;
     }
     // The inner receiver should be `x class` or `(x class)`

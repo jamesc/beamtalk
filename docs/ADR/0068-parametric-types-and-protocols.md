@@ -311,7 +311,7 @@ When the type checker recognises a type-testing message send followed by `ifTrue
 ```beamtalk
 // class identity check — narrows to exact class
 process: x :: Object =>
-  x class = Integer ifTrue: [
+  x class =:= Integer ifTrue: [
     x + 1          // ✅ x is Integer here — has '+'
   ]
   x + 1            // ⚠️ x is Object here — no narrowing outside the block
@@ -332,7 +332,7 @@ validate: x :: Object =>
 
 | Pattern | Narrows to | Scope |
 |---|---|---|
-| `x class = Foo ifTrue: [...]` | `x` is `Foo` in true block | True block only |
+| `x class =:= Foo ifTrue: [...]` | `x` is `Foo` in true block | True block only |
 | `x isKindOf: Foo ifTrue: [...]` | `x` is `Foo` in true block | True block only |
 | `x isNil ifTrue: [^...]` | `x` is non-nil after the statement | Rest of method |
 | `x isNil ifTrue: [^...] ifFalse: [...]` | `x` is non-nil in false block | False block |
@@ -341,7 +341,7 @@ validate: x :: Object =>
 - `respondsTo:` narrowing (requires protocol integration — Stage 2)
 - False-branch complement types (`ifFalse:` knowing "x is NOT Integer" — requires difference types)
 - Narrowing through `and:`/`or:` chains
-- Narrowing stored in variables (`isValid := x class = Integer; isValid ifTrue: [...]`)
+- Narrowing stored in variables (`isValid := x class =:= Integer; isValid ifTrue: [...]`)
 
 These can be added incrementally — each new pattern is a new AST shape to recognise, not a new mechanism.
 
@@ -520,8 +520,8 @@ TypeScript narrows types inside `if` branches — lexical scopes that the compil
 
 **Solution: Pattern-match on the AST shape, not on general message semantics.** The type checker recognises a fixed set of narrowing idioms:
 
-1. When visiting a message send like `[expr] class = [ClassName] ifTrue: [block]`, the checker:
-   - Identifies the cascade: binary send `class =` producing a Boolean, followed by `ifTrue:` with a block argument
+1. When visiting a message send like `[expr] class =:= [ClassName] ifTrue: [block]`, the checker:
+   - Identifies the cascade: binary send `class =:=` producing a Boolean, followed by `ifTrue:` with a block argument
    - Determines which variable `expr` refers to
    - Pushes a scope refinement `{variable → ClassName}` into the block's scope before type-checking the block body
 
@@ -1009,7 +1009,7 @@ Without this, we'd be generating increasingly complex generic specs (`Result(int
 
 **Phase 1g: Control Flow Narrowing (M)**
 - Add narrowing environment to scope: `HashMap<VariableId, InferredType>` refinement layer pushed/popped per block
-- Pattern-match `[expr] class = [ClassName] ifTrue: [block]` — push `{expr → ClassName}` into block scope
+- Pattern-match `[expr] class =:= [ClassName] ifTrue: [block]` — push `{expr → ClassName}` into block scope
 - Pattern-match `[expr] isKindOf: [ClassName] ifTrue: [block]` — same narrowing
 - Early-return narrowing: `[expr] isNil ifTrue: [^...]` — push non-nil refinement for rest of method
 - `ifFalse:` gets the complement for nil checks (`isNil ifTrue: [^...] ifFalse: [block]` — `expr` is non-nil in false block)

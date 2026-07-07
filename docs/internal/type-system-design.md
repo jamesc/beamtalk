@@ -256,7 +256,7 @@ The two checks run side by side and neither suppresses the other.
 
 The type checker pattern-matches on known AST shapes to narrow types:
 
-- `x class = Foo ifTrue: [...]` — narrows `x` to `Foo` in true block (via `intersect`)
+- `x class =:= Foo ifTrue: [...]` — narrows `x` to `Foo` in true block (via `intersect`)
 - `x isKindOf: Foo ifTrue: [...]` — same
 - `x =:= #foo ifTrue: [...] ifFalse: [...]` — narrows to `#foo` (true) / `Symbol \ #foo` (false), via `intersect`/`difference`
 - `x isNil ifTrue: [^...]` — narrows `x` to non-nil for rest of method

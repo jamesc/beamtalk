@@ -491,11 +491,11 @@ mod tests {
 
     #[test]
     fn from_selector_binary_returns_none() {
-        // Binary selectors (e.g., `+`, `=`) are never well-known selectors.
+        // Binary selectors (e.g., `+`, `=:=`) are never well-known selectors.
         let sel = MessageSelector::Binary("+".into());
         assert_eq!(WellKnownSelector::from_selector(&sel), None);
 
-        let sel = MessageSelector::Binary("=".into());
+        let sel = MessageSelector::Binary("=:=".into());
         assert_eq!(WellKnownSelector::from_selector(&sel), None);
     }
 

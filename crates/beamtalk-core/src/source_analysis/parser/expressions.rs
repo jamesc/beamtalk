@@ -790,6 +790,21 @@ impl Parser {
             // Diagnostic suppression directive: @expect category
             TokenKind::AtExpect => self.parse_expect_directive(),
 
+            // Bare `=` is not a valid operator (BT-2762): equality is `=:=`
+            // (value) or `==` (reference); give a targeted hint instead of
+            // the generic "expected expression" fallback below.
+            TokenKind::BinarySelector(s) if s == "=" => {
+                let bad_token = self.advance();
+                let span = bad_token.span();
+                let message: EcoString = "Unexpected token: expected expression, found =".into();
+                self.diagnostics.push(
+                    Diagnostic::error(message.clone(), span).with_hint(
+                        "'=' is not an operator in Beamtalk; use '=:=' for value equality or '==' for reference equality",
+                    ),
+                );
+                Expression::Error { message, span }
+            }
+
             // Unexpected token - consume it to avoid getting stuck
             _ => {
                 let bad_token = self.advance();
