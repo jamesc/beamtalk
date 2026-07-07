@@ -15,7 +15,7 @@
 
 use std::collections::HashMap;
 
-use crate::ast::{Expression, TypeAnnotation};
+use crate::ast::{Expression, Literal, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::semantic_analysis::string_utils::edit_distance;
@@ -1516,6 +1516,196 @@ impl TypeChecker {
             | InferredType::Negation { .. }
             | InferredType::Intersection { .. } => {}
         }
+    }
+
+    /// Shared call-site boundary for `spawnWith:` map-literal inspection
+    /// (ADR 0104 Phase 2, BT-2750).
+    ///
+    /// Returns the `MapPair`s of a `C spawnWith: #{...}` send when the argument
+    /// is a *literal* map — the only point at which per-key inspection is
+    /// possible, because map-literal inference otherwise collapses `#{...}` to a
+    /// single joined `Dictionary(K, V)` and discards the individual literal
+    /// keys. Returns `None` for any non-`spawnWith:` selector or a non-literal
+    /// first argument (e.g. a `Dictionary`-typed variable), so callers never
+    /// inspect a non-literal map — the key check produces no false positives.
+    ///
+    /// This is the reusable walk boundary: ADR 0103's BT-2755 value-sendability
+    /// check iterates the *same* `(key, value)` pairs at the same call site and
+    /// hooks in here.
+    pub(super) fn spawn_with_map_pairs<'a>(
+        selector: &str,
+        arguments: &'a [Expression],
+    ) -> Option<&'a [crate::ast::MapPair]> {
+        if selector != "spawnWith:" {
+            return None;
+        }
+        match arguments.first() {
+            Some(Expression::MapLiteral { pairs, .. }) => Some(pairs),
+            _ => None,
+        }
+    }
+
+    /// Check a `C spawnWith: #{...}` call site's map keys against `C`'s declared
+    /// `state:` slots (ADR 0104 Phase 2, BT-2750).
+    ///
+    /// For each symbol key in the literal map:
+    ///   * a key matching a declared slot (including inherited slots) passes;
+    ///     when that slot carries a type annotation, the literal value's inferred
+    ///     type is checked against it (see [`Self::check_spawn_with_value`]).
+    ///   * an unknown key emits a **Warning** — the provably-failing tier per
+    ///     ADR 0100, since a class's `state:` slot set is closed and declared
+    ///     in-program — with a typo suggestion naming the nearest slot when one
+    ///     is close (edit distance).
+    ///
+    /// No-ops when the argument is not a literal map (via
+    /// [`Self::spawn_with_map_pairs`]) or when the class declares no state slots.
+    pub(super) fn check_spawn_with_map_keys(
+        &mut self,
+        class_name: &EcoString,
+        selector: &str,
+        arguments: &[Expression],
+        hierarchy: &ClassHierarchy,
+    ) {
+        let Some(pairs) = Self::spawn_with_map_pairs(selector, arguments) else {
+            return;
+        };
+        // Declared state slot names, including inherited slots. An empty set
+        // means the class declares no state (e.g. a builtin, or one whose slots
+        // are not in the hierarchy) — bail rather than flag every key.
+        let slots = hierarchy.all_state(class_name);
+        if slots.is_empty() {
+            return;
+        }
+        for pair in pairs {
+            // Keys are symbol literals (`#count`); a non-symbol key is already a
+            // parse error (BT-1240) — skip it here.
+            let Expression::Literal(Literal::Symbol(key_name), key_span) = &pair.key else {
+                continue;
+            };
+            if slots.iter().any(|s| s.as_str() == key_name.as_str()) {
+                // Known slot — value-check against the declared type when typed.
+                if let Some(declared_ty) = hierarchy.state_field_type(class_name, key_name) {
+                    self.check_spawn_with_value(
+                        class_name,
+                        key_name,
+                        &declared_ty,
+                        &pair.value,
+                        hierarchy,
+                    );
+                }
+                continue;
+            }
+            // Unknown key → Warning + typo suggestion.
+            let message = match Self::closest_state_slot(key_name, &slots) {
+                Some(suggestion) => {
+                    format!("unknown state key `{key_name}` — did you mean `{suggestion}`?")
+                }
+                None => format!("unknown state key `{key_name}` for `{class_name}`"),
+            };
+            self.diagnostics.push(
+                Diagnostic::warning(message, *key_span)
+                    .with_category(DiagnosticCategory::Type)
+                    .with_hint(format!(
+                        "`spawnWith:` keys must be declared `state:` slots of `{class_name}`"
+                    )),
+            );
+        }
+    }
+
+    /// Check a `spawnWith:` literal value against a declared slot type
+    /// (ADR 0104 Phase 2, BT-2750).
+    ///
+    /// The value's inferred type is read back from the type map (populated when
+    /// the argument map literal was inferred), so the value expression is not
+    /// re-inferred and its own diagnostics are not double-emitted. Union slot
+    /// types (e.g. `Integer | #infinity`) are handled by [`Self::is_assignable_to`],
+    /// which already splits the declared union string and checks membership.
+    fn check_spawn_with_value(
+        &mut self,
+        class_name: &EcoString,
+        slot_name: &EcoString,
+        declared_ty: &EcoString,
+        value_expr: &Expression,
+        hierarchy: &ClassHierarchy,
+    ) {
+        let Some(value_ty) = self.type_map.get(value_expr.span()).cloned() else {
+            return; // Dynamic / unknown value type — skip conservatively.
+        };
+        let declared_display = InferredType::class_name_for_diagnostic(declared_ty.as_str());
+        match &value_ty {
+            InferredType::Known {
+                class_name: value_type,
+                ..
+            } => {
+                if !Self::is_assignable_to(value_type, declared_ty, hierarchy) {
+                    let value_display =
+                        InferredType::class_name_for_diagnostic(value_type.as_str());
+                    self.diagnostics.push(
+                        Diagnostic::warning(
+                            format!(
+                                "type mismatch for state key `{slot_name}` on `{class_name}`: declared {declared_display}, got {value_display}"
+                            ),
+                            value_expr.span(),
+                        )
+                        .with_category(DiagnosticCategory::Type)
+                        .with_hint(format!(
+                            "Expected {declared_display} for `{slot_name}`, got {value_display}"
+                        )),
+                    );
+                }
+            }
+            InferredType::Union { members, .. } => {
+                let Some((compat, total, incompatible)) =
+                    Self::classify_union_members(members, |m| {
+                        Self::is_assignable_to(m, declared_ty, hierarchy)
+                    })
+                else {
+                    return; // Contains Dynamic — skip.
+                };
+                if compat == total {
+                    return;
+                }
+                let union_display = value_ty
+                    .display_for_diagnostic()
+                    .unwrap_or_else(|| EcoString::from("Dynamic"));
+                let list = incompatible
+                    .iter()
+                    .map(|m| InferredType::class_name_for_diagnostic(m.as_str()))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                self.diagnostics.push(
+                    Diagnostic::warning(
+                        format!(
+                            "type mismatch for state key `{slot_name}` on `{class_name}`: declared {declared_display}, got {union_display}"
+                        ),
+                        value_expr.span(),
+                    )
+                    .with_category(DiagnosticCategory::Type)
+                    .with_hint(format!(
+                        "Some members of {union_display} are not compatible with {declared_display}: {list}"
+                    )),
+                );
+            }
+            // Dynamic / Never / Meta / Negation / Intersection value — skip.
+            _ => {}
+        }
+    }
+
+    /// Find the declared state slot closest (by edit distance) to `target`, for
+    /// a "did you mean" typo suggestion. Mirrors [`Self::find_similar_selector`]'s
+    /// thresholds so suggestions stay conservative.
+    fn closest_state_slot(target: &str, slots: &[EcoString]) -> Option<EcoString> {
+        let mut best: Option<(EcoString, usize)> = None;
+        for slot in slots {
+            let dist = edit_distance(target, slot.as_str());
+            if dist <= 3
+                && dist < target.len() / 2 + 1
+                && best.as_ref().is_none_or(|(_, d)| dist < *d)
+            {
+                best = Some((slot.clone(), dist));
+            }
+        }
+        best.map(|(slot, _)| slot)
     }
 
     /// Check state default values match declared types at class definition time.

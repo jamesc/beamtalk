@@ -1226,6 +1226,8 @@ impl TypeChecker {
                 Some(arguments),
                 Some(env),
             );
+            // ADR 0104 Phase 2 (BT-2750): `C spawnWith: #{...}` literal-map key check.
+            self.check_spawn_with_map_keys(class_name, &selector_name, arguments, hierarchy);
             return self.check_class_side_send(
                 class_name,
                 &selector_name,
@@ -1280,6 +1282,9 @@ impl TypeChecker {
                 Some(arguments),
                 Some(env),
             );
+            // ADR 0104 Phase 2 (BT-2750): type-driven `cls spawnWith: #{...}`
+            // (receiver typed `Meta{C}`) literal-map key check.
+            self.check_spawn_with_map_keys(meta_class, &selector_name, arguments, hierarchy);
             let class_side =
                 self.check_class_side_send(meta_class, &selector_name, span, hierarchy, &arg_types);
             // ADR 0083: when no class-side method on `C` defined the result, a
