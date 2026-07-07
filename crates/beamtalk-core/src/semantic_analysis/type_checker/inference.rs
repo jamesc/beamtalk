@@ -1420,6 +1420,32 @@ impl TypeChecker {
             // Infer return type from method info
             if let Some(method) = hierarchy.find_method(&resolve_class, &selector_name) {
                 if let Some(ref ret_ty) = method.return_type {
+                    // BT-2751 (ADR 0104 Phase 3): `withTimeout:` return-type
+                    // transparency. The generated-builtins table records the
+                    // static return type `TimeoutProxy`, but the proxy is
+                    // transparent — it forwards every message to the wrapped
+                    // actor and a timed-out call *raises* rather than returning,
+                    // so method return types are unchanged. Typing the result as
+                    // the opaque `TimeoutProxy` would make every forwarded
+                    // selector (`slowDb query: sql`) `Dynamic`. Instead, a
+                    // `withTimeout:` send on a receiver of static type `C` is
+                    // typed as `C` (with its type args preserved), so forwarded
+                    // calls resolve the wrapped class's real return types. The
+                    // table can only hold a static string, so the transparency
+                    // rule is applied here. Restricted to `Actor` and its
+                    // subclasses (`is_actor_subclass` returns true for the base
+                    // `Actor` itself too) so the rule's correctness is an explicit
+                    // constraint, not an implicit consequence of `TimeoutProxy`
+                    // being inaccessible from user code (a user
+                    // `withTimeout: -> TimeoutProxy` on a non-Actor class would
+                    // otherwise be silently retyped).
+                    if selector_name == "withTimeout:"
+                        && ret_ty.as_str() == "TimeoutProxy"
+                        && hierarchy.is_actor_subclass(&resolve_class)
+                    {
+                        return receiver_ty.clone();
+                    }
+
                     // `Self` resolves to the static receiver class (with type args)
                     if ret_ty.as_str() == "Self" {
                         if type_args.is_empty() {
