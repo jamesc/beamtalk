@@ -768,6 +768,7 @@ fn test_self_available_in_method_bodies() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -1177,6 +1178,7 @@ fn test_analyse_hierarchy_includes_user_classes() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -1231,6 +1233,7 @@ fn test_analyse_reports_sealed_class_diagnostic() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -1524,6 +1527,7 @@ fn test_abstract_class_instantiation_error() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -1639,6 +1643,7 @@ fn test_self_inside_method_no_error() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -1725,6 +1730,7 @@ fn test_unused_variable_in_method_warns() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -1794,6 +1800,7 @@ fn test_used_variable_no_warning() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -1856,6 +1863,7 @@ fn test_underscore_prefixed_variable_no_warning() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -1920,6 +1928,7 @@ fn test_unused_parameter_emits_warning() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -1986,6 +1995,7 @@ fn test_unused_parameter_underscore_suppresses_warning() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -2053,6 +2063,7 @@ fn test_used_parameter_no_warning() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -2124,6 +2135,7 @@ fn test_unused_parameter_primitive_body_no_warning() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
     let module = Module {
@@ -2196,6 +2208,7 @@ fn test_unused_parameter_intrinsic_body_no_warning() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
     let module = Module {
@@ -2265,6 +2278,7 @@ fn test_unused_variable_in_class_method_warns() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -2330,6 +2344,7 @@ fn test_block_parameter_no_unused_warning() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -2396,6 +2411,7 @@ fn test_pattern_variable_no_unused_warning() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -2466,6 +2482,7 @@ fn test_unused_variable_in_nested_block_warns() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -2544,6 +2561,7 @@ fn test_variable_used_via_closure_no_warning() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -2619,6 +2637,7 @@ fn test_dead_code_after_return_in_method() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -2681,6 +2700,7 @@ fn test_no_dead_code_without_return() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -2751,6 +2771,7 @@ fn test_dead_code_in_block() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -2811,6 +2832,7 @@ fn test_return_at_end_no_warning() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -2897,6 +2919,7 @@ fn test_super_inside_method_no_error() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -3000,6 +3023,7 @@ fn test_block_param_shadows_outer_variable() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -3080,6 +3104,7 @@ fn test_underscore_prefixed_no_shadow_warning() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -3158,6 +3183,7 @@ fn test_no_shadow_warning_different_names() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -3310,6 +3336,7 @@ fn make_abstract_class(name: &str) -> ClassDefinition {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     }
 }
@@ -3493,6 +3520,7 @@ fn test_actor_new_error_in_standalone_method() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -3632,6 +3660,7 @@ fn analyse_with_known_vars_and_classes_injects_user_class_into_hierarchy() {
         package: None,
         is_value: false,
         is_native: false,
+        handle_scope: None,
         state: vec![],
         state_types: std::collections::HashMap::new(),
         state_has_default: std::collections::HashMap::new(),
@@ -3684,6 +3713,41 @@ fn bt2627_singleton_union_annotation_flows_to_type_checker() {
             d.message.contains("understand") && d.message.contains("Integer | #infinity")
         }),
         "expected a union-send diagnostic naming `Integer | #infinity`, got: {:?}",
+        result.diagnostics
+    );
+}
+
+// --- ADR 0103: handleScope: only valid on Object-kind classes (BT-2754) ---
+
+#[test]
+fn handle_scope_on_object_class_is_silent() {
+    let src = "typed Object subclass: MetricsTable native: metrics\n  handleScope: #node\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = analyse(&module);
+    assert!(
+        !result
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("handleScope:")),
+        "handleScope on an Object class must not warn, got: {:?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn handle_scope_on_value_class_warns() {
+    let src = "Value subclass: MyPoint\n  handleScope: #node\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = analyse(&module);
+    assert!(
+        result.diagnostics.iter().any(|d| {
+            d.message.contains("handleScope:")
+                && d.message.contains("value")
+                && d.category == Some(crate::source_analysis::DiagnosticCategory::Sendability)
+        }),
+        "handleScope on a Value class must warn, got: {:?}",
         result.diagnostics
     );
 }
@@ -3842,6 +3906,7 @@ fn workspace_binding_shadowing_class_emits_warning() {
         package: None,
         is_value: false,
         is_native: false,
+        handle_scope: None,
         state: vec![],
         state_types: std::collections::HashMap::new(),
         state_has_default: std::collections::HashMap::new(),
@@ -3901,6 +3966,7 @@ fn workspace_binding_not_in_hierarchy_no_shadow_warning() {
         package: None,
         is_value: false,
         is_native: false,
+        handle_scope: None,
         state: vec![],
         state_types: std::collections::HashMap::new(),
         state_has_default: std::collections::HashMap::new(),
@@ -3957,6 +4023,7 @@ fn fixture_sourced_protocol_name_is_not_unresolved() {
         package: None,
         is_value: false,
         is_native: false,
+        handle_scope: None,
         state: vec![],
         state_types: std::collections::HashMap::new(),
         state_has_default: std::collections::HashMap::new(),

@@ -475,6 +475,42 @@ pub fn check_stdlib_name_shadowing(module: &Module, diagnostics: &mut Vec<Diagno
     }
 }
 
+/// ADR 0103: `handleScope:` is only meaningful on `Object`-kind classes, whose
+/// instances may wrap a runtime-backed handle. A declaration on a `Value` or
+/// `Actor` class is an advisory diagnostic — `Value`s are structurally sendable
+/// and `Actor`s are `SendableRef`, so a handle scope is a no-op there.
+pub fn check_handle_scope_on_object(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for class in &module.classes {
+        let Some(scope) = class.handle_scope.as_ref() else {
+            continue;
+        };
+        let kind = hierarchy.resolve_class_kind(&class.name.name);
+        if kind == ClassKind::Object {
+            continue;
+        }
+        let kind_name = kind.as_str();
+        diagnostics.push(
+            Diagnostic::warning(
+                format!(
+                    "`handleScope:` has no effect on {kind_name} class `{}` — \
+                     handle scopes only apply to Object-kind classes",
+                    class.name.name
+                ),
+                scope.span,
+            )
+            .with_hint(
+                "Value classes are structurally sendable and Actor classes are \
+                 reference-sendable; remove the `handleScope:` declaration",
+            )
+            .with_category(DiagnosticCategory::Sendability),
+        );
+    }
+}
+
 // ── BT-914: Value type slot assignment validation ──────────────────────────────
 
 /// BT-914: Reject `self.slot :=` in Value type methods; warn when it bypasses

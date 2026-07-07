@@ -473,6 +473,9 @@ struct ClassMeta {
     /// Type arguments passed to the superclass, e.g. `["E"]` for
     /// `Collection(E) subclass: List(E)`. Empty when the parent isn't parametric.
     superclass_type_args: Vec<String>,
+    /// Declared sendability handle scope (ADR 0103, `handleScope: #symbol`).
+    /// The bare symbol text (e.g. `"process"`), or `None` when undeclared.
+    handle_scope: Option<String>,
 }
 
 /// Metadata for a single method, extracted from the AST.
@@ -821,6 +824,7 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
         class_variables,
         type_params,
         superclass_type_args,
+        handle_scope: class.handle_scope.as_ref().map(|s| s.name.to_string()),
     })
 }
 
@@ -1045,6 +1049,7 @@ fn generate_builtins_rs(class_metadata: &[ClassMeta]) -> Result<()> {
 }
 
 /// Generate a single class entry for `generated_builtin_classes()`.
+#[allow(clippy::too_many_lines)] // one contiguous struct-literal emission
 fn generate_class_entry(code: &mut String, meta: &ClassMeta) {
     let superclass = if meta.superclass_name == "none" {
         "None".to_string()
@@ -1065,13 +1070,19 @@ fn generate_class_entry(code: &mut String, meta: &ClassMeta) {
          \x20           is_internal: false,\n\
          \x20           package: Some(\"stdlib\".into()),\n\
          \x20           is_value: {is_value},\n\
-         \x20           is_native: {is_native},\n",
+         \x20           is_native: {is_native},\n\
+         \x20           handle_scope: {handle_scope},\n",
         name = meta.class_name,
         sealed = meta.modifiers.is_sealed,
         abstract_ = meta.modifiers.is_abstract,
         typed = meta.modifiers.is_typed,
         is_value = meta.superclass_name == "Value",
         is_native = meta.modifiers.is_native,
+        // ADR 0103: emit the declared handle scope so it survives regeneration.
+        handle_scope = meta
+            .handle_scope
+            .as_deref()
+            .map_or_else(|| "None".to_string(), |s| format!("Some(\"{s}\".into())")),
     );
 
     // State

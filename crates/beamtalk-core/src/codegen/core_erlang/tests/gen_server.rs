@@ -1060,6 +1060,7 @@ fn test_class_registration_generation() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: Span::new(0, 50),
     };
 
@@ -1306,6 +1307,7 @@ fn test_multiple_classes_registration() {
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
+            handle_scope: None,
             span: Span::new(0, span_end),
         }
     }
@@ -1441,6 +1443,7 @@ fn test_multi_class_early_error_short_circuits() {
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
+            handle_scope: None,
             span: Span::new(0, span_end),
         }
     }
@@ -1522,6 +1525,7 @@ fn test_three_class_short_circuit_nesting() {
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
+            handle_scope: None,
             span: Span::new(0, 20),
         }
     }
@@ -1672,6 +1676,7 @@ fn test_is_actor_class_direct_actor_subclass() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: Span::new(0, 0),
     };
     let module = Module {
@@ -1710,6 +1715,7 @@ fn test_is_actor_class_object_subclass_is_value_type() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: Span::new(0, 0),
     };
     let module = Module {
@@ -1750,6 +1756,7 @@ fn test_is_actor_class_multi_level_inheritance() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: Span::new(0, 0),
     };
     let logging_counter = ClassDefinition {
@@ -1771,6 +1778,7 @@ fn test_is_actor_class_multi_level_inheritance() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: Span::new(0, 0),
     };
     // Module with both classes; first class is LoggingCounter
@@ -1833,6 +1841,7 @@ fn test_is_actor_class_unknown_superclass_defaults_to_actor() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: Span::new(0, 0),
     };
     let module = Module {
@@ -1872,6 +1881,7 @@ fn test_is_actor_class_collection_subclass_is_value_type() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: Span::new(0, 0),
     };
     let module = Module {
@@ -1915,6 +1925,7 @@ fn test_is_actor_class_integer_subclass_is_value_type() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: Span::new(0, 0),
     };
     let module = Module {
@@ -1957,6 +1968,7 @@ fn test_is_actor_class_root_class_is_value_type() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: Span::new(0, 0),
     };
     let module = Module {
@@ -2264,6 +2276,7 @@ fn test_object_subclass_no_auto_getters() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: Span::new(0, 0),
     };
     let module = Module {
@@ -2337,6 +2350,7 @@ fn test_value_subclass_user_defined_overrides_auto() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: Span::new(0, 0),
     };
     let module = Module {
@@ -2380,6 +2394,7 @@ fn test_value_subclass_no_slots_no_keyword_constructor() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: Span::new(0, 0),
     };
     let module = Module {
@@ -2482,6 +2497,7 @@ fn test_value_subclass_class_method_slot_send_routes_to_constructor() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: Span::new(0, 0),
     };
     let module = Module {
@@ -2764,6 +2780,7 @@ fn generate_module_with_pre_class_hierarchy_does_not_panic() {
         package: None,
         is_value: false,
         is_native: false,
+        handle_scope: None,
         state: vec![],
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),
@@ -2807,6 +2824,7 @@ fn price_band_class_info_with_lo_type(
         package: None,
         is_value: false,
         is_native: false,
+        handle_scope: None,
         state: vec![ecow::EcoString::from("lo")],
         state_types,
         state_has_default: HashMap::new(),
@@ -2953,6 +2971,7 @@ fn test_value_subclass_typed_fields_emit_type_alias() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: Span::new(0, 0),
     };
     let module = Module {
@@ -3280,6 +3299,7 @@ fn test_bt1213_block_value_with_captured_mutation_actor() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: Span::new(0, 0),
     };
 
@@ -3373,6 +3393,7 @@ fn make_native_actor_module() -> Module {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: Some(Identifier::new("test_backing_mod", Span::new(0, 0))),
+        handle_scope: None,
         span: Span::new(0, 0),
     };
     Module {
@@ -3711,6 +3732,7 @@ fn make_native_actor_with_class_methods() -> Module {
         comments: CommentAttachment::default(),
         doc_comment: Some("A test native actor with class methods.".to_string()),
         backing_module: Some(Identifier::new("test_rich_backing", Span::new(0, 0))),
+        handle_scope: None,
         span: Span::new(0, 0),
     };
     Module {
@@ -4547,6 +4569,7 @@ fn make_actor_typed_no_default(field_name: &str, ty: TypeAnnotation) -> Module {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: s,
     };
     Module {

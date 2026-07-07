@@ -28,6 +28,7 @@ fn hierarchy_with(class: &str, superclass: &str) -> ClassHierarchy {
         package: None,
         is_value: false,
         is_native: false,
+        handle_scope: None,
         state: vec![],
         state_types: HashMap::new(),
         state_has_default: HashMap::new(),

@@ -608,6 +608,7 @@ fn false_or_param_resolves_to_union() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: span(),
     };
 

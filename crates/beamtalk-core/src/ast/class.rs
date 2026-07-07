@@ -164,6 +164,14 @@ pub struct ClassDefinition {
     /// Set by the parser when `native: <module>` appears on the `subclass:` declaration.
     /// `None` for all ordinary Beamtalk classes.
     pub backing_module: Option<Identifier>,
+    /// Declared sendability handle scope (ADR 0103, `handleScope: #symbol`).
+    ///
+    /// Set by the parser when a class-side `handleScope:` clause appears. The
+    /// identifier's name is the bare symbol text (e.g. `"process"`, `"node"`);
+    /// the span points at the symbol for diagnostics. `None` for classes with
+    /// no declaration (they stay tier `Unknown`, silent). Only meaningful on
+    /// `Object`-kind classes.
+    pub handle_scope: Option<Identifier>,
     /// Type parameters for generic classes (e.g., `T`, `E` in `Result(T, E)`).
     ///
     /// Empty for non-generic classes. Populated by the parser when parenthesized
@@ -210,6 +218,7 @@ impl ClassDefinition {
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
+            handle_scope: None,
             span,
         }
     }
@@ -246,6 +255,7 @@ impl ClassDefinition {
             comments: CommentAttachment::default(),
             doc_comment: None,
             backing_module: None,
+            handle_scope: None,
             span,
         }
     }

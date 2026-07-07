@@ -142,6 +142,7 @@ fn bt_2020_result_is_ok_if_true_if_false_preserves_my_val() {
         package: None,
         is_value: true,
         is_native: false,
+        handle_scope: None,
         state: vec![],
         state_types: std::collections::HashMap::new(),
         state_has_default: std::collections::HashMap::new(),

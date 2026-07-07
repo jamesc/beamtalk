@@ -560,6 +560,12 @@ fn analyse_full_with_natives(
         &result.class_hierarchy,
         &mut result.diagnostics,
     );
+    // ADR 0103: `handleScope:` is only meaningful on Object-kind classes.
+    validators::check_handle_scope_on_object(
+        module,
+        &result.class_hierarchy,
+        &mut result.diagnostics,
+    );
     // BT-919: Reject cast (!) on value types
     validators::check_cast_on_value_type(module, &result.class_hierarchy, &mut result.diagnostics);
     // BT-1793: Reject actor state mutation inside non-state-threading block closures

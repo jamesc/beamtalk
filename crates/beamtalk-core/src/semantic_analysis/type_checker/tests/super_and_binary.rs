@@ -44,6 +44,7 @@ fn test_super_infers_parent_class_type() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: span(),
     };
 
@@ -87,6 +88,7 @@ fn test_super_infers_parent_class_type() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: span(),
     };
 
@@ -139,6 +141,7 @@ fn test_super_unknown_selector_warns() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: span(),
     };
 
@@ -178,6 +181,7 @@ fn test_super_unknown_selector_warns() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: span(),
     };
 
