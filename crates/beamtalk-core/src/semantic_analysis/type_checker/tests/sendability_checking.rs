@@ -147,3 +147,50 @@ fn dynamic_arg_silent() {
         "Dynamic arg must be silent (advisory, ADR 0100): {diags:?}"
     );
 }
+
+// --- spawnWith: map value check (ADR 0103 Phase 1) ---
+
+/// Parse `src`, build its hierarchy, run the checker, return the diagnostics.
+fn check_source(src: &str) -> Vec<Diagnostic> {
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    checker.take_diagnostics()
+}
+
+#[test]
+fn spawn_with_port_value_warns() {
+    let src = "Actor subclass: Worker\n  \
+        state: p :: Port = nil\n\n\
+        Object subclass: Main\n  \
+        run: aPort :: Port =>\n    \
+        Worker spawnWith: #{ p => aPort }\n";
+    let diags = check_source(src);
+    let warns = sendability_warnings(&diags);
+    assert_eq!(
+        warns.len(),
+        1,
+        "expected one spawnWith: sendability warning, got: {diags:?}"
+    );
+    assert!(
+        warns[0].message.contains("spawnWith:") && warns[0].message.contains("process-bound"),
+        "unexpected message: {}",
+        warns[0].message
+    );
+}
+
+#[test]
+fn spawn_with_sendable_value_silent() {
+    let src = "Actor subclass: Worker\n  \
+        state: n :: Integer = 0\n\n\
+        Object subclass: Main\n  \
+        run: count :: Integer =>\n    \
+        Worker spawnWith: #{ n => count }\n";
+    let diags = check_source(src);
+    assert!(
+        sendability_warnings(&diags).is_empty(),
+        "sendable spawnWith: value must not warn: {diags:?}"
+    );
+}

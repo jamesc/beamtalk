@@ -56,16 +56,21 @@ pub(crate) enum HandleScope {
 impl HandleScope {
     /// Parse a declared `handleScope:` symbol into a scope. The stored symbol
     /// text has no leading `#` (symbols are interned as their bare name).
-    ///
-    /// Consumed by the Phase 1 tier derivation (BT-2755) once user
-    /// `handleScope:` declarations are read from `ClassInfo`.
     #[must_use]
-    #[allow(dead_code)] // Consumed by Phase 1 tier derivation (BT-2755).
     pub(crate) fn from_symbol(sym: &str) -> Self {
         match sym {
             "process" => HandleScope::Process,
             "node" => HandleScope::Node,
             other => HandleScope::Other(EcoString::from(other)),
+        }
+    }
+
+    /// The bare scope symbol text, for display (`process` / `node` / …).
+    fn as_atom(&self) -> &str {
+        match self {
+            HandleScope::Process => "process",
+            HandleScope::Node => "node",
+            HandleScope::Other(sym) => sym.as_str(),
         }
     }
 
@@ -194,11 +199,25 @@ fn is_primitive_sendable(class_name: &str) -> bool {
     )
 }
 
+/// Recursion cap for structural composition — guards against Value types with
+/// self-referential fields (`Value subclass: Tree` with a `Tree` field). At the
+/// cap, composition contributes nothing (`Sendable`), biasing toward the
+/// already-determined shallow tier rather than over-warning.
+const MAX_COMPOSE_DEPTH: u8 = 12;
+
 /// Derive the sendability tier of an inferred type. **The single source of
 /// truth** — every boundary check calls this.
+#[must_use]
+pub(crate) fn tier_of(ty: &InferredType, hierarchy: &ClassHierarchy) -> Tier {
+    tier_of_depth(ty, hierarchy, 0)
+}
+
 // `Never` and `Meta` coincide at `Sendable` but describe distinct cases.
 #[allow(clippy::match_same_arms)]
-pub(crate) fn tier_of(ty: &InferredType, hierarchy: &ClassHierarchy) -> Tier {
+fn tier_of_depth(ty: &InferredType, hierarchy: &ClassHierarchy, depth: u8) -> Tier {
+    if depth >= MAX_COMPOSE_DEPTH {
+        return Tier::Sendable;
+    }
     match ty {
         // Untyped FFI / Dynamic: no knowledge to grade on (ADR 0075, 0100).
         InferredType::Dynamic(_) => Tier::Unknown,
@@ -210,23 +229,23 @@ pub(crate) fn tier_of(ty: &InferredType, hierarchy: &ClassHierarchy) -> Tier {
             class_name,
             type_args,
             ..
-        } => tier_of_known(class_name, type_args, hierarchy),
+        } => tier_of_known(class_name, type_args, hierarchy, depth),
         // A union value may be *any* member — take the weakest so a hazardous
         // member is not masked by a sendable one.
         InferredType::Union { members, .. } => members
             .iter()
-            .map(|m| tier_of(m, hierarchy))
+            .map(|m| tier_of_depth(m, hierarchy, depth + 1))
             .reduce(Tier::join)
             .unwrap_or(Tier::Unknown),
         // An intersection value satisfies *every* member — the most-known
         // member describes it best.
         InferredType::Intersection { members, .. } => members
             .iter()
-            .map(|m| tier_of(m, hierarchy))
+            .map(|m| tier_of_depth(m, hierarchy, depth + 1))
             .reduce(Tier::meet)
             .unwrap_or(Tier::Unknown),
         // `A \ B` is still an `A`.
-        InferredType::Negation { base, .. } => tier_of(base, hierarchy),
+        InferredType::Negation { base, .. } => tier_of_depth(base, hierarchy, depth),
     }
 }
 
@@ -234,6 +253,7 @@ fn tier_of_known(
     class_name: &EcoString,
     type_args: &[InferredType],
     hierarchy: &ClassHierarchy,
+    depth: u8,
 ) -> Tier {
     let name = class_name.as_str();
     // Symbol singletons (`#foo`) are plain atoms.
@@ -242,38 +262,69 @@ fn tier_of_known(
     }
     // The builtin hazard table takes precedence over class kind: `Pid` is
     // Object-kind but behaves as `SendableRef`, and `Port`/`Subscription`/…
-    // carry scoped handles that the coarse kind fallback would miss.
+    // carry scoped handles that the coarse kind fallback would miss. Builtins
+    // are non-generic, so no composition applies.
     if let Some(tier) = builtin_tier(name) {
         return tier;
     }
     if is_primitive_sendable(name) {
         return Tier::Sendable;
     }
-    // Phase 1 (BT-2755) extends this arm with `Value` structural composition
-    // over fields, generic `type_args` (`List(Port)` → `HandleScoped`), and
-    // user `handleScope:` declarations. Phase 0 uses the coarse kind fallback.
-    let _ = type_args;
-    match hierarchy.resolve_class_kind(name) {
+    // A user `Object subclass:` may declare its handle scope (BT-2754). A
+    // declared scope classifies the otherwise-`Unknown` Object.
+    if let Some(scope) = hierarchy.handle_scope(name) {
+        return Tier::HandleScoped(HandleScope::from_symbol(scope.as_str()));
+    }
+
+    // Base tier from the class kind, then compose structurally.
+    let mut tier = match hierarchy.resolve_class_kind(name) {
         ClassKind::Value => Tier::Sendable,
         ClassKind::Actor => Tier::SendableRef,
+        // Unclassified Object with no declaration stays silent.
         ClassKind::Object => Tier::Unknown,
+    };
+
+    // Generic composition (ADR 0102 `type_args`): a container is as weak as its
+    // weakest element — `List(Port)` (a `Collection` → `Value`) → `HandleScoped`.
+    for arg in type_args {
+        tier = tier.join(tier_of_depth(arg, hierarchy, depth + 1));
     }
+
+    // `Value` structural composition: a Value inherits the weakest tier of its
+    // declared fields — a `SendableRef` field makes it `SendableRef`, a
+    // `HandleScoped` field makes it `HandleScoped`, an untyped/`Unknown` field
+    // makes the composite `Unknown` (ADR 0103 §Tiers).
+    if hierarchy.resolve_class_kind(name) == ClassKind::Value {
+        for field in hierarchy.all_state(name) {
+            let field_tier = match hierarchy.state_field_type(name, &field) {
+                Some(field_ty) => {
+                    tier_of_depth(&InferredType::known(field_ty), hierarchy, depth + 1)
+                }
+                // An untyped field carries no static tier — treat as Unknown.
+                None => Tier::Unknown,
+            };
+            tier = tier.join(field_tier);
+        }
+    }
+
+    tier
 }
 
 /// Hover label for a value's tier, or `None` when nothing should be shown.
 ///
-/// Phase 0's sole tier consumer is hover, and its v1 contract is fixed:
-/// display `SendableRef` for `Pid`- and Actor-typed values (ADR 0103 §Tiers).
-/// Other tiers render nothing yet — Phase 1 (BT-2755) broadens this to all
-/// tiers.
+/// Hover is the sole v1 consumer of the tier lattice (ADR 0103 §Tiers). It
+/// renders the meaningful tiers — `SendableRef` (Pid/Actor references) and
+/// `HandleScoped(#scope)` (scoped handles, including tiers a `Value` inherited
+/// structurally) — so a developer sees the send semantics truthfully. The two
+/// silent tiers are deliberately not shown: `Sendable` is the unremarkable
+/// default (rendering it on every `Integer` would be noise) and `Unknown`
+/// means the checker has nothing to say.
 #[must_use]
-pub(crate) fn hover_tier_label(
-    ty: &InferredType,
-    hierarchy: &ClassHierarchy,
-) -> Option<&'static str> {
+pub(crate) fn hover_tier_label(ty: &InferredType, hierarchy: &ClassHierarchy) -> Option<String> {
     match tier_of(ty, hierarchy) {
-        Tier::SendableRef => Some("SendableRef"),
-        _ => None,
+        Tier::SendableRef => Some("SendableRef".to_string()),
+        Tier::HandleScoped(scope) => Some(format!("HandleScoped(#{})", scope.as_atom())),
+        Tier::Sendable | Tier::Unknown => None,
     }
 }
 
@@ -342,11 +393,75 @@ mod tests {
     }
 
     #[test]
-    fn hover_shows_sendableref_only() {
+    fn hover_renders_meaningful_tiers() {
         let h = hierarchy();
-        assert_eq!(hover_tier_label(&known("Pid"), &h), Some("SendableRef"));
-        assert_eq!(hover_tier_label(&known("Port"), &h), None);
+        assert_eq!(
+            hover_tier_label(&known("Pid"), &h).as_deref(),
+            Some("SendableRef")
+        );
+        assert_eq!(
+            hover_tier_label(&known("Port"), &h).as_deref(),
+            Some("HandleScoped(#process)")
+        );
+        assert_eq!(
+            hover_tier_label(&known("Subscription"), &h).as_deref(),
+            Some("HandleScoped(#node)")
+        );
+        // Sendable and Unknown are the silent tiers — no hover label.
         assert_eq!(hover_tier_label(&known("Integer"), &h), None);
+        assert_eq!(hover_tier_label(&known("SomeRandomClass"), &h), None);
+    }
+
+    #[test]
+    fn generic_collection_composes_element_tier() {
+        let h = hierarchy();
+        // List(Port): List is a Collection → Value (base Sendable); the element
+        // Port makes the whole collection HandleScoped(#process).
+        let list_of_port = InferredType::known_with_args("List", vec![known("Port")]);
+        assert_eq!(
+            tier_of(&list_of_port, &h),
+            Tier::HandleScoped(HandleScope::Process)
+        );
+        // List(Integer) stays Sendable.
+        let list_of_int = InferredType::known_with_args("List", vec![known("Integer")]);
+        assert_eq!(tier_of(&list_of_int, &h), Tier::Sendable);
+    }
+
+    #[test]
+    fn dictionary_composes_value_tier() {
+        let h = hierarchy();
+        // Dictionary(String, Port) → HandleScoped via its value type arg.
+        let dict =
+            InferredType::known_with_args("Dictionary", vec![known("String"), known("Port")]);
+        assert_eq!(tier_of(&dict, &h), Tier::HandleScoped(HandleScope::Process));
+    }
+
+    #[test]
+    fn user_handle_scope_classifies_object() {
+        // A user Object subclass declaring handleScope: #process is HandleScoped.
+        let tokens = crate::source_analysis::lex_with_eof(
+            "typed Object subclass: PortBox native: pb\n  handleScope: #process",
+        );
+        let (module, _) = crate::source_analysis::parse(tokens);
+        let h = ClassHierarchy::build(&module).0.unwrap();
+        assert_eq!(
+            tier_of(&known("PortBox"), &h),
+            Tier::HandleScoped(HandleScope::Process)
+        );
+    }
+
+    #[test]
+    fn value_composition_inherits_weakest_field() {
+        // A Value with a Port field inherits HandleScoped(#process).
+        let tokens = crate::source_analysis::lex_with_eof(
+            "typed Value subclass: Wrapper\n  field: p :: Port = nil",
+        );
+        let (module, _) = crate::source_analysis::parse(tokens);
+        let h = ClassHierarchy::build(&module).0.unwrap();
+        assert_eq!(
+            tier_of(&known("Wrapper"), &h),
+            Tier::HandleScoped(HandleScope::Process)
+        );
     }
 
     #[test]

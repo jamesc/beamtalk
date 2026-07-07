@@ -844,6 +844,58 @@ impl TypeChecker {
     /// silent in v1 (no static remoteness knowledge; advisory per ADR 0100).
     ///
     /// Class-side sends (`spawnWith:` maps, `new:`) are Phase 1 (BT-2755).
+    /// ADR 0103 (Phase 1): warn when a process-bound handle appears as a value
+    /// in a `spawnWith:` initial-state map — the map is copied into the new
+    /// actor process, so a `HandleScoped(#process)` value is only usable by its
+    /// original owner. Inspects the `MapLiteral` call-site pairs (shared model
+    /// with ADR 0104's `spawnWith:` key checking).
+    pub(super) fn check_spawn_with_sendability(
+        &mut self,
+        selector: &str,
+        hierarchy: &ClassHierarchy,
+        receiver_is_actor: bool,
+        arg_exprs: Option<&[Expression]>,
+    ) {
+        if !receiver_is_actor || selector != "spawnWith:" {
+            return;
+        }
+        let Some(Expression::MapLiteral { pairs, .. }) = arg_exprs.and_then(<[_]>::first) else {
+            return;
+        };
+        for pair in pairs {
+            let Some(value_ty) = self.type_map.get(pair.value.span()) else {
+                continue;
+            };
+            let sendability::Tier::HandleScoped(sendability::HandleScope::Process) =
+                sendability::tier_of(value_ty, hierarchy)
+            else {
+                continue;
+            };
+            let ty_name = value_ty
+                .as_known()
+                .cloned()
+                .unwrap_or_else(|| EcoString::from("handle"));
+            let label = match &pair.value {
+                Expression::Identifier(ident) => ident.name.clone(),
+                _ => ty_name.clone(),
+            };
+            self.diagnostics.push(
+                Diagnostic::warning(
+                    format!(
+                        "`{label}` ({ty_name} — process-bound handle) passed in a `spawnWith:` \
+                         map; it is only usable by its owning process"
+                    ),
+                    pair.value.span(),
+                )
+                .with_hint(
+                    "The initial-state map is copied into the new actor process. Consider \
+                     passing data, or an Actor that owns the handle",
+                )
+                .with_category(DiagnosticCategory::Sendability),
+            );
+        }
+    }
+
     pub(super) fn check_arg_sendability(
         &mut self,
         arg_types: &[InferredType],
@@ -906,17 +958,19 @@ impl TypeChecker {
         arg_exprs: Option<&[Expression]>,
         env: Option<&super::TypeEnv>,
     ) {
-        // ADR 0103: sendability of actor message arguments. Independent of the
-        // handler's declared parameter types, so it runs before the method
-        // lookup / early returns below.
+        // ADR 0103: sendability of actor message arguments and `spawnWith:`
+        // map values. Independent of the handler's declared parameter types, so
+        // they run before the method lookup / early returns below.
+        let receiver_is_actor = hierarchy.is_actor_subclass(class_name);
         self.check_arg_sendability(
             arg_types,
             span,
             hierarchy,
             is_class_side,
-            hierarchy.is_actor_subclass(class_name),
+            receiver_is_actor,
             arg_exprs,
         );
+        self.check_spawn_with_sendability(selector, hierarchy, receiver_is_actor, arg_exprs);
 
         let method = if is_class_side {
             hierarchy.find_class_method(class_name, selector)

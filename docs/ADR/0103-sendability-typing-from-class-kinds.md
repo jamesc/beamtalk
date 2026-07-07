@@ -101,6 +101,27 @@ as source annotations:
 This table **is the Phase 0 deliverable** — it makes the canonical hazards
 (`Port` in an actor message) warn on day one with zero user annotations.
 
+### Stdlib inventory audit (BT-2755)
+
+The FFI-wrapping stdlib `Object subclass: … native: …` classes were audited to
+confirm no process-bound handle escapes classification:
+
+| Class | Backing | Tier | Rationale |
+|---|---|---|---|
+| `Port`, `FileHandle` | ports / file handles | `HandleScoped(#process)` | **builtin table** — the true `#process` hazards |
+| `Subscription` | ETS `SubRef` | `HandleScoped(#node)` | builtin table; node-local, silent in v1 |
+| `Ets`, `AtomicCounter` | ETS table / `atomics` | `#node` *(candidate)* | node-local, reachable by name/ref across processes; silent in v1 |
+| `Timer` | `send_after` ref | `#node` *(candidate)* | node-local timer reference |
+| `Console`, `File`, `Json`, `System`, `OS`, `Program`, `Tracing`, `Session`, `BindingsView`, `TestRunner`, `TestResult` | stateless facades | `Unknown` (silent) | class-method APIs with no per-instance runtime handle — nothing to scope |
+
+**Conclusion:** every `#process`-bound handle in the stdlib is covered by the
+builtin table. The node-local candidates (`Ets`, `AtomicCounter`, `Timer`) are
+`#node`-scoped — **silent in v1** regardless of whether they carry an explicit
+`handleScope:` — so declarations are deferred; the undeclared-handle companion
+lint (BT-2757) will nudge for them without changing diagnostics. The stateless
+facades correctly stay `Unknown`. No new `handleScope:` declarations are
+required for v1 correctness.
+
 ### Declaring handle scope (the one new annotation)
 
 User-defined `Object subclass:` classes that wrap runtime state may declare

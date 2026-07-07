@@ -659,7 +659,7 @@ fn find_hover_in_expr(
                 } else {
                     format!("Identifier: `{}`", ident.name)
                 };
-                // ADR 0103: annotate Pid/Actor-typed values with their
+                // ADR 0103: annotate reference/handle-typed values with their
                 // sendability tier (the tier's sole v1 consumer).
                 if let Some(tier) = inferred.and_then(|ty| {
                     crate::semantic_analysis::type_checker::sendability::hover_tier_label(
@@ -667,7 +667,7 @@ fn find_hover_in_expr(
                     )
                 }) {
                     contents.push_str(" — Sendability: ");
-                    contents.push_str(tier);
+                    contents.push_str(&tier);
                 }
                 Some(HoverInfo::new(contents, ident.span))
             } else {
