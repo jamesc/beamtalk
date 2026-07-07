@@ -292,8 +292,16 @@ fn tier_of_known(
     if kind == ClassKind::Value {
         for field in hierarchy.all_state(name) {
             let field_tier = match hierarchy.state_field_type(name, &field) {
+                // Parse the stored type-name string through the shared resolver
+                // so generic annotations keep their `type_args`: `"List(Port)"`
+                // becomes `Known("List", [Known("Port")])`, not an opaque
+                // `Known("List(Port)")`. Without this the whole annotation would
+                // be treated as the class name, `resolve_class_kind` would find
+                // no such class, and a generic field would silently drop to
+                // `Unknown` instead of composing its element tier (BT-2770).
                 Some(field_ty) => {
-                    tier_of_depth(&InferredType::known(field_ty), hierarchy, depth + 1)
+                    let field_type = super::TypeChecker::resolve_type_name_string(&field_ty);
+                    tier_of_depth(&field_type, hierarchy, depth + 1)
                 }
                 // An untyped field carries no static tier — treat as Unknown.
                 None => Tier::Unknown,
@@ -482,6 +490,50 @@ mod tests {
         let h = ClassHierarchy::build(&module).0.unwrap();
         assert_eq!(
             tier_of(&known("Wrapper"), &h),
+            Tier::HandleScoped(HandleScope::Process)
+        );
+    }
+
+    #[test]
+    fn value_composition_inherits_generic_field_element_tier() {
+        // BT-2770: a Value with a `List(Port)` field must compose to
+        // HandleScoped(#process), matching the bare-`Port` field case. The
+        // stored field type is the string "List(Port)"; the fix parses it back
+        // into `Known("List", [Known("Port")])` so the element tier survives.
+        let tokens = crate::source_analysis::lex_with_eof(
+            "typed Value subclass: Wrapper\n  field: ports :: List(Port) = nil",
+        );
+        let (module, _) = crate::source_analysis::parse(tokens);
+        let h = ClassHierarchy::build(&module).0.unwrap();
+        assert_eq!(
+            tier_of(&known("Wrapper"), &h),
+            Tier::HandleScoped(HandleScope::Process)
+        );
+    }
+
+    #[test]
+    fn value_composition_generic_sendable_field_stays_sendable() {
+        // A `List(Integer)` field composes to Sendable — the generic parse must
+        // not spuriously weaken a container of sendable elements.
+        let tokens = crate::source_analysis::lex_with_eof(
+            "typed Value subclass: IntBox\n  field: nums :: List(Integer) = nil",
+        );
+        let (module, _) = crate::source_analysis::parse(tokens);
+        let h = ClassHierarchy::build(&module).0.unwrap();
+        assert_eq!(tier_of(&known("IntBox"), &h), Tier::Sendable);
+    }
+
+    #[test]
+    fn value_composition_dictionary_value_field_is_handle_scoped() {
+        // `Dictionary(String, Port)` field → HandleScoped(#process) via its
+        // value type arg, confirming multi-arg generics survive the parse too.
+        let tokens = crate::source_analysis::lex_with_eof(
+            "typed Value subclass: PortMap\n  field: byName :: Dictionary(String, Port) = nil",
+        );
+        let (module, _) = crate::source_analysis::parse(tokens);
+        let h = ClassHierarchy::build(&module).0.unwrap();
+        assert_eq!(
+            tier_of(&known("PortMap"), &h),
             Tier::HandleScoped(HandleScope::Process)
         );
     }
