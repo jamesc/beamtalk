@@ -1721,50 +1721,21 @@ fn unparse_type_annotation(ty: &TypeAnnotation) -> Document<'static> {
         }
         TypeAnnotation::Difference { base, excluded, .. } => {
             // Re-derive grouping parens (BT-2760) where re-parsing would
-            // otherwise change the AST: a union/intersection operand (only
-            // reachable via explicit grouping) must stay grouped, and the
-            // right operand of the left-associative `\` must stay grouped
-            // when it is itself a difference (`Symbol \ (#a \ #b)`).
-            let base_parens = matches!(
-                base.as_ref(),
-                TypeAnnotation::Union { .. }
-                    | TypeAnnotation::FalseOr { .. }
-                    | TypeAnnotation::Intersection { .. }
-            );
-            let excluded_parens = matches!(
-                excluded.as_ref(),
-                TypeAnnotation::Union { .. }
-                    | TypeAnnotation::FalseOr { .. }
-                    | TypeAnnotation::Intersection { .. }
-                    | TypeAnnotation::Difference { .. }
-            );
+            // otherwise change the AST. The predicate is shared with
+            // `TypeAnnotation::type_name` — single source of truth.
             docvec![
-                unparse_grouped_type(base, base_parens),
+                unparse_grouped_type(base, base.needs_parens_in_difference(false)),
                 " \\ ",
-                unparse_grouped_type(excluded, excluded_parens)
+                unparse_grouped_type(excluded, excluded.needs_parens_in_difference(true))
             ]
         }
         TypeAnnotation::Intersection { left, right, .. } => {
-            // Mirror image of `Difference` above: `&` shares the tier with
-            // `\` and is left-associative, so grouped union/difference
-            // operands and a right-nested intersection keep their parens.
-            let left_parens = matches!(
-                left.as_ref(),
-                TypeAnnotation::Union { .. }
-                    | TypeAnnotation::FalseOr { .. }
-                    | TypeAnnotation::Difference { .. }
-            );
-            let right_parens = matches!(
-                right.as_ref(),
-                TypeAnnotation::Union { .. }
-                    | TypeAnnotation::FalseOr { .. }
-                    | TypeAnnotation::Difference { .. }
-                    | TypeAnnotation::Intersection { .. }
-            );
+            // Mirror image of `Difference` above; predicate shared with
+            // `TypeAnnotation::type_name`.
             docvec![
-                unparse_grouped_type(left, left_parens),
+                unparse_grouped_type(left, left.needs_parens_in_intersection(false)),
                 " & ",
-                unparse_grouped_type(right, right_parens)
+                unparse_grouped_type(right, right.needs_parens_in_intersection(true))
             ]
         }
         TypeAnnotation::SelfType { .. } => Document::Str("Self"),
