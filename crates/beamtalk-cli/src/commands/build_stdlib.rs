@@ -1474,6 +1474,7 @@ mod tests {
             class_variables: vec![],
             type_params: vec![],
             superclass_type_args: vec![],
+            handle_scope: None,
         }
     }
 
@@ -1523,6 +1524,7 @@ mod tests {
             class_variables: vec![],
             type_params: vec![],
             superclass_type_args: vec![],
+            handle_scope: None,
         };
         let mut code = String::new();
         generate_class_entry(&mut code, &meta);
@@ -1619,6 +1621,7 @@ mod tests {
                 class_variables: vec![],
                 type_params: vec![],
                 superclass_type_args: vec![],
+                handle_scope: None,
             },
             ClassMeta {
                 module_name: "bt@stdlib@alpha".to_string(),
@@ -1637,6 +1640,7 @@ mod tests {
                 class_variables: vec![],
                 type_params: vec![],
                 superclass_type_args: vec![],
+                handle_scope: None,
             },
         ];
 
