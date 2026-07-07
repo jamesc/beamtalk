@@ -1431,6 +1431,7 @@ fn class_reference_hover_info(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::language_service::ByteOffset;
     use crate::semantic_analysis::ClassHierarchy;
     use crate::source_analysis::{lex_with_eof, parse};
 
@@ -1440,6 +1441,13 @@ mod tests {
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         compute_hover(&module, source, position, &hierarchy, None)
+    }
+
+    /// Converts a byte offset (as returned by `str::find`/`str::rfind`) to a
+    /// `Position`, for test convenience.
+    fn pos_at(source: &str, offset: usize) -> Position {
+        let offset = u32::try_from(offset).expect("test source under 4GB");
+        Position::from_byte_offset(source, ByteOffset::new(offset)).unwrap()
     }
 
     #[test]
@@ -1553,7 +1561,7 @@ mod tests {
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
         let selector_offset = source.rfind("increment").unwrap();
-        let pos = Position::from_offset(source, selector_offset).unwrap();
+        let pos = pos_at(source, selector_offset);
         let hover = compute_hover(&module, source, pos, &hierarchy, None);
         assert!(hover.is_some(), "Should hover call-site selector");
         let hover = hover.unwrap();
@@ -1682,7 +1690,7 @@ mod tests {
         // "self" appears at offset 59 in the method body
         // Find the exact offset of "self" in the source
         let self_offset = source.find("self.count").unwrap();
-        let pos = Position::from_offset(source, self_offset).unwrap();
+        let pos = pos_at(source, self_offset);
         let hover = compute_hover(&module, source, pos, &hierarchy, None);
         assert!(hover.is_some(), "Should find hover for self");
         let hover = hover.unwrap();
@@ -1702,7 +1710,7 @@ mod tests {
 
         // Find "self" in the class method body
         let class_method_self = source.find("self new:").unwrap();
-        let pos = Position::from_offset(source, class_method_self).unwrap();
+        let pos = pos_at(source, class_method_self);
         let hover = compute_hover(&module, source, pos, &hierarchy, None);
         assert!(
             hover.is_some(),
@@ -1726,7 +1734,7 @@ mod tests {
 
         // Find the position of the top-level "Counter" reference
         let counter_pos = source.rfind("Counter").unwrap();
-        let pos = Position::from_offset(source, counter_pos).unwrap();
+        let pos = pos_at(source, counter_pos);
         let hover = compute_hover(&module, source, pos, &hierarchy, None);
         assert!(hover.is_some(), "Should find hover for Counter reference");
         let hover = hover.unwrap();
@@ -1755,7 +1763,7 @@ mod tests {
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
         let offset = source.find("count ::").unwrap();
-        let pos = Position::from_offset(source, offset).unwrap();
+        let pos = pos_at(source, offset);
         let hover = compute_hover(&module, source, pos, &hierarchy, None);
 
         assert!(hover.is_some(), "Should hover state declaration name");
@@ -1793,7 +1801,7 @@ mod tests {
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
         let offset = source.find("count =").unwrap();
-        let pos = Position::from_offset(source, offset).unwrap();
+        let pos = pos_at(source, offset);
         let hover = compute_hover(&module, source, pos, &hierarchy, None);
 
         assert!(
@@ -1877,7 +1885,7 @@ mod tests {
         // Position at the `x` inside the `ifFalse:` block, not the
         // declaration or the guard.
         let offset = source.rfind("[x]").unwrap() + 1;
-        let pos = Position::from_offset(source, offset).unwrap();
+        let pos = pos_at(source, offset);
         let hover = compute_hover(&module, source, pos, &hierarchy, None);
         assert!(hover.is_some(), "Should hover on narrowed `x`");
         let hover = hover.unwrap();
@@ -1932,7 +1940,7 @@ mod tests {
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
         let self_offset = source.find("self.count").unwrap();
-        let pos = Position::from_offset(source, self_offset).unwrap();
+        let pos = pos_at(source, self_offset);
         let hover = compute_hover(&module, source, pos, &hierarchy, None);
         assert!(
             hover.is_some(),
@@ -1954,7 +1962,7 @@ mod tests {
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
         let self_offset = source.find("self new:").unwrap();
-        let pos = Position::from_offset(source, self_offset).unwrap();
+        let pos = pos_at(source, self_offset);
         let hover = compute_hover(&module, source, pos, &hierarchy, None);
         assert!(
             hover.is_some(),
@@ -1976,7 +1984,7 @@ mod tests {
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
         let selector_offset = source.find("increment =>").unwrap();
-        let pos = Position::from_offset(source, selector_offset).unwrap();
+        let pos = pos_at(source, selector_offset);
         let hover = compute_hover(&module, source, pos, &hierarchy, None);
 
         assert!(hover.is_some(), "Should hover method declaration selector");
@@ -1996,7 +2004,7 @@ mod tests {
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
         let selector_offset = source.find("at:").unwrap();
-        let pos = Position::from_offset(source, selector_offset).unwrap();
+        let pos = pos_at(source, selector_offset);
         let hover = compute_hover(&module, source, pos, &hierarchy, None);
 
         assert!(hover.is_some(), "Should hover keyword declaration selector");
@@ -2016,7 +2024,7 @@ mod tests {
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
         let param_offset = source.find("aBlock ::").unwrap();
-        let pos = Position::from_offset(source, param_offset).unwrap();
+        let pos = pos_at(source, param_offset);
         let hover = compute_hover(&module, source, pos, &hierarchy, None);
 
         assert!(hover.is_some(), "Should hover typed parameter name");
@@ -2036,7 +2044,7 @@ mod tests {
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
         let param_type_offset = source.find("Block ->").unwrap();
-        let param_type_pos = Position::from_offset(source, param_type_offset).unwrap();
+        let param_type_pos = pos_at(source, param_type_offset);
         let param_type_hover = compute_hover(&module, source, param_type_pos, &hierarchy, None);
         assert!(param_type_hover.is_some(), "Should hover parameter type");
         let param_type_hover = param_type_hover.unwrap();
@@ -2049,7 +2057,7 @@ mod tests {
         );
 
         let return_type_offset = source.find("-> Boolean").unwrap() + 3;
-        let return_type_pos = Position::from_offset(source, return_type_offset).unwrap();
+        let return_type_pos = pos_at(source, return_type_offset);
         let return_type_hover = compute_hover(&module, source, return_type_pos, &hierarchy, None);
         assert!(return_type_hover.is_some(), "Should hover return type");
         let return_type_hover = return_type_hover.unwrap();
@@ -2070,7 +2078,7 @@ mod tests {
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
         let selector_offset = source.find("increment ->").unwrap();
-        let pos = Position::from_offset(source, selector_offset).unwrap();
+        let pos = pos_at(source, selector_offset);
         let hover = compute_hover(&module, source, pos, &hierarchy, None);
 
         assert!(hover.is_some(), "Should hover declaration selector");
@@ -2099,7 +2107,7 @@ mod tests {
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
         let object_offset = source.find("Object").unwrap();
-        let pos = Position::from_offset(source, object_offset).unwrap();
+        let pos = pos_at(source, object_offset);
         let hover = compute_hover(&module, source, pos, &hierarchy, None);
 
         assert!(hover.is_some(), "Should hover superclass identifier");
@@ -2119,7 +2127,7 @@ mod tests {
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
         let class_offset = source.find("Counter").unwrap();
-        let pos = Position::from_offset(source, class_offset).unwrap();
+        let pos = pos_at(source, class_offset);
         let hover = compute_hover(&module, source, pos, &hierarchy, None);
 
         assert!(hover.is_some(), "Should hover class declaration name");
@@ -2142,7 +2150,7 @@ mod tests {
         // Hovering over `size` in `"hello" size` should show `size -> Integer`
         // "hello" is 7 chars, space at 7, size starts at 8
         let source = r#""hello" size"#;
-        let pos = Position::from_offset(source, 8).unwrap(); // inside "size"
+        let pos = pos_at(source, 8); // inside "size"
         let hover = hover_at(source, pos);
         assert!(hover.is_some(), "Should hover on stdlib selector");
         let hover = hover.unwrap();
@@ -2158,7 +2166,7 @@ mod tests {
         // Hovering over `abs` in `"hello" size abs` should show `abs -> Integer`
         // "hello" size = 12 chars, space at 12, abs at 13-15
         let source = r#""hello" size abs"#;
-        let pos = Position::from_offset(source, 13).unwrap(); // inside "abs"
+        let pos = pos_at(source, 13); // inside "abs"
         let hover = hover_at(source, pos);
         assert!(hover.is_some(), "Should hover on chained selector");
         let hover = hover.unwrap();
@@ -2178,7 +2186,7 @@ mod tests {
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
         let selector_offset = source.rfind("value").unwrap();
-        let pos = Position::from_offset(source, selector_offset).unwrap();
+        let pos = pos_at(source, selector_offset);
         let hover = compute_hover(&module, source, pos, &hierarchy, None);
         assert!(
             hover.is_some(),
@@ -2201,7 +2209,7 @@ mod tests {
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
         let selector_offset = source.rfind("value").unwrap();
-        let pos = Position::from_offset(source, selector_offset).unwrap();
+        let pos = pos_at(source, selector_offset);
         let hover = compute_hover(&module, source, pos, &hierarchy, None);
         assert!(
             hover.is_some(),
@@ -2374,7 +2382,7 @@ mod tests {
 
         // Hover over "helper" method selector
         let helper_offset = source.find("helper").unwrap();
-        let pos = Position::from_offset(source, helper_offset).unwrap();
+        let pos = pos_at(source, helper_offset);
         let hover = compute_hover(&module, source, pos, &hierarchy, None);
         assert!(hover.is_some(), "Should hover on internal method selector");
         let hover = hover.unwrap();
@@ -2419,7 +2427,7 @@ mod tests {
         // Source: "Erlang lists reverse: #(1, 2, 3)"
         //         0123456789012345678901234
         let reverse_offset = source.find("reverse").unwrap();
-        let pos = Position::from_offset(source, reverse_offset).unwrap();
+        let pos = pos_at(source, reverse_offset);
         let hover = compute_hover(&module, source, pos, &hierarchy, Some(&registry));
         let hover = hover.expect("should get hover for FFI selector");
         assert!(
@@ -2452,7 +2460,7 @@ mod tests {
 
         // Hover over "reverse:" — no registry provided
         let reverse_offset = source.find("reverse").unwrap();
-        let pos = Position::from_offset(source, reverse_offset).unwrap();
+        let pos = pos_at(source, reverse_offset);
         let hover = compute_hover(&module, source, pos, &hierarchy, None);
         let hover = hover.expect("should get hover even without registry");
         let doc = hover.documentation.as_deref().unwrap_or("");
@@ -2472,7 +2480,7 @@ mod tests {
 
         // Hover over the `x` in the method body (the return expression)
         let body_x_offset = source.rfind('x').unwrap();
-        let pos = Position::from_offset(source, body_x_offset).unwrap();
+        let pos = pos_at(source, body_x_offset);
         let hover = compute_hover(&module, source, pos, &hierarchy, None);
         let hover = hover.expect("should get hover for unannotated param reference");
         assert!(
@@ -2492,7 +2500,7 @@ mod tests {
 
         // Hover over the `x` in the method body
         let body_x_offset = source.rfind('x').unwrap();
-        let pos = Position::from_offset(source, body_x_offset).unwrap();
+        let pos = pos_at(source, body_x_offset);
         let hover = compute_hover(&module, source, pos, &hierarchy, None);
         let hover = hover.expect("should get hover for annotated param reference");
         assert!(

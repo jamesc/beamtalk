@@ -50,11 +50,7 @@ pub fn compute_signature_help(
     hierarchy: &ClassHierarchy,
     native_types: Option<&NativeTypeRegistry>,
 ) -> Option<SignatureHelp> {
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "source files over 4GB are not supported"
-    )]
-    let offset = position.to_offset(source)? as u32;
+    let offset = position.to_byte_offset(source)?.get();
     let type_map = infer_types(module, hierarchy);
 
     // Search top-level expressions
