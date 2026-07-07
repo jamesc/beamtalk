@@ -1432,8 +1432,15 @@ impl TypeChecker {
                     // typed as `C` (with its type args preserved), so forwarded
                     // calls resolve the wrapped class's real return types. The
                     // table can only hold a static string, so the transparency
-                    // rule is applied here.
-                    if selector_name == "withTimeout:" && ret_ty.as_str() == "TimeoutProxy" {
+                    // rule is applied here. Restricted to Actor subclasses so the
+                    // rule's correctness is an explicit constraint, not an implicit
+                    // consequence of `TimeoutProxy` being inaccessible from user
+                    // code (a user `withTimeout: -> TimeoutProxy` on a non-Actor
+                    // class would otherwise be silently retyped).
+                    if selector_name == "withTimeout:"
+                        && ret_ty.as_str() == "TimeoutProxy"
+                        && hierarchy.is_actor_subclass(&resolve_class)
+                    {
                         return receiver_ty.clone();
                     }
 

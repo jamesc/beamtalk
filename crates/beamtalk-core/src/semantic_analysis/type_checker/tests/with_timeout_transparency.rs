@@ -133,10 +133,17 @@ fn forwarded_call_on_proxy_infers_wrapped_return_type() {
         checker
             .take_diagnostics()
             .iter()
-            .all(|d| !d.message.contains("does not understand")),
+            .all(|d| d.category != Some(DiagnosticCategory::Dnu)),
         "a real forwarded method must not warn as an unknown selector"
     );
 }
+
+// Note: `withTimeout:` returns `receiver_ty.clone()`, so type args are
+// preserved by construction for any receiver that reaches the guard. A
+// *generic* receiver (`Queue(Integer)`) is not covered here: parametric
+// receivers route through the generic-substitution path and resolve to
+// `Dynamic` before reaching the transparency rule — a separate inference
+// path, out of scope for ADR 0104 (whose actor examples are non-generic).
 
 /// AC #2 (two-step form via a binding): `slowDb := db withTimeout: 30000`
 /// then `slowDb query: sql` infers `List` — the binding carries the
