@@ -1617,9 +1617,27 @@ requires: value :: A & B & C => ...
 
 So `Integer | Symbol \ #foo` parses as `Integer | (Symbol \ #foo)` — `\` binds tighter than `|`. Within one operator, chains are left-associative: `Symbol \ #a \ #b` parses as `(Symbol \ #a) \ #b`, and `A & B & C` parses as `(A & B) & C`.
 
-**Known limitation: no grouping parentheses in type position (yet).** Unlike value expressions, `(...)` is not a grouping operator inside a type annotation — parentheses there are only used for generic type arguments (`Result(T, E)`). So there is currently no way to write, say, "any Symbol except one of a union of exclusions" with an explicit parenthesised group (`Symbol \ (#a | #b)` does **not** parse) — write it as a chain of subtractions instead, which the algebra normalises to the same result: `Symbol \ #a \ #b`.
+**Grouping parentheses.** `(...)` is a grouping operator inside a type annotation, just as in value expressions (in addition to its generic-argument use, `Result(T, E)`). A group wraps any annotation — unions, `&`/`\` chains, generics — and groups nest. Grouping is purely syntactic: the parenthesised annotation is the same annotation, so `(Integer)` means `Integer`, and `(A | B) | C` is the same flat three-member union as `A | B | C`.
 
-This same limitation is why **mixing `&` and `\` in the same chain without parentheses is a deliberate parse error**, not a left-associative fallback — `A & B \ C` is rejected with "Cannot mix `&` and `\` in a type annotation without parentheses; parenthesise to disambiguate", because `(A & B) \ C` and `A & (B \ C)` differ and neither reading is obviously the intended one. Since grouping parens don't exist in type position today, there is currently no way to write *either* explicitly — don't mix the two operators in one annotation; if you need both, split the narrowing into two steps (e.g. an intermediate local variable annotation).
+```beamtalk
+// subtract a whole union in one step — equivalent to the chain
+// `Symbol \ #a \ #b`, which the algebra normalises to the same result
+tag :: Symbol \ (#a | #b) := #c
+
+// a grouped difference as a union member (parens redundant here — `\`
+// already binds tighter than `|` — but allowed)
+withSentinel: ms :: Integer | (Symbol \ #infinity) => ...
+```
+
+Grouping is also how you mix `&` and `\` in one annotation: **mixing them in the same chain without parentheses is a deliberate parse error**, not a left-associative fallback — `A & B \ #c` is rejected with "Cannot mix `&` and `\` in a type annotation without parentheses; parenthesise to disambiguate", because `(A & B) \ #c` and `A & (B \ #c)` differ and neither reading is obviously the intended one. Parenthesise the reading you mean:
+
+```beamtalk
+// intersect first, then subtract
+narrow -> (A & B) \ #c => ...
+
+// subtract first, then intersect
+narrow -> A & (B \ #c) => ...
+```
 
 The lexer also greedily merges `\\` (two backslashes) into the Smalltalk modulo selector, so a doubled backslash in type position — the natural typo for `\` — gets a targeted diagnostic ("did you mean `\`?") instead of a confusing generic parse error.
 

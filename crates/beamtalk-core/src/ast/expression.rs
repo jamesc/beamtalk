@@ -899,6 +899,31 @@ impl TypeAnnotation {
         }
     }
 
+    /// Returns this annotation with its span widened to `span`, preserving
+    /// the variant and all its contents unchanged.
+    ///
+    /// Used to fold grouping parentheses in type-annotation position
+    /// (BT-2760, e.g. `(A & B) \ C`) into the inner annotation transparently:
+    /// the parsed shape is exactly what the parens contained, but the span
+    /// grows to cover the parens themselves so diagnostics/hover point at the
+    /// whole written group.
+    #[must_use]
+    pub fn with_span(mut self, span: Span) -> Self {
+        match &mut self {
+            Self::Simple(id) => id.span = span,
+            Self::Union { span: s, .. }
+            | Self::Singleton { span: s, .. }
+            | Self::Generic { span: s, .. }
+            | Self::FalseOr { span: s, .. }
+            | Self::Difference { span: s, .. }
+            | Self::Intersection { span: s, .. }
+            | Self::SelfType { span: s }
+            | Self::SelfClass { span: s }
+            | Self::ClassOf { span: s, .. } => *s = span,
+        }
+        self
+    }
+
     /// Creates a simple type annotation.
     #[must_use]
     pub fn simple(name: impl Into<EcoString>, span: Span) -> Self {
@@ -1004,26 +1029,48 @@ impl TypeAnnotation {
             Self::Difference { base, excluded, .. } => {
                 // `\` binds tighter than `|` and shares a tier with `&`, so a
                 // union or intersection operand (only reachable via explicit
-                // grouping) is parenthesised to preserve meaning.
-                let paren = |ty: &TypeAnnotation| match ty {
+                // grouping) is parenthesised to preserve meaning. The right
+                // operand additionally needs parens when it is itself a
+                // difference: `\` is left-associative, so `Symbol \ (#a \ #b)`
+                // must not print as `Symbol \ #a \ #b` (which re-parses as
+                // `(Symbol \ #a) \ #b`).
+                let base_name = match base.as_ref() {
                     Self::Union { .. } | Self::FalseOr { .. } | Self::Intersection { .. } => {
-                        eco_format!("({})", ty.type_name())
+                        eco_format!("({})", base.type_name())
                     }
-                    _ => ty.type_name(),
+                    _ => base.type_name(),
                 };
-                eco_format!("{} \\ {}", paren(base), paren(excluded))
+                let excluded_name = match excluded.as_ref() {
+                    Self::Union { .. }
+                    | Self::FalseOr { .. }
+                    | Self::Intersection { .. }
+                    | Self::Difference { .. } => eco_format!("({})", excluded.type_name()),
+                    _ => excluded.type_name(),
+                };
+                eco_format!("{base_name} \\ {excluded_name}")
             }
             Self::Intersection { left, right, .. } => {
                 // `&` binds tighter than `|` and shares a tier with `\`; a
                 // union or difference operand (only reachable via explicit
-                // grouping) is parenthesised to preserve meaning.
-                let paren = |ty: &TypeAnnotation| match ty {
+                // grouping) is parenthesised to preserve meaning. The right
+                // operand additionally needs parens when it is itself an
+                // intersection: `&` is left-associative, so `A & (B & C)`
+                // must not print as `A & B & C` (which re-parses as
+                // `(A & B) & C`).
+                let left_name = match left.as_ref() {
                     Self::Union { .. } | Self::FalseOr { .. } | Self::Difference { .. } => {
-                        eco_format!("({})", ty.type_name())
+                        eco_format!("({})", left.type_name())
                     }
-                    _ => ty.type_name(),
+                    _ => left.type_name(),
                 };
-                eco_format!("{} & {}", paren(left), paren(right))
+                let right_name = match right.as_ref() {
+                    Self::Union { .. }
+                    | Self::FalseOr { .. }
+                    | Self::Difference { .. }
+                    | Self::Intersection { .. } => eco_format!("({})", right.type_name()),
+                    _ => right.type_name(),
+                };
+                eco_format!("{left_name} & {right_name}")
             }
             Self::SelfType { .. } => "Self".into(),
             Self::SelfClass { .. } => "Self class".into(),

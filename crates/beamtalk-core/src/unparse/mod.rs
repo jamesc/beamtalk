@@ -1720,17 +1720,51 @@ fn unparse_type_annotation(ty: &TypeAnnotation) -> Document<'static> {
             docvec![unparse_type_annotation(inner), " | False"]
         }
         TypeAnnotation::Difference { base, excluded, .. } => {
+            // Re-derive grouping parens (BT-2760) where re-parsing would
+            // otherwise change the AST: a union/intersection operand (only
+            // reachable via explicit grouping) must stay grouped, and the
+            // right operand of the left-associative `\` must stay grouped
+            // when it is itself a difference (`Symbol \ (#a \ #b)`).
+            let base_parens = matches!(
+                base.as_ref(),
+                TypeAnnotation::Union { .. }
+                    | TypeAnnotation::FalseOr { .. }
+                    | TypeAnnotation::Intersection { .. }
+            );
+            let excluded_parens = matches!(
+                excluded.as_ref(),
+                TypeAnnotation::Union { .. }
+                    | TypeAnnotation::FalseOr { .. }
+                    | TypeAnnotation::Intersection { .. }
+                    | TypeAnnotation::Difference { .. }
+            );
             docvec![
-                unparse_type_annotation(base),
+                unparse_grouped_type(base, base_parens),
                 " \\ ",
-                unparse_type_annotation(excluded)
+                unparse_grouped_type(excluded, excluded_parens)
             ]
         }
         TypeAnnotation::Intersection { left, right, .. } => {
+            // Mirror image of `Difference` above: `&` shares the tier with
+            // `\` and is left-associative, so grouped union/difference
+            // operands and a right-nested intersection keep their parens.
+            let left_parens = matches!(
+                left.as_ref(),
+                TypeAnnotation::Union { .. }
+                    | TypeAnnotation::FalseOr { .. }
+                    | TypeAnnotation::Difference { .. }
+            );
+            let right_parens = matches!(
+                right.as_ref(),
+                TypeAnnotation::Union { .. }
+                    | TypeAnnotation::FalseOr { .. }
+                    | TypeAnnotation::Difference { .. }
+                    | TypeAnnotation::Intersection { .. }
+            );
             docvec![
-                unparse_type_annotation(left),
+                unparse_grouped_type(left, left_parens),
                 " & ",
-                unparse_type_annotation(right)
+                unparse_grouped_type(right, right_parens)
             ]
         }
         TypeAnnotation::SelfType { .. } => Document::Str("Self"),
@@ -1738,6 +1772,18 @@ fn unparse_type_annotation(ty: &TypeAnnotation) -> Document<'static> {
         TypeAnnotation::ClassOf { class_name, .. } => {
             docvec![leaf::ident(&class_name.name), " class"]
         }
+    }
+}
+
+/// Unparses a `\`/`&` operand, wrapping it in grouping parentheses
+/// (BT-2760) when `parens` is set — i.e. when re-parsing the bare operand
+/// would bind differently (see the `Difference`/`Intersection` arms of
+/// [`unparse_type_annotation`]).
+fn unparse_grouped_type(ty: &TypeAnnotation, parens: bool) -> Document<'static> {
+    if parens {
+        docvec!["(", unparse_type_annotation(ty), ")"]
+    } else {
+        unparse_type_annotation(ty)
     }
 }
 
@@ -1934,6 +1980,102 @@ mod tests {
             formatted.contains("Collection(Object) & Comparable"),
             "intersection type must survive round-trip, got: {formatted}"
         );
+    }
+
+    // --- Grouping parentheses in type annotations (BT-2760) ---
+
+    #[test]
+    fn grouped_difference_operands_unparse_with_parens() {
+        // `Difference { base: Intersection }` must re-derive the grouping
+        // parens — the bare form `A & B \ #c` is the mixed-operator parse
+        // error (ADR 0102 §3).
+        let ann = crate::ast::TypeAnnotation::difference(
+            crate::ast::TypeAnnotation::intersection(
+                crate::ast::TypeAnnotation::simple("A", span()),
+                crate::ast::TypeAnnotation::simple("B", span()),
+                span(),
+            ),
+            crate::ast::TypeAnnotation::singleton("c", span()),
+            span(),
+        );
+        assert_eq!(
+            unparse_type_annotation(&ann).to_pretty_string(),
+            "(A & B) \\ #c"
+        );
+    }
+
+    #[test]
+    fn grouped_union_excluded_unparses_with_parens() {
+        // `Symbol \ (#a | #b)` — a union excluded operand keeps its parens
+        // (`\` binds tighter than `|`).
+        let ann = crate::ast::TypeAnnotation::difference(
+            crate::ast::TypeAnnotation::simple("Symbol", span()),
+            crate::ast::TypeAnnotation::union(
+                vec![
+                    crate::ast::TypeAnnotation::singleton("a", span()),
+                    crate::ast::TypeAnnotation::singleton("b", span()),
+                ],
+                span(),
+            ),
+            span(),
+        );
+        assert_eq!(
+            unparse_type_annotation(&ann).to_pretty_string(),
+            "Symbol \\ (#a | #b)"
+        );
+    }
+
+    #[test]
+    fn right_nested_difference_unparses_with_parens() {
+        // `\` is left-associative, so a right-nested difference must keep
+        // its parens: `Symbol \ (#a \ #b)`, not `Symbol \ #a \ #b`.
+        let ann = crate::ast::TypeAnnotation::difference(
+            crate::ast::TypeAnnotation::simple("Symbol", span()),
+            crate::ast::TypeAnnotation::difference(
+                crate::ast::TypeAnnotation::singleton("a", span()),
+                crate::ast::TypeAnnotation::singleton("b", span()),
+                span(),
+            ),
+            span(),
+        );
+        assert_eq!(
+            unparse_type_annotation(&ann).to_pretty_string(),
+            "Symbol \\ (#a \\ #b)"
+        );
+    }
+
+    #[test]
+    fn grouped_mixed_types_round_trip_through_format_source() {
+        // Parse → unparse preserves the parenthesised mixed forms (BT-2760),
+        // and the formatter is idempotent on them.
+        for (source, expected) in [
+            (
+                "Object subclass: Foo\n  narrow -> (A & B) \\ #c => self\n",
+                "(A & B) \\ #c",
+            ),
+            (
+                "Object subclass: Foo\n  narrow -> A & (B \\ #c) => self\n",
+                "A & (B \\ #c)",
+            ),
+            (
+                "Object subclass: Foo\n  narrow -> Symbol \\ (#a | #b) => #c\n",
+                "Symbol \\ (#a | #b)",
+            ),
+            (
+                "Object subclass: Foo\n  narrow -> Integer | (Symbol \\ #foo) => 1\n",
+                // The group is redundant (`\` already binds tighter than
+                // `|`), so the formatter drops it.
+                "Integer | Symbol \\ #foo",
+            ),
+        ] {
+            let formatted = format_source(source).expect("should format");
+            assert!(
+                formatted.contains(expected),
+                "grouped type must survive round-trip: expected `{expected}` in: {formatted}"
+            );
+            let reformatted = format_source(&formatted).expect("should reformat");
+            assert_eq!(formatted, reformatted, "format must be idempotent");
+        }
     }
 
     // --- Comment unparsing ---

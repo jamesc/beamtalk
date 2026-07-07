@@ -807,6 +807,33 @@ mod tests {
         );
     }
 
+    #[test]
+    fn grouped_mixed_intersection_then_difference_resolves_transparently() {
+        // `(Symbol & Symbol) \ #foo` — writable since grouping parens in
+        // type-annotation position (BT-2760). Grouping is transparent in the
+        // AST, so the resolver just sees Difference { base: Intersection },
+        // no new `InferredType`: the intersection reduces (identity) to
+        // `Symbol`, then the difference produces the usual `Negation`.
+        let ann = TypeAnnotation::difference(
+            TypeAnnotation::intersection(
+                TypeAnnotation::Simple(ident("Symbol")),
+                TypeAnnotation::Simple(ident("Symbol")),
+                span(),
+            ),
+            TypeAnnotation::Singleton {
+                name: "foo".into(),
+                span: span(),
+            },
+            span(),
+        );
+        let result = resolve_type_annotation(&ann, &empty_subst(), None);
+        let InferredType::Negation { base, excluded, .. } = result else {
+            panic!("expected Negation, got {result:?}");
+        };
+        assert_eq!(*base, InferredType::known("Symbol"));
+        assert_eq!(*excluded, InferredType::known("#foo"));
+    }
+
     // ---- resolve_type_annotation: Self / Self class ----
 
     #[test]
