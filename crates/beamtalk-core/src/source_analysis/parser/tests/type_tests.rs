@@ -1775,3 +1775,334 @@ fn value_position_ampersand_is_unchanged() {
         "value-position `&` must parse as before (unchanged), got: {diagnostics:?}"
     );
 }
+
+// ==========================================================================
+// Grouping parentheses in type-annotation position — BT-2760, ADR 0102 §3
+// ==========================================================================
+
+/// Parses `ty` as the return type of a method and returns the annotation.
+fn parse_return_type(ty: &str) -> TypeAnnotation {
+    let module = parse_ok(&format!("Object subclass: Foo\n  narrow -> {ty} => self"));
+    module.classes[0].methods[0]
+        .return_type
+        .clone()
+        .expect("method must have a return type")
+}
+
+/// Asserts that unparsing (`type_name`) is a fixed point: parsing `ty`,
+/// printing it, and re-parsing the printed form yields the same printed
+/// form again. Combined with the shape assertions in the individual tests,
+/// this checks that `type_name` re-derives grouping parens exactly where
+/// precedence requires them.
+fn assert_type_name_round_trips(ty: &str) {
+    let parsed = parse_return_type(ty);
+    let printed = parsed.type_name();
+    let reparsed = parse_return_type(&printed);
+    assert_eq!(
+        reparsed.type_name(),
+        printed,
+        "type_name must be a fixed point for `{ty}`"
+    );
+}
+
+#[test]
+fn parse_grouped_simple_type_is_transparent() {
+    // `(Integer)` parses as plain `Integer` — no extra AST node, only the
+    // span widens to cover the parens.
+    let ret_ty = parse_return_type("(Integer)");
+    assert!(
+        matches!(&ret_ty, TypeAnnotation::Simple(id) if id.name == "Integer"),
+        "expected transparent Simple, got {ret_ty:?}"
+    );
+}
+
+#[test]
+fn parse_grouped_type_span_covers_parens() {
+    let source = "Object subclass: Foo\n  narrow -> (A & B) => self";
+    let module = parse_ok(source);
+    let ret_ty = module.classes[0].methods[0].return_type.as_ref().unwrap();
+    let span = ret_ty.span();
+    assert_eq!(
+        &source[span.start() as usize..span.end() as usize],
+        "(A & B)",
+        "group span must cover the parens"
+    );
+}
+
+#[test]
+fn parse_grouped_intersection_then_difference() {
+    // `(A & B) \ #c` — the previously unwritable mixed form (BT-2760):
+    // Difference { base: Intersection(A, B), excluded: #c }.
+    let ret_ty = parse_return_type("(A & B) \\ #c");
+    let TypeAnnotation::Difference { base, excluded, .. } = &ret_ty else {
+        panic!("expected Difference, got {ret_ty:?}");
+    };
+    let TypeAnnotation::Intersection { left, right, .. } = base.as_ref() else {
+        panic!("expected Intersection base, got {base:?}");
+    };
+    assert!(matches!(left.as_ref(), TypeAnnotation::Simple(id) if id.name == "A"));
+    assert!(matches!(right.as_ref(), TypeAnnotation::Simple(id) if id.name == "B"));
+    assert!(matches!(excluded.as_ref(), TypeAnnotation::Singleton { name, .. } if name == "c"));
+}
+
+#[test]
+fn parse_intersection_with_grouped_difference() {
+    // `A & (B \ #c)` — the other mixed reading, now writable explicitly:
+    // Intersection { left: A, right: Difference(B, #c) }.
+    let ret_ty = parse_return_type("A & (B \\ #c)");
+    let TypeAnnotation::Intersection { left, right, .. } = &ret_ty else {
+        panic!("expected Intersection, got {ret_ty:?}");
+    };
+    assert!(matches!(left.as_ref(), TypeAnnotation::Simple(id) if id.name == "A"));
+    let TypeAnnotation::Difference { base, excluded, .. } = right.as_ref() else {
+        panic!("expected Difference right, got {right:?}");
+    };
+    assert!(matches!(base.as_ref(), TypeAnnotation::Simple(id) if id.name == "B"));
+    assert!(matches!(excluded.as_ref(), TypeAnnotation::Singleton { name, .. } if name == "c"));
+}
+
+#[test]
+fn parse_difference_with_grouped_union_excluded() {
+    // `Symbol \ (#a | #b)` — ADR 0102 §3's own example form:
+    // Difference { base: Symbol, excluded: Union(#a, #b) }.
+    let ret_ty = parse_return_type("Symbol \\ (#a | #b)");
+    let TypeAnnotation::Difference { base, excluded, .. } = &ret_ty else {
+        panic!("expected Difference, got {ret_ty:?}");
+    };
+    assert!(matches!(base.as_ref(), TypeAnnotation::Simple(id) if id.name == "Symbol"));
+    let TypeAnnotation::Union { types, .. } = excluded.as_ref() else {
+        panic!("expected Union excluded, got {excluded:?}");
+    };
+    assert_eq!(types.len(), 2);
+    assert!(matches!(&types[0], TypeAnnotation::Singleton { name, .. } if name == "a"));
+    assert!(matches!(&types[1], TypeAnnotation::Singleton { name, .. } if name == "b"));
+}
+
+#[test]
+fn parse_union_with_grouped_difference_member() {
+    // `Integer | (Symbol \ #foo)` — the group is redundant (same parse as the
+    // bare form) but must still be accepted.
+    let ret_ty = parse_return_type("Integer | (Symbol \\ #foo)");
+    let TypeAnnotation::Union { types, .. } = &ret_ty else {
+        panic!("expected Union, got {ret_ty:?}");
+    };
+    assert_eq!(types.len(), 2);
+    assert!(matches!(&types[0], TypeAnnotation::Simple(id) if id.name == "Integer"));
+    assert!(
+        matches!(&types[1], TypeAnnotation::Difference { .. }),
+        "second member must be a Difference, got {:?}",
+        types[1]
+    );
+}
+
+#[test]
+fn parse_nested_groups() {
+    // Groups nest: `((A & B)) \ #c` parses identically to `(A & B) \ #c`.
+    let ret_ty = parse_return_type("((A & B)) \\ #c");
+    let TypeAnnotation::Difference { base, .. } = &ret_ty else {
+        panic!("expected Difference, got {ret_ty:?}");
+    };
+    assert!(
+        matches!(base.as_ref(), TypeAnnotation::Intersection { .. }),
+        "expected Intersection base, got {base:?}"
+    );
+}
+
+#[test]
+fn parse_grouped_union_member_splices_into_enclosing_union() {
+    // Unions are n-ary and associative, so `(A | B) | C` splices into a flat
+    // three-member union — keeping the AST canonical and `type_name`
+    // round-trippable.
+    let ret_ty = parse_return_type("(A | B) | C");
+    let TypeAnnotation::Union { types, .. } = &ret_ty else {
+        panic!("expected Union, got {ret_ty:?}");
+    };
+    assert_eq!(types.len(), 3, "union must be flat: {types:?}");
+    assert!(matches!(&types[0], TypeAnnotation::Simple(id) if id.name == "A"));
+    assert!(matches!(&types[1], TypeAnnotation::Simple(id) if id.name == "B"));
+    assert!(matches!(&types[2], TypeAnnotation::Simple(id) if id.name == "C"));
+}
+
+#[test]
+fn parse_grouped_right_nested_difference() {
+    // `Symbol \ (#a \ #b)` — right-nested same-operator group; distinct from
+    // the left-associative bare chain `Symbol \ #a \ #b`.
+    let ret_ty = parse_return_type("Symbol \\ (#a \\ #b)");
+    let TypeAnnotation::Difference { base, excluded, .. } = &ret_ty else {
+        panic!("expected Difference, got {ret_ty:?}");
+    };
+    assert!(matches!(base.as_ref(), TypeAnnotation::Simple(id) if id.name == "Symbol"));
+    assert!(
+        matches!(excluded.as_ref(), TypeAnnotation::Difference { .. }),
+        "expected right-nested Difference, got {excluded:?}"
+    );
+}
+
+#[test]
+fn parse_grouped_type_in_param_annotation() {
+    // Grouped type on a keyword-method parameter: the method-header
+    // lookahead (`skip_double_colon_type`) must recognise the group.
+    let module = parse_ok(
+        "Object subclass: Foo
+  narrow: x :: (A & B) \\ #c => x",
+    );
+    let method = &module.classes[0].methods[0];
+    let ann = method.parameters[0].type_annotation.as_ref().unwrap();
+    assert!(
+        matches!(ann, TypeAnnotation::Difference { .. }),
+        "expected Difference param annotation, got {ann:?}"
+    );
+}
+
+#[test]
+fn parse_grouped_type_in_state_annotation() {
+    let module = parse_ok(
+        "typed Value subclass: Spec
+  field: tag :: Symbol \\ (#a | #b) = nil",
+    );
+    let ann = module.classes[0].state[0].type_annotation.as_ref().unwrap();
+    assert!(
+        matches!(ann, TypeAnnotation::Difference { .. }),
+        "expected Difference field annotation, got {ann:?}"
+    );
+}
+
+#[test]
+fn parse_grouped_type_in_generic_argument() {
+    // A group inside a generic argument list: `List((A & B) \ #c)`.
+    let ret_ty = parse_return_type("List((A & B) \\ #c)");
+    let TypeAnnotation::Generic {
+        base, parameters, ..
+    } = &ret_ty
+    else {
+        panic!("expected Generic, got {ret_ty:?}");
+    };
+    assert_eq!(base.name, "List");
+    assert_eq!(parameters.len(), 1);
+    assert!(
+        matches!(&parameters[0], TypeAnnotation::Difference { .. }),
+        "expected Difference type argument, got {:?}",
+        parameters[0]
+    );
+}
+
+#[test]
+fn parse_unparenthesised_mixed_still_errors() {
+    // The bare mixed chain remains a deliberate parse error (ADR 0102 §3) —
+    // grouping parens are the escape hatch, not a precedence change.
+    let diagnostics = parse_err(
+        "Object subclass: Foo
+  narrow -> A & B \\ #c => self",
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("Cannot mix") && d.message.contains("parenthesise")),
+        "expected the mixed-operator diagnostic, got: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn parse_unclosed_group_errors() {
+    // A state declaration parses its `::` annotation unconditionally (no
+    // method-header lookahead), so the unclosed group reaches the annotation
+    // parser and gets the targeted diagnostic. (In a method header an
+    // unclosed group makes the lookahead reject the line as a header
+    // entirely, so it falls back to expression-parse errors instead.)
+    let diagnostics = parse_err(
+        "Object subclass: Foo
+  state: x :: (A | B = 1",
+    );
+    assert!(
+        diagnostics.iter().any(|d| d
+            .message
+            .contains("Expected ')' to close grouping parentheses")),
+        "expected an unclosed-group diagnostic, got: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn grouped_type_name_round_trips() {
+    // `type_name` re-derives parens exactly where precedence requires them,
+    // so printing and re-parsing is a fixed point.
+    assert_type_name_round_trips("(A & B) \\ #c");
+    assert_type_name_round_trips("A & (B \\ #c)");
+    assert_type_name_round_trips("Symbol \\ (#a | #b)");
+    assert_type_name_round_trips("Integer | (Symbol \\ #foo)");
+    assert_type_name_round_trips("Symbol \\ (#a \\ #b)");
+    assert_type_name_round_trips("A & (B & C)");
+    assert_type_name_round_trips("(A | B) | C");
+    assert_type_name_round_trips("(Integer)");
+    assert_type_name_round_trips("List((A & B) \\ #c)");
+}
+
+#[test]
+fn grouped_type_name_prints_required_parens_only() {
+    // Groups that changed the parse keep their parens; redundant groups
+    // collapse away.
+    assert_eq!(
+        parse_return_type("(A & B) \\ #c").type_name().as_str(),
+        "(A & B) \\ #c"
+    );
+    assert_eq!(
+        parse_return_type("Symbol \\ (#a | #b)")
+            .type_name()
+            .as_str(),
+        "Symbol \\ (#a | #b)"
+    );
+    assert_eq!(
+        parse_return_type("Symbol \\ (#a \\ #b)")
+            .type_name()
+            .as_str(),
+        "Symbol \\ (#a \\ #b)"
+    );
+    // Redundant grouping collapses: `(Integer)` prints as `Integer`, and a
+    // grouped tighter-binding member needs no parens under `|`.
+    assert_eq!(
+        parse_return_type("(Integer)").type_name().as_str(),
+        "Integer"
+    );
+    assert_eq!(
+        parse_return_type("Integer | (Symbol \\ #foo)")
+            .type_name()
+            .as_str(),
+        "Integer | Symbol \\ #foo"
+    );
+}
+
+#[test]
+fn value_expression_parens_unchanged_by_type_grouping() {
+    // Guard: `(...)` in a value expression still parses as a parenthesized
+    // expression — the type-position grouping (BT-2760) must not leak.
+    let module = parse_ok(
+        "Object subclass: Foo
+  combine: x => (x + 1) * 2",
+    );
+    let method = &module.classes[0].methods[0];
+    assert_eq!(method.selector.name(), "combine:");
+    assert_eq!(method.body.len(), 1);
+}
+
+#[test]
+fn parse_doc_examples_for_grouped_types() {
+    // The exact forms documented in docs/beamtalk-language-features.md
+    // (§Difference and Intersection Types) must parse.
+    parse_ok(
+        "Object subclass: Foo
+  run =>
+    tag :: Symbol \\ (#a | #b) := #c
+    tag",
+    );
+    parse_ok(
+        "Object subclass: Foo
+  withSentinel: ms :: Integer | (Symbol \\ #infinity) => ms",
+    );
+    parse_ok(
+        "Object subclass: Foo
+  narrow -> (A & B) \\ #c => self",
+    );
+    parse_ok(
+        "Object subclass: Foo
+  narrow -> A & (B \\ #c) => self",
+    );
+}

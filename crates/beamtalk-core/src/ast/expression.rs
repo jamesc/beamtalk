@@ -899,6 +899,31 @@ impl TypeAnnotation {
         }
     }
 
+    /// Returns this annotation with its span widened to `span`, preserving
+    /// the variant and all its contents unchanged.
+    ///
+    /// Used to fold grouping parentheses in type-annotation position
+    /// (BT-2760, e.g. `(A & B) \ C`) into the inner annotation transparently:
+    /// the parsed shape is exactly what the parens contained, but the span
+    /// grows to cover the parens themselves so diagnostics/hover point at the
+    /// whole written group.
+    #[must_use]
+    pub fn with_span(mut self, span: Span) -> Self {
+        match &mut self {
+            Self::Simple(id) => id.span = span,
+            Self::Union { span: s, .. }
+            | Self::Singleton { span: s, .. }
+            | Self::Generic { span: s, .. }
+            | Self::FalseOr { span: s, .. }
+            | Self::Difference { span: s, .. }
+            | Self::Intersection { span: s, .. }
+            | Self::SelfType { span: s }
+            | Self::SelfClass { span: s }
+            | Self::ClassOf { span: s, .. } => *s = span,
+        }
+        self
+    }
+
     /// Creates a simple type annotation.
     #[must_use]
     pub fn simple(name: impl Into<EcoString>, span: Span) -> Self {
@@ -1004,30 +1029,81 @@ impl TypeAnnotation {
             Self::Difference { base, excluded, .. } => {
                 // `\` binds tighter than `|` and shares a tier with `&`, so a
                 // union or intersection operand (only reachable via explicit
-                // grouping) is parenthesised to preserve meaning.
-                let paren = |ty: &TypeAnnotation| match ty {
-                    Self::Union { .. } | Self::FalseOr { .. } | Self::Intersection { .. } => {
-                        eco_format!("({})", ty.type_name())
-                    }
-                    _ => ty.type_name(),
+                // grouping) is parenthesised to preserve meaning. The right
+                // operand additionally needs parens when it is itself a
+                // difference: `\` is left-associative, so `Symbol \ (#a \ #b)`
+                // must not print as `Symbol \ #a \ #b` (which re-parses as
+                // `(Symbol \ #a) \ #b`).
+                let base_name = if base.needs_parens_in_difference(false) {
+                    eco_format!("({})", base.type_name())
+                } else {
+                    base.type_name()
                 };
-                eco_format!("{} \\ {}", paren(base), paren(excluded))
+                let excluded_name = if excluded.needs_parens_in_difference(true) {
+                    eco_format!("({})", excluded.type_name())
+                } else {
+                    excluded.type_name()
+                };
+                eco_format!("{base_name} \\ {excluded_name}")
             }
             Self::Intersection { left, right, .. } => {
                 // `&` binds tighter than `|` and shares a tier with `\`; a
                 // union or difference operand (only reachable via explicit
-                // grouping) is parenthesised to preserve meaning.
-                let paren = |ty: &TypeAnnotation| match ty {
-                    Self::Union { .. } | Self::FalseOr { .. } | Self::Difference { .. } => {
-                        eco_format!("({})", ty.type_name())
-                    }
-                    _ => ty.type_name(),
+                // grouping) is parenthesised to preserve meaning. The right
+                // operand additionally needs parens when it is itself an
+                // intersection: `&` is left-associative, so `A & (B & C)`
+                // must not print as `A & B & C` (which re-parses as
+                // `(A & B) & C`).
+                let left_name = if left.needs_parens_in_intersection(false) {
+                    eco_format!("({})", left.type_name())
+                } else {
+                    left.type_name()
                 };
-                eco_format!("{} & {}", paren(left), paren(right))
+                let right_name = if right.needs_parens_in_intersection(true) {
+                    eco_format!("({})", right.type_name())
+                } else {
+                    right.type_name()
+                };
+                eco_format!("{left_name} & {right_name}")
             }
             Self::SelfType { .. } => "Self".into(),
             Self::SelfClass { .. } => "Self class".into(),
             Self::ClassOf { class_name, .. } => eco_format!("{} class", class_name.name),
+        }
+    }
+
+    /// `true` when `self`, used as an operand of `\`, must be parenthesised
+    /// for the printed form to re-parse to the same AST (BT-2760).
+    ///
+    /// `\` binds tighter than `|` and shares a tier with `&`, so a grouped
+    /// union or intersection operand keeps its parens. The *excluded* (right)
+    /// operand additionally needs parens when it is itself a difference:
+    /// `\` is left-associative, so `Symbol \ (#a \ #b)` must not print as
+    /// `Symbol \ #a \ #b`.
+    ///
+    /// Single source of truth for both [`type_name`](Self::type_name) and the
+    /// formatter's `unparse_type_annotation` — keep them in sync by calling
+    /// this, not by duplicating the match.
+    pub(crate) fn needs_parens_in_difference(&self, is_excluded: bool) -> bool {
+        match self {
+            Self::Union { .. } | Self::FalseOr { .. } | Self::Intersection { .. } => true,
+            Self::Difference { .. } => is_excluded,
+            _ => false,
+        }
+    }
+
+    /// `true` when `self`, used as an operand of `&`, must be parenthesised
+    /// for the printed form to re-parse to the same AST (BT-2760).
+    ///
+    /// Mirror image of [`needs_parens_in_difference`](Self::needs_parens_in_difference):
+    /// grouped union/difference operands keep parens, and the *right* operand
+    /// of the left-associative `&` keeps them when it is itself an
+    /// intersection (`A & (B & C)`).
+    pub(crate) fn needs_parens_in_intersection(&self, is_right: bool) -> bool {
+        match self {
+            Self::Union { .. } | Self::FalseOr { .. } | Self::Difference { .. } => true,
+            Self::Intersection { .. } => is_right,
+            _ => false,
         }
     }
 }
