@@ -968,6 +968,7 @@ fn add_widget_class(hierarchy: &mut ClassHierarchy, class_side_selectors: &[&str
         package: None,
         is_value: true,
         is_native: false,
+        handle_scope: None,
         state: vec![],
         state_types: std::collections::HashMap::new(),
         state_has_default: std::collections::HashMap::new(),
