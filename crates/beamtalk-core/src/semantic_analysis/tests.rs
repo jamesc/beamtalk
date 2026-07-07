@@ -3794,6 +3794,22 @@ fn declared_handle_class_not_nudged() {
 }
 
 #[test]
+fn inherited_handle_scope_not_nudged() {
+    // A native: Object subclass whose *parent* declares handleScope: inherits
+    // the scope, so the companion lint must not nudge it (suppress path).
+    let src = "typed Object subclass: HandleBase native: hb\n  \
+        handleScope: #process\n  \
+        read -> Integer => 0\n\n\
+        typed HandleBase subclass: HandleChild native: hc\n  \
+        write -> Integer => 0\n";
+    let diags = sendability_diags(src);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("declares no")),
+        "a subclass inheriting handleScope: from a parent must not be nudged, got: {diags:?}"
+    );
+}
+
+#[test]
 fn plain_object_class_not_nudged() {
     // No `native:` — not an FFI-wrapping class; must not be nudged.
     let src = "Object subclass: Plain\n  \

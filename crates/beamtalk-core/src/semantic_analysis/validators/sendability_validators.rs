@@ -229,6 +229,10 @@ pub(crate) fn check_undeclared_handle_class(
 
 /// Span of the first identifier use of `name` inside the block (recursing into
 /// nested expressions/blocks), for recovering the captured variable's type.
+///
+/// Approximation: if a nested block re-binds the same name, the inner use is
+/// found first and its type is used instead of the outer capture's. This is
+/// acceptable because block-capture analysis is advisory-only (ADR 0103).
 fn first_use_span(block: &Block, name: &str) -> Option<Span> {
     let mut found: Option<Span> = None;
     for stmt in &block.body {
