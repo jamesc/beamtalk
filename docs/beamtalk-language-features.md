@@ -337,6 +337,12 @@ declaration is an advisory no-op). A companion lint nudges FFI-wrapping
 (`native:`) Object classes that carry instance behaviour but declare no scope.
 Suppress a sendability finding with `@expect sendability`.
 
+Header clauses are parsed in a fixed order — write them as:
+`modifiers` → `Superclass subclass: Name(TypeParams)` → `native: module` →
+`handleScope: #scope`. In particular `native:` must precede `handleScope:`;
+reversing them (`handleScope: #process native: pb`) silently drops the
+`native:` clause (it falls into the class body).
+
 ### Wrong Keyword Errors
 
 The compiler enforces keyword/class-kind rules with clear error messages:
