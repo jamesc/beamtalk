@@ -371,6 +371,7 @@ fn test_match_arm_analysis_with_simple_pattern() {
     // Test that pattern variables are accessible in the body
     // value match: [x -> x]
     let match_expr = Expression::Match {
+        exhaustive: false,
         value: Box::new(Expression::Identifier(Identifier::new(
             "value",
             test_span(),
@@ -400,6 +401,7 @@ fn test_match_arm_analysis_with_guard() {
     // Test that pattern variables are accessible in guards
     // value match: [x when x > 0 -> x]
     let match_expr = Expression::Match {
+        exhaustive: false,
         value: Box::new(Expression::Identifier(Identifier::new(
             "value",
             test_span(),
@@ -429,6 +431,7 @@ fn test_match_arm_analysis_with_guard() {
 fn test_match_arm_analysis_with_tuple_pattern() {
     // Test nested patterns: {#ok, value} -> value
     let match_expr = Expression::Match {
+        exhaustive: false,
         value: Box::new(Expression::Identifier(Identifier::new(
             "result",
             test_span(),
@@ -467,6 +470,7 @@ fn test_match_arm_analysis_multiple_arms() {
     //   {#error, msg} -> msg
     // ]
     let match_expr = Expression::Match {
+        exhaustive: false,
         value: Box::new(Expression::Identifier(Identifier::new(
             "result",
             test_span(),
@@ -514,6 +518,7 @@ fn test_match_arm_analysis_multiple_arms() {
 fn test_match_arm_analysis_with_list_pattern() {
     // Test list patterns: [head | tail] -> head
     let match_expr = Expression::Match {
+        exhaustive: false,
         value: Box::new(Expression::Identifier(Identifier::new("list", test_span()))),
         arms: vec![MatchArm::new(
             Pattern::List {
@@ -547,6 +552,7 @@ fn test_match_arm_scope_isolation() {
     // Test that variables from one arm don't leak to another
     // This test verifies that each arm gets its own scope
     let match_expr = Expression::Match {
+        exhaustive: false,
         value: Box::new(Expression::Identifier(Identifier::new(
             "value",
             test_span(),
@@ -583,6 +589,7 @@ fn test_undefined_variable_in_match_arm_body() {
     // Test that undefined variables produce diagnostics
     // value match: [x -> undefined_var]
     let match_expr = Expression::Match {
+        exhaustive: false,
         value: Box::new(Expression::Identifier(Identifier::new(
             "value",
             test_span(),
@@ -612,6 +619,7 @@ fn test_undefined_variable_in_guard() {
     // Test that undefined variables in guards produce diagnostics
     // value match: [x when undefined_var -> x]
     let match_expr = Expression::Match {
+        exhaustive: false,
         value: Box::new(Expression::Identifier(Identifier::new(
             "value",
             test_span(),
@@ -643,6 +651,7 @@ fn test_pattern_bound_variable_no_error() {
     // Test that pattern-bound variables do NOT produce diagnostics
     // value match: [x -> x]
     let match_expr = Expression::Match {
+        exhaustive: false,
         value: Box::new(Expression::Identifier(Identifier::new(
             "value",
             test_span(),
@@ -672,6 +681,7 @@ fn test_nested_pattern_variables_accessible() {
     // Test nested tuple pattern variables are accessible
     // result match: [{#ok, {x, y}} -> x]
     let match_expr = Expression::Match {
+        exhaustive: false,
         value: Box::new(Expression::Identifier(Identifier::new(
             "result",
             test_span(),
@@ -2371,6 +2381,7 @@ fn test_pattern_variable_no_unused_warning() {
             selector: MessageSelector::Unary("getValue".into()),
             parameters: vec![],
             body: vec![bare(Expression::Match {
+                exhaustive: false,
                 value: Box::new(Expression::Literal(Literal::Integer(1), test_span())),
                 arms: vec![MatchArm::new(
                     Pattern::Variable(Identifier::new("result", test_span())),
@@ -3201,6 +3212,7 @@ fn test_block_match_pattern_var_not_treated_as_capture() {
 
     let block_span = Span::new(100, 200);
     let match_expr = Expression::Match {
+        exhaustive: false,
         value: Box::new(Expression::Identifier(Identifier::new("val", test_span()))),
         arms: vec![MatchArm::new(
             Pattern::Variable(Identifier::new("x", test_span())),
@@ -3256,6 +3268,7 @@ fn test_block_match_captures_real_outer_variable() {
 
     let block_span = Span::new(100, 200);
     let match_expr = Expression::Match {
+        exhaustive: false,
         value: Box::new(Expression::Identifier(Identifier::new("val", test_span()))),
         arms: vec![MatchArm::new(
             Pattern::Variable(Identifier::new("x", test_span())),

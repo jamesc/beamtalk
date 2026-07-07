@@ -539,6 +539,7 @@ mod tests {
             Span::new(14, 20),
         );
         let expr = Expression::Match {
+            exhaustive: false,
             value,
             arms: vec![arm],
             span: Span::new(0, 21),

@@ -564,11 +564,15 @@ impl Parser {
             }
         }
 
-        // Special handling for `match:` — produces Expression::Match
-        if matches!(self.current_kind(), TokenKind::Keyword(k) if k.as_str() == "match:")
+        // Special handling for `match:` / `matchExhaustive:` — both produce
+        // Expression::Match; the latter sets `exhaustive: true`
+        // (BT-2763 / ADR 0106: opt-in asserted exhaustiveness).
+        if matches!(self.current_kind(), TokenKind::Keyword(k)
+            if k.as_str() == "match:" || k.as_str() == "matchExhaustive:")
             && self.peek_at(1) == Some(&TokenKind::LeftBracket)
         {
-            return self.parse_match_expression(receiver);
+            let exhaustive = matches!(self.current_kind(), TokenKind::Keyword(k) if k.as_str() == "matchExhaustive:");
+            return self.parse_match_expression(receiver, exhaustive);
         }
 
         // Parse keyword message
@@ -1165,10 +1169,13 @@ impl Parser {
     }
 
     /// Parses a match expression: `receiver match: [pattern -> body ...]`
+    /// or, when `exhaustive` is set, `receiver matchExhaustive: [pattern -> body ...]`
+    /// (BT-2763 / ADR 0106: opt-in asserted exhaustiveness).
     ///
-    /// The receiver has already been parsed and `match:` keyword is the current token.
-    fn parse_match_expression(&mut self, receiver: Expression) -> Expression {
-        self.advance(); // consume `match:` keyword
+    /// The receiver has already been parsed and the `match:`/`matchExhaustive:`
+    /// keyword is the current token.
+    fn parse_match_expression(&mut self, receiver: Expression, exhaustive: bool) -> Expression {
+        self.advance(); // consume `match:` / `matchExhaustive:` keyword
 
         let bracket_start = self
             .expect(&TokenKind::LeftBracket, "Expected '[' after match:")
@@ -1201,6 +1208,7 @@ impl Parser {
         Expression::Match {
             value: Box::new(receiver),
             arms,
+            exhaustive,
             span,
         }
     }
@@ -2687,6 +2695,81 @@ mod tests {
             errors[0].message.contains("bare word 'foo'"),
             "message: {}",
             errors[0].message
+        );
+    }
+
+    // ── BT-2763 / ADR 0106: `matchExhaustive:` parsing ─────────────────────
+
+    #[test]
+    fn plain_match_sets_exhaustive_false() {
+        let (module, diags) = parse_source("x match: [#a -> 1; _ -> 0]");
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        let expr = &module.expressions[0].expression;
+        match expr {
+            crate::ast::Expression::Match { exhaustive, .. } => {
+                assert!(!exhaustive, "plain `match:` must set exhaustive: false");
+            }
+            other => panic!("expected Expression::Match, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn match_exhaustive_keyword_sets_exhaustive_true() {
+        let (module, diags) = parse_source("x matchExhaustive: [#a -> 1; #b -> 0]");
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        let expr = &module.expressions[0].expression;
+        match expr {
+            crate::ast::Expression::Match {
+                exhaustive, arms, ..
+            } => {
+                assert!(exhaustive, "`matchExhaustive:` must set exhaustive: true");
+                assert_eq!(arms.len(), 2);
+            }
+            other => panic!("expected Expression::Match, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn match_exhaustive_parses_same_arm_syntax_as_match() {
+        // Guards, wildcards, and destructuring all parse identically under
+        // `matchExhaustive:` — only the keyword and the resulting flag differ.
+        let (module, diags) =
+            parse_source("x matchExhaustive: [#a when: [true] -> 1; #b -> 2; _ -> 0]");
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        let expr = &module.expressions[0].expression;
+        match expr {
+            crate::ast::Expression::Match { arms, .. } => {
+                assert_eq!(arms.len(), 3);
+            }
+            other => panic!("expected Expression::Match, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn match_exhaustive_unparse_round_trips_keyword() {
+        let formatted = crate::unparse::format_source("x matchExhaustive: [#a -> 1; #b -> 2]")
+            .expect("formatting should succeed");
+        assert!(
+            formatted.contains("matchExhaustive:"),
+            "unparse output should preserve matchExhaustive: keyword, got: {formatted}"
+        );
+        assert!(
+            !formatted.contains(" match: ["),
+            "unparse output must not downgrade matchExhaustive: to match:, got: {formatted}"
+        );
+    }
+
+    #[test]
+    fn plain_match_unparse_does_not_gain_exhaustive_keyword() {
+        let formatted = crate::unparse::format_source("x match: [#a -> 1; #b -> 2]")
+            .expect("formatting should succeed");
+        assert!(
+            formatted.contains(" match: ["),
+            "plain match: should round-trip unchanged, got: {formatted}"
+        );
+        assert!(
+            !formatted.contains("matchExhaustive:"),
+            "plain match: must not gain the exhaustive keyword, got: {formatted}"
         );
     }
 }

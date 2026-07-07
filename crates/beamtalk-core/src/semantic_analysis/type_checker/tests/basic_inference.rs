@@ -537,6 +537,7 @@ fn test_match_returns_dynamic() {
     let mut env = TypeEnv::new();
 
     let match_expr = Expression::Match {
+        exhaustive: false,
         value: Box::new(int_lit(42)),
         arms: vec![],
         span: span(),
@@ -561,6 +562,7 @@ fn test_match_arm_pattern_vars_bound_in_body() {
     env.set_local("n", InferredType::known("Integer"));
 
     let match_expr = Expression::Match {
+        exhaustive: false,
         value: Box::new(int_lit(42)),
         arms: vec![MatchArm::new(
             Pattern::Variable(ident("n")),
@@ -593,6 +595,7 @@ fn test_match_arm_pattern_vars_bound_in_guard() {
     env.set_local("n", InferredType::known("Integer"));
 
     let match_expr = Expression::Match {
+        exhaustive: false,
         value: Box::new(int_lit(42)),
         arms: vec![MatchArm::with_guard(
             Pattern::Variable(ident("n")),
