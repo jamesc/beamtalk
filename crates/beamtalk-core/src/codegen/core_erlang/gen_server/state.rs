@@ -5,12 +5,13 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
-//! Generates state field initializers for actor `init/1` callbacks,
-//! including inherited fields from parent classes.
+//! Generates state field initializers for actor `init/1` callbacks. Inherited
+//! state from a stateful parent is supplied by the super-init chain (BT-1417,
+//! see `gen_server/callbacks.rs`), not by this module.
 
 use super::super::document::{Document, leaf, line};
 use super::super::{CoreErlangGenerator, Result};
-use crate::ast::{Expression, Identifier, Module};
+use crate::ast::{Expression, Module};
 use crate::docvec;
 
 impl CoreErlangGenerator {
@@ -51,14 +52,21 @@ impl CoreErlangGenerator {
         Ok(fields)
     }
 
-    /// Generates all state fields including inherited ones (for base classes).
+    /// Generates the state fields for a class whose parent is a base class
+    /// (`Actor` / `Object` / none) — i.e. a class with no stateful ancestor.
     ///
     /// Returns a list of `Document` fragments, each representing one field
     /// initializer line (with a leading `line()` for indentation).
     /// The caller wraps these in a `nest()` at the appropriate level.
     ///
-    /// This version includes fields from module-level assignments and recursively
-    /// collects inherited fields from parent classes when they're in the same module.
+    /// Inherited state from a *non-base* parent is NOT collected here. A subclass
+    /// of a stateful actor instead has its `init/1` call the parent's compiled
+    /// `init/1` and merge its own fields on top — the super-init chain (BT-1417,
+    /// see `gen_server/callbacks.rs`). That `has_parent_init` path resolves the
+    /// parent's compiled module and so handles cross-file, stdlib, and package
+    /// parents uniformly; this function is only reached with a base-class parent.
+    /// It also emits fields from module-level `x := literal` assignments for
+    /// script/workspace modules.
     pub(in crate::codegen::core_erlang) fn generate_initial_state_fields(
         &mut self,
         module: &Module,
@@ -89,20 +97,9 @@ impl CoreErlangGenerator {
         });
 
         if let Some(class) = current_class {
-            // Collect inherited fields from parent classes (recursively)
-            let inherited_fields = Self::collect_inherited_fields(class.superclass_name(), module)?;
-
-            // Emit inherited fields first
-            for (field_name, default_value) in inherited_fields {
-                let value_code = self.expression_doc(&default_value)?;
-                fields.push(docvec![
-                    line(),
-                    docvec![", ", leaf::atom(field_name.clone()), " => "],
-                    value_code,
-                ]);
-            }
-
-            // Then emit this class's own fields (can override parent defaults)
+            // Emit this class's own fields. Inherited state from a non-base parent
+            // is supplied at runtime by the super-init chain (BT-1417), not collected
+            // here — this branch is only reached when the parent is a base class.
             for state in &class.state {
                 let value_code = if let Some(ref default_value) = state.default_value {
                     self.expression_doc(default_value)?
@@ -135,58 +132,6 @@ impl CoreErlangGenerator {
                 }
             }
         }
-
-        Ok(fields)
-    }
-
-    /// Recursively collects all inherited state fields from parent classes.
-    ///
-    /// Returns a vector of `(field_name, default_value)` pairs in inheritance order
-    /// (most distant ancestor first). This ensures parent fields are initialized
-    /// before child fields, allowing children to override parent defaults.
-    ///
-    /// Only works when parent classes are defined in the same Module AST.
-    /// For cross-file inheritance (e.g., from standard library classes), the
-    /// parent's fields are not included - they must be provided via `InitArgs` or
-    /// handled by a future import mechanism.
-    fn collect_inherited_fields(
-        parent_name: &str,
-        module: &Module,
-    ) -> Result<Vec<(String, Expression)>> {
-        let mut fields = Vec::new();
-
-        // Base case: Actor, Object, and root classes (none) have no state fields
-        if parent_name == "Actor" || parent_name == "Object" || parent_name == "none" {
-            return Ok(fields);
-        }
-
-        // Find parent class in the same module
-        let parent_class = module
-            .classes
-            .iter()
-            .find(|c| c.name.name.eq_ignore_ascii_case(parent_name));
-
-        if let Some(parent) = parent_class {
-            // Recursively collect grandparent fields first
-            let grandparent_fields =
-                Self::collect_inherited_fields(parent.superclass_name(), module)?;
-            fields.extend(grandparent_fields);
-
-            // Add this parent's fields
-            for state in &parent.state {
-                let default_value = if let Some(ref val) = state.default_value {
-                    val.clone()
-                } else {
-                    // No default - use nil
-                    Expression::Identifier(Identifier {
-                        name: "nil".into(),
-                        span: state.span,
-                    })
-                };
-                fields.push((state.name.name.to_string(), default_value));
-            }
-        }
-        // If parent not found in module, it's a cross-file reference - skip for now
 
         Ok(fields)
     }

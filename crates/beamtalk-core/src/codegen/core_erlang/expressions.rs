@@ -476,7 +476,9 @@ impl CoreErlangGenerator {
                 span: Some(field.span),
             });
         }
-        // For now, assume receiver is 'self' and access from State/Self
+        // Field access resolves against self's State/Self map. A non-self receiver
+        // is not valid (Beamtalk enforces encapsulation) and is rejected with a
+        // diagnostic in the fall-through below.
         if let Expression::Identifier(recv_id) = receiver {
             if recv_id.name == "self" {
                 // BT-1326: In hybrid mode, read-only fields are pre-extracted before the letrec.
