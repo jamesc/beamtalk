@@ -54,10 +54,7 @@ detecting the operating system and architecture, and querying process info.
         Value -> list_to_binary(Value)
     end;
 'getEnv:'(_) ->
-    Error0 = beamtalk_error:new(type_error, 'System'),
-    Error1 = beamtalk_error:with_selector(Error0, 'getEnv:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Argument must be a String">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error('System', 'getEnv:', <<"Argument must be a String">>).
 
 -doc "Read an environment variable with a default fallback.".
 -spec 'getEnv:default:'(binary(), Default :: binary()) -> binary().
@@ -67,15 +64,13 @@ detecting the operating system and architecture, and querying process info.
         Value -> list_to_binary(Value)
     end;
 'getEnv:default:'(Name, _Default) when not is_binary(Name) ->
-    Error0 = beamtalk_error:new(type_error, 'System'),
-    Error1 = beamtalk_error:with_selector(Error0, 'getEnv:default:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Name argument must be a String">>),
-    beamtalk_error:raise(Error2);
+    beamtalk_error:raise_type_error(
+        'System', 'getEnv:default:', <<"Name argument must be a String">>
+    );
 'getEnv:default:'(_Name, _Default) ->
-    Error0 = beamtalk_error:new(type_error, 'System'),
-    Error1 = beamtalk_error:with_selector(Error0, 'getEnv:default:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Default argument must be a String">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error(
+        'System', 'getEnv:default:', <<"Default argument must be a String">>
+    ).
 
 -doc "Set an environment variable. Returns true.".
 -spec 'setEnv:value:'(binary(), Value :: binary()) -> 'true'.
@@ -83,15 +78,13 @@ detecting the operating system and architecture, and querying process info.
     os:putenv(binary_to_list(Name), binary_to_list(Value)),
     true;
 'setEnv:value:'(Name, _Value) when not is_binary(Name) ->
-    Error0 = beamtalk_error:new(type_error, 'System'),
-    Error1 = beamtalk_error:with_selector(Error0, 'setEnv:value:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Name argument must be a String">>),
-    beamtalk_error:raise(Error2);
+    beamtalk_error:raise_type_error(
+        'System', 'setEnv:value:', <<"Name argument must be a String">>
+    );
 'setEnv:value:'(_Name, _Value) ->
-    Error0 = beamtalk_error:new(type_error, 'System'),
-    Error1 = beamtalk_error:with_selector(Error0, 'setEnv:value:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Value argument must be a String">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error(
+        'System', 'setEnv:value:', <<"Value argument must be a String">>
+    ).
 
 -doc "Remove an environment variable. Returns true.".
 -spec 'unsetEnv:'(binary()) -> 'true'.
@@ -99,10 +92,7 @@ detecting the operating system and architecture, and querying process info.
     os:unsetenv(binary_to_list(Name)),
     true;
 'unsetEnv:'(_) ->
-    Error0 = beamtalk_error:new(type_error, 'System'),
-    Error1 = beamtalk_error:with_selector(Error0, 'unsetEnv:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Argument must be a String">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error('System', 'unsetEnv:', <<"Argument must be a String">>).
 
 -doc """
 Return the OS platform name.
@@ -243,17 +233,18 @@ do_halt(Code, Selector) ->
         true ->
             erlang:halt(Code);
         _ ->
-            Error0 = beamtalk_error:new(unsupported, 'System'),
-            Error1 = beamtalk_error:with_selector(Error0, Selector),
-            Error2 = beamtalk_error:with_hint(
-                Error1,
-                <<
-                    "System halt: halts the whole node, which would kill a shared "
-                    "workspace and every other connected session. Use Program exit: "
-                    "to end just this program/session."
-                >>
-            ),
-            beamtalk_error:raise(Error2)
+            beamtalk_error:raise(
+                beamtalk_error:new(
+                    unsupported,
+                    'System',
+                    Selector,
+                    <<
+                        "System halt: halts the whole node, which would kill a shared "
+                        "workspace and every other connected session. Use Program exit: "
+                        "to end just this program/session."
+                    >>
+                )
+            )
     end.
 
 -doc "Map os:type() Name atom to platform string.".

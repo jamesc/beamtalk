@@ -61,9 +61,9 @@ Type error (non-String argument) still raises.
         error:#{error := #beamtalk_error{}} = E:_ ->
             error(E);
         error:Reason when is_tuple(Reason); Reason =:= unexpected_end ->
-            Error0 = beamtalk_error:new(parse_error, 'Json'),
-            Error1 = beamtalk_error:with_selector(Error0, 'parse:'),
-            Error2 = beamtalk_error:with_hint(Error1, <<"Check that the string is valid JSON">>),
+            Error2 = beamtalk_error:new(
+                parse_error, 'Json', 'parse:', <<"Check that the string is valid JSON">>
+            ),
             beamtalk_result:from_tagged_tuple({error, Error2});
         _:Reason ->
             Error0 = beamtalk_error:new(parse_error, 'Json'),
@@ -73,10 +73,7 @@ Type error (non-String argument) still raises.
             beamtalk_result:from_tagged_tuple({error, Error3})
     end;
 'parse:'(_) ->
-    Error0 = beamtalk_error:new(type_error, 'Json'),
-    Error1 = beamtalk_error:with_selector(Error0, 'parse:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Argument must be a String">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error('Json', 'parse:', <<"Argument must be a String">>).
 
 -doc """
 Generate a JSON string from a Beamtalk value.
@@ -94,10 +91,9 @@ booleans, nil becomes null.
         error:#{error := #beamtalk_error{}} = E:_ ->
             error(E);
         error:{unsupported_type, _} ->
-            Error0 = beamtalk_error:new(type_error, 'Json'),
-            Error1 = beamtalk_error:with_selector(Error0, 'generate:'),
-            Error2 = beamtalk_error:with_hint(Error1, <<"Value cannot be converted to JSON">>),
-            beamtalk_error:raise(Error2);
+            beamtalk_error:raise_type_error(
+                'Json', 'generate:', <<"Value cannot be converted to JSON">>
+            );
         _:Reason ->
             Error0 = beamtalk_error:new(type_error, 'Json'),
             Error1 = beamtalk_error:with_selector(Error0, 'generate:'),
@@ -117,10 +113,9 @@ booleans, nil becomes null.
         error:#{error := #beamtalk_error{}} = E:_ ->
             error(E);
         error:{unsupported_type, _} ->
-            Error0 = beamtalk_error:new(type_error, 'Json'),
-            Error1 = beamtalk_error:with_selector(Error0, 'prettyPrint:'),
-            Error2 = beamtalk_error:with_hint(Error1, <<"Value cannot be converted to JSON">>),
-            beamtalk_error:raise(Error2);
+            beamtalk_error:raise_type_error(
+                'Json', 'prettyPrint:', <<"Value cannot be converted to JSON">>
+            );
         _:Reason ->
             Error0 = beamtalk_error:new(type_error, 'Json'),
             Error1 = beamtalk_error:with_selector(Error0, 'prettyPrint:'),

@@ -85,19 +85,17 @@ Raises `type_error` if the argument is not an atom.
         make_counter(Name)
     catch
         error:badarg ->
-            Error0 = beamtalk_error:new(already_exists, 'AtomicCounter'),
-            Error1 = beamtalk_error:with_selector(Error0, 'new:'),
-            Error2 = beamtalk_error:with_hint(
-                Error1,
-                <<"A counter with this name already exists">>
-            ),
-            beamtalk_error:raise(Error2)
+            beamtalk_error:raise(
+                beamtalk_error:new(
+                    already_exists,
+                    'AtomicCounter',
+                    'new:',
+                    <<"A counter with this name already exists">>
+                )
+            )
     end;
 'new:'(_Name) ->
-    Error0 = beamtalk_error:new(type_error, 'AtomicCounter'),
-    Error1 = beamtalk_error:with_selector(Error0, 'new:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Counter name must be a Symbol">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error('AtomicCounter', 'new:', <<"Counter name must be a Symbol">>).
 
 -doc """
 Look up an existing named counter.
@@ -110,21 +108,16 @@ Raises `type_error` if the argument is not an atom.
 'named:'(Name) when is_atom(Name) ->
     case ets:whereis(Name) of
         undefined ->
-            Error0 = beamtalk_error:new(not_found, 'AtomicCounter'),
-            Error1 = beamtalk_error:with_selector(Error0, 'named:'),
-            Error2 = beamtalk_error:with_hint(
-                Error1,
-                <<"No counter with this name exists">>
-            ),
-            beamtalk_error:raise(Error2);
+            beamtalk_error:raise(
+                beamtalk_error:new(
+                    not_found, 'AtomicCounter', 'named:', <<"No counter with this name exists">>
+                )
+            );
         _Tid ->
             make_counter(Name)
     end;
 'named:'(_) ->
-    Error0 = beamtalk_error:new(type_error, 'AtomicCounter'),
-    Error1 = beamtalk_error:with_selector(Error0, 'named:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Counter name must be a Symbol">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error('AtomicCounter', 'named:', <<"Counter name must be a Symbol">>).
 
 %%% ============================================================================
 %%% Instance Methods
@@ -155,10 +148,9 @@ incrementBy(#{'$beamtalk_class' := 'AtomicCounter', table := TableName}, N) when
         error:badarg -> stale_counter_error('incrementBy:', TableName)
     end;
 incrementBy(#{'$beamtalk_class' := 'AtomicCounter', table := _}, _N) ->
-    Error0 = beamtalk_error:new(type_error, 'AtomicCounter'),
-    Error1 = beamtalk_error:with_selector(Error0, 'incrementBy:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Argument must be an Integer">>),
-    beamtalk_error:raise(Error2);
+    beamtalk_error:raise_type_error(
+        'AtomicCounter', 'incrementBy:', <<"Argument must be an Integer">>
+    );
 incrementBy(_Self, _N) ->
     receiver_type_error('incrementBy:').
 
@@ -182,10 +174,9 @@ decrementBy(#{'$beamtalk_class' := 'AtomicCounter', table := TableName}, N) when
         error:badarg -> stale_counter_error('decrementBy:', TableName)
     end;
 decrementBy(#{'$beamtalk_class' := 'AtomicCounter', table := _}, _N) ->
-    Error0 = beamtalk_error:new(type_error, 'AtomicCounter'),
-    Error1 = beamtalk_error:with_selector(Error0, 'decrementBy:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Argument must be an Integer">>),
-    beamtalk_error:raise(Error2);
+    beamtalk_error:raise_type_error(
+        'AtomicCounter', 'decrementBy:', <<"Argument must be an Integer">>
+    );
 decrementBy(_Self, _N) ->
     receiver_type_error('decrementBy:').
 
@@ -244,13 +235,14 @@ delete(#{'$beamtalk_class' := 'AtomicCounter', table := TableName}) ->
                 undefined ->
                     stale_counter_error('delete', TableName);
                 _Tid ->
-                    Error0 = beamtalk_error:new(permission_error, 'AtomicCounter'),
-                    Error1 = beamtalk_error:with_selector(Error0, 'delete'),
-                    Error2 = beamtalk_error:with_hint(
-                        Error1,
-                        <<"Caller is not the owner of the counter table">>
-                    ),
-                    beamtalk_error:raise(Error2)
+                    beamtalk_error:raise(
+                        beamtalk_error:new(
+                            permission_error,
+                            'AtomicCounter',
+                            'delete',
+                            <<"Caller is not the owner of the counter table">>
+                        )
+                    )
             end
     end;
 delete(_Self) ->
@@ -285,21 +277,21 @@ make_counter(Name) ->
 -doc "Build a structured error for a stale or deleted counter table.".
 -spec stale_counter_error(atom(), atom()) -> no_return().
 stale_counter_error(Selector, TableName) ->
-    Error0 = beamtalk_error:new(stale_counter, 'AtomicCounter'),
-    Error1 = beamtalk_error:with_selector(Error0, Selector),
-    Error2 = beamtalk_error:with_hint(
-        Error1,
-        iolist_to_binary([
-            <<"AtomicCounter is stale or has been deleted: ">>,
-            atom_to_binary(TableName, utf8)
-        ])
-    ),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise(
+        beamtalk_error:new(
+            stale_counter,
+            'AtomicCounter',
+            Selector,
+            iolist_to_binary([
+                <<"AtomicCounter is stale or has been deleted: ">>,
+                atom_to_binary(TableName, utf8)
+            ])
+        )
+    ).
 
 -doc "Raise a type_error for a non-AtomicCounter receiver.".
 -spec receiver_type_error(atom()) -> no_return().
 receiver_type_error(Selector) ->
-    Error0 = beamtalk_error:new(type_error, 'AtomicCounter'),
-    Error1 = beamtalk_error:with_selector(Error0, Selector),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Receiver must be an AtomicCounter instance">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error(
+        'AtomicCounter', Selector, <<"Receiver must be an AtomicCounter instance">>
+    ).

@@ -49,16 +49,18 @@ at(Str, Idx) when is_binary(Str), is_integer(Idx), Idx >= 1 ->
         {ok, Grapheme} ->
             Grapheme;
         error ->
-            Error0 = beamtalk_error:new(index_out_of_bounds, 'String'),
-            Error1 = beamtalk_error:with_selector(Error0, 'at:'),
-            Error2 = beamtalk_error:with_hint(Error1, <<"Index is beyond string length">>),
-            beamtalk_error:raise(Error2)
+            beamtalk_error:raise(
+                beamtalk_error:new(
+                    index_out_of_bounds, 'String', 'at:', <<"Index is beyond string length">>
+                )
+            )
     end;
 at(Str, Idx) when is_binary(Str), is_integer(Idx) ->
-    Error0 = beamtalk_error:new(index_out_of_bounds, 'String'),
-    Error1 = beamtalk_error:with_selector(Error0, 'at:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Index must be >= 1 (1-based indexing)">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise(
+        beamtalk_error:new(
+            index_out_of_bounds, 'String', 'at:', <<"Index must be >= 1 (1-based indexing)">>
+        )
+    ).
 
 -doc "Capitalize the first grapheme, keep rest unchanged.".
 -spec capitalize(binary()) -> binary().
@@ -247,21 +249,18 @@ from_code_point(CodePoint) when is_integer(CodePoint), CodePoint >= 0 ->
     case unicode:characters_to_binary([CodePoint]) of
         Bin when is_binary(Bin) -> Bin;
         _ ->
-            Error0 = beamtalk_error:new(type_error, 'String'),
-            Error1 = beamtalk_error:with_selector(Error0, 'fromCodePoint:'),
-            Error2 = beamtalk_error:with_hint(Error1, <<"Invalid Unicode code point">>),
-            beamtalk_error:raise(Error2)
+            beamtalk_error:raise_type_error(
+                'String', 'fromCodePoint:', <<"Invalid Unicode code point">>
+            )
     end;
 from_code_point(CodePoint) when is_integer(CodePoint) ->
-    Error0 = beamtalk_error:new(type_error, 'String'),
-    Error1 = beamtalk_error:with_selector(Error0, 'fromCodePoint:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Code point must be a non-negative integer">>),
-    beamtalk_error:raise(Error2);
+    beamtalk_error:raise_type_error(
+        'String', 'fromCodePoint:', <<"Code point must be a non-negative integer">>
+    );
 from_code_point(_) ->
-    Error0 = beamtalk_error:new(type_error, 'String'),
-    Error1 = beamtalk_error:with_selector(Error0, 'fromCodePoint:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Code point must be an Integer">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error(
+        'String', 'fromCodePoint:', <<"Code point must be an Integer">>
+    ).
 
 -doc "Create a UTF-8 binary from a list of Unicode code points.".
 -spec from_code_points([integer()]) -> binary().
@@ -271,26 +270,21 @@ from_code_points(List) when is_list(List) ->
             case unicode:characters_to_binary(List) of
                 Bin when is_binary(Bin) -> Bin;
                 _ ->
-                    Error0 = beamtalk_error:new(type_error, 'String'),
-                    Error1 = beamtalk_error:with_selector(Error0, 'fromCodePoints:'),
-                    Error2 = beamtalk_error:with_hint(
-                        Error1, <<"Invalid Unicode code points in list">>
-                    ),
-                    beamtalk_error:raise(Error2)
+                    beamtalk_error:raise_type_error(
+                        'String', 'fromCodePoints:', <<"Invalid Unicode code points in list">>
+                    )
             end;
         false ->
-            Error0 = beamtalk_error:new(type_error, 'String'),
-            Error1 = beamtalk_error:with_selector(Error0, 'fromCodePoints:'),
-            Error2 = beamtalk_error:with_hint(
-                Error1, <<"List must contain only non-negative integer code points">>
-            ),
-            beamtalk_error:raise(Error2)
+            beamtalk_error:raise_type_error(
+                'String',
+                'fromCodePoints:',
+                <<"List must contain only non-negative integer code points">>
+            )
     end;
 from_code_points(_) ->
-    Error0 = beamtalk_error:new(type_error, 'String'),
-    Error1 = beamtalk_error:with_selector(Error0, 'fromCodePoints:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Expected a List of Integer code points">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error(
+        'String', 'fromCodePoints:', <<"Expected a List of Integer code points">>
+    ).
 
 -doc """
 Coerce an Erlang iolist or charlist to a UTF-8 binary String.
@@ -336,12 +330,9 @@ from_iolist(X) when is_list(X) ->
                         {ok, UtfBin2} when is_binary(UtfBin2) ->
                             UtfBin2;
                         _ ->
-                            Error0 = beamtalk_error:new(type_error, 'String'),
-                            Error1 = beamtalk_error:with_selector(Error0, 'fromIolist:'),
-                            Error2 = beamtalk_error:with_hint(
-                                Error1, <<"Could not convert iolist to String">>
-                            ),
-                            beamtalk_error:raise(Error2)
+                            beamtalk_error:raise_type_error(
+                                'String', 'fromIolist:', <<"Could not convert iolist to String">>
+                            )
                     end
             end;
         _ ->
@@ -356,19 +347,15 @@ from_iolist(X) when is_list(X) ->
                 {ok, UtfBin} when is_binary(UtfBin) ->
                     UtfBin;
                 _ ->
-                    Error0 = beamtalk_error:new(type_error, 'String'),
-                    Error1 = beamtalk_error:with_selector(Error0, 'fromIolist:'),
-                    Error2 = beamtalk_error:with_hint(
-                        Error1, <<"Could not convert iolist to String">>
-                    ),
-                    beamtalk_error:raise(Error2)
+                    beamtalk_error:raise_type_error(
+                        'String', 'fromIolist:', <<"Could not convert iolist to String">>
+                    )
             end
     end;
 from_iolist(_) ->
-    Error0 = beamtalk_error:new(type_error, 'String'),
-    Error1 = beamtalk_error:with_selector(Error0, 'fromIolist:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Expected an iolist (List) or String">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error(
+        'String', 'fromIolist:', <<"Expected an iolist (List) or String">>
+    ).
 
 %%% ============================================================================
 %%% Internal Functions

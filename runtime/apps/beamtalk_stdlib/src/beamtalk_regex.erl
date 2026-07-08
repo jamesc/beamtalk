@@ -67,16 +67,11 @@ Returns `Result ok: regex` on success, `Result error:` if the pattern is invalid
             );
         {error, {ErrStr, Pos}} ->
             Msg = iolist_to_binary(io_lib:format("~s at position ~p", [ErrStr, Pos])),
-            Error0 = beamtalk_error:new(regex_error, 'Regex'),
-            Error1 = beamtalk_error:with_selector(Error0, 'from:'),
-            Error2 = beamtalk_error:with_hint(Error1, Msg),
+            Error2 = beamtalk_error:new(regex_error, 'Regex', 'from:', Msg),
             beamtalk_result:from_tagged_tuple({error, Error2})
     end;
 'from:'(_) ->
-    Error0 = beamtalk_error:new(type_error, 'Regex'),
-    Error1 = beamtalk_error:with_selector(Error0, 'from:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Pattern must be a String">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error('Regex', 'from:', <<"Pattern must be a String">>).
 
 -doc """
 Compile a regex pattern string with PCRE options.
@@ -98,16 +93,13 @@ Unknown options still raise (programming error).
             );
         {error, {ErrStr, Pos}} ->
             Msg = iolist_to_binary(io_lib:format("~s at position ~p", [ErrStr, Pos])),
-            Error0 = beamtalk_error:new(regex_error, 'Regex'),
-            Error1 = beamtalk_error:with_selector(Error0, 'from:options:'),
-            Error2 = beamtalk_error:with_hint(Error1, Msg),
+            Error2 = beamtalk_error:new(regex_error, 'Regex', 'from:options:', Msg),
             beamtalk_result:from_tagged_tuple({error, Error2})
     end;
 'from:options:'(_, _) ->
-    Error0 = beamtalk_error:new(type_error, 'Regex'),
-    Error1 = beamtalk_error:with_selector(Error0, 'from:options:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Pattern must be a String and options a List">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error(
+        'Regex', 'from:options:', <<"Pattern must be a String and options a List">>
+    ).
 
 %%% ============================================================================
 %%% FFI aliases — no-colon names for Erlang FFI dispatch
@@ -151,12 +143,9 @@ matches_regex(Str, Pattern) when is_binary(Str), is_binary(Pattern) ->
         error:badarg -> raise_bad_pattern('matchesRegex:', Pattern)
     end;
 matches_regex(_, _) ->
-    Error0 = beamtalk_error:new(type_error, 'String'),
-    Error1 = beamtalk_error:with_selector(Error0, 'matchesRegex:'),
-    Error2 = beamtalk_error:with_hint(
-        Error1, <<"Receiver must be a String, argument a String or Regex">>
-    ),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error(
+        'String', 'matchesRegex:', <<"Receiver must be a String, argument a String or Regex">>
+    ).
 
 -doc "Test if string matches pattern with options (String only pattern).".
 -spec matches_regex_options(binary(), binary(), list()) -> boolean().
@@ -170,12 +159,11 @@ matches_regex_options(Str, Pattern, Options) when
         error:badarg -> raise_bad_pattern('matchesRegex:options:', Pattern)
     end;
 matches_regex_options(_, _, _) ->
-    Error0 = beamtalk_error:new(type_error, 'String'),
-    Error1 = beamtalk_error:with_selector(Error0, 'matchesRegex:options:'),
-    Error2 = beamtalk_error:with_hint(
-        Error1, <<"Receiver must be a String, pattern a String, options a List">>
-    ),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error(
+        'String',
+        'matchesRegex:options:',
+        <<"Receiver must be a String, pattern a String, options a List">>
+    ).
 
 -doc "Find first match in string, return String or nil.".
 -spec first_match(binary(), binary() | map()) -> binary() | 'nil'.
@@ -194,12 +182,9 @@ first_match(Str, Pattern) when is_binary(Str), is_binary(Pattern) ->
         error:badarg -> raise_bad_pattern('firstMatch:', Pattern)
     end;
 first_match(_, _) ->
-    Error0 = beamtalk_error:new(type_error, 'String'),
-    Error1 = beamtalk_error:with_selector(Error0, 'firstMatch:'),
-    Error2 = beamtalk_error:with_hint(
-        Error1, <<"Receiver must be a String, argument a String or Regex">>
-    ),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error(
+        'String', 'firstMatch:', <<"Receiver must be a String, argument a String or Regex">>
+    ).
 
 -doc "Find all matches in string, return List of Strings.".
 -spec all_matches(binary(), binary() | map()) -> list().
@@ -218,12 +203,9 @@ all_matches(Str, Pattern) when is_binary(Str), is_binary(Pattern) ->
         error:badarg -> raise_bad_pattern('allMatches:', Pattern)
     end;
 all_matches(_, _) ->
-    Error0 = beamtalk_error:new(type_error, 'String'),
-    Error1 = beamtalk_error:with_selector(Error0, 'allMatches:'),
-    Error2 = beamtalk_error:with_hint(
-        Error1, <<"Receiver must be a String, argument a String or Regex">>
-    ),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error(
+        'String', 'allMatches:', <<"Receiver must be a String, argument a String or Regex">>
+    ).
 
 -doc "Replace first match with replacement string.".
 -spec replace_regex(binary(), binary() | map(), binary()) -> binary().
@@ -240,10 +222,9 @@ replace_regex(Str, Pattern, Replacement) when
         error:badarg -> raise_bad_pattern('replaceRegex:with:', Pattern)
     end;
 replace_regex(_, _, _) ->
-    Error0 = beamtalk_error:new(type_error, 'String'),
-    Error1 = beamtalk_error:with_selector(Error0, 'replaceRegex:with:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Arguments must be Strings or Regex">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error(
+        'String', 'replaceRegex:with:', <<"Arguments must be Strings or Regex">>
+    ).
 
 -doc "Replace all matches with replacement string.".
 -spec replace_all_regex(binary(), binary() | map(), binary()) -> binary().
@@ -260,10 +241,9 @@ replace_all_regex(Str, Pattern, Replacement) when
         error:badarg -> raise_bad_pattern('replaceAllRegex:with:', Pattern)
     end;
 replace_all_regex(_, _, _) ->
-    Error0 = beamtalk_error:new(type_error, 'String'),
-    Error1 = beamtalk_error:with_selector(Error0, 'replaceAllRegex:with:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Arguments must be Strings or Regex">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error(
+        'String', 'replaceAllRegex:with:', <<"Arguments must be Strings or Regex">>
+    ).
 
 -doc "Split string by regex pattern.".
 -spec split_regex(binary(), binary() | map()) -> list().
@@ -276,12 +256,9 @@ split_regex(Str, Pattern) when is_binary(Str), is_binary(Pattern) ->
         error:badarg -> raise_bad_pattern('splitRegex:', Pattern)
     end;
 split_regex(_, _) ->
-    Error0 = beamtalk_error:new(type_error, 'String'),
-    Error1 = beamtalk_error:with_selector(Error0, 'splitRegex:'),
-    Error2 = beamtalk_error:with_hint(
-        Error1, <<"Receiver must be a String, argument a String or Regex">>
-    ),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error(
+        'String', 'splitRegex:', <<"Receiver must be a String, argument a String or Regex">>
+    ).
 
 %%% ============================================================================
 %%% Internal Functions
@@ -300,10 +277,7 @@ raise_bad_pattern(Selector, Pattern) ->
             _ ->
                 <<"Invalid regex pattern">>
         end,
-    Error0 = beamtalk_error:new(regex_error, 'String'),
-    Error1 = beamtalk_error:with_selector(Error0, Selector),
-    Error2 = beamtalk_error:with_hint(Error1, Hint),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise(beamtalk_error:new(regex_error, 'String', Selector, Hint)).
 
 -doc "Translate Beamtalk option atoms to Erlang re compile options.".
 -spec translate_options(list()) -> list().

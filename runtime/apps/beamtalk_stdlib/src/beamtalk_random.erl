@@ -70,15 +70,11 @@ directly to `next/1` / `nextInteger/2` (ADR 0101 / BT-2731).
 'nextInteger:'(Max) when is_integer(Max), Max > 0 ->
     rand:uniform(Max);
 'nextInteger:'(Max) when is_integer(Max) ->
-    Error0 = beamtalk_error:new(type_error, 'Random'),
-    Error1 = beamtalk_error:with_selector(Error0, 'nextInteger:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Argument must be a positive Integer">>),
-    beamtalk_error:raise(Error2);
+    beamtalk_error:raise_type_error(
+        'Random', 'nextInteger:', <<"Argument must be a positive Integer">>
+    );
 'nextInteger:'(_) ->
-    Error0 = beamtalk_error:new(type_error, 'Random'),
-    Error1 = beamtalk_error:with_selector(Error0, 'nextInteger:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Argument must be an Integer">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error('Random', 'nextInteger:', <<"Argument must be an Integer">>).
 
 %%% ============================================================================
 %%% Class-side Constructors
@@ -102,10 +98,7 @@ directly to `next/1` / `nextInteger/2` (ADR 0101 / BT-2731).
         state => State
     };
 'seed:'(_) ->
-    Error0 = beamtalk_error:new(type_error, 'Random'),
-    Error1 = beamtalk_error:with_selector(Error0, 'seed:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Seed must be an Integer">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error('Random', 'seed:', <<"Seed must be an Integer">>).
 
 %%% ============================================================================
 %%% Instance Methods (explicit state)
@@ -121,10 +114,7 @@ next(#{state := State0}) ->
     {Value, _State1} = rand:uniform_s(State0),
     Value;
 next(_) ->
-    Error0 = beamtalk_error:new(type_error, 'Random'),
-    Error1 = beamtalk_error:with_selector(Error0, 'next'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Receiver must be a Random instance">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error('Random', 'next', <<"Receiver must be a Random instance">>).
 
 -doc """
 Return a random integer between 1 and Max from instance state.
@@ -136,20 +126,15 @@ nextInteger(#{state := State0}, Max) when is_integer(Max), Max > 0 ->
     {Value, _State1} = rand:uniform_s(Max, State0),
     Value;
 nextInteger(#{state := _}, Max) when is_integer(Max) ->
-    Error0 = beamtalk_error:new(type_error, 'Random'),
-    Error1 = beamtalk_error:with_selector(Error0, 'nextInteger:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Argument must be a positive Integer">>),
-    beamtalk_error:raise(Error2);
+    beamtalk_error:raise_type_error(
+        'Random', 'nextInteger:', <<"Argument must be a positive Integer">>
+    );
 nextInteger(#{state := _}, _) ->
-    Error0 = beamtalk_error:new(type_error, 'Random'),
-    Error1 = beamtalk_error:with_selector(Error0, 'nextInteger:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Argument must be an Integer">>),
-    beamtalk_error:raise(Error2);
+    beamtalk_error:raise_type_error('Random', 'nextInteger:', <<"Argument must be an Integer">>);
 nextInteger(_, _) ->
-    Error0 = beamtalk_error:new(type_error, 'Random'),
-    Error1 = beamtalk_error:with_selector(Error0, 'nextInteger:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Receiver must be a Random instance">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error(
+        'Random', 'nextInteger:', <<"Receiver must be a Random instance">>
+    ).
 
 %%% ============================================================================
 %%% Collection Integration
@@ -161,12 +146,9 @@ Used by List atRandom and Tuple atRandom.
 """.
 -spec 'atRandom'(list() | tuple()) -> term().
 'atRandom'([]) ->
-    Error0 = beamtalk_error:new(type_error, 'List'),
-    Error1 = beamtalk_error:with_selector(Error0, 'atRandom'),
-    Error2 = beamtalk_error:with_hint(
-        Error1, <<"Cannot select random element from empty collection">>
-    ),
-    beamtalk_error:raise(Error2);
+    beamtalk_error:raise_type_error(
+        'List', 'atRandom', <<"Cannot select random element from empty collection">>
+    );
 'atRandom'(List) when is_list(List) ->
     Len = length(List),
     Index = rand:uniform(Len),
@@ -175,12 +157,9 @@ Used by List atRandom and Tuple atRandom.
     Index = rand:uniform(tuple_size(Tuple)),
     element(Index, Tuple);
 'atRandom'(Tuple) when is_tuple(Tuple) ->
-    Error0 = beamtalk_error:new(type_error, 'Tuple'),
-    Error1 = beamtalk_error:with_selector(Error0, 'atRandom'),
-    Error2 = beamtalk_error:with_hint(
-        Error1, <<"Cannot select random element from empty collection">>
-    ),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error(
+        'Tuple', 'atRandom', <<"Cannot select random element from empty collection">>
+    ).
 
 %%% ============================================================================
 %%% FFI Shims

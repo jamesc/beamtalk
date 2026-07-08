@@ -78,28 +78,17 @@ input. Atoms not already in the atom table will cause an error.
         erlang:binary_to_term(Bin, [safe])
     catch
         error:badarg ->
-            Error0 = beamtalk_error:new(type_error, 'Binary'),
-            Error1 = beamtalk_error:with_selector(Error0, 'deserialize:'),
-            Error2 = beamtalk_error:with_hint(
-                Error1, <<"Binary data is invalid or contains unknown atoms">>
-            ),
-            beamtalk_error:raise(Error2)
+            raise_type_error('deserialize:', <<"Binary data is invalid or contains unknown atoms">>)
     end;
 'deserialize:'(_) ->
-    Error0 = beamtalk_error:new(type_error, 'Binary'),
-    Error1 = beamtalk_error:with_selector(Error0, 'deserialize:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Argument must be a Binary">>),
-    beamtalk_error:raise(Error2).
+    raise_type_error('deserialize:', <<"Argument must be a Binary">>).
 
 -doc "Return the byte size of a binary.".
 -spec 'size:'(binary()) -> non_neg_integer().
 'size:'(Bin) when is_binary(Bin) ->
     erlang:byte_size(Bin);
 'size:'(_) ->
-    Error0 = beamtalk_error:new(type_error, 'Binary'),
-    Error1 = beamtalk_error:with_selector(Error0, 'size:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Argument must be a Binary">>),
-    beamtalk_error:raise(Error2).
+    raise_type_error('size:', <<"Argument must be a Binary">>).
 
 -doc "Convert an iolist to a flat binary.".
 -spec 'fromIolist:'(iolist()) -> binary().
@@ -108,13 +97,10 @@ input. Atoms not already in the atom table will cause an error.
         erlang:iolist_to_binary(Iolist)
     catch
         error:badarg ->
-            Error0 = beamtalk_error:new(type_error, 'Binary'),
-            Error1 = beamtalk_error:with_selector(Error0, 'fromIolist:'),
-            Error2 = beamtalk_error:with_hint(
-                Error1,
+            raise_type_error(
+                'fromIolist:',
                 <<"Argument must be a valid iolist (list of binaries, integers 0-255, or nested iolists)">>
-            ),
-            beamtalk_error:raise(Error2)
+            )
     end.
 
 %%% ============================================================================
@@ -200,18 +186,19 @@ part(Bin, Pos, Len) when is_binary(Bin), is_integer(Pos), is_integer(Len) ->
         binary:part(Bin, Pos, Len)
     catch
         error:badarg ->
-            Error0 = beamtalk_error:new(index_out_of_bounds, 'Binary'),
-            Error1 = beamtalk_error:with_selector(Error0, part),
-            Error2 = beamtalk_error:with_hint(
-                Error1,
-                iolist_to_binary(
-                    io_lib:format(
-                        "part(~B, ~B) is out of bounds for binary of size ~B",
-                        [Pos, Len, erlang:byte_size(Bin)]
+            beamtalk_error:raise(
+                beamtalk_error:new(
+                    index_out_of_bounds,
+                    'Binary',
+                    part,
+                    iolist_to_binary(
+                        io_lib:format(
+                            "part(~B, ~B) is out of bounds for binary of size ~B",
+                            [Pos, Len, erlang:byte_size(Bin)]
+                        )
                     )
                 )
-            ),
-            beamtalk_error:raise(Error2)
+            )
     end;
 part(Bin, _Pos, _Len) when not is_binary(Bin) ->
     raise_type_error(part, <<"Receiver must be a Binary">>);
@@ -299,12 +286,9 @@ deserialize_with_used(Bin) when is_binary(Bin) ->
         erlang:binary_to_term(Bin, [safe, used])
     catch
         error:badarg ->
-            Error0 = beamtalk_error:new(type_error, 'Binary'),
-            Error1 = beamtalk_error:with_selector(Error0, deserialize_with_used),
-            Error2 = beamtalk_error:with_hint(
-                Error1, <<"Binary data is invalid or contains unknown atoms">>
-            ),
-            beamtalk_error:raise(Error2)
+            raise_type_error(
+                deserialize_with_used, <<"Binary data is invalid or contains unknown atoms">>
+            )
     end;
 deserialize_with_used(_) ->
     raise_type_error(deserialize_with_used, <<"Receiver must be a Binary">>).
