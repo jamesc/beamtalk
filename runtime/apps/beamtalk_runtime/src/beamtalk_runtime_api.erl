@@ -34,7 +34,6 @@ See `docs/development/erlang-guidelines.md` § Approved Cross-Context API.
     class_display_name/1,
     is_class_name/1,
     drain_class_warnings_by_names/1,
-    drain_class_warnings_by_qualified_names/1,
     extract_package_from_module/1,
     drain_pending_load_errors_by_names/1,
     get_method_return_type/2,
@@ -48,10 +47,8 @@ See `docs/development/erlang-guidelines.md` § Approved Cross-Context API.
     class_name/1,
     module_name/1,
     set_class_var/3,
-    start_link_class/2,
     class_methods/1,
     local_class_methods/1,
-    local_class_methods_map/1,
     local_instance_methods/1,
     instance_variables/1,
     superclass/1
@@ -129,8 +126,6 @@ See `docs/development/erlang-guidelines.md` § Approved Cross-Context API.
 %%% Futures
 %%% ===================================================================
 -export([
-    future_resolve/2,
-    future_reject/2,
     future_await/2
 ]).
 
@@ -176,11 +171,6 @@ is_class_name(Name) ->
 -spec drain_class_warnings_by_names([atom()]) -> [{atom(), atom(), atom()}].
 drain_class_warnings_by_names(Names) ->
     beamtalk_class_registry:drain_class_warnings_by_names(Names).
-
--spec drain_class_warnings_by_qualified_names([{atom() | undefined, atom()}]) ->
-    [{atom(), atom(), atom()}].
-drain_class_warnings_by_qualified_names(QualifiedNames) ->
-    beamtalk_class_registry:drain_class_warnings_by_qualified_names(QualifiedNames).
 
 -spec extract_package_from_module(atom()) -> atom() | undefined.
 extract_package_from_module(ModuleName) ->
@@ -241,10 +231,6 @@ module_name(Pid) ->
 set_class_var(ClassName, VarName, Value) ->
     beamtalk_object_class:set_class_var(ClassName, VarName, Value).
 
--spec start_link_class(atom(), map()) -> {ok, pid()} | {error, term()}.
-start_link_class(ClassName, ClassInfo) ->
-    beamtalk_object_class:start_link(ClassName, ClassInfo).
-
 -spec class_methods(pid()) -> [atom()].
 class_methods(Pid) ->
     beamtalk_object_class:methods(Pid).
@@ -252,10 +238,6 @@ class_methods(Pid) ->
 -spec local_class_methods(pid()) -> [atom()].
 local_class_methods(Pid) ->
     beamtalk_object_class:local_class_methods(Pid).
-
--spec local_class_methods_map(pid()) -> map().
-local_class_methods_map(Pid) ->
-    beamtalk_object_class:local_class_methods_map(Pid).
 
 -spec local_instance_methods(pid()) -> [atom()].
 local_instance_methods(Pid) ->
@@ -391,14 +373,6 @@ hot_reload_code_change(OldVsn, State, Extra) ->
 %%% ====================================================================
 %%% Future Delegators
 %%% ====================================================================
-
--spec future_resolve(beamtalk_future:future() | pid(), term()) -> ok.
-future_resolve(FuturePid, Value) ->
-    beamtalk_future:resolve(FuturePid, Value).
-
--spec future_reject(beamtalk_future:future() | pid(), term()) -> ok.
-future_reject(FuturePid, Reason) ->
-    beamtalk_future:reject(FuturePid, Reason).
 
 -spec future_await(beamtalk_future:future() | pid() | term(), timeout()) -> term().
 future_await(Future, Timeout) ->

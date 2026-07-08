@@ -11,7 +11,7 @@ EUnit tests for beamtalk_file_handle module (BT-1173, BT-1762).
 Tests dispatch/3 and has_method/1 for FileHandle instances.
 dispatch/3 routes 'lines' to beamtalk_file:handle_lines/1 and
 delegates Object protocol selectors to beamtalk_object_ops.
-Unknown selectors raise case_clause (BT-1762: catch-all removed).
+Unknown selectors raise a structured does_not_understand error.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -89,13 +89,15 @@ dispatch_printString_returns_binary_test() ->
 dispatch_unknown_selector_raises_test() ->
     with_temp_handle(<<"data">>, fun(Handle) ->
         ?assertError(
-            {case_clause, false}, beamtalk_file_handle:dispatch(unknown_selector_xyz, [], Handle)
+            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = does_not_understand}},
+            beamtalk_file_handle:dispatch(unknown_selector_xyz, [], Handle)
         )
     end).
 
 dispatch_write_selector_raises_test() ->
     with_temp_handle(<<"data">>, fun(Handle) ->
         ?assertError(
-            {case_clause, false}, beamtalk_file_handle:dispatch('writeLine:', [<<"text">>], Handle)
+            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = does_not_understand}},
+            beamtalk_file_handle:dispatch('writeLine:', [<<"text">>], Handle)
         )
     end).

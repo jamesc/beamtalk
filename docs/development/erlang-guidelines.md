@@ -754,10 +754,8 @@ The following functions are exposed by `beamtalk_runtime_api`:
 | `class_name/1` | `beamtalk_object_class:class_name/1` |
 | `module_name/1` | `beamtalk_object_class:module_name/1` |
 | `set_class_var/3` | `beamtalk_object_class:set_class_var/3` |
-| `start_link_class/2` | `beamtalk_object_class:start_link/2` |
 | `class_methods/1` | `beamtalk_object_class:methods/1` |
 | `local_class_methods/1` | `beamtalk_object_class:local_class_methods/1` |
-| `local_class_methods_map/1` | `beamtalk_object_class:local_class_methods_map/1` |
 | `local_instance_methods/1` | `beamtalk_object_class:local_instance_methods/1` |
 | `instance_variables/1` | `beamtalk_object_class:instance_variables/1` |
 | `superclass/1` | `beamtalk_object_class:superclass/1` |
@@ -776,8 +774,6 @@ The following functions are exposed by `beamtalk_runtime_api`:
 | `trigger_code_change/2` | `beamtalk_hot_reload:trigger_code_change/2` |
 | `trigger_code_change/3` | `beamtalk_hot_reload:trigger_code_change/3` |
 | `hot_reload_code_change/3` | `beamtalk_hot_reload:code_change/3` |
-| `future_resolve/2` | `beamtalk_future:resolve/2` |
-| `future_reject/2` | `beamtalk_future:reject/2` |
 | `future_await/2` | `beamtalk_future:await/2` |
 | `hierarchy_foldl/2` | `beamtalk_class_hierarchy_table:foldl/2` |
 

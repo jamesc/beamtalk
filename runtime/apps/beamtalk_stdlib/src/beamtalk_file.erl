@@ -140,10 +140,7 @@ Result error map if the file cannot be read.
             beamtalk_result:from_tagged_tuple({error, Error2})
     end;
 'readAll:'(_) ->
-    Error0 = beamtalk_error:new(type_error, 'File'),
-    Error1 = beamtalk_error:with_selector(Error0, 'readAll:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Path must be a String">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error('File', 'readAll:', <<"Path must be a String">>).
 
 -doc """
 Write string contents to a file.
@@ -183,15 +180,9 @@ Returns a Result ok map on success, Result error map on failure.
             beamtalk_result:from_tagged_tuple({error, Error3})
     end;
 'writeAll:contents:'(Path, _) when is_binary(Path) ->
-    Error0 = beamtalk_error:new(type_error, 'File'),
-    Error1 = beamtalk_error:with_selector(Error0, 'writeAll:contents:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Contents must be a String">>),
-    beamtalk_error:raise(Error2);
+    beamtalk_error:raise_type_error('File', 'writeAll:contents:', <<"Contents must be a String">>);
 'writeAll:contents:'(_, _) ->
-    Error0 = beamtalk_error:new(type_error, 'File'),
-    Error1 = beamtalk_error:with_selector(Error0, 'writeAll:contents:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Path must be a String">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error('File', 'writeAll:contents:', <<"Path must be a String">>).
 
 %%% ============================================================================
 %%% Binary I/O (BT-1555)
@@ -228,10 +219,7 @@ does not assume the contents are a UTF-8 string.
             beamtalk_result:from_tagged_tuple({error, Error2})
     end;
 'readBinary:'(_) ->
-    Error0 = beamtalk_error:new(type_error, 'File'),
-    Error1 = beamtalk_error:with_selector(Error0, 'readBinary:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Path must be a String">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error('File', 'readBinary:', <<"Path must be a String">>).
 
 -doc """
 Write binary data to a file, creating or overwriting it.
@@ -271,15 +259,11 @@ Returns a Result ok map on success, Result error map on failure.
             beamtalk_result:from_tagged_tuple({error, Error3})
     end;
 'writeBinary:contents:'(Path, _) when is_binary(Path) ->
-    Error0 = beamtalk_error:new(type_error, 'File'),
-    Error1 = beamtalk_error:with_selector(Error0, 'writeBinary:contents:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Contents must be a binary">>),
-    beamtalk_error:raise(Error2);
+    beamtalk_error:raise_type_error(
+        'File', 'writeBinary:contents:', <<"Contents must be a binary">>
+    );
 'writeBinary:contents:'(_, _) ->
-    Error0 = beamtalk_error:new(type_error, 'File'),
-    Error1 = beamtalk_error:with_selector(Error0, 'writeBinary:contents:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Path must be a String">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error('File', 'writeBinary:contents:', <<"Path must be a String">>).
 
 -doc """
 Append binary data to a file, creating it if it doesn't exist.
@@ -319,15 +303,11 @@ Returns a Result ok map on success, Result error map on failure.
             beamtalk_result:from_tagged_tuple({error, Error3})
     end;
 'appendBinary:contents:'(Path, _) when is_binary(Path) ->
-    Error0 = beamtalk_error:new(type_error, 'File'),
-    Error1 = beamtalk_error:with_selector(Error0, 'appendBinary:contents:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Contents must be a binary">>),
-    beamtalk_error:raise(Error2);
+    beamtalk_error:raise_type_error(
+        'File', 'appendBinary:contents:', <<"Contents must be a binary">>
+    );
 'appendBinary:contents:'(_, _) ->
-    Error0 = beamtalk_error:new(type_error, 'File'),
-    Error1 = beamtalk_error:with_selector(Error0, 'appendBinary:contents:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Path must be a String">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error('File', 'appendBinary:contents:', <<"Path must be a String">>).
 
 -doc "Check if FileHandle responds to the given selector.".
 -spec handle_has_method(atom()) -> boolean().
@@ -373,10 +353,7 @@ process that created them (BEAM file handles are process-local).
             beamtalk_result:from_tagged_tuple({error, Error2})
     end;
 'lines:'(_) ->
-    Error0 = beamtalk_error:new(type_error, 'File'),
-    Error1 = beamtalk_error:with_selector(Error0, 'lines:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Path must be a String">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error('File', 'lines:', <<"Path must be a String">>).
 
 -doc """
 Block-scoped file handle management.
@@ -415,15 +392,9 @@ Returns a Result ok map with the result of the block.
             beamtalk_result:from_tagged_tuple({error, Error2})
     end;
 'open:do:'(Path, _) when is_binary(Path) ->
-    Error0 = beamtalk_error:new(type_error, 'File'),
-    Error1 = beamtalk_error:with_selector(Error0, 'open:do:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Expected a Block with 1 argument">>),
-    beamtalk_error:raise(Error2);
+    beamtalk_error:raise_type_error('File', 'open:do:', <<"Expected a Block with 1 argument">>);
 'open:do:'(_, _) ->
-    Error0 = beamtalk_error:new(type_error, 'File'),
-    Error1 = beamtalk_error:with_selector(Error0, 'open:do:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Path must be a String">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error('File', 'open:do:', <<"Path must be a String">>).
 
 %%% ============================================================================
 %%% Directory Operations (BT-1120)
@@ -490,10 +461,7 @@ Returns a Result ok map on success, Result error map on failure.
             beamtalk_result:from_tagged_tuple({error, Error2})
     end;
 'mkdir:'(_) ->
-    Error0 = beamtalk_error:new(type_error, 'File'),
-    Error1 = beamtalk_error:with_selector(Error0, 'mkdir:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Path must be a String">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error('File', 'mkdir:', <<"Path must be a String">>).
 
 -doc """
 Create a directory and all missing parent directories.
@@ -519,10 +487,7 @@ Returns a Result ok map on success, Result error map on failure.
             beamtalk_result:from_tagged_tuple({error, Error2})
     end;
 'mkdirAll:'(_) ->
-    Error0 = beamtalk_error:new(type_error, 'File'),
-    Error1 = beamtalk_error:with_selector(Error0, 'mkdirAll:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Path must be a String">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error('File', 'mkdirAll:', <<"Path must be a String">>).
 
 -doc """
 List entries in a directory as a List (Beamtalk array) of Strings.
@@ -584,10 +549,7 @@ if the directory does not exist or cannot be read.
             end
     end;
 'listDirectory:'(_) ->
-    Error0 = beamtalk_error:new(type_error, 'File'),
-    Error1 = beamtalk_error:with_selector(Error0, 'listDirectory:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Path must be a String">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error('File', 'listDirectory:', <<"Path must be a String">>).
 
 -doc """
 Delete a file or empty directory.
@@ -660,10 +622,7 @@ file:delete/1 returns {error, eperm} for directories on Linux
             end
     end;
 'delete:'(_) ->
-    Error0 = beamtalk_error:new(type_error, 'File'),
-    Error1 = beamtalk_error:with_selector(Error0, 'delete:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Path must be a String">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error('File', 'delete:', <<"Path must be a String">>).
 
 -doc """
 Recursively delete a directory tree.
@@ -694,10 +653,7 @@ Returns a Result ok map on success, Result error map on failure.
             beamtalk_result:from_tagged_tuple({error, Error2})
     end;
 'deleteAll:'(_) ->
-    Error0 = beamtalk_error:new(type_error, 'File'),
-    Error1 = beamtalk_error:with_selector(Error0, 'deleteAll:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Path must be a String">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error('File', 'deleteAll:', <<"Path must be a String">>).
 
 -doc """
 Rename or move a file or directory.
@@ -730,15 +686,9 @@ Returns a Result ok map on success, Result error map on failure.
             beamtalk_result:from_tagged_tuple({error, Error2})
     end;
 'rename:to:'(From, _) when is_binary(From) ->
-    Error0 = beamtalk_error:new(type_error, 'File'),
-    Error1 = beamtalk_error:with_selector(Error0, 'rename:to:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Destination must be a String">>),
-    beamtalk_error:raise(Error2);
+    beamtalk_error:raise_type_error('File', 'rename:to:', <<"Destination must be a String">>);
 'rename:to:'(_, _) ->
-    Error0 = beamtalk_error:new(type_error, 'File'),
-    Error1 = beamtalk_error:with_selector(Error0, 'rename:to:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Path must be a String">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error('File', 'rename:to:', <<"Path must be a String">>).
 
 -doc """
 Resolve a relative path to its absolute path.
@@ -756,10 +706,7 @@ Returns a Result ok map with the absolute path as a String.
             beamtalk_result:from_tagged_tuple({ok, unicode:characters_to_binary(AbsPath)})
     end;
 'absolutePath:'(_) ->
-    Error0 = beamtalk_error:new(type_error, 'File'),
-    Error1 = beamtalk_error:with_selector(Error0, 'absolutePath:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Path must be a String">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error('File', 'absolutePath:', <<"Path must be a String">>).
 
 -doc """
 Get the last modification time of a file.
@@ -790,10 +737,7 @@ if the file does not exist.
             beamtalk_result:from_tagged_tuple({ok, DT})
     end;
 'lastModified:'(_) ->
-    Error0 = beamtalk_error:new(type_error, 'File'),
-    Error1 = beamtalk_error:with_selector(Error0, 'lastModified:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Path must be a String">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error('File', 'lastModified:', <<"Path must be a String">>).
 
 -doc """
 Return the current working directory.
@@ -916,10 +860,7 @@ already-open file handle. The handle's lifetime is managed by open:do:.
 handle_lines(#{'$beamtalk_class' := 'FileHandle', fd := Fd}) ->
     make_line_stream_from_fd(Fd);
 handle_lines(_) ->
-    Error0 = beamtalk_error:new(type_error, 'FileHandle'),
-    Error1 = beamtalk_error:with_selector(Error0, 'lines'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Expected a FileHandle">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error('FileHandle', 'lines', <<"Expected a FileHandle">>).
 
 %%% ============================================================================
 %%% Stream Generator Helpers (BT-513)

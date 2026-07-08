@@ -53,13 +53,34 @@ where State is the actor's actual state map (containing `$beamtalk_class`, field
 - BT-282: Bootstrap Object with shared reflection methods
 """.
 
--export([dispatch/4, has_method/1, class_name/3]).
+-export([dispatch/4, try_dispatch/3, has_method/1, class_name/3]).
 
 -include("beamtalk.hrl").
 
 %%% ============================================================================
 %%% Public API
 %%% ============================================================================
+
+-doc """
+Try dispatching a base Object protocol message where the receiver is its
+own state (value types, proxies, tagged maps).
+
+Returns `{ok, Result}` if the selector is an Object protocol method
+(raising the structured error if the method fails), or `false` if the
+selector is not part of the base protocol so the caller can continue its
+own dispatch chain.
+""".
+-spec try_dispatch(atom(), list(), term()) -> {ok, term()} | false.
+try_dispatch(Selector, Args, Self) ->
+    case has_method(Selector) of
+        true ->
+            case dispatch(Selector, Args, Self, Self) of
+                {reply, Result, _State} -> {ok, Result};
+                {error, Error, _State} -> beamtalk_error:raise(Error)
+            end;
+        false ->
+            false
+    end.
 
 -doc """
 Dispatch a message to the Object base class.
@@ -147,9 +168,13 @@ dispatch('perform:withArguments:', [TargetSelector, ArgList], Self, State) when
     normalize_dispatch_result(Result, State);
 dispatch('perform:withArguments:', [_TargetSelector, _ArgList], Self, State) ->
     ClassName = class_name(Self, State, 'Object'),
-    Error1 = beamtalk_error:new(type_error, ClassName, 'perform:withArguments:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Expected atom selector and list of arguments">>),
-    {error, Error2, State};
+    Error = beamtalk_error:new(
+        type_error,
+        ClassName,
+        'perform:withArguments:',
+        <<"Expected atom selector and list of arguments">>
+    ),
+    {error, Error, State};
 %% BT-1190: Dynamic message send with explicit timeout.
 %% For value types, timeout is irrelevant — dispatch locally like perform:withArguments:.
 %% Cross-actor sends are intercepted in beamtalk_message_dispatch:send/3.
@@ -163,12 +188,13 @@ dispatch('perform:withArguments:timeout:', [TargetSelector, ArgList, Timeout], S
     normalize_dispatch_result(Result, State);
 dispatch('perform:withArguments:timeout:', [_TargetSelector, _ArgList, _Timeout], Self, State) ->
     ClassName = class_name(Self, State, 'Object'),
-    Error1 = beamtalk_error:new(type_error, ClassName, 'perform:withArguments:timeout:'),
-    Error2 = beamtalk_error:with_hint(
-        Error1,
+    Error = beamtalk_error:new(
+        type_error,
+        ClassName,
+        'perform:withArguments:timeout:',
         <<"Expected atom selector, list of arguments, and non-negative integer or #infinity timeout">>
     ),
-    {error, Error2, State};
+    {error, Error, State};
 %% BT-405: Abstract method contract — mirrors Object.bt pure method body
 %% Runtime clause needed until compiled stdlib dispatch is wired up
 dispatch(subclassResponsibility, [], Self, State) ->
@@ -182,9 +208,10 @@ dispatch(subclassResponsibility, [], Self, State) ->
 
 dispatch(Selector, _Args, Self, State) ->
     ClassName = class_name(Self, State, 'Object'),
-    Error1 = beamtalk_error:new(does_not_understand, ClassName, Selector),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Method not found in Object">>),
-    {error, Error2, State}.
+    Error = beamtalk_error:new(
+        does_not_understand, ClassName, Selector, <<"Method not found in Object">>
+    ),
+    {error, Error, State}.
 
 -doc "Check if Object responds to a given selector.".
 -spec has_method(atom()) -> boolean().

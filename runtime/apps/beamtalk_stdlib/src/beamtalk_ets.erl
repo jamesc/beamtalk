@@ -86,27 +86,20 @@ Raises `type_error` if arguments are not atoms.
         make_ets(Name)
     catch
         error:badarg ->
-            Error0 = beamtalk_error:new(already_exists, 'Ets'),
-            Error1 = beamtalk_error:with_selector(Error0, 'new:type:'),
-            Error2 = beamtalk_error:with_hint(
-                Error1,
-                <<"A table with this name already exists">>
-            ),
-            beamtalk_error:raise(Error2)
+            beamtalk_error:raise(
+                beamtalk_error:new(
+                    already_exists, 'Ets', 'new:type:', <<"A table with this name already exists">>
+                )
+            )
     end;
 'new:type:'(Name, _TableType) when not is_atom(Name) ->
-    Error0 = beamtalk_error:new(type_error, 'Ets'),
-    Error1 = beamtalk_error:with_selector(Error0, 'new:type:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Table name must be a Symbol">>),
-    beamtalk_error:raise(Error2);
+    beamtalk_error:raise_type_error('Ets', 'new:type:', <<"Table name must be a Symbol">>);
 'new:type:'(_Name, _TableType) ->
-    Error0 = beamtalk_error:new(type_error, 'Ets'),
-    Error1 = beamtalk_error:with_selector(Error0, 'new:type:'),
-    Error2 = beamtalk_error:with_hint(
-        Error1,
+    beamtalk_error:raise_type_error(
+        'Ets',
+        'new:type:',
         <<"Table type must be a Symbol (#set, #orderedSet, #bag, #duplicateBag)">>
-    ),
-    beamtalk_error:raise(Error2).
+    ).
 
 -doc """
 Look up an existing named ETS table.
@@ -119,21 +112,16 @@ Raises `type_error` if the argument is not an atom.
 'named:'(Name) when is_atom(Name) ->
     case ets:whereis(Name) of
         undefined ->
-            Error0 = beamtalk_error:new(not_found, 'Ets'),
-            Error1 = beamtalk_error:with_selector(Error0, 'named:'),
-            Error2 = beamtalk_error:with_hint(
-                Error1,
-                <<"No ETS table with this name exists">>
-            ),
-            beamtalk_error:raise(Error2);
+            beamtalk_error:raise(
+                beamtalk_error:new(
+                    not_found, 'Ets', 'named:', <<"No ETS table with this name exists">>
+                )
+            );
         _Tid ->
             make_ets(Name)
     end;
 'named:'(_) ->
-    Error0 = beamtalk_error:new(type_error, 'Ets'),
-    Error1 = beamtalk_error:with_selector(Error0, 'named:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Table name must be a Symbol">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error('Ets', 'named:', <<"Table name must be a Symbol">>).
 
 -doc """
 Check whether a named ETS table exists.
@@ -145,10 +133,7 @@ Raises `type_error` if the argument is not an atom.
 'exists:'(Name) when is_atom(Name) ->
     ets:whereis(Name) =/= undefined;
 'exists:'(_) ->
-    Error0 = beamtalk_error:new(type_error, 'Ets'),
-    Error1 = beamtalk_error:with_selector(Error0, 'exists:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Table name must be a Symbol">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error('Ets', 'exists:', <<"Table name must be a Symbol">>).
 
 -doc """
 Create a named table or return the existing one.
@@ -169,30 +154,28 @@ Raises `type_error` if arguments are not atoms.
             case ets:whereis(Name) of
                 undefined ->
                     %% Table vanished between ets:new and ets:whereis — re-raise.
-                    Error0 = beamtalk_error:new(already_exists, 'Ets'),
-                    Error1 = beamtalk_error:with_selector(Error0, 'newOrExisting:type:'),
-                    Error2 = beamtalk_error:with_hint(
-                        Error1,
-                        <<"Failed to create or find table">>
-                    ),
-                    beamtalk_error:raise(Error2);
+                    beamtalk_error:raise(
+                        beamtalk_error:new(
+                            already_exists,
+                            'Ets',
+                            'newOrExisting:type:',
+                            <<"Failed to create or find table">>
+                        )
+                    );
                 _Tid ->
                     make_ets(Name)
             end
     end;
 'newOrExisting:type:'(Name, _TableType) when not is_atom(Name) ->
-    Error0 = beamtalk_error:new(type_error, 'Ets'),
-    Error1 = beamtalk_error:with_selector(Error0, 'newOrExisting:type:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Table name must be a Symbol">>),
-    beamtalk_error:raise(Error2);
+    beamtalk_error:raise_type_error(
+        'Ets', 'newOrExisting:type:', <<"Table name must be a Symbol">>
+    );
 'newOrExisting:type:'(_Name, _TableType) ->
-    Error0 = beamtalk_error:new(type_error, 'Ets'),
-    Error1 = beamtalk_error:with_selector(Error0, 'newOrExisting:type:'),
-    Error2 = beamtalk_error:with_hint(
-        Error1,
+    beamtalk_error:raise_type_error(
+        'Ets',
+        'newOrExisting:type:',
         <<"Table type must be a Symbol (#set, #orderedSet, #bag, #duplicateBag)">>
-    ),
-    beamtalk_error:raise(Error2).
+    ).
 
 %%% ============================================================================
 %%% Instance Methods
@@ -219,10 +202,7 @@ lookup(#{'$beamtalk_class' := 'Ets', table := TableName}, Key) ->
         error:badarg -> stale_table_error('lookup:key:', TableName)
     end;
 lookup(_Self, _Key) ->
-    Error0 = beamtalk_error:new(type_error, 'Ets'),
-    Error1 = beamtalk_error:with_selector(Error0, 'at:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Receiver must be an Ets instance">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error('Ets', 'at:', <<"Receiver must be an Ets instance">>).
 
 -doc """
 Insert or update a key-value pair. Returns nil.
@@ -248,10 +228,7 @@ insert(#{'$beamtalk_class' := 'Ets', table := TableName}, Key, Value) ->
         error:badarg -> stale_table_error('insert:key:value:', TableName)
     end;
 insert(_Self, _Key, _Value) ->
-    Error0 = beamtalk_error:new(type_error, 'Ets'),
-    Error1 = beamtalk_error:with_selector(Error0, 'at:put:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Receiver must be an Ets instance">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error('Ets', 'at:put:', <<"Receiver must be an Ets instance">>).
 
 -doc "Look up a key; if absent, evaluate the block and return its result.".
 -spec lookupIfAbsent(t(), Key :: term(), Block :: function()) -> term().
@@ -267,15 +244,9 @@ lookupIfAbsent(#{'$beamtalk_class' := 'Ets', table := TableName}, Key, Block) wh
         error:badarg -> stale_table_error('lookupIfAbsent:key:block:', TableName)
     end;
 lookupIfAbsent(#{'$beamtalk_class' := 'Ets'}, _Key, _Block) ->
-    Error0 = beamtalk_error:new(type_error, 'Ets'),
-    Error1 = beamtalk_error:with_selector(Error0, 'at:ifAbsent:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Third argument must be a Block">>),
-    beamtalk_error:raise(Error2);
+    beamtalk_error:raise_type_error('Ets', 'at:ifAbsent:', <<"Third argument must be a Block">>);
 lookupIfAbsent(_Self, _Key, _Block) ->
-    Error0 = beamtalk_error:new(type_error, 'Ets'),
-    Error1 = beamtalk_error:with_selector(Error0, 'at:ifAbsent:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Receiver must be an Ets instance">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error('Ets', 'at:ifAbsent:', <<"Receiver must be an Ets instance">>).
 
 -doc "Test whether a key exists in the table.".
 -spec includesKey(t(), Key :: term()) -> boolean().
@@ -286,10 +257,7 @@ includesKey(#{'$beamtalk_class' := 'Ets', table := TableName}, Key) ->
         error:badarg -> stale_table_error('includesKey:key:', TableName)
     end;
 includesKey(_Self, _Key) ->
-    Error0 = beamtalk_error:new(type_error, 'Ets'),
-    Error1 = beamtalk_error:with_selector(Error0, 'includesKey:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Receiver must be an Ets instance">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error('Ets', 'includesKey:', <<"Receiver must be an Ets instance">>).
 
 -doc "Remove the entry for key. Returns nil.".
 -spec removeKey(t(), Key :: term()) -> nil.
@@ -301,10 +269,7 @@ removeKey(#{'$beamtalk_class' := 'Ets', table := TableName}, Key) ->
         error:badarg -> stale_table_error('removeKey:key:', TableName)
     end;
 removeKey(_Self, _Key) ->
-    Error0 = beamtalk_error:new(type_error, 'Ets'),
-    Error1 = beamtalk_error:with_selector(Error0, 'removeKey:'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Receiver must be an Ets instance">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error('Ets', 'removeKey:', <<"Receiver must be an Ets instance">>).
 
 -doc """
 Return all unique keys in the table as a List.
@@ -320,10 +285,7 @@ keys(#{'$beamtalk_class' := 'Ets', table := TableName}) ->
         error:badarg -> stale_table_error('keys:', TableName)
     end;
 keys(_Self) ->
-    Error0 = beamtalk_error:new(type_error, 'Ets'),
-    Error1 = beamtalk_error:with_selector(Error0, 'keys'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Receiver must be an Ets instance">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error('Ets', 'keys', <<"Receiver must be an Ets instance">>).
 
 -doc """
 Return the number of entries in the table.
@@ -337,10 +299,7 @@ tableSize(#{'$beamtalk_class' := 'Ets', table := TableName}) ->
         Size -> Size
     end;
 tableSize(_Self) ->
-    Error0 = beamtalk_error:new(type_error, 'Ets'),
-    Error1 = beamtalk_error:with_selector(Error0, 'size'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Receiver must be an Ets instance">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error('Ets', 'size', <<"Receiver must be an Ets instance">>).
 
 -doc """
 Destroy the ETS table. Returns nil.
@@ -354,19 +313,17 @@ deleteTable(#{'$beamtalk_class' := 'Ets', table := TableName}) ->
         nil
     catch
         error:badarg ->
-            Error0 = beamtalk_error:new(permission_error, 'Ets'),
-            Error1 = beamtalk_error:with_selector(Error0, 'delete'),
-            Error2 = beamtalk_error:with_hint(
-                Error1,
-                <<"Caller is not the owner of the ETS table, or the table has already been deleted">>
-            ),
-            beamtalk_error:raise(Error2)
+            beamtalk_error:raise(
+                beamtalk_error:new(
+                    permission_error,
+                    'Ets',
+                    'delete',
+                    <<"Caller is not the owner of the ETS table, or the table has already been deleted">>
+                )
+            )
     end;
 deleteTable(_Self) ->
-    Error0 = beamtalk_error:new(type_error, 'Ets'),
-    Error1 = beamtalk_error:with_selector(Error0, 'delete'),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Receiver must be an Ets instance">>),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error('Ets', 'delete', <<"Receiver must be an Ets instance">>).
 
 %%% ============================================================================
 %%% FFI Shims
@@ -408,16 +365,17 @@ longer exists (owner terminated or `deleteTable/1` was called).
 """.
 -spec stale_table_error(atom(), atom()) -> no_return().
 stale_table_error(Selector, TableName) ->
-    Error0 = beamtalk_error:new(stale_table, 'Ets'),
-    Error1 = beamtalk_error:with_selector(Error0, Selector),
-    Error2 = beamtalk_error:with_hint(
-        Error1,
-        iolist_to_binary([
-            <<"ETS table is stale or has been deleted: ">>,
-            atom_to_binary(TableName, utf8)
-        ])
-    ),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise(
+        beamtalk_error:new(
+            stale_table,
+            'Ets',
+            Selector,
+            iolist_to_binary([
+                <<"ETS table is stale or has been deleted: ">>,
+                atom_to_binary(TableName, utf8)
+            ])
+        )
+    ).
 
 -doc "Build an Ets tagged map for the given table name.".
 -spec make_ets(atom()) -> t().

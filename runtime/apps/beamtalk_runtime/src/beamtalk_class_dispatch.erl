@@ -412,8 +412,7 @@ metaclass_send_dispatch(Pid, Selector, Args, Self) ->
                     beamtalk_error:raise(Error);
                 {error, Error} ->
                     %% A real error from a method in the chain. Wrap idempotently.
-                    Wrapped = beamtalk_exception_handler:ensure_wrapped(Error),
-                    error(Wrapped)
+                    beamtalk_exception_handler:reraise(Error)
             end;
         {error, {beamtalk_script_exit, _} = ScriptExit} ->
             %% BT-2691 (ADR 0099 §3): re-raise a connected `Program exit:` from a
@@ -449,15 +448,14 @@ Unwrap a class gen_server call result for use in class_send.
 
 Translates {ok, Value} → Value, {error, Error} → re-raise as exception.
 Handles both raw #beamtalk_error{} records and already-wrapped Exception
-maps (from raise/1 inside handle_call). Uses ensure_wrapped/1 for
-idempotent wrapping (BT-525).
+maps (from raise/1 inside handle_call). Uses reraise/1 (which wraps
+idempotently) (BT-525).
 """.
 -spec unwrap_class_call(term()) -> term().
 unwrap_class_call({ok, Value}) ->
     Value;
 unwrap_class_call({error, Error}) ->
-    Wrapped = beamtalk_exception_handler:ensure_wrapped(Error),
-    error(Wrapped).
+    beamtalk_exception_handler:reraise(Error).
 
 -doc """
 Handle a class method call from the gen_server.
@@ -1151,7 +1149,6 @@ try_class_chain_fallthrough(ClassSelf, Selector, Args) ->
             %% A real error from a Class method (type_error, arity_mismatch, etc.).
             %% Error may be a raw #beamtalk_error{} or an already-wrapped Exception map
             %% (dispatch/4 catches and returns wrapped exceptions as {error, Wrapped, State}).
-            %% Use ensure_wrapped for idempotent wrapping before re-raising.
-            Wrapped = beamtalk_exception_handler:ensure_wrapped(Error),
-            error(Wrapped)
+            %% Use reraise for idempotent wrapping before re-raising.
+            beamtalk_exception_handler:reraise(Error)
     end.

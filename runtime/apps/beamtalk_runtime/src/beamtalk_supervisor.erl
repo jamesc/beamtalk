@@ -936,7 +936,7 @@ spec_to_otp(BtSpec) ->
                                 )
                             )
                         ),
-                        error(beamtalk_exception_handler:ensure_wrapped(Error))
+                        beamtalk_exception_handler:reraise(Error)
                 end
         end,
     #{

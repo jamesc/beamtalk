@@ -2161,7 +2161,7 @@ should_include_class(_Name, _Super, ModName, <<"stdlib">>) ->
 should_include_class(_Name, _Super, ModName, <<"user">>) ->
     not beamtalk_class_registry:is_stdlib_module(ModName);
 should_include_class(Name, _Super, _ModName, {superclass, FilterAtom}) ->
-    beamtalk_class_registry:inherits_from(Name, FilterAtom).
+    beamtalk_runtime_api:inherits_from(Name, FilterAtom).
 
 %%% ============================================================================
 %%% Erlang FFI Help (BT-1852)

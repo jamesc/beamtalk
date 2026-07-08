@@ -80,9 +80,7 @@ data_to_list(Data) ->
 from_list(List) when is_list(List) ->
     new(data_from_list(List));
 from_list(_NonList) ->
-    Error0 = beamtalk_error:new(type_error, 'Array'),
-    Error1 = beamtalk_error:with_selector(Error0, 'withAll:'),
-    beamtalk_error:raise(beamtalk_error:with_hint(Error1, <<"Expected a List argument">>)).
+    beamtalk_error:raise_type_error('Array', 'withAll:', <<"Expected a List argument">>).
 
 %%% ============================================================================
 %%% Accessors
@@ -108,21 +106,20 @@ at(#{'$beamtalk_class' := 'Array', 'data' := Data}, Index) when is_integer(Index
     N = maps:size(Data),
     if
         Index > N ->
-            Error0 = beamtalk_error:new(index_out_of_bounds, 'Array'),
-            Error1 = beamtalk_error:with_selector(Error0, 'at:'),
-            Error2 = beamtalk_error:with_hint(Error1, <<"Index is beyond array size">>),
-            beamtalk_error:raise(Error2);
+            beamtalk_error:raise(
+                beamtalk_error:new(
+                    index_out_of_bounds, 'Array', 'at:', <<"Index is beyond array size">>
+                )
+            );
         true ->
             maps:get(Index - 1, Data)
     end;
 at(#{'$beamtalk_class' := 'Array'}, Index) when is_integer(Index) ->
-    Error0 = beamtalk_error:new(index_out_of_bounds, 'Array'),
-    Error1 = beamtalk_error:with_selector(Error0, 'at:'),
-    beamtalk_error:raise(beamtalk_error:with_hint(Error1, <<"Index must be >= 1">>));
+    beamtalk_error:raise(
+        beamtalk_error:new(index_out_of_bounds, 'Array', 'at:', <<"Index must be >= 1">>)
+    );
 at(#{'$beamtalk_class' := 'Array'}, _Index) ->
-    Error0 = beamtalk_error:new(type_error, 'Array'),
-    Error1 = beamtalk_error:with_selector(Error0, 'at:'),
-    beamtalk_error:raise(beamtalk_error:with_hint(Error1, <<"Index must be an Integer">>)).
+    beamtalk_error:raise_type_error('Array', 'at:', <<"Index must be an Integer">>).
 
 -doc """
 Return a new Array with the element at `Index` (1-based) replaced by `Value`.
@@ -140,23 +137,22 @@ at_put(#{'$beamtalk_class' := 'Array', 'data' := Data}, Index, Value) when
     N = maps:size(Data),
     if
         Index > N ->
-            Error0 = beamtalk_error:new(index_out_of_bounds, 'Array'),
-            Error1 = beamtalk_error:with_selector(Error0, 'at:put:'),
-            Error2 = beamtalk_error:with_hint(Error1, <<"Index is beyond array size">>),
-            beamtalk_error:raise(Error2);
+            beamtalk_error:raise(
+                beamtalk_error:new(
+                    index_out_of_bounds, 'Array', 'at:put:', <<"Index is beyond array size">>
+                )
+            );
         true ->
             %% Key Index-1 is guaranteed to exist (0..N-1), so this replaces in
             %% place and never inserts a new key — keeping the map canonical.
             new(Data#{Index - 1 => Value})
     end;
 at_put(#{'$beamtalk_class' := 'Array'}, Index, _Value) when is_integer(Index) ->
-    Error0 = beamtalk_error:new(index_out_of_bounds, 'Array'),
-    Error1 = beamtalk_error:with_selector(Error0, 'at:put:'),
-    beamtalk_error:raise(beamtalk_error:with_hint(Error1, <<"Index must be >= 1">>));
+    beamtalk_error:raise(
+        beamtalk_error:new(index_out_of_bounds, 'Array', 'at:put:', <<"Index must be >= 1">>)
+    );
 at_put(#{'$beamtalk_class' := 'Array'}, _Index, _Value) ->
-    Error0 = beamtalk_error:new(type_error, 'Array'),
-    Error1 = beamtalk_error:with_selector(Error0, 'at:put:'),
-    beamtalk_error:raise(beamtalk_error:with_hint(Error1, <<"Index must be an Integer">>)).
+    beamtalk_error:raise_type_error('Array', 'at:put:', <<"Index must be an Integer">>).
 
 %%% ============================================================================
 %%% Iteration
@@ -168,9 +164,7 @@ do(#{'$beamtalk_class' := 'Array', 'data' := Data}, Block) when is_function(Bloc
     lists:foreach(Block, data_to_list(Data)),
     nil;
 do(#{'$beamtalk_class' := 'Array'}, _Block) ->
-    Error0 = beamtalk_error:new(type_error, 'Array'),
-    Error1 = beamtalk_error:with_selector(Error0, 'do:'),
-    beamtalk_error:raise(beamtalk_error:with_hint(Error1, <<"Block must be a unary function">>)).
+    beamtalk_error:raise_type_error('Array', 'do:', <<"Block must be a unary function">>).
 
 -doc "Return true if the Array contains the given element.".
 -spec includes(map(), term()) -> boolean().
@@ -189,9 +183,7 @@ collect(#{'$beamtalk_class' := 'Array', 'data' := Data}, Block) when is_function
     %% maps:map preserves keys (0..N-1), so the result stays canonical.
     new(maps:map(fun(_Index, Elem) -> Block(Elem) end, Data));
 collect(#{'$beamtalk_class' := 'Array'}, _Block) ->
-    Error0 = beamtalk_error:new(type_error, 'Array'),
-    Error1 = beamtalk_error:with_selector(Error0, 'collect:'),
-    beamtalk_error:raise(beamtalk_error:with_hint(Error1, <<"Block must be a unary function">>)).
+    beamtalk_error:raise_type_error('Array', 'collect:', <<"Block must be a unary function">>).
 
 -doc "Select elements for which block returns true, returning a new Array.".
 -spec select(map(), fun((term()) -> boolean())) -> map().
@@ -200,9 +192,7 @@ select(#{'$beamtalk_class' := 'Array', 'data' := Data}, Block) when is_function(
     Kept = [Elem || Elem <- data_to_list(Data), Block(Elem) =:= true],
     new(data_from_list(Kept));
 select(#{'$beamtalk_class' := 'Array'}, _Block) ->
-    Error0 = beamtalk_error:new(type_error, 'Array'),
-    Error1 = beamtalk_error:with_selector(Error0, 'select:'),
-    beamtalk_error:raise(beamtalk_error:with_hint(Error1, <<"Block must be a unary function">>)).
+    beamtalk_error:raise_type_error('Array', 'select:', <<"Block must be a unary function">>).
 
 -doc """
 Fold the Array with an accumulator.
@@ -216,9 +206,7 @@ inject_into(#{'$beamtalk_class' := 'Array', 'data' := Data}, Initial, Block) whe
 ->
     lists:foldl(fun(Elem, Acc) -> Block(Acc, Elem) end, Initial, data_to_list(Data));
 inject_into(#{'$beamtalk_class' := 'Array'}, _Initial, _Block) ->
-    Error0 = beamtalk_error:new(type_error, 'Array'),
-    Error1 = beamtalk_error:with_selector(Error0, 'inject:into:'),
-    beamtalk_error:raise(beamtalk_error:with_hint(Error1, <<"Block must be a binary function">>)).
+    beamtalk_error:raise_type_error('Array', 'inject:into:', <<"Block must be a binary function">>).
 
 %%% ============================================================================
 %%% Slicing
@@ -242,13 +230,11 @@ slice_from(#{'$beamtalk_class' := 'Array', 'data' := Data}, From) when
             new(data_from_list(Rest))
     end;
 slice_from(#{'$beamtalk_class' := 'Array'}, From) when is_integer(From) ->
-    Error0 = beamtalk_error:new(index_out_of_bounds, 'Array'),
-    Error1 = beamtalk_error:with_selector(Error0, 'sliceFrom:'),
-    beamtalk_error:raise(beamtalk_error:with_hint(Error1, <<"Index must be >= 1">>));
+    beamtalk_error:raise(
+        beamtalk_error:new(index_out_of_bounds, 'Array', 'sliceFrom:', <<"Index must be >= 1">>)
+    );
 slice_from(#{'$beamtalk_class' := 'Array'}, _From) ->
-    Error0 = beamtalk_error:new(type_error, 'Array'),
-    Error1 = beamtalk_error:with_selector(Error0, 'sliceFrom:'),
-    beamtalk_error:raise(beamtalk_error:with_hint(Error1, <<"Index must be an Integer">>)).
+    beamtalk_error:raise_type_error('Array', 'sliceFrom:', <<"Index must be an Integer">>).
 
 %%% ============================================================================
 %%% String Representation

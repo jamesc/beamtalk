@@ -568,22 +568,6 @@ module_for_value(X) when is_map(X) ->
 module_for_value(_) ->
     undefined.
 
--doc """
-Try dispatching via beamtalk_object_ops (base Object protocol).
-Returns {ok, Result} if handled, false if not.
-""".
--spec try_object_ops(atom(), list(), term()) -> {ok, term()} | false.
-try_object_ops(Selector, Args, Self) ->
-    case beamtalk_object_ops:has_method(Selector) of
-        true ->
-            case beamtalk_object_ops:dispatch(Selector, Args, Self, Self) of
-                {reply, Result, _State} -> {ok, Result};
-                {error, Error, _State} -> beamtalk_error:raise(Error)
-            end;
-        false ->
-            false
-    end.
-
 -doc "Send a message to a value type instance (BT-354).".
 -spec value_type_send(map(), atom(), atom(), list()) -> term().
 value_type_send(Self, Class, Selector, Args) ->
@@ -614,7 +598,7 @@ value_type_send(Self, Class, Selector, Args) ->
                         {ok, Fun} ->
                             erlang:apply(Fun, [Self | Args]);
                         none ->
-                            case try_object_ops(Selector, Args, Self) of
+                            case beamtalk_object_ops:try_dispatch(Selector, Args, Self) of
                                 {ok, Result} ->
                                     Result;
                                 false ->

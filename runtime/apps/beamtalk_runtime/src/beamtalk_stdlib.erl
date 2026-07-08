@@ -42,9 +42,6 @@ No Erlang code changes needed.
 %% Beamtalk class dispatch - implements class methods for the Beamtalk global
 -export([dispatch/3, has_method/1]).
 
-%% Re-export for backwards compatibility (tests reference beamtalk_stdlib:topo_sort/1)
--export([topo_sort/1]).
-
 -ifdef(TEST).
 %% Export internal helpers for EUnit coverage (BT-1975, BT-1983)
 -export([
@@ -140,7 +137,7 @@ load_compiled_stdlib_modules() ->
             %%   parent => 'SuperClass', package => 'stdlib',
             %%   kind => object|value|actor, type_params => []}
             %% BT-446: Load ALL classes — bootstrap no longer registers any
-            Sorted = topo_sort(ClassList),
+            Sorted = beamtalk_module_activation:topo_sort(ClassList),
             StdlibOpts = #{log_domain => [beamtalk, stdlib]},
             lists:foreach(
                 fun(Entry) ->
@@ -208,14 +205,6 @@ find_stdlib_ebin() ->
 -doc "Extract module name from a class entry (map or legacy tuple).".
 class_entry_module(#{module := Mod}) -> Mod;
 class_entry_module({Mod, _Name, _Super}) -> Mod.
-
--doc """
-Delegate to beamtalk_module_activation:topo_sort/1.
-Kept as a public export for backwards compatibility with tests.
-""".
--spec topo_sort([map() | {module(), atom(), atom()}]) -> [map() | {module(), atom(), atom()}].
-topo_sort(Entries) ->
-    beamtalk_module_activation:topo_sort(Entries).
 
 -doc """
 Fallback: discover .beam files and load them all.
