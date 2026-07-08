@@ -44,4 +44,3 @@ TestCase subclass: LoggerTest
     self assert: (Logger debug: "test debug" metadata: #{
       "count" => 42
     }) equals: nil
-
