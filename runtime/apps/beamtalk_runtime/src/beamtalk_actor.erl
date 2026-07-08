@@ -573,8 +573,7 @@ async_send(ActorPid, Selector, Args, FuturePid) ->
                 spawn_future_watcher(ActorPid, FuturePid, Selector),
                 {ok, Metadata#{outcome => ok}};
             false ->
-                {error, Error} = actor_dead_error(Selector),
-                beamtalk_future:reject(FuturePid, Error),
+                beamtalk_future:reject(FuturePid, actor_dead_error_record(Selector)),
                 {ok, Metadata#{outcome => error}}
         end
     end),
@@ -1013,8 +1012,7 @@ The caller will see a beamtalk_error{kind = actor_dead} exception.
 """.
 -spec raise_actor_dead(atom()) -> no_return().
 raise_actor_dead(Selector) ->
-    {error, Error} = actor_dead_error(Selector),
-    beamtalk_exception_handler:reraise(Error).
+    beamtalk_exception_handler:reraise(actor_dead_error_record(Selector)).
 
 -doc """
 Raise a structured timeout error as an Erlang exception.
@@ -1039,13 +1037,16 @@ raise_timeout(Selector) ->
 -doc "Construct a structured actor_dead error for the given selector.".
 -spec actor_dead_error(atom()) -> {error, #beamtalk_error{}}.
 actor_dead_error(Selector) ->
-    Error = beamtalk_error:new(
+    {error, actor_dead_error_record(Selector)}.
+
+-spec actor_dead_error_record(atom()) -> #beamtalk_error{}.
+actor_dead_error_record(Selector) ->
+    beamtalk_error:new(
         actor_dead,
         unknown,
         Selector,
         <<"Use 'isAlive' to check, or use monitors for lifecycle events">>
-    ),
-    {error, Error}.
+    ).
 
 -doc """
 ADR 0079 / BT-1990: raise a `no_such_process` error for sends through a
@@ -1418,8 +1419,7 @@ spawn_future_watcher(ActorPid, FuturePid, Selector) ->
         receive
             {'DOWN', ActorRef, process, ActorPid, _Reason} ->
                 %% Actor died — reject future (no-op if already resolved)
-                {error, Error} = actor_dead_error(Selector),
-                beamtalk_future:reject(FuturePid, Error),
+                beamtalk_future:reject(FuturePid, actor_dead_error_record(Selector)),
                 erlang:demonitor(FutureRef, [flush]);
             {'DOWN', FutureRef, process, FuturePid, _Reason} ->
                 %% Future completed and its process ended — clean up
