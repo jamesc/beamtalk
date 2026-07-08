@@ -448,8 +448,8 @@ Unwrap a class gen_server call result for use in class_send.
 
 Translates {ok, Value} → Value, {error, Error} → re-raise as exception.
 Handles both raw #beamtalk_error{} records and already-wrapped Exception
-maps (from raise/1 inside handle_call). Uses reraise/1 for idempotent
-wrapping (BT-525).
+maps (from raise/1 inside handle_call). Uses reraise/1 (which wraps
+idempotently) (BT-525).
 """.
 -spec unwrap_class_call(term()) -> term().
 unwrap_class_call({ok, Value}) ->

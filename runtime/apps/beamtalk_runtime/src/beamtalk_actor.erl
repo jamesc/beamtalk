@@ -663,7 +663,7 @@ sync_send(ActorPid, stop, []) ->
             ok;
         exit:_Other ->
             %% Preserve sync_send/3 contract: translate exits to structured errors
-            actor_dead_error(stop)
+            beamtalk_exception_handler:reraise(actor_dead_error_record(stop))
     end;
 sync_send(ActorPid, kill, []) ->
     %% kill is handled locally - forcefully kills the actor process.
