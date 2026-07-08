@@ -787,13 +787,9 @@ sync_send_remote(ActorPid, Selector, Args) ->
                             %% Guard prevents false-match on non-stacktrace 3-tuples.
                             %% BT-2705: attach the active selector/class breadcrumb so a raw
                             %% error escaping the method is classified *and* located.
-                            error(
-                                beamtalk_exception_handler:ensure_wrapped(
-                                    ErlType, ErrorValue, Stacktrace, #{
-                                        selector => Selector, class => Class
-                                    }
-                                )
-                            );
+                            beamtalk_exception_handler:reraise(ErlType, ErrorValue, Stacktrace, #{
+                                selector => Selector, class => Class
+                            });
                         {error, {ErlType, ErrorValue}} ->
                             %% Backward compat: safe_dispatch without stacktrace —
                             %% still pass exception class to preserve error kind
@@ -871,12 +867,10 @@ sync_send(ActorPid, Selector, Args, Timeout) when
                                 {error, {ErlType, ErrorValue, Stacktrace}} ->
                                     %% BT-1822: safe_dispatch with stacktrace
                                     %% BT-2705: attach selector/class breadcrumb (see sync_send/3).
-                                    error(
-                                        beamtalk_exception_handler:ensure_wrapped(
-                                            ErlType, ErrorValue, Stacktrace, #{
-                                                selector => Selector, class => Class
-                                            }
-                                        )
+                                    beamtalk_exception_handler:reraise(
+                                        ErlType, ErrorValue, Stacktrace, #{
+                                            selector => Selector, class => Class
+                                        }
                                     );
                                 {error, {ErlType, ErrorValue}} ->
                                     %% Backward compat: preserve exception class
@@ -1019,12 +1013,7 @@ The caller will see a beamtalk_error{kind = actor_dead} exception.
 """.
 -spec raise_actor_dead(atom()) -> no_return().
 raise_actor_dead(Selector) ->
-    Error = beamtalk_error:new(
-        actor_dead,
-        unknown,
-        Selector,
-        <<"Use 'isAlive' to check, or use monitors for lifecycle events">>
-    ),
+    {error, Error} = actor_dead_error(Selector),
     beamtalk_exception_handler:reraise(Error).
 
 -doc """

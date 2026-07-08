@@ -47,6 +47,7 @@ helpers called by that generated code: `wrap/1` and `matches_class/2`.
     ensure_wrapped/4,
     reraise/1,
     reraise/3,
+    reraise/4,
     matches_class/2,
     dispatch/3,
     has_method/1,
@@ -454,6 +455,14 @@ from a try/catch `Type:Error:Stack` triple (see ensure_wrapped/3).
 -spec reraise(atom(), term(), list()) -> no_return().
 reraise(Type, Reason, Stacktrace) ->
     error(ensure_wrapped(Type, Reason, Stacktrace)).
+
+-doc """
+Like reraise/3 but also attaches a selector/class breadcrumb context map
+(see ensure_wrapped/4).
+""".
+-spec reraise(atom(), term(), list(), map()) -> no_return().
+reraise(Type, Reason, Stacktrace, Context) ->
+    error(ensure_wrapped(Type, Reason, Stacktrace, Context)).
 
 -doc """
 Idempotent exception wrapper with stacktrace capture (BT-107).

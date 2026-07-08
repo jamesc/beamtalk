@@ -29,6 +29,7 @@ See `docs/development/erlang-guidelines.md` § Approved Cross-Context API.
     all_classes/0,
     whereis_class/1,
     user_classes/0,
+    inherits_from/2,
     class_object_tag/1,
     class_display_name/1,
     is_class_name/1,
@@ -150,6 +151,10 @@ whereis_class(ClassName) ->
 -spec user_classes() -> [beamtalk_class_registry:user_class_entry()].
 user_classes() ->
     beamtalk_class_registry:user_classes().
+
+-spec inherits_from(atom() | none, atom()) -> boolean().
+inherits_from(ClassName, SuperName) ->
+    beamtalk_class_registry:inherits_from(ClassName, SuperName).
 
 -spec class_object_tag(atom()) -> atom().
 class_object_tag(ClassName) ->

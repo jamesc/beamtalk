@@ -66,11 +66,13 @@ Type error (non-String argument) still raises.
             ),
             beamtalk_result:from_tagged_tuple({error, Error2});
         _:Reason ->
-            Error0 = beamtalk_error:new(parse_error, 'Json'),
-            Error1 = beamtalk_error:with_selector(Error0, 'parse:'),
-            Error2 = beamtalk_error:with_details(Error1, #{reason => Reason}),
-            Error3 = beamtalk_error:with_hint(Error2, <<"Check that the string is valid JSON">>),
-            beamtalk_result:from_tagged_tuple({error, Error3})
+            Error = beamtalk_error:with_details(
+                beamtalk_error:new(
+                    parse_error, 'Json', 'parse:', <<"Check that the string is valid JSON">>
+                ),
+                #{reason => Reason}
+            ),
+            beamtalk_result:from_tagged_tuple({error, Error})
     end;
 'parse:'(_) ->
     beamtalk_error:raise_type_error('Json', 'parse:', <<"Argument must be a String">>).
@@ -95,11 +97,13 @@ booleans, nil becomes null.
                 'Json', 'generate:', <<"Value cannot be converted to JSON">>
             );
         _:Reason ->
-            Error0 = beamtalk_error:new(type_error, 'Json'),
-            Error1 = beamtalk_error:with_selector(Error0, 'generate:'),
-            Error2 = beamtalk_error:with_details(Error1, #{reason => Reason}),
-            Error3 = beamtalk_error:with_hint(Error2, <<"Value cannot be converted to JSON">>),
-            beamtalk_error:raise(Error3)
+            Error = beamtalk_error:with_details(
+                beamtalk_error:new(
+                    type_error, 'Json', 'generate:', <<"Value cannot be converted to JSON">>
+                ),
+                #{reason => Reason}
+            ),
+            beamtalk_error:raise(Error)
     end.
 
 -doc "Generate a pretty-printed JSON string with indentation.".
@@ -117,11 +121,13 @@ booleans, nil becomes null.
                 'Json', 'prettyPrint:', <<"Value cannot be converted to JSON">>
             );
         _:Reason ->
-            Error0 = beamtalk_error:new(type_error, 'Json'),
-            Error1 = beamtalk_error:with_selector(Error0, 'prettyPrint:'),
-            Error2 = beamtalk_error:with_details(Error1, #{reason => Reason}),
-            Error3 = beamtalk_error:with_hint(Error2, <<"Value cannot be converted to JSON">>),
-            beamtalk_error:raise(Error3)
+            Error = beamtalk_error:with_details(
+                beamtalk_error:new(
+                    type_error, 'Json', 'prettyPrint:', <<"Value cannot be converted to JSON">>
+                ),
+                #{reason => Reason}
+            ),
+            beamtalk_error:raise(Error)
     end.
 
 %%% ============================================================================

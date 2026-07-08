@@ -90,17 +90,12 @@ send({beamtalk_supervisor, ClassName, _Module, Pid} = _Self, stop, []) ->
         gen_server:stop(Pid),
         nil
     catch
-        exit:{noproc, _} ->
-            %% gen_server:call path (shouldn't happen for stop, but guard defensively)
-            Error = beamtalk_error:new(
-                runtime_error,
-                ClassName,
-                stop,
-                <<"supervisor is not running — the handle is stale">>
-            ),
-            beamtalk_exception_handler:reraise(Error);
-        exit:noproc ->
-            %% gen_server:stop/1 exits with bare noproc when process is dead.
+        %% gen_server:stop/1 exits with bare noproc when the process is dead;
+        %% the {noproc, _} tuple form guards the gen_server:call path defensively.
+        exit:Reason when
+            Reason =:= noproc orelse
+                (is_tuple(Reason) andalso element(1, Reason) =:= noproc)
+        ->
             Error = beamtalk_error:new(
                 runtime_error,
                 ClassName,

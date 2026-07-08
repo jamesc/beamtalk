@@ -294,7 +294,7 @@ topo_sort_test_() ->
 topo_sort_linear_chain_test() ->
     %% C -> B -> A (C depends on B, B depends on A)
     Entries = [{mod_c, 'C', 'B'}, {mod_a, 'A', 'External'}, {mod_b, 'B', 'A'}],
-    Result = beamtalk_stdlib:topo_sort(Entries),
+    Result = beamtalk_module_activation:topo_sort(Entries),
     Names = [Class || {_, Class, _} <- Result],
     %% A must come before B, B must come before C
     PosA = pos(Names, 'A'),
@@ -306,7 +306,7 @@ topo_sort_linear_chain_test() ->
 topo_sort_diamond_test() ->
     %% D depends on B and C; B and C both depend on A
     Entries = [{mod_d, 'D', 'B'}, {mod_b, 'B', 'A'}, {mod_c, 'C', 'A'}, {mod_a, 'A', 'External'}],
-    Result = beamtalk_stdlib:topo_sort(Entries),
+    Result = beamtalk_module_activation:topo_sort(Entries),
     Names = [Class || {_, Class, _} <- Result],
     PosA = pos(Names, 'A'),
     PosB = pos(Names, 'B'),
@@ -315,16 +315,16 @@ topo_sort_diamond_test() ->
     ?assert(PosB < PosD orelse pos(Names, 'C') < PosD).
 
 topo_sort_single_test() ->
-    Result = beamtalk_stdlib:topo_sort([{mod_a, 'A', 'Object'}]),
+    Result = beamtalk_module_activation:topo_sort([{mod_a, 'A', 'Object'}]),
     ?assertEqual([{mod_a, 'A', 'Object'}], Result).
 
 topo_sort_empty_test() ->
-    ?assertEqual([], beamtalk_stdlib:topo_sort([])).
+    ?assertEqual([], beamtalk_module_activation:topo_sort([])).
 
 topo_sort_external_super_test() ->
     %% Both depend on external 'Object' — both should be ready in first wave
     Entries = [{mod_a, 'A', 'Object'}, {mod_b, 'B', 'Object'}],
-    Result = beamtalk_stdlib:topo_sort(Entries),
+    Result = beamtalk_module_activation:topo_sort(Entries),
     ?assertEqual(2, length(Result)).
 
 topo_sort_map_entries_test() ->
@@ -355,7 +355,7 @@ topo_sort_map_entries_test() ->
             type_params => []
         }
     ],
-    Result = beamtalk_stdlib:topo_sort(Entries),
+    Result = beamtalk_module_activation:topo_sort(Entries),
     Names = [maps:get(name, E) || E <- Result],
     PosA = pos(Names, 'A'),
     PosB = pos(Names, 'B'),
@@ -376,7 +376,7 @@ topo_sort_mixed_test() ->
         },
         {mod_a, 'A', 'External'}
     ],
-    Result = beamtalk_stdlib:topo_sort(Entries),
+    Result = beamtalk_module_activation:topo_sort(Entries),
     ?assertEqual(2, length(Result)).
 
 pos(List, Elem) ->
