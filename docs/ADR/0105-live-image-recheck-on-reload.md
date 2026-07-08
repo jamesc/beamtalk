@@ -3,6 +3,26 @@
 ## Status
 Proposed (2026-07-05)
 
+## Implementation Tracking
+
+**Epic:** [BT-2775](https://linear.app/beamtalk/issue/BT-2775)
+**Issues:**
+
+| Phase | Issue | Title | Size | Blocked by |
+|---|---|---|---|---|
+| 0 | [BT-2776](https://linear.app/beamtalk/issue/BT-2776) | Walking skeleton — one method → one caller → one LSP diagnostic (proves the 3 assumptions) | M | – |
+| 1 | [BT-2777](https://linear.app/beamtalk/issue/BT-2777) | Per-selector signature-generation store + capture plumbing | M | BT-2776 |
+| 1 | [BT-2778](https://linear.app/beamtalk/issue/BT-2778) | Re-check orchestration (xref lookup + receiver filter + batched port re-check + findings) | M | BT-2777 |
+| 1 | [BT-2779](https://linear.app/beamtalk/issue/BT-2779) | Publish on all surfaces + clearing-by-replacement semantics | M | BT-2778 |
+| 2 | [BT-2780](https://linear.app/beamtalk/issue/BT-2780) | Shape-change re-check (`state:`/`field:`), integrated with ADR 0104 `spawnWith:`/accessor checking | M | BT-2778, BT-2779 |
+| 2 | [BT-2781](https://linear.app/beamtalk/issue/BT-2781) | Fan-out benchmarks + xref receiver-type-key decision | S | BT-2778 |
+| 3 | [BT-2782](https://linear.app/beamtalk/issue/BT-2782) | Pre-save advisory + `:recheck image` command | S | BT-2778 |
+| 4 | [BT-2783](https://linear.app/beamtalk/issue/BT-2783) | E2E killer-demo test + docs + status flip | S | BT-2779, BT-2780, BT-2782 |
+
+Deferred / recorded follow-ups: xref receiver-type-key extension (BT-2781 decides), transitive re-check refinement, proxy meta-dependent tracking, single-method check API. Enabling ADRs (all landed): 0087 (xref), 0082 (edit/save), 0100 (severity), 0022 (compiler port), 0104 (actor/`spawnWith:` checking).
+
+**Status:** Planned
+
 ## Context
 
 ### Problem statement
