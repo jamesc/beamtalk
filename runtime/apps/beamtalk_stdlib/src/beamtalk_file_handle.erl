@@ -32,8 +32,8 @@ dispatch(Selector, Args, X) ->
         {ok, Result} ->
             Result;
         false ->
-            %% Unreachable when callers gate on has_method/1; raise a
-            %% structured DNU instead of crashing with case_clause.
+            %% Defensive fallback: direct callers can reach this with an
+            %% unknown selector (previously crashed with case_clause).
             beamtalk_error:raise(beamtalk_error:new(does_not_understand, 'FileHandle', Selector))
     end.
 

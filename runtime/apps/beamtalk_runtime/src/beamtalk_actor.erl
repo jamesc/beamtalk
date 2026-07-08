@@ -661,9 +661,11 @@ sync_send(ActorPid, stop, []) ->
         exit:{noproc, _} ->
             %% Idempotent: actor already stopped (tuple exit)
             ok;
-        exit:_Other ->
+        exit:Other ->
             %% Preserve sync_send/3 contract: translate exits to structured errors
-            beamtalk_exception_handler:reraise(actor_dead_error_record(stop))
+            beamtalk_exception_handler:reraise(
+                beamtalk_error:with_details(actor_dead_error_record(stop), #{exit_reason => Other})
+            )
     end;
 sync_send(ActorPid, kill, []) ->
     %% kill is handled locally - forcefully kills the actor process.
