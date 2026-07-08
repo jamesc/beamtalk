@@ -18,8 +18,6 @@
 /// // => nil
 /// Logger debug: "trace detail"
 /// // => nil
-/// Logger setLevel: #debug
-/// // => nil
 /// ```
 sealed typed Object subclass: Logger
 
@@ -98,18 +96,3 @@ sealed typed Object subclass: Logger
   /// ```
   class sealed debug: message :: String metadata: meta :: Dictionary -> Nil =>
     @intrinsic loggerDebugMeta
-
-  /// Set the primary log level at runtime.
-  ///
-  /// Valid levels: #emergency, #alert, #critical, #error,
-  /// #warning, #notice, #info, #debug
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// Logger setLevel: #debug
-  /// // => nil
-  /// Logger setLevel: #warning
-  /// // => nil
-  /// ```
-  class sealed setLevel: level :: #emergency | #alert | #critical | #error | #warning | #notice | #info | #debug -> Nil =>
-    (Erlang beamtalk_logger) setLevel: level

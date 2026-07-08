@@ -134,7 +134,7 @@ logLevel(Level) when is_atom(Level) ->
         true ->
             ok = logger:set_primary_config(level, Level),
             %% Also update the file handler level if it exists, so that
-            %% `Logger setLevel: #debug` makes debug messages visible.
+            %% `Beamtalk logLevel: #debug` makes debug messages visible.
             case logger:get_handler_config(beamtalk_file_log) of
                 {ok, _} -> logger:update_handler_config(beamtalk_file_log, level, Level);
                 _ -> ok

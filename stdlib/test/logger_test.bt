@@ -1,8 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Tests the Logger class — info:, warn:, error:, debug:, metadata variants,
-// setLevel:, and type-error validation
+// Tests the Logger class — info:, warn:, error:, debug:, and metadata variants
 
 TestCase subclass: LoggerTest
 
@@ -46,21 +45,3 @@ TestCase subclass: LoggerTest
       "count" => 42
     }) equals: nil
 
-  testSetLevel =>
-    // setLevel: accepts valid log levels
-    self assert: (Logger setLevel: #debug) equals: nil
-    // Restore to a reasonable default
-    self assert: (Logger setLevel: #notice) equals: nil
-
-  testSetLevelTypeError =>
-    // setLevel: requires Symbol argument — still dispatched through beamtalk_logger
-    @expect type
-    self should: [Logger setLevel: "debug"] raise: #type_error
-
-  testSetLevelInvalidLevel =>
-    // setLevel: with invalid symbol raises argument_error
-    // BT-2618: setLevel: is now typed to the valid level union, so passing a
-    // non-member symbol is a static type mismatch — @expect type suppresses it
-    // (we are deliberately exercising the runtime's argument validation).
-    @expect type
-    self should: [Logger setLevel: #not_a_real_level] raise: #argument_error
