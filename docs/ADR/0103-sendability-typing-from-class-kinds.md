@@ -157,6 +157,11 @@ plausible later addition rather than a redesign. Construction of such classes
 follows the existing FFI-wrapping pattern (ADR 0101 `native:` / delegate, as
 `Ets` and `Subscription` do today).
 
+Header clauses are parsed in a fixed order:
+`modifiers` → `Superclass subclass: Name(TypeParams)` → `native: module` →
+`handleScope: #scope`. `native:` must precede `handleScope:`; reversing them
+(`handleScope: #process native: pb`) silently drops the `native:` clause.
+
 ### Checked boundaries
 
 1. **Actor message arguments and `spawnWith:` maps** — warn when a

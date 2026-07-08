@@ -834,21 +834,11 @@ impl TypeChecker {
             .all(|(e, a)| Self::type_args_compatible(e, a, hierarchy))
     }
 
-    /// ADR 0103 (Phase 0): warn when a process-bound handle
-    /// (`HandleScoped(#process)`) is passed as an argument in an actor message.
-    ///
-    /// Runs independently of whether the receiver's handler has typed
-    /// parameters — the hazard is about *what* is sent, not the declared
-    /// parameter type — so it is invoked before the method lookup in
-    /// [`check_argument_types`]. `#node`-scoped and `Unknown` arguments stay
-    /// silent in v1 (no static remoteness knowledge; advisory per ADR 0100).
-    ///
-    /// Class-side sends (`spawnWith:` maps, `new:`) are Phase 1 (BT-2755).
-    /// ADR 0103 (Phase 1): warn when a process-bound handle appears as a value
-    /// in a `spawnWith:` initial-state map — the map is copied into the new
-    /// actor process, so a `HandleScoped(#process)` value is only usable by its
-    /// original owner. Inspects the `MapLiteral` call-site pairs (shared model
-    /// with ADR 0104's `spawnWith:` key checking).
+    /// ADR 0103 (Phase 1): warn when a process-bound handle
+    /// (`HandleScoped(#process)`) appears as a value in a `spawnWith:`
+    /// initial-state map — the map is copied into the new actor process, so the
+    /// value is only usable by its original owner. Inspects the `MapLiteral`
+    /// call-site pairs (shared model with ADR 0104's `spawnWith:` key checking).
     pub(super) fn check_spawn_with_sendability(
         &mut self,
         selector: &str,
@@ -896,6 +886,19 @@ impl TypeChecker {
         }
     }
 
+    /// ADR 0103 (Phase 0): warn when a process-bound handle
+    /// (`HandleScoped(#process)`) is passed as an argument in an actor message
+    /// (boundary #1) or used as an Announcement payload (boundary #3) — both
+    /// copy the term across a process boundary. The wording differs; the tier
+    /// rule does not.
+    ///
+    /// Runs independently of whether the receiver's handler has typed
+    /// parameters — the hazard is about *what* is sent, not the declared
+    /// parameter type — so it is invoked before the method lookup in
+    /// [`check_argument_types`]. `#node`-scoped and `Unknown` arguments stay
+    /// silent in v1 (no static remoteness knowledge; advisory per ADR 0100).
+    /// Class-side `spawnWith:` maps are handled by
+    /// [`check_spawn_with_sendability`].
     #[allow(clippy::too_many_arguments)] // boundary context: selector + receiver flags + arg spans
     pub(super) fn check_arg_sendability(
         &mut self,

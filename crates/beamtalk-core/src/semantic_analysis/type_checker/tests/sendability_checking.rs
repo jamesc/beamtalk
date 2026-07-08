@@ -194,3 +194,55 @@ fn spawn_with_sendable_value_silent() {
         "sendable spawnWith: value must not warn: {diags:?}"
     );
 }
+
+// --- @expect sendability suppression (BT-2774) ---
+
+/// Parse `src`, build its hierarchy, run the full diagnostic pipeline
+/// (type check + `@expect` suppression via `apply_expect_directives`).
+fn check_source_with_expect(src: &str) -> Vec<Diagnostic> {
+    let module = parse_source(src);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    run_with_expect(&module, &hierarchy)
+}
+
+#[test]
+fn expect_sendability_suppresses_actor_message_warning() {
+    // A `Port` passed in an actor message is a sendability Warning (boundary #1,
+    // ADR 0103). `@expect sendability` on the preceding line must suppress it
+    // end-to-end — this is the only coverage of the
+    // `(Sendability, Sendability)` arm in `category_matches`; a rename of the
+    // `DiagnosticCategory` variant would otherwise silently break suppression.
+
+    // Without the directive: the warning fires.
+    let bare = "Actor subclass: Worker\n  \
+        use: p => p asString\n\n\
+        Object subclass: Main\n  \
+        run: port :: Port with: worker :: Worker =>\n    \
+        worker use: port\n";
+    let diags_without = check_source_with_expect(bare);
+    assert_eq!(
+        sendability_warnings(&diags_without).len(),
+        1,
+        "Port in an actor message must warn without @expect, got: {diags_without:?}"
+    );
+
+    // With `@expect sendability`: the warning is suppressed, and the directive
+    // is not reported stale (it matched a real diagnostic).
+    let suppressed = "Actor subclass: Worker\n  \
+        use: p => p asString\n\n\
+        Object subclass: Main\n  \
+        run: port :: Port with: worker :: Worker =>\n    \
+        @expect sendability\n    \
+        worker use: port\n";
+    let diags_with = check_source_with_expect(suppressed);
+    assert!(
+        sendability_warnings(&diags_with).is_empty(),
+        "@expect sendability must suppress the actor-message warning, got: {diags_with:?}"
+    );
+    assert!(
+        diags_with
+            .iter()
+            .all(|d| !d.message.contains("stale @expect")),
+        "@expect sendability should not be reported stale, got: {diags_with:?}"
+    );
+}
