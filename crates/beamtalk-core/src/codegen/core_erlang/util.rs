@@ -400,6 +400,8 @@ pub(super) fn user_package_prefix(module_name: &str) -> Option<String> {
 ///
 /// ADR 0016/0026: Module names may be prefixed with `bt@` (user code),
 /// `bt@stdlib@` (stdlib), `bt@{package}@` (package mode), or unprefixed (legacy/tests).
+/// The unprefixed arm is retained because hand-constructed test-fixture `Module`s use
+/// bare class names (e.g. "counter"); real compilation always emits a `bt@…` prefix.
 pub(super) fn module_matches_class(module_name: &str, class_name: &str) -> bool {
     let snake = to_module_name(class_name);
     module_name == snake

@@ -31,7 +31,11 @@ impl CoreErlangGenerator {
         &self,
         module: &Module,
     ) -> Result<Document<'static>> {
-        // Collect methods from expression-based definitions (legacy)
+        // Collect methods from expression-based script/workspace modules: top-level
+        // `name := [block]` assignments compiled as the module's methods. This is a
+        // LIVE compilation mode (the package/workspace compiler — exercised by the
+        // test-package-compiler snapshot cases), distinct from class definitions.
+        // Not dead code: removing it strips methods from every compiled script.
         let mut methods: Vec<(String, usize)> = module
             .expressions
             .iter()
@@ -101,7 +105,11 @@ impl CoreErlangGenerator {
         &self,
         module: &Module,
     ) -> Result<Document<'static>> {
-        // Collect methods from expression-based definitions (legacy)
+        // Collect methods from expression-based script/workspace modules: top-level
+        // `name := [block]` assignments compiled as the module's methods. This is a
+        // LIVE compilation mode (the package/workspace compiler — exercised by the
+        // test-package-compiler snapshot cases), distinct from class definitions.
+        // Not dead code: removing it strips methods from every compiled script.
         let mut methods: Vec<String> = module
             .expressions
             .iter()
@@ -233,8 +241,10 @@ impl CoreErlangGenerator {
 
     /// Generates the dispatch/4 function for message routing.
     ///
-    /// This function is complex because it handles both legacy expression-based modules
-    /// and class definitions, including the `doesNotUnderstand:args:` fallback per BT-29.
+    /// Handles both expression-based script/workspace modules (top-level
+    /// `name := [block]` assignments become methods — a live mode used by the
+    /// package/workspace compiler) and class definitions, including the
+    /// `doesNotUnderstand:args:` fallback per BT-29.
     pub(in crate::codegen::core_erlang) fn generate_dispatch(
         &mut self,
         module: &Module,
@@ -295,7 +305,9 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(docs))
     }
 
-    /// Generates a dispatch case clause for a legacy expression-based method.
+    /// Generates a dispatch case clause for an expression-based method — a
+    /// top-level `name := [block]` binding in a script/workspace module. This is
+    /// a live compilation mode (not dead/legacy); see `generate_method_table`.
     ///
     /// Handles scope setup, NLR detection, body generation, and the Args
     /// destructuring case when the method has parameters.

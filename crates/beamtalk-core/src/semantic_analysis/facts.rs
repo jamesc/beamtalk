@@ -237,8 +237,9 @@ pub fn compute_semantic_facts(module: &Module) -> SemanticFacts {
 
     // Process module-level expressions
     for stmt in &module.expressions {
-        // Detect legacy expression-based method blocks (used by gen_server dispatch legacy path).
-        // These are top-level assignments of the form `methodName := [:param | body]`.
+        // Detect expression-based method blocks — top-level `methodName := [:param | body]`
+        // assignments in a script/workspace module, which the gen_server dispatch compiles
+        // as the module's methods (a live mode, not dead code; see gen_server/dispatch.rs).
         // The block body is treated as method-level (inside_block=false): a ^ directly in the
         // block is a normal early return, not an NLR — only ^ inside a *nested* block is NLR.
         if let Expression::Assignment { value, .. } = &stmt.expression {
