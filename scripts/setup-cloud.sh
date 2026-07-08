@@ -224,7 +224,7 @@ else
       info "Installing Erlang runtime deps (${_OTP_DEPS# })..."
       require_sudo
       # shellcheck disable=SC2086
-      if $SUDO apt-get update -qq && $SUDO apt-get install -y -qq --no-install-recommends ${_OTP_DEPS}; then
+      if $SUDO apt-get update -qq --allow-releaseinfo-change && $SUDO apt-get install -y -qq --no-install-recommends ${_OTP_DEPS}; then
         ok "Erlang runtime deps installed"
       else
         warn "Could not install Erlang runtime deps (${_OTP_DEPS# }) — erl may fail to start"
@@ -380,7 +380,7 @@ case "$OS_ID" in
     done
     if [ -n "$PKGS" ]; then
       require_sudo
-      $SUDO apt-get update -qq
+      $SUDO apt-get update -qq --allow-releaseinfo-change
       # shellcheck disable=SC2086
       $SUDO apt-get install -y -qq --no-install-recommends $PKGS
       ok "System packages installed"
@@ -424,7 +424,7 @@ else
   $SUDO chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
   echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
     | $SUDO tee /etc/apt/sources.list.d/github-cli.list > /dev/null
-  $SUDO apt-get update -qq
+  $SUDO apt-get update -qq --allow-releaseinfo-change
   $SUDO apt-get install -y -qq gh
   ok "GitHub CLI installed"
 fi
