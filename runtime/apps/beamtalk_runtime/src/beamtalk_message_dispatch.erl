@@ -94,7 +94,7 @@ send({beamtalk_supervisor, ClassName, _Module, Pid} = _Self, stop, []) ->
         %% the {noproc, _} tuple form guards the gen_server:call path defensively.
         exit:Reason when
             Reason =:= noproc orelse
-                (is_tuple(Reason) andalso element(1, Reason) =:= noproc)
+                (tuple_size(Reason) =:= 2 andalso element(1, Reason) =:= noproc)
         ->
             Error = beamtalk_error:new(
                 runtime_error,
