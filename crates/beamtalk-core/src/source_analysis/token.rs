@@ -477,17 +477,6 @@ impl Token {
         self.span
     }
 
-    /// Returns the full span including leading and trailing trivia.
-    ///
-    /// This is useful for formatting operations that need to preserve
-    /// all source text.
-    #[must_use]
-    pub fn full_span(&self) -> Span {
-        // For now, just return the token span
-        // When trivia has spans, this will merge them
-        self.span
-    }
-
     /// Returns the trivia that precedes this token.
     #[must_use]
     pub fn leading_trivia(&self) -> &[Trivia] {
@@ -985,14 +974,6 @@ mod tests {
         let token = Token::new(TokenKind::Integer("42".into()), Span::new(0, 2));
         let kind = token.into_kind();
         assert!(matches!(kind, TokenKind::Integer(s) if s == "42"));
-    }
-
-    #[test]
-    fn token_full_span() {
-        let token = Token::new(TokenKind::Identifier("x".into()), Span::new(5, 6));
-        // Currently full_span equals span (trivia spans not yet tracked)
-        assert_eq!(token.full_span().start(), 5);
-        assert_eq!(token.full_span().end(), 6);
     }
 
     #[test]

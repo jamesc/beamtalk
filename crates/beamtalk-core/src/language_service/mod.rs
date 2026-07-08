@@ -73,7 +73,7 @@ use crate::ast::{
     Expression, Identifier, MessageSelector, MethodDefinition, Module, Pattern, TypeAnnotation,
 };
 use crate::semantic_analysis::type_checker::NativeTypeRegistry;
-use crate::source_analysis::Span;
+use crate::source_analysis::{Lexer, Span, Token, TokenKind};
 use camino::Utf8PathBuf;
 use ecow::EcoString;
 use std::collections::HashMap;
@@ -298,8 +298,8 @@ impl SimpleLanguageService {
         //    fill in the enclosing class and class-side flag.
         for class in &file_data.module.classes {
             for method in &class.methods {
-                if Self::offset_in_method_header_selector(method, offset_val) {
-                    let selection = Self::method_header_selection_span(method);
+                if Self::offset_in_method_header_selector(method, &file_data.source, offset_val) {
+                    let selection = Self::method_header_selection_span(method, &file_data.source);
                     return Some(CallHierarchyTarget::new(
                         method.selector.name(),
                         Some(class.name.name.clone()),
@@ -311,8 +311,8 @@ impl SimpleLanguageService {
                 }
             }
             for method in &class.class_methods {
-                if Self::offset_in_method_header_selector(method, offset_val) {
-                    let selection = Self::method_header_selection_span(method);
+                if Self::offset_in_method_header_selector(method, &file_data.source, offset_val) {
+                    let selection = Self::method_header_selection_span(method, &file_data.source);
                     return Some(CallHierarchyTarget::new(
                         method.selector.name(),
                         Some(class.name.name.clone()),
@@ -325,8 +325,8 @@ impl SimpleLanguageService {
             }
         }
         for smd in &file_data.module.method_definitions {
-            if Self::offset_in_method_header_selector(&smd.method, offset_val) {
-                let selection = Self::method_header_selection_span(&smd.method);
+            if Self::offset_in_method_header_selector(&smd.method, &file_data.source, offset_val) {
+                let selection = Self::method_header_selection_span(&smd.method, &file_data.source);
                 return Some(CallHierarchyTarget::new(
                     smd.method.selector.name(),
                     Some(smd.class_name.name.clone()),
@@ -381,20 +381,12 @@ impl SimpleLanguageService {
     }
 
     /// The selector-token span of a method-definition header, used as the
-    /// `selection_range` on `CallHierarchyItem`. For keyword selectors this
-    /// is the span covering all keyword parts; for unary / binary selectors
-    /// we fall back to `method.span` since `MessageSelector` carries no
-    /// per-token span (see [`Self::offset_in_method_header_selector`] for
-    /// the same trade-off).
-    fn method_header_selection_span(method: &MethodDefinition) -> Span {
-        match &method.selector {
-            MessageSelector::Keyword(parts) if !parts.is_empty() => {
-                let first = parts.first().expect("non-empty checked above").span;
-                let last = parts.last().expect("non-empty checked above").span;
-                first.merge(last)
-            }
-            _ => method.span,
-        }
+    /// `selection_range` on `CallHierarchyItem`. Delegates to
+    /// [`Self::method_header_selector_span`] for the exact span, falling
+    /// back to the whole `method.span` in the (should-not-happen) case
+    /// where the header text can't be tokenized.
+    fn method_header_selection_span(method: &MethodDefinition, source: &str) -> Span {
+        Self::method_header_selector_span(method, source).unwrap_or(method.span)
     }
 
     /// BT-2239: Classify the cursor for a Find-References request and
@@ -424,9 +416,11 @@ impl SimpleLanguageService {
         {
             return Some(NavQuery::SendersOf(selector_lookup.selector_name));
         }
-        if let Some(selector_name) =
-            Self::find_method_header_selector_at_offset(&file_data.module, offset.get())
-        {
+        if let Some(selector_name) = Self::find_method_header_selector_at_offset(
+            &file_data.module,
+            &file_data.source,
+            offset.get(),
+        ) {
             return Some(NavQuery::SendersOf(selector_name));
         }
         let (ident, _span) = self.find_identifier_at_position(file, position)?;
@@ -511,9 +505,11 @@ impl SimpleLanguageService {
         {
             return Some(NavQuery::ImplementorsOf(selector_lookup.selector_name));
         }
-        if let Some(selector_name) =
-            Self::find_method_header_selector_at_offset(&file_data.module, offset.get())
-        {
+        if let Some(selector_name) = Self::find_method_header_selector_at_offset(
+            &file_data.module,
+            &file_data.source,
+            offset.get(),
+        ) {
             return Some(NavQuery::ImplementorsOf(selector_name));
         }
         None
@@ -661,16 +657,23 @@ impl SimpleLanguageService {
     /// This powers "Find All References" (and, indirectly, rename) when the
     /// user's cursor is on the selector of the method definition itself —
     /// not on a call site.
-    fn find_method_header_selector_at_offset(module: &Module, offset: u32) -> Option<EcoString> {
+    ///
+    /// `source` is the full file text `method`'s spans are offsets into;
+    /// see [`Self::offset_in_method_header_selector`] for why it's needed.
+    fn find_method_header_selector_at_offset(
+        module: &Module,
+        source: &str,
+        offset: u32,
+    ) -> Option<EcoString> {
         for class in &module.classes {
             for method in class.methods.iter().chain(class.class_methods.iter()) {
-                if Self::offset_in_method_header_selector(method, offset) {
+                if Self::offset_in_method_header_selector(method, source, offset) {
                     return Some(method.selector.name());
                 }
             }
         }
         for smd in &module.method_definitions {
-            if Self::offset_in_method_header_selector(&smd.method, offset) {
+            if Self::offset_in_method_header_selector(&smd.method, source, offset) {
                 return Some(smd.method.selector.name());
             }
         }
@@ -683,39 +686,24 @@ impl SimpleLanguageService {
     /// # Precision contract
     ///
     /// For keyword selectors we have precise per-keyword spans and only
-    /// accept offsets that fall within one of those keyword parts.
+    /// accept offsets that fall within one of those keyword parts — note
+    /// this deliberately does *not* go through
+    /// [`Self::method_header_selector_span`], whose merged first/last span
+    /// would also cover the parameter names *between* keyword parts (e.g.
+    /// the `i` in `at: i put: v`).
     ///
-    /// For unary and binary selectors, `MessageSelector` does not carry a
-    /// span for the selector token itself, so we use the coarser rule
-    /// "inside `method.span`, but before any parameter, return type, or
-    /// body element".
-    ///
-    /// **What this rule guarantees (the precision that matters):**
-    /// - Clicks on parameter names are rejected.
-    /// - Clicks on parameter type annotations are rejected.
-    /// - Clicks on return type annotations are rejected.
-    /// - Clicks on body expressions are rejected.
-    ///
-    /// **What this rule is deliberately permissive about:**
-    /// - Clicks on `sealed` / `internal` / `class` modifiers at the start
-    ///   of the header match. `method.span.start()` is captured before
-    ///   modifiers are consumed, so they're inside the header window.
-    /// - Clicks on `->` punctuation between the selector and a return type
-    ///   match, because `->` is neither in `method.span` outside the header
-    ///   nor inside the return type annotation span.
-    /// - Clicks on whitespace inside the header window match.
-    ///
-    /// In all of those cases the answer to *Find All References on this
-    /// method* is still this method's reference set, so the extra
-    /// permissiveness is harmless UX — not a wrong answer.
-    ///
-    /// A tighter rule would require either adding a `selector_span` field
-    /// to `MethodDefinition` (cascading into ~70 construction sites across
-    /// parser, codegen, and test fixtures) or lexing the header from file
-    /// source. Neither is justified by the UX gain today; rename refactoring
-    /// or semantic tokens for selectors would be the natural moment to add
-    /// precise spans.
-    fn offset_in_method_header_selector(method: &MethodDefinition, offset: u32) -> bool {
+    /// For unary and binary selectors, `MessageSelector` carries no span for
+    /// the selector token itself, so we recover it by scanning the header
+    /// text with [`Self::method_header_selector_span`] (BT-1941). The result
+    /// is exact: clicks on modifiers (`sealed` / `internal` / `class`),
+    /// `->` punctuation, whitespace, parameter names/types, return types,
+    /// and body expressions are all rejected — only the selector token
+    /// itself matches.
+    fn offset_in_method_header_selector(
+        method: &MethodDefinition,
+        source: &str,
+        offset: u32,
+    ) -> bool {
         if offset < method.span.start() || offset >= method.span.end() {
             return false;
         }
@@ -725,8 +713,64 @@ impl SimpleLanguageService {
                 .iter()
                 .any(|part| offset >= part.span.start() && offset < part.span.end()),
             MessageSelector::Unary(_) | MessageSelector::Binary(_) => {
+                Self::method_header_selector_span(method, source)
+                    .is_some_and(|span| offset >= span.start() && offset < span.end())
+            }
+        }
+    }
+
+    /// Computes the exact source span of a method definition's selector
+    /// token(s) (BT-1941). Used for the `selection_range` on
+    /// `CallHierarchyItem` ([`Self::method_header_selection_span`]) and, for
+    /// unary/binary selectors, for the offset containment check in
+    /// [`Self::offset_in_method_header_selector`].
+    ///
+    /// For keyword selectors this merges the precise per-part spans already
+    /// carried on `MessageSelector::Keyword` — a *display* span suitable for
+    /// highlighting the whole selector, not a containment check (see the
+    /// doc comment on [`Self::offset_in_method_header_selector`] for why).
+    ///
+    /// For unary and binary selectors, which carry no span of their own,
+    /// this re-tokenizes the header text — from `method.span.start()` up to
+    /// the first parameter, return-type annotation, or body element — and
+    /// skips leading modifier keyword tokens exactly as the parser's own
+    /// modifier loop (`parse_method_definition`) does, returning the span of
+    /// the first token that the parser would treat as the selector.
+    ///
+    /// The skip decision mirrors the parser token-for-token rather than
+    /// counting `method`'s modifier flags, because the flags record only
+    /// *which* modifiers are present, not *how many* tokens were consumed:
+    /// the parser accepts repeated modifiers (`sealed sealed bar => 1`,
+    /// `internal internal bar => 1`) — each sets the same boolean once but
+    /// consumes a distinct token — so a flag-count-driven skip would stop
+    /// short and mis-identify a second modifier keyword as the selector.
+    /// Matching the parser's per-token rule instead:
+    ///
+    /// - `sealed` is *always* a modifier (the parser consumes it
+    ///   unconditionally), so a method can never be named `sealed`.
+    /// - `class` / `internal` are modifiers *unless* the next token is `=>`,
+    ///   `->`, or `::` — the parser's `is_fat_arrow_or_return_type`
+    ///   lookahead, which resolves `class => ...` (and `class -> T => ...`,
+    ///   `class :: -> T => ...`) in favour of "this is the selector named
+    ///   `class`". So `class => 1` returns the `class` token as the selector
+    ///   and is never mistaken for the `class` modifier.
+    ///
+    /// Returns `None` only if the header text can't be tokenized down to a
+    /// selector-shaped token, which should not happen for a
+    /// `MethodDefinition` produced by parsing this exact `source`.
+    fn method_header_selector_span(method: &MethodDefinition, source: &str) -> Option<Span> {
+        match &method.selector {
+            MessageSelector::Keyword(parts) => {
+                let first = parts.first()?.span;
+                let last = parts.last()?.span;
+                Some(first.merge(last))
+            }
+            MessageSelector::Unary(_) | MessageSelector::Binary(_) => {
+                let start = method.span.start();
+
                 // The header ends at the first of: first parameter name,
-                // return type annotation, or first body statement.
+                // parameter type annotation, return type annotation, or
+                // first body statement.
                 let mut header_end = method.span.end();
                 if let Some(first_param) = method.parameters.first() {
                     header_end = header_end.min(first_param.name.span.start());
@@ -740,7 +784,44 @@ impl SimpleLanguageService {
                 if let Some(first_stmt) = method.body.first() {
                     header_end = header_end.min(first_stmt.expression.span().start());
                 }
-                offset < header_end
+
+                let header_text = source.get(start as usize..header_end as usize)?;
+
+                // Re-tokenize the header and walk it exactly as the parser's
+                // modifier loop does (see doc comment above). `tokens` holds
+                // the meaningful tokens (whitespace is trivia; the iterator
+                // excludes EOF), so index `i + 1` peeks the next token.
+                let tokens: Vec<_> = Lexer::new(header_text).collect();
+                let mut i = 0;
+                while let Some(token) = tokens.get(i) {
+                    let is_modifier = match token.kind() {
+                        // `sealed` is unconditionally a modifier.
+                        TokenKind::Identifier(name) if name.as_str() == "sealed" => true,
+                        // `class` / `internal` are modifiers unless the next
+                        // token marks them as the selector (`=>`, `->`, `::`).
+                        TokenKind::Identifier(name)
+                            if matches!(name.as_str(), "class" | "internal") =>
+                        {
+                            !matches!(
+                                tokens.get(i + 1).map(Token::kind),
+                                Some(
+                                    TokenKind::FatArrow | TokenKind::Arrow | TokenKind::DoubleColon
+                                )
+                            )
+                        }
+                        _ => false,
+                    };
+                    if is_modifier {
+                        i += 1;
+                        continue;
+                    }
+                    let token_span = token.span();
+                    return Some(Span::new(
+                        token_span.start() + start,
+                        token_span.end() + start,
+                    ));
+                }
+                None
             }
         }
     }
@@ -1425,9 +1506,11 @@ impl LanguageService for SimpleLanguageService {
         //    "go to parent" semantics we want the strict MRO-only walk: if
         //    nothing in the ancestors defines this selector, the result is
         //    `None` (matches the no-regression scope in the issue).
-        if let Some(selector_name) =
-            Self::find_method_header_selector_at_offset(&file_data.module, offset.get())
-        {
+        if let Some(selector_name) = Self::find_method_header_selector_at_offset(
+            &file_data.module,
+            &file_data.source,
+            offset.get(),
+        ) {
             let receiver_context =
                 crate::queries::definition_provider::resolve_enclosing_superclass_context(
                     &file_data.module,
@@ -1480,9 +1563,11 @@ impl LanguageService for SimpleLanguageService {
         //    `at: i put: v => ...`). Without this check, clicking on the name
         //    where a method is defined would fall through to the identifier
         //    path and return nothing.
-        if let Some(selector_name) =
-            Self::find_method_header_selector_at_offset(&file_data.module, offset.get())
-        {
+        if let Some(selector_name) = Self::find_method_header_selector_at_offset(
+            &file_data.module,
+            &file_data.source,
+            offset.get(),
+        ) {
             return crate::queries::references_provider::find_selector_references(
                 selector_name.as_str(),
                 self.files.iter().map(|(path, data)| (path, &data.module)),
@@ -2006,6 +2091,267 @@ mod tests {
             refs_on_param.len(),
             2,
             "param-name click was mistaken for `at:put:` selector click"
+        );
+    }
+
+    // ── BT-1941: tightened unary/binary selector-span precision ────────
+
+    #[test]
+    fn find_references_rejects_click_on_sealed_modifier_in_header() {
+        // Clicking on the `sealed` modifier keyword must NOT be treated as
+        // a click on the selector `bar`. Before BT-1941 the coarse
+        // "inside method.span, before the first param/return-type/body"
+        // rule was permissive here because `method.span.start()` is
+        // captured before modifiers are consumed.
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("test.bt");
+
+        service.update_file(
+            file.clone(),
+            "Object subclass: Foo\n  sealed bar => 1\nx := Foo new\nx bar".to_string(),
+        );
+
+        // Line 1: `  sealed bar => 1` — `sealed` spans columns 2-7, `bar`
+        // spans columns 9-11.
+        let refs_on_selector = service.find_references(&file, Position::new(1, 9));
+        assert_eq!(
+            refs_on_selector.len(),
+            2,
+            "expected exactly 2 refs (definition + call site) from `bar` selector click, got {}",
+            refs_on_selector.len()
+        );
+
+        let refs_on_modifier = service.find_references(&file, Position::new(1, 4));
+        assert_ne!(
+            refs_on_modifier.len(),
+            2,
+            "click on `sealed` modifier was mistaken for a click on the `bar` selector"
+        );
+    }
+
+    #[test]
+    fn find_references_rejects_click_on_arrow_in_header() {
+        // Clicking on the `->` punctuation between a unary selector and its
+        // return type annotation must NOT be treated as a click on the
+        // selector. Before BT-1941 this was permissive because `->` falls
+        // inside `method.span` but outside the return-type annotation's own
+        // span.
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("test.bt");
+
+        service.update_file(
+            file.clone(),
+            "Object subclass: Foo\n  bar -> Integer => 1\nx := Foo new\nx bar".to_string(),
+        );
+
+        // Line 1: `  bar -> Integer => 1` — `bar` spans columns 2-4, `->`
+        // spans columns 6-7.
+        let refs_on_selector = service.find_references(&file, Position::new(1, 2));
+        assert_eq!(
+            refs_on_selector.len(),
+            2,
+            "expected exactly 2 refs (definition + call site) from `bar` selector click, got {}",
+            refs_on_selector.len()
+        );
+
+        let refs_on_arrow = service.find_references(&file, Position::new(1, 6));
+        assert_ne!(
+            refs_on_arrow.len(),
+            2,
+            "click on `->` punctuation was mistaken for a click on the `bar` selector"
+        );
+    }
+
+    #[test]
+    fn find_references_rejects_click_on_whitespace_in_header() {
+        // Clicking on whitespace between the selector and the `=>` must NOT
+        // be treated as a click on the selector.
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("test.bt");
+
+        service.update_file(
+            file.clone(),
+            "Object subclass: Foo\n  bar => 1\nx := Foo new\nx bar".to_string(),
+        );
+
+        // Line 1: `  bar => 1` — `bar` spans columns 2-4, whitespace at
+        // column 5.
+        let refs_on_selector = service.find_references(&file, Position::new(1, 2));
+        assert_eq!(
+            refs_on_selector.len(),
+            2,
+            "expected exactly 2 refs (definition + call site) from `bar` selector click, got {}",
+            refs_on_selector.len()
+        );
+
+        let refs_on_whitespace = service.find_references(&file, Position::new(1, 5));
+        assert_ne!(
+            refs_on_whitespace.len(),
+            2,
+            "click on whitespace was mistaken for a click on the `bar` selector"
+        );
+    }
+
+    #[test]
+    fn find_references_rejects_click_on_class_and_internal_modifiers_in_header() {
+        // Both `class` and `internal` modifiers, combined on one header,
+        // must be rejected — and the skip-count logic must correctly walk
+        // past *both* of them to land on the real selector `bar`.
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("test.bt");
+
+        service.update_file(
+            file.clone(),
+            "Object subclass: Foo\n  internal class bar => 1\nFoo bar".to_string(),
+        );
+
+        // Line 1: `  internal class bar => 1` — `internal` spans columns
+        // 2-9, `class` spans columns 11-15, `bar` spans columns 17-19.
+        let refs_on_selector = service.find_references(&file, Position::new(1, 17));
+        assert_eq!(
+            refs_on_selector.len(),
+            2,
+            "expected exactly 2 refs (definition + call site) from `bar` selector click, got {}",
+            refs_on_selector.len()
+        );
+
+        let refs_on_internal = service.find_references(&file, Position::new(1, 5));
+        assert_ne!(
+            refs_on_internal.len(),
+            2,
+            "click on `internal` modifier was mistaken for a click on the `bar` selector"
+        );
+
+        let refs_on_class = service.find_references(&file, Position::new(1, 13));
+        assert_ne!(
+            refs_on_class.len(),
+            2,
+            "click on `class` modifier was mistaken for a click on the `bar` selector"
+        );
+    }
+
+    #[test]
+    fn find_references_rejects_click_on_duplicate_sealed_modifiers_in_header() {
+        // The parser consumes `sealed` unconditionally and does not dedupe,
+        // so `sealed sealed bar => 1` parses with `is_sealed == true` but two
+        // `sealed` tokens consumed. The header scan must skip *both* tokens
+        // (mirroring the parser token-for-token) rather than skipping a fixed
+        // count derived from the single `is_sealed` flag — otherwise the
+        // second `sealed` would be mis-identified as the `bar` selector.
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("test.bt");
+
+        service.update_file(
+            file.clone(),
+            "Object subclass: Foo\n  sealed sealed bar => 1\nx := Foo new\nx bar".to_string(),
+        );
+
+        // Line 1: `  sealed sealed bar => 1` — first `sealed` cols 2-7,
+        // second `sealed` cols 9-14, `bar` cols 16-18.
+        let refs_on_selector = service.find_references(&file, Position::new(1, 16));
+        assert_eq!(
+            refs_on_selector.len(),
+            2,
+            "expected exactly 2 refs (definition + call site) from `bar` selector click, got {}",
+            refs_on_selector.len()
+        );
+
+        let refs_on_second_sealed = service.find_references(&file, Position::new(1, 11));
+        assert_ne!(
+            refs_on_second_sealed.len(),
+            2,
+            "click on the second `sealed` modifier was mistaken for a click on the `bar` selector"
+        );
+    }
+
+    #[test]
+    fn find_references_rejects_click_on_duplicate_class_modifiers_in_header() {
+        // `class` is a modifier when its lookahead is not `=>`/`->`/`::`, so
+        // `class class bar => 1` consumes *two* `class` tokens as modifiers
+        // (each keeping `is_class_method == true`) before the `bar` selector.
+        // The scan must walk past both.
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("test.bt");
+
+        service.update_file(
+            file.clone(),
+            "Object subclass: Foo\n  class class bar => 1\nFoo bar".to_string(),
+        );
+
+        // Line 1: `  class class bar => 1` — first `class` cols 2-7, second
+        // `class` cols 8-13, `bar` cols 14-17.
+        let refs_on_selector = service.find_references(&file, Position::new(1, 14));
+        assert_eq!(
+            refs_on_selector.len(),
+            2,
+            "expected exactly 2 refs (definition + call site) from `bar` selector click, got {}",
+            refs_on_selector.len()
+        );
+
+        let refs_on_second_class = service.find_references(&file, Position::new(1, 9));
+        assert_ne!(
+            refs_on_second_class.len(),
+            2,
+            "click on the second `class` modifier was mistaken for a click on the `bar` selector"
+        );
+    }
+
+    #[test]
+    fn find_references_from_binary_method_header_with_modifier() {
+        // Binary selector (`+`) with a leading modifier: the scan must skip
+        // `sealed` and land on the `+` selector token (a `BinarySelector`
+        // token kind, exercising the non-`Identifier` selector path).
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("test.bt");
+
+        service.update_file(
+            file.clone(),
+            "Object subclass: Foo\n  sealed + other => other\nx := Foo new\nx + 1".to_string(),
+        );
+
+        // Line 1: `  sealed + other => other` — `sealed` cols 2-7, `+` col 9.
+        let refs_on_selector = service.find_references(&file, Position::new(1, 9));
+        assert_eq!(
+            refs_on_selector.len(),
+            2,
+            "expected exactly 2 refs (definition + call site) from `+` selector click, got {}",
+            refs_on_selector.len()
+        );
+
+        let refs_on_sealed = service.find_references(&file, Position::new(1, 4));
+        assert_ne!(
+            refs_on_sealed.len(),
+            2,
+            "click on `sealed` modifier was mistaken for a click on the `+` selector"
+        );
+    }
+
+    #[test]
+    fn find_references_from_method_header_named_after_modifier_keyword() {
+        // Edge case called out in BT-1941: a unary method whose selector
+        // name is itself a modifier keyword. `class => ...` parses with
+        // `is_class_method == false` because the parser's own lookahead
+        // (`is_fat_arrow_or_return_type`) resolves the ambiguity in favour
+        // of "this is the selector" when `class` is immediately followed by
+        // `=>`. The header scan must drive its skip count off that flag —
+        // not off pattern-matching the literal word `class` — so it must
+        // still recognize `class` as the selector rather than skipping it
+        // as a modifier and then finding nothing.
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("test.bt");
+
+        service.update_file(
+            file.clone(),
+            "Object subclass: Foo\n  class => 1\nx := Foo new\nx class".to_string(),
+        );
+
+        // Line 1: `  class => 1` — `class` spans columns 2-6.
+        let refs = service.find_references(&file, Position::new(1, 4));
+        assert_eq!(
+            refs.len(),
+            2,
+            "expected exactly 2 refs (definition + call site) from `class`-named selector click, got {}",
+            refs.len()
         );
     }
 

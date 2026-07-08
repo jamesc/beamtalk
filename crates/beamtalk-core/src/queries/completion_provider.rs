@@ -132,13 +132,8 @@ pub fn compute_completions(
     native_types: Option<&NativeTypeRegistry>,
 ) -> Vec<Completion> {
     // Validate position is within bounds
-    let offset = match position.to_offset(source) {
-        Some(o) => {
-            // Source files won't exceed u32::MAX bytes
-            #[expect(clippy::cast_possible_truncation, reason = "source files < 4GB")]
-            let offset = o as u32;
-            offset
-        }
+    let offset = match position.to_byte_offset(source) {
+        Some(o) => o.get(),
         None => return Vec::new(),
     };
     let mut completions = Vec::new();
@@ -2187,6 +2182,7 @@ mod tests {
             package: Some(EcoString::from("other_pkg")),
             is_value: false,
             is_native: false,
+            handle_scope: None,
             state: vec![],
             state_types: HashMap::new(),
             state_has_default: HashMap::new(),
@@ -2228,6 +2224,7 @@ mod tests {
             package: Some(EcoString::from("my_pkg")),
             is_value: false,
             is_native: false,
+            handle_scope: None,
             state: vec![],
             state_types: HashMap::new(),
             state_has_default: HashMap::new(),
@@ -2269,6 +2266,7 @@ mod tests {
             package: Some(EcoString::from("some_pkg")),
             is_value: false,
             is_native: false,
+            handle_scope: None,
             state: vec![],
             state_types: HashMap::new(),
             state_has_default: HashMap::new(),
@@ -2303,6 +2301,7 @@ mod tests {
             package: Some(EcoString::from("other_pkg")),
             is_value: false,
             is_native: false,
+            handle_scope: None,
             state: vec![],
             state_types: HashMap::new(),
             state_has_default: HashMap::new(),
@@ -2378,6 +2377,7 @@ mod tests {
             package: Some(EcoString::from("other_pkg")),
             is_value: false,
             is_native: false,
+            handle_scope: None,
             state: vec![],
             state_types: HashMap::new(),
             state_has_default: HashMap::new(),
@@ -2435,6 +2435,7 @@ mod tests {
             package: Some(EcoString::from("other_pkg")),
             is_value: false,
             is_native: false,
+            handle_scope: None,
             state: vec![],
             state_types: HashMap::new(),
             state_has_default: HashMap::new(),

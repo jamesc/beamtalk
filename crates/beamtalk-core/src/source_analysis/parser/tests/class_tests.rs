@@ -49,6 +49,91 @@ fn parse_no_native_keyword_leaves_backing_module_none() {
     assert_eq!(module.classes[0].backing_module, None);
 }
 
+// ========================================================================
+// handleScope: keyword tests (ADR 0103, BT-2754)
+// ========================================================================
+
+#[test]
+fn parse_handle_scope_stores_symbol() {
+    let module = parse_ok(
+        "sealed typed Object subclass: MetricsTable
+  handleScope: #node",
+    );
+    assert_eq!(module.classes.len(), 1);
+    let class = &module.classes[0];
+    assert_eq!(
+        class.handle_scope.as_ref().map(|id| id.name.as_str()),
+        Some("node")
+    );
+}
+
+#[test]
+fn parse_handle_scope_process_with_body() {
+    let module = parse_ok(
+        "typed Object subclass: PortHolder native: port_impl
+  handleScope: #process
+  read => 42",
+    );
+    let class = &module.classes[0];
+    assert_eq!(
+        class.handle_scope.as_ref().map(|id| id.name.as_str()),
+        Some("process")
+    );
+    // The method after the clause still parses as a class member.
+    assert_eq!(class.methods.len(), 1);
+}
+
+#[test]
+fn parse_no_handle_scope_leaves_field_none() {
+    let module = parse_ok("Object subclass: Plain");
+    assert_eq!(module.classes[0].handle_scope, None);
+}
+
+#[test]
+fn parse_handle_scope_accepts_open_symbol_set() {
+    // The parser accepts any symbol; the checker decides meaning.
+    let module = parse_ok(
+        "Object subclass: Custom
+  handleScope: #dynamicExtent",
+    );
+    assert_eq!(
+        module.classes[0]
+            .handle_scope
+            .as_ref()
+            .map(|id| id.name.as_str()),
+        Some("dynamicExtent")
+    );
+}
+
+#[test]
+fn parse_handle_scope_misplaced_after_state_emits_error() {
+    let diagnostics = parse_err(
+        "Object subclass: Bad
+  state: x :: Integer = 0
+  handleScope: #process",
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("must appear in the class header")),
+        "Expected a targeted error for misplaced handleScope:, got: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn parse_handle_scope_missing_symbol_emits_error() {
+    let diagnostics = parse_err(
+        "Object subclass: Bad
+  handleScope: notASymbol",
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("Expected a symbol")),
+        "Expected error for non-symbol handleScope, got: {diagnostics:?}"
+    );
+}
+
 #[test]
 fn parse_native_keyword_missing_module_name_emits_error() {
     let diagnostics = parse_err("Actor subclass: Foo native:");

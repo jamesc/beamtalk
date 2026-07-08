@@ -302,6 +302,26 @@ impl ClassHierarchy {
         }
     }
 
+    /// Resolve a class's declared sendability handle scope (ADR 0103).
+    ///
+    /// Returns the bare scope symbol (e.g. `"process"`, `"node"`) declared via
+    /// a class-side `handleScope:` clause on the class or, failing that, the
+    /// nearest ancestor that declares one — handle scope is inherited like
+    /// other class metadata. Returns `None` when neither the class nor any
+    /// ancestor declares a scope (the class stays tier `Unknown`, silent).
+    #[must_use]
+    pub fn handle_scope(&self, class_name: &str) -> Option<&EcoString> {
+        if let Some(scope) = self
+            .get_class(class_name)
+            .and_then(|c| c.handle_scope.as_ref())
+        {
+            return Some(scope);
+        }
+        self.superclass_chain(class_name)
+            .iter()
+            .find_map(|s| self.get_class(s).and_then(|c| c.handle_scope.as_ref()))
+    }
+
     /// BT-1540: Check whether a class defines its own class-side method with the given selector.
     ///
     /// Returns `true` if the class has a class method matching `selector` defined

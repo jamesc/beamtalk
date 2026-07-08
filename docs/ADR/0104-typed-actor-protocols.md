@@ -1,7 +1,8 @@
 # ADR 0104: Typed Actor Protocols — the Class Interface Is the Protocol
 
 ## Status
-Proposed (2026-07-05)
+Accepted (2026-07-07) — implemented via Epic BT-2747 (Phases 1–4,
+BT-2749…BT-2752).
 
 ## Implementation Tracking
 
@@ -17,7 +18,10 @@ Proposed (2026-07-05)
 
 Sibling epic **[BT-2748](https://linear.app/beamtalk/issue/BT-2748)** (ADR 0103): BT-2750 shares the `spawnWith:` `MapLiteral` call-site inspection with BT-2755 (`related-to`, either order).
 
-**Status:** Planned
+**Status:** Implemented — all four phases (BT-2749…BT-2752) landed: sync-send
+typing + cast→`Nil` (Phase 1), `spawnWith:` key checking (Phase 2),
+`withTimeout:` transparency + cross-process DNU wording (Phase 3), and
+integration tests + docs + this status flip (Phase 4).
 
 ## Context
 

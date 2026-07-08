@@ -1530,3 +1530,25 @@ fn parse_annotated_assignment_missing_assign_op() {
         "Expected diagnostic about missing ':=', got: {diagnostics:?}"
     );
 }
+
+/// Bare `=` is not a valid Beamtalk operator (BT-2762): it has no entry in
+/// `binary_binding_power`, so `x = y` never parses as an equality test.
+/// Assert the parser reports a clear, targeted diagnostic rather than the
+/// generic "expected expression" fallback.
+#[test]
+fn bare_equals_is_not_an_operator() {
+    let diagnostics = parse_err("x = y");
+    assert_eq!(diagnostics.len(), 1);
+    let diag = &diagnostics[0];
+    assert_eq!(diag.severity, Severity::Error);
+    assert_eq!(
+        diag.message,
+        "Unexpected token: expected expression, found ="
+    );
+    assert_eq!(
+        diag.hint.as_deref(),
+        Some(
+            "'=' is not an operator in Beamtalk; use '=:=' for value equality or '==' for reference equality"
+        )
+    );
+}

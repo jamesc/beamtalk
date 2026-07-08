@@ -105,7 +105,19 @@ pub fn run(
                  Example: beamtalk run {class_name} run"
             ))
         }
-        _ => unreachable!(),
+        // BT-2767: unreachable today — the guards above are exhaustive over
+        // every (class_or_dot, selector) combination that argv parsing can
+        // produce: `(".", None)`, `(_, Some(_))`, and `(_ != ".", None)`
+        // cover the whole space. Rust's guard-based match can't prove that
+        // exhaustiveness statically, so a catch-all arm is required. Kept as
+        // a real user-facing error rather than `unreachable!()` so a future
+        // refactor of the guards above degrades to a diagnostic instead of a
+        // panic on user argv (CLAUDE.md: "Never panic/unwrap() on user input").
+        (class_name, selector) => Err(miette!(
+            "Invalid arguments to `beamtalk run`: class_or_dot={class_name:?}, selector={selector:?}\n\
+             Usage: beamtalk run <ClassName> <selector> [args...]\n\
+             Or:    beamtalk run ."
+        )),
     }
 }
 

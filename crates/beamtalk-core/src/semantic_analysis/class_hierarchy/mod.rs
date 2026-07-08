@@ -183,6 +183,7 @@ impl ClassHierarchy {
                     package: None,
                     is_value: false,
                     is_native: false,
+                    handle_scope: None,
                     state: vec![],
                     state_types: HashMap::new(),
                     state_has_default: HashMap::new(),
@@ -280,6 +281,7 @@ impl ClassHierarchy {
                         // Temporarily set from direct superclass; fixed below.
                         is_value: superclass_name == "Value",
                         is_native: false,
+                        handle_scope: None,
                         state: Vec::new(),
                         state_types: HashMap::new(),
                         state_has_default: HashMap::new(),

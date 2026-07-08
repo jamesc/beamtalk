@@ -235,7 +235,7 @@ The type checker narrows types inside conditional blocks:
 ```
 // Class identity check
 process: x :: Object =>
-  x class = Integer ifTrue: [
+  x class =:= Integer ifTrue: [
     x + 1          // x is Integer here
   ]
 
@@ -358,7 +358,7 @@ to avoid type warnings.
 
 ```
 double: x :: Integer | String =>
-  x class = Integer ifTrue: [
+  x class =:= Integer ifTrue: [
     ^x * 2       // x narrowed to Integer — has '*'
   ]
   x ++ x         // x is String here (Integer case returned early)

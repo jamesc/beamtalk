@@ -182,6 +182,7 @@ Module {
             },
             doc_comment: None,
             backing_module: None,
+            handle_scope: None,
             type_params: [],
             superclass_type_args: [],
             span: Span {
@@ -593,6 +594,7 @@ Module {
             },
             doc_comment: None,
             backing_module: None,
+            handle_scope: None,
             type_params: [],
             superclass_type_args: [],
             span: Span {

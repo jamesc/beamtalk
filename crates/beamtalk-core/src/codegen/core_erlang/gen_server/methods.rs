@@ -3298,6 +3298,7 @@ impl CoreErlangGenerator {
     ///
     /// Used by native facade codegen to add `'native'` and `'backing_module'` keys
     /// while reusing the standard meta map structure.
+    #[allow(clippy::too_many_lines)] // one contiguous map literal; splitting hurts readability
     pub(super) fn build_meta_map_doc_with_extra(
         class: &ClassDefinition,
         module: &Module,
@@ -3395,6 +3396,17 @@ impl CoreErlangGenerator {
             ClassKind::Actor => Document::Str("'actor'"),
         };
 
+        // ADR 0103: emit the declared sendability handle scope as an atom, only
+        // when present — keeps meta output stable for the vast majority of
+        // classes that declare none (mirrors the provenance keys' pattern).
+        let handle_scope_doc: Document<'static> = match &class.handle_scope {
+            Some(sym) => docvec![
+                ",\n      'handle_scope' => ",
+                leaf::atom(sym.name.to_string()),
+            ],
+            None => Document::Nil,
+        };
+
         docvec![
             "~{'class' => ",
             leaf::atom(class_name),
@@ -3430,6 +3442,8 @@ impl CoreErlangGenerator {
             method_info_doc,
             ",\n      'class_method_info' => ",
             class_method_info_doc,
+            // ADR 0103: sendability handle scope (omitted when undeclared).
+            handle_scope_doc,
             // ADR 0098 Phase 3: producing-toolchain identity (omitted when unknown).
             Self::meta_provenance_entries(provenance),
             extra_entries,

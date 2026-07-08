@@ -794,6 +794,21 @@ impl Parser {
             // Diagnostic suppression directive: @expect category
             TokenKind::AtExpect => self.parse_expect_directive(),
 
+            // Bare `=` is not a valid operator (BT-2762): equality is `=:=`
+            // (value) or `==` (reference); give a targeted hint instead of
+            // the generic "expected expression" fallback below.
+            TokenKind::BinarySelector(s) if s == "=" => {
+                let bad_token = self.advance();
+                let span = bad_token.span();
+                let message: EcoString = "Unexpected token: expected expression, found =".into();
+                self.diagnostics.push(
+                    Diagnostic::error(message.clone(), span).with_hint(
+                        "'=' is not an operator in Beamtalk; use '=:=' for value equality or '==' for reference equality",
+                    ),
+                );
+                Expression::Error { message, span }
+            }
+
             // Unexpected token - consume it to avoid getting stuck
             _ => {
                 let bad_token = self.advance();
@@ -1049,8 +1064,7 @@ impl Parser {
     fn parse_block(&mut self) -> Expression {
         let start = self
             .expect(&TokenKind::LeftBracket, "Expected '['")
-            .unwrap()
-            .span();
+            .map_or_else(|| self.current_token().span(), |t: Token| t.span());
 
         let mut parameters = Vec::new();
 
@@ -1428,8 +1442,7 @@ impl Parser {
     fn parse_tuple_pattern(&mut self) -> Pattern {
         let start = self
             .expect(&TokenKind::LeftBrace, "Expected '{'")
-            .unwrap()
-            .span();
+            .map_or_else(|| self.current_token().span(), |t: Token| t.span());
 
         let mut elements = Vec::new();
 
@@ -2499,8 +2512,7 @@ impl Parser {
     fn parse_parenthesized(&mut self) -> Expression {
         let start = self
             .expect(&TokenKind::LeftParen, "Expected '('")
-            .unwrap()
-            .span();
+            .map_or_else(|| self.current_token().span(), |t: Token| t.span());
 
         let inner = self.parse_expression();
 
@@ -2770,6 +2782,71 @@ mod tests {
         assert!(
             !formatted.contains("matchExhaustive:"),
             "plain match: must not gain the exhaustive keyword, got: {formatted}"
+        );
+    }
+
+    // ========================================================================
+    // BT-2767: expect().unwrap() hardening — guard-bypass regression tests
+    // ========================================================================
+    //
+    // parse_block, parse_tuple_pattern, and parse_parenthesized each start by
+    // calling `expect()` for their opening delimiter and used to `.unwrap()`
+    // the result directly, which would panic on a user-input parse error.
+    // In normal operation this is unreachable: every call site dispatches on
+    // the exact TokenKind before calling in (see `parse_primary` for '[' and
+    // '(', `parse_pattern` for '{'), so `expect()` always succeeds today.
+    //
+    // These tests call the private parse_* methods directly on a token
+    // stream that does NOT start with the expected delimiter, bypassing the
+    // dispatch guard, to prove that a future dispatch bug (or a new,
+    // unguarded caller) degrades to a diagnostic instead of a panic.
+
+    fn parser_for(src: &str) -> Parser {
+        Parser::new(crate::source_analysis::lex_with_eof(src))
+    }
+
+    #[test]
+    fn parse_block_guard_bypass_does_not_panic() {
+        let mut parser = parser_for("42"); // no leading '['
+        let expr = parser.parse_block();
+        assert!(matches!(expr, Expression::Block(_)));
+        assert!(
+            parser
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("Expected '['")),
+            "expected a diagnostic instead of a panic, got: {:?}",
+            parser.diagnostics
+        );
+    }
+
+    #[test]
+    fn parse_tuple_pattern_guard_bypass_does_not_panic() {
+        let mut parser = parser_for("42"); // no leading '{'
+        let pattern = parser.parse_tuple_pattern();
+        assert!(matches!(pattern, Pattern::Tuple { .. }));
+        assert!(
+            parser
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("Expected '{'")),
+            "expected a diagnostic instead of a panic, got: {:?}",
+            parser.diagnostics
+        );
+    }
+
+    #[test]
+    fn parse_parenthesized_guard_bypass_does_not_panic() {
+        let mut parser = parser_for("42"); // no leading '('
+        let expr = parser.parse_parenthesized();
+        assert!(matches!(expr, Expression::Parenthesized { .. }));
+        assert!(
+            parser
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("Expected '('")),
+            "expected a diagnostic instead of a panic, got: {:?}",
+            parser.diagnostics
         );
     }
 }

@@ -608,6 +608,7 @@ fn false_or_param_resolves_to_union() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: span(),
     };
 
@@ -706,24 +707,6 @@ fn infer_singleton_union_send(
         .map(|d| format!("{:?}: {}", d.severity, d.message))
         .collect();
     (ty, diags)
-}
-
-/// BT-2624 (item 2): the equality alias `=` on a union receiver is a universal
-/// comparison — it returns Boolean without a spurious "does not understand '='".
-#[test]
-fn bt2624_union_equality_alias_returns_boolean_no_warning() {
-    let (ty, diags) = infer_singleton_union_send(
-        MessageSelector::Binary("=".into()),
-        vec![Expression::Literal(
-            Literal::Symbol("infinity".into()),
-            span(),
-        )],
-    );
-    assert_eq!(ty, InferredType::known("Boolean"));
-    assert!(
-        diags.iter().all(|d| !d.contains("understand")),
-        "no DNU expected for `=` on a union, got: {diags:?}"
-    );
 }
 
 /// BT-2624 (item 2/3): identity comparison `=:=` on a singleton-bearing union

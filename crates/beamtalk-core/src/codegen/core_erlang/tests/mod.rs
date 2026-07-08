@@ -74,6 +74,7 @@ pub(crate) fn make_value_subclass_point() -> Module {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: Span::new(0, 0),
     };
     Module {

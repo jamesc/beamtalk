@@ -17,17 +17,8 @@ fn x_class(var_name: &str) -> Expression {
     )
 }
 
-/// Helper: build `(x class) = ClassName` binary expression
-fn class_eq(var_name: &str, class_name: &str) -> Expression {
-    msg_send(
-        x_class(var_name),
-        MessageSelector::Binary("=".into()),
-        vec![class_ref(class_name)],
-    )
-}
-
 /// Helper: build `(x class) =:= ClassName` binary expression
-fn class_eqeq(var_name: &str, class_name: &str) -> Expression {
+fn class_eq(var_name: &str, class_name: &str) -> Expression {
     msg_send(
         x_class(var_name),
         MessageSelector::Binary("=:=".into()),
@@ -69,7 +60,7 @@ fn block_with_return(value: Expression) -> Expression {
 fn test_narrowing_class_eq_in_true_block() {
     // Build a class with a method:
     //   process: x :: Object =>
-    //     (x class = Integer) ifTrue: [x + 1]
+    //     (x class =:= Integer) ifTrue: [x + 1]
     //     x + 1    // should warn — x is Object outside the block
     let hierarchy = ClassHierarchy::with_builtins();
     let class = {
@@ -77,7 +68,7 @@ fn test_narrowing_class_eq_in_true_block() {
             &["process:"],
             vec![("x", Some("Object"))],
             vec![
-                // (x class = Integer) ifTrue: [x + 1]
+                // (x class =:= Integer) ifTrue: [x + 1]
                 if_true(
                     class_eq("x", "Integer"),
                     block_expr(vec![msg_send(
@@ -125,7 +116,9 @@ fn test_narrowing_class_eq_in_true_block() {
 
 #[test]
 fn test_narrowing_class_eqeq_in_true_block() {
-    // Same as above but with =:= operator
+    // Isolated variant of the test above: only the guarded block, no
+    // outside-the-block statement (that scoping case is covered by
+    // `test_narrowing_class_eq_in_true_block`).
     let hierarchy = ClassHierarchy::with_builtins();
     let class = {
         let process_method = make_keyword_method(
@@ -134,7 +127,7 @@ fn test_narrowing_class_eqeq_in_true_block() {
             vec![
                 // (x class =:= Integer) ifTrue: [x + 1]
                 if_true(
-                    class_eqeq("x", "Integer"),
+                    class_eq("x", "Integer"),
                     block_expr(vec![msg_send(
                         var("x"),
                         MessageSelector::Binary("+".into()),
@@ -258,7 +251,7 @@ fn bt2741_is_kind_of_subclass_narrows_true_branch_to_subclass() {
     );
 }
 
-/// ADR 0102 §2 group 2 / BT-2741: `x class = Bar` against a hierarchy-unrelated
+/// ADR 0102 §2 group 2 / BT-2741: `x class =:= Bar` against a hierarchy-unrelated
 /// sealed class types the (unreachable) true branch `Never` and fires the
 /// impossible-class-comparison hint, mirroring
 /// `check_impossible_singleton_comparison`'s "can never be true" wording.
@@ -274,7 +267,7 @@ fn bt2741_class_eq_unrelated_class_true_branch_never_emits_hint() {
     // Integer and String are both sealed and hierarchy-unrelated.
     let assignment = assign("x", int_lit(42));
     let _ = checker.infer_expr(&assignment, &hierarchy, &mut env, false);
-    // `(x class = String) ifTrue: [nil]`
+    // `(x class =:= String) ifTrue: [nil]`
     let guard = class_eq("x", "String");
     let expr = if_true(guard, block_expr(vec![var("nil")]));
     let _ = checker.infer_expr(&expr, &hierarchy, &mut env, false);
@@ -390,7 +383,7 @@ fn bt2741_send_on_never_receiver_is_silent() {
     let hierarchy = ClassHierarchy::with_builtins();
     let mut env = TypeEnv::new();
     env.set_local("x", InferredType::known("Integer"));
-    // `(x class = String) ifTrue: [x totallyBogusSelector]` — inside the
+    // `(x class =:= String) ifTrue: [x totallyBogusSelector]` — inside the
     // (unreachable, Never-typed) true branch, an otherwise-unknown selector
     // send must not add a second diagnostic beyond the guard's own hint.
     let guard = class_eq("x", "String");
@@ -583,13 +576,13 @@ fn test_union_deduplication() {
 
 #[test]
 fn test_detect_narrowing_class_eq_pattern() {
-    // (x class = Integer) → should detect narrowing for x, tested against
+    // (x class =:= Integer) → should detect narrowing for x, tested against
     // Integer. ADR 0102 §2 group 2: `detect` leaves `true_type` provisional
     // (`Dynamic`) and records the tested class in `class_test`;
     // `refine_class_narrowing` resolves the actual narrowed type later.
     let expr = class_eq("x", "Integer");
     let info = TypeChecker::detect_narrowing(&expr);
-    assert!(info.is_some(), "Should detect class = narrowing");
+    assert!(info.is_some(), "Should detect class =:= narrowing");
     let info = info.unwrap();
     assert_eq!(info.variable, EnvKey::local("x"));
     assert_eq!(
@@ -643,13 +636,13 @@ fn test_detect_narrowing_no_match() {
 
 #[test]
 fn test_detect_narrowing_singleton_eq() {
-    // `ms = #infinity` records the singleton, not negated.
+    // `ms =:= #infinity` records the singleton, not negated.
     let expr = msg_send(
         var("ms"),
-        MessageSelector::Binary("=".into()),
+        MessageSelector::Binary("=:=".into()),
         vec![symbol_lit("infinity")],
     );
-    let info = TypeChecker::detect_narrowing(&expr).expect("should detect singleton =");
+    let info = TypeChecker::detect_narrowing(&expr).expect("should detect singleton =:=");
     assert_eq!(info.variable, EnvKey::local("ms"));
     let eq = info.singleton_eq.expect("singleton_eq recorded");
     assert_eq!(eq.singleton.as_str(), "#infinity");
@@ -658,10 +651,10 @@ fn test_detect_narrowing_singleton_eq() {
 
 #[test]
 fn test_detect_narrowing_singleton_eq_symmetric() {
-    // `#infinity = ms` detects the same as `ms = #infinity`.
+    // `#infinity =:= ms` detects the same as `ms =:= #infinity`.
     let expr = msg_send(
         symbol_lit("infinity"),
-        MessageSelector::Binary("=".into()),
+        MessageSelector::Binary("=:=".into()),
         vec![var("ms")],
     );
     let info = TypeChecker::detect_narrowing(&expr).expect("should detect #foo = x");
@@ -687,7 +680,7 @@ fn test_detect_narrowing_singleton_inequality_is_negated() {
 
 #[test]
 fn test_detect_narrowing_singleton_eq_through_nested_parens() {
-    // `ms = ((#infinity))` — `symbol_literal` unwraps all paren levels.
+    // `ms =:= ((#infinity))` — `symbol_literal` unwraps all paren levels.
     let nested = Expression::Parenthesized {
         expression: Box::new(Expression::Parenthesized {
             expression: Box::new(symbol_lit("infinity")),
@@ -695,7 +688,11 @@ fn test_detect_narrowing_singleton_eq_through_nested_parens() {
         }),
         span: span(),
     };
-    let expr = msg_send(var("ms"), MessageSelector::Binary("=".into()), vec![nested]);
+    let expr = msg_send(
+        var("ms"),
+        MessageSelector::Binary("=:=".into()),
+        vec![nested],
+    );
     let info = TypeChecker::detect_narrowing(&expr).expect("should detect through nested parens");
     assert_eq!(info.variable, EnvKey::local("ms"));
     assert_eq!(info.singleton_eq.unwrap().singleton.as_str(), "#infinity");
@@ -703,10 +700,10 @@ fn test_detect_narrowing_singleton_eq_through_nested_parens() {
 
 #[test]
 fn test_detect_narrowing_two_symbol_literals_no_match() {
-    // `#a = #b` has no variable to narrow.
+    // `#a =:= #b` has no variable to narrow.
     let expr = msg_send(
         symbol_lit("a"),
-        MessageSelector::Binary("=".into()),
+        MessageSelector::Binary("=:=".into()),
         vec![symbol_lit("b")],
     );
     assert!(TypeChecker::detect_narrowing(&expr).is_none());
@@ -714,14 +711,14 @@ fn test_detect_narrowing_two_symbol_literals_no_match() {
 
 #[test]
 fn test_refine_singleton_eq_splits_union() {
-    // ms :: Integer | #infinity, after `ms = #infinity`:
+    // ms :: Integer | #infinity, after `ms =:= #infinity`:
     //   true branch → #infinity, false branch → Integer.
     let hierarchy = ClassHierarchy::with_builtins();
     let mut env = TypeEnv::new();
     env.set_local("ms", InferredType::simple_union(&["Integer", "#infinity"]));
     let expr = msg_send(
         var("ms"),
-        MessageSelector::Binary("=".into()),
+        MessageSelector::Binary("=:=".into()),
         vec![symbol_lit("infinity")],
     );
     let info = TypeChecker::detect_narrowing(&expr).unwrap();
@@ -749,7 +746,7 @@ fn test_refine_singleton_inequality_swaps_branches() {
 
 #[test]
 fn test_refine_singleton_eq_multi_member_union_keeps_rest() {
-    // d :: #north | #south | #east, after `d = #north`:
+    // d :: #north | #south | #east, after `d =:= #north`:
     //   false branch keeps #south | #east.
     let hierarchy = ClassHierarchy::with_builtins();
     let mut env = TypeEnv::new();
@@ -759,7 +756,7 @@ fn test_refine_singleton_eq_multi_member_union_keeps_rest() {
     );
     let expr = msg_send(
         var("d"),
-        MessageSelector::Binary("=".into()),
+        MessageSelector::Binary("=:=".into()),
         vec![symbol_lit("north")],
     );
     let info = TypeChecker::detect_narrowing(&expr).unwrap();
@@ -773,14 +770,14 @@ fn test_refine_singleton_eq_multi_member_union_keeps_rest() {
 
 #[test]
 fn test_refine_singleton_eq_all_removed_is_never() {
-    // d :: #north (already narrowed), after `d = #north`:
+    // d :: #north (already narrowed), after `d =:= #north`:
     //   the false branch is unreachable → Never.
     let hierarchy = ClassHierarchy::with_builtins();
     let mut env = TypeEnv::new();
     env.set_local("d", InferredType::known("#north"));
     let expr = msg_send(
         var("d"),
-        MessageSelector::Binary("=".into()),
+        MessageSelector::Binary("=:=".into()),
         vec![symbol_lit("north")],
     );
     let info = TypeChecker::detect_narrowing(&expr).unwrap();
@@ -791,14 +788,14 @@ fn test_refine_singleton_eq_all_removed_is_never() {
 
 #[test]
 fn test_refine_singleton_eq_dynamic_variable_keeps_false_dynamic() {
-    // An unbound variable resolves to Dynamic; `x = #foo` narrows the true
+    // An unbound variable resolves to Dynamic; `x =:= #foo` narrows the true
     // branch to #foo and leaves the false branch Dynamic — `difference(Dynamic,
     // #foo) = Dynamic` (Dynamic is opaque to subtraction, ADR 0102 §1).
     let hierarchy = ClassHierarchy::with_builtins();
     let env = TypeEnv::new(); // `x` is absent → Dynamic
     let expr = msg_send(
         var("x"),
-        MessageSelector::Binary("=".into()),
+        MessageSelector::Binary("=:=".into()),
         vec![symbol_lit("foo")],
     );
     let info = TypeChecker::detect_narrowing(&expr).unwrap();
@@ -830,7 +827,7 @@ fn test_refine_singleton_symbol_left_inequality_swaps_branches() {
 }
 
 /// BT-2740 / ADR 0102 §2 (pinned corner 1): an impossible singleton test
-/// (`x :: Integer; x = #foo`) now narrows the *true* branch to `Never` via
+/// (`x :: Integer; x =:= #foo`) now narrows the *true* branch to `Never` via
 /// `intersect(Integer, #foo) = Never`. Previously `union_without` returned the
 /// singleton (`#foo`) unconditionally for the true branch even though it is
 /// unreachable. The "can never be true" diagnostic still fires elsewhere
@@ -842,7 +839,7 @@ fn test_refine_singleton_eq_impossible_true_branch_is_never() {
     env.set_local("x", InferredType::known("Integer"));
     let expr = msg_send(
         var("x"),
-        MessageSelector::Binary("=".into()),
+        MessageSelector::Binary("=:=".into()),
         vec![symbol_lit("foo")],
     );
     let info = TypeChecker::detect_narrowing(&expr).unwrap();
@@ -853,7 +850,7 @@ fn test_refine_singleton_eq_impossible_true_branch_is_never() {
     assert_eq!(refined.false_type, Some(InferredType::known("Integer")));
 }
 
-/// BT-2740 / ADR 0102 §2 (new capability): the false branch of `x = #foo` on a
+/// BT-2740 / ADR 0102 §2 (new capability): the false branch of `x =:= #foo` on a
 /// bare `Symbol` receiver narrows to the negation `Symbol \ #foo` (every symbol
 /// except `#foo`) and renders as `Symbol \ #foo` in hover.
 #[test]
@@ -863,7 +860,7 @@ fn test_refine_singleton_eq_symbol_false_branch_is_negation() {
     env.set_local("s", InferredType::known("Symbol"));
     let expr = msg_send(
         var("s"),
-        MessageSelector::Binary("=".into()),
+        MessageSelector::Binary("=:=".into()),
         vec![symbol_lit("foo")],
     );
     let info = TypeChecker::detect_narrowing(&expr).unwrap();
@@ -888,10 +885,10 @@ fn bt2624_singleton_eq_impossible_member_emits_hint() {
     let hierarchy = ClassHierarchy::with_builtins();
     let mut env = TypeEnv::new();
     env.set_local("d", InferredType::simple_union(&["#north", "#south"]));
-    // `(d = #west) ifTrue: [nil]` — the comparison is the guard receiver.
+    // `(d =:= #west) ifTrue: [nil]` — the comparison is the guard receiver.
     let guard = msg_send(
         var("d"),
-        MessageSelector::Binary("=".into()),
+        MessageSelector::Binary("=:=".into()),
         vec![symbol_lit("west")],
     );
     let expr = if_true(guard, block_expr(vec![var("nil")]));
@@ -950,13 +947,13 @@ fn bt2624_singleton_eq_possible_member_no_hint() {
     let hierarchy = ClassHierarchy::with_builtins();
     let mut checker = TypeChecker::new();
 
-    // `(d = #north) ifTrue: [nil]` — #north is a member, so satisfiable.
+    // `(d =:= #north) ifTrue: [nil]` — #north is a member, so satisfiable.
     let mut env = TypeEnv::new();
     env.set_local("d", InferredType::simple_union(&["#north", "#south"]));
     let member_guard = if_true(
         msg_send(
             var("d"),
-            MessageSelector::Binary("=".into()),
+            MessageSelector::Binary("=:=".into()),
             vec![symbol_lit("north")],
         ),
         block_expr(vec![var("nil")]),
@@ -964,12 +961,12 @@ fn bt2624_singleton_eq_possible_member_no_hint() {
     let _ = checker.infer_expr(&member_guard, &hierarchy, &mut env, false);
 
     // `s :: Symbol` admits every singleton — no impossibility hint for
-    // `s = #anything`.
+    // `s =:= #anything`.
     let mut sym_env = TypeEnv::new();
     sym_env.set_local("s", InferredType::known("Symbol"));
     let sym_expr = msg_send(
         var("s"),
-        MessageSelector::Binary("=".into()),
+        MessageSelector::Binary("=:=".into()),
         vec![symbol_lit("anything")],
     );
     let _ = checker.infer_expr(&sym_expr, &hierarchy, &mut sym_env, false);
@@ -1128,14 +1125,14 @@ fn bt2764_singleton_eq_symbol_supertype_union_member_no_hint() {
     let hierarchy = ClassHierarchy::with_builtins();
     let mut env = TypeEnv::new();
     // `x :: ProtoObject | Integer` — the ProtoObject member could hold any
-    // symbol value, so `x = #foo` is satisfiable.
+    // symbol value, so `x =:= #foo` is satisfiable.
     env.set_local("x", InferredType::simple_union(&["ProtoObject", "Integer"]));
     let mut checker = TypeChecker::new();
 
-    // Guarded form: `(x = #foo) ifTrue: [nil]`.
+    // Guarded form: `(x =:= #foo) ifTrue: [nil]`.
     let guard = msg_send(
         var("x"),
-        MessageSelector::Binary("=".into()),
+        MessageSelector::Binary("=:=".into()),
         vec![symbol_lit("foo")],
     );
     let guarded = if_true(guard, block_expr(vec![var("nil")]));
@@ -1160,7 +1157,7 @@ fn bt2764_singleton_eq_symbol_supertype_union_member_no_hint() {
 }
 
 /// BT-2764: `refine_singleton_narrowing` on a bare `ProtoObject`-typed
-/// variable — the true branch of `x = #foo` narrows to the singleton (via the
+/// variable — the true branch of `x =:= #foo` narrows to the singleton (via the
 /// hierarchy-aware `intersect`), not to a spurious `Never`; the false branch
 /// keeps `ProtoObject` (nominal-class difference is out of scope, so nothing
 /// is removable).
@@ -1171,7 +1168,7 @@ fn bt2764_refine_singleton_eq_symbol_supertype_true_branch_is_singleton() {
     env.set_local("x", InferredType::known("ProtoObject"));
     let expr = msg_send(
         var("x"),
-        MessageSelector::Binary("=".into()),
+        MessageSelector::Binary("=:=".into()),
         vec![symbol_lit("foo")],
     );
     let info = TypeChecker::detect_narrowing(&expr).unwrap();
@@ -1184,7 +1181,7 @@ fn bt2764_refine_singleton_eq_symbol_supertype_true_branch_is_singleton() {
 fn test_narrowing_does_not_leak_outside_block() {
     // Verify narrowing is scoped to block only:
     //   process: x :: Object =>
-    //     (x class = String) ifTrue: [x size]
+    //     (x class =:= String) ifTrue: [x size]
     //     x unknownThing   // Object doesn't have unknownThing → warning
     let hierarchy = ClassHierarchy::with_builtins();
     let class = {

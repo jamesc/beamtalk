@@ -590,7 +590,7 @@ Module {
 }
 
 Diagnostics:
-Diagnostic { severity: Error, message: "Unexpected token: expected expression, found =", span: Span { start: 337, end: 338 }, hint: None, category: None, notes: [] }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found =", span: Span { start: 337, end: 338 }, hint: Some("'=' is not an operator in Beamtalk; use '=:=' for value equality or '==' for reference equality"), category: None, notes: [] }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 421, end: 422 }, hint: None, category: None, notes: [] }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 485, end: 486 }, hint: None, category: None, notes: [] }
 Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 672, end: 673 }, hint: None, category: None, notes: [] }

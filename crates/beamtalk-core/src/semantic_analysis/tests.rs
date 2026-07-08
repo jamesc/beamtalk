@@ -778,6 +778,7 @@ fn test_self_available_in_method_bodies() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -1187,6 +1188,7 @@ fn test_analyse_hierarchy_includes_user_classes() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -1241,6 +1243,7 @@ fn test_analyse_reports_sealed_class_diagnostic() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -1534,6 +1537,7 @@ fn test_abstract_class_instantiation_error() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -1649,6 +1653,7 @@ fn test_self_inside_method_no_error() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -1735,6 +1740,7 @@ fn test_unused_variable_in_method_warns() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -1804,6 +1810,7 @@ fn test_used_variable_no_warning() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -1866,6 +1873,7 @@ fn test_underscore_prefixed_variable_no_warning() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -1930,6 +1938,7 @@ fn test_unused_parameter_emits_warning() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -1996,6 +2005,7 @@ fn test_unused_parameter_underscore_suppresses_warning() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -2063,6 +2073,7 @@ fn test_used_parameter_no_warning() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -2134,6 +2145,7 @@ fn test_unused_parameter_primitive_body_no_warning() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
     let module = Module {
@@ -2206,6 +2218,7 @@ fn test_unused_parameter_intrinsic_body_no_warning() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
     let module = Module {
@@ -2275,6 +2288,7 @@ fn test_unused_variable_in_class_method_warns() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -2340,6 +2354,7 @@ fn test_block_parameter_no_unused_warning() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -2407,6 +2422,7 @@ fn test_pattern_variable_no_unused_warning() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -2477,6 +2493,7 @@ fn test_unused_variable_in_nested_block_warns() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -2555,6 +2572,7 @@ fn test_variable_used_via_closure_no_warning() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -2630,6 +2648,7 @@ fn test_dead_code_after_return_in_method() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -2692,6 +2711,7 @@ fn test_no_dead_code_without_return() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -2762,6 +2782,7 @@ fn test_dead_code_in_block() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -2822,6 +2843,7 @@ fn test_return_at_end_no_warning() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -2908,6 +2930,7 @@ fn test_super_inside_method_no_error() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -3011,6 +3034,7 @@ fn test_block_param_shadows_outer_variable() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -3091,6 +3115,7 @@ fn test_underscore_prefixed_no_shadow_warning() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -3169,6 +3194,7 @@ fn test_no_shadow_warning_different_names() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -3323,6 +3349,7 @@ fn make_abstract_class(name: &str) -> ClassDefinition {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     }
 }
@@ -3506,6 +3533,7 @@ fn test_actor_new_error_in_standalone_method() {
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: test_span(),
     };
 
@@ -3645,6 +3673,7 @@ fn analyse_with_known_vars_and_classes_injects_user_class_into_hierarchy() {
         package: None,
         is_value: false,
         is_native: false,
+        handle_scope: None,
         state: vec![],
         state_types: std::collections::HashMap::new(),
         state_has_default: std::collections::HashMap::new(),
@@ -3698,6 +3727,208 @@ fn bt2627_singleton_union_annotation_flows_to_type_checker() {
         }),
         "expected a union-send diagnostic naming `Integer | #infinity`, got: {:?}",
         result.diagnostics
+    );
+}
+
+// --- ADR 0103: handleScope: only valid on Object-kind classes (BT-2754) ---
+
+#[test]
+fn handle_scope_on_object_class_is_silent() {
+    let src = "typed Object subclass: MetricsTable native: metrics\n  handleScope: #node\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = analyse(&module);
+    assert!(
+        !result
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("handleScope:")),
+        "handleScope on an Object class must not warn, got: {:?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn handle_scope_on_value_class_warns() {
+    let src = "Value subclass: MyPoint\n  handleScope: #node\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = analyse(&module);
+    assert!(
+        result.diagnostics.iter().any(|d| {
+            d.message.contains("handleScope:")
+                && d.message.contains("value")
+                && d.category == Some(crate::source_analysis::DiagnosticCategory::Sendability)
+        }),
+        "handleScope on a Value class must warn, got: {:?}",
+        result.diagnostics
+    );
+}
+
+// --- ADR 0103: Announcement payload sendability + companion lint (BT-2757) ---
+
+#[test]
+fn announcement_payload_port_warns() {
+    let src = "Object subclass: Main\n  \
+        fire: port :: Port =>\n    \
+        Announcer new announce: port\n";
+    let diags = sendability_diags(src);
+    assert!(
+        diags.iter().any(|d| {
+            d.message.contains("Announcement payload") && d.message.contains("process-bound")
+        }),
+        "Port announcement payload must warn, got: {diags:?}"
+    );
+}
+
+#[test]
+fn undeclared_handle_class_nudged() {
+    let src = "typed Object subclass: MyHandle native: my_backing\n  \
+        read -> Integer => 0\n";
+    let diags = sendability_diags(src);
+    assert!(
+        diags
+            .iter()
+            .any(|d| { d.message.contains("MyHandle") && d.message.contains("handleScope:") }),
+        "undeclared FFI-wrapping handle class must be nudged, got: {diags:?}"
+    );
+}
+
+#[test]
+fn declared_handle_class_not_nudged() {
+    let src = "typed Object subclass: MyHandle native: my_backing\n  \
+        handleScope: #process\n  \
+        read -> Integer => 0\n";
+    let diags = sendability_diags(src);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("declares no")),
+        "a class with handleScope: must not be nudged, got: {diags:?}"
+    );
+}
+
+#[test]
+fn inherited_handle_scope_not_nudged() {
+    // A native: Object subclass whose *parent* declares handleScope: inherits
+    // the scope, so the companion lint must not nudge it (suppress path).
+    let src = "typed Object subclass: HandleBase native: hb\n  \
+        handleScope: #process\n  \
+        read -> Integer => 0\n\n\
+        typed HandleBase subclass: HandleChild native: hc\n  \
+        write -> Integer => 0\n";
+    let diags = sendability_diags(src);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("declares no")),
+        "a subclass inheriting handleScope: from a parent must not be nudged, got: {diags:?}"
+    );
+}
+
+#[test]
+fn plain_object_class_not_nudged() {
+    // No `native:` — not an FFI-wrapping class; must not be nudged.
+    let src = "Object subclass: Plain\n  \
+        doThing -> Integer => 0\n";
+    let diags = sendability_diags(src);
+    assert!(
+        diags.is_empty(),
+        "a plain Object class must not be nudged, got: {diags:?}"
+    );
+}
+
+// --- ADR 0103: block-capture sendability (BT-2756) ---
+
+fn sendability_diags(src: &str) -> Vec<Diagnostic> {
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    analyse(&module)
+        .diagnostics
+        .into_iter()
+        .filter(|d| d.category == Some(crate::source_analysis::DiagnosticCategory::Sendability))
+        .collect()
+}
+
+// --- ADR 0103: end-to-end diagnostic integration (BT-2758) ---
+// User-declared handleScope crossing a boundary, and #node silence.
+
+#[test]
+fn e2e_user_process_handle_in_actor_message_warns() {
+    let src = "typed Object subclass: DbConn native: db\n  \
+        handleScope: #process\n  \
+        query -> Integer => 0\n\n\
+        Actor subclass: Worker\n  \
+        use: conn => conn query\n\n\
+        Object subclass: Main\n  \
+        run: conn :: DbConn with: worker :: Worker =>\n    \
+        worker use: conn\n";
+    let diags = sendability_diags(src);
+    assert!(
+        diags.iter().any(|d| {
+            d.message.contains("`conn`") && d.message.contains("passed in an actor message")
+        }),
+        "user handleScope: #process value in an actor message must warn, got: {diags:?}"
+    );
+}
+
+#[test]
+fn e2e_node_scoped_handle_in_actor_message_silent() {
+    let src = "typed Object subclass: Cache native: c\n  \
+        handleScope: #node\n  \
+        get -> Integer => 0\n\n\
+        Actor subclass: Worker\n  \
+        use: cache => cache get\n\n\
+        Object subclass: Main\n  \
+        run: cache :: Cache with: worker :: Worker =>\n    \
+        worker use: cache\n";
+    let diags = sendability_diags(src);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("`cache`")),
+        "#node-scoped value in an actor message must be silent in v1, got: {diags:?}"
+    );
+}
+
+#[test]
+fn block_captures_port_sent_to_actor_warns() {
+    let src = "Actor subclass: Worker\n  \
+        schedule: aBlock => aBlock value\n\n\
+        Object subclass: Main\n  \
+        run: port :: Port with: worker :: Worker =>\n    \
+        worker schedule: [port asString]\n";
+    let diags = sendability_diags(src);
+    assert_eq!(
+        diags.len(),
+        1,
+        "expected one block-capture warning: {diags:?}"
+    );
+    assert!(
+        diags[0].message.contains("block captures `port`") && diags[0].message.contains("sent to"),
+        "unexpected message: {}",
+        diags[0].message
+    );
+}
+
+#[test]
+fn block_captures_port_in_local_do_is_silent() {
+    // `do:` is a state-threading selector — the block stays in this process.
+    let src = "Object subclass: Main\n  \
+        run: port :: Port =>\n    \
+        #(1, 2) do: [:each | port asString]\n";
+    let diags = sendability_diags(src);
+    assert!(
+        diags.is_empty(),
+        "block in a local do: must not warn: {diags:?}"
+    );
+}
+
+#[test]
+fn block_captures_sendable_value_is_silent() {
+    let src = "Actor subclass: Worker\n  \
+        schedule: aBlock => aBlock value\n\n\
+        Object subclass: Main\n  \
+        run: count :: Integer with: worker :: Worker =>\n    \
+        worker schedule: [count printString]\n";
+    let diags = sendability_diags(src);
+    assert!(
+        diags.is_empty(),
+        "capturing a Sendable value must not warn: {diags:?}"
     );
 }
 
@@ -3855,6 +4086,7 @@ fn workspace_binding_shadowing_class_emits_warning() {
         package: None,
         is_value: false,
         is_native: false,
+        handle_scope: None,
         state: vec![],
         state_types: std::collections::HashMap::new(),
         state_has_default: std::collections::HashMap::new(),
@@ -3914,6 +4146,7 @@ fn workspace_binding_not_in_hierarchy_no_shadow_warning() {
         package: None,
         is_value: false,
         is_native: false,
+        handle_scope: None,
         state: vec![],
         state_types: std::collections::HashMap::new(),
         state_has_default: std::collections::HashMap::new(),
@@ -3970,6 +4203,7 @@ fn fixture_sourced_protocol_name_is_not_unresolved() {
         package: None,
         is_value: false,
         is_native: false,
+        handle_scope: None,
         state: vec![],
         state_types: std::collections::HashMap::new(),
         state_has_default: std::collections::HashMap::new(),

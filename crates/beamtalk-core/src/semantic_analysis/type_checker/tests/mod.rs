@@ -8,6 +8,7 @@
 
 mod common;
 
+mod adr_0104_integration;
 mod arg_return_checking;
 mod asserted_match_exhaustiveness;
 mod basic_inference;
@@ -33,6 +34,7 @@ mod protocol;
 mod result_and_type_args;
 mod self_class;
 mod self_type;
+mod sendability_checking;
 mod set_operators;
 mod singleton_match_exhaustiveness;
 mod spawn_with_keys;

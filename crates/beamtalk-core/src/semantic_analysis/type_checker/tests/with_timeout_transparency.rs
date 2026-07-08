@@ -43,6 +43,7 @@ fn add_slow_db_actor(hierarchy: &mut ClassHierarchy) {
         package: None,
         is_value: false,
         is_native: false,
+        handle_scope: None,
         state: vec![],
         state_types: std::collections::HashMap::new(),
         state_has_default: std::collections::HashMap::new(),
@@ -84,6 +85,7 @@ fn add_fake_proxy_object(hierarchy: &mut ClassHierarchy) {
         package: None,
         is_value: false,
         is_native: false,
+        handle_scope: None,
         state: vec![],
         state_types: std::collections::HashMap::new(),
         state_has_default: std::collections::HashMap::new(),
@@ -204,11 +206,13 @@ fn non_actor_with_timeout_is_not_retyped() {
 }
 
 // Note: `withTimeout:` returns `receiver_ty.clone()`, so type args are
-// preserved by construction for any receiver that reaches the guard. A
-// *generic* receiver (`Queue(Integer)`) is not covered here: parametric
-// receivers route through the generic-substitution path and resolve to
-// `Dynamic` before reaching the transparency rule — a separate inference
-// path, out of scope for ADR 0104 (whose actor examples are non-generic).
+// preserved for any receiver that reaches the guard — including *generic*
+// actors. `(q withTimeout: t) m` on `q :: Queue(Integer)` resolves `m`'s
+// return with `E = Integer`; this is verified end-to-end from real source in
+// `adr_0104_integration.rs::generic_actor_through_proxy_*`. It is pinned there
+// rather than here because the hand-built `ClassHierarchy` in this unit file
+// does not reproduce a generic actor's builtin-method inheritance the way the
+// full compile pipeline does.
 
 /// AC #2 (two-step form via a binding): `slowDb := db withTimeout: 30000`
 /// then `slowDb query: sql` infers `List` — the binding carries the
@@ -260,6 +264,7 @@ fn logger_class(
         package: None,
         is_value: false,
         is_native: false,
+        handle_scope: None,
         state: vec![],
         state_types: std::collections::HashMap::new(),
         state_has_default: std::collections::HashMap::new(),

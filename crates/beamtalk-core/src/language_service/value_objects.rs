@@ -90,20 +90,6 @@ impl Position {
         Some(Self::new(line, (offset_val - line_start) as u32))
     }
 
-    /// Converts a byte offset to a position given source text (legacy).
-    ///
-    /// Returns `None` if the offset is out of bounds.
-    ///
-    /// **Deprecated:** Use `from_byte_offset` for type safety.
-    #[must_use]
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "source files over 4GB are not supported"
-    )]
-    pub fn from_offset(source: &str, offset: usize) -> Option<Self> {
-        Self::from_byte_offset(source, ByteOffset::new(offset as u32))
-    }
-
     /// Converts a position to a byte offset given source text.
     ///
     /// Returns `None` if the position is out of bounds.
@@ -113,21 +99,6 @@ impl Position {
         reason = "source files over 4GB are not supported"
     )]
     pub fn to_byte_offset(self, source: &str) -> Option<ByteOffset> {
-        self.to_offset(source)
-            .map(|off| ByteOffset::new(off as u32))
-    }
-
-    /// Converts a position to a byte offset given source text (legacy).
-    ///
-    /// Returns `None` if the position is out of bounds.
-    ///
-    /// **Deprecated:** Use `to_byte_offset` for type safety.
-    #[must_use]
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "source files over 4GB are not supported"
-    )]
-    pub fn to_offset(self, source: &str) -> Option<usize> {
         let mut current_line = 0;
         let mut line_start = 0;
 
@@ -135,7 +106,7 @@ impl Position {
             if current_line == self.line {
                 let col = (i - line_start) as u32;
                 if col == self.column {
-                    return Some(i);
+                    return Some(ByteOffset::new(i as u32));
                 }
             }
             if ch == '\n' {
@@ -152,7 +123,7 @@ impl Position {
         if current_line == self.line {
             let col = (source.len() - line_start) as u32;
             if col == self.column {
-                return Some(source.len());
+                return Some(ByteOffset::new(source.len() as u32));
             }
         }
 
@@ -442,78 +413,165 @@ mod tests {
     use super::*;
 
     #[test]
-    fn position_from_offset() {
+    fn position_from_byte_offset() {
         let source = "hello\nworld\n!";
-        assert_eq!(Position::from_offset(source, 0), Some(Position::new(0, 0)));
-        assert_eq!(Position::from_offset(source, 5), Some(Position::new(0, 5)));
-        assert_eq!(Position::from_offset(source, 6), Some(Position::new(1, 0)));
-        assert_eq!(Position::from_offset(source, 11), Some(Position::new(1, 5)));
-        assert_eq!(Position::from_offset(source, 12), Some(Position::new(2, 0)));
+        assert_eq!(
+            Position::from_byte_offset(source, ByteOffset::new(0)),
+            Some(Position::new(0, 0))
+        );
+        assert_eq!(
+            Position::from_byte_offset(source, ByteOffset::new(5)),
+            Some(Position::new(0, 5))
+        );
+        assert_eq!(
+            Position::from_byte_offset(source, ByteOffset::new(6)),
+            Some(Position::new(1, 0))
+        );
+        assert_eq!(
+            Position::from_byte_offset(source, ByteOffset::new(11)),
+            Some(Position::new(1, 5))
+        );
+        assert_eq!(
+            Position::from_byte_offset(source, ByteOffset::new(12)),
+            Some(Position::new(2, 0))
+        );
     }
 
     #[test]
-    fn position_to_offset() {
+    fn position_to_byte_offset() {
         let source = "hello\nworld\n!";
-        assert_eq!(Position::new(0, 0).to_offset(source), Some(0));
-        assert_eq!(Position::new(0, 5).to_offset(source), Some(5));
-        assert_eq!(Position::new(1, 0).to_offset(source), Some(6));
-        assert_eq!(Position::new(1, 5).to_offset(source), Some(11));
-        assert_eq!(Position::new(2, 0).to_offset(source), Some(12));
+        assert_eq!(
+            Position::new(0, 0).to_byte_offset(source),
+            Some(ByteOffset::new(0))
+        );
+        assert_eq!(
+            Position::new(0, 5).to_byte_offset(source),
+            Some(ByteOffset::new(5))
+        );
+        assert_eq!(
+            Position::new(1, 0).to_byte_offset(source),
+            Some(ByteOffset::new(6))
+        );
+        assert_eq!(
+            Position::new(1, 5).to_byte_offset(source),
+            Some(ByteOffset::new(11))
+        );
+        assert_eq!(
+            Position::new(2, 0).to_byte_offset(source),
+            Some(ByteOffset::new(12))
+        );
     }
 
     // UTF-8 multi-byte character tests
     #[test]
-    fn position_from_offset_with_multibyte_utf8() {
+    fn position_from_byte_offset_with_multibyte_utf8() {
         // "héllo" has é as 2 bytes (0xC3 0xA9), total 6 bytes
         let source = "héllo";
-        assert_eq!(Position::from_offset(source, 0), Some(Position::new(0, 0))); // h
-        assert_eq!(Position::from_offset(source, 1), Some(Position::new(0, 1))); // start of é
-        assert_eq!(Position::from_offset(source, 3), Some(Position::new(0, 3))); // l (after 2-byte é)
-        assert_eq!(Position::from_offset(source, 6), Some(Position::new(0, 6))); // end of string
+        assert_eq!(
+            Position::from_byte_offset(source, ByteOffset::new(0)),
+            Some(Position::new(0, 0))
+        ); // h
+        assert_eq!(
+            Position::from_byte_offset(source, ByteOffset::new(1)),
+            Some(Position::new(0, 1))
+        ); // start of é
+        assert_eq!(
+            Position::from_byte_offset(source, ByteOffset::new(3)),
+            Some(Position::new(0, 3))
+        ); // l (after 2-byte é)
+        assert_eq!(
+            Position::from_byte_offset(source, ByteOffset::new(6)),
+            Some(Position::new(0, 6))
+        ); // end of string
     }
 
     #[test]
-    fn position_from_offset_with_emoji() {
+    fn position_from_byte_offset_with_emoji() {
         // "a🎉b" has 🎉 as 4 bytes, total 6 bytes
         let source = "a🎉b";
-        assert_eq!(Position::from_offset(source, 0), Some(Position::new(0, 0))); // a
-        assert_eq!(Position::from_offset(source, 1), Some(Position::new(0, 1))); // start of 🎉
-        assert_eq!(Position::from_offset(source, 5), Some(Position::new(0, 5))); // b (after 4-byte emoji)
-        assert_eq!(Position::from_offset(source, 6), Some(Position::new(0, 6))); // end
+        assert_eq!(
+            Position::from_byte_offset(source, ByteOffset::new(0)),
+            Some(Position::new(0, 0))
+        ); // a
+        assert_eq!(
+            Position::from_byte_offset(source, ByteOffset::new(1)),
+            Some(Position::new(0, 1))
+        ); // start of 🎉
+        assert_eq!(
+            Position::from_byte_offset(source, ByteOffset::new(5)),
+            Some(Position::new(0, 5))
+        ); // b (after 4-byte emoji)
+        assert_eq!(
+            Position::from_byte_offset(source, ByteOffset::new(6)),
+            Some(Position::new(0, 6))
+        ); // end
     }
 
     #[test]
-    fn position_from_offset_with_cjk() {
+    fn position_from_byte_offset_with_cjk() {
         // "日本" has 2 CJK chars, each 3 bytes, total 6 bytes
         let source = "日本";
-        assert_eq!(Position::from_offset(source, 0), Some(Position::new(0, 0))); // 日
-        assert_eq!(Position::from_offset(source, 3), Some(Position::new(0, 3))); // 本
-        assert_eq!(Position::from_offset(source, 6), Some(Position::new(0, 6))); // end
+        assert_eq!(
+            Position::from_byte_offset(source, ByteOffset::new(0)),
+            Some(Position::new(0, 0))
+        ); // 日
+        assert_eq!(
+            Position::from_byte_offset(source, ByteOffset::new(3)),
+            Some(Position::new(0, 3))
+        ); // 本
+        assert_eq!(
+            Position::from_byte_offset(source, ByteOffset::new(6)),
+            Some(Position::new(0, 6))
+        ); // end
     }
 
     #[test]
-    fn position_to_offset_with_multibyte_utf8() {
+    fn position_to_byte_offset_with_multibyte_utf8() {
         let source = "héllo";
-        assert_eq!(Position::new(0, 0).to_offset(source), Some(0)); // h
-        assert_eq!(Position::new(0, 1).to_offset(source), Some(1)); // start of é
-        assert_eq!(Position::new(0, 3).to_offset(source), Some(3)); // l
-        assert_eq!(Position::new(0, 6).to_offset(source), Some(6)); // end
+        assert_eq!(
+            Position::new(0, 0).to_byte_offset(source),
+            Some(ByteOffset::new(0))
+        ); // h
+        assert_eq!(
+            Position::new(0, 1).to_byte_offset(source),
+            Some(ByteOffset::new(1))
+        ); // start of é
+        assert_eq!(
+            Position::new(0, 3).to_byte_offset(source),
+            Some(ByteOffset::new(3))
+        ); // l
+        assert_eq!(
+            Position::new(0, 6).to_byte_offset(source),
+            Some(ByteOffset::new(6))
+        ); // end
     }
 
     #[test]
-    fn position_from_offset_multiline_with_utf8() {
+    fn position_from_byte_offset_multiline_with_utf8() {
         // Test multiline with UTF-8
         let source = "héllo\nwörld";
-        assert_eq!(Position::from_offset(source, 0), Some(Position::new(0, 0))); // h
-        assert_eq!(Position::from_offset(source, 7), Some(Position::new(1, 0))); // w (after "héllo\n" which is 7 bytes)
-        assert_eq!(Position::from_offset(source, 8), Some(Position::new(1, 1))); // start of ö
+        assert_eq!(
+            Position::from_byte_offset(source, ByteOffset::new(0)),
+            Some(Position::new(0, 0))
+        ); // h
+        assert_eq!(
+            Position::from_byte_offset(source, ByteOffset::new(7)),
+            Some(Position::new(1, 0))
+        ); // w (after "héllo\n" which is 7 bytes)
+        assert_eq!(
+            Position::from_byte_offset(source, ByteOffset::new(8)),
+            Some(Position::new(1, 1))
+        ); // start of ö
     }
 
     #[test]
     fn position_out_of_bounds() {
         let source = "hello";
-        assert_eq!(Position::from_offset(source, 100), None);
-        assert_eq!(Position::new(10, 0).to_offset(source), None);
-        assert_eq!(Position::new(0, 100).to_offset(source), None);
+        assert_eq!(
+            Position::from_byte_offset(source, ByteOffset::new(100)),
+            None
+        );
+        assert_eq!(Position::new(10, 0).to_byte_offset(source), None);
+        assert_eq!(Position::new(0, 100).to_byte_offset(source), None);
     }
 }

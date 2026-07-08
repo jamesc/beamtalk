@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! `x = #foo` / `#foo = x` singleton (in)equality narrowing (BT-2617).
+//! `x =:= #foo` / `#foo =:= x` singleton (in)equality narrowing (BT-2617).
 //!
 //! Detects an (in)equality test of a variable against a singleton symbol
 //! literal (`#foo`). `detect` only sees the AST, so it records the tested
@@ -59,21 +59,21 @@ pub(crate) struct SingletonEqDetection {
 /// `lhs <op> rhs` (where `rhs` is `arguments.first()`). Reused by both the
 /// narrowing-guard path (via [`detect`]) and the standalone-send path
 /// (`infer_union_message_send`, BT-2631) so the operand-matching rule — accept
-/// `x = #foo` or `#foo = x`, reject `#a = #b` and non-singleton tests — lives in
-/// one place.
+/// `x =:= #foo` or `#foo =:= x`, reject `#a =:= #b` and non-singleton tests —
+/// lives in one place.
 pub(crate) fn detect_binary(
     lhs: &Expression,
     op: &EcoString,
     arguments: &[Expression],
 ) -> Option<SingletonEqDetection> {
     let negated = match op.as_str() {
-        "=" | "=:=" => false,
+        "=:=" => false,
         "/=" | "=/=" => true,
         _ => return None,
     };
     let rhs_expr = arguments.first()?;
-    // Accept either `x = #foo` or `#foo = x`; reject `#a = #b` (two literals)
-    // and any test where neither side is a singleton literal.
+    // Accept either `x =:= #foo` or `#foo =:= x`; reject `#a =:= #b` (two
+    // literals) and any test where neither side is a singleton literal.
     let (var_expr, symbol_name) = match (symbol_literal(lhs), symbol_literal(rhs_expr)) {
         (None, Some(name)) => (lhs, name),
         (Some(name), None) => (rhs_expr, name),

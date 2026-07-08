@@ -182,6 +182,10 @@ impl Parser {
             None
         };
 
+        // Parse optional `handleScope: #symbol` clause (ADR 0103). Appears at
+        // the head of the class body, like `native:` is a header clause.
+        let handle_scope = self.parse_optional_handle_scope();
+
         // Parse class body (state declarations, instance methods, class methods, class variables)
         let (state, methods, class_methods, class_variables) = self.parse_class_body();
 
@@ -189,6 +193,12 @@ impl Parser {
         let mut end = name.span;
         if let Some(ref bm) = backing_module {
             end = end.merge(bm.span);
+        }
+        // ADR 0103: include the `handleScope:` clause so a scope-only class body
+        // (no state/methods) still spans its declaration — hover/diagnostic
+        // ranges must cover it.
+        if let Some(ref hs) = handle_scope {
+            end = end.merge(hs.span);
         }
         if let Some(s) = state.last() {
             end = end.merge(s.span);
@@ -225,7 +235,36 @@ impl Parser {
         class_def.doc_comment = doc_comment;
         class_def.comments = comments;
         class_def.backing_module = backing_module;
+        class_def.handle_scope = handle_scope;
         class_def
+    }
+
+    /// Parses an optional class-side `handleScope: #symbol` clause (ADR 0103).
+    ///
+    /// The scope value is symbol-valued and the set is deliberately **open**
+    /// (`#process` / `#node` ship first) — the parser accepts any symbol and
+    /// lets the checker decide meaning, so no closed enum is hardcoded here.
+    /// Returns the bare symbol as an [`Identifier`] (name without the leading
+    /// `#`), or `None` when no clause is present.
+    fn parse_optional_handle_scope(&mut self) -> Option<Identifier> {
+        if !matches!(self.current_kind(), TokenKind::Keyword(k) if k == "handleScope:") {
+            return None;
+        }
+        self.advance(); // consume `handleScope:`
+        if let TokenKind::Symbol(name) = self.current_kind() {
+            let name = name.clone();
+            let span = self.current_token().span();
+            self.advance(); // consume the symbol
+            Some(Identifier::new(name, span))
+        } else {
+            self.error("Expected a symbol (e.g. #process or #node) after 'handleScope:'");
+            // Consume the offending token so class-body parsing recovers cleanly
+            // instead of cascading on it (mirrors the `native:` error path).
+            if !self.current_token().has_leading_newline() && !self.is_at_end() {
+                self.advance();
+            }
+            None
+        }
     }
 
     /// Parses optional type parameters: `(T, E)` or `(T :: Printable, E)`.
@@ -411,6 +450,21 @@ impl Parser {
                     } else {
                         methods.push(method);
                     }
+                }
+            } else if matches!(self.current_kind(), TokenKind::Keyword(k) if k == "handleScope:") {
+                // ADR 0103: `handleScope:` is a header clause parsed *before* the
+                // body (see `parse_optional_handle_scope`). Reaching it here means
+                // it was misplaced after state/method declarations — emit a
+                // targeted error and consume the clause so parsing recovers
+                // instead of treating it as a stray keyword message.
+                self.error(
+                    "'handleScope:' must appear in the class header, before state or method declarations",
+                );
+                self.advance(); // consume `handleScope:`
+                if !self.current_token().has_leading_newline()
+                    && matches!(self.current_kind(), TokenKind::Symbol(_))
+                {
+                    self.advance(); // consume the symbol argument to recover
                 }
             } else {
                 // BT-1856: @expect before an invalid position (e.g., end of class body)

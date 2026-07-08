@@ -285,6 +285,7 @@ pub(super) fn counter_class_with_typed_state(
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: span(),
     }
 }
@@ -348,6 +349,7 @@ pub(super) fn make_class_with_methods(
         comments: CommentAttachment::default(),
         doc_comment: None,
         backing_module: None,
+        handle_scope: None,
         span: span(),
     }
 }
@@ -391,6 +393,7 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
         package: None,
         is_value: true,
         is_native: false,
+        handle_scope: None,
         state: vec![eco_string("okValue"), eco_string("errReason")],
         state_types: {
             let mut m = std::collections::HashMap::new();

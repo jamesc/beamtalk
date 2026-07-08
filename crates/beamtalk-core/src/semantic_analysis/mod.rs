@@ -532,6 +532,16 @@ fn analyse_full_with_natives(
     let mut analyser = Analyser::with_scope(scope, type_map);
 
     analyser.analyse_module(module);
+    // ADR 0103 Phase 2 (BT-2756): block-capture sendability. Runs here where
+    // both the type_map (owned by the analyser) and the computed block captures
+    // are live.
+    validators::check_block_capture_sendability(
+        module,
+        &result.class_hierarchy,
+        analyser.type_map(),
+        &analyser.result.block_info,
+        &mut result.diagnostics,
+    );
     result.diagnostics.extend(analyser.result.diagnostics);
     result.block_info = analyser.result.block_info;
 
@@ -560,6 +570,21 @@ fn analyse_full_with_natives(
         &result.class_hierarchy,
         &mut result.diagnostics,
     );
+    // ADR 0103: `handleScope:` is only meaningful on Object-kind classes.
+    validators::check_handle_scope_on_object(
+        module,
+        &result.class_hierarchy,
+        &mut result.diagnostics,
+    );
+    // ADR 0103: nudge undeclared FFI-wrapping handle classes. Suppressed for
+    // stdlib compilation — the builtin tier table already covers the stdlib.
+    if !stdlib_mode {
+        validators::check_undeclared_handle_class(
+            module,
+            &result.class_hierarchy,
+            &mut result.diagnostics,
+        );
+    }
     // BT-919: Reject cast (!) on value types
     validators::check_cast_on_value_type(module, &result.class_hierarchy, &mut result.diagnostics);
     // BT-1793: Reject actor state mutation inside non-state-threading block closures

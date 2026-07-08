@@ -292,6 +292,51 @@ abstract Object subclass: Supervisor
   class children => self subclassResponsibility
 ```
 
+### Sendability Tiers (ADR 0103)
+
+Because a BEAM send *copies* the term, whether a value survives crossing a
+process boundary depends on its class kind. The type checker derives a
+**sendability tier** for every inferred type and warns (advisory only, per ADR
+0100) when a value's tier is too weak for the boundary it crosses. No new
+annotations are required for the common case — the class kind *is* the
+annotation.
+
+| Tier | What it is | Boundary behaviour |
+|---|---|---|
+| `Sendable` | Value kinds, primitives, symbols, `Reference` | copies perfectly — always fine |
+| `SendableRef` | Actor kinds and the builtin `Pid` | copies the reference; identity preserved (hover-visible; no v1 diagnostic) |
+| `HandleScoped(#scope)` | Object kinds wrapping a scoped runtime handle | `#process` handles warn when sent; `#node` handles are silent in v1 |
+| `Unknown` | `Dynamic` / untyped FFI / unclassified Object | silent (nothing to grade on) |
+
+A `Value` composes structurally, inheriting the **weakest** tier of its fields,
+and generic collections inherit their element tier (`List(Port)` is
+`HandleScoped`). The builtin table classifies the canonical hazards directly:
+`Pid` → `SendableRef`, `Port`/`FileHandle` → `HandleScoped(#process)`,
+`Reference` → `Sendable`, `Subscription` → `HandleScoped(#node)`.
+
+**Checked boundaries** (a `HandleScoped(#process)` value warns): actor message
+arguments, `spawnWith:` initial-state maps, blocks sent to actors (including
+`Timer every:do:` and postfix `!` casts), and Announcement payloads. Local
+blocks (`do:`, `collect:`, `ifTrue:`) and self-sends do not warn.
+
+#### Declaring handle scope
+
+A user `Object subclass:` that wraps runtime state may declare its scope with a
+class-side `handleScope:` clause. The value is symbol-valued and the set is
+open (`#process` and `#node` ship first); undeclared Object kinds stay
+`Unknown` (silent).
+
+```beamtalk
+// node-global handle: fine to send within the node, not across nodes
+sealed typed Object subclass: MetricsTable
+  handleScope: #node
+```
+
+`handleScope:` is only meaningful on `Object`-kind classes (a `Value`/`Actor`
+declaration is an advisory no-op). A companion lint nudges FFI-wrapping
+(`native:`) Object classes that carry instance behaviour but declare no scope.
+Suppress a sendability finding with `@expect sendability`.
+
 ### Wrong Keyword Errors
 
 The compiler enforces keyword/class-kind rules with clear error messages:
@@ -482,7 +527,8 @@ Binary operators follow standard math precedence (highest to lowest):
 - `==` - Loose equality (Erlang `==`): `5 == 5.0` → `true`
 - `/=` - Loose inequality (Erlang `/=`): `5 /= 6` → `true`
 - `=/=` - Strict inequality (Erlang `=/=`): `5 =/= 6` → `true`
-- `=` - Legacy alias for `=:=` (strict equality). Prefer `=:=` instead. `beamtalk lint` warns on `x = true` / `x = false`.
+
+Note: bare `=` is **not** a valid Beamtalk operator — it has no entry in the parser's precedence table, so `x = y` fails to parse. Use `=:=` for value equality or `==` for reference equality.
 
 #### Short-circuit boolean operators (`and:`/`or:`)
 
@@ -1650,7 +1696,7 @@ When the type checker recognises a type-testing pattern followed by `ifTrue:` / 
 ```beamtalk
 // class identity check — narrows to exact class
 process: x :: Object =>
-  x class = Integer ifTrue: [
+  x class =:= Integer ifTrue: [
     x + 1          // x is Integer here — has '+'
   ]
   x + 1            // x is Object here — no narrowing outside the block
@@ -1671,7 +1717,7 @@ validate: x :: Object =>
 
 | Pattern | Narrows to | Scope |
 |---|---|---|
-| `x class = Foo ifTrue: [...]` | `x` is `Foo` in true block | True block only |
+| `x class =:= Foo ifTrue: [...]` | `x` is `Foo` in true block | True block only |
 | `x isKindOf: Foo ifTrue: [...]` | `x` is `Foo` in true block | True block only |
 | `x isNil ifTrue: [^...]` | `x` is non-nil after the statement | Rest of method |
 | `x isNil ifTrue: [self error: "..."]` | `x` is non-nil after the statement | Rest of method |
@@ -1965,6 +2011,46 @@ infDb stop
 `withTimeout:` returns a `TimeoutProxy` — a lightweight actor that forwards ordinary messages to the target via `doesNotUnderstand:args:` using the specified timeout. Lifecycle messages such as `stop` apply to the proxy itself, not the target. This is pure message passing with no special syntax or reserved keywords.
 
 **Lifecycle:** The proxy is a separate actor process. Capture the reference and call `stop` when finished to avoid leaking processes.
+
+### Static Typing of Actor Protocols (ADR 0104)
+
+An `Actor subclass:`'s public method set *is* its message protocol — the checker types actor sends exactly as ordinary method sends, with no parallel channel type and no new syntax. Four typing rules apply (all advisory per [ADR 0100](ADR/0100-diagnostic-severity-open-world.md), and static-only — no runtime, codegen, or wire change):
+
+1. **A sync send types as the method's return.** `c increment` on a `Counter` whose `increment` declares (or infers) `-> Integer` types as `Integer`, and forwards its declared/inferred return to callers:
+
+   ```beamtalk
+   c := Counter spawn
+   c increment          // :: Integer — the method's declared/inferred return
+   ```
+
+2. **A bare cast (`!`) types as `Nil`.** The fire-and-forget `gen_server:cast` has no synchronous reply, so a cast *statement* evaluates to `Nil` regardless of the target method's return type. (Using a cast's value in an assignment, return, or argument is already a parse error — see **Explicit Async Cast** above). One consequence: a method declaring a non-`Nil` return whose body *ends* in a bare cast now warns "body returns Nil" — usually a genuine bug where a mutator returns nothing:
+
+   ```beamtalk
+   c increment!         // :: Nil — no reply is awaited
+
+   // ⚠️ Method 'bump' declares return type Integer, but body returns Nil
+   bump -> Integer => c increment!
+   ```
+
+3. **`spawnWith:` keys are checked against `state:` slots.** The keys of a literal init-state map are validated against the actor's declared `state:` slots; an unknown key is a Warning (a provably-failing construction, not merely an unresolved selector) with a typo suggestion naming the nearest slot. When a slot is typed, the literal value's type is checked against it too:
+
+   ```beamtalk
+   Counter spawnWith: #{#count => 0}     // :: Counter — key `count` is a declared slot
+   Counter spawnWith: #{#cuont => 0}     // ⚠️ unknown state key `cuont` — did you mean `count`?
+   ```
+
+   Only a *literal* map is inspected; a `spawnWith:` argument flowing in through a variable is not key-checked. The rule fires only for `Actor subclass:` receivers.
+
+4. **`withTimeout:` is transparent; cross-process DNU grades like a local send.** `withTimeout:` returns a value typed as the *wrapped* actor (not the opaque `TimeoutProxy`), so forwarded calls resolve the wrapped class's real return types. A timeout raises rather than returning, so method return types are unchanged. An unknown selector on a statically-known actor gets the same knowledge-graded [ADR 0100](ADR/0100-diagnostic-severity-open-world.md) diagnostic as a local send — the process boundary is invisible to the checker:
+
+   ```beamtalk
+   (db withTimeout: 30000) query: sql    // resolves query:'s real return, not Dynamic
+
+   logger := Logger spawn
+   logger logg: "hi"                     // ⚠️ Logger does not understand 'logg:' — did you mean 'log:'?
+   ```
+
+See [ADR 0104](ADR/0104-typed-actor-protocols.md) for the full rationale, prior art, and the metaclass-aware constructor inference (ADR 0083) that types `spawn` / `spawnWith:`.
 
 ### BEAM Mapping
 
