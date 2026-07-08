@@ -15,8 +15,7 @@ decode_new_format_eval_test() ->
     ?assertEqual(<<"eval">>, element(2, Msg)),
     ?assertEqual(<<"msg-001">>, element(3, Msg)),
     ?assertEqual(<<"alice">>, element(4, Msg)),
-    ?assertEqual(#{<<"code">> => <<"1 + 2">>}, element(5, Msg)),
-    ?assertEqual(false, beamtalk_repl_protocol:is_legacy(Msg)).
+    ?assertEqual(#{<<"code">> => <<"1 + 2">>}, element(5, Msg)).
 
 decode_new_format_load_file_test() ->
     {ok, Msg} = beamtalk_repl_protocol:decode(
@@ -89,57 +88,26 @@ decode_new_format_shutdown_test() ->
     ?assertEqual(<<"shutdown">>, beamtalk_repl_protocol:get_op(Msg)),
     ?assertEqual(#{<<"cookie">> => <<"secret123">>}, beamtalk_repl_protocol:get_params(Msg)).
 
-%%% Legacy format decode tests
-
-decode_legacy_eval_test() ->
-    {ok, Msg} = beamtalk_repl_protocol:decode(
-        <<"{\"type\": \"eval\", \"expression\": \"1 + 2\"}">>
-    ),
-    ?assertEqual(<<"eval">>, element(2, Msg)),
-    ?assertEqual(#{<<"code">> => <<"1 + 2">>}, element(5, Msg)),
-    ?assertEqual(true, beamtalk_repl_protocol:is_legacy(Msg)).
-
-decode_legacy_load_test() ->
-    {ok, Msg} = beamtalk_repl_protocol:decode(
-        <<"{\"type\": \"load\", \"path\": \"examples/counter.bt\"}">>
-    ),
-    ?assertEqual(<<"load-file">>, element(2, Msg)),
-    ?assertEqual(#{<<"path">> => <<"examples/counter.bt">>}, element(5, Msg)),
-    ?assertEqual(true, beamtalk_repl_protocol:is_legacy(Msg)).
-
-decode_legacy_actors_test() ->
-    {ok, Msg} = beamtalk_repl_protocol:decode(
-        <<"{\"type\": \"actors\"}">>
-    ),
-    ?assertEqual(<<"actors">>, element(2, Msg)).
-
-decode_legacy_modules_test() ->
-    {ok, Msg} = beamtalk_repl_protocol:decode(
-        <<"{\"type\": \"modules\"}">>
-    ),
-    ?assertEqual(<<"modules">>, element(2, Msg)).
-
-decode_legacy_kill_test() ->
-    {ok, Msg} = beamtalk_repl_protocol:decode(
-        <<"{\"type\": \"kill\", \"pid\": \"<0.123.0>\"}">>
-    ),
-    ?assertEqual(<<"kill">>, element(2, Msg)),
-    ?assertEqual(#{<<"actor">> => <<"<0.123.0>">>}, element(5, Msg)).
-
-decode_legacy_unload_test() ->
-    {ok, Msg} = beamtalk_repl_protocol:decode(
-        <<"{\"type\": \"unload\", \"module\": \"Counter\"}">>
-    ),
-    ?assertEqual(<<"unload">>, element(2, Msg)),
-    ?assertEqual(#{<<"module">> => <<"Counter">>}, element(5, Msg)).
-
 %%% Raw expression decode
 
 decode_raw_expression_test() ->
     {ok, Msg} = beamtalk_repl_protocol:decode(<<"1 + 2">>),
     ?assertEqual(<<"eval">>, element(2, Msg)),
-    ?assertEqual(#{<<"code">> => <<"1 + 2">>}, element(5, Msg)),
-    ?assertEqual(true, beamtalk_repl_protocol:is_legacy(Msg)).
+    ?assertEqual(undefined, element(3, Msg)),
+    ?assertEqual(undefined, element(4, Msg)),
+    ?assertEqual(#{<<"code">> => <<"1 + 2">>}, element(5, Msg)).
+
+%% BT-2789: raw non-JSON eval responses use the standard op-protocol shape;
+%% base_response omits id/session when undefined.
+decode_raw_expression_response_shape_test() ->
+    {ok, Msg} = beamtalk_repl_protocol:decode(<<"1 + 2">>),
+    Result = beamtalk_repl_protocol:encode_result(3, Msg, fun identity/1),
+    Decoded = json:decode(Result),
+    ?assertEqual(3, maps:get(<<"value">>, Decoded)),
+    ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)),
+    ?assertEqual(error, maps:find(<<"id">>, Decoded)),
+    ?assertEqual(error, maps:find(<<"session">>, Decoded)),
+    ?assertEqual(error, maps:find(<<"type">>, Decoded)).
 
 decode_empty_expression_test() ->
     ?assertEqual({error, empty_expression}, beamtalk_repl_protocol:decode(<<>>)).
@@ -147,10 +115,10 @@ decode_empty_expression_test() ->
 decode_whitespace_only_test() ->
     ?assertEqual({error, empty_expression}, beamtalk_repl_protocol:decode(<<"   ">>)).
 
-%%% Encode tests (new format)
+%%% Encode tests
 
 encode_result_new_format_test() ->
-    Msg = make_msg(<<"eval">>, <<"msg-001">>, <<"alice">>, false),
+    Msg = make_msg(<<"eval">>, <<"msg-001">>, <<"alice">>),
     Result = beamtalk_repl_protocol:encode_result(42, Msg, fun identity/1),
     Decoded = json:decode(Result),
     ?assertEqual(<<"msg-001">>, maps:get(<<"id">>, Decoded)),
@@ -159,7 +127,7 @@ encode_result_new_format_test() ->
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
 
 encode_error_new_format_test() ->
-    Msg = make_msg(<<"eval">>, <<"msg-002">>, <<"bob">>, false),
+    Msg = make_msg(<<"eval">>, <<"msg-002">>, <<"bob">>),
     Result = beamtalk_repl_protocol:encode_error(some_error, Msg, fun format_err/1),
     Decoded = json:decode(Result),
     ?assertEqual(<<"msg-002">>, maps:get(<<"id">>, Decoded)),
@@ -168,7 +136,7 @@ encode_error_new_format_test() ->
     ?assertEqual([<<"done">>, <<"error">>], maps:get(<<"status">>, Decoded)).
 
 encode_status_new_format_test() ->
-    Msg = make_msg(<<"clear">>, <<"msg-003">>, undefined, false),
+    Msg = make_msg(<<"clear">>, <<"msg-003">>, undefined),
     Result = beamtalk_repl_protocol:encode_status(ok, Msg, fun atom_to_binary/1),
     Decoded = json:decode(Result),
     ?assertEqual(<<"msg-003">>, maps:get(<<"id">>, Decoded)),
@@ -177,7 +145,7 @@ encode_status_new_format_test() ->
     ?assertEqual(error, maps:find(<<"session">>, Decoded)).
 
 encode_loaded_new_format_test() ->
-    Msg = make_msg(<<"load-file">>, <<"msg-005">>, undefined, false),
+    Msg = make_msg(<<"load-file">>, <<"msg-005">>, undefined),
     Classes = [#{name => "Counter"}, #{name => "Logger"}],
     Result = beamtalk_repl_protocol:encode_loaded(Classes, Msg, fun identity/1),
     Decoded = json:decode(Result),
@@ -185,7 +153,7 @@ encode_loaded_new_format_test() ->
     ?assertEqual([<<"Counter">>, <<"Logger">>], maps:get(<<"classes">>, Decoded)).
 
 encode_sessions_new_format_test() ->
-    Msg = make_msg(<<"sessions">>, <<"msg-006">>, undefined, false),
+    Msg = make_msg(<<"sessions">>, <<"msg-006">>, undefined),
     Sessions = [#{id => <<"s1">>}, #{id => <<"s2">>, created_at => 12345}],
     Result = beamtalk_repl_protocol:encode_sessions(Sessions, Msg, fun identity/1),
     Decoded = json:decode(Result),
@@ -196,7 +164,7 @@ encode_sessions_new_format_test() ->
 %% BT-2688: connected-session `Program exit:` reply carries the POSIX exit status
 %% in `exit_code`, alongside a `done` status and a null value — NOT an error.
 encode_script_exit_new_format_test() ->
-    Msg = make_msg(<<"eval">>, <<"msg-exit-1">>, <<"alice">>, false),
+    Msg = make_msg(<<"eval">>, <<"msg-exit-1">>, <<"alice">>),
     Result = beamtalk_repl_protocol:encode_script_exit(5, Msg, <<>>, []),
     Decoded = json:decode(Result),
     ?assertEqual(<<"msg-exit-1">>, maps:get(<<"id">>, Decoded)),
@@ -208,64 +176,16 @@ encode_script_exit_new_format_test() ->
     ?assertNot(lists:member(<<"error">>, maps:get(<<"status">>, Decoded))).
 
 encode_script_exit_with_output_test() ->
-    Msg = make_msg(<<"eval">>, <<"msg-exit-2">>, undefined, false),
+    Msg = make_msg(<<"eval">>, <<"msg-exit-2">>, undefined),
     Result = beamtalk_repl_protocol:encode_script_exit(0, Msg, <<"bye\n">>, []),
     Decoded = json:decode(Result),
     ?assertEqual(0, maps:get(<<"exit_code">>, Decoded)),
     ?assertEqual(<<"bye\n">>, maps:get(<<"output">>, Decoded)).
 
-encode_script_exit_legacy_format_test() ->
-    Msg = make_msg(<<"eval">>, undefined, undefined, true),
-    Result = beamtalk_repl_protocol:encode_script_exit(3, Msg, <<>>, []),
-    Decoded = json:decode(Result),
-    ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)),
-    ?assertEqual(3, maps:get(<<"exit_code">>, Decoded)),
-    ?assertEqual(null, maps:get(<<"value">>, Decoded)).
-
-%%% Encode tests (legacy format)
-
-encode_result_legacy_format_test() ->
-    Msg = make_msg(<<"eval">>, undefined, undefined, true),
-    Result = beamtalk_repl_protocol:encode_result(42, Msg, fun identity/1),
-    Decoded = json:decode(Result),
-    ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)),
-    ?assertEqual(42, maps:get(<<"value">>, Decoded)),
-    ?assertEqual(error, maps:find(<<"status">>, Decoded)).
-
-encode_error_legacy_format_test() ->
-    Msg = make_msg(<<"eval">>, undefined, undefined, true),
-    Result = beamtalk_repl_protocol:encode_error(some_error, Msg, fun format_err/1),
-    Decoded = json:decode(Result),
-    ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)),
-    ?assert(is_binary(maps:get(<<"message">>, Decoded))),
-    ?assertEqual(error, maps:find(<<"status">>, Decoded)).
-
-encode_loaded_legacy_format_test() ->
-    Msg = make_msg(<<"load-file">>, undefined, undefined, true),
-    Classes = [#{name => "Counter"}],
-    Result = beamtalk_repl_protocol:encode_loaded(Classes, Msg, fun identity/1),
-    Decoded = json:decode(Result),
-    ?assertEqual(<<"loaded">>, maps:get(<<"type">>, Decoded)),
-    ?assertEqual([<<"Counter">>], maps:get(<<"classes">>, Decoded)).
-
-encode_actors_legacy_format_test() ->
-    Msg = make_msg(<<"actors">>, undefined, undefined, true),
-    Result = beamtalk_repl_protocol:encode_actors([], Msg, fun identity/1),
-    Decoded = json:decode(Result),
-    ?assertEqual(<<"actors">>, maps:get(<<"type">>, Decoded)),
-    ?assertEqual([], maps:get(<<"actors">>, Decoded)).
-
-encode_modules_legacy_format_test() ->
-    Msg = make_msg(<<"modules">>, undefined, undefined, true),
-    Result = beamtalk_repl_protocol:encode_modules([], Msg, fun identity/1),
-    Decoded = json:decode(Result),
-    ?assertEqual(<<"modules">>, maps:get(<<"type">>, Decoded)),
-    ?assertEqual([], maps:get(<<"modules">>, Decoded)).
-
 %%% Encode tests (with output field)
 
 encode_result_with_output_new_format_test() ->
-    Msg = make_msg(<<"eval">>, <<"msg-010">>, <<"alice">>, false),
+    Msg = make_msg(<<"eval">>, <<"msg-010">>, <<"alice">>),
     Result = beamtalk_repl_protocol:encode_result(42, Msg, fun identity/1, <<"Hello\n">>),
     Decoded = json:decode(Result),
     ?assertEqual(<<"msg-010">>, maps:get(<<"id">>, Decoded)),
@@ -274,23 +194,15 @@ encode_result_with_output_new_format_test() ->
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
 
 encode_result_with_empty_output_omitted_test() ->
-    Msg = make_msg(<<"eval">>, <<"msg-011">>, undefined, false),
+    Msg = make_msg(<<"eval">>, <<"msg-011">>, undefined),
     Result = beamtalk_repl_protocol:encode_result(42, Msg, fun identity/1, <<>>),
     Decoded = json:decode(Result),
     ?assertEqual(42, maps:get(<<"value">>, Decoded)),
     %% Empty output should NOT appear in response
     ?assertEqual(error, maps:find(<<"output">>, Decoded)).
 
-encode_result_with_output_legacy_format_test() ->
-    Msg = make_msg(<<"eval">>, undefined, undefined, true),
-    Result = beamtalk_repl_protocol:encode_result(<<"ok">>, Msg, fun identity/1, <<"World">>),
-    Decoded = json:decode(Result),
-    ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)),
-    ?assertEqual(<<"ok">>, maps:get(<<"value">>, Decoded)),
-    ?assertEqual(<<"World">>, maps:get(<<"output">>, Decoded)).
-
 encode_error_with_output_new_format_test() ->
-    Msg = make_msg(<<"eval">>, <<"msg-012">>, <<"alice">>, false),
+    Msg = make_msg(<<"eval">>, <<"msg-012">>, <<"alice">>),
     Result = beamtalk_repl_protocol:encode_error(
         some_error, Msg, fun(R) -> list_to_binary(io_lib:format("~p", [R])) end, <<"Captured\n">>
     ),
@@ -301,7 +213,7 @@ encode_error_with_output_new_format_test() ->
     ?assertEqual([<<"done">>, <<"error">>], maps:get(<<"status">>, Decoded)).
 
 encode_error_with_empty_output_omitted_test() ->
-    Msg = make_msg(<<"eval">>, <<"msg-013">>, undefined, false),
+    Msg = make_msg(<<"eval">>, <<"msg-013">>, undefined),
     Result = beamtalk_repl_protocol:encode_error(
         some_error, Msg, fun(R) -> list_to_binary(io_lib:format("~p", [R])) end, <<>>
     ),
@@ -320,19 +232,10 @@ roundtrip_new_format_test() ->
     ?assertEqual(<<"s1">>, maps:get(<<"session">>, Decoded)),
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
 
-roundtrip_legacy_format_test() ->
-    Input = <<"{\"type\": \"eval\", \"expression\": \"42\"}">>,
-    {ok, Msg} = beamtalk_repl_protocol:decode(Input),
-    Result = beamtalk_repl_protocol:encode_result(42, Msg, fun identity/1),
-    Decoded = json:decode(Result),
-    %% Response should use legacy format
-    ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)),
-    ?assertEqual(error, maps:find(<<"status">>, Decoded)).
-
 %%% Helpers
 
-make_msg(Op, Id, Session, Legacy) ->
-    {protocol_msg, Op, Id, Session, #{}, Legacy}.
+make_msg(Op, Id, Session) ->
+    {protocol_msg, Op, Id, Session, #{}}.
 
 identity(X) -> X.
 
@@ -371,7 +274,7 @@ get_session_undefined_test() ->
 %%% Encode result/error with warnings
 
 encode_result_with_warnings_new_format_test() ->
-    Msg = make_msg(<<"eval">>, <<"msg-w1">>, <<"alice">>, false),
+    Msg = make_msg(<<"eval">>, <<"msg-w1">>, <<"alice">>),
     Result = beamtalk_repl_protocol:encode_result(
         42, Msg, fun identity/1, <<"out">>, [<<"warn1">>, <<"warn2">>]
     ),
@@ -381,25 +284,14 @@ encode_result_with_warnings_new_format_test() ->
     ?assertEqual([<<"warn1">>, <<"warn2">>], maps:get(<<"warnings">>, Decoded)),
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
 
-encode_result_with_warnings_legacy_format_test() ->
-    Msg = make_msg(<<"eval">>, undefined, undefined, true),
-    Result = beamtalk_repl_protocol:encode_result(
-        99, Msg, fun identity/1, <<>>, [<<"w1">>]
-    ),
-    Decoded = json:decode(Result),
-    ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)),
-    ?assertEqual(99, maps:get(<<"value">>, Decoded)),
-    ?assertEqual([<<"w1">>], maps:get(<<"warnings">>, Decoded)),
-    ?assertEqual(error, maps:find(<<"output">>, Decoded)).
-
 encode_result_with_empty_warnings_omitted_test() ->
-    Msg = make_msg(<<"eval">>, <<"msg-w2">>, undefined, false),
+    Msg = make_msg(<<"eval">>, <<"msg-w2">>, undefined),
     Result = beamtalk_repl_protocol:encode_result(1, Msg, fun identity/1, <<>>, []),
     Decoded = json:decode(Result),
     ?assertEqual(error, maps:find(<<"warnings">>, Decoded)).
 
 encode_error_with_warnings_new_format_test() ->
-    Msg = make_msg(<<"eval">>, <<"msg-e1">>, <<"bob">>, false),
+    Msg = make_msg(<<"eval">>, <<"msg-e1">>, <<"bob">>),
     Result = beamtalk_repl_protocol:encode_error(
         bad, Msg, fun format_err/1, <<"captured">>, [<<"w1">>]
     ),
@@ -409,18 +301,8 @@ encode_error_with_warnings_new_format_test() ->
     ?assertEqual([<<"w1">>], maps:get(<<"warnings">>, Decoded)),
     ?assertEqual([<<"done">>, <<"error">>], maps:get(<<"status">>, Decoded)).
 
-encode_error_with_warnings_legacy_format_test() ->
-    Msg = make_msg(<<"eval">>, undefined, undefined, true),
-    Result = beamtalk_repl_protocol:encode_error(
-        oops, Msg, fun format_err/1, <<"out">>, [<<"w">>]
-    ),
-    Decoded = json:decode(Result),
-    ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)),
-    ?assertEqual(<<"out">>, maps:get(<<"output">>, Decoded)),
-    ?assertEqual([<<"w">>], maps:get(<<"warnings">>, Decoded)).
-
 encode_error_with_empty_warnings_omitted_test() ->
-    Msg = make_msg(<<"eval">>, <<"msg-e2">>, undefined, false),
+    Msg = make_msg(<<"eval">>, <<"msg-e2">>, undefined),
     Result = beamtalk_repl_protocol:encode_error(err, Msg, fun format_err/1, <<>>, []),
     Decoded = json:decode(Result),
     ?assertEqual(error, maps:find(<<"warnings">>, Decoded)).
@@ -429,7 +311,7 @@ encode_error_with_empty_warnings_omitted_test() ->
 
 encode_error_with_metadata_new_format_test() ->
     %% BT-1235: metadata (line/hint) merged into JSON response
-    Msg = make_msg(<<"eval">>, <<"msg-m1">>, <<"s1">>, false),
+    Msg = make_msg(<<"eval">>, <<"msg-m1">>, <<"s1">>),
     Metadata = #{<<"line">> => 3, <<"hint">> => <<"prefix with _">>},
     Result = beamtalk_repl_protocol:encode_error(
         err, Msg, fun format_err/1, <<>>, [], Metadata
@@ -441,7 +323,7 @@ encode_error_with_metadata_new_format_test() ->
 
 encode_error_with_empty_metadata_test() ->
     %% Empty metadata adds no extra fields
-    Msg = make_msg(<<"eval">>, <<"msg-m2">>, undefined, false),
+    Msg = make_msg(<<"eval">>, <<"msg-m2">>, undefined),
     Result = beamtalk_repl_protocol:encode_error(
         err, Msg, fun format_err/1, <<>>, [], #{}
     ),
@@ -449,38 +331,20 @@ encode_error_with_empty_metadata_test() ->
     ?assertEqual(error, maps:find(<<"line">>, Decoded)),
     ?assertEqual(error, maps:find(<<"hint">>, Decoded)).
 
-encode_error_with_metadata_legacy_drops_metadata_test() ->
-    %% BT-1235: legacy protocol intentionally drops metadata
-    Msg = make_msg(<<"eval">>, undefined, undefined, true),
-    Metadata = #{<<"line">> => 5},
-    Result = beamtalk_repl_protocol:encode_error(
-        err, Msg, fun format_err/1, <<>>, [], Metadata
-    ),
-    Decoded = json:decode(Result),
-    ?assertEqual(error, maps:find(<<"line">>, Decoded)),
-    ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)).
-
 %%% encode_inspect/2 (binary version)
 
 encode_inspect_binary_new_format_test() ->
-    Msg = make_msg(<<"inspect">>, <<"msg-i1">>, <<"s1">>, false),
+    Msg = make_msg(<<"inspect">>, <<"msg-i1">>, <<"s1">>),
     Result = beamtalk_repl_protocol:encode_inspect(<<"state_str">>, Msg),
     Decoded = json:decode(Result),
     ?assertEqual(<<"msg-i1">>, maps:get(<<"id">>, Decoded)),
     ?assertEqual(<<"state_str">>, maps:get(<<"state">>, Decoded)),
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
 
-encode_inspect_binary_legacy_format_test() ->
-    Msg = make_msg(<<"inspect">>, undefined, undefined, true),
-    Result = beamtalk_repl_protocol:encode_inspect(<<"state_str">>, Msg),
-    Decoded = json:decode(Result),
-    ?assertEqual(<<"inspect">>, maps:get(<<"type">>, Decoded)),
-    ?assertEqual(<<"state_str">>, maps:get(<<"state">>, Decoded)).
-
 %%% encode_inspect/3 (map version)
 
 encode_inspect_map_new_format_test() ->
-    Msg = make_msg(<<"inspect">>, <<"msg-i2">>, undefined, false),
+    Msg = make_msg(<<"inspect">>, <<"msg-i2">>, undefined),
     Result = beamtalk_repl_protocol:encode_inspect(
         #{count => 42, name => <<"foo">>}, Msg, fun identity/1
     ),
@@ -490,36 +354,20 @@ encode_inspect_map_new_format_test() ->
     ?assertEqual(<<"foo">>, maps:get(<<"name">>, StateMap)),
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
 
-encode_inspect_map_legacy_format_test() ->
-    Msg = make_msg(<<"inspect">>, undefined, undefined, true),
-    Result = beamtalk_repl_protocol:encode_inspect(
-        #{x => 1}, Msg, fun identity/1
-    ),
-    Decoded = json:decode(Result),
-    ?assertEqual(<<"inspect">>, maps:get(<<"type">>, Decoded)),
-    ?assertEqual(1, maps:get(<<"x">>, maps:get(<<"state">>, Decoded))).
-
 %%% encode_docs/2
 
 encode_docs_new_format_test() ->
-    Msg = make_msg(<<"docs">>, <<"msg-d1">>, <<"s1">>, false),
+    Msg = make_msg(<<"docs">>, <<"msg-d1">>, <<"s1">>),
     Result = beamtalk_repl_protocol:encode_docs(<<"Integer: A whole number">>, Msg),
     Decoded = json:decode(Result),
     ?assertEqual(<<"msg-d1">>, maps:get(<<"id">>, Decoded)),
     ?assertEqual(<<"Integer: A whole number">>, maps:get(<<"docs">>, Decoded)),
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
 
-encode_docs_legacy_format_test() ->
-    Msg = make_msg(<<"docs">>, undefined, undefined, true),
-    Result = beamtalk_repl_protocol:encode_docs(<<"Some docs">>, Msg),
-    Decoded = json:decode(Result),
-    ?assertEqual(<<"docs">>, maps:get(<<"type">>, Decoded)),
-    ?assertEqual(<<"Some docs">>, maps:get(<<"docs">>, Decoded)).
-
 %%% encode_actors/3 new format
 
 encode_actors_new_format_test() ->
-    Msg = make_msg(<<"actors">>, <<"msg-a1">>, undefined, false),
+    Msg = make_msg(<<"actors">>, <<"msg-a1">>, undefined),
     Actors = [#{pid => self(), class => 'Counter', module => counter, spawned_at => 12345}],
     Result = beamtalk_repl_protocol:encode_actors(Actors, Msg, fun identity/1),
     Decoded = json:decode(Result),
@@ -533,7 +381,7 @@ encode_actors_new_format_test() ->
 %%% encode_modules/3 new format
 
 encode_modules_new_format_test() ->
-    Msg = make_msg(<<"modules">>, <<"msg-m1">>, undefined, false),
+    Msg = make_msg(<<"modules">>, <<"msg-m1">>, undefined),
     Modules = [
         {counter, #{
             name => <<"Counter">>,
@@ -550,51 +398,28 @@ encode_modules_new_format_test() ->
     ?assertEqual(<<"Counter">>, maps:get(<<"name">>, M)),
     ?assertEqual(<<"counter.bt">>, maps:get(<<"source_file">>, M)).
 
-%%% encode_sessions/3 legacy format
-
-encode_sessions_legacy_format_test() ->
-    Msg = make_msg(<<"sessions">>, undefined, undefined, true),
-    Sessions = [#{id => <<"s1">>}],
-    Result = beamtalk_repl_protocol:encode_sessions(Sessions, Msg, fun identity/1),
-    Decoded = json:decode(Result),
-    ?assertEqual(<<"sessions">>, maps:get(<<"type">>, Decoded)),
-    ?assertEqual(1, length(maps:get(<<"sessions">>, Decoded))).
-
 %%% base_response edge cases
 
 base_response_with_both_id_and_session_test() ->
-    Msg = make_msg(<<"eval">>, <<"id1">>, <<"sess1">>, false),
+    Msg = make_msg(<<"eval">>, <<"id1">>, <<"sess1">>),
     Base = beamtalk_repl_protocol:base_response(Msg),
     ?assertEqual(<<"id1">>, maps:get(<<"id">>, Base)),
     ?assertEqual(<<"sess1">>, maps:get(<<"session">>, Base)).
 
 base_response_with_no_id_no_session_test() ->
-    Msg = make_msg(<<"eval">>, undefined, undefined, false),
+    Msg = make_msg(<<"eval">>, undefined, undefined),
     Base = beamtalk_repl_protocol:base_response(Msg),
     ?assertEqual(error, maps:find(<<"id">>, Base)),
     ?assertEqual(error, maps:find(<<"session">>, Base)).
 
 %%% decode edge cases
 
-decode_missing_op_and_type_test() ->
+decode_missing_op_test() ->
     Result = beamtalk_repl_protocol:decode(<<"{\"foo\": \"bar\"}">>),
-    ?assertMatch({error, {invalid_request, missing_op_or_type}}, Result).
-
-decode_legacy_unknown_type_test() ->
-    {ok, Msg} = beamtalk_repl_protocol:decode(
-        <<"{\"type\": \"unknown_op\"}">>
-    ),
-    ?assertEqual(<<"unknown_op">>, beamtalk_repl_protocol:get_op(Msg)),
-    ?assertEqual(#{}, beamtalk_repl_protocol:get_params(Msg)).
-
-%%% encode_status legacy format
-
-encode_status_legacy_format_test() ->
-    Msg = make_msg(<<"clear">>, undefined, undefined, true),
-    Result = beamtalk_repl_protocol:encode_status(ok, Msg, fun atom_to_binary/1),
-    Decoded = json:decode(Result),
-    ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)),
-    ?assertEqual(<<"ok">>, maps:get(<<"value">>, Decoded)).
+    ?assertMatch({error, {invalid_request, missing_op}}, Result),
+    %% BT-2789: the legacy "type"-field format is rejected, not translated
+    LegacyResult = beamtalk_repl_protocol:decode(<<"{\"type\": \"eval\"}">>),
+    ?assertMatch({error, {invalid_request, missing_op}}, LegacyResult).
 
 %%% R7: Non-map JSON decode tests
 
@@ -613,7 +438,7 @@ decode_json_number_returns_error_test() ->
 %%% encode_describe tests
 
 encode_describe_new_format_test() ->
-    Msg = make_msg(<<"describe">>, <<"msg-040">>, undefined, false),
+    Msg = make_msg(<<"describe">>, <<"msg-040">>, undefined),
     Ops = #{
         <<"eval">> => #{<<"params">> => [<<"code">>]},
         <<"describe">> => #{<<"params">> => []}
@@ -633,23 +458,10 @@ encode_describe_new_format_test() ->
         maps:get(<<"versions">>, Decoded)
     ).
 
-encode_describe_legacy_format_test() ->
-    Msg = make_msg(<<"describe">>, undefined, undefined, true),
-    Ops = #{<<"health">> => #{<<"params">> => []}},
-    Versions = #{<<"protocol">> => <<"1.0">>, <<"beamtalk">> => <<"0.1.0">>},
-    Result = beamtalk_repl_protocol:encode_describe(Ops, Versions, Msg),
-    Decoded = json:decode(Result),
-    ?assertEqual(<<"describe">>, maps:get(<<"type">>, Decoded)),
-    ?assert(is_map(maps:get(<<"ops">>, Decoded))),
-    ?assertEqual(
-        #{<<"protocol">> => <<"1.0">>, <<"beamtalk">> => <<"0.1.0">>},
-        maps:get(<<"versions">>, Decoded)
-    ).
-
 %%% encode_need_input tests (BT-698)
 
 encode_need_input_new_format_test() ->
-    Msg = make_msg(<<"eval">>, <<"msg-050">>, <<"sess1">>, false),
+    Msg = make_msg(<<"eval">>, <<"msg-050">>, <<"sess1">>),
     Result = beamtalk_repl_protocol:encode_need_input(<<"Name: ">>, Msg),
     Decoded = json:decode(Result),
     ?assertEqual(<<"msg-050">>, maps:get(<<"id">>, Decoded)),
@@ -658,7 +470,7 @@ encode_need_input_new_format_test() ->
     ?assertEqual(<<"Name: ">>, maps:get(<<"prompt">>, Decoded)).
 
 encode_need_input_no_session_test() ->
-    Msg = make_msg(<<"eval">>, <<"msg-051">>, undefined, false),
+    Msg = make_msg(<<"eval">>, <<"msg-051">>, undefined),
     Result = beamtalk_repl_protocol:encode_need_input(<<"? ">>, Msg),
     Decoded = json:decode(Result),
     ?assertEqual(<<"msg-051">>, maps:get(<<"id">>, Decoded)),
@@ -669,7 +481,7 @@ encode_need_input_no_session_test() ->
 %%% encode_trace_result tests (BT-1238)
 
 encode_trace_result_empty_steps_new_format_test() ->
-    Msg = make_msg(<<"eval">>, <<"tr-001">>, <<"s1">>, false),
+    Msg = make_msg(<<"eval">>, <<"tr-001">>, <<"s1">>),
     Result = beamtalk_repl_protocol:encode_trace_result([], Msg, fun identity/1, <<>>, []),
     Decoded = json:decode(Result),
     ?assertEqual(<<"tr-001">>, maps:get(<<"id">>, Decoded)),
@@ -678,7 +490,7 @@ encode_trace_result_empty_steps_new_format_test() ->
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
 
 encode_trace_result_single_step_new_format_test() ->
-    Msg = make_msg(<<"eval">>, <<"tr-002">>, <<"s1">>, false),
+    Msg = make_msg(<<"eval">>, <<"tr-002">>, <<"s1">>),
     Steps = [{<<"1 + 2">>, 3}],
     Result = beamtalk_repl_protocol:encode_trace_result(Steps, Msg, fun identity/1, <<>>, []),
     Decoded = json:decode(Result),
@@ -688,7 +500,7 @@ encode_trace_result_single_step_new_format_test() ->
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
 
 encode_trace_result_multiple_steps_new_format_test() ->
-    Msg = make_msg(<<"eval">>, <<"tr-003">>, undefined, false),
+    Msg = make_msg(<<"eval">>, <<"tr-003">>, undefined),
     Steps = [{<<"x := 1">>, 1}, {<<"y := 2">>, 2}, {<<"x + y">>, 3}],
     Result = beamtalk_repl_protocol:encode_trace_result(Steps, Msg, fun identity/1, <<>>, []),
     Decoded = json:decode(Result),
@@ -703,7 +515,7 @@ encode_trace_result_multiple_steps_new_format_test() ->
     ?assertEqual(3, maps:get(<<"value">>, S3)).
 
 encode_trace_result_with_output_new_format_test() ->
-    Msg = make_msg(<<"eval">>, <<"tr-004">>, <<"s1">>, false),
+    Msg = make_msg(<<"eval">>, <<"tr-004">>, <<"s1">>),
     Steps = [{<<"Transcript show: 'hi'">>, nil}],
     Result = beamtalk_repl_protocol:encode_trace_result(
         Steps, Msg, fun identity/1, <<"hi\n">>, []
@@ -713,13 +525,13 @@ encode_trace_result_with_output_new_format_test() ->
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
 
 encode_trace_result_empty_output_omitted_new_format_test() ->
-    Msg = make_msg(<<"eval">>, <<"tr-005">>, undefined, false),
+    Msg = make_msg(<<"eval">>, <<"tr-005">>, undefined),
     Result = beamtalk_repl_protocol:encode_trace_result([], Msg, fun identity/1, <<>>, []),
     Decoded = json:decode(Result),
     ?assertEqual(error, maps:find(<<"output">>, Decoded)).
 
 encode_trace_result_with_warnings_new_format_test() ->
-    Msg = make_msg(<<"eval">>, <<"tr-006">>, <<"s1">>, false),
+    Msg = make_msg(<<"eval">>, <<"tr-006">>, <<"s1">>),
     Steps = [{<<"42">>, 42}],
     Result = beamtalk_repl_protocol:encode_trace_result(
         Steps, Msg, fun identity/1, <<>>, [<<"unused var">>, <<"deprecated">>]
@@ -728,33 +540,13 @@ encode_trace_result_with_warnings_new_format_test() ->
     ?assertEqual([<<"unused var">>, <<"deprecated">>], maps:get(<<"warnings">>, Decoded)).
 
 encode_trace_result_empty_warnings_omitted_new_format_test() ->
-    Msg = make_msg(<<"eval">>, <<"tr-007">>, undefined, false),
+    Msg = make_msg(<<"eval">>, <<"tr-007">>, undefined),
     Result = beamtalk_repl_protocol:encode_trace_result([], Msg, fun identity/1, <<>>, []),
     Decoded = json:decode(Result),
     ?assertEqual(error, maps:find(<<"warnings">>, Decoded)).
 
-encode_trace_result_legacy_format_test() ->
-    Msg = make_msg(<<"eval">>, undefined, undefined, true),
-    Steps = [{<<"1">>, 1}, {<<"2">>, 2}],
-    Result = beamtalk_repl_protocol:encode_trace_result(Steps, Msg, fun identity/1, <<>>, []),
-    Decoded = json:decode(Result),
-    ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)),
-    ?assertEqual(error, maps:find(<<"status">>, Decoded)),
-    StepList = maps:get(<<"steps">>, Decoded),
-    ?assertEqual(2, length(StepList)).
-
-encode_trace_result_legacy_with_output_test() ->
-    Msg = make_msg(<<"eval">>, undefined, undefined, true),
-    Steps = [{<<"Transcript show: 'x'">>, nil}],
-    Result = beamtalk_repl_protocol:encode_trace_result(
-        Steps, Msg, fun identity/1, <<"x\n">>, []
-    ),
-    Decoded = json:decode(Result),
-    ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)),
-    ?assertEqual(<<"x\n">>, maps:get(<<"output">>, Decoded)).
-
 encode_trace_result_applies_term_to_json_test() ->
-    Msg = make_msg(<<"eval">>, <<"tr-010">>, undefined, false),
+    Msg = make_msg(<<"eval">>, <<"tr-010">>, undefined),
     %% TermToJson converts atom to binary
     Steps = [{<<"some_atom">>, hello}],
     Result = beamtalk_repl_protocol:encode_trace_result(
@@ -767,7 +559,7 @@ encode_trace_result_applies_term_to_json_test() ->
 %%% Test results encoding (BT-1673)
 
 encode_test_results_skip_entry_test() ->
-    Msg = make_msg(<<"test">>, <<"t-001">>, undefined, false),
+    Msg = make_msg(<<"test">>, <<"t-001">>, undefined),
     TestResult = #{
         '$beamtalk_class' => 'TestResult',
         total => 3,
@@ -804,7 +596,7 @@ encode_test_results_skip_entry_test() ->
     ?assertEqual(<<"MyTest">>, maps:get(<<"class">>, SkipEntry)).
 
 encode_test_results_all_skipped_test() ->
-    Msg = make_msg(<<"test">>, <<"t-002">>, undefined, false),
+    Msg = make_msg(<<"test">>, <<"t-002">>, undefined),
     TestResult = #{
         '$beamtalk_class' => 'TestResult',
         total => 2,
@@ -830,7 +622,7 @@ encode_test_results_all_skipped_test() ->
     ?assertEqual(<<"skip">>, maps:get(<<"status">>, T2)).
 
 encode_test_results_skip_without_class_test() ->
-    Msg = make_msg(<<"test">>, <<"t-003">>, undefined, false),
+    Msg = make_msg(<<"test">>, <<"t-003">>, undefined),
     TestResult = #{
         '$beamtalk_class' => 'TestResult',
         total => 1,
@@ -852,7 +644,7 @@ encode_test_results_skip_without_class_test() ->
     ?assertEqual(error, maps:find(<<"class">>, Entry)).
 
 encode_test_results_skip_without_reason_test() ->
-    Msg = make_msg(<<"test">>, <<"t-004">>, undefined, false),
+    Msg = make_msg(<<"test">>, <<"t-004">>, undefined),
     TestResult = #{
         '$beamtalk_class' => 'TestResult',
         total => 1,
@@ -879,7 +671,7 @@ encode_test_results_skip_without_reason_test() ->
 encode_diagnostics_projects_atom_keyed_maps_test() ->
     %% Backend diagnostics carry atom keys with byte-offset spans; the encoder
     %% must project them onto the binary-keyed wire shape with a `done` status.
-    Msg = make_msg(<<"diagnostics">>, <<"dg-100">>, undefined, false),
+    Msg = make_msg(<<"diagnostics">>, <<"dg-100">>, undefined),
     Diagnostics = [
         #{message => <<"unexpected token">>, severity => <<"error">>, start => 4, 'end' => 6}
     ],
@@ -893,7 +685,7 @@ encode_diagnostics_projects_atom_keyed_maps_test() ->
     ?assertEqual(6, maps:get(<<"end">>, Entry)).
 
 encode_diagnostics_empty_list_test() ->
-    Msg = make_msg(<<"diagnostics">>, <<"dg-101">>, undefined, false),
+    Msg = make_msg(<<"diagnostics">>, <<"dg-101">>, undefined),
     Result = beamtalk_repl_protocol:encode_diagnostics([], Msg),
     Decoded = json:decode(Result),
     ?assertEqual([], maps:get(<<"diagnostics">>, Decoded)),

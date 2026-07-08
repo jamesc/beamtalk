@@ -213,7 +213,7 @@ sequenceDiagram
     participant BEAM as BEAM VM
 
     User->>CLI: counter increment
-    CLI->>Server: {"type":"eval","expression":"counter increment"}
+    CLI->>Server: {"op":"eval","id":"msg-1","code":"counter increment"}
     Server->>Server: Generate module name (beamtalk_repl_eval_N)
     Server->>Daemon: JSON-RPC compile_expression
     Daemon->>Daemon: Parse Beamtalk
@@ -229,7 +229,7 @@ sequenceDiagram
     Server->>Server: Restore group_leader
     Server->>Server: Update bindings (if assignment)
     Server->>Server: code:purge + code:delete (cleanup)
-    Server-->>CLI: {"type":"result","value":"...","output":"..."}
+    Server-->>CLI: {"id":"msg-1","value":"...","output":"...","status":["done"]}
     CLI-->>User: Display captured output, then result
 ```
 
@@ -240,20 +240,17 @@ sequenceDiagram
 The CLI sends JSON over TCP (newline-delimited):
 
 ```json
-{"type": "eval", "expression": "counter increment"}
+{"op": "eval", "id": "msg-1", "code": "counter increment"}
 ```
 
 #### 2. Server Request Parsing
 
-The server parses JSON and extracts the expression:
+The server decodes the message into a protocol record and dispatches on the op:
 
 ```erlang
-parse_request(Data) ->
-    case parse_json(Data) of
-        {ok, #{<<"type">> := <<"eval">>, <<"expression">> := Expr}} ->
-            {eval, binary_to_list(Expr)};
-        ...
-    end.
+{ok, Msg} = beamtalk_repl_protocol:decode(Data),
+<<"eval">> = beamtalk_repl_protocol:get_op(Msg),
+Code = maps:get(<<"code">>, beamtalk_repl_protocol:get_params(Msg)).
 ```
 
 #### 3. Daemon Compilation Request
