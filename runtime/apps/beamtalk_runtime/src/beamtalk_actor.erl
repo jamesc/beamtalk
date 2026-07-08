@@ -1034,11 +1034,7 @@ raise_timeout(Selector) ->
     ),
     beamtalk_exception_handler:reraise(Error).
 
--doc "Construct a structured actor_dead error for the given selector.".
--spec actor_dead_error(atom()) -> {error, #beamtalk_error{}}.
-actor_dead_error(Selector) ->
-    {error, actor_dead_error_record(Selector)}.
-
+-doc "Construct a structured actor_dead error record for the given selector.".
 -spec actor_dead_error_record(atom()) -> #beamtalk_error{}.
 actor_dead_error_record(Selector) ->
     beamtalk_error:new(
