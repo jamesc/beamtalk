@@ -1972,13 +1972,13 @@ generate_session_id_unique_test() ->
 %%% base_protocol_response/1 tests
 
 base_protocol_response_with_id_session_test() ->
-    Msg = {protocol_msg, <<"eval">>, <<"id1">>, <<"s1">>, #{}, false},
+    Msg = {protocol_msg, <<"eval">>, <<"id1">>, <<"s1">>, #{}},
     Base = beamtalk_repl_server:base_protocol_response(Msg),
     ?assertEqual(<<"id1">>, maps:get(<<"id">>, Base)),
     ?assertEqual(<<"s1">>, maps:get(<<"session">>, Base)).
 
 base_protocol_response_no_id_no_session_test() ->
-    Msg = {protocol_msg, <<"eval">>, undefined, undefined, #{}, false},
+    Msg = {protocol_msg, <<"eval">>, undefined, undefined, #{}},
     Base = beamtalk_repl_server:base_protocol_response(Msg),
     ?assertEqual(error, maps:find(<<"id">>, Base)),
     ?assertEqual(error, maps:find(<<"session">>, Base)).

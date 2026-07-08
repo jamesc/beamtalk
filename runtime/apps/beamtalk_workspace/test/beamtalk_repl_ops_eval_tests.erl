@@ -27,7 +27,7 @@ Covers:
 %%====================================================================
 
 make_msg(Op) ->
-    {protocol_msg, Op, <<"id-1">>, undefined, #{}, false}.
+    {protocol_msg, Op, <<"id-1">>, undefined, #{}}.
 
 setup(SessionId) ->
     {ok, _} = application:ensure_all_started(compiler),

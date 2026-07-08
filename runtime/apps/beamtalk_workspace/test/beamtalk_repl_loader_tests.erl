@@ -932,7 +932,7 @@ browse_method_value(Class) ->
             <<"side">> => <<"instance">>,
             <<"selector">> => <<"value">>
         },
-        {protocol_msg, <<"browse">>, <<"t1">>, <<"s1">>, #{}, false},
+        {protocol_msg, <<"browse">>, <<"t1">>, <<"s1">>, #{}},
         self()
     ),
     V.
