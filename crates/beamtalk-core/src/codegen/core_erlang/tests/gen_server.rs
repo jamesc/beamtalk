@@ -4470,6 +4470,12 @@ fn test_handle_continue_dispatches_initialize_chain() {
 /// from `Actor`), `init/1` must call the parent's `init/1` to accumulate
 /// inherited state, then merge the child's own fields on top, and propagate
 /// any `{error, Reason}` the parent returns.
+///
+/// BT-2768: This is also the cross-file inherited-state regression coverage.
+/// The parent (`Counter`) is compiled in a *separate* module — its AST is absent
+/// here — yet the child correctly pulls the parent's state via `bt@counter:init/1`.
+/// This is why the old AST-only `collect_inherited_fields` was removed: the
+/// super-init chain already handles cross-file / stdlib / package parents.
 #[test]
 fn test_init_parent_actor_subclass_calls_parent_init() {
     // LoggingCounter extends Counter (itself an Actor subclass).
