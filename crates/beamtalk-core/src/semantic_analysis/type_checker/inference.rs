@@ -770,13 +770,23 @@ impl TypeChecker {
             }
 
             // Match — union of arm body types (Never arms are eliminated)
-            Expression::Match { value, arms, span } => {
+            Expression::Match {
+                value,
+                arms,
+                exhaustive,
+                span,
+            } => {
                 let scrutinee_ty = self.infer_expr(value, hierarchy, env, in_abstract_method);
-                // BT-2745 / ADR 0102 §4: advisory exhaustiveness for
-                // singleton-union scrutinees. Distinct from (and does not
-                // replace) BT-1299's pattern-based sealed-constructor check,
-                // which still runs separately in `validators::match_validators`.
-                self.check_singleton_match_exhaustiveness(&scrutinee_ty, arms, *span);
+                // BT-2745 / ADR 0102 §4 (advisory `Warning`) vs. BT-2763 /
+                // ADR 0106 (opt-in asserted `Error`, `matchExhaustive:`).
+                // Distinct from (and does not replace) BT-1299's
+                // pattern-based sealed-constructor check, which still runs
+                // separately in `validators::match_validators`.
+                if *exhaustive {
+                    self.check_asserted_match_exhaustiveness(&scrutinee_ty, arms, *span);
+                } else {
+                    self.check_singleton_match_exhaustiveness(&scrutinee_ty, arms, *span);
+                }
                 let arm_types: Vec<InferredType> = arms
                     .iter()
                     .map(|arm| {
@@ -2645,7 +2655,120 @@ impl TypeChecker {
         if !Self::is_closed_singleton_union(scrutinee_ty) {
             return;
         }
+        let Some((residual_display, missing)) = Self::singleton_match_residual(scrutinee_ty, arms)
+        else {
+            return;
+        };
+        let missing_str = Self::format_missing_members(&missing);
+        let verb = if missing.len() == 1 { "is" } else { "are" };
 
+        self.diagnostics.push(
+            Diagnostic::warning(
+                format!(
+                    "non-exhaustive match: {missing_str} {verb} not handled \
+                     (residual type: `{residual_display}`)"
+                ),
+                match_span,
+            )
+            .with_hint(
+                "Add an arm for the remaining case(s), or a `_ ->` wildcard \
+                 to handle them."
+                    .to_string(),
+            )
+            .with_category(DiagnosticCategory::Type),
+        );
+    }
+
+    /// BT-2763 / ADR 0106: `matchExhaustive:` — an opt-in **assertion** that a
+    /// `match:` is provably exhaustive, at asserted `Error` severity (the user
+    /// opted in by writing `matchExhaustive:` instead of `match:`, so ADR
+    /// 0100's "escalation to a build-failing error is always opt-in" rule is
+    /// satisfied here, not violated).
+    ///
+    /// **Distinct from, and does not replace,**
+    /// [`check_singleton_match_exhaustiveness`](Self::check_singleton_match_exhaustiveness)
+    /// (BT-2745's advisory `Warning` path for plain `match:`), which is
+    /// unchanged and still runs whenever `exhaustive` is `false` — see the
+    /// call site in `infer_expr`'s `Expression::Match` arm.
+    ///
+    /// Two failure modes, both `Error`:
+    /// - **Residual non-empty on a closed singleton union**: same residual
+    ///   computation as the advisory check, naming the uncovered members.
+    /// - **Scrutinee is not a *known-closed* singleton union at all**
+    ///   (`Dynamic`, an open/bare `Symbol`, a `Negation` co-finite set, a
+    ///   union with any non-singleton member, or an ordinary nominal type) —
+    ///   the assertion cannot be verified, so it fails loudly rather than
+    ///   silently downgrading to advisory. This is the behaviour BT-2745 /
+    ///   ADR 0102 §4 left as a "known discoverability cliff": once the
+    ///   scrutinee widens, `matchExhaustive:` stops being provable and must
+    ///   say so, not go quiet.
+    pub(super) fn check_asserted_match_exhaustiveness(
+        &mut self,
+        scrutinee_ty: &InferredType,
+        arms: &[MatchArm],
+        match_span: Span,
+    ) {
+        if !Self::is_closed_singleton_union(scrutinee_ty) {
+            let ty_display = scrutinee_ty.display_for_diagnostic().unwrap_or_default();
+            self.diagnostics.push(
+                Diagnostic::error(
+                    format!(
+                        "cannot verify `matchExhaustive:` is exhaustive — scrutinee type \
+                         `{ty_display}` is not a closed union of symbol singletons"
+                    ),
+                    match_span,
+                )
+                .with_hint(
+                    "matchExhaustive: only proves exhaustiveness over a closed union of \
+                     `#symbol` singletons (e.g. `x :: #north | #south`). Annotate the \
+                     scrutinee with such a type, or use `match:` if exhaustiveness cannot \
+                     be guaranteed statically."
+                        .to_string(),
+                )
+                .with_category(DiagnosticCategory::Type),
+            );
+            return;
+        }
+
+        let Some((residual_display, missing)) = Self::singleton_match_residual(scrutinee_ty, arms)
+        else {
+            return;
+        };
+        let missing_str = Self::format_missing_members(&missing);
+        let verb = if missing.len() == 1 { "is" } else { "are" };
+
+        self.diagnostics.push(
+            Diagnostic::error(
+                format!(
+                    "non-exhaustive matchExhaustive: {missing_str} {verb} not handled \
+                     (residual type: `{residual_display}`)"
+                ),
+                match_span,
+            )
+            .with_hint(
+                "Add an arm for the remaining case(s), or a `_ ->` wildcard \
+                 to handle them."
+                    .to_string(),
+            )
+            .with_category(DiagnosticCategory::Type),
+        );
+    }
+
+    /// Shared residual computation for both the advisory (BT-2745) and
+    /// asserted (BT-2763) singleton-union `match:` exhaustiveness checks.
+    ///
+    /// Callers must already have checked
+    /// [`is_closed_singleton_union`](Self::is_closed_singleton_union) —
+    /// this function assumes `scrutinee_ty` is one.
+    ///
+    /// Returns `None` when the match is exhaustive (an unguarded
+    /// wildcard/variable-binding arm, or a `Never` residual after subtracting
+    /// covered singleton arms). Otherwise returns `(residual_display,
+    /// missing_members)`.
+    fn singleton_match_residual(
+        scrutinee_ty: &InferredType,
+        arms: &[MatchArm],
+    ) -> Option<(EcoString, Vec<EcoString>)> {
         // An unguarded wildcard arm is full coverage — mirrors BT-1299's
         // suppression rule. An unguarded variable-binding arm (`x -> ...`)
         // always matches too, so it counts the same. A *guarded* catch-all
@@ -2655,7 +2778,7 @@ impl TypeChecker {
             arm.guard.is_none()
                 && matches!(arm.pattern, Pattern::Wildcard(_) | Pattern::Variable(_))
         }) {
-            return;
+            return None;
         }
 
         // Collect covered singletons from unguarded symbol-literal arms only —
@@ -2678,7 +2801,7 @@ impl TypeChecker {
 
         // `Never` residual ⇒ every member is covered ⇒ exhaustive.
         if matches!(residual, InferredType::Never) {
-            return;
+            return None;
         }
 
         let residual_display = residual.display_for_diagnostic().unwrap_or_default();
@@ -2695,28 +2818,17 @@ impl TypeChecker {
             // panicking if the algebra's normal form ever changes.
             _ => vec![],
         };
-        let missing_str = missing
+        Some((residual_display, missing))
+    }
+
+    /// Formats a list of missing singleton member names as a
+    /// backtick-quoted, comma-separated list for a diagnostic message.
+    fn format_missing_members(missing: &[EcoString]) -> String {
+        missing
             .iter()
             .map(|m| format!("`{m}`"))
             .collect::<Vec<_>>()
-            .join(", ");
-        let verb = if missing.len() == 1 { "is" } else { "are" };
-
-        self.diagnostics.push(
-            Diagnostic::warning(
-                format!(
-                    "non-exhaustive match: {missing_str} {verb} not handled \
-                     (residual type: `{residual_display}`)"
-                ),
-                match_span,
-            )
-            .with_hint(
-                "Add an arm for the remaining case(s), or a `_ ->` wildcard \
-                 to handle them."
-                    .to_string(),
-            )
-            .with_category(DiagnosticCategory::Type),
-        );
+            .join(", ")
     }
 
     /// BT-2045: Infer argument types for `on:do:` with exception class propagation.
@@ -5683,6 +5795,7 @@ mod tests {
         let expr = Expression::Match {
             value: Box::new(int_lit(1)),
             arms: vec![],
+            exhaustive: false,
             span: span(),
         };
         let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);

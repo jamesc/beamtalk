@@ -10,6 +10,7 @@ mod common;
 
 mod adr_0104_integration;
 mod arg_return_checking;
+mod asserted_match_exhaustiveness;
 mod basic_inference;
 mod cast_and_sync_send;
 mod destructure_and_extension;

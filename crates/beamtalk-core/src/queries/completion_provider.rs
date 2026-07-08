@@ -381,6 +381,10 @@ fn add_keyword_completions(
         ("false", "Boolean false value"),
         ("nil", "Null/absent value"),
         ("match:", "Pattern matching expression"),
+        (
+            "matchExhaustive:",
+            "Pattern matching expression, asserted exhaustive (BT-2763 / ADR 0106)",
+        ),
         ("if:then:else:", "Conditional expression"),
     ];
     for (keyword, doc) in &keywords {

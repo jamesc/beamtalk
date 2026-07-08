@@ -248,11 +248,20 @@ pub enum Expression {
     /// A pattern match expression.
     ///
     /// Example: `value match: [{#ok, x} -> x; {#error, e} -> nil]`
+    ///
+    /// BT-2763 / ADR 0106: `value matchExhaustive: [...]` is the same shape
+    /// with `exhaustive: true` — an opt-in assertion that the checker must
+    /// *prove* the match covers every case (asserted `Error` severity),
+    /// rather than merely warn when it happens to notice a gap (BT-2745's
+    /// advisory path, `exhaustive: false`).
     Match {
         /// The value being matched against.
         value: Box<Expression>,
         /// The match arms.
         arms: Vec<MatchArm>,
+        /// `true` when written as `matchExhaustive:` rather than `match:` —
+        /// an opt-in, asserted exhaustiveness check (BT-2763 / ADR 0106).
+        exhaustive: bool,
         /// Source location of the entire match.
         span: Span,
     },

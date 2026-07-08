@@ -1031,7 +1031,12 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
         Expression::Parenthesized { expression, .. } => {
             docvec!["(", unparse_expression(expression), ")"]
         }
-        Expression::Match { value, arms, .. } => unparse_match(value, arms),
+        Expression::Match {
+            value,
+            arms,
+            exhaustive,
+            ..
+        } => unparse_match(value, arms, *exhaustive),
         Expression::MapLiteral { pairs, .. } => unparse_map_literal(pairs),
         Expression::ListLiteral { elements, tail, .. } => {
             unparse_list_literal(elements, tail.as_deref())
@@ -1451,12 +1456,19 @@ fn unparse_cascade(receiver: &Expression, messages: &[CascadeMessage]) -> Docume
 
 // --- Match unparsing ---
 
-fn unparse_match(value: &Expression, arms: &[MatchArm]) -> Document<'static> {
+fn unparse_match(value: &Expression, arms: &[MatchArm], exhaustive: bool) -> Document<'static> {
+    // BT-2763 / ADR 0106: `matchExhaustive:` round-trips through unparse just
+    // like `match:` — only the keyword selector differs.
+    let keyword = if exhaustive {
+        " matchExhaustive: ["
+    } else {
+        " match: ["
+    };
     let arm_docs: Vec<Document<'static>> = arms.iter().map(unparse_match_arm).collect();
     if arm_docs.len() <= 1 {
         // Single arm: try inline, break if too wide
         let joined = join_docs(arm_docs, "; ");
-        group(docvec![unparse_expression(value), " match: [", joined, "]"])
+        group(docvec![unparse_expression(value), keyword, joined, "]"])
     } else {
         // Multiple arms: one per line
         let mut body: Vec<Document<'static>> = Vec::new();
@@ -1480,7 +1492,7 @@ fn unparse_match(value: &Expression, arms: &[MatchArm]) -> Document<'static> {
         }
         docvec![
             unparse_expression(value),
-            " match: [",
+            keyword,
             nest(2, concat(body)),
             line(),
             "]"

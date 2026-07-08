@@ -56,6 +56,7 @@ fn guarded_wildcard_arm(guard: Expression, body: Expression) -> MatchArm {
 
 fn match_expr(value: Expression, arms: Vec<MatchArm>) -> Expression {
     Expression::Match {
+        exhaustive: false,
         value: Box::new(value),
         arms,
         span: span(),

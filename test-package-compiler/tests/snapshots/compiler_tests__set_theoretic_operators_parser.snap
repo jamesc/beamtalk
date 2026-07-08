@@ -401,6 +401,7 @@ Module {
                                         },
                                     },
                                 ],
+                                exhaustive: false,
                                 span: Span {
                                     start: 1748,
                                     end: 1839,

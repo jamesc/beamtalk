@@ -2795,6 +2795,44 @@ direction match: [
 
 This check is advisory — it fires only when the scrutinee type is a union of pure `#symbol` singletons (not `Dynamic`, open `Symbol`, or mixed unions). An unguarded `_ ->` wildcard silences the warning; guarded arms do not count as coverage.
 
+**Asserted exhaustiveness — `matchExhaustive:` (BT-2763, ADR 0106):** `matchExhaustive:` is an opt-in, stricter variant of `match:` that *asserts* exhaustiveness. It parses identically to `match:` (same patterns, guards, and destructuring), but the check runs at **error** severity instead of warning:
+
+```beamtalk
+// direction :: #north | #south | #east | #west
+
+// Compile error: matchExhaustive: proves this is NOT exhaustive
+direction matchExhaustive: [
+  #north -> 0;
+  #south -> 180;
+  #east  -> 90
+]
+// ⛔ Error: non-exhaustive matchExhaustive: `#west` is not handled (residual type: `#west`)
+
+// Fine: all four members covered — silent, no diagnostic
+direction matchExhaustive: [
+  #north -> 0;
+  #south -> 180;
+  #east  -> 90;
+  #west  -> 270
+]
+
+// Fine: an unguarded wildcard is still full coverage
+direction matchExhaustive: [
+  #north -> 0;
+  _      -> -1
+]
+```
+
+If the scrutinee's type is **not** a closed union of `#symbol` singletons (`Dynamic`, a bare/open `Symbol`, or a mixed union), `matchExhaustive:` cannot verify the assertion and fails loudly rather than staying silent:
+
+```beamtalk
+x matchExhaustive: [#ok -> 1; _ -> 0]
+// ⛔ Error: cannot verify `matchExhaustive:` is exhaustive — scrutinee type
+//    `Dynamic` is not a closed union of symbol singletons
+```
+
+Plain `match:`'s advisory warning behaviour is unchanged by `matchExhaustive:` — the two checks are independent, and only the keyword you write selects between them.
+
 **Guard expressions** support: `>`, `<`, `>=`, `<=`, `=:=`, `=/=`, `/=`, `+`, `-`, `*`, `/`
 
 ### Destructuring in Match Arms
