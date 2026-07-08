@@ -18,139 +18,6 @@ beamtalk_repl_json_tests.
 %% Tests
 %%====================================================================
 
-%%% Request parsing tests
-
-parse_request_eval_test() ->
-    Request = <<"{\"type\": \"eval\", \"expression\": \"1 + 2\"}">>,
-    ?assertEqual({eval, "1 + 2"}, beamtalk_repl_server:parse_request(Request)).
-
-%% BT-2369 (ADR 0081 Phase 6): the legacy `clear` / `bindings` types were
-%% removed; the parser now reports them as invalid types. Session state is read
-%% and mutated via the `Session` API (`Session current bindings` /
-%% `Session current clear`) over `eval`.
-parse_request_clear_removed_test() ->
-    Request = <<"{\"type\": \"clear\"}">>,
-    ?assertMatch(
-        {error, {invalid_request, unknown_type}},
-        beamtalk_repl_server:parse_request(Request)
-    ).
-
-parse_request_bindings_removed_test() ->
-    Request = <<"{\"type\": \"bindings\"}">>,
-    ?assertMatch(
-        {error, {invalid_request, unknown_type}},
-        beamtalk_repl_server:parse_request(Request)
-    ).
-
-%% BT-2091: legacy "load" type maps to the removed `load-file` op; the parser
-%% reports it as an invalid type rather than dispatching it.
-parse_request_load_invalid_test() ->
-    Request = <<"{\"type\": \"load\", \"path\": \"examples/counter.bt\"}">>,
-    ?assertMatch(
-        {error, {invalid_request, unknown_type}},
-        beamtalk_repl_server:parse_request(Request)
-    ).
-
-parse_request_load_source_test() ->
-    Request = <<"{\"op\": \"load-source\", \"source\": \"Object subclass: Foo\"}">>,
-    ?assertEqual(
-        {load_source, <<"Object subclass: Foo">>}, beamtalk_repl_server:parse_request(Request)
-    ).
-
-parse_request_with_newline_test() ->
-    Request = <<"{\"type\": \"eval\", \"expression\": \"1 + 2\"}\n">>,
-    ?assertEqual({eval, "1 + 2"}, beamtalk_repl_server:parse_request(Request)).
-
-parse_request_raw_expression_test() ->
-    %% Backwards compatibility: non-JSON is treated as eval
-    Request = <<"1 + 2">>,
-    ?assertEqual({eval, "1 + 2"}, beamtalk_repl_server:parse_request(Request)).
-
-parse_request_empty_test() ->
-    Request = <<"">>,
-    ?assertMatch({error, empty_expression}, beamtalk_repl_server:parse_request(Request)).
-
-parse_request_unknown_type_test() ->
-    Request = <<"{\"type\": \"unknown\"}">>,
-    ?assertMatch(
-        {error, {invalid_request, unknown_type}}, beamtalk_repl_server:parse_request(Request)
-    ).
-
-parse_request_missing_expression_test() ->
-    Request = <<"{\"type\": \"eval\"}">>,
-    %% Missing expression field - parser can't extract the expression value
-    %% so it returns an invalid_request error
-    Result = beamtalk_repl_server:parse_request(Request),
-    ?assertMatch({error, {invalid_request, _}}, Result).
-
-%%% New protocol format (op) parsing tests
-
-parse_request_op_eval_test() ->
-    Request = <<"{\"op\": \"eval\", \"id\": \"msg-001\", \"code\": \"1 + 2\"}">>,
-    ?assertEqual({eval, "1 + 2"}, beamtalk_repl_server:parse_request(Request)).
-
-%% BT-2369 (ADR 0081 Phase 6): the `clear` / `bindings` ops were removed;
-%% parse_request now reports them as unknown ops.
-parse_request_op_clear_removed_test() ->
-    Request = <<"{\"op\": \"clear\", \"id\": \"msg-002\"}">>,
-    ?assertMatch(
-        {error, {unknown_op, <<"clear">>}}, beamtalk_repl_server:parse_request(Request)
-    ).
-
-parse_request_op_bindings_removed_test() ->
-    Request = <<"{\"op\": \"bindings\"}">>,
-    ?assertMatch(
-        {error, {unknown_op, <<"bindings">>}}, beamtalk_repl_server:parse_request(Request)
-    ).
-
-%% BT-2091: load-file and modules ops were removed; parse_request returns
-%% unknown_op for them. Their successors are `Workspace load:` and
-%% `Workspace classes` evaluated via the eval op.
-parse_request_op_load_file_unknown_test() ->
-    Request = <<"{\"op\": \"load-file\", \"path\": \"examples/counter.bt\"}">>,
-    ?assertMatch(
-        {error, {unknown_op, <<"load-file">>}},
-        beamtalk_repl_server:parse_request(Request)
-    ).
-
-parse_request_op_actors_test() ->
-    Request = <<"{\"op\": \"actors\"}">>,
-    ?assertEqual({list_actors}, beamtalk_repl_server:parse_request(Request)).
-
-parse_request_op_modules_unknown_test() ->
-    Request = <<"{\"op\": \"modules\"}">>,
-    ?assertMatch(
-        {error, {unknown_op, <<"modules">>}},
-        beamtalk_repl_server:parse_request(Request)
-    ).
-
-parse_request_op_kill_test() ->
-    Request = <<"{\"op\": \"kill\", \"actor\": \"<0.123.0>\"}">>,
-    ?assertEqual({kill_actor, "<0.123.0>"}, beamtalk_repl_server:parse_request(Request)).
-
-parse_request_op_unload_test() ->
-    %% BT-1239: unload op restored — parses module name for full class removal.
-    Request = <<"{\"op\": \"unload\", \"module\": \"Counter\"}">>,
-    ?assertMatch({unload, <<"Counter">>}, beamtalk_repl_server:parse_request(Request)).
-
-parse_request_op_unknown_test() ->
-    Request = <<"{\"op\": \"foobar\"}">>,
-    ?assertMatch({error, {unknown_op, <<"foobar">>}}, beamtalk_repl_server:parse_request(Request)).
-
-%%% Health and shutdown protocol tests (BT-611)
-
-parse_request_op_health_test() ->
-    Request = <<"{\"op\": \"health\"}">>,
-    ?assertEqual({health}, beamtalk_repl_server:parse_request(Request)).
-
-parse_request_op_shutdown_test() ->
-    Request = <<"{\"op\": \"shutdown\", \"cookie\": \"my_secret_cookie\"}">>,
-    ?assertEqual({shutdown, "my_secret_cookie"}, beamtalk_repl_server:parse_request(Request)).
-
-parse_request_op_shutdown_no_cookie_test() ->
-    Request = <<"{\"op\": \"shutdown\"}">>,
-    ?assertEqual({shutdown, ""}, beamtalk_repl_server:parse_request(Request)).
-
 %%% Nonce generation tests (BT-611)
 
 generate_nonce_returns_binary_test() ->
@@ -172,51 +39,6 @@ generate_nonce_is_hex_test() ->
         binary_to_list(Nonce)
     ),
     ?assert(IsHex).
-
-%%% JSON parsing tests (internal parser)
-
-parse_json_not_json_test() ->
-    %% Non-JSON should be treated as raw expression
-    NotJson = <<"not json at all">>,
-    ?assertEqual({eval, "not json at all"}, beamtalk_repl_server:parse_request(NotJson)).
-
-%%% Request parsing edge cases
-
-parse_request_whitespace_only_test() ->
-    Request = <<"   \n\t  ">>,
-    Result = beamtalk_repl_server:parse_request(Request),
-    %% Whitespace-only is treated as empty after stripping
-    ?assertMatch({error, empty_expression}, Result).
-
-parse_request_json_with_extra_fields_test() ->
-    %% JSON with extra fields should be ignored
-    Request = <<"{\"type\": \"eval\", \"expression\": \"1 + 1\", \"extra\": \"ignored\"}">>,
-    ?assertEqual({eval, "1 + 1"}, beamtalk_repl_server:parse_request(Request)).
-
-%% BT-2091: legacy "load" type maps to the removed `load-file` op.
-parse_request_load_with_spaces_in_path_invalid_test() ->
-    Request = <<"{\"type\": \"load\", \"path\": \"/path/with spaces/file.bt\"}">>,
-    ?assertMatch(
-        {error, {invalid_request, unknown_type}},
-        beamtalk_repl_server:parse_request(Request)
-    ).
-
-parse_request_string_literal_with_escaped_quotes_test() ->
-    %% Test parsing string literal with escaped quotes (BT-227 regression test)
-    %% The expression "\"hello\"" contains escaped quotes that must be parsed correctly
-    Request = <<"{\"type\": \"eval\", \"expression\": \"\\\"hello\\\"\"}">>,
-    ?assertEqual({eval, "\"hello\""}, beamtalk_repl_server:parse_request(Request)).
-
-parse_request_malformed_json_test() ->
-    %% Malformed JSON should fall back to raw expression (backwards compatibility)
-    Request = <<"{\"type\": incomplete">>,
-    ?assertEqual({eval, "{\"type\": incomplete"}, beamtalk_repl_server:parse_request(Request)).
-
-parse_request_unicode_test() ->
-    %% Test with unicode characters
-    Request = <<"{\"type\": \"eval\", \"expression\": \"greeting := \\\"你好\\\"\"}">>,
-    Result = beamtalk_repl_server:parse_request(Request),
-    ?assertMatch({eval, _}, Result).
 
 %%% BT-520: safe_to_existing_atom tests
 
@@ -240,120 +62,6 @@ safe_to_existing_atom_non_binary_test() ->
 safe_to_existing_atom_integer_atom_test() ->
     %% 'Integer' is a well-known existing atom in beamtalk
     ?assertEqual({ok, 'Integer'}, beamtalk_repl_server:safe_to_existing_atom(<<"Integer">>)).
-
-%%% BT-520: generate_session_id tests (via parse_request with session operations)
-
-%% Test that parse_request handles op "sessions"
-parse_request_op_sessions_test() ->
-    Request = <<"{\"op\": \"sessions\"}">>,
-    %% sessions doesn't map via op_to_request - it's handled in handle_op
-    %% The legacy parse doesn't have a sessions type, so this goes through op route
-    Result = beamtalk_repl_server:parse_request(Request),
-    %% sessions isn't in op_to_request, so it's an unknown_op
-    ?assertMatch({error, {unknown_op, <<"sessions">>}}, Result).
-
-%% Test that parse_request handles op "clone"
-parse_request_op_clone_test() ->
-    Request = <<"{\"op\": \"clone\"}">>,
-    Result = beamtalk_repl_server:parse_request(Request),
-    ?assertMatch({error, {unknown_op, <<"clone">>}}, Result).
-
-%% Test that parse_request handles op "close"
-parse_request_op_close_test() ->
-    Request = <<"{\"op\": \"close\"}">>,
-    Result = beamtalk_repl_server:parse_request(Request),
-    ?assertMatch({error, {unknown_op, <<"close">>}}, Result).
-
-%% Test that parse_request handles op "inspect"
-parse_request_op_inspect_test() ->
-    Request = <<"{\"op\": \"inspect\", \"actor\": \"<0.1.0>\"}">>,
-    Result = beamtalk_repl_server:parse_request(Request),
-    ?assertMatch({error, {unknown_op, <<"inspect">>}}, Result).
-
-%% BT-2091: reload op was hard-removed; legacy parse_request returns unknown_op.
-parse_request_op_reload_test() ->
-    Request = <<"{\"op\": \"reload\", \"module\": \"Counter\"}">>,
-    Result = beamtalk_repl_server:parse_request(Request),
-    ?assertMatch({error, {unknown_op, <<"reload">>}}, Result).
-
-%% Test that parse_request handles op "complete"
-parse_request_op_complete_test() ->
-    Request = <<"{\"op\": \"complete\", \"code\": \"Cou\"}">>,
-    Result = beamtalk_repl_server:parse_request(Request),
-    ?assertMatch({error, {unknown_op, <<"complete">>}}, Result).
-
-%% BT-2091: docs op was hard-removed; legacy parse_request returns unknown_op.
-parse_request_op_docs_test() ->
-    Request = <<"{\"op\": \"docs\", \"class\": \"Integer\"}">>,
-    Result = beamtalk_repl_server:parse_request(Request),
-    ?assertMatch({error, {unknown_op, <<"docs">>}}, Result).
-
-%%% BT-520: Additional parse_request edge cases
-
-parse_request_nested_json_expression_test() ->
-    Request = <<"{\"type\": \"eval\", \"expression\": \"#{x => 1, y => 2}\"}">>,
-    ?assertMatch({eval, _}, beamtalk_repl_server:parse_request(Request)).
-
-parse_request_very_long_expression_test() ->
-    LongExpr = list_to_binary(lists:duplicate(1000, $a)),
-    Request = iolist_to_binary(
-        json:encode(#{<<"type">> => <<"eval">>, <<"expression">> => LongExpr})
-    ),
-    ?assertMatch({eval, _}, beamtalk_repl_server:parse_request(Request)).
-
-parse_request_op_with_id_and_session_test() ->
-    Request = <<"{\"op\": \"eval\", \"id\": \"msg-123\", \"session\": \"s1\", \"code\": \"42\"}">>,
-    ?assertEqual({eval, "42"}, beamtalk_repl_server:parse_request(Request)).
-
-%% BT-2091: load-file op was hard-removed; legacy parse_request returns unknown_op.
-parse_request_op_load_file_missing_path_unknown_test() ->
-    Request = <<"{\"op\": \"load-file\"}">>,
-    ?assertMatch(
-        {error, {unknown_op, <<"load-file">>}},
-        beamtalk_repl_server:parse_request(Request)
-    ).
-
-parse_request_op_unload_missing_module_test() ->
-    %% BT-1239: unload op restored — missing module defaults to empty binary.
-    Request = <<"{\"op\": \"unload\"}">>,
-    ?assertMatch({unload, <<>>}, beamtalk_repl_server:parse_request(Request)).
-
-parse_request_op_kill_with_pid_field_test() ->
-    Request = <<"{\"op\": \"kill\", \"pid\": \"<0.99.0>\"}">>,
-    ?assertEqual({kill_actor, "<0.99.0>"}, beamtalk_repl_server:parse_request(Request)).
-
-%%% BT-520: Legacy type-format parse_request tests (covering lines 499-506)
-
-parse_request_type_actors_test() ->
-    Request = <<"{\"type\": \"actors\"}">>,
-    ?assertEqual({list_actors}, beamtalk_repl_server:parse_request(Request)).
-
-%% BT-2091: legacy "modules" type maps to the removed `modules` op; the parser
-%% reports it as an invalid type rather than dispatching it.
-parse_request_type_modules_invalid_test() ->
-    Request = <<"{\"type\": \"modules\"}">>,
-    ?assertMatch(
-        {error, {invalid_request, unknown_type}},
-        beamtalk_repl_server:parse_request(Request)
-    ).
-
-parse_request_type_unload_test() ->
-    %% BT-1239: legacy type "unload" is now supported again
-    Request = <<"{\"type\": \"unload\", \"module\": \"Counter\"}">>,
-    ?assertEqual({unload, <<"Counter">>}, beamtalk_repl_server:parse_request(Request)).
-
-parse_request_type_kill_test() ->
-    Request = <<"{\"type\": \"kill\", \"pid\": \"<0.1.0>\"}">>,
-    ?assertEqual({kill_actor, "<0.1.0>"}, beamtalk_repl_server:parse_request(Request)).
-
-%%% BT-520: parse_request catching exceptions (covering line 519)
-
-parse_request_binary_causes_crash_test() ->
-    %% Test that parse_request doesn't crash on truly bizarre input
-    %% Even if something throws during parsing, it should return error
-    Result = beamtalk_repl_server:parse_request(<<0>>),
-    %% Should either parse as raw expression or return error
-    ?assert(element(1, Result) =:= eval orelse element(1, Result) =:= error).
 
 %% Generator: runs all TCP integration tests within a single workspace instance
 tcp_integration_test_() ->
@@ -2264,13 +1972,13 @@ generate_session_id_unique_test() ->
 %%% base_protocol_response/1 tests
 
 base_protocol_response_with_id_session_test() ->
-    Msg = {protocol_msg, <<"eval">>, <<"id1">>, <<"s1">>, #{}, false},
+    Msg = {protocol_msg, <<"eval">>, <<"id1">>, <<"s1">>, #{}},
     Base = beamtalk_repl_server:base_protocol_response(Msg),
     ?assertEqual(<<"id1">>, maps:get(<<"id">>, Base)),
     ?assertEqual(<<"s1">>, maps:get(<<"session">>, Base)).
 
 base_protocol_response_no_id_no_session_test() ->
-    Msg = {protocol_msg, <<"eval">>, undefined, undefined, #{}, false},
+    Msg = {protocol_msg, <<"eval">>, undefined, undefined, #{}},
     Base = beamtalk_repl_server:base_protocol_response(Msg),
     ?assertEqual(error, maps:find(<<"id">>, Base)),
     ?assertEqual(error, maps:find(<<"session">>, Base)).

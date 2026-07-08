@@ -24,7 +24,7 @@ beamtalk_repl_ops_nav_tests.
 %%====================================================================
 
 make_msg() ->
-    {protocol_msg, <<"nav-symbols">>, <<"t1">>, <<"s1">>, #{}, false}.
+    {protocol_msg, <<"nav-symbols">>, <<"t1">>, <<"s1">>, #{}}.
 
 assert_error_response(Response) ->
     Decoded = json:decode(Response),

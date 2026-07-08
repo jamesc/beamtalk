@@ -889,28 +889,14 @@ Actor lifecycle events pushed when actors spawn or stop in the workspace. Client
 | `data.spawned_at` | integer | Unix timestamp (seconds), present on `spawned` events |
 | `data.reason` | string | Termination reason, present on `stopped` events |
 
-## Legacy Format (Backward Compatible)
+## Legacy Format (Removed)
 
-The server also accepts the legacy format for backward compatibility:
-
-**Legacy request:**
-```json
-{"type": "eval", "expression": "1 + 2"}
-```
-
-**Legacy response:**
-```json
-{"type": "result", "value": 3}
-```
-
-Legacy format is auto-detected by the presence of a `type` field instead of `op`.
-
-| Legacy Type | New Op | Notes |
-|-------------|--------|-------|
-| `eval` | `eval` | `expression` → `code` |
-| `actors` | `actors` | |
-| `kill` | `kill` | `pid` → `actor` |
-| `unload` | `unload` | |
+The pre-0.5.0 legacy format (`type`-field requests such as
+`{"type": "eval", "expression": "1 + 2"}` with `type`-keyed responses) was
+removed in BT-2789. Requests without an `op` field are rejected with an
+`invalid_request` error. A raw non-JSON line is still accepted as an eval
+expression for convenience (e.g. netcat); its response uses the standard
+op-protocol shape.
 
 > Legacy `load` and `modules` types previously mapped to the `load-file` and
 > `modules` ops, both of which were removed in protocol 2.0 (BT-2091).

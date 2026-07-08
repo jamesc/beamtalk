@@ -29,9 +29,9 @@ Covers:
 %% Helpers
 %%====================================================================
 
-%% Construct a minimal non-legacy protocol_msg record (mirrors nav tests).
+%% Construct a minimal protocol_msg record (mirrors nav tests).
 make_msg() ->
-    {protocol_msg, <<"browse">>, <<"t1">>, <<"s1">>, #{}, false}.
+    {protocol_msg, <<"browse">>, <<"t1">>, <<"s1">>, #{}}.
 
 %% Decode a JSON binary and assert it represents an error response.
 assert_error_response(Response) ->

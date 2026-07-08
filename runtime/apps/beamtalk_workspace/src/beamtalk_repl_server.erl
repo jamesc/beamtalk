@@ -47,7 +47,6 @@ in BT-2091. Use the Beamtalk-native message sends instead:
     get_nonce/0,
     handle_protocol_request/2,
     generate_session_id/0,
-    parse_request/1,
     safe_to_existing_atom/1,
     ensure_structured_error/1
 ]).
@@ -352,24 +351,6 @@ handle_op(Op, Params, Msg, SessionPid) ->
     beamtalk_repl_ops:encode(
         beamtalk_repl_ops:dispatch(Op, Params, Msg, SessionPid), Msg
     ).
-
-%%% Protocol Parsing and Formatting
-
--doc """
-Parse a request from the CLI (legacy interface).
-Expected format: JSON with "type" field.
-New code should use beamtalk_repl_protocol:decode/1 instead.
-Implementation lives in beamtalk_repl_protocol (extracted BT-865).
-""".
--spec parse_request(binary()) ->
-    {eval, string()}
-    | {load_source, binary()}
-    | {list_actors}
-    | {kill_actor, string()}
-    | {health}
-    | {shutdown, string()}
-    | {error, term()}.
-parse_request(Data) -> beamtalk_repl_protocol:parse_request(Data).
 
 %%% Delegated helpers (BT-705)
 %%%

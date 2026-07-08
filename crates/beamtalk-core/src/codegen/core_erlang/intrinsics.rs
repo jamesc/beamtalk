@@ -2036,8 +2036,7 @@ impl CoreErlangGenerator {
     /// (and their `*:metadata:` variants) and generates direct OTP `logger:log/3`
     /// calls with domain metadata injected at the call site.
     ///
-    /// `Logger setLevel:` is NOT inlined — it continues through normal class dispatch
-    /// to `beamtalk_logger.erl`.
+    /// Non-logging selectors fall through to normal class dispatch.
     ///
     /// - Returns `Ok(Some(doc))` if the message was a Logger intrinsic
     /// - Returns `Ok(None)` if not a Logger message (caller should continue)
@@ -2087,7 +2086,7 @@ impl CoreErlangGenerator {
                     "info:metadata:" if arguments.len() == 2 => ("info", true),
                     "warn:metadata:" if arguments.len() == 2 => ("warning", true),
                     "error:metadata:" if arguments.len() == 2 => ("error", true),
-                    // setLevel: and any other selector — fall through to normal dispatch
+                    // any other selector — fall through to normal dispatch
                     _ => return Ok(None),
                 }
             }

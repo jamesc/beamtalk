@@ -20,7 +20,7 @@ Uses a running trace store for integration-style tests.
 %%====================================================================
 
 make_msg(Op) ->
-    {protocol_msg, Op, <<"test-1">>, <<"session-1">>, #{}, false}.
+    {protocol_msg, Op, <<"test-1">>, <<"session-1">>, #{}}.
 
 decode_response(Bin) ->
     json:decode(Bin).

@@ -361,7 +361,7 @@ do_setup_file_logger(WorkspaceId) ->
                             {beamtalk_json_formatter, #{}}
                     },
                     %% Set primary logger level (from --log-level CLI flag, default info).
-                    %% Use `Logger setLevel: #debug` at runtime to change dynamically.
+                    %% Use `Beamtalk logLevel: #debug` at runtime to change dynamically.
                     logger:set_primary_config(level, Level),
                     case logger:add_handler(beamtalk_file_log, logger_std_h, HandlerConfig) of
                         ok ->

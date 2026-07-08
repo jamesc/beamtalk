@@ -21,10 +21,10 @@ atom-safety sentinel invariants under selector/class floods.
 %% Helpers
 %%====================================================================
 
-%% Construct a minimal non-legacy protocol_msg record.
-%% The tuple form mirrors #protocol_msg{op, id, session, params, legacy}.
+%% Construct a minimal protocol_msg record.
+%% The tuple form mirrors #protocol_msg{op, id, session, params}.
 make_msg() ->
-    {protocol_msg, <<"nav-query">>, <<"t1">>, <<"s1">>, #{}, false}.
+    {protocol_msg, <<"nav-query">>, <<"t1">>, <<"s1">>, #{}}.
 
 %% Decode a JSON binary and assert it represents an error response.
 assert_error_response(Response) ->

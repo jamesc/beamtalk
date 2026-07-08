@@ -23,10 +23,7 @@ the same JSON the WebSocket transport returns via `handle_op/4`.
 %%====================================================================
 
 make_msg(Op) ->
-    make_msg(Op, false).
-
-make_msg(Op, Legacy) ->
-    {protocol_msg, Op, <<"id-1">>, undefined, #{}, Legacy}.
+    {protocol_msg, Op, <<"id-1">>, undefined, #{}}.
 
 %%====================================================================
 %% dispatch/4 — term shapes (no JSON in the core path)
@@ -220,12 +217,14 @@ subscribe_single_stream_returns_ok_test() ->
      || S <- beamtalk_repl_subscriptions:streams()
     ].
 
-%% Start the announcements bus if not already running (supervised in the full
-%% runtime; standalone here).
+%% Start the announcements bus if not already running. Start the full runtime
+%% app (which supervises the bus) rather than a bare gen_server: a standalone
+%% registered bus would leak past this module and break later test modules'
+%% application:ensure_all_started(beamtalk_runtime) with already_started.
 ensure_announcements_bus() ->
     case whereis(beamtalk_announcements) of
         undefined ->
-            {ok, _} = beamtalk_announcements:start_link(),
+            {ok, _} = application:ensure_all_started(beamtalk_runtime),
             ok;
         _ ->
             ok
