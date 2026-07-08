@@ -311,8 +311,11 @@ anti-liveness, and off-positioning.
   `Counter` can produce a false "no stale callers" for proxy-wrapped usage —
   exactly the "files nobody has open" case this ADR exists for. Fix path:
   either track proxies as meta-dependents of the wrapped class's interface in
-  xref, or (interim) accept and document the gap. The Phase 0 napkin must
-  probe the proxy case to establish the actual miss scope.
+  xref, or (interim) accept and document the gap. **The Phase 0 spike (BT-2776)
+  established the miss scope, and it is worse than "under the proxy path": a
+  proxy-routed send records _no_ site at all (absent from `senders_of`
+  entirely), so the false "no stale callers" is guaranteed for proxy-wrapped
+  usage — an explicit decision is required in the core phases.**
 - Interface deltas require previous-generation metadata retention — small but
   new state in the class registry.
 - Findings can be stale-about-staleness: a caller flagged after reload A may
