@@ -116,7 +116,10 @@ impl CoreErlangGenerator {
                 ]);
             }
         } else {
-            // Fallback: if no matching class found (legacy modules), emit all class fields
+            // Fallback: no class matched the module name. Reached by hand-constructed test
+            // fixtures that build a `Module` with an unprefixed/bare class name (e.g.
+            // "counter") instead of the `bt@…` scheme real compilation uses — see
+            // `util::module_matches_class`. Load-bearing for those tests, not dead code.
             for class in &module.classes {
                 for state in &class.state {
                     let value_code = if let Some(ref default_value) = state.default_value {
