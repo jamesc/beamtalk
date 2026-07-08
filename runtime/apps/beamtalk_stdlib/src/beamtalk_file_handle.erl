@@ -28,12 +28,13 @@ Object protocol for everything else.
 dispatch('lines', [], X) ->
     beamtalk_file:handle_lines(X);
 dispatch(Selector, Args, X) ->
-    case beamtalk_object_ops:has_method(Selector) of
-        true ->
-            case beamtalk_object_ops:dispatch(Selector, Args, X, X) of
-                {reply, Result, _State} -> Result;
-                {error, Error, _State} -> beamtalk_error:raise(Error)
-            end
+    case beamtalk_object_ops:try_dispatch(Selector, Args, X) of
+        {ok, Result} ->
+            Result;
+        false ->
+            %% Unreachable when callers gate on has_method/1; raise a
+            %% structured DNU instead of crashing with case_clause.
+            beamtalk_error:raise(beamtalk_error:new(does_not_understand, 'FileHandle', Selector))
     end.
 
 -doc "Check if a FileHandle responds to the given selector.".

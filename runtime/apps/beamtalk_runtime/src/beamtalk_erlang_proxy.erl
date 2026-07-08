@@ -97,29 +97,24 @@ dispatch('call:args:', [SelectorSym, ArgsTuple], _Self) ->
     %% Type validation for call:args: arguments
     case {is_atom(SelectorSym), is_tuple(ArgsTuple)} of
         {false, _} ->
-            Error1 = beamtalk_error:new(type_error, 'ErlangModule', 'call:args:'),
-            Error2 = beamtalk_error:with_hint(
-                Error1,
+            beamtalk_error:raise_type_error(
+                'ErlangModule',
+                'call:args:',
                 <<"call:args: first argument must be a Symbol (function name)">>
-            ),
-            beamtalk_error:raise(Error2);
+            );
         {_, false} ->
-            Error1 = beamtalk_error:new(type_error, 'ErlangModule', 'call:args:'),
-            Error2 = beamtalk_error:with_hint(
-                Error1,
+            beamtalk_error:raise_type_error(
+                'ErlangModule',
+                'call:args:',
                 <<"call:args: second argument must be a Tuple of arguments">>
-            ),
-            beamtalk_error:raise(Error2)
+            )
     end;
 dispatch(Selector, Args, Self) ->
     Module = maps:get(module, Self),
     %% Check Object protocol methods first
-    case beamtalk_object_ops:has_method(Selector) of
-        true ->
-            case beamtalk_object_ops:dispatch(Selector, Args, Self, Self) of
-                {reply, Result, _State} -> Result;
-                {error, Error, _State} -> beamtalk_error:raise(Error)
-            end;
+    case beamtalk_object_ops:try_dispatch(Selector, Args, Self) of
+        {ok, Result} ->
+            Result;
         false ->
             %% Ensure the module is loaded so its exported function atoms are
             %% in the atom table before selector_to_function/1 calls

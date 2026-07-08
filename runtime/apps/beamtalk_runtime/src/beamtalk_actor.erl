@@ -671,12 +671,12 @@ sync_send(ActorPid, kill, []) ->
     %% BT-1629: Telemetry, monitor-before-kill, and DOWN-wait are in kill_and_wait/1.
     case kill_and_wait(ActorPid) of
         ok -> ok;
-        {error, Error} -> error(beamtalk_exception_handler:ensure_wrapped(Error))
+        {error, Error} -> beamtalk_exception_handler:reraise(Error)
     end;
 sync_send(_ActorPid, delegate, []) ->
     %% BT-1208: Non-native Actors do not have a backing Erlang module.
     %% Native Actors will override this at the codegen level.
-    error(beamtalk_exception_handler:ensure_wrapped(delegate_error(unknown)));
+    beamtalk_exception_handler:reraise(delegate_error(unknown));
 sync_send(ActorPid, pid, []) ->
     %% BT-1442: pid returns the raw Erlang PID backing the actor
     ActorPid;
@@ -797,11 +797,9 @@ sync_send_remote(ActorPid, Selector, Args) ->
                         {error, {ErlType, ErrorValue}} ->
                             %% Backward compat: safe_dispatch without stacktrace —
                             %% still pass exception class to preserve error kind
-                            error(
-                                beamtalk_exception_handler:ensure_wrapped(ErlType, ErrorValue, [])
-                            );
+                            beamtalk_exception_handler:reraise(ErlType, ErrorValue, []);
                         {error, Error} ->
-                            error(beamtalk_exception_handler:ensure_wrapped(Error));
+                            beamtalk_exception_handler:reraise(Error);
                         DirectValue ->
                             %% Backward compat: actors using beamtalk_actor:handle_call/3 directly
                             %% (rather than the generated handle_call) return values unwrapped.
@@ -882,13 +880,9 @@ sync_send(ActorPid, Selector, Args, Timeout) when
                                     );
                                 {error, {ErlType, ErrorValue}} ->
                                     %% Backward compat: preserve exception class
-                                    error(
-                                        beamtalk_exception_handler:ensure_wrapped(
-                                            ErlType, ErrorValue, []
-                                        )
-                                    );
+                                    beamtalk_exception_handler:reraise(ErlType, ErrorValue, []);
                                 {error, Error} ->
-                                    error(beamtalk_exception_handler:ensure_wrapped(Error));
+                                    beamtalk_exception_handler:reraise(Error);
                                 DirectValue ->
                                     {DirectValue, Metadata#{outcome => ok}}
                             end;
@@ -916,7 +910,7 @@ sync_send(_ActorPid, Selector, _Args, _InvalidTimeout) ->
         Selector,
         <<"Timeout must be a non-negative integer (milliseconds) or #infinity">>
     ),
-    error(beamtalk_exception_handler:ensure_wrapped(Error)).
+    beamtalk_exception_handler:reraise(Error).
 
 -doc """
 Direct self-dispatch for re-entrant self-sends (BT-1325 Layer 1).
@@ -962,14 +956,14 @@ unwrap_dispatch_result({noreply, NewState}) ->
 unwrap_dispatch_result({error, {ErlType, ErrorValue, Stacktrace}, NewState}) ->
     %% BT-1822: safe_dispatch with stacktrace
     put('$bt_actor_state', NewState),
-    error(beamtalk_exception_handler:ensure_wrapped(ErlType, ErrorValue, Stacktrace));
+    beamtalk_exception_handler:reraise(ErlType, ErrorValue, Stacktrace);
 unwrap_dispatch_result({error, {ErlType, ErrorValue}, NewState}) ->
     %% Backward compat: preserve exception class without stacktrace
     put('$bt_actor_state', NewState),
-    error(beamtalk_exception_handler:ensure_wrapped(ErlType, ErrorValue, []));
+    beamtalk_exception_handler:reraise(ErlType, ErrorValue, []);
 unwrap_dispatch_result({error, Reason, NewState}) ->
     put('$bt_actor_state', NewState),
-    error(beamtalk_exception_handler:ensure_wrapped(Reason)).
+    beamtalk_exception_handler:reraise(Reason).
 
 -doc """
 Restore pdict entries after a dispatch completes (BT-1325).
@@ -1013,7 +1007,7 @@ check_call_stack(ActorPid, Selector) ->
                         call_stack => CallStack,
                         target_pid => ActorPid
                     }),
-                    error(beamtalk_exception_handler:ensure_wrapped(Error1))
+                    beamtalk_exception_handler:reraise(Error1)
             end
     end.
 
@@ -1031,7 +1025,7 @@ raise_actor_dead(Selector) ->
         Selector,
         <<"Use 'isAlive' to check, or use monitors for lifecycle events">>
     ),
-    error(beamtalk_exception_handler:ensure_wrapped(Error)).
+    beamtalk_exception_handler:reraise(Error).
 
 -doc """
 Raise a structured timeout error as an Erlang exception.
@@ -1051,7 +1045,7 @@ raise_timeout(Selector) ->
             "The actor may be slow, overloaded, or deadlocked"
         >>
     ),
-    error(beamtalk_exception_handler:ensure_wrapped(Error)).
+    beamtalk_exception_handler:reraise(Error).
 
 -doc "Construct a structured actor_dead error for the given selector.".
 -spec actor_dead_error(atom()) -> {error, #beamtalk_error{}}.
@@ -1072,11 +1066,7 @@ at a dead process — `no_such_process` says the *name* failed to resolve.
 """.
 -spec raise_no_such_process({registered, atom()}, atom()) -> no_return().
 raise_no_such_process({registered, Name}, Selector) ->
-    error(
-        beamtalk_exception_handler:ensure_wrapped(
-            no_such_process_error_record(Name, Selector)
-        )
-    ).
+    beamtalk_exception_handler:reraise(no_such_process_error_record(Name, Selector)).
 
 -doc "Construct a structured `no_such_process` error for the given proxy ref.".
 -spec no_such_process_error({registered, atom()}, atom()) -> #beamtalk_error{}.

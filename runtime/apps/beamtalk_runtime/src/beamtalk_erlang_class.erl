@@ -35,12 +35,9 @@ dispatch('class', _Args, _Self) ->
 dispatch('printString', _Args, _Self) ->
     <<"Erlang">>;
 dispatch(Selector, Args, Self) ->
-    case beamtalk_object_ops:has_method(Selector) of
-        true ->
-            case beamtalk_object_ops:dispatch(Selector, Args, Self, Self) of
-                {reply, Result, _State} -> Result;
-                {error, Error, _State} -> beamtalk_error:raise(Error)
-            end;
+    case beamtalk_object_ops:try_dispatch(Selector, Args, Self) of
+        {ok, Result} ->
+            Result;
         false ->
             case lists:member($:, atom_to_list(Selector)) of
                 true ->

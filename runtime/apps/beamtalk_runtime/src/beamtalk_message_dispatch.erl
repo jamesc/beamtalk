@@ -98,7 +98,7 @@ send({beamtalk_supervisor, ClassName, _Module, Pid} = _Self, stop, []) ->
                 stop,
                 <<"supervisor is not running — the handle is stale">>
             ),
-            error(beamtalk_exception_handler:ensure_wrapped(Error));
+            beamtalk_exception_handler:reraise(Error);
         exit:noproc ->
             %% gen_server:stop/1 exits with bare noproc when process is dead.
             Error = beamtalk_error:new(
@@ -107,7 +107,7 @@ send({beamtalk_supervisor, ClassName, _Module, Pid} = _Self, stop, []) ->
                 stop,
                 <<"supervisor is not running — the handle is stale">>
             ),
-            error(beamtalk_exception_handler:ensure_wrapped(Error))
+            beamtalk_exception_handler:reraise(Error)
     end;
 send({beamtalk_supervisor, ClassName, _Module, _Pid} = Self, Selector, Args) ->
     %% ADR 0059: Route supervisor method calls via class hierarchy walk.
@@ -119,7 +119,7 @@ send({beamtalk_supervisor, ClassName, _Module, _Pid} = Self, Selector, Args) ->
         {reply, Result, _} ->
             Result;
         {error, Error} ->
-            error(beamtalk_exception_handler:ensure_wrapped(Error))
+            beamtalk_exception_handler:reraise(Error)
     end;
 send(Receiver, Selector, Args) ->
     case is_actor(Receiver) of
@@ -156,7 +156,7 @@ send(Receiver, Selector, Args) ->
                                         Selector,
                                         <<"Actor process is not available — class may not be fully registered">>
                                     ),
-                                    error(beamtalk_exception_handler:ensure_wrapped(Error))
+                                    beamtalk_exception_handler:reraise(Error)
                             end
                     end
             end;
@@ -205,7 +205,7 @@ send(Receiver, Selector, Args, Timeout) ->
                                         Selector,
                                         <<"Actor process is not available — class may not be fully registered">>
                                     ),
-                                    error(beamtalk_exception_handler:ensure_wrapped(Error))
+                                    beamtalk_exception_handler:reraise(Error)
                             end
                     end
             end;

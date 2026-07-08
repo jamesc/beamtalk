@@ -23,7 +23,6 @@ for manipulating state during REPL sessions.
     get_client_kind/1,
     get_loaded_modules/1,
     add_loaded_module/2,
-    set_loaded_modules/2,
     get_listen_socket/1,
     get_port/1,
     get_actor_registry/1,
@@ -164,11 +163,6 @@ get_loaded_modules(#state{loaded_modules = Modules}) ->
 -spec add_loaded_module(atom(), state()) -> state().
 add_loaded_module(Module, State = #state{loaded_modules = Modules}) ->
     State#state{loaded_modules = [Module | Modules]}.
-
--doc "Set the loaded modules list.".
--spec set_loaded_modules([atom()], state()) -> state().
-set_loaded_modules(Modules, State) ->
-    State#state{loaded_modules = Modules}.
 
 -doc "Get listen socket.".
 -spec get_listen_socket(state()) -> gen_tcp:socket() | undefined.

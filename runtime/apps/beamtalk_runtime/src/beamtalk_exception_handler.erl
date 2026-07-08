@@ -45,6 +45,8 @@ helpers called by that generated code: `wrap/1` and `matches_class/2`.
     ensure_wrapped/2,
     ensure_wrapped/3,
     ensure_wrapped/4,
+    reraise/1,
+    reraise/3,
     matches_class/2,
     dispatch/3,
     has_method/1,
@@ -432,6 +434,26 @@ ensure_wrapped(#{'$beamtalk_class' := _} = Already) ->
     Already;
 ensure_wrapped(Other) ->
     wrap(Other).
+
+-doc """
+Wrap idempotently and re-raise as an Erlang error.
+
+Shorthand for `error(ensure_wrapped(Reason))` — the standard way to
+re-signal an exception that may or may not already be a wrapped
+Exception tagged map. Contrast `beamtalk_error:raise/1`, which wraps
+unconditionally and only accepts a raw `#beamtalk_error{}`.
+""".
+-spec reraise(term()) -> no_return().
+reraise(Reason) ->
+    error(ensure_wrapped(Reason)).
+
+-doc """
+Like reraise/1 but takes the Erlang exception class atom and stacktrace
+from a try/catch `Type:Error:Stack` triple (see ensure_wrapped/3).
+""".
+-spec reraise(atom(), term(), list()) -> no_return().
+reraise(Type, Reason, Stacktrace) ->
+    error(ensure_wrapped(Type, Reason, Stacktrace)).
 
 -doc """
 Idempotent exception wrapper with stacktrace capture (BT-107).
