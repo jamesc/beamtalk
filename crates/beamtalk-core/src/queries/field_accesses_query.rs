@@ -108,43 +108,11 @@ fn collect_field_lines(method_source: &str, field_name: &str, kind: AccessKind) 
 
     let mut wrapped_lines = Vec::new();
 
-    for class in &module.classes {
-        for method in class.methods.iter().chain(class.class_methods.iter()) {
-            for stmt in &method.body {
-                collect_access_lines(
-                    &stmt.expression,
-                    field_name,
-                    kind,
-                    &wrapped,
-                    &mut wrapped_lines,
-                );
-            }
+    crate::ast_walker::for_each_expr_seq(&module, |seq| {
+        for stmt in seq {
+            collect_access_lines(&stmt.expression, field_name, kind, &wrapped, &mut wrapped_lines);
         }
-    }
-
-    // Sources that look like top-level expressions, or that parsed as
-    // standalone `Class >> selector => body` definitions, are walked as
-    // fallbacks so partial-parse cases still contribute results.
-    for stmt in &module.expressions {
-        collect_access_lines(
-            &stmt.expression,
-            field_name,
-            kind,
-            &wrapped,
-            &mut wrapped_lines,
-        );
-    }
-    for smd in &module.method_definitions {
-        for stmt in &smd.method.body {
-            collect_access_lines(
-                &stmt.expression,
-                field_name,
-                kind,
-                &wrapped,
-                &mut wrapped_lines,
-            );
-        }
-    }
+    });
 
     // Translate from wrapped-source line numbers back to input-source space.
     wrapped_lines

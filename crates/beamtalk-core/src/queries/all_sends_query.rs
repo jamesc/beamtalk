@@ -102,25 +102,11 @@ pub fn find_all_sends_in_source(method_source: &str) -> Vec<SendHit> {
 
     let mut hits = Vec::new();
 
-    for class in &module.classes {
-        for method in class.methods.iter().chain(class.class_methods.iter()) {
-            for stmt in &method.body {
-                collect_sends(&stmt.expression, &wrapped, &mut hits);
-            }
-        }
-    }
-
-    // Sources that look like top-level expressions, or that parsed as
-    // standalone `Class >> selector => body` definitions, are walked as
-    // fallbacks so partial-parse cases still contribute sends.
-    for stmt in &module.expressions {
-        collect_sends(&stmt.expression, &wrapped, &mut hits);
-    }
-    for smd in &module.method_definitions {
-        for stmt in &smd.method.body {
+    crate::ast_walker::for_each_expr_seq(&module, |seq| {
+        for stmt in seq {
             collect_sends(&stmt.expression, &wrapped, &mut hits);
         }
-    }
+    });
 
     // Translate from wrapped-source line numbers back to input-source space.
     for hit in &mut hits {
