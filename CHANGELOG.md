@@ -23,6 +23,7 @@
 - **Set-theoretic type operators `\` / `&` in annotations (ADR 0102)** — type annotations support `\` (difference: `Symbol \ #foo` = "any Symbol except #foo") and `&` (intersection: `Integer & Printable` = class-protocol composition). Both bind tighter than `|` (union), are left-associative, and are restricted to type-annotation position. `&` generalizes ADR 0068's class/protocol composition; `\` is new. Mixing `&` and `\` without parentheses is a deliberate parse error (grouping parens not yet available in type position) (BT-2742, BT-2743).
 - **Uniform set-theoretic narrowing for control flow (ADR 0102)** — singleton equality (`x =:= #foo`) and `isNil` false branches now narrow via `difference`: `x =:= #foo ifFalse:` on a `Symbol` narrows to `Symbol \ #foo` (visible in hover). `class =` / `isKindOf:` true branches narrow via `intersect` with hierarchy awareness: `x :: Number; x isKindOf: Integer` true branch is `Integer` (was `Number`); hierarchy-unrelated class tests narrow to `Never` with a diagnostic hint (BT-2740, BT-2741).
 - **Advisory `match:` exhaustiveness for singleton unions (ADR 0102)** — when a `match:` scrutinee is a known-closed union of `#symbol` singletons, the type checker warns about unhandled members (e.g. "non-exhaustive match: `#west` is not handled"). Advisory (Warning, never Error); silent under `Dynamic`, open `Symbol`, or mixed unions; silenced by a wildcard `_` arm (BT-2745).
+- **Opt-in match exhaustiveness assertion: `matchExhaustive:` (ADR 0106)** — `matchExhaustive:` is an opt-in, stricter variant of `match:` that asserts exhaustiveness at error severity instead of warning. A closed `#symbol`-singleton-union scrutinee with uncovered members produces a compile error naming the missing members; a non-closed scrutinee (`Dynamic`, open `Symbol`, mixed union) produces an error stating the type cannot be verified. Parses identically to `match:` (same patterns, guards, destructuring). Advisory `match:` behaviour is unchanged (BT-2763).
 
 ### Standard Library
 
@@ -103,6 +104,7 @@
 - **Compiled actor `notify_state_change` hook** — compiled actor `handle_call`/`handle_cast` now call `beamtalk_actor:notify_state_change/2` after committing new state, mirroring the runtime dispatch path. Previously compiled actors never published object-changed events, so the Cockpit Inspector's field-flash never fired for compiled actor mutations (BT-2524).
 - Fix announcements cross-node delivery — `subscriber_alive/1` now discriminates on `node(Pid) =:= node()` so remote pids (e.g. the LiveView IDE process) no longer crash `is_process_alive/1`. All four delivery paths converted (BT-2530).
 - Inspector: render foreign-state charlists as Strings with navigable text tree display (BT-2511, BT-2519).
+- Fix `FileHandle` dispatch miss raising a `case_clause` crash instead of a structured `does_not_understand` error — the miss path now uses the shared `try_dispatch/3` helper (#2879).
 
 ### Tooling
 
@@ -166,6 +168,7 @@
 
 ### Internal
 
+- Runtime dead-code + idiom consolidation: retire orphaned `beamtalk_behaviour_bt`, five zero-caller `beamtalk_runtime_api` delegators, and `beamtalk_repl_state:set_loaded_modules/2`; consolidate `reraise` (22 sites → `beamtalk_exception_handler`), `try_dispatch` (4 sites → `beamtalk_object_ops`), and ~120 stdlib error-construction sites onto shared helpers. Net −549 lines (#2879).
 - Collapse `beamtalk_error:new/2` + `with_selector/2` chains to `new/3` across 12 runtime modules — 36 call sites, no behavior change (#2814).
 - Consolidate zero-param dispatch BIFs to use `leaf::atom` pattern (BT-2498).
 - Add codegen unit tests for Actor initialize chain (BT-2499).
