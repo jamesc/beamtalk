@@ -744,6 +744,15 @@ loader_setup() ->
         _ ->
             ok
     end,
+    %% ADR 0105 Phase 1 (BT-2777): a live signature-generation store lets
+    %% capture_signature_generation/1 actually record into the store instead
+    %% of taking only its best-effort catch path (`noproc`).
+    case whereis(beamtalk_workspace_signature_store) of
+        undefined ->
+            {ok, _} = beamtalk_workspace_signature_store:start_link();
+        _ ->
+            ok
+    end,
     Proj.
 
 loader_teardown(Proj) ->
@@ -757,6 +766,10 @@ loader_teardown(Proj) ->
     case whereis(beamtalk_workspace_meta) of
         undefined -> ok;
         MetaPid -> gen_server:stop(MetaPid)
+    end,
+    case whereis(beamtalk_workspace_signature_store) of
+        undefined -> ok;
+        SigStorePid -> gen_server:stop(SigStorePid)
     end,
     %% Stop the compiler app so later test modules in the shared EUnit node see
     %% the baseline "compiler not running" state (noproc error-path tests in
@@ -886,6 +899,96 @@ t_install_method_preserves_comments(_Proj) ->
     ),
     Src2 = stored_method_source('InstallDoc', bumped),
     ?assertEqual(Src1, Src2).
+
+%% ADR 0105 Phase 1 (BT-2777): a save through the real structured install path
+%% (compile_method -> load_recompiled_method -> capture_signature_generation)
+%% must land a correctly-typed signature in the store — not just the direct
+%% beamtalk_workspace_signature_store:capture/4 API tested in isolation in
+%% beamtalk_workspace_signature_store_tests.erl. This is the plumbing test: a
+%% dropped/misspelled key anywhere in the return_type/param_types forwarding
+%% chain (compiler port -> compiler_server -> repl_compiler -> repl_loader)
+%% would otherwise collapse silently to the "Dynamic"/[] degenerate signature.
+t_install_method_records_signature(_Proj) ->
+    Proj = live_project_dir(),
+    Path = write_bt_under(
+        Proj,
+        "src",
+        "SignatureCapture.bt",
+        <<"Actor subclass: SignatureCapture\n  state: v = 1\n\n  value -> Integer =>\n    self.v\n">>
+    ),
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, State0),
+    ?assertMatch(
+        {ok, _, _, _, _},
+        beamtalk_repl_loader:install_method(
+            <<"SignatureCapture">>,
+            <<"describe:">>,
+            <<"describe: n :: Integer -> String =>\n  \"x\"">>,
+            durable,
+            <<"test">>,
+            human,
+            [],
+            State1
+        )
+    ),
+    Signature = beamtalk_workspace_signature_store:previous(
+        <<"SignatureCapture">>, <<"describe:">>, instance
+    ),
+    ?assertEqual(
+        #{return_type => <<"String">>, param_types => [<<"Integer">>]}, Signature
+    ).
+
+%% Two successive saves to the same method must chain: the second save's
+%% "previous" is the first save's signature, not undefined/generation 0 — the
+%% core ADR 0105 generation-handling guarantee, exercised end-to-end.
+t_install_method_chains_signature_generations(_Proj) ->
+    Proj = live_project_dir(),
+    Path = write_bt_under(
+        Proj,
+        "src",
+        "SignatureChain.bt",
+        <<"Actor subclass: SignatureChain\n  state: v = 1\n\n  value -> Integer =>\n    self.v\n">>
+    ),
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, State0),
+    ?assertMatch(
+        {ok, _, _, _, _},
+        beamtalk_repl_loader:install_method(
+            <<"SignatureChain">>,
+            <<"getValue">>,
+            <<"getValue -> Integer =>\n  self.v">>,
+            durable,
+            <<"test">>,
+            human,
+            [],
+            State1
+        )
+    ),
+    Gen1 = beamtalk_workspace_signature_store:previous(
+        <<"SignatureChain">>, <<"getValue">>, instance
+    ),
+    ?assertEqual(#{return_type => <<"Integer">>, param_types => []}, Gen1),
+    ?assertMatch(
+        {ok, _, _, _, _},
+        beamtalk_repl_loader:install_method(
+            <<"SignatureChain">>,
+            <<"getValue">>,
+            <<"getValue -> String =>\n  \"x\"">>,
+            durable,
+            <<"test">>,
+            human,
+            [],
+            State1
+        )
+    ),
+    %% The store's "previous" now reflects generation 2 (the just-installed
+    %% String-returning body) — proving generation 1's Integer signature was
+    %% correctly recorded and chained through, not left as generation 0/undefined.
+    Gen2 = beamtalk_workspace_signature_store:previous(
+        <<"SignatureChain">>, <<"getValue">>, instance
+    ),
+    ?assertEqual(#{return_type => <<"String">>, param_types => []}, Gen2),
+    ?assertNotEqual(Gen1, Gen2).
 
 %% BT-2567: `browse-method-source`'s `disk_differs` re-reads the on-disk class
 %% file *live* each browse, so an out-of-band rewrite (an external editor, or
@@ -1129,6 +1232,14 @@ loader_integration_test_() ->
             end},
             {"new method flushes at class body indentation (BT-2583)", fun() ->
                 t_new_method_appends_indented(Proj)
+            end},
+            %% ADR 0105 Phase 1 (BT-2777): the signature-generation store, exercised
+            %% through the real install path (not just direct store API calls).
+            {"install_method records the declared signature in the store", fun() ->
+                t_install_method_records_signature(Proj)
+            end},
+            {"repeated install_method chains store generations", fun() ->
+                t_install_method_chains_signature_generations(Proj)
             end}
         ]
     end}.

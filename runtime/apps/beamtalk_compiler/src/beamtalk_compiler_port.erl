@@ -987,20 +987,31 @@ handle_response(
                 BaseInfo
         end,
     {ok, class_definition, ClassInfo};
-handle_response(#{
-    status := ok,
-    kind := method_definition,
-    class_name := ClassName,
-    selector := Selector,
-    is_class_method := IsClassMethod,
-    method_source := MethodSource,
-    warnings := Warnings
-}) ->
+handle_response(
+    #{
+        status := ok,
+        kind := method_definition,
+        class_name := ClassName,
+        selector := Selector,
+        is_class_method := IsClassMethod,
+        method_source := MethodSource,
+        warnings := Warnings
+    } = Response
+) ->
+    %% ADR 0105 Phase 1 (BT-2777): return_type/param_types carry the compiled
+    %% method's declared signature so the workspace can capture it into the
+    %% signature-generation store before the patch installs. Defaulted so an
+    %% older compiler-port binary (pre-BT-2777) that omits these keys still
+    %% decodes.
+    ReturnType = maps:get(return_type, Response, <<"Dynamic">>),
+    ParamTypes = maps:get(param_types, Response, []),
     {ok, method_definition, #{
         class_name => ClassName,
         selector => Selector,
         is_class_method => IsClassMethod,
         method_source => MethodSource,
+        return_type => ReturnType,
+        param_types => ParamTypes,
         warnings => Warnings
     }};
 %% BT-1612: Protocol definition response

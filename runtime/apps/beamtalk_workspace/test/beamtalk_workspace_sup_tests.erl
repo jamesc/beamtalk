@@ -49,14 +49,15 @@ supervisor_intensity_test() ->
 children_count_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
 
-    %% Should have 9 children: workspace_meta, workspace_changelog,
-    %% transcript_stream, actor_registry, workspace_bootstrap, repl_server,
-    %% idle_monitor, actor_sup, session_sup.
+    %% Should have 10 children: workspace_meta, workspace_changelog,
+    %% workspace_signature_store, transcript_stream, actor_registry,
+    %% workspace_bootstrap, repl_server, idle_monitor, actor_sup, session_sup.
     %% BeamtalkInterface and WorkspaceInterface are value singletons (no gen_server).
     %% BT-2531: the class_events / bindings_events / flush_events pub/sub
     %% gen_servers were retired — those push streams now ride the SystemAnnouncer
     %% bus (`beamtalk_announcements`, supervised under `beamtalk_runtime_sup`).
-    ?assertEqual(9, length(ChildSpecs)).
+    %% ADR 0105 Phase 1 (BT-2777): workspace_signature_store added.
+    ?assertEqual(10, length(ChildSpecs)).
 
 children_ids_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
@@ -67,6 +68,7 @@ children_ids_test() ->
     Ids = [maps:get(id, Spec) || Spec <- ChildSpecs],
     ?assert(lists:member(beamtalk_workspace_meta, Ids)),
     ?assert(lists:member(beamtalk_workspace_changelog, Ids)),
+    ?assert(lists:member(beamtalk_workspace_signature_store, Ids)),
     ?assert(lists:member(beamtalk_transcript_stream, Ids)),
     ?assertNot(lists:member('bt@stdlib@beamtalk_interface', Ids)),
     ?assertNot(lists:member('bt@stdlib@workspace_interface', Ids)),
@@ -288,6 +290,8 @@ all_children_alive_test() ->
         ExpectedIds = [
             beamtalk_workspace_meta,
             beamtalk_workspace_changelog,
+            %% ADR 0105 Phase 1 (BT-2777).
+            beamtalk_workspace_signature_store,
             beamtalk_transcript_stream,
             beamtalk_actor_registry,
             beamtalk_workspace_bootstrap,
@@ -499,11 +503,14 @@ run_mode_config() ->
 run_mode_children_count_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(run_mode_config()),
 
-    %% Run mode: 6 children (no repl_server, idle_monitor, session_sup).
+    %% Run mode: 6 children (no repl_server, idle_monitor, session_sup,
+    %% workspace_signature_store — all REPL-only).
     %% workspace_meta, workspace_changelog, transcript_stream, actor_registry,
     %% workspace_bootstrap, actor_sup.
     %% BT-2531: class_events / bindings_events / flush_events retired (those push
     %% streams now ride the SystemAnnouncer bus).
+    %% ADR 0105 Phase 1 (BT-2777): workspace_signature_store is REPL-only (run
+    %% mode has no live-edit path to feed it) — see run_mode_no_signature_store_test.
     ?assertEqual(6, length(ChildSpecs)).
 
 run_mode_no_repl_server_test() ->
@@ -523,6 +530,17 @@ run_mode_no_session_sup_test() ->
 
     Ids = [maps:get(id, S) || S <- ChildSpecs],
     ?assertNot(lists:member(beamtalk_session_sup, Ids)).
+
+%% ADR 0105 Phase 1 (BT-2777): run mode executes a precompiled artifact with
+%% no live-edit path (no session, no way to reach
+%% beamtalk_repl_loader:install_method/9), so the signature-generation store
+%% — REPL-only, like session_sup/repl_server/idle_monitor above — must not
+%% start there.
+run_mode_no_signature_store_test() ->
+    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(run_mode_config()),
+
+    Ids = [maps:get(id, S) || S <- ChildSpecs],
+    ?assertNot(lists:member(beamtalk_workspace_signature_store, Ids)).
 
 run_mode_required_children_present_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(run_mode_config()),

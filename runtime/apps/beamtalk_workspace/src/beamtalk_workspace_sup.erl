@@ -27,6 +27,8 @@ beamtalk_workspace_sup
   ├─ beamtalk_workspace_bootstrap % Class var bootstrap (ADR 0019)
   │     (also initialises sealed Object singletons: BeamtalkInterface, WorkspaceInterface)
   ├─ beamtalk_actor_sup           % Supervises user actors
+  │   -- REPL mode only (repl=true) below this line --
+  ├─ beamtalk_workspace_signature_store % Signature-generation store (ADR 0105, BT-2777)
   ├─ beamtalk_session_sup         % Supervises session shell processes (before repl_server)
   ├─ beamtalk_repl_server         % TCP server (session-per-connection)
   └─ beamtalk_idle_monitor        % Tracks activity, self-terminates if idle
@@ -206,12 +208,29 @@ init(Config) ->
 -doc """
 Return child specs for REPL-mode children.
 When repl=false (run mode), these are omitted: no TCP listener, no idle monitor,
-no per-connection session supervisor.
+no per-connection session supervisor, no signature-generation store.
 """.
 repl_child_specs(false, _TcpPort, _WorkspaceId, _BindAddr, _AutoCleanup, _MaxIdleSeconds) ->
     [];
 repl_child_specs(true, TcpPort, WorkspaceId, BindAddr, AutoCleanup, MaxIdleSeconds) ->
     [
+        %% Signature-generation store (ADR 0105 Phase 1, BT-2777).
+        %% Per-selector previous-generation method signatures, captured at
+        %% patch time so a diff survives the class-state metadata wipe. Only
+        %% meaningful in REPL mode — run mode (repl=false) executes a
+        %% precompiled artifact with no live-edit path (no session, no way to
+        %% reach beamtalk_repl_loader:install_method/9), so there is nothing
+        %% for it to capture there. Started before session_sup/repl_server so
+        %% it's ready before any REPL connection could trigger an install.
+        #{
+            id => beamtalk_workspace_signature_store,
+            start => {beamtalk_workspace_signature_store, start_link, []},
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [beamtalk_workspace_signature_store]
+        },
+
         %% Session supervisor (one child per REPL connection).
         %%
         %% MUST start before beamtalk_repl_server: the REPL server's init/1 binds

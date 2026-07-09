@@ -799,6 +799,10 @@ install_method_with_source(
                 merged_class_source := MergedClassSource,
                 warnings := RecompileWarnings
             } = Result,
+            %% ADR 0105 Phase 1 (BT-2777): declared signature, carried through to
+            %% load_recompiled_method's capture-before-install hook.
+            ReturnType = maps:get(return_type, Result, <<"Dynamic">>),
+            ParamTypes = maps:get(param_types, Result, []),
             MethodInfo = #{
                 class_name => ClassNameBin,
                 selector => Selector,
@@ -806,7 +810,9 @@ install_method_with_source(
                 method_source => CanonicalSource,
                 intent => Intent,
                 author => Author,
-                author_kind => AuthorKind
+                author_kind => AuthorKind,
+                return_type => ReturnType,
+                param_types => ParamTypes
             },
             AllWarnings = Warnings ++ RecompileWarnings,
             load_recompiled_method(
@@ -855,11 +861,58 @@ remove_method(ClassNameBin, Selector, Side) ->
                 )
             of
                 {ok, Span, _Body} ->
+                    %% ADR 0105 Phase 1 (BT-2777): record the removal in the
+                    %% signature-generation store BEFORE the recompile-without-
+                    %% the-method installs (mirrors capture_signature_generation/1
+                    %% in load_recompiled_method/8 — this IS the install for a
+                    %% deletion, and must run beforehand so a first-ever capture
+                    %% still seeds the method's pre-removal signature from
+                    %% __beamtalk_meta/0 rather than the just-recompiled module,
+                    %% which no longer has this selector at all). Rolled back
+                    %% below if the recompile fails, so a failed removal never
+                    %% poisons the store with a removal that didn't happen.
+                    RemovalCapture = capture_signature_removal(ClassNameBin, SelectorBin, Side),
                     NewSourceBin = splice_out_span(ClassSourceBin, Span),
-                    reload_class_without_method(ClassNameBin, NewSourceBin);
+                    case reload_class_without_method(ClassNameBin, NewSourceBin) of
+                        {ok, _} = Ok ->
+                            Ok;
+                        {error, _} = Error ->
+                            rollback_signature_generation(
+                                ClassNameBin, SelectorBin, Side, RemovalCapture
+                            ),
+                            Error
+                    end;
                 {error, Reason, _Msg} ->
                     {error, {method_not_found, Reason}}
             end
+    end.
+
+%% Record a method removal into the signature-generation store (ADR 0105 Phase
+%% 1, BT-2777). Best-effort and self-swallowing, mirroring
+%% capture_signature_generation/1 — a store failure must never block the
+%% removal itself. Returns the same {captured, Prev} | not_captured outcome so
+%% the caller can roll back on a subsequent recompile failure.
+-spec capture_signature_removal(binary(), binary(), instance | class) -> capture_outcome().
+capture_signature_removal(ClassNameBin, SelectorBin, Side) ->
+    try
+        {Prev, _Classification} = beamtalk_workspace_signature_store:capture(
+            ClassNameBin, SelectorBin, Side, removed
+        ),
+        {captured, Prev}
+    catch
+        Class:Reason:Stack ->
+            ?LOG_WARNING(
+                "Failed to capture method-removal signature generation (removal proceeding)",
+                #{
+                    error_class => Class,
+                    reason => Reason,
+                    stack => Stack,
+                    class => ClassNameBin,
+                    selector => SelectorBin,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            not_captured
     end.
 
 %% Recompile the (method-removed) class source and hot-reload it, preserving the
@@ -941,6 +994,18 @@ load_recompiled_method(
     State
 ) ->
     #{class_name := ClassNameBin, selector := SelectorBin} = MethodInfo,
+    Side = patch_side(maps:get(is_class_method, MethodInfo, false)),
+    %% ADR 0105 Phase 1 (BT-2777): capture the freshly-compiled signature into
+    %% the signature-generation store BEFORE the patch installs. Must run here
+    %% (not after code:load_binary below) — install reloads the class's
+    %% compiled module under its *existing* atom, so a first-ever capture made
+    %% after install would seed from the just-installed module's own
+    %% __beamtalk_meta/0 (comparing the new generation against itself) instead
+    %% of the true pre-patch original. Rolled back on the {error, LoadReason}
+    %% branch below, so a load failure never leaves the store holding a
+    %% generation that was never actually live. Best-effort: a store failure
+    %% must never block the install.
+    CaptureOutcome = capture_signature_generation(MethodInfo),
     %% Pass the class's on-disk source path (when known) so `code:which/1`
     %% reports a real path — keeping a patched project class classified as a
     %% project class, not "stdlib"/"dynamic" (BT-2553 follow-up).
@@ -976,6 +1041,10 @@ load_recompiled_method(
             Result = <<ClassNameBin/binary, ">>", SelectorBin/binary>>,
             {ok, Result, <<>>, AllWarnings, State};
         {error, LoadReason} ->
+            %% ADR 0105 Phase 1 (BT-2777): the install this capture described
+            %% never happened — undo it so the store still reflects the actually
+            %% live generation.
+            rollback_signature_generation(ClassNameBin, SelectorBin, Side, CaptureOutcome),
             ClassAtoms = class_name_atoms(Classes),
             case beamtalk_runtime_api:drain_pending_load_errors_by_names(ClassAtoms) of
                 [{_ClassName, StructuredError} | _] ->
@@ -1461,6 +1530,82 @@ do_emit_change_entry(MethodInfo) ->
     Entry = add_flushability(Base, ClassNameBin, SelectorBin, Side),
     _ = beamtalk_workspace_changelog:append(Entry),
     ok.
+
+%% The outcome of a best-effort signature-store capture (ADR 0105 Phase 1,
+%% BT-2777): `{captured, Prev}` when the store call succeeded (`Prev` is
+%% whatever it reported as the pre-capture generation — feed this straight
+%% back to rollback_signature_generation/4 on a subsequent install failure),
+%% or `not_captured` when the capture itself failed (nothing to roll back).
+-type capture_outcome() ::
+    {captured, beamtalk_workspace_signature_store:maybe_signature()} | not_captured.
+
+%% Capture the freshly-compiled signature into the signature-generation store
+%% (ADR 0105 Phase 1, BT-2777). Called from load_recompiled_method/8 *before*
+%% the patch installs — see the call site for why ordering matters. Best-effort
+%% and self-swallowing, mirroring emit_change_entry/1: the store is diagnostic
+%% plumbing for a later re-check (BT-2778), never a gate on the install itself.
+%% Returns the capture_outcome() so the caller can roll back on install failure.
+-spec capture_signature_generation(map()) -> capture_outcome().
+capture_signature_generation(MethodInfo) ->
+    try
+        do_capture_signature_generation(MethodInfo)
+    catch
+        Class:Reason:Stack ->
+            ?LOG_WARNING(
+                "Failed to capture method signature generation (install proceeding)",
+                #{
+                    error_class => Class,
+                    reason => Reason,
+                    stack => Stack,
+                    method_info => maps:with([class_name, selector], MethodInfo),
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            not_captured
+    end.
+
+-spec do_capture_signature_generation(map()) -> capture_outcome().
+do_capture_signature_generation(MethodInfo) ->
+    ClassNameBin = maps:get(class_name, MethodInfo),
+    SelectorBin = maps:get(selector, MethodInfo),
+    IsClassMethod = maps:get(is_class_method, MethodInfo, false),
+    Side = patch_side(IsClassMethod),
+    NewSignature = #{
+        return_type => maps:get(return_type, MethodInfo, <<"Dynamic">>),
+        param_types => maps:get(param_types, MethodInfo, [])
+    },
+    {Prev, _Classification} = beamtalk_workspace_signature_store:capture(
+        ClassNameBin, SelectorBin, Side, NewSignature
+    ),
+    {captured, Prev}.
+
+%% Undo a capture_signature_generation/1 (or capture_signature_removal/3) call
+%% whose install/removal subsequently failed (ADR 0105 Phase 1, BT-2777).
+%% `not_captured` is a no-op (the capture itself never wrote anything). Best-
+%% effort and self-swallowing — a rollback failure must never surface as the
+%% install/removal error the caller is already propagating.
+-spec rollback_signature_generation(binary(), binary(), instance | class, capture_outcome()) -> ok.
+rollback_signature_generation(_ClassNameBin, _SelectorBin, _Side, not_captured) ->
+    ok;
+rollback_signature_generation(ClassNameBin, SelectorBin, Side, {captured, Prev}) ->
+    try
+        _ = beamtalk_workspace_signature_store:rollback(ClassNameBin, SelectorBin, Side, Prev),
+        ok
+    catch
+        Class:Reason:Stack ->
+            ?LOG_WARNING(
+                "Failed to roll back method signature generation (install/removal failure proceeding)",
+                #{
+                    error_class => Class,
+                    reason => Reason,
+                    stack => Stack,
+                    class => ClassNameBin,
+                    selector => SelectorBin,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            ok
+    end.
 
 -spec patch_side(boolean()) -> instance | class.
 patch_side(true) -> class;
