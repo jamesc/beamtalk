@@ -1010,6 +1010,22 @@ impl TypeChecker {
             let Some(expected_ty) = expected else {
                 continue;
             };
+            // BT-2784: a protocol-typed parameter is registered as a synthetic
+            // sealed-abstract class entry by `register_protocol_classes`
+            // (BT-1933), so `hierarchy.has_class` sees it and the nominal
+            // walk below no longer takes the "unknown type → compatible"
+            // escape hatch. Nominal subtyping doesn't apply to protocols —
+            // conformance is structural — so defer entirely to
+            // `check_protocol_conformance_in_module` /
+            // `check_protocol_argument_conformance` (which run later in
+            // `check_module_with_protocols` and consult the protocol
+            // registry) rather than flagging a false "expects P, got C"
+            // mismatch here for an argument that structurally conforms.
+            // Applies to both class-side and instance-side params — the
+            // nominal walk has no protocol awareness on either path.
+            if hierarchy.is_protocol_class(super::type_resolver::base_name_of_string(expected_ty)) {
+                continue;
+            }
             let is_class_ref_arg = arg_exprs
                 .and_then(|exprs| exprs.get(i))
                 .is_some_and(|e| matches!(e, Expression::ClassReference { .. }));
