@@ -503,13 +503,15 @@ run_mode_config() ->
 run_mode_children_count_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(run_mode_config()),
 
-    %% Run mode: 7 children (no repl_server, idle_monitor, session_sup).
-    %% workspace_meta, workspace_changelog, workspace_signature_store,
-    %% transcript_stream, actor_registry, workspace_bootstrap, actor_sup.
+    %% Run mode: 6 children (no repl_server, idle_monitor, session_sup,
+    %% workspace_signature_store — all REPL-only).
+    %% workspace_meta, workspace_changelog, transcript_stream, actor_registry,
+    %% workspace_bootstrap, actor_sup.
     %% BT-2531: class_events / bindings_events / flush_events retired (those push
     %% streams now ride the SystemAnnouncer bus).
-    %% ADR 0105 Phase 1 (BT-2777): workspace_signature_store added.
-    ?assertEqual(7, length(ChildSpecs)).
+    %% ADR 0105 Phase 1 (BT-2777): workspace_signature_store is REPL-only (run
+    %% mode has no live-edit path to feed it) — see run_mode_no_signature_store_test.
+    ?assertEqual(6, length(ChildSpecs)).
 
 run_mode_no_repl_server_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(run_mode_config()),
@@ -528,6 +530,17 @@ run_mode_no_session_sup_test() ->
 
     Ids = [maps:get(id, S) || S <- ChildSpecs],
     ?assertNot(lists:member(beamtalk_session_sup, Ids)).
+
+%% ADR 0105 Phase 1 (BT-2777): run mode executes a precompiled artifact with
+%% no live-edit path (no session, no way to reach
+%% beamtalk_repl_loader:install_method/9), so the signature-generation store
+%% — REPL-only, like session_sup/repl_server/idle_monitor above — must not
+%% start there.
+run_mode_no_signature_store_test() ->
+    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(run_mode_config()),
+
+    Ids = [maps:get(id, S) || S <- ChildSpecs],
+    ?assertNot(lists:member(beamtalk_workspace_signature_store, Ids)).
 
 run_mode_required_children_present_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(run_mode_config()),

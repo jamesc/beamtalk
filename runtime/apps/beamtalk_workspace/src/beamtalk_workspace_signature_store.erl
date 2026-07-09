@@ -203,7 +203,10 @@ Seed the "original" (never-patched) signature from the class's compiled
 selector. Best-effort: any resolution failure (class not registered, no
 `__beamtalk_meta/0` exported, selector not a known method) returns
 `undefined` — "no baseline to compare against" — rather than raising, since a
-brand-new method or a not-yet-loaded class are both ordinary, not errors.
+brand-new method or a not-yet-loaded class are both ordinary, not errors. The
+ordinary/expected failure modes (`badarg`, `{badmatch, not_found}`, `undef`)
+degrade silently; anything else is logged at `?LOG_WARNING` before degrading,
+since an unrecognised failure is more likely a real bug than routine absence.
 """.
 -spec seed_from_meta(binary(), binary(), side()) -> maybe_signature().
 seed_from_meta(ClassName, Selector, Side) ->
@@ -237,7 +240,33 @@ seed_from_meta(ClassName, Selector, Side) ->
                 undefined
         end
     catch
-        _:_ ->
+        %% Expected, ordinary resolution failures — silent, no log:
+        %%   badarg   — ClassName/Selector isn't an atom yet (brand-new this session).
+        %%   {badmatch, not_found} — class not registered in beamtalk_class_metadata.
+        %%   undef    — Module has no __beamtalk_meta/0 (or no code at all).
+        error:badarg ->
+            undefined;
+        error:{badmatch, not_found} ->
+            undefined;
+        error:undef ->
+            undefined;
+        %% Anything else is unexpected — still degrade to `undefined` (this
+        %% function must never crash the capture hook), but log it so a real
+        %% bug (e.g. a __beamtalk_meta/0 shape this module doesn't understand)
+        %% doesn't silently masquerade as "no baseline to compare against".
+        Class:Reason:Stack ->
+            ?LOG_WARNING(
+                "Unexpected failure seeding signature from __beamtalk_meta/0",
+                #{
+                    error_class => Class,
+                    reason => Reason,
+                    stack => Stack,
+                    class => ClassName,
+                    selector => Selector,
+                    side => Side,
+                    domain => [beamtalk, runtime]
+                }
+            ),
             undefined
     end.
 

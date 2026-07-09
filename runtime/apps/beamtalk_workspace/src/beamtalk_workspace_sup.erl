@@ -22,12 +22,13 @@ Architecture (from ADR 0004, implemented in BT-262):
 beamtalk_workspace_sup
   ├─ beamtalk_workspace_meta      % Metadata (project path, created_at)
   ├─ beamtalk_workspace_changelog % Append-only ChangeLog (ADR 0082, BT-2282)
-  ├─ beamtalk_workspace_signature_store % Signature-generation store (ADR 0105, BT-2777)
   ├─ beamtalk_transcript_stream    % Transcript singleton (ADR 0010, Actor)
   ├─ beamtalk_actor_registry       % Workspace-wide actor registry
   ├─ beamtalk_workspace_bootstrap % Class var bootstrap (ADR 0019)
   │     (also initialises sealed Object singletons: BeamtalkInterface, WorkspaceInterface)
   ├─ beamtalk_actor_sup           % Supervises user actors
+  │   -- REPL mode only (repl=true) below this line --
+  ├─ beamtalk_workspace_signature_store % Signature-generation store (ADR 0105, BT-2777)
   ├─ beamtalk_session_sup         % Supervises session shell processes (before repl_server)
   ├─ beamtalk_repl_server         % TCP server (session-per-connection)
   └─ beamtalk_idle_monitor        % Tracks activity, self-terminates if idle
@@ -156,21 +157,6 @@ init(Config) ->
                 shutdown => 5000,
                 type => worker,
                 modules => [beamtalk_workspace_changelog]
-            },
-
-            %% Signature-generation store (ADR 0105 Phase 1, BT-2777).
-            %% Per-selector previous-generation method signatures, captured at
-            %% patch time so a diff survives the class-state metadata wipe.
-            %% Session-only (no disk persistence) — no config dependency, so it
-            %% can start anywhere after meta; placed alongside the ChangeLog
-            %% since both are install-hook targets of beamtalk_repl_loader.
-            #{
-                id => beamtalk_workspace_signature_store,
-                start => {beamtalk_workspace_signature_store, start_link, []},
-                restart => permanent,
-                shutdown => 5000,
-                type => worker,
-                modules => [beamtalk_workspace_signature_store]
             }
 
             %% Actor singleton — workspace singletons (ADR 0010 Phase 2, ADR 0019 Phase 4)
@@ -222,12 +208,29 @@ init(Config) ->
 -doc """
 Return child specs for REPL-mode children.
 When repl=false (run mode), these are omitted: no TCP listener, no idle monitor,
-no per-connection session supervisor.
+no per-connection session supervisor, no signature-generation store.
 """.
 repl_child_specs(false, _TcpPort, _WorkspaceId, _BindAddr, _AutoCleanup, _MaxIdleSeconds) ->
     [];
 repl_child_specs(true, TcpPort, WorkspaceId, BindAddr, AutoCleanup, MaxIdleSeconds) ->
     [
+        %% Signature-generation store (ADR 0105 Phase 1, BT-2777).
+        %% Per-selector previous-generation method signatures, captured at
+        %% patch time so a diff survives the class-state metadata wipe. Only
+        %% meaningful in REPL mode — run mode (repl=false) executes a
+        %% precompiled artifact with no live-edit path (no session, no way to
+        %% reach beamtalk_repl_loader:install_method/9), so there is nothing
+        %% for it to capture there. Started before session_sup/repl_server so
+        %% it's ready before any REPL connection could trigger an install.
+        #{
+            id => beamtalk_workspace_signature_store,
+            start => {beamtalk_workspace_signature_store, start_link, []},
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [beamtalk_workspace_signature_store]
+        },
+
         %% Session supervisor (one child per REPL connection).
         %%
         %% MUST start before beamtalk_repl_server: the REPL server's init/1 binds
