@@ -1624,8 +1624,8 @@ fn test_each_with_index_pure_block_falls_through() {
     let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    items eachWithIndex: [:item :i | item + i]\n";
     let code = codegen(src);
     assert!(
-        code.contains("'eachWithIndex:'"),
-        "eachWithIndex: pure block: should fall through to eachWithIndex: dispatch. Got:\n{code}"
+        code.contains("'send'(_items1, 'eachWithIndex:', ["),
+        "eachWithIndex: pure block: should fall through to a dispatch call site (not just method metadata). Got:\n{code}"
     );
     assert!(
         !code.contains("'lists':'foldl'"),
@@ -1641,8 +1641,8 @@ fn test_each_with_index_wrong_arity_block_falls_through() {
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    items eachWithIndex: [:x | self.total := self.total + x]\n";
     let code = codegen(src);
     assert!(
-        code.contains("'eachWithIndex:'"),
-        "eachWithIndex: wrong arity: should fall through to eachWithIndex: dispatch. Got:\n{code}"
+        code.contains("'send'(_items1, 'eachWithIndex:', ["),
+        "eachWithIndex: wrong arity: should fall through to a dispatch call site (not just method metadata). Got:\n{code}"
     );
     assert!(
         !code.contains("'lists':'foldl'"),
@@ -1656,7 +1656,7 @@ fn test_each_with_index_value_type_desugars_without_reprojection() {
     // threading) but the actor nil-with-state re-projection must NOT appear —
     // the fold accumulator value is the result directly (covers the else branch
     // of finalize_enumeration_fold).
-    let src = "Value subclass: Accumulator\n  state: total = 0\n\n  run: items =>\n    acc := 0\n    items eachWithIndex: [:item :i | acc := acc + i]\n";
+    let src = "Value subclass: Accumulator\n  state: dummy = 0\n\n  run: items =>\n    acc := 0\n    items eachWithIndex: [:item :i | acc := acc + i]\n";
     let code = codegen(src);
     assert!(
         code.contains("'lists':'foldl'"),
@@ -1716,8 +1716,8 @@ fn test_do_separated_by_pure_blocks_fall_through() {
     let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    items do: [:item | item + 1] separatedBy: [nil]\n";
     let code = codegen(src);
     assert!(
-        code.contains("'do:separatedBy:'"),
-        "do:separatedBy: pure blocks: should fall through to do:separatedBy: dispatch. Got:\n{code}"
+        code.contains("'send'(_items1, 'do:separatedBy:', ["),
+        "do:separatedBy: pure blocks: should fall through to a dispatch call site (not just method metadata). Got:\n{code}"
     );
     assert!(
         !code.contains("'lists':'foldl'"),
@@ -1734,8 +1734,8 @@ fn test_each_with_index_degenerate_param_names_falls_through() {
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    items eachWithIndex: [:x :x | self.total := self.total + x]\n";
     let code = codegen(src);
     assert!(
-        code.contains("'eachWithIndex:'"),
-        "eachWithIndex: degenerate params: should fall through to eachWithIndex: dispatch. Got:\n{code}"
+        code.contains("'send'(_items1, 'eachWithIndex:', ["),
+        "eachWithIndex: degenerate params: should fall through to a dispatch call site (not just method metadata). Got:\n{code}"
     );
     assert!(
         !code.contains("'lists':'foldl'"),
@@ -1748,10 +1748,16 @@ fn test_each_with_index_non_literal_callable_falls_through() {
     // A block *variable* (not a literal `[ … ]`) cannot be desugared — the
     // synthetic AST builders need the actual parameter names and body, so the
     // call dispatches to Collection.bt as an ordinary callable send.
+    //
+    // NB: this does NOT mean the field mutation inside `blk` is threaded back
+    // to actor state correctly. It isn't — storing a self-mutating block in a
+    // local and invoking it later is a *pre-existing, general* codegen bug
+    // (unrelated to eachWithIndex:/do:separatedBy:) that produces Core Erlang
+    // `erlc` rejects with "unbound variable" in `dispatch/4`. See BT-2792.
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    blk := [:item :i | self.total := self.total + item]\n    items eachWithIndex: blk\n";
     let code = codegen(src);
     assert!(
-        code.contains("'beamtalk_message_dispatch':'send'"),
+        code.contains("'send'(_items1, 'eachWithIndex:', [Blk]"),
         "eachWithIndex: non-literal callable: should dispatch via message send. Got:\n{code}"
     );
     assert!(
@@ -1763,16 +1769,35 @@ fn test_each_with_index_non_literal_callable_falls_through() {
 #[test]
 fn test_do_separated_by_non_literal_callable_falls_through() {
     // Same non-literal guard as above, but for the `do:separatedBy:` element
-    // block argument.
+    // block argument. See BT-2792 for the pre-existing state-threading bug
+    // this scenario's field mutation would hit if actually compiled.
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    blk := [:x | self.total := self.total + x]\n    items do: blk separatedBy: [nil]\n";
     let code = codegen(src);
     assert!(
-        code.contains("'beamtalk_message_dispatch':'send'"),
+        code.contains("'send'(_items1, 'do:separatedBy:', [Blk"),
         "do:separatedBy: non-literal callable: should dispatch via message send. Got:\n{code}"
     );
     assert!(
         !code.contains("'lists':'foldl'"),
         "do:separatedBy: non-literal callable: should NOT desugar to lists:foldl. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_do_separated_by_non_literal_separator_falls_through() {
+    // Symmetric with test_do_separated_by_non_literal_callable_falls_through,
+    // but the *separator* block (not the element block) is the non-literal
+    // variable. Both callable positions must be literal blocks for the
+    // desugar to fire.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    sep := [self.total := self.total + 1]\n    items do: [:x | x printString] separatedBy: sep\n";
+    let code = codegen(src);
+    assert!(
+        code.contains("'send'(_items1, 'do:separatedBy:', ["),
+        "do:separatedBy: non-literal separator: should dispatch via message send. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'lists':'foldl'"),
+        "do:separatedBy: non-literal separator: should NOT desugar to lists:foldl. Got:\n{code}"
     );
 }
 
@@ -1783,7 +1808,7 @@ fn test_do_separated_by_value_type_desugars_without_reprojection() {
     // mutating local, but the actor nil-with-state re-projection must NOT
     // appear (covers the else branch of finalize_enumeration_fold for this
     // selector).
-    let src = "Value subclass: Accumulator\n  state: total = 0\n\n  run: items =>\n    acc := 0\n    items do: [:x | x printString] separatedBy: [acc := acc + 1]\n";
+    let src = "Value subclass: Accumulator\n  state: dummy = 0\n\n  run: items =>\n    acc := 0\n    items do: [:x | x printString] separatedBy: [acc := acc + 1]\n";
     let code = codegen(src);
     assert!(
         code.contains("'lists':'foldl'"),
