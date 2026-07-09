@@ -58,32 +58,8 @@ pub fn find_senders_in_source(method_source: &str, selector_name: &str) -> Vec<u
 
     let mut wrapped_lines = Vec::new();
 
-    for class in &module.classes {
-        for method in class.methods.iter().chain(class.class_methods.iter()) {
-            for stmt in &method.body {
-                collect_send_lines(
-                    &stmt.expression,
-                    selector_name,
-                    &wrapped,
-                    &mut wrapped_lines,
-                );
-            }
-        }
-    }
-
-    // Sources that look like top-level expressions, or that parsed as
-    // standalone `Class >> selector => body` definitions, are walked as
-    // fallbacks so partial-parse cases still contribute senders.
-    for stmt in &module.expressions {
-        collect_send_lines(
-            &stmt.expression,
-            selector_name,
-            &wrapped,
-            &mut wrapped_lines,
-        );
-    }
-    for smd in &module.method_definitions {
-        for stmt in &smd.method.body {
+    crate::ast_walker::for_each_expr_seq(&module, |seq| {
+        for stmt in seq {
             collect_send_lines(
                 &stmt.expression,
                 selector_name,
@@ -91,7 +67,7 @@ pub fn find_senders_in_source(method_source: &str, selector_name: &str) -> Vec<u
                 &mut wrapped_lines,
             );
         }
-    }
+    });
 
     // Translate from wrapped-source line numbers back to input-source space.
     wrapped_lines

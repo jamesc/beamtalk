@@ -118,25 +118,11 @@ pub fn find_ffi_sites_in_source(
 
     let mut wrapped_lines = Vec::new();
 
-    for class in &parsed.classes {
-        for method in class.methods.iter().chain(class.class_methods.iter()) {
-            for stmt in &method.body {
-                collect_ffi_sites(&stmt.expression, &target, &wrapped, &mut wrapped_lines);
-            }
-        }
-    }
-
-    // Sources that look like top-level expressions, or that parsed as
-    // standalone `Class >> selector => body` definitions, are walked as
-    // fallbacks so partial-parse cases still contribute results.
-    for stmt in &parsed.expressions {
-        collect_ffi_sites(&stmt.expression, &target, &wrapped, &mut wrapped_lines);
-    }
-    for smd in &parsed.method_definitions {
-        for stmt in &smd.method.body {
+    crate::ast_walker::for_each_expr_seq(&parsed, |seq| {
+        for stmt in seq {
             collect_ffi_sites(&stmt.expression, &target, &wrapped, &mut wrapped_lines);
         }
-    }
+    });
 
     // Translate from wrapped-source line numbers back to input-source space.
     wrapped_lines
