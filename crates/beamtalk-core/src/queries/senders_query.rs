@@ -60,7 +60,12 @@ pub fn find_senders_in_source(method_source: &str, selector_name: &str) -> Vec<u
 
     crate::ast_walker::for_each_expr_seq(&module, |seq| {
         for stmt in seq {
-            collect_send_lines(&stmt.expression, selector_name, &wrapped, &mut wrapped_lines);
+            collect_send_lines(
+                &stmt.expression,
+                selector_name,
+                &wrapped,
+                &mut wrapped_lines,
+            );
         }
     });
 

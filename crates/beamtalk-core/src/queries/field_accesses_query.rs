@@ -110,7 +110,13 @@ fn collect_field_lines(method_source: &str, field_name: &str, kind: AccessKind) 
 
     crate::ast_walker::for_each_expr_seq(&module, |seq| {
         for stmt in seq {
-            collect_access_lines(&stmt.expression, field_name, kind, &wrapped, &mut wrapped_lines);
+            collect_access_lines(
+                &stmt.expression,
+                field_name,
+                kind,
+                &wrapped,
+                &mut wrapped_lines,
+            );
         }
     });
 
