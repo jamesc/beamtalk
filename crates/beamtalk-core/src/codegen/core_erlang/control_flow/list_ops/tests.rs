@@ -1575,6 +1575,14 @@ fn test_sort_pure_generates_beamtalk_list_sort_with() {
 // correctly threaded.  Non-mutating blocks fall through to the `Collection.bt`
 // dispatch.  The selector still appears in the generated method metadata, so
 // negative assertions must target the *dispatch body*, not the whole module.
+//
+// Fall-through assertions below match on the literal generated variable name
+// `_items1`: every test in this section uses a single-statement `run: items`
+// method, so the collection parameter is always the first extracted arg and
+// always gets the deterministic name `_items1` (param name + arg-position
+// counter). This is stable for these snippets but is an artifact of codegen's
+// naming scheme, not a documented contract — if that scheme changes these
+// assertions need to change with it.
 
 #[test]
 fn test_each_with_index_field_mutation_desugars_in_actor() {
@@ -1661,6 +1669,10 @@ fn test_each_with_index_value_type_desugars_without_reprojection() {
     assert!(
         code.contains("'lists':'foldl'"),
         "eachWithIndex: Value type: should still desugar to lists:foldl. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'maps':'put'('__local__acc'"),
+        "eachWithIndex: Value type: should thread 'acc' through the fold accumulator. Got:\n{code}"
     );
     assert!(
         !code.contains("{'nil', call 'erlang':'element'(2,"),
@@ -1773,6 +1785,9 @@ fn test_do_separated_by_non_literal_callable_falls_through() {
     // this scenario's field mutation would hit if actually compiled.
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    blk := [:x | self.total := self.total + x]\n    items do: blk separatedBy: [nil]\n";
     let code = codegen(src);
+    // Bracket deliberately left open (no trailing `]`) here, unlike the
+    // eachWithIndex: assertion above: do:separatedBy: passes two arguments
+    // (`[Blk, fun () -> 'nil']`), so `[Blk]` alone would never match.
     assert!(
         code.contains("'send'(_items1, 'do:separatedBy:', [Blk"),
         "do:separatedBy: non-literal callable: should dispatch via message send. Got:\n{code}"
@@ -1816,6 +1831,10 @@ fn test_do_separated_by_value_type_desugars_without_reprojection() {
     assert!(
         code.contains("'lists':'foldl'"),
         "do:separatedBy: Value type: should still desugar to lists:foldl. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'maps':'put'('__local__acc'"),
+        "do:separatedBy: Value type: should thread 'acc' through the fold accumulator. Got:\n{code}"
     );
     assert!(
         !code.contains("{'nil', call 'erlang':'element'(2,"),
