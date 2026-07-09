@@ -1789,6 +1789,9 @@ fn test_do_separated_by_non_literal_separator_falls_through() {
     // but the *separator* block (not the element block) is the non-literal
     // variable. Both callable positions must be literal blocks for the
     // desugar to fire.
+    //
+    // NB: `sep` mutates `self.total`, so the mutation is also subject to the
+    // BT-2792 state-threading bug when this falls through to normal dispatch.
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    sep := [self.total := self.total + 1]\n    items do: [:x | x printString] separatedBy: sep\n";
     let code = codegen(src);
     assert!(
