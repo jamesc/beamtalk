@@ -60,7 +60,7 @@ Classify the change from `Old` (generation N-1) to `New` (generation N).
   `New` being the same map) — `no_op`.
 - Anything else — `signature_change`.
 """.
--spec diff(maybe_signature(), maybe_signature() | removed) -> classification().
+-spec diff(maybe_signature(), maybe_signature()) -> classification().
 diff(_Old, removed) ->
     removal;
 diff(undefined, _New) ->
