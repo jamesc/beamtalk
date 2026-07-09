@@ -1841,3 +1841,37 @@ fn test_do_separated_by_value_type_desugars_without_reprojection() {
         "do:separatedBy: Value type: should NOT re-project (not an actor). Got:\n{code}"
     );
 }
+
+#[test]
+fn test_each_with_index_zero_arity_block_falls_through() {
+    // A 0-arg block is wrong arity too (the guard is `!= 2`, not `== 1`), so it
+    // must fall through the same as the 1-arg case covered by
+    // test_each_with_index_wrong_arity_block_falls_through.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    items eachWithIndex: [self.total := self.total + 1]\n";
+    let code = codegen(src);
+    assert!(
+        code.contains("'send'(_items1, 'eachWithIndex:', ["),
+        "eachWithIndex: zero-arity block: should fall through to a dispatch call site. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'lists':'foldl'"),
+        "eachWithIndex: zero-arity block: should NOT desugar to lists:foldl. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_do_separated_by_separator_with_param_falls_through() {
+    // do:separatedBy:'s separator block must be 0-arg (`[…]`); a separator with
+    // a parameter (`[:y | …]`) is wrong arity and must fall through, covering
+    // the `!separator_block.parameters.is_empty()` guard.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    items do: [:x | x printString] separatedBy: [:y | self.total := self.total + 1]\n";
+    let code = codegen(src);
+    assert!(
+        code.contains("'send'(_items1, 'do:separatedBy:', ["),
+        "do:separatedBy: separator with param: should fall through to a dispatch call site. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'lists':'foldl'"),
+        "do:separatedBy: separator with param: should NOT desugar to lists:foldl. Got:\n{code}"
+    );
+}
