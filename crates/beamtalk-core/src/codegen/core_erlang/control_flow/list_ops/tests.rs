@@ -1577,12 +1577,14 @@ fn test_sort_pure_generates_beamtalk_list_sort_with() {
 // negative assertions must target the *dispatch body*, not the whole module.
 //
 // Fall-through assertions below match on the literal generated variable name
-// `_items1`: every test in this section uses a single-statement `run: items`
-// method, so the collection parameter is always the first extracted arg and
-// always gets the deterministic name `_items1` (param name + arg-position
-// counter). This is stable for these snippets but is an artifact of codegen's
-// naming scheme, not a documented contract — if that scheme changes these
-// assertions need to change with it.
+// `_items1`: method parameters are registered via `fresh_var` before any body
+// statement is codegen'd (see the "Register parameters BEFORE generating
+// body" step in gen_server/dispatch.rs), so the collection parameter is
+// always the *first* `fresh_var` call for the method and always gets the
+// deterministic name `_items1` (param name + counter), regardless of how many
+// statements the method body has. This is stable for these snippets but is an
+// artifact of codegen's naming scheme, not a documented contract — if that
+// scheme changes these assertions need to change with it.
 
 #[test]
 fn test_each_with_index_field_mutation_desugars_in_actor() {
