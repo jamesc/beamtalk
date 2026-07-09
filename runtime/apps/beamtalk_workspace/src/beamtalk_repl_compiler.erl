@@ -369,6 +369,11 @@ compile_method_reload(ClassSource, MethodSource, Options) ->
                                 is_class_method => maps:get(is_class_method, CR, false),
                                 method_source => maps:get(method_source, CR),
                                 merged_class_source => maps:get(merged_class_source, CR),
+                                %% ADR 0105 Phase 1 (BT-2777): declared signature,
+                                %% forwarded so the signature-generation store can
+                                %% capture it before the patch installs.
+                                return_type => maps:get(return_type, CR, <<"Dynamic">>),
+                                param_types => maps:get(param_types, CR, []),
                                 warnings => maps:get(warnings, CR, [])
                             }};
                         {error, Reason} ->
@@ -398,9 +403,20 @@ compile_expression_via_port(Expression, ModuleName, Bindings) ->
                     compile_class_definition_result(ClassInfo, ModuleName);
                 {ok, method_definition, MethodInfo} ->
                     Warnings = maps:get(warnings, MethodInfo, []),
+                    %% ADR 0105 Phase 1 (BT-2777): return_type/param_types ride
+                    %% along so the signature-generation store can capture the
+                    %% declared signature before the patch installs.
                     {ok, method_definition,
                         maps:with(
-                            [class_name, selector, is_class_method, method_source], MethodInfo
+                            [
+                                class_name,
+                                selector,
+                                is_class_method,
+                                method_source,
+                                return_type,
+                                param_types
+                            ],
+                            MethodInfo
                         ),
                         Warnings};
                 %% BT-1612: Protocol definition — compile Core Erlang to BEAM

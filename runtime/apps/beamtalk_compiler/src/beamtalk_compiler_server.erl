@@ -941,18 +941,26 @@ handle_compile_response(Other) ->
 
 %% Decode the `compile_method` response: the compiled class module plus the
 %% recovered method metadata (canonical source, selector, side).
-handle_compile_method_response(#{
-    status := ok,
-    kind := method_definition,
-    core_erlang := CoreErlang,
-    module_name := ModuleName,
-    classes := Classes,
-    selector := Selector,
-    is_class_method := IsClassMethod,
-    method_source := MethodSource,
-    merged_class_source := MergedClassSource,
-    warnings := Warnings
-}) ->
+handle_compile_method_response(
+    #{
+        status := ok,
+        kind := method_definition,
+        core_erlang := CoreErlang,
+        module_name := ModuleName,
+        classes := Classes,
+        selector := Selector,
+        is_class_method := IsClassMethod,
+        method_source := MethodSource,
+        merged_class_source := MergedClassSource,
+        warnings := Warnings
+    } = Response
+) ->
+    %% ADR 0105 Phase 1 (BT-2777): return_type/param_types carry the patched
+    %% method's declared signature so the workspace can capture it into the
+    %% signature-generation store before install. Defaulted so an older
+    %% compiler-port binary (pre-BT-2777) that omits these keys still decodes.
+    ReturnType = maps:get(return_type, Response, <<"Dynamic">>),
+    ParamTypes = maps:get(param_types, Response, []),
     {ok, #{
         core_erlang => CoreErlang,
         module_name => ModuleName,
@@ -961,6 +969,8 @@ handle_compile_method_response(#{
         is_class_method => decode_bool(IsClassMethod),
         method_source => MethodSource,
         merged_class_source => MergedClassSource,
+        return_type => ReturnType,
+        param_types => ParamTypes,
         warnings => Warnings
     }};
 handle_compile_method_response(#{status := error, diagnostics := Diagnostics}) ->

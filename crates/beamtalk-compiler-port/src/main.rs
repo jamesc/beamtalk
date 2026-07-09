@@ -440,12 +440,56 @@ fn class_definition_ok_response(
     Term::from(Map::from(map))
 }
 
+/// Compute the declared signature (return type + parameter types) of a method
+/// definition for the ADR 0105 Phase 1 signature-generation store (BT-2777).
+///
+/// Uses `TypeAnnotation::type_name()` — the same canonical string rendering
+/// the class hierarchy already uses for declared state/method types — so the
+/// workspace-side store compares like-for-like against `__beamtalk_meta`
+/// seeded signatures. An absent annotation (param or return) is reported as
+/// the sentinel `"Dynamic"` rather than omitted, so the signature-diff always
+/// has two comparable values.
+///
+/// **Scope note (Phase 0 finding, `docs/internal/adr-0105-phase0-spike-findings.md`
+/// §1b):** only *declared* annotations are captured here, not re-inferred
+/// return types. Reading declared annotations is the cheaper interim the spike
+/// recommended; extending this to inferred (unannotated) return types is a
+/// follow-up once a cheap way to thread `TypeMap` through the port response
+/// exists.
+fn method_signature_terms(method: &beamtalk_core::ast::MethodDefinition) -> (String, Vec<String>) {
+    const DYNAMIC: &str = "Dynamic";
+    let return_type = method
+        .return_type
+        .as_ref()
+        .map_or_else(|| DYNAMIC.to_string(), |rt| rt.type_name().to_string());
+    let param_types = method
+        .parameters
+        .iter()
+        .map(|p| {
+            p.type_annotation
+                .as_ref()
+                .map_or_else(|| DYNAMIC.to_string(), |ta| ta.type_name().to_string())
+        })
+        .collect();
+    (return_type, param_types)
+}
+
+/// Build ETF term list from parameter type-name strings.
+fn build_param_type_terms(param_types: &[String]) -> Term {
+    Term::from(List::from(
+        param_types.iter().map(|t| binary(t)).collect::<Vec<_>>(),
+    ))
+}
+
 /// Build a response map for a successful standalone method definition in REPL.
+#[allow(clippy::too_many_arguments)]
 fn method_definition_ok_response(
     class_name: &str,
     selector: &str,
     is_class_method: bool,
     method_source: &str,
+    return_type: &str,
+    param_types: &[String],
     warnings: &[String],
 ) -> Term {
     Term::from(Map::from([
@@ -462,6 +506,12 @@ fn method_definition_ok_response(
             },
         ),
         (atom("method_source"), binary(method_source)),
+        // ADR 0105 Phase 1 (BT-2777): the compiled method's declared signature,
+        // carried so the workspace can capture it into the signature-generation
+        // store before the patch installs (the pre-patch signature is otherwise
+        // unrecoverable — see beamtalk_object_class.erl's put_method/4 clearing).
+        (atom("return_type"), binary(return_type)),
+        (atom("param_types"), build_param_type_terms(param_types)),
         (
             atom("warnings"),
             Term::from(List::from(build_warning_terms(warnings))),
@@ -524,6 +574,8 @@ fn compile_method_ok_response(
     is_class_method: bool,
     method_source: &str,
     merged_class_source: &str,
+    return_type: &str,
+    param_types: &[String],
     warnings: &[String],
 ) -> Term {
     Term::from(Map::from([
@@ -546,6 +598,10 @@ fn compile_method_ok_response(
         ),
         (atom("method_source"), binary(method_source)),
         (atom("merged_class_source"), binary(merged_class_source)),
+        // ADR 0105 Phase 1 (BT-2777): see method_definition_ok_response's doc
+        // comment for why this is carried (signature-generation store capture).
+        (atom("return_type"), binary(return_type)),
+        (atom("param_types"), build_param_type_terms(param_types)),
         (
             atom("warnings"),
             Term::from(List::from(build_warning_terms(warnings))),
@@ -882,11 +938,14 @@ fn handle_compile_expression(request: &Map) -> Term {
         // follow-up). `unparse_method` re-emits the parsed method, comments and
         // all, so the recorded source round-trips cleanly.
         let method_source = beamtalk_core::unparse::unparse_method(&method_def.method);
+        let (return_type, param_types) = method_signature_terms(&method_def.method);
         return method_definition_ok_response(
             &class_name,
             &selector,
             method_def.is_class_method,
             &method_source,
+            &return_type,
+            &param_types,
             &warnings,
         );
     }
@@ -1447,7 +1506,7 @@ fn handle_compile_method(request: &Map) -> Term {
     // diagnostics can be reported relative to the method snippet the user edits
     // (BT-2563 #2). Its span now indexes into `merged_class_source`, the same
     // coordinate system as every diagnostic span.
-    let patched_method_span = merged_module
+    let patched_method = merged_module
         .classes
         .iter()
         .find(|c| c.name.name == class_name)
@@ -1460,8 +1519,16 @@ fn handle_compile_method(request: &Map) -> Term {
             methods
                 .iter()
                 .find(|m| m.selector.name() == selector && m.kind == patched_kind)
-        })
-        .map(|m| m.span);
+        });
+    let patched_method_span = patched_method.map(|m| m.span);
+    // ADR 0105 Phase 1 (BT-2777): declared signature of the patched method, read
+    // from the re-parsed merged module so it reflects exactly what was installed
+    // (not the standalone pre-merge parse). Falls back to "Dynamic"/no params in
+    // the never-should-happen case the method isn't found post-merge.
+    let (patched_return_type, patched_param_types) = patched_method.map_or_else(
+        || ("Dynamic".to_string(), Vec::new()),
+        method_signature_terms,
+    );
 
     // 4. Full semantic analysis on the MERGED module — catches method errors in
     //    class context (undefined fields, type errors). Every diagnostic span
@@ -1539,6 +1606,8 @@ fn handle_compile_method(request: &Map) -> Term {
             is_class_method,
             &canonical_method_source,
             &merged_class_source,
+            &patched_return_type,
+            &patched_param_types,
             &warning_msgs,
         ),
         // Codegen spans are now relative to the re-parsed merged module, so the
@@ -2890,6 +2959,79 @@ Object subclass: Counter
         let module_name = map_get(m, "module_name").and_then(term_to_string);
         assert_eq!(module_name.as_deref(), Some("bt@my_thing"));
     }
+
+    /// ADR 0105 Phase 1 (BT-2777): the standalone `Class >> sel` method-definition
+    /// response (the REPL `>>` live-patch path) must carry the declared signature
+    /// alongside the existing `method_source`, so the workspace can capture it into
+    /// the signature-generation store before the patch installs.
+    #[test]
+    fn standalone_method_definition_carries_declared_signature() {
+        let request = Map::from([
+            (atom("command"), atom("compile_expression")),
+            (
+                atom("source"),
+                binary("Counter >> setValue: v :: Integer -> Object => self.value := v"),
+            ),
+            (atom("module"), binary("bt@repl_eval_1")),
+            (atom("known_vars"), Term::from(List::from(vec![]))),
+        ]);
+
+        let response = handle_compile_expression(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected a map response, got: {response:?}");
+        };
+
+        assert_eq!(
+            map_get(m, "kind").and_then(term_to_atom).as_deref(),
+            Some("method_definition")
+        );
+        assert_eq!(
+            map_get(m, "return_type")
+                .and_then(term_to_string)
+                .as_deref(),
+            Some("Object")
+        );
+        let Some(Term::List(param_types)) = map_get(m, "param_types") else {
+            panic!("Expected param_types list, got: {m:?}");
+        };
+        let param_type_strs: Vec<String> = param_types
+            .elements
+            .iter()
+            .filter_map(term_to_string)
+            .collect();
+        assert_eq!(param_type_strs, vec!["Integer".to_string()]);
+    }
+
+    /// Unannotated standalone method definitions report the `"Dynamic"` sentinel
+    /// rather than omitting the fields.
+    #[test]
+    fn standalone_method_definition_reports_dynamic_when_unannotated() {
+        let request = Map::from([
+            (atom("command"), atom("compile_expression")),
+            (
+                atom("source"),
+                binary("Counter >> increment => self.value := self.value + 1"),
+            ),
+            (atom("module"), binary("bt@repl_eval_1")),
+            (atom("known_vars"), Term::from(List::from(vec![]))),
+        ]);
+
+        let response = handle_compile_expression(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected a map response, got: {response:?}");
+        };
+
+        assert_eq!(
+            map_get(m, "return_type")
+                .and_then(term_to_string)
+                .as_deref(),
+            Some("Dynamic")
+        );
+        assert_eq!(
+            map_get(m, "param_types"),
+            Some(&Term::from(List::from(Vec::<Term>::new())))
+        );
+    }
 }
 
 // ============================================================================
@@ -2960,6 +3102,16 @@ mod property_tests {
         } else {
             None
         }
+    }
+
+    /// Extract a list-of-binary-valued field from a response Term (e.g. `param_types`).
+    fn response_field_str_list(term: &Term, key: &str) -> Option<Vec<String>> {
+        if let Term::Map(map) = term {
+            if let Some(Term::List(list)) = map_get(map, key) {
+                return Some(list.elements.iter().filter_map(term_to_string).collect());
+            }
+        }
+        None
     }
 
     const COMPILE_METHOD_CLASS: &str = "Actor subclass: EventStore\n  state: events = #{}\n\n  initialize -> Nil =>\n    self.events := #{}";
@@ -3080,6 +3232,59 @@ mod property_tests {
         assert!(
             !merged.contains(">>"),
             "merged class should be inline, not `>>` extensions:\n{merged}"
+        );
+    }
+
+    #[test]
+    fn compile_method_response_carries_declared_signature() {
+        // ADR 0105 Phase 1 (BT-2777): the compile_method response must carry the
+        // patched method's declared return/param types so the workspace can
+        // capture them into the signature-generation store before install.
+        let request = Term::from(Map::from([
+            (atom("command"), atom("compile_method")),
+            (atom("class_source"), binary(COMPILE_METHOD_CLASS)),
+            (
+                atom("method_source"),
+                binary("touch: n :: Integer -> Object =>\n  self"),
+            ),
+            (atom("is_class_method"), atom("false")),
+        ]));
+        let response = handle_request(&request);
+        assert_eq!(
+            response_status(&response).as_deref(),
+            Some("ok"),
+            "resp: {response:?}"
+        );
+        assert_eq!(
+            response_field_str(&response, "return_type").as_deref(),
+            Some("Object")
+        );
+        assert_eq!(
+            response_field_str_list(&response, "param_types").as_deref(),
+            Some(&["Integer".to_string()][..])
+        );
+    }
+
+    #[test]
+    fn compile_method_response_reports_dynamic_for_unannotated_signature() {
+        // No return/param annotations on the patched method → both fields report
+        // the "Dynamic" sentinel (never omitted, so the diff always compares two
+        // values).
+        let request = Term::from(Map::from([
+            (atom("command"), atom("compile_method")),
+            (atom("class_source"), binary(COMPILE_METHOD_CLASS)),
+            (atom("method_source"), binary("touch: n =>\n  self")),
+            (atom("is_class_method"), atom("false")),
+        ]));
+        let response = handle_request(&request);
+        assert_eq!(response_status(&response).as_deref(), Some("ok"));
+        assert_eq!(
+            response_field_str(&response, "return_type").as_deref(),
+            Some("Dynamic")
+        );
+        assert_eq!(
+            response_field_str_list(&response, "param_types").as_deref(),
+            Some(&["Dynamic".to_string()][..])
         );
     }
 

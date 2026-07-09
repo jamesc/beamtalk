@@ -22,6 +22,7 @@ Architecture (from ADR 0004, implemented in BT-262):
 beamtalk_workspace_sup
   ├─ beamtalk_workspace_meta      % Metadata (project path, created_at)
   ├─ beamtalk_workspace_changelog % Append-only ChangeLog (ADR 0082, BT-2282)
+  ├─ beamtalk_workspace_signature_store % Signature-generation store (ADR 0105, BT-2777)
   ├─ beamtalk_transcript_stream    % Transcript singleton (ADR 0010, Actor)
   ├─ beamtalk_actor_registry       % Workspace-wide actor registry
   ├─ beamtalk_workspace_bootstrap % Class var bootstrap (ADR 0019)
@@ -155,6 +156,21 @@ init(Config) ->
                 shutdown => 5000,
                 type => worker,
                 modules => [beamtalk_workspace_changelog]
+            },
+
+            %% Signature-generation store (ADR 0105 Phase 1, BT-2777).
+            %% Per-selector previous-generation method signatures, captured at
+            %% patch time so a diff survives the class-state metadata wipe.
+            %% Session-only (no disk persistence) — no config dependency, so it
+            %% can start anywhere after meta; placed alongside the ChangeLog
+            %% since both are install-hook targets of beamtalk_repl_loader.
+            #{
+                id => beamtalk_workspace_signature_store,
+                start => {beamtalk_workspace_signature_store, start_link, []},
+                restart => permanent,
+                shutdown => 5000,
+                type => worker,
+                modules => [beamtalk_workspace_signature_store]
             }
 
             %% Actor singleton — workspace singletons (ADR 0010 Phase 2, ADR 0019 Phase 4)
