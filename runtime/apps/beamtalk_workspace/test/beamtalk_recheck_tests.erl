@@ -561,7 +561,8 @@ trigger_never_raises_on_unknown_selector_test_() ->
                             checked => 0,
                             total_candidates => 0,
                             not_checked => 0,
-                            cap_note => undefined
+                            cap_note => undefined,
+                            checked_owners => []
                         },
                         Result
                     )

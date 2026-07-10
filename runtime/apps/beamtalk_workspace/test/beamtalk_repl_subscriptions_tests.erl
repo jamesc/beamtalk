@@ -28,9 +28,9 @@ branch of the bus delivers.
 %%% streams/0
 %%% ===========================================================================
 
-streams_lists_all_five_streams_test() ->
+streams_lists_all_six_streams_test() ->
     ?assertEqual(
-        [transcript, actors, classes, bindings, flush],
+        [transcript, actors, classes, bindings, flush, reload_check],
         beamtalk_repl_subscriptions:streams()
     ).
 

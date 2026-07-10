@@ -251,8 +251,16 @@ impl ProtocolClient {
     ///
     /// Transcript push messages are printed inline to stdout with a `│ `
     /// gutter prefix at the start of each line so they are visually distinct
-    /// from eval results. Other push types (actor lifecycle, etc.) are
-    /// silently ignored.
+    /// from eval results. `reload_check`/`completed` pushes (ADR 0105 Phase
+    /// 1, BT-2779) render the reload-induced re-check notice the same way
+    /// the ADR's demo shows it — asynchronous, interleaved with whatever the
+    /// REPL is doing, since the re-check that produced it runs on the
+    /// install path of a *different* session's save as easily as this one's.
+    /// Both are gated on `print_transcript`, same as transcript pushes: when
+    /// multiple clients share a session (e.g. a completion client alongside
+    /// the main REPL connection), only the one client showing transcript
+    /// output should also print reload-check notices, or they double-print.
+    /// Other push types (actor lifecycle, etc.) are silently ignored.
     ///
     /// Returns `true` if the message was a push and should be skipped for
     /// response parsing.
@@ -274,6 +282,24 @@ impl ProtocolClient {
                     .and_then(|()| out.flush())
                 {
                     eprintln!("warning: failed to write transcript output: {err}");
+                }
+            }
+        }
+        if self.print_transcript
+            && parsed.get("channel").and_then(|v| v.as_str()) == Some("reload_check")
+            && parsed.get("event").and_then(|v| v.as_str()) == Some("completed")
+        {
+            if let Some(data) = parsed.get("data") {
+                if let Some(notice) = format_reload_check_notice(data) {
+                    use std::io::Write;
+                    let mut out = std::io::stdout().lock();
+                    if let Err(err) = writeln!(out, "{notice}").and_then(|()| out.flush()) {
+                        eprintln!("warning: failed to write reload check notice: {err}");
+                    }
+                    // A fresh notice always starts at its own line start; the
+                    // next transcript chunk (if any) should get the gutter
+                    // prefix rather than gluing onto this notice's last line.
+                    self.transcript_bol = true;
                 }
             }
         }
@@ -424,6 +450,98 @@ pub fn format_transcript_chunk(text: &str, bol: &mut bool) -> String {
     out
 }
 
+/// Render a `reload_check`/`completed` push frame's `data` payload as the
+/// REPL notice (ADR 0105 §"The demo", BT-2779). Returns `None` if `data`
+/// is missing the fields the notice needs (defensive — a malformed push
+/// should never crash the REPL; it just prints nothing).
+///
+/// Mirrors the ADR's demo shape:
+/// ```text
+/// ⚠ reload check: Counter>>getCount signature changed; 2 callers re-checked, 1 stale
+///    Dashboard>>refresh (line 14): `+` expects a number, `getCount` now returns String
+/// ```
+/// `removal` uses `ℹ` (informational — Hint severity per ADR 0100 Rule 1);
+/// `signature_change` uses `⚠`. A `self_edit` classification means no
+/// dependent re-check ran at all — this call only exists because clearing
+/// this class's own stale findings (its source just changed) was itself
+/// worth telling the user about, so the notice is a single clearing line
+/// with no caller list.
+pub fn format_reload_check_notice(data: &serde_json::Value) -> Option<String> {
+    use std::fmt::Write as _;
+
+    let changed_class = data.get("changedClass")?.as_str()?;
+    let changed_selector = data.get("changedSelector")?.as_str()?;
+    let classification = data
+        .get("classification")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("signature_change");
+
+    if classification == "self_edit" {
+        return Some(format!(
+            "✓ reload check: {changed_class}>>{changed_selector} — cleared stale reload-induced finding(s)"
+        ));
+    }
+
+    let checked = data
+        .get("checked")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let cap_note = data.get("capNote").and_then(|v| v.as_str());
+    let findings: Vec<&serde_json::Value> = data
+        .get("findings")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().collect())
+        .unwrap_or_default();
+    let stale = findings.len();
+
+    let icon = if classification == "removal" {
+        "ℹ"
+    } else {
+        "⚠"
+    };
+    let verb = if classification == "removal" {
+        "was removed"
+    } else {
+        "signature changed"
+    };
+
+    let mut out = format!("{icon} reload check: {changed_class}>>{changed_selector} {verb}");
+    if checked > 0 {
+        let caller_word = if checked == 1 { "caller" } else { "callers" };
+        let _ = write!(out, "; {checked} {caller_word} re-checked, {stale} stale");
+    }
+    if let Some(note) = cap_note {
+        let _ = write!(out, " ({note})");
+    }
+
+    for finding in findings {
+        let owner = finding.get("owner").and_then(|v| v.as_str()).unwrap_or("?");
+        let message = finding
+            .get("message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let sites: Vec<&serde_json::Value> = finding
+            .get("sites")
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().collect())
+            .unwrap_or_default();
+        if sites.is_empty() {
+            let _ = write!(out, "\n   {owner}: {message}");
+            continue;
+        }
+        for site in sites {
+            let method = site.get("method").and_then(|v| v.as_str()).unwrap_or("?");
+            let line = site
+                .get("line")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0);
+            let _ = write!(out, "\n   {owner}>>{method} (line {line}): {message}");
+        }
+    }
+
+    Some(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::format_transcript_chunk;
@@ -509,5 +627,133 @@ mod tests {
         let mut bol = false;
         assert_eq!(format_transcript_chunk("\n", &mut bol), "\n");
         assert!(bol);
+    }
+
+    mod reload_check_notice {
+        use super::super::format_reload_check_notice;
+        use serde_json::json;
+
+        #[test]
+        fn signature_change_with_one_stale_caller() {
+            let data = json!({
+                "changedClass": "Counter",
+                "changedSelector": "getCount",
+                "classification": "signature_change",
+                "checked": 2,
+                "notChecked": 0,
+                "capNote": null,
+                "checkedOwners": ["Dashboard", "StatsView"],
+                "findings": [{
+                    "owner": "Dashboard",
+                    "changedClass": "Counter",
+                    "selector": "getCount",
+                    "classification": "signature_change",
+                    "severity": "warning",
+                    "category": "Dnu",
+                    "message": "String does not understand '+'",
+                    "note": null,
+                    "sites": [{"method": "refresh", "line": 14}],
+                    "start": 0,
+                    "end": 10
+                }]
+            });
+            let notice = format_reload_check_notice(&data).expect("notice");
+            assert_eq!(
+                notice,
+                "⚠ reload check: Counter>>getCount signature changed; 2 callers re-checked, 1 stale\n   Dashboard>>refresh (line 14): String does not understand '+'"
+            );
+        }
+
+        #[test]
+        fn removal_uses_info_icon() {
+            let data = json!({
+                "changedClass": "Counter",
+                "changedSelector": "reset",
+                "classification": "removal",
+                "checked": 1,
+                "notChecked": 0,
+                "capNote": null,
+                "checkedOwners": ["AdminPanel"],
+                "findings": [{
+                    "owner": "AdminPanel",
+                    "changedClass": "Counter",
+                    "selector": "reset",
+                    "classification": "removal",
+                    "severity": "hint",
+                    "category": "Dnu",
+                    "message": "'Counter' does not understand 'reset'",
+                    "note": "removed by the reload of Counter",
+                    "sites": [{"method": "onClick", "line": 9}],
+                    "start": 0,
+                    "end": 5
+                }]
+            });
+            let notice = format_reload_check_notice(&data).expect("notice");
+            assert!(notice.starts_with("ℹ reload check: Counter>>reset was removed"));
+            assert!(notice.contains("1 caller re-checked, 1 stale"));
+            assert!(notice.contains("AdminPanel>>onClick (line 9)"));
+        }
+
+        #[test]
+        fn clean_recheck_has_no_stale_findings() {
+            // reload-fixes-reload: a recheck ran (checked=1) but produced no
+            // findings — the caller was clean against the new generation.
+            let data = json!({
+                "changedClass": "Counter",
+                "changedSelector": "getCount",
+                "classification": "signature_change",
+                "checked": 1,
+                "notChecked": 0,
+                "capNote": null,
+                "checkedOwners": ["Dashboard"],
+                "findings": []
+            });
+            let notice = format_reload_check_notice(&data).expect("notice");
+            assert_eq!(
+                notice,
+                "⚠ reload check: Counter>>getCount signature changed; 1 caller re-checked, 0 stale"
+            );
+        }
+
+        #[test]
+        fn cap_note_is_appended() {
+            let data = json!({
+                "changedClass": "Counter",
+                "changedSelector": "size",
+                "classification": "signature_change",
+                "checked": 20,
+                "notChecked": 5,
+                "capNote": "5 more not checked",
+                "checkedOwners": [],
+                "findings": []
+            });
+            let notice = format_reload_check_notice(&data).expect("notice");
+            assert!(notice.ends_with("(5 more not checked)"));
+        }
+
+        #[test]
+        fn self_edit_classification_is_a_single_clearing_line() {
+            let data = json!({
+                "changedClass": "Dashboard",
+                "changedSelector": "refresh",
+                "classification": "self_edit",
+                "checked": 0,
+                "notChecked": 0,
+                "capNote": null,
+                "checkedOwners": ["Dashboard"],
+                "findings": []
+            });
+            let notice = format_reload_check_notice(&data).expect("notice");
+            assert_eq!(
+                notice,
+                "✓ reload check: Dashboard>>refresh — cleared stale reload-induced finding(s)"
+            );
+        }
+
+        #[test]
+        fn missing_required_field_returns_none() {
+            let data = json!({"changedClass": "Counter"});
+            assert!(format_reload_check_notice(&data).is_none());
+        }
     }
 }

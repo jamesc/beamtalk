@@ -192,9 +192,9 @@ encode_describe_term_matches_handle_op_json_test() ->
 %% beamtalk_repl_subscriptions — facade
 %%====================================================================
 
-streams_lists_all_five_push_streams_test() ->
+streams_lists_all_six_push_streams_test() ->
     ?assertEqual(
-        [transcript, actors, classes, bindings, flush],
+        [transcript, actors, classes, bindings, flush, reload_check],
         beamtalk_repl_subscriptions:streams()
     ).
 
