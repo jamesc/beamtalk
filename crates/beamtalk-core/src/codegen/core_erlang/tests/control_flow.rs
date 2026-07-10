@@ -201,7 +201,8 @@ fn test_validate_stored_closure_empty_block() {
         span: Span::new(0, 2),
     };
 
-    let result = CoreErlangGenerator::validate_stored_closure(&block, "test".to_string());
+    let analysis = crate::codegen::core_erlang::block_analysis::analyze_block(&block);
+    let result = CoreErlangGenerator::validate_stored_closure(&analysis, || "test".to_string());
     assert!(result.is_ok(), "Empty block should be valid");
 }
 
@@ -232,7 +233,8 @@ fn test_validate_stored_closure_with_captured_mutation() {
         span: Span::new(0, 20),
     };
 
-    let result = CoreErlangGenerator::validate_stored_closure(&block, "test".to_string());
+    let analysis = crate::codegen::core_erlang::block_analysis::analyze_block(&block);
+    let result = CoreErlangGenerator::validate_stored_closure(&analysis, || "test".to_string());
     assert!(
         result.is_err(),
         "Captured variable mutation should produce error"
@@ -263,7 +265,8 @@ fn test_validate_stored_closure_with_new_local_definition() {
         span: Span::new(0, 11),
     };
 
-    let result = CoreErlangGenerator::validate_stored_closure(&block, "test".to_string());
+    let analysis = crate::codegen::core_erlang::block_analysis::analyze_block(&block);
+    let result = CoreErlangGenerator::validate_stored_closure(&analysis, || "test".to_string());
     assert!(
         result.is_ok(),
         "New local definition should be allowed in stored closure"
@@ -309,7 +312,8 @@ fn test_validate_stored_closure_with_new_local_used_later() {
         span: Span::new(0, 29),
     };
 
-    let result = CoreErlangGenerator::validate_stored_closure(&block, "test".to_string());
+    let analysis = crate::codegen::core_erlang::block_analysis::analyze_block(&block);
+    let result = CoreErlangGenerator::validate_stored_closure(&analysis, || "test".to_string());
     assert!(
         result.is_ok(),
         "Block with new local definition used later should be allowed"
@@ -337,10 +341,11 @@ fn test_validate_stored_closure_with_field_assignment() {
         span: Span::new(0, 17),
     };
 
-    let result = CoreErlangGenerator::validate_stored_closure(&block, "test".to_string());
+    let analysis = crate::codegen::core_erlang::block_analysis::analyze_block(&block);
+    let result = CoreErlangGenerator::validate_stored_closure(&analysis, || "test".to_string());
     assert!(result.is_err(), "Field assignment should produce error");
 
-    if let Err(CodeGenError::FieldAssignmentInStoredClosure {
+    if let Err(CodeGenError::FieldAssignmentInUnsupportedBlock {
         field,
         field_capitalized,
         ..
@@ -349,14 +354,22 @@ fn test_validate_stored_closure_with_field_assignment() {
         assert_eq!(field, "value");
         assert_eq!(field_capitalized, "Value");
     } else {
-        panic!("Expected FieldAssignmentInStoredClosure error");
+        panic!("Expected FieldAssignmentInUnsupportedBlock error");
     }
 }
 
 #[test]
-fn test_validate_stored_closure_field_takes_precedence() {
+fn test_validate_stored_closure_field_takes_precedence_contract() {
     // Block with both field and local assignment
-    // Field error should be reported first
+    // Field error should be reported first.
+    //
+    // This exercises validate_stored_closure's own contract directly. Through
+    // the production generate_block path this precedence is never actually
+    // observed: generate_block only calls validate_stored_closure when
+    // field_writes is non-empty, and the field branch always returns early,
+    // so validate_stored_closure only ever sees the local-mutation branch
+    // when field_writes is already empty (which can only happen via direct
+    // unit-test calls, not through generate_block).
     let block = Block {
         parameters: vec![],
         body: vec![
@@ -386,23 +399,31 @@ fn test_validate_stored_closure_field_takes_precedence() {
         span: Span::new(0, 29),
     };
 
-    let result = CoreErlangGenerator::validate_stored_closure(&block, "test".to_string());
+    let analysis = crate::codegen::core_erlang::block_analysis::analyze_block(&block);
+    let result = CoreErlangGenerator::validate_stored_closure(&analysis, || "test".to_string());
     assert!(result.is_err());
 
     // Should be field error (checked first), not local
     assert!(
         matches!(
             result,
-            Err(CodeGenError::FieldAssignmentInStoredClosure { .. })
+            Err(CodeGenError::FieldAssignmentInUnsupportedBlock { .. })
         ),
         "Field error should take precedence over local mutation"
     );
 }
 
 #[test]
-fn test_codegen_allows_stored_closure_with_field_assignment() {
-    // Integration test: verify the full codegen pipeline allows field assignments
-    // in stored closures and successfully generates code for: test := [ myBlock := [self.value := 1]. myBlock ]
+fn test_codegen_rejects_stored_closure_with_field_assignment() {
+    // BT-2792: Integration test covering the full codegen pipeline for
+    // test := [ myBlock := [self.value := 1]. myBlock ]
+    //
+    // This used to be asserted as allowed (BT-852, "supported via Tier 2 stateful
+    // block protocol"), but Tier 2 promotion only ever triggers on *captured local*
+    // mutations, never on `self.field :=` writes — so this actually produced Core
+    // Erlang that `erlc` rejects with "unbound variable" (the inner block's `fun`
+    // bumps the shared state-version counter, but that binding is scoped inside the
+    // `fun` and never reaches the caller). Must now be a clear compile-time error.
     let module = Module {
         classes: vec![],
         method_definitions: Vec::new(),
@@ -459,11 +480,14 @@ fn test_codegen_allows_stored_closure_with_field_assignment() {
         file_trailing_comments: Vec::new(),
     };
 
-    // BT-852: Stored closures with field assignments are now allowed via Tier 2 protocol.
     let result = generate(&module);
     assert!(
-        result.is_ok(),
-        "Field assignment in stored closure should now be allowed via Tier 2 protocol. Got: {result:?}"
+        matches!(
+            result,
+            Err(CodeGenError::FieldAssignmentInUnsupportedBlock { .. })
+        ),
+        "Field assignment in a stored closure must be a compile-time error, not silently \
+         accepted (BT-2792). Got: {result:?}"
     );
 }
 
@@ -1029,5 +1053,105 @@ fn test_actor_conditional_assign_rhs_emit_actor_threaded_assign_rhs() {
     assert!(
         code.contains("case "),
         "Conditional must compile to an inline case expression. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_immediately_invoked_literal_block_with_field_mutation_compiles() {
+    // BT-2792: `[self.total := self.total + n] value` — a literal block that is
+    // immediately invoked (the block is the *receiver* of `value`, not stored or
+    // passed) — must NOT hit the FieldAssignmentInUnsupportedBlock rejection. The
+    // compiler inlines this case correctly (state threads through StateAcc, same
+    // as ifTrue:/do:), unlike a block bound to a variable and invoked later.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: n =>\n    [self.total := self.total + n] value\n";
+    let code = codegen(src);
+    assert!(
+        code.contains("'maps':'put'('total'"),
+        "Immediately-invoked block with a field mutation must thread state via maps:put. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_immediately_invoked_literal_block_value_keyword_with_field_mutation_compiles() {
+    // BT-2792 (PR review follow-up): same as the unary `value` case above, but
+    // for the keyword form `[...] value: arg`. This goes through a separate
+    // code path (`try_generate_block_value_keyword`'s BT-1481 check in
+    // intrinsics.rs) that must also inline field mutations rather than falling
+    // through to generate_block's rejection.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: n =>\n    [:x | self.total := self.total + x] value: n\n";
+    let code = codegen(src);
+    assert!(
+        code.contains("'maps':'put'('total'"),
+        "Immediately-invoked block (value: form) with a field mutation must thread state via maps:put. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_block_returned_from_method_with_field_mutation_is_compile_error() {
+    // BT-2792: `^[self.total := self.total + 1]` — a block *returned as a value*
+    // (never invoked in this method) is not caught by any of the semantic-analysis
+    // passes that guard field mutations in blocks (they only flag blocks that are
+    // stored to a variable or passed as a literal argument to an unsafe message
+    // send — see block_analyzer.rs's BlockContext::Stored check and
+    // class_validators.rs's BT-1793 check). It still reaches generate_block's
+    // generic fallback and must be rejected there.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  makeBlock =>\n    ^[self.total := self.total + 1]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(CodeGenError::FieldAssignmentInUnsupportedBlock { .. })
+        ),
+        "A field-mutating block returned as a value must be a compile-time error \
+         (BT-2792), not silently accepted. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_block_with_mixed_local_and_field_mutation_is_compile_error() {
+    // BT-2792 (PR review follow-up): a block with BOTH a captured-local
+    // mutation and a field write — e.g. `[:x | outerCount := outerCount + x.
+    // self.total := self.total + outerCount]` stored in a var and invoked
+    // later — used to bypass the field-write check entirely: captured_mutations
+    // is non-empty (from `outerCount`), so generate_block routed straight to
+    // Tier 2 for the local mutation, never reaching validate_stored_closure.
+    // That produced Core Erlang that *compiles* (passes erlc) but crashes at
+    // runtime: the resulting block is a 2-arity stateful fun (params + State),
+    // but generate_block_value_call and friends call it with only its declared
+    // params (no State argument) — `badarity`. The field check must fire
+    // before the Tier 2 promotion, not after.
+    //
+    // `outerCount := outerCount + x` is deliberately the block's first use of
+    // `outerCount`: block_analysis classifies a name as a *captured* mutation
+    // only when it's read before being locally defined *within the block*,
+    // and `outerCount + x` on the assignment's right-hand side reads the
+    // name before this statement (the block's only mention of it) defines
+    // it. Writing the block as `outerCount := 0. outerCount := outerCount +
+    // x` instead would make `outerCount` a fresh block-local, not a captured
+    // one, and the mixed local+field shape this test targets wouldn't
+    // reproduce. The outer method's own `outerCount := 0` — appearing after
+    // `blk`'s definition in program order — only needs to exist so the
+    // source parses as a valid Beamtalk program; it has no bearing on the
+    // capture classification itself.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: item =>\n    blk := [:x | outerCount := outerCount + x. self.total := self.total + outerCount]\n    outerCount := 0\n    blk value: item\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(CodeGenError::FieldAssignmentInUnsupportedBlock { .. })
+        ),
+        "A block with both a local and a field mutation, reaching the opaque \
+         call-site fallback, must be a compile-time error — not code that \
+         compiles but crashes with badarity at runtime. Got: {result:?}"
     );
 }

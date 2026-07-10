@@ -184,11 +184,16 @@ pub enum CodeGenError {
     #[error("formatting error: {0}")]
     Format(#[from] fmt::Error),
 
-    /// Field assignment in a stored closure.
+    /// Field assignment in a block that can't thread state back — whether the block is
+    /// assigned to a variable, passed as an argument, or returned (BT-2792).
     #[error(
-        "Cannot assign to field '{field}' inside a stored closure at {location}.\n\n\
-             Field assignments require immediate execution context for state threading.\n\n\
-             Fix: Use control flow directly, or extract to a method:\n\
+        "Cannot assign to field '{field}' inside this block at {location}.\n\n\
+             Field assignments only thread state back to the actor when the block is used \
+             directly with a control-flow construct (ifTrue:/whileTrue:/do:/collect:/...), \
+             sent directly to self, or immediately invoked (`[...] value`, `[...] value: arg`, \
+             `[...] value:value:`, etc.) — not when it's stored in a variable, passed to a \
+             user-defined method, or returned as a value.\n\n\
+             Fix: Use the block directly at the call site, or extract the mutation into a method:\n\
              \x20 // Instead of:\n\
              \x20 myBlock := [:item | self.{field} := self.{field} + item].\n\
              \x20 items do: myBlock.\n\
@@ -200,7 +205,7 @@ pub enum CodeGenError {
              \x20 addTo{field_capitalized}: item => self.{field} := self.{field} + item.\n\
              \x20 items do: [:item | self addTo{field_capitalized}: item]."
     )]
-    FieldAssignmentInStoredClosure {
+    FieldAssignmentInUnsupportedBlock {
         /// The field being assigned.
         field: String,
         /// The capitalized field name for method suggestion.
@@ -2691,8 +2696,11 @@ impl CoreErlangGenerator {
                 Ok(doc)
             }
             Expression::Assignment { target, value, .. } => {
-                // BT-852: Stored blocks with mutations are now supported via Tier 2.
-                // generate_block() handles stateful emission; no validation needed here.
+                // BT-2792: Tier 2 only ever supported captured-local mutations, not
+                // field writes — a stored block with `self.field :=` is rejected by
+                // generate_block()'s validate_stored_closure call, not silently
+                // accepted. No validation needed *here* only because that check
+                // already lives inside generate_block() itself.
 
                 // Check if this is a field assignment (self.field := value)
                 if let Expression::FieldAccess {
@@ -3188,26 +3196,60 @@ impl CoreErlangGenerator {
             .collect()
     }
 
-    /// Validates that a stored closure (block assigned to variable) doesn't contain mutations.
-    /// Returns an error for both field assignments and local mutations; the local-mutation
-    /// error is phrased as a warning in its message.
+    /// Validates a block's mutation analysis for shapes that can't correctly thread state:
+    /// field assignments, and (separately) captured-local mutations. Returns an error for
+    /// either; the local-mutation error is phrased as a warning in its message.
     ///
-    /// BT-852: This function is retained for unit tests. Production call sites have been
-    /// removed since stored closures with mutations are now supported via the Tier 2
-    /// stateful block protocol (ADR 0041).
-    #[allow(dead_code)]
-    fn validate_stored_closure(block: &Block, span_str: String) -> Result<()> {
-        use crate::codegen::core_erlang::block_analysis::analyze_block;
-
-        let analysis = analyze_block(block);
-
-        // ERROR: Field assignments in stored closures are not allowed
+    /// **Precondition for production callers:** only call this when
+    /// `analysis.field_writes` is non-empty. A valid Tier 2 block (captured-local
+    /// mutations, no field writes) passed here would incorrectly hit the
+    /// local-mutation branch and produce a spurious `LocalMutationInStoredClosure`
+    /// — that branch exists for this function's own unit tests, which construct
+    /// analyses field-write-empty on purpose to test it, not for callers on a path
+    /// where a genuine Tier 2 block could reach this function.
+    ///
+    /// BT-852 claimed production call sites could be removed because blocks with
+    /// mutations are supported via the Tier 2 stateful block protocol (ADR 0041).
+    /// BT-2792 found that's only true for *captured local* mutations
+    /// (`captured_mutations_for_block` in `expressions.rs`, which promotes to
+    /// `generate_block_stateful`) — Tier 2 promotion never triggers on `self.field :=`
+    /// writes. A block with field writes that reaches the generic "pure fun" fallback
+    /// in `generate_block` silently emits Core Erlang `erlc` rejects with "unbound
+    /// variable" (the block's own `fun` bumps the shared state-version counter, but
+    /// that binding is scoped inside the `fun` and never reaches the caller).
+    ///
+    /// Called from `generate_block` (with an already-computed analysis, so callers
+    /// that need more than this check don't re-walk the block's AST) to turn that into
+    /// a clear compile-time diagnostic instead. `generate_block` only calls this when
+    /// `field_writes` is non-empty (checked *before* the Tier 2 captured-local-mutation
+    /// promotion, so a block with both a field write and a local mutation errors here
+    /// instead of silently reaching Tier 2 for the local mutation alone), so the field
+    /// branch below always fires from that call site and the local-mutation branch is
+    /// unreachable from it — it's kept live (and directly unit-tested) since this
+    /// function checks a block's mutation shape in general, not just the field-write
+    /// case `generate_block` currently cares about. BT-2797 tracks lifting the
+    /// field-write restriction for stored/opaque blocks by generalizing Tier 2 the same
+    /// way; once that lands this function's field-write branch should shrink to
+    /// whatever shapes remain genuinely unsupported.
+    ///
+    /// `location` is a lazy thunk rather than a pre-formatted `String`, so formatting
+    /// only happens when an error is actually produced. From `generate_block`'s call
+    /// site this always errors (it's only called when `field_writes` is non-empty), but
+    /// `generate_block` still runs `analyze_block` and checks `field_writes` on every
+    /// block it compiles — the thunk keeps this function itself free of `span_to_line`/
+    /// `format!` cost for callers (present or future) that reach it on a path where an
+    /// `Ok(())` result is actually possible, e.g. this function's own unit tests.
+    fn validate_stored_closure(
+        analysis: &block_analysis::BlockMutationAnalysis,
+        location: impl FnOnce() -> String,
+    ) -> Result<()> {
+        // ERROR: Field assignments that can't thread state back are not allowed.
+        // Sort before picking one so the reported field is deterministic across
+        // builds/runs when a block writes more than one field.
         if !analysis.field_writes.is_empty() {
-            let field = analysis
-                .field_writes
-                .iter()
-                .next()
-                .expect("field_writes is non-empty");
+            let mut fields: Vec<&String> = analysis.field_writes.iter().collect();
+            fields.sort_unstable();
+            let field = fields[0];
             let field_capitalized = {
                 let mut chars = field.chars();
                 chars
@@ -3216,10 +3258,10 @@ impl CoreErlangGenerator {
                     .unwrap_or_default()
                     + chars.as_str()
             };
-            return Err(CodeGenError::FieldAssignmentInStoredClosure {
+            return Err(CodeGenError::FieldAssignmentInUnsupportedBlock {
                 field: field.clone(),
                 field_capitalized,
-                location: span_str,
+                location: location(),
             });
         }
 
@@ -3229,14 +3271,17 @@ impl CoreErlangGenerator {
         // BT-665: Only flag mutations of captured variables, not new local definitions.
         // A "captured mutation" is a write to a variable that was read before being
         // locally defined (i.e., it captures from outer scope).
-        if let Some(variable) = analysis
-            .local_writes
-            .intersection(&analysis.captured_reads)
-            .next()
-        {
+        if let Some(variable) = {
+            let mut vars: Vec<&String> = analysis
+                .local_writes
+                .intersection(&analysis.captured_reads)
+                .collect();
+            vars.sort_unstable();
+            vars.into_iter().next()
+        } {
             return Err(CodeGenError::LocalMutationInStoredClosure {
                 variable: variable.clone(),
-                location: span_str,
+                location: location(),
             });
         }
 
