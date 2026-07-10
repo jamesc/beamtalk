@@ -1243,6 +1243,19 @@ pub(crate) struct CoreErlangGenerator {
     /// on that parameter use the stateful Tier 2 protocol:
     /// `apply _Fun(Args..., State) → {Result, NewState}`.
     tier2_block_params: std::collections::HashSet<String>,
+    /// BT-2797: Local variables in the current method/block body known to hold
+    /// a Tier 2 block value — i.e. a `var := [block]` assignment where the
+    /// block literal has captured-local or field mutations, *and* every later
+    /// reference to `var` in the same body is a safe `value`/`value:`/etc.
+    /// call (proven by `prescan_tier2_local_vars`, which runs once at the top
+    /// of `generate_body_exprs_with_reply` before classification starts).
+    /// `value:` / `value:value:` calls on a variable in this set use the
+    /// stateful Tier 2 protocol: `apply _Fun(Args..., State) → {Result, NewState}`.
+    /// A block whose safety can't be proven (returned, passed elsewhere,
+    /// reassigned, ...) is deliberately left out — it keeps hitting the
+    /// `generate_block`/`validate_stored_closure` compile-time diagnostic
+    /// instead, since no known call site would thread state through it.
+    tier2_local_vars: std::collections::HashSet<String>,
     /// BT-851: Pre-scanned Tier 2 block info for the current class.
     ///
     /// Maps method selector → list of parameter indices that receive Tier 2 blocks
@@ -1321,6 +1334,7 @@ impl CoreErlangGenerator {
             last_open_scope_result: None,
             source_path: None,
             tier2_block_params: std::collections::HashSet::new(),
+            tier2_local_vars: std::collections::HashSet::new(),
             tier2_method_info: std::collections::HashMap::new(),
             codegen_warnings: Vec::new(),
             semantic_facts: crate::semantic_analysis::SemanticFacts::default(),

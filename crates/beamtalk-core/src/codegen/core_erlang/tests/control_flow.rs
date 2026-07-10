@@ -1113,18 +1113,27 @@ fn test_block_returned_from_method_with_field_mutation_is_compile_error() {
 }
 
 #[test]
-fn test_block_with_mixed_local_and_field_mutation_is_compile_error() {
+fn test_block_with_mixed_local_and_field_mutation_stored_then_invoked_compiles() {
     // BT-2792 (PR review follow-up): a block with BOTH a captured-local
     // mutation and a field write — e.g. `[:x | outerCount := outerCount + x.
     // self.total := self.total + outerCount]` stored in a var and invoked
     // later — used to bypass the field-write check entirely: captured_mutations
     // is non-empty (from `outerCount`), so generate_block routed straight to
     // Tier 2 for the local mutation, never reaching validate_stored_closure.
-    // That produced Core Erlang that *compiles* (passes erlc) but crashes at
+    // That produced Core Erlang that *compiled* (passed erlc) but crashed at
     // runtime: the resulting block is a 2-arity stateful fun (params + State),
-    // but generate_block_value_call and friends call it with only its declared
-    // params (no State argument) — `badarity`. The field check must fire
-    // before the Tier 2 promotion, not after.
+    // but generate_block_value_call and friends called it with only its
+    // declared params (no State argument) — `badarity`. BT-2792 closed that
+    // gap by making it a compile-time error instead.
+    //
+    // BT-2797 replaces the compile-time error with a real fix for exactly
+    // this shape: `blk`'s only use in the rest of the method is the `value:`
+    // call below, which `prescan_tier2_local_vars` proves is safe (BT-2797),
+    // so the block is now compiled via `generate_block_stateful` and invoked
+    // through the Tier 2 calling convention (`apply Fun(Args, State)`,
+    // unpacking the `{Result, NewState}` tuple) — see
+    // `test_bt2797_same_method_tier2_local_var_threads_state_correctly` below
+    // for a check of the generated Core Erlang shape itself.
     //
     // `outerCount := outerCount + x` is deliberately the block's first use of
     // `outerCount`: block_analysis classifies a name as a *captured* mutation
@@ -1146,12 +1155,46 @@ fn test_block_with_mixed_local_and_field_mutation_is_compile_error() {
         crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
     );
     assert!(
-        matches!(
-            result,
-            Err(CodeGenError::FieldAssignmentInUnsupportedBlock { .. })
-        ),
-        "A block with both a local and a field mutation, reaching the opaque \
-         call-site fallback, must be a compile-time error — not code that \
-         compiles but crashes with badarity at runtime. Got: {result:?}"
+        result.is_ok(),
+        "A block with both a local and a field mutation, stored then invoked \
+         via `value:` later in the same method, must compile now that the \
+         compiler can prove the call site threads state correctly (BT-2797). \
+         Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_bt2797_same_method_tier2_local_var_threads_state_correctly() {
+    // BT-2797: verifies the *shape* of the generated Core Erlang for the
+    // scenario above, not just that codegen returns Ok(..). `blk` must be a
+    // 2-arity fun taking a trailing state accumulator and returning a
+    // `{Result, NewState}` tuple, and the call site must `apply` it with the
+    // outer method's State and unpack the tuple — not naively `apply Fun
+    // (Arg)` (which would compile but badarity-crash at runtime).
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: item =>\n    blk := [:x | outerCount := outerCount + x. self.total := self.total + outerCount]\n    outerCount := 0\n    blk value: item\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let code = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    )
+    .expect("should compile (BT-2797)");
+
+    assert!(
+        code.contains("let Blk = fun (_x2, StateAcc) ->"),
+        "blk must compile to a 2-arity Tier 2 fun (block param + trailing \
+         state accumulator). Got: {code}"
+    );
+    assert!(
+        code.contains("apply _Fun8 (_item1, State)"),
+        "the `blk value: item` call site must apply the block with the \
+         outer method's State as a trailing argument. Got: {code}"
+    );
+    assert!(
+        code.contains("call 'erlang':'element'(1, _T2Tuple9)")
+            && code.contains("call 'erlang':'element'(2, _T2Tuple9)"),
+        "the call site must unpack the returned {{Result, NewState}} tuple \
+         rather than treating the raw apply result as the method's return \
+         value. Got: {code}"
     );
 }

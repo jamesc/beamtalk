@@ -213,8 +213,11 @@ impl CoreErlangGenerator {
             return Ok(None);
         }
         // BT-851: Check if receiver is a Tier 2 block parameter (zero-arg value)
+        // BT-2797: or a local var this method assigned a Tier 2 block literal to.
         if let Expression::Identifier(id) = receiver {
-            if self.tier2_block_params.contains(id.name.as_str()) {
+            if self.tier2_block_params.contains(id.name.as_str())
+                || self.tier2_local_vars.contains(id.name.as_str())
+            {
                 let doc = self.generate_block_value_call_stateful(receiver, arguments)?;
                 return Ok(Some(doc));
             }
@@ -326,8 +329,11 @@ impl CoreErlangGenerator {
         selector_name: &str,
     ) -> Result<Option<Document<'static>>> {
         // BT-851: Check if receiver is a Tier 2 block parameter
+        // BT-2797: or a local var this method assigned a Tier 2 block literal to.
         if let Expression::Identifier(id) = receiver {
-            if self.tier2_block_params.contains(id.name.as_str()) {
+            if self.tier2_block_params.contains(id.name.as_str())
+                || self.tier2_local_vars.contains(id.name.as_str())
+            {
                 let doc = self.generate_block_value_call_stateful(receiver, arguments)?;
                 return Ok(Some(doc));
             }
