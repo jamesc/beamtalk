@@ -433,8 +433,9 @@ abstract Object subclass: Behaviour
   /// this edit were installed — non-blocking, since the post-reload image
   /// check (triggered automatically by `compile:source:` itself) remains
   /// the authority. Nothing installs and nothing is recorded to the
-  /// ChangeLog; this is read-only and safe to call repeatedly (e.g. on
-  /// every keystroke) without side effects.
+  /// ChangeLog, so repeated calls never accumulate state — but each call
+  /// does run a real compile (plus one per candidate dependent, capped),
+  /// so a caller driving this from every keystroke should debounce.
   ///
   /// Returns a Dictionary: `#findings` (a List of finding Dictionaries —
   /// `#owner`, `#changedClass`, `#selector`, `#classification`,

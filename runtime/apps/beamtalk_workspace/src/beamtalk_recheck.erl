@@ -344,6 +344,17 @@ function:
    one level up by `trigger_pending/5`'s own try/catch, which still needs the
    real generation back in place for the next request).
 
+**Ordering invariant this relies on** (same shape as
+`beamtalk_repl_loader:load_recompiled_method/8`'s documented invariant): the
+cast in step 3 and every `diagnostics/3` call `do_trigger/3` subsequently
+makes go to the *same* `beamtalk_compiler_server` process from this *same*
+calling process — Erlang's per-sender mailbox ordering guarantees the cast
+is processed before any of those calls, so every candidate's diagnostics
+round-trip sees the spliced (pending) meta, never a race against the cast
+itself. This would break only if `register_class/2` or `diagnostics/3` ever
+routed through a different process/mailbox than a direct `gen_server`
+send to `beamtalk_compiler_server`.
+
 No ambient meta at all for the changed class (never registered this
 session — brand new class, or the workspace just restarted) means there is
 no baseline to splice into and no `class_hierarchy` context for the
