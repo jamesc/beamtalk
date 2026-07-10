@@ -201,7 +201,8 @@ fn test_validate_stored_closure_empty_block() {
         span: Span::new(0, 2),
     };
 
-    let result = CoreErlangGenerator::validate_stored_closure(&block, "test".to_string());
+    let analysis = crate::codegen::core_erlang::block_analysis::analyze_block(&block);
+    let result = CoreErlangGenerator::validate_stored_closure(&analysis, "test".to_string());
     assert!(result.is_ok(), "Empty block should be valid");
 }
 
@@ -232,7 +233,8 @@ fn test_validate_stored_closure_with_captured_mutation() {
         span: Span::new(0, 20),
     };
 
-    let result = CoreErlangGenerator::validate_stored_closure(&block, "test".to_string());
+    let analysis = crate::codegen::core_erlang::block_analysis::analyze_block(&block);
+    let result = CoreErlangGenerator::validate_stored_closure(&analysis, "test".to_string());
     assert!(
         result.is_err(),
         "Captured variable mutation should produce error"
@@ -263,7 +265,8 @@ fn test_validate_stored_closure_with_new_local_definition() {
         span: Span::new(0, 11),
     };
 
-    let result = CoreErlangGenerator::validate_stored_closure(&block, "test".to_string());
+    let analysis = crate::codegen::core_erlang::block_analysis::analyze_block(&block);
+    let result = CoreErlangGenerator::validate_stored_closure(&analysis, "test".to_string());
     assert!(
         result.is_ok(),
         "New local definition should be allowed in stored closure"
@@ -309,7 +312,8 @@ fn test_validate_stored_closure_with_new_local_used_later() {
         span: Span::new(0, 29),
     };
 
-    let result = CoreErlangGenerator::validate_stored_closure(&block, "test".to_string());
+    let analysis = crate::codegen::core_erlang::block_analysis::analyze_block(&block);
+    let result = CoreErlangGenerator::validate_stored_closure(&analysis, "test".to_string());
     assert!(
         result.is_ok(),
         "Block with new local definition used later should be allowed"
@@ -337,7 +341,8 @@ fn test_validate_stored_closure_with_field_assignment() {
         span: Span::new(0, 17),
     };
 
-    let result = CoreErlangGenerator::validate_stored_closure(&block, "test".to_string());
+    let analysis = crate::codegen::core_erlang::block_analysis::analyze_block(&block);
+    let result = CoreErlangGenerator::validate_stored_closure(&analysis, "test".to_string());
     assert!(result.is_err(), "Field assignment should produce error");
 
     if let Err(CodeGenError::FieldAssignmentInStoredClosure {
@@ -386,7 +391,8 @@ fn test_validate_stored_closure_field_takes_precedence() {
         span: Span::new(0, 29),
     };
 
-    let result = CoreErlangGenerator::validate_stored_closure(&block, "test".to_string());
+    let analysis = crate::codegen::core_erlang::block_analysis::analyze_block(&block);
+    let result = CoreErlangGenerator::validate_stored_closure(&analysis, "test".to_string());
     assert!(result.is_err());
 
     // Should be field error (checked first), not local
@@ -1039,5 +1045,46 @@ fn test_actor_conditional_assign_rhs_emit_actor_threaded_assign_rhs() {
     assert!(
         code.contains("case "),
         "Conditional must compile to an inline case expression. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_immediately_invoked_literal_block_with_field_mutation_compiles() {
+    // BT-2792: `[self.total := self.total + n] value` — a literal block that is
+    // immediately invoked (the block is the *receiver* of `value`, not stored or
+    // passed) — must NOT hit the FieldAssignmentInStoredClosure rejection. The
+    // compiler inlines this case correctly (state threads through StateAcc, same
+    // as ifTrue:/do:), unlike a block bound to a variable and invoked later.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: n =>\n    [self.total := self.total + n] value\n";
+    let code = codegen(src);
+    assert!(
+        code.contains("'maps':'put'('total'"),
+        "Immediately-invoked block with a field mutation must thread state via maps:put. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_block_returned_from_method_with_field_mutation_is_compile_error() {
+    // BT-2792: `^[self.total := self.total + 1]` — a block *returned as a value*
+    // (never invoked in this method) is not caught by any of the semantic-analysis
+    // passes that guard field mutations in blocks (they only flag blocks that are
+    // stored to a variable or passed as a literal argument to an unsafe message
+    // send — see block_analyzer.rs's BlockContext::Stored check and
+    // class_validators.rs's BT-1793 check). It still reaches generate_block's
+    // generic fallback and must be rejected there.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  makeBlock =>\n    ^[self.total := self.total + 1]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(CodeGenError::FieldAssignmentInStoredClosure { .. })
+        ),
+        "A field-mutating block returned as a value must be a compile-time error \
+         (BT-2792), not silently accepted. Got: {result:?}"
     );
 }

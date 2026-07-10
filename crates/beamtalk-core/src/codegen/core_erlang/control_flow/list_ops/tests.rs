@@ -1663,6 +1663,31 @@ fn test_each_with_index_wrong_arity_block_falls_through() {
 }
 
 #[test]
+fn test_each_with_index_wrong_arity_field_mutating_block_is_compile_error() {
+    // BT-2792: the compound case the 7 sibling "falls through" tests above and
+    // below deliberately avoid (they use pure bodies so they can assert on the
+    // dispatch/lists:foldl shape of successful codegen). When a block that
+    // falls through eachWithIndex:'s arity guard *also* mutates self.<field>,
+    // it reaches generate_block's generic fallback and must now be rejected at
+    // compile time — not silently produce Core Erlang erlc rejects.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    items eachWithIndex: [:x | self.total := self.total + x]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(crate::codegen::core_erlang::CodeGenError::FieldAssignmentInStoredClosure { .. })
+        ),
+        "A field-mutating block that falls through eachWithIndex:'s arity guard must be a \
+         compile-time error (BT-2792), not silently accepted. Got: {result:?}"
+    );
+}
+
+#[test]
 fn test_each_with_index_value_type_desugars_without_reprojection() {
     // In a Value-type method the desugar fires (a mutating local still needs
     // threading) but the actor nil-with-state re-projection must NOT appear —
