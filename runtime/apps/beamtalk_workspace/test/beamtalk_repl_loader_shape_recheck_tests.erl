@@ -217,3 +217,108 @@ removing_a_state_slot_flags_the_real_dependent_test_() ->
                 end)
             ]
         end}}.
+
+%%====================================================================
+%% End-to-end: a clean shape re-check still announces (BT-2780 review fix,
+%% PR #2901) — an empty Findings with non-empty CheckedOwners is the
+%% "reload-fixes-reload" clearing signal, not silence.
+%%====================================================================
+
+%% `spawnWith:` (unlike a field's own accessor selectors) is *always* in
+%% `trigger_shape/2`'s dependent-selector set regardless of classification
+%% (`beamtalk_recheck:shape_dependent_selectors/1` — every field change,
+%% `added` included, can flip a call site's key/value validity). Using it
+%% here sidesteps a real gotcha: `Actor` classes never auto-generate field
+%% accessors at all (only `ClassKind::Value` does — see
+%% `beamtalk_recheck:field_accessor_atoms/1`'s doc), so a `c name`-style
+%% dependent on an `Actor` receiver is *always* a DNU independent of any
+%% shape change, which would not actually exercise a clean re-check.
+%% Generation 2 only *adds* an unrelated `count` slot — `name` (the only key
+%% the dependent's `spawnWith:` map uses) stays valid across both
+%% generations, so the dependent recompiles clean.
+clean_counter_source_gen1() ->
+    <<
+        "Actor subclass: LoaderShapeCleanCounter\n"
+        "  state: name :: String = \"\"\n"
+    >>.
+
+clean_counter_source_gen2() ->
+    <<
+        "Actor subclass: LoaderShapeCleanCounter\n"
+        "  state: name :: String = \"\"\n"
+        "  state: count :: Integer = 0\n"
+    >>.
+
+clean_dashboard_spawn_with_xref() ->
+    [
+        #{
+            class_side => false,
+            selector => build,
+            line => 2,
+            sends => [#{selector => 'spawnWith:', line => 2, recv_kind => other}],
+            references => [#{class => 'LoaderShapeCleanCounter', line => 2}],
+            source_status => indexed,
+            provenance => class_body
+        }
+    ].
+
+%% `#name` is the only key used, and it is valid (declared, `String`-typed,
+%% "x" is a `String` literal) in both generations — clean regardless of the
+%% newly-added, unreferenced `count` slot.
+clean_dashboard_spawn_with_source() ->
+    <<
+        "Object subclass: LoaderShapeCleanDashboard\n"
+        "  build => LoaderShapeCleanCounter spawnWith: #{#name => \"x\"}\n"
+    >>.
+
+adding_an_unrelated_field_with_no_stale_dependents_still_announces_test_() ->
+    {timeout, 30,
+        {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    subscribe_self_to_reload_check(),
+                    UniqueId = erlang:unique_integer([positive]),
+                    Path = filename:join(
+                        temp_dir(), io_lib:format("loader_shape_clean_counter_~p.bt", [UniqueId])
+                    ),
+
+                    %% Generation 1: first-ever install this session — no_op,
+                    %% nothing published (same reasoning as the sibling test).
+                    ok = file:write_file(Path, clean_counter_source_gen1()),
+                    State0 = beamtalk_repl_state:new(undefined, 0),
+                    {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, State0),
+
+                    ok = beamtalk_xref:register_class(
+                        'LoaderShapeCleanDashboard', clean_dashboard_spawn_with_xref()
+                    ),
+                    ok = beamtalk_workspace_meta:set_class_source(
+                        <<"LoaderShapeCleanDashboard">>, clean_dashboard_spawn_with_source()
+                    ),
+
+                    %% Generation 2: an unrelated `count` slot is added. The
+                    %% dependent is swept into trigger_shape/2's candidate
+                    %% set (spawnWith: is always included, added changes
+                    %% included) and re-checks clean — checked_owners is
+                    %% non-empty, findings is empty.
+                    ok = file:write_file(Path, clean_counter_source_gen2()),
+                    {ok, _, _State2} = beamtalk_repl_loader:handle_load(Path, State1),
+
+                    Event = receive_reload_check_announcement(),
+                    ?assertEqual(<<"LoaderShapeCleanCounter">>, maps:get(changedClass, Event)),
+                    ?assertEqual(shape_change, maps:get(classification, Event)),
+                    ?assert(
+                        lists:member(
+                            <<"LoaderShapeCleanDashboard">>, maps:get(checkedOwners, Event)
+                        )
+                    ),
+                    ?assertEqual([], maps:get(findings, Event)),
+
+                    ?assertEqual(
+                        [],
+                        beamtalk_workspace_findings_store:for_owner(
+                            <<"LoaderShapeCleanDashboard">>
+                        )
+                    )
+                end)
+            ]
+        end}}.

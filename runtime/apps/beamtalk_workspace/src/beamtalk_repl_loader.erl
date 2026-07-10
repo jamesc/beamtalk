@@ -2041,6 +2041,17 @@ single selector to report for a shape change, so it carries
 `shape_change_summary/1`'s comma-joined list of affected slot names instead
 — still meaningful in the generic "`{changed_class}`>>`{changed_selector}`"
 templates every surface already uses.
+
+The announce fires whenever `CheckedOwners` is non-empty, **not** only when
+`Findings` is — an empty `Findings` with non-empty `CheckedOwners` is exactly
+the "reload-fixes-reload" clearing signal `publish_recheck_outcome/5` already
+relies on: `put_owner_origin/3` above already cleared each checked owner's
+stale shape-change findings from the store, and every surface needs the
+announcement itself to know to drop what it was showing, not just a quiet
+store write nobody hears about. Matching `publish_recheck_outcome/5`'s
+structure exactly (found in review, BT-2780): the `?LOG_INFO` is gated on
+`Findings` (nothing worth logging about a clean re-check), the announce is
+gated on `CheckedOwners` alone.
 """.
 -spec publish_shape_recheck_outcome(
     binary(), [beamtalk_shape_diff:field_change()], beamtalk_recheck:result()
@@ -2061,23 +2072,26 @@ publish_shape_recheck_outcome(ClassNameBin, FieldChanges, Result) ->
         end,
         CheckedOwners
     ),
-    case {CheckedOwners, Findings} of
-        {[], _} ->
-            ok;
-        {_, []} ->
+    case CheckedOwners of
+        [] ->
             ok;
         _ ->
-            ?LOG_INFO(
-                "Shape reload re-check produced findings",
-                #{
-                    class => ClassNameBin,
-                    field_changes => FieldChanges,
-                    callers_checked => Checked,
-                    callers_not_checked => NotChecked,
-                    finding_count => length(Findings),
-                    domain => [beamtalk, runtime]
-                }
-            ),
+            case Findings of
+                [] ->
+                    ok;
+                _ ->
+                    ?LOG_INFO(
+                        "Shape reload re-check produced findings",
+                        #{
+                            class => ClassNameBin,
+                            field_changes => FieldChanges,
+                            callers_checked => Checked,
+                            callers_not_checked => NotChecked,
+                            finding_count => length(Findings),
+                            domain => [beamtalk, runtime]
+                        }
+                    )
+            end,
             beamtalk_announcements:system_announce('ReloadCheckCompleted', #{
                 changedClass => ClassNameBin,
                 changedSelector => shape_change_summary(FieldChanges),
