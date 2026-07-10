@@ -74,10 +74,12 @@ compile_core_erlang_cerl_malformed_etf_test() ->
 %% defines bar/0) → {error, Errors, _Warnings} → covers compile_core_forms line 313.
 compile_core_erlang_compile_error_test() ->
     CoreErlang =
-        <<"module 'bt_bw_compile_err' ['foo'/0]\n"
-          "  attributes []\n"
-          "  'bar'/0 = fun () -> 'world'\n"
-          "end\n">>,
+        <<
+            "module 'bt_bw_compile_err' ['foo'/0]\n"
+            "  attributes []\n"
+            "  'bar'/0 = fun () -> 'world'\n"
+            "end\n"
+        >>,
     Result = beamtalk_build_worker:compile_core_erlang(CoreErlang),
     ?assertMatch({error, {core_compile_error, _}}, Result).
 
