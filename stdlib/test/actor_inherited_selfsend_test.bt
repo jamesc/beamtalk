@@ -6,32 +6,33 @@
 // self-sends to getValue/increment which are defined on Counter.
 
 TestCase subclass: ActorInheritedSelfsendTest
+  field: c = nil
+
+  setUp => self.c := InheritingCounter spawn
+
+  tearDown => self.c isNil ifFalse: [self.c stop]
 
   // #1: Direct self-send to inherited method
   testDirectSelfsendToInherited =>
-    c := InheritingCounter spawn
-    c increment
-    c increment
-    self assert: c getValueViaSelfsend equals: 2
+    self.c increment
+    self.c increment
+    self assert: self.c getValueViaSelfsend equals: 2
 
   // #1: Self-send to inherited method inside collect: block
   testSelfsendToInheritedInBlock =>
-    c := InheritingCounter spawn
-    result := c collectWithInheritedSend: #(1, 2, 3)
+    result := self.c collectWithInheritedSend: #(1, 2, 3)
     self assert: result equals: #(1, 2, 3)
 
   // #1+#2: Self-send to inherited method + own state mutation
   testInheritedSelfsendWithOwnState =>
-    c := InheritingCounter spawn
-    c incrementAndLog
-    c incrementAndLog
-    c incrementAndLog
-    self assert: c getValue equals: 3
+    self.c incrementAndLog
+    self.c incrementAndLog
+    self.c incrementAndLog
+    self assert: self.c getValue equals: 3
 
   // #2: Access inherited state field directly via self.value
   testAccessInheritedStateField =>
-    c := InheritingCounter spawn
-    c increment
-    c increment
-    c increment
-    self assert: c getValueDirect equals: 3
+    self.c increment
+    self.c increment
+    self.c increment
+    self assert: self.c getValueDirect equals: 3
