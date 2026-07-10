@@ -617,6 +617,88 @@ flush_completed_normalises_files_test() ->
     %% Only the two valid path entries survive.
     ?assertEqual([<<"src/a.bt">>, <<"src/b.bt">>], Out).
 
+%% ADR 0105 Phase 1 (BT-2779): the reload_check/completed push frame —
+%% `beamtalk_repl_loader:publish_recheck_outcome/5`'s `'ReloadCheckCompleted'`
+%% announcement, re-encoded as JSON.
+reload_check_completed_pushes_frame_test() ->
+    Finding = #{
+        owner => <<"Dashboard">>,
+        changed_class => <<"Counter">>,
+        selector => <<"getCount">>,
+        classification => signature_change,
+        severity => <<"warning">>,
+        category => <<"Dnu">>,
+        message => <<"String does not understand '+'">>,
+        note => undefined,
+        sites => [#{method => <<"refresh">>, line => 14}],
+        start => 0,
+        'end' => 5
+    },
+    Event = #{
+        '$beamtalk_class' => 'ReloadCheckCompleted',
+        changedClass => <<"Counter">>,
+        changedSelector => <<"getCount">>,
+        classification => signature_change,
+        checked => 1,
+        notChecked => 0,
+        capNote => undefined,
+        checkedOwners => [<<"Dashboard">>],
+        findings => [Finding]
+    },
+    {Frames, _State} = beamtalk_ws_handler:websocket_info(
+        ann('ReloadCheckCompleted', Event), authed_state()
+    ),
+    Decoded = first_text(Frames),
+    ?assertEqual(<<"reload_check">>, maps:get(<<"channel">>, Decoded)),
+    ?assertEqual(<<"completed">>, maps:get(<<"event">>, Decoded)),
+    Data = maps:get(<<"data">>, Decoded),
+    ?assertEqual(<<"Counter">>, maps:get(<<"changedClass">>, Data)),
+    ?assertEqual(<<"signature_change">>, maps:get(<<"classification">>, Data)),
+    ?assertEqual(null, maps:get(<<"capNote">>, Data)),
+    ?assertEqual([<<"Dashboard">>], maps:get(<<"checkedOwners">>, Data)),
+    [FindingOut] = maps:get(<<"findings">>, Data),
+    ?assertEqual(<<"Dashboard">>, maps:get(<<"owner">>, FindingOut)),
+    ?assertEqual(null, maps:get(<<"note">>, FindingOut)),
+    [SiteOut] = maps:get(<<"sites">>, FindingOut),
+    ?assertEqual(14, maps:get(<<"line">>, SiteOut)).
+
+reload_check_completed_with_cap_note_and_undefined_category_test() ->
+    Finding = #{
+        owner => <<"AdminPanel">>,
+        changed_class => <<"Counter">>,
+        selector => <<"reset">>,
+        classification => removal,
+        severity => <<"hint">>,
+        category => undefined,
+        message => <<"'Counter' does not understand 'reset'">>,
+        note => <<"removed by the reload of Counter">>,
+        sites => [#{method => <<"onClick">>, line => 9}],
+        start => 0,
+        'end' => 1
+    },
+    Event = #{
+        '$beamtalk_class' => 'ReloadCheckCompleted',
+        changedClass => <<"Counter">>,
+        changedSelector => <<"reset">>,
+        classification => removal,
+        checked => 20,
+        notChecked => 3,
+        capNote => <<"3 more not checked">>,
+        checkedOwners => [<<"AdminPanel">>],
+        findings => [Finding]
+    },
+    {Frames, _State} = beamtalk_ws_handler:websocket_info(
+        ann('ReloadCheckCompleted', Event), authed_state()
+    ),
+    Decoded = first_text(Frames),
+    Data = maps:get(<<"data">>, Decoded),
+    ?assertEqual(<<"3 more not checked">>, maps:get(<<"capNote">>, Data)),
+    [FindingOut] = maps:get(<<"findings">>, Data),
+    ?assertEqual(null, maps:get(<<"category">>, FindingOut)),
+    ?assertEqual(
+        <<"removed by the reload of Counter">>, maps:get(<<"note">>, FindingOut)
+    ).
+
 log_event_subscribed_pushes_frame_test() ->
     State = (authed_state())#ws_state{log_subscribed = true},
     {Frames, _State} = beamtalk_ws_handler:websocket_info(

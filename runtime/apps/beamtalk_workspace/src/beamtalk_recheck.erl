@@ -91,10 +91,18 @@ fan-out only, the proxy-routed-call miss).
 
 ## Scope
 
-Produces and returns findings; does not publish them to any surface (LSP /
-REPL notification / workspace UI) or persist them across reloads — that is
-BT-2779 ("Publish reload-induced diagnostics on all surfaces + clearing-by-
-replacement semantics"), explicitly out of scope here. `trigger/4` is
+Produces and returns findings; publishing them to a surface (LSP / REPL
+notification / workspace UI) and persisting/clearing them across reloads is
+`beamtalk_workspace_findings_store` + `beamtalk_repl_loader`'s
+`maybe_trigger_recheck/4` (ADR 0105 Phase 1, BT-2779) — this module stays a
+pure "what changed" computation. `result()`'s `checked_owners` field exists
+specifically for that consumer: it is the exact set of caller classes a
+diagnostics round-trip *completed* for this trigger (`ok` status in
+`recheck_owner/5`, regardless of whether that class turned out clean or
+stale), which is what BT-2779 needs to know which owners' stored findings to
+replace — a clean re-check still has to `put_owner(Owner, [])` its way past
+a stale generation-A finding (`checked` alone can't answer "which classes",
+and `findings` alone omits clean classes entirely). `trigger/4` is
 synchronous and best-effort: any internal failure degrades to an empty
 result rather than raising, since a re-check failure must never affect the
 reload that triggered it (ADR 0105: "advisory, never blocking").
@@ -108,7 +116,7 @@ reload that triggered it (ADR 0105: "advisory, never blocking").
 -export([group_by_owner/1, apply_cap/2, relevant_diagnostic/4, cap_note/1]).
 -endif.
 
--export_type([finding/0, result/0]).
+-export_type([finding/0, result/0, classification/0]).
 
 -type classification() :: signature_change | removal.
 
@@ -149,7 +157,8 @@ reload that triggered it (ADR 0105: "advisory, never blocking").
     checked := non_neg_integer(),
     total_candidates := non_neg_integer(),
     not_checked := non_neg_integer(),
-    cap_note := binary() | undefined
+    cap_note := binary() | undefined,
+    checked_owners := [binary()]
 }.
 
 %%====================================================================
@@ -198,7 +207,14 @@ trigger(ClassNameBin, SelectorBin, Side, Classification) ->
 
 -spec empty_result() -> result().
 empty_result() ->
-    #{findings => [], checked => 0, total_candidates => 0, not_checked => 0, cap_note => undefined}.
+    #{
+        findings => [],
+        checked => 0,
+        total_candidates => 0,
+        not_checked => 0,
+        cap_note => undefined,
+        checked_owners => []
+    }.
 
 -spec do_trigger(binary(), binary(), classification()) -> result().
 do_trigger(ClassNameBin, SelectorBin, Classification) ->
@@ -215,22 +231,31 @@ do_trigger(ClassNameBin, SelectorBin, Classification) ->
     Cap = recheck_caller_cap(),
     {Kept, NotChecked} = apply_cap(OwnerGroups, Cap),
     Outcomes = [
-        recheck_owner(Owner, OwnerSites, ClassNameBin, SelectorBin, Classification)
+        {Owner, recheck_owner(Owner, OwnerSites, ClassNameBin, SelectorBin, Classification)}
      || {Owner, OwnerSites} <- Kept
     ],
-    Findings = lists:flatmap(fun({_Status, OwnerFindings}) -> OwnerFindings end, Outcomes),
+    Findings = lists:flatmap(
+        fun({_Owner, {_Status, OwnerFindings}}) -> OwnerFindings end, Outcomes
+    ),
     %% `checked` counts candidates a diagnostics round-trip actually completed
     %% for — not every *kept* candidate: one with no recorded live source (a
     %% stdlib/dependency class) or a compiler-port failure never ran a check,
     %% so it must not inflate the "N callers checked" figure the ADR 0105 demo
-    %% reports ("2 callers re-checked, 1 stale").
-    CheckedCount = length([ok || {ok, _} <- Outcomes]),
+    %% reports ("2 callers re-checked, 1 stale"). `checked_owners` is the same
+    %% set, named rather than counted — BT-2779's findings-store consumer
+    %% needs to know exactly *which* owners a check completed for (including
+    %% ones that came back clean), not just how many.
+    CheckedOwners = [
+        atom_to_binary(Owner, utf8)
+     || {Owner, {ok, _}} <- Outcomes
+    ],
     #{
         findings => Findings,
-        checked => CheckedCount,
+        checked => length(CheckedOwners),
         total_candidates => length(OwnerGroups),
         not_checked => NotChecked,
-        cap_note => cap_note(NotChecked)
+        cap_note => cap_note(NotChecked),
+        checked_owners => CheckedOwners
     }.
 
 -doc "Read the per-reload caller cap (ADR 0105 §Mechanism step 2).".

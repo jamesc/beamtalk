@@ -23,6 +23,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
+use serde::Deserialize;
 use tokio::net::TcpStream;
 use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio_tungstenite::tungstenite::Message;
@@ -100,6 +101,102 @@ pub struct ClassChangedEvent {
     pub class_name: String,
 }
 
+/// One caller call-site inside a reload-induced finding (ADR 0105 Phase 1,
+/// BT-2779) — mirrors `beamtalk_recheck:site_ref()`
+/// (`runtime/apps/beamtalk_workspace/src/beamtalk_recheck.erl`). `line` is
+/// the 1-based line xref recorded for the call site, not a byte offset —
+/// same precedent as [`beamtalk_core::language_service::NavSite`].
+#[derive(Debug, Clone, Deserialize)]
+pub struct ReloadSite {
+    /// Selector of the caller method containing the site.
+    pub method: String,
+    /// 1-based line number of the send.
+    pub line: u32,
+}
+
+/// One reload-induced finding — a caller whose re-check surfaced a
+/// signature-change or removed-selector diagnostic attributable to a live
+/// reload. Mirrors `beamtalk_recheck:finding()`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ReloadFinding {
+    /// Caller class this finding is attributed to (the document the LSP
+    /// publishes the diagnostic against).
+    pub owner: String,
+    /// The class whose reload triggered this re-check.
+    #[serde(rename = "changedClass")]
+    pub changed_class: String,
+    /// The selector that changed or was removed on `changed_class`.
+    pub selector: String,
+    /// `"signature_change"` or `"removal"` (ADR 0105 §Mechanism step 1).
+    pub classification: String,
+    /// ADR 0100 severity string (`"error"` | `"warning"` | `"lint"` |
+    /// `"hint"`) — `"error"` never appears (`beamtalk_recheck` drops it,
+    /// a reload finding is advisory, never build-failing).
+    pub severity: String,
+    /// Diagnostic category (`"Dnu"` / `"Type"`), when the checker reported one.
+    pub category: Option<String>,
+    /// The underlying diagnostic's message.
+    pub message: String,
+    /// Reload attribution note (e.g. "removed by the reload of Counter"),
+    /// present only for `removal` findings.
+    pub note: Option<String>,
+    /// Call sites xref recorded for this owner/selector pair.
+    pub sites: Vec<ReloadSite>,
+    /// Byte-offset span of the diagnostic in the owner's live combined
+    /// source (not necessarily the same bytes as the on-disk file — a
+    /// flagged caller may itself carry unflushed edits). The LSP surface
+    /// uses [`Self::sites`]' line numbers instead of this span, since there
+    /// is no existing machinery to map a byte offset in the *live* combined
+    /// source back to an on-disk position (see `nav_site_to_location`'s doc)
+    /// — kept here for parity with the wire payload and possible future use.
+    #[allow(dead_code, reason = "kept for wire parity; LSP publishes by site line")]
+    pub start: u32,
+    /// See [`Self::start`].
+    #[allow(dead_code, reason = "kept for wire parity; LSP publishes by site line")]
+    pub end: u32,
+}
+
+/// A `reload_check`/`completed` push event (ADR 0105 Phase 1, BT-2779): the
+/// outcome of `beamtalk_repl_loader:maybe_trigger_recheck/4` for one live
+/// reload, surfaced to the LSP so it can publish/clear reload-induced
+/// diagnostics on the caller classes' documents.
+///
+/// `checked_owners` is the clearing-by-replacement signal (ADR 0105
+/// §Mechanism step 4): for every owner listed, the LSP must replace
+/// whatever reload-induced diagnostics it is currently showing for that
+/// owner's document with `findings` filtered to that owner — possibly
+/// none, which is exactly how a stale finding disappears without anyone
+/// editing the caller (reload-fixes-reload) or how a plain hand-edit's own
+/// stale findings get cleared (`classification: "self_edit"`, `findings:
+/// []`, `checked: 0`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct ReloadCheckEvent {
+    /// The class whose reload triggered this event.
+    #[serde(rename = "changedClass")]
+    pub changed_class: String,
+    /// The selector that changed or was removed.
+    #[serde(rename = "changedSelector")]
+    pub changed_selector: String,
+    /// `"signature_change"` | `"removal"` | `"self_edit"` (the last meaning
+    /// no dependent re-check ran — only clearing happened).
+    pub classification: String,
+    /// Number of distinct caller classes a diagnostics round-trip completed for.
+    pub checked: u32,
+    /// Number of known dependents skipped by the per-reload caller cap.
+    #[serde(rename = "notChecked")]
+    pub not_checked: u32,
+    /// `"N more not checked"` note when the caller cap was exceeded.
+    #[serde(rename = "capNote")]
+    pub cap_note: Option<String>,
+    /// Every caller class this event's `findings` are authoritative for —
+    /// see the struct doc's clearing-by-replacement note.
+    #[serde(rename = "checkedOwners")]
+    pub checked_owners: Vec<String>,
+    /// The stale findings themselves (empty when every checked owner came
+    /// back clean).
+    pub findings: Vec<ReloadFinding>,
+}
+
 /// WebSocket client to a running Beamtalk workspace.
 ///
 /// Single-connection, single-process. Cloneable handle so async tasks can
@@ -174,10 +271,15 @@ impl RuntimeClient {
     /// the listener never blocks. Listeners that don't care can drop the
     /// receiver — the send will fail silently, which is fine for a
     /// best-effort signal.
+    ///
+    /// `reload_check_tx` receives `{reload_check, completed}` push frames
+    /// translated to [`ReloadCheckEvent`] (ADR 0105 Phase 1, BT-2779) — used
+    /// by the LSP to publish/clear reload-induced diagnostics.
     pub async fn connect(
         project_path: &Path,
         flush_tx: mpsc::UnboundedSender<FlushEvent>,
         class_changed_tx: mpsc::UnboundedSender<ClassChangedEvent>,
+        reload_check_tx: mpsc::UnboundedSender<ReloadCheckEvent>,
     ) -> Result<Self, RuntimeError> {
         let workspace_id =
             beamtalk_workspace::generate_workspace_id(project_path).map_err(|e| {
@@ -207,7 +309,7 @@ impl RuntimeClient {
                 reason: "no cookie file under ~/.beamtalk/workspaces/<id>/".to_string(),
             })?;
 
-        Self::connect_to(port, &cookie, flush_tx, class_changed_tx).await
+        Self::connect_to(port, &cookie, flush_tx, class_changed_tx, reload_check_tx).await
     }
 
     /// Connect directly to a workspace on `port` with `cookie`. Used by
@@ -217,6 +319,7 @@ impl RuntimeClient {
         cookie: &str,
         flush_tx: mpsc::UnboundedSender<FlushEvent>,
         class_changed_tx: mpsc::UnboundedSender<ClassChangedEvent>,
+        reload_check_tx: mpsc::UnboundedSender<ReloadCheckEvent>,
     ) -> Result<Self, RuntimeError> {
         let url = format!("ws://127.0.0.1:{port}/ws");
         let connect_fut = connect_async(&url);
@@ -248,7 +351,13 @@ impl RuntimeClient {
         let (req_tx, req_rx) = mpsc::channel::<EvalRequest>(64);
 
         let writer = tokio::spawn(writer_task(sink, req_rx, Arc::clone(&pending)));
-        let listener = tokio::spawn(listener_task(stream, pending, flush_tx, class_changed_tx));
+        let listener = tokio::spawn(listener_task(
+            stream,
+            pending,
+            flush_tx,
+            class_changed_tx,
+            reload_check_tx,
+        ));
 
         Ok(Self {
             inner: Arc::new(RuntimeInner {
@@ -502,6 +611,7 @@ async fn listener_task(
     pending: Arc<Mutex<PendingMap>>,
     flush_tx: mpsc::UnboundedSender<FlushEvent>,
     class_changed_tx: mpsc::UnboundedSender<ClassChangedEvent>,
+    reload_check_tx: mpsc::UnboundedSender<ReloadCheckEvent>,
 ) {
     while let Some(msg) = stream.next().await {
         match msg {
@@ -515,7 +625,7 @@ async fn listener_task(
                 };
                 // Push frame? Dispatch and continue.
                 if value.get("type").and_then(|v| v.as_str()) == Some("push") {
-                    handle_push_frame(&value, &flush_tx, &class_changed_tx);
+                    handle_push_frame(&value, &flush_tx, &class_changed_tx, &reload_check_tx);
                     continue;
                 }
                 // Otherwise it's a reply to a pending request — look up by id.
@@ -564,6 +674,7 @@ fn handle_push_frame(
     value: &serde_json::Value,
     flush_tx: &mpsc::UnboundedSender<FlushEvent>,
     class_changed_tx: &mpsc::UnboundedSender<ClassChangedEvent>,
+    reload_check_tx: &mpsc::UnboundedSender<ReloadCheckEvent>,
 ) {
     let channel = value.get("channel").and_then(|v| v.as_str());
     let event = value.get("event").and_then(|v| v.as_str());
@@ -604,6 +715,24 @@ fn handle_push_frame(
             };
             if let Err(e) = class_changed_tx.send(ClassChangedEvent { class_name }) {
                 warn!(error = %e, "runtime: class_changed_tx receiver dropped");
+            }
+        }
+        // ADR 0105 Phase 1 (BT-2779): reload-induced re-check outcome —
+        // publish/clear diagnostics on the affected caller classes.
+        (Some("reload_check"), Some("completed")) => {
+            let Some(data) = value.get("data") else {
+                debug!("runtime: reload_check/completed push with no data");
+                return;
+            };
+            let event: ReloadCheckEvent = match serde_json::from_value(data.clone()) {
+                Ok(e) => e,
+                Err(e) => {
+                    warn!(error = %e, "runtime: malformed reload_check/completed payload");
+                    return;
+                }
+            };
+            if let Err(e) = reload_check_tx.send(event) {
+                warn!(error = %e, "runtime: reload_check_tx receiver dropped");
             }
         }
         _ => {}
@@ -688,6 +817,7 @@ mod tests {
     async fn push_frame_with_files_is_forwarded() {
         let (tx, mut rx) = unbounded_channel::<FlushEvent>();
         let (class_tx, _class_rx) = unbounded_channel::<ClassChangedEvent>();
+        let (reload_tx, _reload_rx) = unbounded_channel::<ReloadCheckEvent>();
         handle_push_frame(
             &json!({
                 "type": "push",
@@ -699,6 +829,7 @@ mod tests {
             }),
             &tx,
             &class_tx,
+            &reload_tx,
         );
         let evt = rx.recv().await.expect("flush event");
         assert_eq!(evt.files, vec!["src/counter.bt", "src/foo.bt"]);
@@ -708,6 +839,7 @@ mod tests {
     async fn push_frame_with_empty_files_is_dropped() {
         let (tx, mut rx) = unbounded_channel::<FlushEvent>();
         let (class_tx, _class_rx) = unbounded_channel::<ClassChangedEvent>();
+        let (reload_tx, _reload_rx) = unbounded_channel::<ReloadCheckEvent>();
         handle_push_frame(
             &json!({
                 "type": "push",
@@ -717,6 +849,7 @@ mod tests {
             }),
             &tx,
             &class_tx,
+            &reload_tx,
         );
         // Empty files: nothing should arrive.
         assert!(rx.try_recv().is_err());
@@ -726,6 +859,7 @@ mod tests {
     async fn push_frame_unknown_channel_is_ignored() {
         let (tx, mut rx) = unbounded_channel::<FlushEvent>();
         let (class_tx, mut class_rx) = unbounded_channel::<ClassChangedEvent>();
+        let (reload_tx, mut reload_rx) = unbounded_channel::<ReloadCheckEvent>();
         handle_push_frame(
             &json!({
                 "type": "push",
@@ -735,15 +869,18 @@ mod tests {
             }),
             &tx,
             &class_tx,
+            &reload_tx,
         );
         assert!(rx.try_recv().is_err());
         assert!(class_rx.try_recv().is_err());
+        assert!(reload_rx.try_recv().is_err());
     }
 
     #[tokio::test]
     async fn class_loaded_push_forwards_to_class_changed_channel() {
         let (tx, mut rx) = unbounded_channel::<FlushEvent>();
         let (class_tx, mut class_rx) = unbounded_channel::<ClassChangedEvent>();
+        let (reload_tx, _reload_rx) = unbounded_channel::<ReloadCheckEvent>();
         handle_push_frame(
             &json!({
                 "type": "push",
@@ -753,6 +890,7 @@ mod tests {
             }),
             &tx,
             &class_tx,
+            &reload_tx,
         );
         let evt = class_rx.recv().await.expect("class changed");
         assert_eq!(evt.class_name, "Counter");
@@ -764,6 +902,7 @@ mod tests {
     async fn class_loaded_push_without_class_name_is_dropped() {
         let (tx, _rx) = unbounded_channel::<FlushEvent>();
         let (class_tx, mut class_rx) = unbounded_channel::<ClassChangedEvent>();
+        let (reload_tx, _reload_rx) = unbounded_channel::<ReloadCheckEvent>();
         handle_push_frame(
             &json!({
                 "type": "push",
@@ -773,6 +912,7 @@ mod tests {
             }),
             &tx,
             &class_tx,
+            &reload_tx,
         );
         assert!(class_rx.try_recv().is_err());
     }
@@ -781,6 +921,7 @@ mod tests {
     async fn push_frame_missing_data_is_ignored() {
         let (tx, mut rx) = unbounded_channel::<FlushEvent>();
         let (class_tx, _class_rx) = unbounded_channel::<ClassChangedEvent>();
+        let (reload_tx, _reload_rx) = unbounded_channel::<ReloadCheckEvent>();
         handle_push_frame(
             &json!({
                 "type": "push",
@@ -789,7 +930,71 @@ mod tests {
             }),
             &tx,
             &class_tx,
+            &reload_tx,
         );
         assert!(rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn reload_check_completed_push_is_forwarded() {
+        let (tx, _rx) = unbounded_channel::<FlushEvent>();
+        let (class_tx, _class_rx) = unbounded_channel::<ClassChangedEvent>();
+        let (reload_tx, mut reload_rx) = unbounded_channel::<ReloadCheckEvent>();
+        handle_push_frame(
+            &json!({
+                "type": "push",
+                "channel": "reload_check",
+                "event": "completed",
+                "data": {
+                    "changedClass": "Counter",
+                    "changedSelector": "getCount",
+                    "classification": "signature_change",
+                    "checked": 1,
+                    "notChecked": 0,
+                    "capNote": null,
+                    "checkedOwners": ["Dashboard"],
+                    "findings": [{
+                        "owner": "Dashboard",
+                        "changedClass": "Counter",
+                        "selector": "getCount",
+                        "classification": "signature_change",
+                        "severity": "warning",
+                        "category": "Dnu",
+                        "message": "String does not understand '+'",
+                        "note": null,
+                        "sites": [{"method": "refresh", "line": 14}],
+                        "start": 0,
+                        "end": 5
+                    }]
+                }
+            }),
+            &tx,
+            &class_tx,
+            &reload_tx,
+        );
+        let evt = reload_rx.recv().await.expect("reload check event");
+        assert_eq!(evt.changed_class, "Counter");
+        assert_eq!(evt.checked_owners, vec!["Dashboard".to_string()]);
+        assert_eq!(evt.findings.len(), 1);
+        assert_eq!(evt.findings[0].sites[0].line, 14);
+    }
+
+    #[tokio::test]
+    async fn reload_check_completed_push_with_malformed_data_is_dropped() {
+        let (tx, _rx) = unbounded_channel::<FlushEvent>();
+        let (class_tx, _class_rx) = unbounded_channel::<ClassChangedEvent>();
+        let (reload_tx, mut reload_rx) = unbounded_channel::<ReloadCheckEvent>();
+        handle_push_frame(
+            &json!({
+                "type": "push",
+                "channel": "reload_check",
+                "event": "completed",
+                "data": { "changedClass": "Counter" }
+            }),
+            &tx,
+            &class_tx,
+            &reload_tx,
+        );
+        assert!(reload_rx.try_recv().is_err());
     }
 }

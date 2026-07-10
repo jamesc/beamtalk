@@ -11,7 +11,8 @@ Stable subscription facade for the workspace live push streams (BT-2399, ADR
 
 The curated op layer (`beamtalk_repl_ops`) covers request/response ops, but the
 workspace also pushes **live streams** — Transcript output, actor lifecycle,
-class loads, bindings changes, and flush completions. Previously those were
+class loads, bindings changes, flush completions, and reload-induced
+re-check outcomes (ADR 0105, BT-2779). Previously those were
 wired only inside `beamtalk_ws_handler`, which called each underlying event
 module (`beamtalk_transcript_stream:subscribe/1`, `beamtalk_repl_actors:subscribe/0`,
 …) directly. A dist-attached client (Phoenix LiveView, runtime-attached LSP)
@@ -51,6 +52,7 @@ BT-2530).
 | `classes` | `ClassLoaded`, `ClassRemoved` | `{beamtalk_announcement, SubRef, Class, Handler, Event}` |
 | `bindings` | `BindingChanged` | `{beamtalk_announcement, SubRef, 'BindingChanged', Handler, Event}` |
 | `flush` | `FlushCompleted` | `{beamtalk_announcement, SubRef, 'FlushCompleted', Handler, Event}` |
+| `reload_check` | `ReloadCheckCompleted` | `{beamtalk_announcement, SubRef, 'ReloadCheckCompleted', Handler, Event}` |
 
 `Class` is the *announced* class atom; `Event` is the typed announcement payload
 (a tagged map, e.g. `#{'$beamtalk_class' => 'ActorSpawned', actorClass => …,
@@ -126,14 +128,14 @@ membership read and never builds or sends an event (see `beamtalk_object_watch`)
 %% message to the subscriber's mailbox instead of trying to run it.
 -define(PUSH_HANDLER, repl_push_subscription).
 
--type stream() :: transcript | actors | classes | bindings | flush.
+-type stream() :: transcript | actors | classes | bindings | flush | reload_check.
 
 -export_type([stream/0]).
 
 -doc "The ordered list of live push streams a client can subscribe to.".
 -spec streams() -> [stream()].
 streams() ->
-    [transcript, actors, classes, bindings, flush].
+    [transcript, actors, classes, bindings, flush, reload_check].
 
 -doc """
 Subscribe the calling process to a single live push stream. The subscriber
@@ -209,11 +211,12 @@ The announcement class(es) a bus-backed stream subscribes to (BT-2531). A stream
 that fans into more than one class (`actors`, `classes`) registers one
 subscription per class so each announced event reaches the subscriber.
 """.
--spec announcement_classes(actors | classes | bindings | flush) -> [atom(), ...].
+-spec announcement_classes(actors | classes | bindings | flush | reload_check) -> [atom(), ...].
 announcement_classes(actors) -> ['ActorSpawned', 'ActorStopped'];
 announcement_classes(classes) -> ['ClassLoaded', 'ClassRemoved'];
 announcement_classes(bindings) -> ['BindingChanged'];
-announcement_classes(flush) -> ['FlushCompleted'].
+announcement_classes(flush) -> ['FlushCompleted'];
+announcement_classes(reload_check) -> ['ReloadCheckCompleted'].
 
 -doc """
 Register `Pid` on the SystemAnnouncer bus for every announcement class of
@@ -233,7 +236,7 @@ check — so a missing bus is skipped (the consumer simply gets no pushes until 
 re-subscribes) and any mid-call failure is swallowed. This restores the
 crash-immunity the legacy `gen_server:cast` channels had.
 """.
--spec subscribe_bus(actors | classes | bindings | flush, pid()) -> ok.
+-spec subscribe_bus(actors | classes | bindings | flush | reload_check, pid()) -> ok.
 subscribe_bus(Stream, Pid) ->
     case whereis(beamtalk_announcements) of
         undefined ->
@@ -255,7 +258,7 @@ subscribe_bus(Stream, Pid) ->
     end.
 
 -doc "Remove `Pid`'s bus subscriptions for every announcement class of `Stream`.".
--spec unsubscribe_bus(actors | classes | bindings | flush, pid()) -> ok.
+-spec unsubscribe_bus(actors | classes | bindings | flush | reload_check, pid()) -> ok.
 unsubscribe_bus(Stream, Pid) ->
     lists:foreach(
         fun(Class) ->

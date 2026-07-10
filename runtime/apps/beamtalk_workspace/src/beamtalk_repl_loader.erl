@@ -61,7 +61,9 @@ Extracted from beamtalk_repl_eval (BT-863).
     %% ADR 0082 Phase 1 (BT-2285): pure validation helpers for new_class/2.
     declared_class_name/1,
     validate_new_class/3,
-    validate_target_path/1
+    validate_target_path/1,
+    %% ADR 0105 Phase 1 (BT-2779): the reload-check publish/clear hook.
+    maybe_trigger_recheck/4
 ]).
 -endif.
 
@@ -1651,13 +1653,22 @@ rollback_signature_generation(ClassNameBin, SelectorBin, Side, {captured, Prev, 
     end.
 
 %% Fire the re-check orchestration (ADR 0105 Phase 1, BT-2778) for a
-%% successfully-installed patch/removal whose signature-store capture
-%% classified the change as `signature_change` or `removal` — `no_op` (and
-%% `not_captured`, when the store itself failed) skip the re-check, since
-%% there is nothing to diff dependents against. Synchronous and best-effort:
-%% `beamtalk_recheck:trigger/4` never raises, but the count is still logged
-%% here for workspace-session visibility (surfacing findings to any surface
-%% is BT-2779's job, out of scope here).
+%% successfully-installed patch/removal, then publish the outcome (ADR 0105
+%% Phase 1, BT-2779): update `beamtalk_workspace_findings_store` and, when
+%% there is something for a live surface (LSP / REPL / workspace UI) to act
+%% on, broadcast a `'ReloadCheckCompleted'` system announcement.
+%%
+%% `ClassNameBin`'s source just changed (install or removal — a
+%% `Workspace changes revert:` re-install routes through this exact same
+%% path, `do_revert/2` -> `install_revert_patch/4` / `revert_removal/3` ->
+%% `load_recompiled_method/8` / `remove_method/3`), so any reload-induced
+%% findings previously recorded with `ClassNameBin` as the *caller* reference
+%% byte offsets into source that no longer exists — they are cleared
+%% unconditionally, before deciding whether a dependent re-check is even
+%% warranted (`beamtalk_workspace_findings_store`'s moduledoc "Clearing-by-
+%% replacement" section explains why this single hook covers the ADR's
+%% explicit revert bullet with no bespoke revert-specific code, and also
+%% closes the same gap for a plain hand-edit that fixes what a reload broke).
 %%
 %% Accepted tradeoff (flagged on BT-2777's review, recorded on BT-2778):
 %% `Classification` is only as correct as the signature-generation store's
@@ -1672,31 +1683,186 @@ rollback_signature_generation(ClassNameBin, SelectorBin, Side, {captured, Prev, 
 %% rollback) is out of this issue's scope. Advisory-only mitigates the
 %% blast radius (a wrong finding is noise, not a build/runtime failure).
 -spec maybe_trigger_recheck(binary(), binary(), instance | class, capture_outcome()) -> ok.
-maybe_trigger_recheck(_ClassNameBin, _SelectorBin, _Side, not_captured) ->
-    ok;
-maybe_trigger_recheck(_ClassNameBin, _SelectorBin, _Side, {captured, _Prev, no_op}) ->
-    ok;
-maybe_trigger_recheck(ClassNameBin, SelectorBin, Side, {captured, _Prev, Classification}) ->
-    #{findings := Findings, checked := Checked, not_checked := NotChecked} =
-        beamtalk_recheck:trigger(ClassNameBin, SelectorBin, Side, Classification),
-    case Findings of
+maybe_trigger_recheck(ClassNameBin, SelectorBin, Side, CaptureOutcome) ->
+    PrevOwnFindings = findings_store_clear_owner(ClassNameBin),
+    {Classification, DependentResult} = maybe_run_recheck(
+        ClassNameBin, SelectorBin, Side, CaptureOutcome
+    ),
+    publish_recheck_outcome(
+        ClassNameBin, SelectorBin, Classification, PrevOwnFindings, DependentResult
+    ).
+
+%% Best-effort wrapper around `beamtalk_workspace_findings_store:clear_owner/1`
+%% (ADR 0105 Phase 1, BT-2779) — the store is REPL-mode-only (see
+%% `beamtalk_workspace_sup`'s `repl_child_specs/6`), so it is legitimately
+%% absent under `beamtalk_repl_loader:install_method/9`'s non-REPL callers
+%% (e.g. `beamtalk_repl_loader_tests.erl`'s unit fixtures, and — per the same
+%% reasoning `capture_signature_generation/1` already documents — a run-mode
+%% precompiled artifact never reaches this hook at all). Degrades to "nothing
+%% was cleared" on any failure rather than crashing the install/removal that
+%% called `maybe_trigger_recheck/4` — the ADR's "advisory, never blocking"
+%% guarantee applies to publishing exactly as it does to the re-check itself.
+-spec findings_store_clear_owner(binary()) -> [beamtalk_recheck:finding()].
+findings_store_clear_owner(OwnerBin) ->
+    try
+        beamtalk_workspace_findings_store:clear_owner(OwnerBin)
+    catch
+        Class:Reason:Stack ->
+            ?LOG_WARNING(
+                "Reload-findings store unavailable (clear skipped)",
+                #{
+                    error_class => Class,
+                    reason => Reason,
+                    stack => Stack,
+                    owner => OwnerBin,
+                    domain => [
+                        beamtalk, runtime
+                    ]
+                }
+            ),
+            []
+    end.
+
+%% Best-effort wrapper around
+%% `beamtalk_workspace_findings_store:put_owner_origin/3` — see
+%% `findings_store_clear_owner/1`'s doc for why the store may legitimately be
+%% absent, and why a failure here must degrade rather than crash.
+%%
+%% `ChangedClassBin` scopes the replacement to *this* changed class's
+%% contribution to `OwnerBin`'s findings (ADR 0105 §Mechanism step 4,
+%% `beamtalk_workspace_findings_store`'s moduledoc) — a caller broken by two
+%% independently-reloading classes keeps both findings; only the one that
+%% actually just got re-checked is replaced.
+-spec findings_store_put_owner_origin(binary(), binary(), [beamtalk_recheck:finding()]) -> ok.
+findings_store_put_owner_origin(OwnerBin, ChangedClassBin, Findings) ->
+    try
+        _ = beamtalk_workspace_findings_store:put_owner_origin(OwnerBin, ChangedClassBin, Findings),
+        ok
+    catch
+        Class:Reason:Stack ->
+            ?LOG_WARNING(
+                "Reload-findings store unavailable (publish skipped)",
+                #{
+                    error_class => Class,
+                    reason => Reason,
+                    stack => Stack,
+                    owner => OwnerBin,
+                    changed_class => ChangedClassBin,
+                    domain => [
+                        beamtalk, runtime
+                    ]
+                }
+            ),
+            ok
+    end.
+
+%% Runs `beamtalk_recheck:trigger/4` only when `CaptureOutcome` warrants it
+%% (`{captured, _, signature_change | removal}`) — `no_op`/`not_captured`
+%% skip it, since there is nothing to diff dependents against. When it does
+%% run, replaces every checked owner's stored findings **for this changed
+%% class** via `beamtalk_workspace_findings_store:put_owner_origin/3` — this
+%% is the clearing-by-replacement rule applied per `{caller, changed class}`
+%% origin (not per caller alone — see the store's moduledoc for why a caller
+%% broken by two independently-reloading classes needs both origins kept
+%% separate), including a clean re-check (`put_owner_origin(Owner,
+%% ClassNameBin, [])`) and a self-referential caller (already cleared in full
+%% by `clear_owner/1` above, since that call is un-scoped; a fresh
+%% empty-or-not set here re-adds only this origin's contribution).
+%%
+%% Returns `{Classification, Result}` when a re-check ran, or `{self_edit,
+%% undefined}` when it did not — `self_edit` stands in for "this install had
+%% no dependents worth diffing", so `publish_recheck_outcome/5` always has a
+%% classification to log/announce with even when the only newsworthy thing
+%% that happened is `ClassNameBin`'s own stale findings being cleared.
+-spec maybe_run_recheck(binary(), binary(), instance | class, capture_outcome()) ->
+    {self_edit | beamtalk_recheck:classification(), beamtalk_recheck:result() | undefined}.
+maybe_run_recheck(_ClassNameBin, _SelectorBin, _Side, not_captured) ->
+    {self_edit, undefined};
+maybe_run_recheck(_ClassNameBin, _SelectorBin, _Side, {captured, _Prev, no_op}) ->
+    {self_edit, undefined};
+maybe_run_recheck(ClassNameBin, SelectorBin, Side, {captured, _Prev, Classification}) ->
+    Result = beamtalk_recheck:trigger(ClassNameBin, SelectorBin, Side, Classification),
+    #{checked_owners := CheckedOwners, findings := Findings} = Result,
+    lists:foreach(
+        fun(OwnerBin) ->
+            OwnerFindings = [F || F <- Findings, maps:get(owner, F) =:= OwnerBin],
+            findings_store_put_owner_origin(OwnerBin, ClassNameBin, OwnerFindings)
+        end,
+        CheckedOwners
+    ),
+    {Classification, Result}.
+
+%% Log + broadcast the outcome of one `maybe_trigger_recheck/4` call — but
+%% only when a live surface has something to act on: either a dependent
+%% re-check ran against at least one owner (`DependentResult`'s
+%% `checked_owners` non-empty), or clearing `ClassNameBin`'s own findings
+%% above (`PrevOwnFindings`) actually removed something a surface might
+%% still be showing. A no-op edit with no prior findings and no known
+%% dependents announces nothing — the common case, and not worth a push
+%% frame on every keystroke-save.
+-spec publish_recheck_outcome(
+    binary(),
+    binary(),
+    self_edit | beamtalk_recheck:classification(),
+    [beamtalk_recheck:finding()],
+    beamtalk_recheck:result() | undefined
+) -> ok.
+publish_recheck_outcome(
+    ClassNameBin, SelectorBin, Classification, PrevOwnFindings, DependentResult
+) ->
+    {DependentCheckedOwners, Findings, Checked, NotChecked, CapNote} =
+        case DependentResult of
+            undefined ->
+                {[], [], 0, 0, undefined};
+            #{
+                checked_owners := CO,
+                findings := F,
+                checked := C,
+                not_checked := NC,
+                cap_note := CN
+            } ->
+                {CO, F, C, NC, CN}
+        end,
+    TouchedOwners = lists:usort(
+        DependentCheckedOwners ++
+            case PrevOwnFindings of
+                [] -> [];
+                _ -> [ClassNameBin]
+            end
+    ),
+    case TouchedOwners of
         [] ->
             ok;
         _ ->
-            ?LOG_INFO(
-                "Reload re-check produced findings",
-                #{
-                    class => ClassNameBin,
-                    selector => SelectorBin,
-                    classification => Classification,
-                    callers_checked => Checked,
-                    callers_not_checked => NotChecked,
-                    finding_count => length(Findings),
-                    domain => [beamtalk, runtime]
-                }
-            )
-    end,
-    ok.
+            case Findings of
+                [] ->
+                    ok;
+                _ ->
+                    ?LOG_INFO(
+                        "Reload re-check produced findings",
+                        #{
+                            class => ClassNameBin,
+                            selector => SelectorBin,
+                            classification => Classification,
+                            callers_checked => Checked,
+                            callers_not_checked => NotChecked,
+                            finding_count => length(Findings),
+                            domain => [beamtalk, runtime]
+                        }
+                    )
+            end,
+            beamtalk_announcements:system_announce('ReloadCheckCompleted', #{
+                changedClass => ClassNameBin,
+                changedSelector => SelectorBin,
+                classification => Classification,
+                checked => Checked,
+                notChecked => NotChecked,
+                capNote => CapNote,
+                checkedOwners => TouchedOwners,
+                findings => Findings
+            }),
+            ok
+    end.
 
 -spec patch_side(boolean()) -> instance | class.
 patch_side(true) -> class;
