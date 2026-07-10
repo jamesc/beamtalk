@@ -349,6 +349,7 @@ fn type_args_for_generic_class_no_false_positive() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![
         ClassInfo {
+            surface_incomplete: false,
             name: "GenericDict".into(),
             superclass: Some("Object".into()),
             is_sealed: false,
@@ -370,6 +371,7 @@ fn type_args_for_generic_class_no_false_positive() {
             superclass_type_args: vec![],
         },
         ClassInfo {
+            surface_incomplete: false,
             name: "Counter".into(),
             superclass: Some("Object".into()),
             is_sealed: false,

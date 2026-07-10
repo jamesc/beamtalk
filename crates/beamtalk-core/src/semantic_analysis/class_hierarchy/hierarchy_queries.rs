@@ -225,6 +225,39 @@ impl ClassHierarchy {
         false
     }
 
+    /// Returns true if any class in the superclass chain (including the class
+    /// itself) was extracted from a file with parse errors (BT-2796).
+    ///
+    /// Parser error recovery can silently drop method definitions, so a
+    /// marked class's recorded method surface may be incomplete. The
+    /// receiver-knowledge classifier (ADR 0100 Rule 1) treats such receivers
+    /// as `Open` so an under-recovered surface never produces false
+    /// unresolved-selector hints. The walk stops at the first unknown
+    /// ancestor — a missing parent is `has_cross_file_parent`'s concern.
+    #[must_use]
+    pub fn has_incomplete_surface_in_chain(&self, class_name: &str) -> bool {
+        let mut current = class_name;
+        let mut visited = HashSet::new();
+
+        while let Some(info) = self.classes.get(current) {
+            if info.surface_incomplete {
+                return true;
+            }
+
+            let Some(ref superclass) = info.superclass else {
+                return false; // Reached root — whole chain checked
+            };
+
+            if !visited.insert(current.to_string()) {
+                return false; // Cycle guard
+            }
+
+            current = superclass.as_str();
+        }
+
+        false
+    }
+
     /// Returns true if the named class is Value or a subclass of Value (ADR 0042).
     ///
     /// Value subclasses use immutable value semantics — `self.slot :=` is a

@@ -60,7 +60,7 @@ pub use facts::{DispatchKind, SemanticFacts, compute_semantic_facts};
 pub use name_resolver::NameResolver;
 pub use pattern_bindings::{extract_match_arm_bindings, extract_pattern_bindings};
 pub use protocol_registry::{ProtocolInfo, ProtocolRegistry};
-pub use receiver_knowledge::{ReceiverKnowledge, classify_receiver};
+pub use receiver_knowledge::{KnowledgeScope, ReceiverKnowledge, classify_receiver};
 pub use return_type_writeback::apply_return_type_writeback;
 pub use scope::BindingKind;
 pub use supervisor_kind_writeback::apply_supervisor_kind_writeback;
@@ -211,7 +211,16 @@ pub enum MutationKind {
 /// assert_eq!(result.diagnostics.len(), 0);
 /// ```
 pub fn analyse(module: &Module) -> AnalysisResult {
-    analyse_full(module, &[], false, false, vec![], None, None)
+    analyse_full(
+        module,
+        &[],
+        false,
+        false,
+        vec![],
+        None,
+        None,
+        KnowledgeScope::default(),
+    )
 }
 
 /// Analyse a module with pre-defined variables (for REPL context).
@@ -225,7 +234,16 @@ pub fn analyse(module: &Module) -> AnalysisResult {
 /// services. Pre-defining known variables is essential for REPL contexts where
 /// users build up state incrementally across multiple evaluations.
 pub fn analyse_with_known_vars(module: &Module, known_vars: &[&str]) -> AnalysisResult {
-    analyse_full(module, known_vars, false, false, vec![], None, None)
+    analyse_full(
+        module,
+        known_vars,
+        false,
+        false,
+        vec![],
+        None,
+        None,
+        KnowledgeScope::default(),
+    )
 }
 
 /// Analyse a module with compiler options controlling stdlib-specific behaviour.
@@ -241,6 +259,7 @@ pub fn analyse_with_options(module: &Module, options: &crate::CompilerOptions) -
         vec![],
         None,
         options.current_package.as_deref(),
+        options.knowledge_scope,
     )
 }
 
@@ -262,6 +281,7 @@ pub fn analyse_with_options_and_classes(
         pre_loaded_classes,
         None,
         options.current_package.as_deref(),
+        options.knowledge_scope,
     )
 }
 
@@ -287,6 +307,7 @@ pub fn analyse_with_natives(
         None,
         options.current_package.as_deref(),
         native_type_registry,
+        options.knowledge_scope,
     )
 }
 
@@ -314,6 +335,7 @@ pub fn analyse_with_natives_and_protocols(
         None,
         options.current_package.as_deref(),
         native_type_registry,
+        options.knowledge_scope,
     )
 }
 
@@ -335,6 +357,7 @@ pub fn analyse_with_known_vars_and_classes(
         pre_loaded_classes,
         None,
         None,
+        KnowledgeScope::default(),
     )
 }
 
@@ -358,11 +381,13 @@ pub fn analyse_with_packages(
         pre_loaded_classes,
         Some(known_packages),
         options.current_package.as_deref(),
+        options.knowledge_scope,
     )
 }
 
 /// Internal: full analysis with all knobs.
 #[allow(clippy::too_many_lines)] // orchestration function — one call per analysis phase
+#[allow(clippy::too_many_arguments)]
 fn analyse_full(
     module: &Module,
     known_vars: &[&str],
@@ -371,6 +396,7 @@ fn analyse_full(
     pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
     known_packages: Option<std::collections::HashSet<String>>,
     current_package: Option<&str>,
+    knowledge_scope: KnowledgeScope,
 ) -> AnalysisResult {
     analyse_full_with_natives(
         module,
@@ -382,6 +408,7 @@ fn analyse_full(
         known_packages,
         current_package,
         None,
+        knowledge_scope,
     )
 }
 
@@ -401,6 +428,7 @@ fn analyse_full_with_natives(
     known_packages: Option<std::collections::HashSet<String>>,
     current_package: Option<&str>,
     native_type_registry: Option<std::sync::Arc<type_checker::NativeTypeRegistry>>,
+    knowledge_scope: KnowledgeScope,
 ) -> AnalysisResult {
     let mut result = AnalysisResult::new();
 
@@ -410,6 +438,10 @@ fn analyse_full_with_natives(
     // build_with_options is infallible; propagate any diagnostics it produced
     result.class_hierarchy = hierarchy_result.expect("ClassHierarchy::build is infallible");
     result.diagnostics.extend(hierarchy_diags);
+
+    // BT-2796: Record how complete the injected cross-file knowledge is so
+    // the receiver-knowledge classifier can consult it (ADR 0100 Rule 2).
+    result.class_hierarchy.set_knowledge_scope(knowledge_scope);
 
     // ADR 0071 BT-1700: Stamp current package on AST-derived classes
     if let Some(pkg) = current_package {

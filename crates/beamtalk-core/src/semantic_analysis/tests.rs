@@ -3664,6 +3664,7 @@ fn analyse_with_known_vars_and_classes_injects_user_class_into_hierarchy() {
     use crate::semantic_analysis::class_hierarchy::ClassInfo;
 
     let pre_class = ClassInfo {
+        surface_incomplete: false,
         name: EcoString::from("UserClass"),
         superclass: Some(EcoString::from("Object")),
         is_sealed: false,
@@ -4077,6 +4078,7 @@ fn workspace_binding_shadowing_class_emits_warning() {
 
     // Pre-load a class "Workspace" so the hierarchy knows about it.
     let pre_class = ClassInfo {
+        surface_incomplete: false,
         name: EcoString::from("Workspace"),
         superclass: Some(EcoString::from("Object")),
         is_sealed: false,
@@ -4137,6 +4139,7 @@ fn workspace_binding_not_in_hierarchy_no_shadow_warning() {
     // meaning the shadow check doesn't run at all. To test the no-match
     // path, we need at least one pre-loaded class.
     let dummy_class = ClassInfo {
+        surface_incomplete: false,
         name: EcoString::from("DummyClass"),
         superclass: Some(EcoString::from("Object")),
         is_sealed: false,
@@ -4194,6 +4197,7 @@ fn fixture_sourced_protocol_name_is_not_unresolved() {
     // true and the unresolved-class validator actually runs. Without this
     // sentinel, the check is suppressed and the test would pass vacuously.
     let dummy_class = ClassInfo {
+        surface_incomplete: false,
         name: EcoString::from("DummyClass"),
         superclass: Some(EcoString::from("Object")),
         is_sealed: false,
@@ -4327,4 +4331,34 @@ Value subclass: UnusedUntypedSmall
             "Expected no unused warnings for source:\n{source}\ngot: {unused:?}"
         );
     }
+}
+
+// ── BT-2796: KnowledgeScope plumbing ─────────────────────────────────────────
+
+#[test]
+fn analyse_stamps_default_knowledge_scope() {
+    let tokens = crate::source_analysis::lex_with_eof("Object subclass: ScopeDefault\n  m => 1\n");
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = analyse(&module);
+    assert_eq!(
+        result.class_hierarchy.knowledge_scope(),
+        KnowledgeScope::ModuleOnly,
+        "analysis without a project orchestrator must keep the conservative default"
+    );
+}
+
+#[test]
+fn analyse_with_options_stamps_project_complete_scope() {
+    let tokens = crate::source_analysis::lex_with_eof("Object subclass: ScopeFull\n  m => 1\n");
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let options = crate::CompilerOptions {
+        knowledge_scope: KnowledgeScope::ProjectComplete,
+        ..Default::default()
+    };
+    let result = analyse_with_options(&module, &options);
+    assert_eq!(
+        result.class_hierarchy.knowledge_scope(),
+        KnowledgeScope::ProjectComplete,
+        "the orchestrator's completeness claim must reach the hierarchy"
+    );
 }

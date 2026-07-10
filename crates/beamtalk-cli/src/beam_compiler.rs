@@ -2453,6 +2453,7 @@ end
         use beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo;
 
         let sibling = ClassInfo {
+            surface_incomplete: false,
             name: "SiblingBt2793".into(),
             superclass: Some("Object".into()),
             is_sealed: false,

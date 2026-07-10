@@ -87,6 +87,10 @@ struct PreloadConfig {
 struct PreloadedFiles {
     user_files: Vec<(PathBuf, String)>,
     stdlib_files: Vec<(PathBuf, String)>,
+    /// Whether the preload file budget (`PRELOAD_MAX_FILES`) was exhausted
+    /// mid-walk (BT-2796). When true, workspace coverage may be partial and
+    /// the language service must NOT claim `KnowledgeScope::ProjectComplete`.
+    budget_exhausted: bool,
 }
 
 /// Params for the `beamtalk-lsp/fetchContent` custom request.
@@ -744,12 +748,18 @@ impl Backend {
         }
 
         let mut svc = self.service.lock().expect("service lock poisoned");
+        let budget_exhausted = loaded.budget_exhausted;
         for (path, content) in loaded.user_files.into_iter().chain(loaded.stdlib_files) {
             let Ok(utf8_path) = Utf8PathBuf::from_path_buf(path) else {
                 continue;
             };
             svc.update_file(utf8_path, content);
         }
+        // BT-2796: With every workspace source file indexed, the ProjectIndex
+        // is project-complete and diagnostics may say so (ADR 0100 Rule 2
+        // sequencing guard). A budget-exhausted preload has partial coverage
+        // and must keep the conservative ModuleOnly default.
+        svc.set_project_complete(!budget_exhausted);
     }
 
     /// Handles the `beamtalk-lsp/fetchContent` custom request.
@@ -3068,6 +3078,7 @@ fn collect_preload_files(config: PreloadConfig) -> PreloadedFiles {
     PreloadedFiles {
         user_files,
         stdlib_files,
+        budget_exhausted: remaining_budget == 0,
     }
 }
 

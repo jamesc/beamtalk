@@ -86,4 +86,15 @@ pub struct CompilerOptions {
     /// `ClassInfo` entries built from AST source. `None` for REPL sessions
     /// and contexts where no package is active.
     pub current_package: Option<String>,
+
+    /// How complete the cross-file knowledge injected into analysis is
+    /// (BT-2796, ADR 0100 Rule 2 sequencing guard).
+    ///
+    /// Defaults to [`semantic_analysis::KnowledgeScope::ModuleOnly`]. Set to
+    /// `ProjectComplete` only by orchestrators that walked the entire project
+    /// (CLI build Pass 1, lint with a package root, the LSP after workspace
+    /// preload) so the receiver-knowledge classifier can distinguish
+    /// "parent missing because single-file analysis" from "parent missing
+    /// because genuinely unresolved".
+    pub knowledge_scope: semantic_analysis::KnowledgeScope,
 }

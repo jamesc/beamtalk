@@ -384,6 +384,7 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
     use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
 
     let result_info = ClassInfo {
+        surface_incomplete: false,
         name: eco_string("GenResult"),
         superclass: Some(eco_string("Value")),
         is_sealed: true,

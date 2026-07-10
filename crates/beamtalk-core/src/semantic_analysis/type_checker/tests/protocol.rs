@@ -358,6 +358,7 @@ fn setup_json_class_side_fixture(
     // protocol-typed. (NOT named "Json" — that's a *builtin*, which
     // `add_from_beam_meta` skips, silently substituting the stdlib class.)
     let json_info = ClassInfo {
+        surface_incomplete: false,
         name: "JsonEncoder".into(),
         superclass: Some("Object".into()),
         is_sealed: false,
@@ -788,6 +789,7 @@ fn setup_intersection_param_fixture() -> (
     hierarchy.register_protocol_classes(&proto_module);
 
     let zzyzx_info = ClassInfo {
+        surface_incomplete: false,
         name: "Zzyzx".into(),
         superclass: Some("Object".into()),
         is_sealed: false,
@@ -928,6 +930,7 @@ fn test_intersection_param_conforms_to_both_no_warning() {
     let (mut hierarchy, registry) = setup_intersection_param_fixture();
 
     let report_info = ClassInfo {
+        surface_incomplete: false,
         name: "Report".into(),
         superclass: Some("Object".into()),
         is_sealed: false,
@@ -1043,6 +1046,7 @@ fn add_widget_class(hierarchy: &mut ClassHierarchy, class_side_selectors: &[&str
         .collect();
 
     let widget_info = ClassInfo {
+        surface_incomplete: false,
         name: "Widget".into(),
         superclass: Some("Object".into()),
         is_sealed: false,

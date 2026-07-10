@@ -44,6 +44,13 @@ pub struct ClassHierarchy {
     /// Tracked so `merge()` can prefer real class definitions over
     /// synthetic protocol entries when files define both.
     protocol_classes: HashSet<EcoString>,
+    /// How complete the knowledge injected into this hierarchy is (BT-2796).
+    ///
+    /// Stamped by `analyse_full_with_natives` from the orchestrator's
+    /// `CompilerOptions::knowledge_scope`. Defaults to
+    /// [`KnowledgeScope::ModuleOnly`]; consulted by the receiver-knowledge
+    /// classifier (ADR 0100 Rule 2, BT-2794).
+    knowledge_scope: crate::semantic_analysis::receiver_knowledge::KnowledgeScope,
 }
 impl ClassHierarchy {
     /// Returns true if the given class name is a built-in class.
@@ -184,6 +191,7 @@ impl ClassHierarchy {
                     is_value: false,
                     is_native: false,
                     handle_scope: None,
+                    surface_incomplete: false,
                     state: vec![],
                     state_types: HashMap::new(),
                     state_has_default: HashMap::new(),
@@ -219,9 +227,45 @@ impl ClassHierarchy {
                     method_indexes,
                     class_method_indexes,
                     protocol_classes: HashSet::new(),
+                    knowledge_scope:
+                        crate::semantic_analysis::receiver_knowledge::KnowledgeScope::default(),
                 }
             })
             .clone()
+    }
+
+    /// How complete the knowledge injected into this hierarchy is (BT-2796).
+    #[must_use]
+    pub fn knowledge_scope(&self) -> crate::semantic_analysis::receiver_knowledge::KnowledgeScope {
+        self.knowledge_scope
+    }
+
+    /// Declare how complete the knowledge injected into this hierarchy is
+    /// (BT-2796, ADR 0100 Rule 2 sequencing guard).
+    ///
+    /// Only orchestrators that have genuinely walked the whole project (CLI
+    /// build Pass 1, lint's package walk, the LSP after workspace preload)
+    /// may claim [`KnowledgeScope::ProjectComplete`].
+    pub fn set_knowledge_scope(
+        &mut self,
+        scope: crate::semantic_analysis::receiver_knowledge::KnowledgeScope,
+    ) {
+        self.knowledge_scope = scope;
+    }
+
+    /// Mark the classes defined in `module` as having a possibly-incomplete
+    /// method surface (BT-2796 parse-error guard).
+    ///
+    /// Called by orchestrators when the file that produced `module` had parse
+    /// **errors** — error recovery may have dropped method definitions, so
+    /// the recorded surface cannot be trusted as complete. See
+    /// [`Self::has_incomplete_surface_in_chain`].
+    pub fn mark_module_classes_surface_incomplete(&mut self, module: &Module) {
+        for class in &module.classes {
+            if let Some(info) = self.classes.get_mut(class.name.name.as_str()) {
+                info.surface_incomplete = true;
+            }
+        }
     }
     /// Look up a class by name.
     #[must_use]
@@ -282,6 +326,11 @@ impl ClassHierarchy {
                         is_value: superclass_name == "Value",
                         is_native: false,
                         handle_scope: None,
+                        // BT-2796: A stub carries only name + superclass — its
+                        // method surface is genuinely unknown, so receivers
+                        // whose chain includes it must never be classified
+                        // ClosedComplete.
+                        surface_incomplete: true,
                         state: Vec::new(),
                         state_types: HashMap::new(),
                         state_has_default: HashMap::new(),

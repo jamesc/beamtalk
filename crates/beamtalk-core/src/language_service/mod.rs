@@ -147,6 +147,16 @@ pub struct SimpleLanguageService {
     project_index: ProjectIndex,
     /// Native type registry for Erlang FFI typed completions (ADR 0075).
     native_types: Option<std::sync::Arc<NativeTypeRegistry>>,
+    /// Whether workspace preload has completed with full coverage (BT-2796).
+    ///
+    /// When `true`, diagnostics are computed with
+    /// `KnowledgeScope::ProjectComplete` — the `ProjectIndex` holds every
+    /// project file's classes, so the receiver-knowledge classifier may
+    /// treat missing parents as genuinely unresolved rather than
+    /// not-yet-seen. Set by the LSP server after `preload_workspace_source_files`
+    /// finishes within its file budget; stays `false` if the budget was
+    /// exhausted (coverage would be partial).
+    project_complete: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -167,6 +177,7 @@ impl SimpleLanguageService {
             files: HashMap::new(),
             project_index: ProjectIndex::new(),
             native_types: None,
+            project_complete: false,
         }
     }
 
@@ -180,7 +191,19 @@ impl SimpleLanguageService {
             files: HashMap::new(),
             project_index,
             native_types: None,
+            project_complete: false,
         }
+    }
+
+    /// Declare that workspace preload completed with full coverage (BT-2796).
+    ///
+    /// After this, diagnostics run with `KnowledgeScope::ProjectComplete`.
+    /// Only call when the preload walked every project source file — a
+    /// budget-exhausted preload must NOT claim completeness, or the
+    /// receiver-knowledge classifier would mistake unseen files for
+    /// genuinely-unresolved classes.
+    pub fn set_project_complete(&mut self, complete: bool) {
+        self.project_complete = complete;
     }
 
     /// Sets the native type registry for Erlang FFI typed completions.
@@ -1359,6 +1382,18 @@ impl LanguageService for SimpleLanguageService {
             // so LSP features (completions, has_class) work with protocol names.
             class_hierarchy.register_protocol_classes(&module);
 
+            // BT-2796: A file with parse errors may have an under-recovered
+            // method surface (error recovery can drop method definitions).
+            // Mark its classes so cross-file consumers of this file's
+            // hierarchy never emit unresolved-selector hints against a
+            // surface the parser never fully saw.
+            let has_parse_errors = diagnostics
+                .iter()
+                .any(|d| d.severity == crate::source_analysis::Severity::Error);
+            if has_parse_errors {
+                class_hierarchy.mark_module_classes_surface_incomplete(&module);
+            }
+
             // Update the project-wide index with this file's class hierarchy
             self.project_index
                 .update_file(file.clone(), &class_hierarchy);
@@ -1408,6 +1443,13 @@ impl LanguageService for SimpleLanguageService {
                 let mut options = crate::CompilerOptions::default();
                 if self.project_index.is_stdlib_file(file) {
                     options.stdlib_mode = true;
+                }
+                // BT-2796: After a full-coverage workspace preload the
+                // ProjectIndex holds every project file's classes, so the
+                // injected knowledge is project-complete.
+                if self.project_complete {
+                    options.knowledge_scope =
+                        crate::semantic_analysis::KnowledgeScope::ProjectComplete;
                 }
                 let ctx = crate::queries::diagnostic_provider::ProjectDiagnosticContext {
                     options,

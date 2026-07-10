@@ -2771,6 +2771,7 @@ fn generate_module_with_pre_class_hierarchy_does_not_panic() {
     let (module, _) = crate::source_analysis::parse(tokens);
 
     let pre_class = ClassInfo {
+        surface_incomplete: false,
         name: ecow::EcoString::from("Helper"),
         superclass: Some(ecow::EcoString::from("Object")),
         is_sealed: false,
@@ -2815,6 +2816,7 @@ fn price_band_class_info_with_lo_type(
         state_types.insert(ecow::EcoString::from("lo"), ecow::EcoString::from(ty));
     }
     ClassInfo {
+        surface_incomplete: false,
         name: ecow::EcoString::from("PriceBand"),
         superclass: Some(ecow::EcoString::from("Object")),
         is_sealed: false,

@@ -217,6 +217,19 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, force: bool) 
     info!("Starting build");
 
     let env = setup_build_environment(path)?;
+
+    // BT-2796: A directory build walks every project source file (Pass 1)
+    // before any per-file analysis runs (Pass 2), so the injected cross-file
+    // knowledge is project-complete. Declare that to the receiver-knowledge
+    // classifier (ADR 0100 Rule 2 sequencing guard). A single-file build
+    // (`beamtalk build foo.bt`) sees only that file and keeps the
+    // conservative `ModuleOnly` default.
+    let mut options = options.clone();
+    if Utf8Path::new(path).is_dir() {
+        options.knowledge_scope = beamtalk_core::semantic_analysis::KnowledgeScope::ProjectComplete;
+    }
+    let options = &options;
+
     let dep_ctx = resolve_and_validate_dependencies(&env, options)?;
     let passes = execute_build_passes(&env, options, &dep_ctx, force)?;
 
@@ -1585,8 +1598,23 @@ pub(crate) fn build_class_module_index(
         }
 
         // BT-1523: Extract full ClassInfo for cross-file hierarchy resolution.
-        let class_infos =
+        //
+        // BT-2796: A file with parse *errors* may have an under-recovered
+        // method surface (error recovery can drop method definitions), so its
+        // classes are marked `surface_incomplete`. The receiver-knowledge
+        // classifier downgrades receivers whose superclass chain contains a
+        // marked class to `Open`, preventing false unresolved-selector hints
+        // against a surface Pass 1 never fully saw.
+        let has_parse_errors = diagnostics
+            .iter()
+            .any(|d| d.severity == beamtalk_core::source_analysis::Severity::Error);
+        let mut class_infos =
             beamtalk_core::semantic_analysis::ClassHierarchy::extract_class_infos(&module);
+        if has_parse_errors {
+            for info in &mut class_infos {
+                info.surface_incomplete = true;
+            }
+        }
         all_class_infos.extend(class_infos);
 
         for class in &module.classes {

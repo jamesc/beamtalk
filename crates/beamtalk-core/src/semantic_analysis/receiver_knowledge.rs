@@ -21,6 +21,34 @@
 
 use super::class_hierarchy::ClassHierarchy;
 
+/// How complete the knowledge injected into an analysis run is (BT-2796, WS2).
+///
+/// The orchestrator that assembles cross-file knowledge (CLI build Pass 1,
+/// CLI lint's package walk, the LSP `ProjectIndex` after workspace preload)
+/// declares how far that knowledge extends. The classifier uses this to
+/// decide whether "a parent class is missing from the hierarchy" means
+/// *incomplete knowledge* (single-file analysis — stay quiet) or *genuinely
+/// unresolved* (project-complete analysis — still conservative, but eligible
+/// for ADR 0100 Rule 2's suppression removal, BT-2794).
+///
+/// This is the per-hierarchy realisation of ADR 0100's sequencing-guard
+/// "feature flag": no orchestrator claims [`ProjectComplete`](Self::ProjectComplete)
+/// until its assembly genuinely covers the whole project, and any context
+/// that cannot claim it keeps today's conservative behaviour automatically.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum KnowledgeScope {
+    /// Only the current module (plus whatever was injected) is known.
+    /// Today's conservative rules apply unchanged. This is the default for
+    /// isolated single-file analysis, the REPL/compiler-port, and any
+    /// context that has not walked the whole project.
+    #[default]
+    ModuleOnly,
+    /// The orchestrator walked the entire project: every project file's
+    /// classes are present in the hierarchy (extensions and protocols ride
+    /// the same channel as they land — WS1/BT-2795).
+    ProjectComplete,
+}
+
 /// How completely the checker knows a receiver's method surface (ADR 0100 Rule 1).
 ///
 /// A conservative classification consulted before validation code decides
@@ -105,6 +133,17 @@ pub fn classify_receiver(
         return ReceiverKnowledge::Open;
     }
 
+    // BT-2796 (WS2 parse-error guard): a class extracted from a file with
+    // parse errors may have an under-recovered method surface — error
+    // recovery can silently drop method definitions. Treat the receiver as
+    // Open if any class in its superclass chain carries that mark, so a
+    // half-parsed file degrades only its own classes (and their subclasses)
+    // to silence rather than emitting hints against a surface the checker
+    // never fully saw.
+    if hierarchy.has_incomplete_surface_in_chain(class_name) {
+        return ReceiverKnowledge::Open;
+    }
+
     ReceiverKnowledge::ClosedComplete
 }
 
@@ -137,6 +176,7 @@ mod tests {
 
     fn base_class_info(name: &str, superclass: &str) -> ClassInfo {
         ClassInfo {
+            surface_incomplete: false,
             name: eco(name),
             superclass: Some(eco(superclass)),
             is_sealed: false,
@@ -240,6 +280,52 @@ mod tests {
         assert_eq!(
             classify_receiver("Child", &hierarchy, true),
             ReceiverKnowledge::Open
+        );
+    }
+
+    #[test]
+    fn surface_incomplete_class_is_open() {
+        // BT-2796: a class extracted from a file with parse errors may have
+        // an under-recovered method surface — never diagnose against it.
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        let mut info = base_class_info("HalfParsed", "Object");
+        info.surface_incomplete = true;
+        hierarchy.add_from_beam_meta(vec![info]);
+        assert_eq!(
+            classify_receiver("HalfParsed", &hierarchy, false),
+            ReceiverKnowledge::Open
+        );
+        assert_eq!(
+            classify_receiver("HalfParsed", &hierarchy, true),
+            ReceiverKnowledge::Open
+        );
+    }
+
+    #[test]
+    fn surface_incomplete_parent_makes_subclass_open() {
+        // BT-2796: the guard is transitive — a subclass inherits from an
+        // under-recovered surface, so it cannot be ClosedComplete either.
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        let mut parent = base_class_info("HalfParsedParent", "Object");
+        parent.surface_incomplete = true;
+        let child = base_class_info("CleanChild", "HalfParsedParent");
+        hierarchy.add_from_beam_meta(vec![parent, child]);
+        assert_eq!(
+            classify_receiver("CleanChild", &hierarchy, false),
+            ReceiverKnowledge::Open
+        );
+    }
+
+    #[test]
+    fn clean_chain_stays_closed_complete() {
+        // BT-2796: the guard must not fire for fully-parsed chains.
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        let parent = base_class_info("CleanParent", "Object");
+        let child = base_class_info("CleanChild2", "CleanParent");
+        hierarchy.add_from_beam_meta(vec![parent, child]);
+        assert_eq!(
+            classify_receiver("CleanChild2", &hierarchy, false),
+            ReceiverKnowledge::ClosedComplete
         );
     }
 

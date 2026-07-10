@@ -43,6 +43,7 @@ fn collect_diagnostics(
     native_type_registry: Option<
         std::sync::Arc<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,
     >,
+    knowledge_scope: beamtalk_core::semantic_analysis::KnowledgeScope,
 ) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
     // Collect parser-level lint diagnostics (e.g. unnecessary `.` — BT-948)
     // plus AST-level lint passes.
@@ -67,9 +68,13 @@ fn collect_diagnostics(
     // FFI call falls back to `Dynamic(UntypedFfi)` and lint emits a
     // "Dynamic in typed class" warning that build does not — leaving the user
     // with no `@expect` configuration that satisfies both passes.
+    let options = beamtalk_core::CompilerOptions {
+        knowledge_scope,
+        ..Default::default()
+    };
     let analysis_result = beamtalk_core::semantic_analysis::analyse_with_natives(
         module,
-        &beamtalk_core::CompilerOptions::default(),
+        &options,
         cross_file_classes,
         native_type_registry,
     );
@@ -130,6 +135,16 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
     let mut total_lint_count = 0usize;
     let mut all_diags: Vec<beamtalk_core::source_analysis::Diagnostic> = Vec::new();
 
+    // BT-2796: With a package root, Pass 1 walked the full package source set
+    // (BT-2027), so the injected knowledge is project-complete. Without one
+    // (a bare file outside any package), only the targeted files were parsed
+    // — keep the conservative `ModuleOnly` default.
+    let knowledge_scope = if package_root.is_some() {
+        beamtalk_core::semantic_analysis::KnowledgeScope::ProjectComplete
+    } else {
+        beamtalk_core::semantic_analysis::KnowledgeScope::ModuleOnly
+    };
+
     for (file, source, module, parse_diags) in parsed_files {
         let cross_file_classes =
             beamtalk_core::semantic_analysis::ClassHierarchy::cross_file_class_infos(
@@ -142,6 +157,7 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
             parse_diags,
             cross_file_classes,
             native_type_registry.clone(),
+            knowledge_scope,
         );
 
         for diag in &lint_diags {
@@ -416,8 +432,19 @@ fn parse_and_extract_class_infos(
         let tokens = lex_with_eof(&source);
         let (module, parse_diags) = parse(tokens);
 
-        all_class_infos
-            .extend(beamtalk_core::semantic_analysis::ClassHierarchy::extract_class_infos(&module));
+        // BT-2796: A file with parse errors may have an under-recovered
+        // method surface — mark its classes so the receiver-knowledge
+        // classifier treats them (and their subclasses) as `Open` rather
+        // than emitting hints against a surface extraction never fully saw.
+        let has_parse_errors = parse_diags.iter().any(|d| d.severity == Severity::Error);
+        let mut class_infos =
+            beamtalk_core::semantic_analysis::ClassHierarchy::extract_class_infos(&module);
+        if has_parse_errors {
+            for info in &mut class_infos {
+                info.surface_incomplete = true;
+            }
+        }
+        all_class_infos.extend(class_infos);
 
         if source_file_set.contains(&canonicalize_or_clone(file)) {
             parsed_files.push((file.clone(), source, module, parse_diags));
@@ -536,7 +563,13 @@ pub(crate) fn diagnostic_summary_to_json(
 fn collect_lint_diagnostics(source: &str) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
     let tokens = lex_with_eof(source);
     let (module, parse_diags) = parse(tokens);
-    collect_diagnostics(&module, parse_diags, vec![], None)
+    collect_diagnostics(
+        &module,
+        parse_diags,
+        vec![],
+        None,
+        beamtalk_core::semantic_analysis::KnowledgeScope::default(),
+    )
 }
 
 #[cfg(test)]
@@ -621,7 +654,13 @@ mod tests {
 ";
         let tokens = lex_with_eof(test_source);
         let (module, parse_diags) = parse(tokens);
-        let diags = collect_diagnostics(&module, parse_diags, cross_file_classes, None);
+        let diags = collect_diagnostics(
+            &module,
+            parse_diags,
+            cross_file_classes,
+            None,
+            beamtalk_core::semantic_analysis::KnowledgeScope::default(),
+        );
         let stale = diags.iter().any(|d| d.message.contains("stale @expect"));
         assert!(
             !stale,
@@ -812,7 +851,13 @@ mod tests {
                 &all_class_infos,
                 &module,
             );
-        let diags = collect_diagnostics(&module, parse_diags, cross_file_classes, None);
+        let diags = collect_diagnostics(
+            &module,
+            parse_diags,
+            cross_file_classes,
+            None,
+            beamtalk_core::semantic_analysis::KnowledgeScope::default(),
+        );
 
         let unresolved: Vec<_> = diags
             .iter()
@@ -910,7 +955,13 @@ mod tests {
 "#;
         let tokens = lex_with_eof(source);
         let (module, parse_diags) = parse(tokens);
-        let diags = collect_diagnostics(&module, parse_diags, vec![], None);
+        let diags = collect_diagnostics(
+            &module,
+            parse_diags,
+            vec![],
+            None,
+            beamtalk_core::semantic_analysis::KnowledgeScope::default(),
+        );
 
         let has_untyped_ffi = diags.iter().any(|d| d.message.contains("untyped FFI"));
         assert!(
@@ -954,6 +1005,7 @@ mod tests {
             parse_diags,
             vec![],
             Some(std::sync::Arc::new(registry)),
+            beamtalk_core::semantic_analysis::KnowledgeScope::default(),
         );
 
         let untyped_ffi: Vec<_> = diags

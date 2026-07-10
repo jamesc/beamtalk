@@ -26,7 +26,8 @@ use super::util::mtime_of;
 const CACHE_FILENAME: &str = ".beamtalk-pass1-cache.json";
 
 /// Current cache format version. Bump when the serialised layout changes.
-const CACHE_VERSION: u32 = 1;
+/// v2: `ClassInfo` gained `surface_incomplete` (BT-2796).
+const CACHE_VERSION: u32 = 2;
 
 /// On-disk representation of the Pass 1 metadata cache.
 ///

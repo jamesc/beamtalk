@@ -25,6 +25,7 @@ fn add_counter_actor(hierarchy: &mut ClassHierarchy) {
     use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
 
     let info = ClassInfo {
+        surface_incomplete: false,
         name: eco_string("Counter"),
         superclass: Some(eco_string("Actor")),
         is_sealed: false,
