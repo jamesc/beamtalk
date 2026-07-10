@@ -189,9 +189,9 @@ pub enum CodeGenError {
     #[error(
         "Cannot assign to field '{field}' inside this block at {location}.\n\n\
              Field assignments only thread state back to the actor when the block is used \
-             directly with a control-flow construct (ifTrue:/whileTrue:/do:/collect:/...) or \
-             sent directly to self — not when it's stored in a variable, passed to a \
-             user-defined method, or otherwise invoked indirectly.\n\n\
+             directly with a control-flow construct (ifTrue:/whileTrue:/do:/collect:/...), \
+             sent directly to self, or immediately invoked (`[...] value`) — not when it's \
+             stored in a variable, passed to a user-defined method, or returned as a value.\n\n\
              Fix: Use the block directly at the call site, or extract the mutation into a method:\n\
              \x20 // Instead of:\n\
              \x20 myBlock := [:item | self.{field} := self.{field} + item].\n\
@@ -3216,9 +3216,15 @@ impl CoreErlangGenerator {
     /// about. BT-2797 tracks lifting the field-write restriction for stored/opaque
     /// blocks by generalizing Tier 2 the same way; once that lands this function's
     /// field-write branch should shrink to whatever shapes remain genuinely unsupported.
+    ///
+    /// `location` is a lazy thunk rather than a pre-formatted `String`: this is
+    /// called on every block that reaches `generate_block`'s fallback, and the
+    /// overwhelming majority return `Ok(())` here, so formatting the location
+    /// eagerly would allocate on every pure block instead of only on the (rare)
+    /// error path.
     fn validate_stored_closure(
         analysis: &block_analysis::BlockMutationAnalysis,
-        span_str: String,
+        location: impl FnOnce() -> String,
     ) -> Result<()> {
         // ERROR: Field assignments that can't thread state back are not allowed.
         // Sort before picking one so the reported field is deterministic across
@@ -3238,7 +3244,7 @@ impl CoreErlangGenerator {
             return Err(CodeGenError::FieldAssignmentInStoredClosure {
                 field: field.clone(),
                 field_capitalized,
-                location: span_str,
+                location: location(),
             });
         }
 
@@ -3258,7 +3264,7 @@ impl CoreErlangGenerator {
         } {
             return Err(CodeGenError::LocalMutationInStoredClosure {
                 variable: variable.clone(),
-                location: span_str,
+                location: location(),
             });
         }
 

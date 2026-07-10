@@ -737,12 +737,15 @@ impl CoreErlangGenerator {
         // BT-2792: `self.field :=` inside a block that reaches this generic
         // fallback can't correctly thread state — see `validate_stored_closure`
         // for why, and BT-2797 for the follow-up that will lift this once
-        // stored/opaque blocks get proper Tier 2 support.
-        let location = self.span_to_line(block.span).map_or_else(
-            || format!("offset {}", block.span.start()),
-            |line| format!("line {line}"),
-        );
-        Self::validate_stored_closure(&analysis, location)?;
+        // stored/opaque blocks get proper Tier 2 support. Location is a lazy
+        // thunk: format! only runs on the (rare) error path, not on every
+        // pure block that reaches this line.
+        Self::validate_stored_closure(&analysis, || {
+            self.span_to_line(block.span).map_or_else(
+                || format!("offset {}", block.span.start()),
+                |line| format!("line {line}"),
+            )
+        })?;
 
         // Pure block: plain fun (no mutations to thread via Tier 2)
         self.push_scope();

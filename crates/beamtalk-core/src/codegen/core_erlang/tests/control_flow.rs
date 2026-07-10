@@ -202,7 +202,7 @@ fn test_validate_stored_closure_empty_block() {
     };
 
     let analysis = crate::codegen::core_erlang::block_analysis::analyze_block(&block);
-    let result = CoreErlangGenerator::validate_stored_closure(&analysis, "test".to_string());
+    let result = CoreErlangGenerator::validate_stored_closure(&analysis, || "test".to_string());
     assert!(result.is_ok(), "Empty block should be valid");
 }
 
@@ -234,7 +234,7 @@ fn test_validate_stored_closure_with_captured_mutation() {
     };
 
     let analysis = crate::codegen::core_erlang::block_analysis::analyze_block(&block);
-    let result = CoreErlangGenerator::validate_stored_closure(&analysis, "test".to_string());
+    let result = CoreErlangGenerator::validate_stored_closure(&analysis, || "test".to_string());
     assert!(
         result.is_err(),
         "Captured variable mutation should produce error"
@@ -266,7 +266,7 @@ fn test_validate_stored_closure_with_new_local_definition() {
     };
 
     let analysis = crate::codegen::core_erlang::block_analysis::analyze_block(&block);
-    let result = CoreErlangGenerator::validate_stored_closure(&analysis, "test".to_string());
+    let result = CoreErlangGenerator::validate_stored_closure(&analysis, || "test".to_string());
     assert!(
         result.is_ok(),
         "New local definition should be allowed in stored closure"
@@ -313,7 +313,7 @@ fn test_validate_stored_closure_with_new_local_used_later() {
     };
 
     let analysis = crate::codegen::core_erlang::block_analysis::analyze_block(&block);
-    let result = CoreErlangGenerator::validate_stored_closure(&analysis, "test".to_string());
+    let result = CoreErlangGenerator::validate_stored_closure(&analysis, || "test".to_string());
     assert!(
         result.is_ok(),
         "Block with new local definition used later should be allowed"
@@ -342,7 +342,7 @@ fn test_validate_stored_closure_with_field_assignment() {
     };
 
     let analysis = crate::codegen::core_erlang::block_analysis::analyze_block(&block);
-    let result = CoreErlangGenerator::validate_stored_closure(&analysis, "test".to_string());
+    let result = CoreErlangGenerator::validate_stored_closure(&analysis, || "test".to_string());
     assert!(result.is_err(), "Field assignment should produce error");
 
     if let Err(CodeGenError::FieldAssignmentInStoredClosure {
@@ -392,7 +392,7 @@ fn test_validate_stored_closure_field_takes_precedence() {
     };
 
     let analysis = crate::codegen::core_erlang::block_analysis::analyze_block(&block);
-    let result = CoreErlangGenerator::validate_stored_closure(&analysis, "test".to_string());
+    let result = CoreErlangGenerator::validate_stored_closure(&analysis, || "test".to_string());
     assert!(result.is_err());
 
     // Should be field error (checked first), not local
