@@ -370,6 +370,18 @@ build/runtime failure. Not fixed here; mirrors
 `beamtalk_workspace_findings_store`'s and
 `beamtalk_workspace_signature_store`'s own documented concurrency gaps.
 
+A sharper variant of the same gap: the `after`-block restore always writes
+back the *snapshot* taken in step 1, not "whatever is ambient now". If a
+real `compile:source:`/`reload` for this same class commits a genuine
+`register_class/2` from a different process while this swap window is open,
+the restore overwrites that real commit with the stale pre-swap snapshot —
+unlike the read-only race above, this one is not self-healing (the next
+real compile/diagnostics call sees the reverted, stale generation until
+something re-registers it). Accepted for the same reason: both classes of
+race require a concurrent write to this *specific* class landing in a
+narrow, single-request window, on an advisory surface where the ADR's own
+risk tolerance is "momentary noise, not corruption" — not fixed here.
+
 Never installs anything and never touches `beamtalk_workspace_findings_store`
 — nothing has changed on the live image yet, so there is nothing to publish
 or clear. Never raises: degrades to `empty_result()` on any internal failure,
@@ -421,10 +433,27 @@ selector-name matching, no classification, no per-site translation.
 
 `checked` counts classes whose diagnostics round-trip completed (mirrors
 `trigger/4`'s `checked` semantics: a compiler-port failure for one class
-degrades that class to "not checked" rather than aborting the whole scan).
+degrades that class to "not checked" rather than aborting the whole scan —
+`recheck_image_class/2` catches both an `{error, Reason}` compile result
+and the compiler port's `gen_server:call/3` itself exiting, e.g. `timeout`).
 `stale` counts distinct classes with at least one finding. Never raises:
 degrades to `#{findings => [], checked => 0, stale => 0}` on any internal
 failure.
+
+**Cost, beyond "unbounded latency" for the caller:** each class's
+diagnostics round-trip is one more synchronous `gen_server:call` against
+the single, shared, workspace-wide `beamtalk_compiler_server` — the same
+process every other surface's compiles/diagnostics/completions go through.
+`trigger_image/0` makes these calls serially, one live class at a time, for
+the duration of the whole sweep. On an image with many live classes this is
+not just "the `:recheck image` caller waits a while" — every other
+connected client's hover/completion/save requests queue up behind it on
+the same server for that whole window, since `beamtalk_compiler_server`
+processes one request at a time. Not fixed here (ADR 0105 accepts
+`trigger_image/0`'s latency as a deliberate unbounded-but-explicit,
+on-demand tradeoff); a future revision batching/parallelising the sweep
+would need to weigh that against `beamtalk_compiler_server`'s own
+single-process-serialises-everything design.
 """.
 -spec trigger_image() -> image_result().
 trigger_image() ->
@@ -567,13 +596,18 @@ hierarchy (mirrors `recheck_owner/5`'s compiler call, minus the xref
 site-cap/attribution machinery a single changed selector needs). Returns
 `{Status, Findings}` — `Status` is `ok` only when the diagnostics round-trip
 completed, so `do_trigger_image/0` can count `checked` accurately; a
-compiler-port failure degrades this one class to `failed` (no findings for
-it) rather than aborting the whole scan.
+compiler-port failure (a `{error, Reason}' tuple, or the compiler port's
+`gen_server:call/3' exiting on `noproc`/`timeout` — unlike the `{error,
+Reason}' case, `beamtalk_compiler_server:diagnostics/3' does not itself
+catch these) degrades this one class to `failed` (no findings for it)
+rather than aborting the whole scan — a thousand-class image should not
+lose its entire sweep because one class's diagnostics call outlives the
+compiler port's 30s timeout.
 """.
 -spec recheck_image_class(binary(), string()) -> {ok | failed, [image_finding()]}.
 recheck_image_class(OwnerBin, Source) ->
     SourceBin = unicode:characters_to_binary(Source),
-    case beamtalk_compiler:diagnostics(SourceBin, <<"expression">>, #{class_hierarchy => true}) of
+    try beamtalk_compiler:diagnostics(SourceBin, <<"expression">>, #{class_hierarchy => true}) of
         {ok, Diagnostics} ->
             Findings = [
                 image_finding(OwnerBin, D)
@@ -584,6 +618,18 @@ recheck_image_class(OwnerBin, Source) ->
             ?LOG_WARNING(
                 "Whole-image re-check compile failed for class (no findings reported)",
                 #{owner => OwnerBin, reason => Reason, domain => [beamtalk, runtime]}
+            ),
+            {failed, []}
+    catch
+        Class:Reason ->
+            ?LOG_WARNING(
+                "Whole-image re-check compiler-port call failed for class (no findings reported)",
+                #{
+                    owner => OwnerBin,
+                    error_class => Class,
+                    reason => Reason,
+                    domain => [beamtalk, runtime]
+                }
             ),
             {failed, []}
     end.

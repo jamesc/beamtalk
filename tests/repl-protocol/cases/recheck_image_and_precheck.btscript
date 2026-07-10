@@ -11,14 +11,15 @@
 // compiles a pending method edit and reports would-be-stale dependents
 // *without installing it* — the editor/LSP "check before save" hook.
 //
-// These cases exercise cross-surface wiring (both ops are reachable, return
-// the documented report shape, and precheck never installs). The precise
-// "a pending signature change flags a real stale dependent" behavioural
-// contract is covered by the isolated EUnit integration suite
-// (`beamtalk_repl_loader_precheck_tests.erl`,
+// These cases exercise cross-surface wiring end to end against a real
+// running workspace: both ops are reachable, return the documented report
+// shape, precheck never installs, and — the whole point of the pre-save
+// advisory — a pending signature change genuinely flags a real stale
+// dependent (not just an empty default). The precise classification/
+// severity/message shape of a finding is covered in more detail by the
+// isolated EUnit integration suite (`beamtalk_repl_loader_precheck_tests.erl`,
 // `beamtalk_recheck_tests.erl`'s `trigger_pending_*`/`trigger_image_*`
-// cases), which controls the ambient class-hierarchy/xref state directly
-// rather than relying on this file's shared, long-lived session.
+// cases), which controls the ambient class-hierarchy/xref state directly.
 //
 // IMPORTANT: REPL-protocol cases share one long-lived workspace session
 // (see repl_flush_changes_dirty.btscript's note) — class names here are
@@ -57,17 +58,30 @@ Actor subclass: RecheckPrecheckCounter
   size -> Integer => 42
 // => RecheckPrecheckCounter
 
+// A dependent whose own return type assumes `size` still answers an
+// Integer — the real caller the pre-save advisory should flag once `size`'s
+// pending edit changes its return type to String.
+Object subclass: RecheckPrecheckDashboard
+  refresh: c :: RecheckPrecheckCounter -> Integer => (c size) + 1
+// => RecheckPrecheckDashboard
+
 // Sanity: the live behaviour before any precheck.
 RecheckPrecheckCounter spawn size
 // => 42
 
 // Pending edit: size -> String. Not yet saved — the report is a Dictionary
 // shaped like the reload-check report (findings/checked/totalCandidates/
-// notChecked/capNote/checkedOwners).
+// notChecked/capNote/checkedOwners). A real, type-relevant signature change
+// (Integer -> String) against a real dependent (`refresh:`, which assumes
+// an Integer) must produce at least one finding — the whole point of the
+// pre-save advisory. `findings size > 0` rather than an exact count: this
+// file shares one long-lived session with every other REPL-protocol case,
+// so the total candidate pool for the common `#size` selector isn't
+// controlled the way an isolated EUnit test's is.
 (RecheckPrecheckCounter precheckCompile: #size source: "size -> String => 42 printString") isKindOf: Dictionary
 // => true
 
-((RecheckPrecheckCounter precheckCompile: #size source: "size -> String => 42 printString") at: #findings) isKindOf: List
+((RecheckPrecheckCounter precheckCompile: #size source: "size -> String => 42 printString") at: #findings) size > 0
 // => true
 
 // Never installed: the real message still runs the ORIGINAL method — the

@@ -33,6 +33,7 @@ to avoid temp files on disk (BT-48).
     version/0,
     compile_core_erlang/1,
     register_class/2,
+    get_classes/0,
     resolve_completion_type/1,
     find_senders_in_source/2,
     find_all_sends_in_source/1,
@@ -53,7 +54,6 @@ to avoid temp files on disk (BT-48).
     handle_compile_response/1,
     handle_diagnostics_response/1,
     handle_version_response/1,
-    get_classes/0,
     clear_classes/0
 ]).
 -endif.
@@ -196,11 +196,6 @@ version() ->
     gen_server:call(?MODULE, version, 5000).
 
 -ifdef(TEST).
--doc "Return the current class cache map (test use only).".
--spec get_classes() -> #{atom() => map()}.
-get_classes() ->
-    gen_server:call(?MODULE, get_classes, 5000).
-
 -doc """
 Clear all cached class metadata (test use only).
 
@@ -442,6 +437,25 @@ register_class(ClassName, MetaMap) ->
         _:_ -> ok
     end,
     ok.
+
+-doc """
+Return the current ambient class cache map (`register_class/2`'s
+accumulator).
+
+Production caller: `beamtalk_recheck:trigger_pending/5` (ADR 0105 Phase 3,
+BT-2782) reads this to snapshot a class's current ambient meta before
+temporarily splicing a pending signature into it. Also used directly by
+tests. Returns an empty map (not an error) if the server is not running,
+mirroring `register_class/2`'s degrade-silently contract.
+""".
+-spec get_classes() -> #{atom() => map()}.
+get_classes() ->
+    try
+        gen_server:call(?MODULE, get_classes, 5000)
+    catch
+        exit:{noproc, _} -> #{};
+        exit:{timeout, _} -> #{}
+    end.
 
 -doc """
 Compile Core Erlang source to BEAM bytecode in memory.

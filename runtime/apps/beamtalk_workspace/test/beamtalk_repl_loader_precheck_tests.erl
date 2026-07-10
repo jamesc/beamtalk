@@ -165,6 +165,70 @@ precheck_flags_stale_caller_without_installing_test_() ->
         end}}.
 
 %%====================================================================
+%% Pre-save advisory flags a would-be-stale caller — class side (only the
+%% instance side above was exercised until now: `IsClassMethod = true`
+%% threads a different meta key (`class_method_info`, `method_info_key/1`)
+%% through `override_method_signature/4` — worth its own coverage).
+%%====================================================================
+
+class_counter_source() ->
+    "Object subclass: PrecheckClassCounter\n"
+    "  class size -> Integer => 42".
+
+%% Real dependent of the CLASS-side `size` — sends to the class object
+%% itself (`PrecheckClassCounter size`), not an instance.
+class_dashboard_source() ->
+    "Object subclass: PrecheckClassDashboard\n"
+    "  refresh -> Integer => (PrecheckClassCounter size) + 1".
+
+install_class_side_fixture() ->
+    {ok, <<"PrecheckClassCounter">>, _, _, _} = beamtalk_repl_eval:do_eval(
+        class_counter_source(), state0()
+    ),
+    {ok, <<"PrecheckClassDashboard">>, _, _, _} = beamtalk_repl_eval:do_eval(
+        class_dashboard_source(), state0()
+    ),
+    ok.
+
+precheck_flags_stale_caller_class_side_test_() ->
+    {timeout, 30,
+        {setup, fun precheck_setup/0, fun precheck_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    ok = install_class_side_fixture(),
+
+                    %% Sanity: the real, currently-live behaviour before any
+                    %% precheck — class-side size returns 42 (an Integer).
+                    {ok, 42, _, _, _} = beamtalk_repl_eval:do_eval(
+                        "PrecheckClassCounter size", state0()
+                    ),
+
+                    %% Pending edit: class size -> String. Not yet saved.
+                    %% `IsClassMethod = true` — the class-side sibling of
+                    %% `precheck_flags_stale_caller_without_installing_test_`.
+                    {ok, Result} = beamtalk_repl_loader:precheck_method(
+                        <<"PrecheckClassCounter">>,
+                        <<"size">>,
+                        <<"class size -> String => \"forty-two\"">>,
+                        true
+                    ),
+                    #{findings := Findings, checked := Checked} = Result,
+                    ?assertEqual(1, Checked),
+                    ?assertEqual(1, length(Findings)),
+                    [Finding] = Findings,
+                    ?assertEqual(<<"PrecheckClassDashboard">>, maps:get(owner, Finding)),
+                    ?assertEqual(signature_change, maps:get(classification, Finding)),
+
+                    %% Never installed: sending the real message still runs
+                    %% the ORIGINAL class-side method.
+                    {ok, 42, _, _, _} = beamtalk_repl_eval:do_eval(
+                        "PrecheckClassCounter size", state0()
+                    )
+                end)
+            ]
+        end}}.
+
+%%====================================================================
 %% A pending edit with no type-relevant signature change reports empty
 %%====================================================================
 
