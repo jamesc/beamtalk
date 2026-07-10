@@ -190,8 +190,9 @@ pub enum CodeGenError {
         "Cannot assign to field '{field}' inside this block at {location}.\n\n\
              Field assignments only thread state back to the actor when the block is used \
              directly with a control-flow construct (ifTrue:/whileTrue:/do:/collect:/...), \
-             sent directly to self, or immediately invoked (`[...] value`) — not when it's \
-             stored in a variable, passed to a user-defined method, or returned as a value.\n\n\
+             sent directly to self, or immediately invoked (`[...] value`, `[...] value: arg`, \
+             `[...] value:value:`, etc.) — not when it's stored in a variable, passed to a \
+             user-defined method, or returned as a value.\n\n\
              Fix: Use the block directly at the call site, or extract the mutation into a method:\n\
              \x20 // Instead of:\n\
              \x20 myBlock := [:item | self.{field} := self.{field} + item].\n\
@@ -2695,8 +2696,11 @@ impl CoreErlangGenerator {
                 Ok(doc)
             }
             Expression::Assignment { target, value, .. } => {
-                // BT-852: Stored blocks with mutations are now supported via Tier 2.
-                // generate_block() handles stateful emission; no validation needed here.
+                // BT-2792: Tier 2 only ever supported captured-local mutations, not
+                // field writes — a stored block with `self.field :=` is rejected by
+                // generate_block()'s validate_stored_closure call, not silently
+                // accepted. No validation needed *here* only because that check
+                // already lives inside generate_block() itself.
 
                 // Check if this is a field assignment (self.field := value)
                 if let Expression::FieldAccess {

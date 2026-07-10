@@ -1072,6 +1072,21 @@ fn test_immediately_invoked_literal_block_with_field_mutation_compiles() {
 }
 
 #[test]
+fn test_immediately_invoked_literal_block_value_keyword_with_field_mutation_compiles() {
+    // BT-2792 (PR review follow-up): same as the unary `value` case above, but
+    // for the keyword form `[...] value: arg`. This goes through a separate
+    // code path (`try_generate_block_value_keyword`'s BT-1481 check in
+    // intrinsics.rs) that must also inline field mutations rather than falling
+    // through to generate_block's rejection.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: n =>\n    [:x | self.total := self.total + x] value: n\n";
+    let code = codegen(src);
+    assert!(
+        code.contains("'maps':'put'('total'"),
+        "Immediately-invoked block (value: form) with a field mutation must thread state via maps:put. Got:\n{code}"
+    );
+}
+
+#[test]
 fn test_block_returned_from_method_with_field_mutation_is_compile_error() {
     // BT-2792: `^[self.total := self.total + 1]` — a block *returned as a value*
     // (never invoked in this method) is not caught by any of the semantic-analysis
