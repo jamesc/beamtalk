@@ -3200,6 +3200,14 @@ impl CoreErlangGenerator {
     /// field assignments, and (separately) captured-local mutations. Returns an error for
     /// either; the local-mutation error is phrased as a warning in its message.
     ///
+    /// **Precondition for production callers:** only call this when
+    /// `analysis.field_writes` is non-empty. A valid Tier 2 block (captured-local
+    /// mutations, no field writes) passed here would incorrectly hit the
+    /// local-mutation branch and produce a spurious `LocalMutationInStoredClosure`
+    /// — that branch exists for this function's own unit tests, which construct
+    /// analyses field-write-empty on purpose to test it, not for callers on a path
+    /// where a genuine Tier 2 block could reach this function.
+    ///
     /// BT-852 claimed production call sites could be removed because blocks with
     /// mutations are supported via the Tier 2 stateful block protocol (ADR 0041).
     /// BT-2792 found that's only true for *captured local* mutations
