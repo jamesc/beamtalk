@@ -29,6 +29,7 @@ to avoid temp files on disk (BT-48).
     compile_method/3,
     diagnostics/1,
     diagnostics/2,
+    diagnostics/3,
     version/0,
     compile_core_erlang/1,
     register_class/2,
@@ -158,11 +159,36 @@ compile_method(ClassSource, MethodSource, Options) ->
 diagnostics(Source) ->
     diagnostics(Source, <<"expression">>).
 
--doc "Get diagnostics for source code under a parse `Mode' (no code generation).".
+-doc """
+Get diagnostics for source code under a parse `Mode' (no code generation).
+Equivalent to `diagnostics/3' with `#{}' — no ambient class-hierarchy
+awareness (see `diagnostics/3').
+""".
 -spec diagnostics(binary(), binary()) ->
     {ok, [map()]} | {error, [binary()]}.
 diagnostics(Source, Mode) ->
-    gen_server:call(?MODULE, {diagnostics, Source, Mode}, 30000).
+    diagnostics(Source, Mode, #{}).
+
+-doc """
+Get diagnostics for source code under a parse `Mode', with options.
+
+Options:
+  class_hierarchy => boolean() — when `true' (ADR 0105 Phase 1, BT-2778),
+  threads the ambient class cache (the same `register_class' accumulation
+  `compile_expression'/`compile_method' already get, ADR 0050 Phase 4) into
+  the request, so a receiver resolving to an already-loaded class is checked
+  against that class's *current* interface. Defaults to `false' —
+  deliberately opt-in, not the default for `diagnostics/1,2', because this
+  command also backs the LiveView cockpit's keystroke-driven editor
+  diagnostics (BT-2556, `beamtalk_repl_ops_dev:diagnostics_for/2'), and
+  changing what fires on every keystroke for every existing caller is a
+  bigger behavioural change than this option's one new caller (BT-2778's
+  re-check orchestration) needs.
+""".
+-spec diagnostics(binary(), binary(), map()) ->
+    {ok, [map()]} | {error, [binary()]}.
+diagnostics(Source, Mode, Options) ->
+    gen_server:call(?MODULE, {diagnostics, Source, Mode, Options}, 30000).
 
 -doc "Get compiler version.".
 -spec version() -> {ok, binary()} | {error, term()}.
@@ -529,8 +555,17 @@ handle_call({resolve_completion_type, Expression}, _From, State) ->
         State#state.port, Expression, State#state.classes
     ),
     {reply, Result, State};
-handle_call({diagnostics, Source, Mode}, _From, State) ->
-    Result = do_diagnostics(State#state.port, Source, Mode),
+handle_call({diagnostics, Source, Mode, Options}, _From, State) ->
+    %% ADR 0105 Phase 1 (BT-2778): only thread the ambient class cache when
+    %% explicitly requested (see diagnostics/3's moduledoc) — the default
+    %% stays class-context-free so the keystroke-driven cockpit editor path
+    %% (BT-2556) is unaffected by this option's addition.
+    Classes =
+        case maps:get(class_hierarchy, Options, false) of
+            true -> State#state.classes;
+            false -> #{}
+        end,
+    Result = do_diagnostics(State#state.port, Source, Mode, Classes),
     {reply, Result, State};
 handle_call({find_senders_in_source, Source, Selector}, _From, State) ->
     Result = beamtalk_compiler_port:find_senders_in_source(
@@ -868,9 +903,11 @@ do_compile_method(Port, ClassSource, MethodSource, Options) ->
 
 %% Send a diagnostics request via the port. `Mode' selects the parse grammar
 %% (BT-2569): `<<"expression">>' (default, top-level script) or `<<"method">>'
-%% (bare method body — the System Browser method editor).
-do_diagnostics(Port, Source, Mode) ->
-    Request = #{command => diagnostics, source => Source, mode => Mode},
+%% (bare method body — the System Browser method editor). `Classes' is the
+%% ambient class cache (ADR 0105 Phase 1, BT-2778) — ignored by the port in
+%% `"method"' mode, which stays class-context-free by design.
+do_diagnostics(Port, Source, Mode, Classes) ->
+    Request = #{command => diagnostics, source => Source, mode => Mode, class_hierarchy => Classes},
     case send_port_request(Port, Request, 30000) of
         {ok, Response} ->
             handle_diagnostics_response(Response);

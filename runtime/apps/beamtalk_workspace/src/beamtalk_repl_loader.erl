@@ -875,6 +875,12 @@ remove_method(ClassNameBin, Selector, Side) ->
                     NewSourceBin = splice_out_span(ClassSourceBin, Span),
                     case reload_class_without_method(ClassNameBin, NewSourceBin) of
                         {ok, _} = Ok ->
+                            %% ADR 0105 Phase 1 (BT-2778): the removal is
+                            %% live — re-check known dependents (mirrors the
+                            %% install success path in load_recompiled_method/8).
+                            maybe_trigger_recheck(
+                                ClassNameBin, SelectorBin, Side, RemovalCapture
+                            ),
                             Ok;
                         {error, _} = Error ->
                             rollback_signature_generation(
@@ -890,15 +896,15 @@ remove_method(ClassNameBin, Selector, Side) ->
 %% Record a method removal into the signature-generation store (ADR 0105 Phase
 %% 1, BT-2777). Best-effort and self-swallowing, mirroring
 %% capture_signature_generation/1 — a store failure must never block the
-%% removal itself. Returns the same {captured, Prev} | not_captured outcome so
+%% removal itself. Returns the same capture_outcome() so
 %% the caller can roll back on a subsequent recompile failure.
 -spec capture_signature_removal(binary(), binary(), instance | class) -> capture_outcome().
 capture_signature_removal(ClassNameBin, SelectorBin, Side) ->
     try
-        {Prev, _Classification} = beamtalk_workspace_signature_store:capture(
+        {Prev, Classification} = beamtalk_workspace_signature_store:capture(
             ClassNameBin, SelectorBin, Side, removed
         ),
-        {captured, Prev}
+        {captured, Prev, Classification}
     catch
         Class:Reason:Stack ->
             ?LOG_WARNING(
@@ -1038,6 +1044,24 @@ load_recompiled_method(
             %% reconciliation. Ephemeral patches are not autoflushed because
             %% only durable+flushable entries are written by `flush/0'.
             maybe_autoflush(maps:get(intent, MethodInfo, durable)),
+            %% (5) ADR 0105 Phase 1 (BT-2778): re-check known dependents of a
+            %% signature_change/removal now that the new generation is live.
+            %% Best-effort, never affects this reply — see the function doc.
+            %%
+            %% Ordering invariant this relies on: beamtalk_recheck's re-check
+            %% needs the compiler port's ambient class cache
+            %% (beamtalk_compiler_server's `classes` map) to already reflect
+            %% THIS class's new signature. activate_module/2 above is
+            %% synchronous — it runs the freshly-loaded module's
+            %% register_class/0, which (via beamtalk_object_class:start/2,
+            %% ADR 0050 Phase 4) casts the new metadata to
+            %% beamtalk_compiler_server *before* activate_module returns here
+            %% — so by the time maybe_trigger_recheck's diagnostics/3 call
+            %% reaches that same gen_server, the cast is already enqueued
+            %% ahead of it. This holds because activate_module blocks on
+            %% class registration; it would break if that registration ever
+            %% became async relative to this call site.
+            maybe_trigger_recheck(ClassNameBin, SelectorBin, Side, CaptureOutcome),
             Result = <<ClassNameBin/binary, ">>", SelectorBin/binary>>,
             {ok, Result, <<>>, AllWarnings, State};
         {error, LoadReason} ->
@@ -1532,12 +1556,16 @@ do_emit_change_entry(MethodInfo) ->
     ok.
 
 %% The outcome of a best-effort signature-store capture (ADR 0105 Phase 1,
-%% BT-2777): `{captured, Prev}` when the store call succeeded (`Prev` is
-%% whatever it reported as the pre-capture generation — feed this straight
-%% back to rollback_signature_generation/4 on a subsequent install failure),
-%% or `not_captured` when the capture itself failed (nothing to roll back).
+%% BT-2777): `{captured, Prev, Classification}` when the store call succeeded
+%% (`Prev` is whatever it reported as the pre-capture generation — feed this
+%% straight back to rollback_signature_generation/4 on a subsequent install
+%% failure; `Classification` is `beamtalk_signature_diff:classification/0`,
+%% consumed by BT-2778's re-check trigger below), or `not_captured` when the
+%% capture itself failed (nothing to roll back, nothing to re-check).
 -type capture_outcome() ::
-    {captured, beamtalk_workspace_signature_store:maybe_signature()} | not_captured.
+    {captured, beamtalk_workspace_signature_store:maybe_signature(),
+        beamtalk_signature_diff:classification()}
+    | not_captured.
 
 %% Capture the freshly-compiled signature into the signature-generation store
 %% (ADR 0105 Phase 1, BT-2777). Called from load_recompiled_method/8 *before*
@@ -1574,10 +1602,10 @@ do_capture_signature_generation(MethodInfo) ->
         return_type => maps:get(return_type, MethodInfo, <<"Dynamic">>),
         param_types => maps:get(param_types, MethodInfo, [])
     },
-    {Prev, _Classification} = beamtalk_workspace_signature_store:capture(
+    {Prev, Classification} = beamtalk_workspace_signature_store:capture(
         ClassNameBin, SelectorBin, Side, NewSignature
     ),
-    {captured, Prev}.
+    {captured, Prev, Classification}.
 
 %% Undo a capture_signature_generation/1 (or capture_signature_removal/3) call
 %% whose install/removal subsequently failed (ADR 0105 Phase 1, BT-2777).
@@ -1587,7 +1615,7 @@ do_capture_signature_generation(MethodInfo) ->
 -spec rollback_signature_generation(binary(), binary(), instance | class, capture_outcome()) -> ok.
 rollback_signature_generation(_ClassNameBin, _SelectorBin, _Side, not_captured) ->
     ok;
-rollback_signature_generation(ClassNameBin, SelectorBin, Side, {captured, Prev}) ->
+rollback_signature_generation(ClassNameBin, SelectorBin, Side, {captured, Prev, _Classification}) ->
     try
         _ = beamtalk_workspace_signature_store:rollback(ClassNameBin, SelectorBin, Side, Prev),
         ok
@@ -1606,6 +1634,54 @@ rollback_signature_generation(ClassNameBin, SelectorBin, Side, {captured, Prev})
             ),
             ok
     end.
+
+%% Fire the re-check orchestration (ADR 0105 Phase 1, BT-2778) for a
+%% successfully-installed patch/removal whose signature-store capture
+%% classified the change as `signature_change` or `removal` — `no_op` (and
+%% `not_captured`, when the store itself failed) skip the re-check, since
+%% there is nothing to diff dependents against. Synchronous and best-effort:
+%% `beamtalk_recheck:trigger/4` never raises, but the count is still logged
+%% here for workspace-session visibility (surfacing findings to any surface
+%% is BT-2779's job, out of scope here).
+%%
+%% Accepted tradeoff (flagged on BT-2777's review, recorded on BT-2778):
+%% `Classification` is only as correct as the signature-generation store's
+%% chain. Two concurrent sessions patching the same `{Class, Selector, Side}`
+%% key can race `capture/4`/`rollback/4` such that a losing session's
+%% rollback overwrites the store with a generation that is no longer the
+%% actually-live one (`beamtalk_workspace_signature_store:rollback/4` does an
+%% unconditional put, not a conditional "restore only if I'm still current"
+%% write) — the *next* capture then diffs against the wrong baseline and this
+%% function can fire on a false `signature_change`/`no_op`. Not fixed here:
+%% the store is BT-2777's merged surface, and a full fix (per-key conditional
+%% rollback) is out of this issue's scope. Advisory-only mitigates the
+%% blast radius (a wrong finding is noise, not a build/runtime failure).
+-spec maybe_trigger_recheck(binary(), binary(), instance | class, capture_outcome()) -> ok.
+maybe_trigger_recheck(_ClassNameBin, _SelectorBin, _Side, not_captured) ->
+    ok;
+maybe_trigger_recheck(_ClassNameBin, _SelectorBin, _Side, {captured, _Prev, no_op}) ->
+    ok;
+maybe_trigger_recheck(ClassNameBin, SelectorBin, Side, {captured, _Prev, Classification}) ->
+    #{findings := Findings, checked := Checked, not_checked := NotChecked} =
+        beamtalk_recheck:trigger(ClassNameBin, SelectorBin, Side, Classification),
+    case Findings of
+        [] ->
+            ok;
+        _ ->
+            ?LOG_INFO(
+                "Reload re-check produced findings",
+                #{
+                    class => ClassNameBin,
+                    selector => SelectorBin,
+                    classification => Classification,
+                    callers_checked => Checked,
+                    callers_not_checked => NotChecked,
+                    finding_count => length(Findings),
+                    domain => [beamtalk, runtime]
+                }
+            )
+    end,
+    ok.
 
 -spec patch_side(boolean()) -> instance | class.
 patch_side(true) -> class;

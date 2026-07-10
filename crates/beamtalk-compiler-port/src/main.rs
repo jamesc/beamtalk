@@ -618,6 +618,13 @@ fn diagnostics_ok_response(diagnostics: &[DiagInfo]) -> Term {
                 (atom("message"), binary(&d.message)),
                 (atom("severity"), binary(&d.severity)),
                 (
+                    atom("category"),
+                    match &d.category {
+                        Some(c) => binary(c),
+                        None => atom("undefined"),
+                    },
+                ),
+                (
                     atom("start"),
                     Term::from(eetf::FixInteger::from(
                         i32::try_from(d.start).unwrap_or(i32::MAX),
@@ -787,12 +794,25 @@ fn compile_method_diagnostic_response(
 struct DiagInfo {
     /// Human-readable diagnostic message.
     message: String,
-    /// Severity level (`"error"` or `"warning"`).
+    /// Severity level (`"error"`, `"warning"`, `"lint"`, or `"hint"`).
     severity: String,
+    /// Diagnostic category (`"Dnu"`, `"Type"`, ...), when the checker tagged
+    /// one — `None` for parse errors and other untagged diagnostics
+    /// (ADR 0105 Phase 1, BT-2778: the re-check orchestration filters
+    /// findings by category).
+    category: Option<String>,
     /// Byte offset where the diagnosed span begins.
     start: u32,
     /// Byte offset where the diagnosed span ends.
     end: u32,
+}
+
+/// Render a `Diagnostic`'s category as the same `PascalCase` label
+/// `beamtalk lint` / `beamtalk-mcp` use (`category_name`), or `None` when
+/// the diagnostic carries no category.
+fn diag_category(d: &beamtalk_core::source_analysis::Diagnostic) -> Option<String> {
+    d.category
+        .map(|c| beamtalk_core::source_analysis::category_name(c).to_string())
 }
 
 /// Separate diagnostics into errors and warnings, returning structured info.
@@ -805,6 +825,7 @@ fn partition_diagnostics(
         .map(|d| DiagInfo {
             message: d.message.to_string(),
             severity: "error".to_string(),
+            category: diag_category(d),
             start: d.span.start(),
             end: d.span.end(),
         })
@@ -824,6 +845,7 @@ fn partition_diagnostics(
                 beamtalk_core::source_analysis::Severity::Hint => "hint".to_string(),
                 _ => "warning".to_string(),
             },
+            category: diag_category(d),
             start: d.span.start(),
             end: d.span.end(),
         })
@@ -1297,6 +1319,7 @@ fn handle_compile(request: &Map) -> Term {
                         "Standalone method targets unknown class `{target_class}` in this module"
                     ),
                     severity: "warning".to_string(),
+                    category: None,
                     start: method_def.span.start(),
                     end: method_def.span.end(),
                 });
@@ -1632,6 +1655,13 @@ fn handle_compile_method(request: &Map) -> Term {
 ///     semantic analysis here would emit false positives. Those checks run on
 ///     Compile (`compile_method`, which has class context); live squiggles
 ///     cover syntax.
+///
+/// The optional `class_hierarchy` field (ADR 0105 Phase 1, BT-2778) carries
+/// pre-loaded class metadata — the same channel `compile_expression` /
+/// `compile_method` already accept — so a re-check can inject a reloaded
+/// class's *new* signature and see the resulting diagnostics located and
+/// severity-tagged (`"expression"` mode only; `"method"` mode stays
+/// class-context-free per the paragraph above).
 fn handle_diagnostics(request: &Map) -> Term {
     let Some(source) = map_get(request, "source").and_then(term_to_string) else {
         return error_response(&["Missing or invalid 'source' field".to_string()]);
@@ -1644,10 +1674,12 @@ fn handle_diagnostics(request: &Map) -> Term {
         parse_diagnostics
     } else {
         let (module, parse_diagnostics) = beamtalk_core::source_analysis::parse(tokens);
-        beamtalk_core::queries::diagnostic_provider::compute_diagnostics_with_known_vars(
+        let pre_class_hierarchy = extract_class_hierarchy(request);
+        beamtalk_core::queries::diagnostic_provider::compute_diagnostics_with_known_vars_and_classes(
             &module,
             parse_diagnostics,
             &[],
+            pre_class_hierarchy,
         )
     };
 
@@ -1667,6 +1699,7 @@ fn diag_info(d: &beamtalk_core::source_analysis::Diagnostic) -> DiagInfo {
             beamtalk_core::source_analysis::Severity::Lint => "lint".to_string(),
             beamtalk_core::source_analysis::Severity::Hint => "hint".to_string(),
         },
+        category: diag_category(d),
         start: d.span.start(),
         end: d.span.end(),
     }
@@ -2453,6 +2486,92 @@ mod tests {
             map_get(m, "status"),
             Some(&atom("ok")),
             "compile_expression with class_hierarchy should succeed: {response:?}"
+        );
+    }
+
+    /// ADR 0105 Phase 1 (BT-2778): `diagnostics` accepts `class_hierarchy`
+    /// (like `compile_expression`/`compile_method` already did) and returns
+    /// severity- and category-tagged diagnostics, so a re-check can tell a
+    /// removed-selector `Dnu` from a `Type` mismatch without location alone.
+    #[test]
+    fn diagnostics_accepts_class_hierarchy_and_reports_category() {
+        use eetf::{FixInteger, List};
+
+        let method_info = Map::from([(
+            atom("getCount"),
+            Term::from(Map::from([
+                (atom("arity"), Term::from(FixInteger::from(0))),
+                (atom("param_types"), Term::from(List::from(vec![]))),
+                // The reload changed Counter>>getCount's return type to
+                // String — the caller's `+ 1` is now stale.
+                (atom("return_type"), atom("String")),
+            ])),
+        )]);
+        let counter_meta = Map::from([
+            (atom("superclass"), atom("Object")),
+            (atom("method_info"), Term::from(method_info)),
+        ]);
+        let class_hierarchy_term =
+            Term::from(Map::from([(atom("Counter"), Term::from(counter_meta))]));
+
+        let request = Map::from([
+            (atom("command"), atom("diagnostics")),
+            (
+                atom("source"),
+                binary(
+                    "Object subclass: Dashboard\n  refresh: c :: Counter -> Integer => (c getCount) + 1\n",
+                ),
+            ),
+            (atom("class_hierarchy"), class_hierarchy_term),
+        ]);
+
+        let response = handle_diagnostics(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("ok")));
+        let Some(Term::List(diagnostics)) = map_get(m, "diagnostics") else {
+            panic!("Expected diagnostics list: {response:?}");
+        };
+        assert!(
+            !diagnostics.elements.is_empty(),
+            "expected at least one diagnostic for the now-stale `+ 1`: {response:?}"
+        );
+        // Every diagnostic carries a `category` key (an atom `undefined` or a
+        // binary label) — BT-2778's re-check orchestration filters on it.
+        for diag in &diagnostics.elements {
+            let Term::Map(dm) = diag else {
+                panic!("Expected diagnostic map, got {diag:?}");
+            };
+            assert!(
+                map_get(dm, "category").is_some(),
+                "diagnostic missing category key: {diag:?}"
+            );
+        }
+    }
+
+    /// Without `class_hierarchy`, `diagnostics` behaves exactly as before
+    /// (Counter is unknown, so no diagnostic is produced for the `+ 1` — the
+    /// checker treats an undeclared receiver type as unresolved-class, not
+    /// as `Counter`).
+    #[test]
+    fn diagnostics_without_class_hierarchy_is_unaffected() {
+        let request = Map::from([
+            (atom("command"), atom("diagnostics")),
+            (atom("source"), binary("1 + 1.")),
+        ]);
+
+        let response = handle_diagnostics(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("ok")));
+        let Some(Term::List(diagnostics)) = map_get(m, "diagnostics") else {
+            panic!("Expected diagnostics list: {response:?}");
+        };
+        assert!(
+            diagnostics.elements.is_empty(),
+            "expected no diagnostics for a plain valid expression: {response:?}"
         );
     }
 

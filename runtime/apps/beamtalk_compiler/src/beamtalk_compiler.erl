@@ -18,6 +18,7 @@ All functions delegate to `beamtalk_compiler_server' (port backend).
 - `compile/2' — Compile a file/class definition (`:load')
 - `diagnostics/1' — Get parse/semantic diagnostics only (default "expression" mode)
 - `diagnostics/2' — Get parse/semantic diagnostics under a named parse mode
+- `diagnostics/3' — Get parse/semantic diagnostics with options (e.g. opt-in class-hierarchy awareness)
 - `version/0' — Get compiler version
 - `compile_core_erlang/1' — Core Erlang → BEAM bytecode (in-memory)
 """.
@@ -29,6 +30,7 @@ All functions delegate to `beamtalk_compiler_server' (port backend).
     compile_method/3,
     diagnostics/1,
     diagnostics/2,
+    diagnostics/3,
     version/0,
     compile_core_erlang/1,
     resolve_completion_type/1,
@@ -137,6 +139,17 @@ diagnostics(Source) ->
 
 -doc """
 Get diagnostics for source code under a parse `Mode` (no code generation).
+Equivalent to `diagnostics/3` with `#{}` — see its doc for the `Mode` values
+and for the opt-in `class_hierarchy` option.
+""".
+-spec diagnostics(binary(), binary()) ->
+    {ok, [map()]} | {error, [binary()]}.
+diagnostics(Source, Mode) ->
+    beamtalk_compiler_server:diagnostics(Source, Mode).
+
+-doc """
+Get diagnostics for source code under a parse `Mode`, with options (no code
+generation).
 
 `Mode' selects the grammar the buffer is analysed under (BT-2569):
 
@@ -147,11 +160,17 @@ Get diagnostics for source code under a parse `Mode` (no code generation).
     longer trips a false `expected expression' error. Parse-only: a method has
     no class context here, so semantic checks (which would false-positive on
     field/`self' references) are deferred to Compile.
+
+`Options`: `class_hierarchy => boolean()` (ADR 0105 Phase 1, BT-2778,
+default `false`) — thread the ambient class cache into the check, so a
+receiver resolving to an already-loaded class is checked against its
+*current* interface. See `beamtalk_compiler_server:diagnostics/3` for why
+this is opt-in rather than the `diagnostics/2` default.
 """.
--spec diagnostics(binary(), binary()) ->
+-spec diagnostics(binary(), binary(), map()) ->
     {ok, [map()]} | {error, [binary()]}.
-diagnostics(Source, Mode) ->
-    beamtalk_compiler_server:diagnostics(Source, Mode).
+diagnostics(Source, Mode, Options) ->
+    beamtalk_compiler_server:diagnostics(Source, Mode, Options).
 
 -doc "Get compiler version.".
 -spec version() -> {ok, binary()} | {error, term()}.
