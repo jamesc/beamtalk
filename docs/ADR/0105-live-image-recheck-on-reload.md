@@ -19,7 +19,7 @@ Proposed (2026-07-05)
 | 3 | [BT-2782](https://linear.app/beamtalk/issue/BT-2782) | Pre-save advisory + `:recheck image` command | S | BT-2778 |
 | 4 | [BT-2783](https://linear.app/beamtalk/issue/BT-2783) | E2E killer-demo test + docs + status flip | S | BT-2779, BT-2780, BT-2782 |
 
-Deferred / recorded follow-ups: xref receiver-type-key extension (BT-2781 decides), transitive re-check refinement, proxy meta-dependent tracking, single-method check API. Enabling ADRs (all landed): 0087 (xref), 0082 (edit/save), 0100 (severity), 0022 (compiler port), 0104 (actor/`spawnWith:` checking).
+Deferred / recorded follow-ups: xref receiver-type-key extension (decided by BT-2781, filed as [BT-2798](https://linear.app/beamtalk/issue/BT-2798)), transitive re-check refinement, proxy meta-dependent tracking, single-method check API. Enabling ADRs (all landed): 0087 (xref), 0082 (edit/save), 0100 (severity), 0022 (compiler port), 0104 (actor/`spawnWith:` checking).
 
 **Status:** Planned
 
@@ -272,6 +272,20 @@ Would make dependent lookup precise instead of selector-wide (Mechanism step
 generation lifecycle for a cost that only matters if common-selector fan-out
 proves hot in practice. Recorded as the follow-up, with the per-reload caller
 cap as the interim guard.
+
+**Phase 2 benchmark decision (BT-2781, full data in
+`docs/development/benchmarks.md` "Reload re-check fan-out"):** today's real
+stdlib fan-out does not yet justify the extension — the worst measured
+selector (`delegate`) has 23 distinct caller classes, barely over the
+default cap of 20, and every other selector is comfortably under it. But a
+controlled fan-out benchmark against the real `beamtalk_recheck:trigger/4`
+orchestration confirmed the interim cap's known limitation is severe once
+fan-out does grow past it: at 10x the cap, the alphabetic (non-relevance-
+ranked) cap silently drops **90% of genuine stale-caller findings**. Per-
+check cost is flat regardless of fan-out size, so the extension would be
+both a latency and a completeness win once that threshold is crossed.
+**Decision: not implemented now, filed as a proactive (non-blocking)
+follow-up — [BT-2798](https://linear.app/beamtalk/issue/BT-2798).**
 
 ### Static-only (no runtime trigger)
 Let the LSP re-check open files on edit, ignore the live image. Rejected: the
