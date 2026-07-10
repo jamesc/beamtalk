@@ -795,6 +795,7 @@ mod tests {
         };
         // Add an internal class from another package
         let info = ClassInfo {
+            surface_incomplete: false,
             name: EcoString::from(internal_class),
             superclass: Some(EcoString::from("Object")),
             is_sealed: false,
@@ -870,6 +871,7 @@ mod tests {
         };
         // Add a public class from another package
         let info = ClassInfo {
+            surface_incomplete: false,
             name: EcoString::from("Parser"),
             superclass: Some(EcoString::from("Object")),
             is_sealed: false,
@@ -1206,6 +1208,7 @@ mod tests {
         // Parent has internal method `helper`, Child redefines `helper`
         let mut hierarchy = ClassHierarchy::with_builtins();
         hierarchy.add_from_beam_meta(vec![ClassInfo {
+            surface_incomplete: false,
             name: "Parent".into(),
             superclass: Some("Object".into()),
             is_sealed: false,
@@ -1261,6 +1264,7 @@ mod tests {
         // Parent has a public method `helper` — Child overriding it is fine (no warning)
         let mut hierarchy = ClassHierarchy::with_builtins();
         hierarchy.add_from_beam_meta(vec![ClassInfo {
+            surface_incomplete: false,
             name: "Parent".into(),
             superclass: Some("Object".into()),
             is_sealed: false,
@@ -1317,6 +1321,7 @@ mod tests {
         // Child defines a new method that doesn't exist on superclass — no warning
         let mut hierarchy = ClassHierarchy::with_builtins();
         hierarchy.add_from_beam_meta(vec![ClassInfo {
+            surface_incomplete: false,
             name: "Parent".into(),
             superclass: Some("Object".into()),
             is_sealed: false,

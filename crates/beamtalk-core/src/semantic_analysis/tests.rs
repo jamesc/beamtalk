@@ -3664,6 +3664,7 @@ fn analyse_with_known_vars_and_classes_injects_user_class_into_hierarchy() {
     use crate::semantic_analysis::class_hierarchy::ClassInfo;
 
     let pre_class = ClassInfo {
+        surface_incomplete: false,
         name: EcoString::from("UserClass"),
         superclass: Some(EcoString::from("Object")),
         is_sealed: false,
@@ -4077,6 +4078,7 @@ fn workspace_binding_shadowing_class_emits_warning() {
 
     // Pre-load a class "Workspace" so the hierarchy knows about it.
     let pre_class = ClassInfo {
+        surface_incomplete: false,
         name: EcoString::from("Workspace"),
         superclass: Some(EcoString::from("Object")),
         is_sealed: false,
@@ -4137,6 +4139,7 @@ fn workspace_binding_not_in_hierarchy_no_shadow_warning() {
     // meaning the shadow check doesn't run at all. To test the no-match
     // path, we need at least one pre-loaded class.
     let dummy_class = ClassInfo {
+        surface_incomplete: false,
         name: EcoString::from("DummyClass"),
         superclass: Some(EcoString::from("Object")),
         is_sealed: false,
@@ -4194,6 +4197,7 @@ fn fixture_sourced_protocol_name_is_not_unresolved() {
     // true and the unresolved-class validator actually runs. Without this
     // sentinel, the check is suppressed and the test would pass vacuously.
     let dummy_class = ClassInfo {
+        surface_incomplete: false,
         name: EcoString::from("DummyClass"),
         superclass: Some(EcoString::from("Object")),
         is_sealed: false,
@@ -4232,6 +4236,7 @@ fn fixture_sourced_protocol_name_is_not_unresolved() {
         vec![dummy_class],
         vec![fixture_protocol],
         None,
+        &crate::compilation::extension_index::ExtensionIndex::new(),
     );
 
     let unresolved: Vec<_> = result
@@ -4327,4 +4332,163 @@ Value subclass: UnusedUntypedSmall
             "Expected no unused warnings for source:\n{source}\ngot: {unused:?}"
         );
     }
+}
+
+// ── BT-2796: KnowledgeScope plumbing ─────────────────────────────────────────
+
+#[test]
+fn analyse_stamps_default_knowledge_scope() {
+    let tokens = crate::source_analysis::lex_with_eof("Object subclass: ScopeDefault\n  m => 1\n");
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = analyse(&module);
+    assert_eq!(
+        result.class_hierarchy.knowledge_scope(),
+        KnowledgeScope::ModuleOnly,
+        "analysis without a project orchestrator must keep the conservative default"
+    );
+}
+
+#[test]
+fn analyse_with_options_stamps_project_complete_scope() {
+    let tokens = crate::source_analysis::lex_with_eof("Object subclass: ScopeFull\n  m => 1\n");
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let options = crate::CompilerOptions {
+        knowledge_scope: KnowledgeScope::ProjectComplete,
+        ..Default::default()
+    };
+    let result = analyse_with_options(&module, &options);
+    assert_eq!(
+        result.class_hierarchy.knowledge_scope(),
+        KnowledgeScope::ProjectComplete,
+        "the orchestrator's completeness claim must reach the hierarchy"
+    );
+}
+
+// ── BT-2795: project-wide cross-file extension visibility ────────────────────
+
+#[test]
+fn cross_file_extension_resolves_instead_of_dnu_hint() {
+    use crate::compilation::extension_index::ExtensionIndex;
+
+    // Another file defines `String >> shoutLouder`.
+    let ext_tokens = crate::source_analysis::lex_with_eof("String >> shoutLouder => self\n");
+    let (ext_module, _) = crate::source_analysis::parse(ext_tokens);
+    let mut cross_file_extensions = ExtensionIndex::new();
+    cross_file_extensions.add_module(&ext_module, std::path::Path::new("other.bt"));
+
+    // The current file sends it to a String receiver.
+    let source = "Object subclass: UseShout\n  class demo =>\n    \"abc\" shoutLouder\n";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, _) = crate::source_analysis::parse(tokens);
+
+    // Without the index: false Dnu hint (today's behaviour).
+    let result = analyse(&module);
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("shoutLouder")),
+        "without cross-file extensions the send must produce a Dnu hint"
+    );
+
+    // With the index: the extension resolves, the hint disappears.
+    let options = crate::CompilerOptions::default();
+    let result = analyse_with_natives_and_extensions(
+        &module,
+        &options,
+        vec![],
+        None,
+        &cross_file_extensions,
+    );
+    let dnu: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.message.contains("shoutLouder"))
+        .collect();
+    assert!(
+        dnu.is_empty(),
+        "cross-file extension should resolve instead of hinting, got: {dnu:?}"
+    );
+}
+
+#[test]
+fn genuinely_unresolved_selector_still_hints_with_extensions_registered() {
+    use crate::compilation::extension_index::ExtensionIndex;
+
+    let ext_tokens = crate::source_analysis::lex_with_eof("String >> shoutLouder => self\n");
+    let (ext_module, _) = crate::source_analysis::parse(ext_tokens);
+    let mut cross_file_extensions = ExtensionIndex::new();
+    cross_file_extensions.add_module(&ext_module, std::path::Path::new("other.bt"));
+
+    // A genuine typo on a closed receiver still hints (ADR 0100 Rule 2:
+    // improved resolution removes false positives, not true ones).
+    let source = "Object subclass: UseTypo\n  class demo =>\n    \"abc\" reverssed\n";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let options = crate::CompilerOptions::default();
+    let result = analyse_with_natives_and_extensions(
+        &module,
+        &options,
+        vec![],
+        None,
+        &cross_file_extensions,
+    );
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("reverssed")),
+        "a genuine typo must still produce a Dnu hint"
+    );
+}
+
+// ── BT-2794: ADR 0100 Rule 2 end-to-end ──────────────────────────────────────
+
+#[test]
+fn typo_hints_in_project_complete_dependency_free_package() {
+    // Rule 2: knowing more makes the Hint trustworthy, not fatal — a genuine
+    // typo on a closed receiver still hints in a project-complete,
+    // dependency-free build.
+    let source = "Object subclass: TypoDemo\n  class demo =>\n    \"abc\" reverssed\n";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let options = crate::CompilerOptions {
+        knowledge_scope: KnowledgeScope::ProjectComplete,
+        has_package_dependencies: false,
+        ..Default::default()
+    };
+    let result = analyse_with_options(&module, &options);
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("reverssed")),
+        "typo must still hint in a dependency-free project-complete build"
+    );
+}
+
+#[test]
+fn dependency_package_suppresses_unresolved_selector_hints_pre_ws3() {
+    // BT-2794 pre-WS3 guard: with dependencies declared, a dependency could
+    // extend any class, so unresolved-selector hints are withheld until WS3
+    // loads cross-package extension metadata (ADR 0100 Rule 1, third
+    // downgrade; hints go down, not up).
+    let source = "Object subclass: DepDemo\n  class demo =>\n    \"abc\" reverssed\n";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let options = crate::CompilerOptions {
+        knowledge_scope: KnowledgeScope::ProjectComplete,
+        has_package_dependencies: true,
+        ..Default::default()
+    };
+    let result = analyse_with_options(&module, &options);
+    let dnu: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.message.contains("reverssed"))
+        .collect();
+    assert!(
+        dnu.is_empty(),
+        "with dependencies present, unresolved-selector hints are withheld pre-WS3, got: {dnu:?}"
+    );
 }

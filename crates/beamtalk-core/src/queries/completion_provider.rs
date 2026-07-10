@@ -2173,6 +2173,7 @@ mod tests {
         let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
         // Inject an internal class from package "other_pkg"
         hierarchy.add_from_beam_meta(vec![crate::semantic_analysis::class_hierarchy::ClassInfo {
+            surface_incomplete: false,
             name: EcoString::from("SecretHelper"),
             superclass: Some(EcoString::from("Object")),
             is_sealed: false,
@@ -2215,6 +2216,7 @@ mod tests {
         let (module, _) = parse(tokens);
         let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
         hierarchy.add_from_beam_meta(vec![crate::semantic_analysis::class_hierarchy::ClassInfo {
+            surface_incomplete: false,
             name: EcoString::from("InternalHelper"),
             superclass: Some(EcoString::from("Object")),
             is_sealed: false,
@@ -2257,6 +2259,7 @@ mod tests {
         let (module, _) = parse(tokens);
         let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
         hierarchy.add_from_beam_meta(vec![crate::semantic_analysis::class_hierarchy::ClassInfo {
+            surface_incomplete: false,
             name: EcoString::from("InternalHelper"),
             superclass: Some(EcoString::from("Object")),
             is_sealed: false,
@@ -2292,6 +2295,7 @@ mod tests {
         let mut hierarchy = ClassHierarchy::with_builtins();
         // Inject a class with both public and internal methods from "other_pkg"
         hierarchy.add_from_beam_meta(vec![crate::semantic_analysis::class_hierarchy::ClassInfo {
+            surface_incomplete: false,
             name: EcoString::from("RemoteService"),
             superclass: Some(EcoString::from("Object")),
             is_sealed: false,
@@ -2368,6 +2372,7 @@ mod tests {
     fn cross_package_internal_class_helper() {
         use std::collections::HashMap;
         let internal_class = crate::semantic_analysis::class_hierarchy::ClassInfo {
+            surface_incomplete: false,
             name: EcoString::from("InternalClass"),
             superclass: Some(EcoString::from("Object")),
             is_sealed: false,
@@ -2404,6 +2409,7 @@ mod tests {
             "Internal class should not be filtered when no package context"
         );
         let public_class = crate::semantic_analysis::class_hierarchy::ClassInfo {
+            surface_incomplete: false,
             name: EcoString::from("PublicClass"),
             is_internal: false,
             package: Some(EcoString::from("other_pkg")),
@@ -2426,6 +2432,7 @@ mod tests {
         let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
         // Inject RemoteService with both public and internal methods
         hierarchy.add_from_beam_meta(vec![crate::semantic_analysis::class_hierarchy::ClassInfo {
+            surface_incomplete: false,
             name: EcoString::from("RemoteService"),
             superclass: Some(EcoString::from("Object")),
             is_sealed: false,

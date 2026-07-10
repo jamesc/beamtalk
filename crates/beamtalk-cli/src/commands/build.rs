@@ -217,6 +217,27 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, force: bool) 
     info!("Starting build");
 
     let env = setup_build_environment(path)?;
+
+    // BT-2796: A package directory build walks every project source file
+    // (Pass 1) before any per-file analysis runs (Pass 2), so the injected
+    // cross-file knowledge is project-complete. Declare that to the
+    // receiver-knowledge classifier (ADR 0100 Rule 2 sequencing guard).
+    // A single-file build (`beamtalk build foo.bt`) sees only that file, and
+    // a manifest-less directory build skips Pass 1 entirely — both keep the
+    // conservative `ModuleOnly` default.
+    let mut options = options.clone();
+    if Utf8Path::new(path).is_dir() && env.full_manifest.is_some() {
+        options.knowledge_scope = beamtalk_core::semantic_analysis::KnowledgeScope::ProjectComplete;
+    }
+    // BT-2794 (pre-WS3 guard): dependency extension contributions are not
+    // loaded until WS3 (ADR 0070 amendment), so declaring dependencies means
+    // no receiver's method surface is provably complete.
+    options.has_package_dependencies = env
+        .full_manifest
+        .as_ref()
+        .is_some_and(|m| !m.dependencies.is_empty());
+    let options = &options;
+
     let dep_ctx = resolve_and_validate_dependencies(&env, options)?;
     let passes = execute_build_passes(&env, options, &dep_ctx, force)?;
 
@@ -357,6 +378,8 @@ struct ClassIndexResult {
     class_superclass_index: HashMap<String, String>,
     /// Unified collection of all `ClassInfo` from source and dependency classes.
     all_class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    /// Project-wide standalone extension index from Pass 1 (BT-2795).
+    extension_index: beamtalk_core::compilation::extension_index::ExtensionIndex,
     /// Dependency registry for cross-package collision detection.
     dep_registry: beamtalk_core::semantic_analysis::DependencyRegistry,
     /// Cached ASTs from incremental Pass 1, keyed by source file path.
@@ -392,6 +415,7 @@ fn build_class_index(
         mut class_module_index,
         class_superclass_index,
         source_class_infos,
+        extension_index,
         cached_asts,
         force_pass2,
     ) = if let Some(pkg) = pkg_manifest {
@@ -409,6 +433,7 @@ fn build_class_index(
             result.class_module_index,
             result.class_superclass_index,
             result.all_class_infos,
+            result.extension_index,
             result.cached_asts,
             result.manifest_invalidated,
         )
@@ -417,6 +442,7 @@ fn build_class_index(
             HashMap::new(),
             HashMap::new(),
             Vec::new(),
+            beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
             HashMap::new(),
             false,
         )
@@ -469,6 +495,7 @@ fn build_class_index(
         class_module_index,
         class_superclass_index,
         all_class_infos,
+        extension_index,
         dep_registry,
         cached_asts,
         force_pass2,
@@ -740,6 +767,7 @@ fn execute_build_passes(
             class_superclass_index: index.class_superclass_index.clone(),
             pre_loaded_classes: index.all_class_infos.clone(),
             pre_loaded_protocols: Vec::new(),
+            extension_index: index.extension_index.clone(),
         },
         dep_registry: registry_ref,
         strict_deps,
@@ -1552,11 +1580,13 @@ pub(crate) fn build_class_module_index(
     HashMap<String, String>,
     HashMap<String, String>,
     Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    beamtalk_core::compilation::extension_index::ExtensionIndex,
     HashMap<Utf8PathBuf, CachedAst>,
 )> {
     let mut module_index = HashMap::new();
     let mut superclass_index = HashMap::new();
     let mut all_class_infos = Vec::new();
+    let mut extension_index = beamtalk_core::compilation::extension_index::ExtensionIndex::new();
     let mut cached_asts: HashMap<Utf8PathBuf, CachedAst> = HashMap::new();
 
     for file in source_files {
@@ -1585,9 +1615,31 @@ pub(crate) fn build_class_module_index(
         }
 
         // BT-1523: Extract full ClassInfo for cross-file hierarchy resolution.
-        let class_infos =
+        //
+        // BT-2796: A file with parse *errors* may have an under-recovered
+        // method surface (error recovery can drop method definitions), so its
+        // classes are marked `surface_incomplete`. The receiver-knowledge
+        // classifier downgrades receivers whose superclass chain contains a
+        // marked class to `Open`, preventing false unresolved-selector hints
+        // against a surface Pass 1 never fully saw.
+        let has_parse_errors = diagnostics
+            .iter()
+            .any(|d| d.severity == beamtalk_core::source_analysis::Severity::Error);
+        let mut class_infos =
             beamtalk_core::semantic_analysis::ClassHierarchy::extract_class_infos(&module);
+        if has_parse_errors {
+            for info in &mut class_infos {
+                info.surface_incomplete = true;
+            }
+        }
         all_class_infos.extend(class_infos);
+
+        // BT-2795: Collect standalone extension definitions
+        // (`ClassName >> selector => ...`) project-wide so Pass 2 can
+        // register them into every file's class hierarchy — a same-project
+        // cross-file extension then resolves instead of producing a false
+        // `Dnu` hint (ADR 0066 / ADR 0100 Rule 2 WS1).
+        extension_index.add_module(&module, file.as_std_path());
 
         for class in &module.classes {
             let class_name = class.name.name.to_string();
@@ -1622,7 +1674,13 @@ pub(crate) fn build_class_module_index(
         );
     }
 
-    Ok((module_index, superclass_index, all_class_infos, cached_asts))
+    Ok((
+        module_index,
+        superclass_index,
+        all_class_infos,
+        extension_index,
+        cached_asts,
+    ))
 }
 
 // ── BT-1730: Class module header generation ─────────────────────────────────
@@ -2849,7 +2907,8 @@ mod tests {
         let nonexistent = Utf8PathBuf::from("/nonexistent/no_such_file.bt");
         let result = build_class_module_index(&[nonexistent], None, "my_app");
         assert!(result.is_ok());
-        let (module_index, superclass_index, _class_infos, _cached_asts) = result.unwrap();
+        let (module_index, superclass_index, _class_infos, _extensions, _cached_asts) =
+            result.unwrap();
         assert!(module_index.is_empty());
         assert!(superclass_index.is_empty());
     }
@@ -2887,7 +2946,7 @@ mod tests {
         );
 
         let source_files = vec![observer_path.join("event_bus.bt")];
-        let (index, _superclass, _class_infos, _cached_asts) =
+        let (index, _superclass, _class_infos, _extensions, _cached_asts) =
             build_class_module_index(&source_files, Some(&src_path), "gang_of_four").unwrap();
 
         assert_eq!(
@@ -2927,8 +2986,13 @@ mod tests {
         fs::create_dir_all(&build_dir).unwrap();
 
         let source_files = vec![observer_path.join("event_bus.bt"), src_path.join("main.bt")];
-        let (class_module_index, class_superclass_index, all_class_infos, _cached_asts) =
-            build_class_module_index(&source_files, Some(&src_path), "gang_of_four").unwrap();
+        let (
+            class_module_index,
+            class_superclass_index,
+            all_class_infos,
+            _extensions,
+            _cached_asts,
+        ) = build_class_module_index(&source_files, Some(&src_path), "gang_of_four").unwrap();
 
         // Build the class index — EventBus should map to observer subdir module
         assert_eq!(
@@ -2950,7 +3014,7 @@ mod tests {
                     class_module_index: class_module_index.clone(),
                     class_superclass_index: class_superclass_index.clone(),
                     pre_loaded_classes: all_class_infos.clone(),
-                    pre_loaded_protocols: Vec::new(),
+                    ..ClassHierarchyContext::default()
                 },
                 ..CompileContext::default()
             },
@@ -3002,8 +3066,13 @@ mod tests {
             src_path.join("counter.bt"),
             src_path.join("inheriting_counter.bt"),
         ];
-        let (class_module_index, class_superclass_index, all_class_infos, _cached_asts) =
-            build_class_module_index(&source_files, Some(&src_path), "test_pkg").unwrap();
+        let (
+            class_module_index,
+            class_superclass_index,
+            all_class_infos,
+            _extensions,
+            _cached_asts,
+        ) = build_class_module_index(&source_files, Some(&src_path), "test_pkg").unwrap();
 
         // Verify ClassInfo extraction captured Counter's methods
         assert!(
@@ -3036,7 +3105,7 @@ mod tests {
                     class_module_index: class_module_index.clone(),
                     class_superclass_index: class_superclass_index.clone(),
                     pre_loaded_classes: all_class_infos.clone(),
-                    pre_loaded_protocols: Vec::new(),
+                    ..ClassHierarchyContext::default()
                 },
                 ..CompileContext::default()
             },
@@ -3986,7 +4055,7 @@ mod tests {
 
         // Use build_class_module_index to extract ClassInfo from source
         let source_files = vec![bt_file];
-        let (_module_index, _superclass_index, class_infos, _cached_asts) =
+        let (_module_index, _superclass_index, class_infos, _extensions, _cached_asts) =
             build_class_module_index(&source_files, Some(&src_dir), "my_pkg").unwrap();
 
         let result = generate_package_corpus(&corpus_dir, "my_pkg", &class_infos, &source_files);
@@ -4047,7 +4116,7 @@ mod tests {
         );
 
         let source_files = vec![bt_file];
-        let (_module_index, _superclass_index, class_infos, _cached_asts) =
+        let (_module_index, _superclass_index, class_infos, _extensions, _cached_asts) =
             build_class_module_index(&source_files, Some(&src_dir), "my_pkg").unwrap();
 
         // Verify the class was parsed as internal

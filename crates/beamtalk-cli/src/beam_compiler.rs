@@ -677,6 +677,11 @@ pub struct ClassHierarchyContext {
     /// recognise protocol names defined outside the current module (BT-2006).
     pub pre_loaded_protocols:
         Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
+    /// Project-wide standalone extension definitions from Pass 1 (BT-2795).
+    /// Registered into each file's class hierarchy during Pass 2 so
+    /// same-project cross-file extensions resolve instead of producing
+    /// false `Dnu` hints (ADR 0066 / ADR 0100 Rule 2 WS1).
+    pub extension_index: beamtalk_core::compilation::extension_index::ExtensionIndex,
 }
 
 /// Compilation context bundling hierarchy data with dependency resolution settings.
@@ -935,6 +940,7 @@ pub(crate) fn compile_source_with_bindings(
         options: options.clone(),
         cross_file_classes: cross_file_classes.clone(),
         pre_loaded_protocols: ctx.hierarchy.pre_loaded_protocols.clone(),
+        cross_file_extensions: ctx.hierarchy.extension_index.clone(),
         native_type_registry: ctx.native_type_registry.clone(),
         dep_registry: ctx.dep_registry,
         strict_deps: ctx.strict_deps,
@@ -1049,7 +1055,7 @@ pub(crate) fn compile_source_with_bindings(
         class_module_index: ctx.hierarchy.class_module_index.clone(),
         class_superclass_index: ctx.hierarchy.class_superclass_index.clone(),
         pre_loaded_classes: cross_file_classes,
-        pre_loaded_protocols: Vec::new(),
+        ..ClassHierarchyContext::default()
     };
     write_core_erlang_with_bindings(
         &module,
@@ -2453,6 +2459,7 @@ end
         use beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo;
 
         let sibling = ClassInfo {
+            surface_incomplete: false,
             name: "SiblingBt2793".into(),
             superclass: Some("Object".into()),
             is_sealed: false,

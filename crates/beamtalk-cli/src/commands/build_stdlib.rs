@@ -1076,7 +1076,8 @@ fn generate_class_entry(code: &mut String, meta: &ClassMeta) {
          \x20           package: Some(\"stdlib\".into()),\n\
          \x20           is_value: {is_value},\n\
          \x20           is_native: {is_native},\n\
-         \x20           handle_scope: {handle_scope},\n",
+         \x20           handle_scope: {handle_scope},\n\
+         \x20           surface_incomplete: false,\n",
         name = meta.class_name,
         sealed = meta.modifiers.is_sealed,
         abstract_ = meta.modifiers.is_abstract,

@@ -108,6 +108,14 @@ type ReloadDiagnosticsByUriAndOrigin =
 struct PreloadedFiles {
     user_files: Vec<(PathBuf, String)>,
     stdlib_files: Vec<(PathBuf, String)>,
+    /// Whether the preload file budget (`PRELOAD_MAX_FILES`) was exhausted
+    /// mid-walk (BT-2796). When true, workspace coverage may be partial and
+    /// the language service must NOT claim `KnowledgeScope::ProjectComplete`.
+    budget_exhausted: bool,
+    /// Whether any workspace root has fetched package dependencies
+    /// (`_build/deps/*/src` present, BT-2794). Pre-WS3, dependency extension
+    /// contributions are invisible, so diagnostics must stay conservative.
+    deps_present: bool,
 }
 
 /// Params for the `beamtalk-lsp/fetchContent` custom request.
@@ -787,12 +795,32 @@ impl Backend {
         }
 
         let mut svc = self.service.lock().expect("service lock poisoned");
+        let budget_exhausted = loaded.budget_exhausted;
+        let deps_present = loaded.deps_present;
         for (path, content) in loaded.user_files.into_iter().chain(loaded.stdlib_files) {
             let Ok(utf8_path) = Utf8PathBuf::from_path_buf(path) else {
                 continue;
             };
             svc.update_file(utf8_path, content);
         }
+        // BT-2796: With every workspace source file indexed, the ProjectIndex
+        // is project-complete and diagnostics may say so (ADR 0100 Rule 2
+        // sequencing guard). A budget-exhausted preload has partial coverage
+        // and must keep the conservative ModuleOnly default.
+        //
+        // "Complete" here means the conventional source layout (`src/`,
+        // `test/`, fetched dep sources, stdlib) was fully walked. Files
+        // outside those directories are not preloaded and are only indexed
+        // when opened — same coverage the ProjectIndex has always had for
+        // classes. Scope claims must stay tied to this walk; do not claim
+        // completeness from any weaker signal.
+        svc.set_project_complete(!budget_exhausted);
+        // BT-2794 (pre-WS3): fetched deps mean dependency extensions may
+        // exist that the checker cannot see. (Declared-but-unfetched deps are
+        // invisible here — the LSP deliberately avoids parsing beamtalk.toml —
+        // but such a workspace cannot resolve dep classes at all, so hint
+        // noise is the lesser concern.)
+        svc.set_has_package_dependencies(deps_present);
     }
 
     /// Handles the `beamtalk-lsp/fetchContent` custom request.
@@ -3374,8 +3402,10 @@ fn collect_preload_files(config: PreloadConfig) -> PreloadedFiles {
         }
     }
 
+    let mut deps_present = false;
     for root in &roots {
         for dep_src in dependency_src_dirs(root) {
+            deps_present = true;
             if remaining_budget == 0 {
                 break;
             }
@@ -3437,6 +3467,8 @@ fn collect_preload_files(config: PreloadConfig) -> PreloadedFiles {
     PreloadedFiles {
         user_files,
         stdlib_files,
+        budget_exhausted: remaining_budget == 0,
+        deps_present,
     }
 }
 

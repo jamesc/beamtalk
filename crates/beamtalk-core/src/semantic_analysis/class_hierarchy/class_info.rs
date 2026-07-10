@@ -137,6 +137,20 @@ pub struct ClassInfo {
     /// declaration. Inherited via [`ClassHierarchy::handle_scope`], which walks
     /// the superclass chain. Only meaningful on `Object`-kind classes.
     pub handle_scope: Option<EcoString>,
+    /// Whether this class was extracted from a file with parse errors
+    /// (BT-2796, ADR 0100 Rule 2 parse-error guard).
+    ///
+    /// Parser error recovery can silently drop method definitions, so the
+    /// method surface recorded here may be incomplete. The receiver-knowledge
+    /// classifier treats any receiver whose superclass chain contains a
+    /// marked class as `Open` (no unresolved-selector diagnostics), so a
+    /// half-parsed file degrades only its own classes to silence instead of
+    /// producing false hints. Set by the orchestrators that extract
+    /// cross-file class metadata (CLI build Pass 1, lint's package walk, LSP
+    /// `update_file`); always `false` for builtins and AST-built classes in
+    /// the current module (their parse errors surface directly).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub surface_incomplete: bool,
     /// State (instance variable) names.
     pub state: Vec<EcoString>,
     /// Declared type annotations for state fields (field name → type name).
@@ -252,6 +266,7 @@ impl ClassInfo {
             is_value: class.class_kind == ClassKind::Value,
             is_native: class.backing_module.is_some(),
             handle_scope: class.handle_scope.as_ref().map(|s| s.name.clone()),
+            surface_incomplete: false,
             state: class.state.iter().map(|s| s.name.name.clone()).collect(),
             state_types: class
                 .state

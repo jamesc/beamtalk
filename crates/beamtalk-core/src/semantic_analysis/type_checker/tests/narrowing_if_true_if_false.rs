@@ -133,6 +133,7 @@ fn bt_2020_result_is_ok_if_true_if_false_preserves_my_val() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     // Register a `MyVal` class so `MyVal new` yields `Known(MyVal)`.
     hierarchy.add_from_beam_meta(vec![ClassInfo {
+        surface_incomplete: false,
         name: "MyVal".into(),
         superclass: Some("Object".into()),
         is_sealed: false,

@@ -1103,6 +1103,7 @@ mod tests {
 
         let mut hierarchy = ClassHierarchy::with_builtins();
         let gadget = ClassInfo {
+            surface_incomplete: false,
             name: "Gadget".into(),
             superclass: Some("Object".into()),
             is_sealed: false,
@@ -1179,6 +1180,7 @@ mod tests {
             use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
             let mut h = ClassHierarchy::with_builtins();
             h.add_from_beam_meta(vec![ClassInfo {
+                surface_incomplete: false,
                 name: "Gadget".into(),
                 superclass: Some("Object".into()),
                 is_sealed: false,
@@ -1453,6 +1455,7 @@ mod tests {
         hierarchy.classes_mut().insert(
             "Printable".into(),
             crate::semantic_analysis::class_hierarchy::ClassInfo {
+                surface_incomplete: false,
                 name: "Printable".into(),
                 superclass: Some("Protocol".into()),
                 is_sealed: true,
@@ -1520,6 +1523,7 @@ mod tests {
         hierarchy.classes_mut().insert(
             "Tickable".into(),
             crate::semantic_analysis::class_hierarchy::ClassInfo {
+                surface_incomplete: false,
                 name: "Tickable".into(),
                 superclass: Some("Protocol".into()),
                 is_sealed: true,

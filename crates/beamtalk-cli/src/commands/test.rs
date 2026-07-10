@@ -913,7 +913,7 @@ fn build_merged_class_indexes(
         let src_dir = pkg_root.join("src");
         if let Ok(src_files) = super::build::collect_source_files_from_dir(&src_dir) {
             let source_root = src_dir.exists().then_some(src_dir);
-            if let Ok((pkg_class_map, pkg_super_map, class_infos, _cached_asts)) =
+            if let Ok((pkg_class_map, pkg_super_map, class_infos, _extensions, _cached_asts)) =
                 super::build::build_class_module_index(
                     &src_files,
                     source_root.as_deref(),
@@ -1068,6 +1068,7 @@ fn compile_fixtures(pipeline: &mut TestPipeline) -> Result<()> {
         class_superclass_index: pipeline.class_superclass_index.clone(),
         pre_loaded_classes: pipeline.all_class_infos.clone(),
         pre_loaded_protocols: pipeline.fixture_protocol_infos.clone(),
+        ..ClassHierarchyContext::default()
     };
     let precompiled = compile_fixtures_directory(
         &fixtures_dir,
@@ -1182,6 +1183,7 @@ fn compile_single_test_file(
         class_superclass_index: file_super_index.clone(),
         pre_loaded_classes: pipeline.all_class_infos.clone(),
         pre_loaded_protocols: pipeline.fixture_protocol_infos.clone(),
+        ..ClassHierarchyContext::default()
     };
 
     // Handle deprecated @load directives as fallback.

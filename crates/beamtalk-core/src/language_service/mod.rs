@@ -147,6 +147,18 @@ pub struct SimpleLanguageService {
     project_index: ProjectIndex,
     /// Native type registry for Erlang FFI typed completions (ADR 0075).
     native_types: Option<std::sync::Arc<NativeTypeRegistry>>,
+    /// Whether workspace preload has completed with full coverage (BT-2796).
+    ///
+    /// When `true`, diagnostics are computed with
+    /// `KnowledgeScope::ProjectComplete` — the `ProjectIndex` holds every
+    /// project file's classes, so the receiver-knowledge classifier may
+    /// treat missing parents as genuinely unresolved rather than
+    /// not-yet-seen. Set by the LSP server after `preload_workspace_source_files`
+    /// finishes within its file budget; stays `false` if the budget was
+    /// exhausted (coverage would be partial).
+    project_complete: bool,
+    /// Whether the workspace has package dependencies (BT-2794 pre-WS3 guard).
+    has_package_dependencies: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -167,6 +179,8 @@ impl SimpleLanguageService {
             files: HashMap::new(),
             project_index: ProjectIndex::new(),
             native_types: None,
+            project_complete: false,
+            has_package_dependencies: false,
         }
     }
 
@@ -180,7 +194,29 @@ impl SimpleLanguageService {
             files: HashMap::new(),
             project_index,
             native_types: None,
+            project_complete: false,
+            has_package_dependencies: false,
         }
+    }
+
+    /// Declare that workspace preload completed with full coverage (BT-2796).
+    ///
+    /// After this, diagnostics run with `KnowledgeScope::ProjectComplete`.
+    /// Only call when the preload walked every project source file — a
+    /// budget-exhausted preload must NOT claim completeness, or the
+    /// receiver-knowledge classifier would mistake unseen files for
+    /// genuinely-unresolved classes.
+    pub fn set_project_complete(&mut self, complete: bool) {
+        self.project_complete = complete;
+    }
+
+    /// Declare whether the workspace has package dependencies (BT-2794).
+    ///
+    /// Pre-WS3, dependency extension contributions are invisible, so when
+    /// true (and the project is complete) the receiver-knowledge classifier
+    /// keeps every receiver `Open`.
+    pub fn set_has_package_dependencies(&mut self, has_deps: bool) {
+        self.has_package_dependencies = has_deps;
     }
 
     /// Sets the native type registry for Erlang FFI typed completions.
@@ -1359,9 +1395,29 @@ impl LanguageService for SimpleLanguageService {
             // so LSP features (completions, has_class) work with protocol names.
             class_hierarchy.register_protocol_classes(&module);
 
+            // BT-2796: A file with parse errors may have an under-recovered
+            // method surface (error recovery can drop method definitions).
+            // Mark its classes so cross-file consumers of this file's
+            // hierarchy never emit unresolved-selector hints against a
+            // surface the parser never fully saw.
+            let has_parse_errors = diagnostics
+                .iter()
+                .any(|d| d.severity == crate::source_analysis::Severity::Error);
+            if has_parse_errors {
+                class_hierarchy.mark_module_classes_surface_incomplete(&module);
+            }
+
             // Update the project-wide index with this file's class hierarchy
             self.project_index
                 .update_file(file.clone(), &class_hierarchy);
+
+            // BT-2795: Track this file's standalone extension definitions so
+            // other files' diagnostics see them (cross-file extension
+            // visibility, ADR 0066 / ADR 0100 Rule 2 WS1).
+            let mut extensions = crate::compilation::extension_index::ExtensionIndex::new();
+            extensions.add_module(&module, file.as_std_path());
+            self.project_index
+                .set_file_extensions(file.clone(), extensions);
         } else {
             // Hierarchy build failed: store the file with merged diagnostics
             // but do not update the project index for this file.
@@ -1409,9 +1465,22 @@ impl LanguageService for SimpleLanguageService {
                 if self.project_index.is_stdlib_file(file) {
                     options.stdlib_mode = true;
                 }
+                // BT-2796: After a full-coverage workspace preload the
+                // ProjectIndex holds every project file's classes, so the
+                // injected knowledge is project-complete.
+                if self.project_complete {
+                    options.knowledge_scope =
+                        crate::semantic_analysis::KnowledgeScope::ProjectComplete;
+                }
+                options.has_package_dependencies = self.has_package_dependencies;
+                // BT-2795: Cross-file extensions from the ProjectIndex are
+                // passed so a same-project `ClassName >> selector` defined in
+                // another file resolves instead of producing a false Dnu hint.
+                let cross_file_extensions = self.project_index.cross_file_extensions_for(file);
                 let ctx = crate::queries::diagnostic_provider::ProjectDiagnosticContext {
                     options,
                     cross_file_classes,
+                    cross_file_extensions,
                     native_type_registry: self.native_types.clone(),
                     ..Default::default()
                 };
@@ -3681,6 +3750,63 @@ mod tests {
         assert!(
             unresolved.is_empty(),
             "cross-file class `Foo` should resolve via ProjectIndex, got: {unresolved:?}"
+        );
+    }
+
+    /// BT-2795 (ADR 0100 Rule 2 WS1): a standalone extension defined in one
+    /// file must be visible to another file's diagnostics — the false `Dnu`
+    /// hint on a same-project cross-file extension disappears.
+    #[test]
+    fn diagnostics_resolve_cross_file_extension_via_project_index() {
+        let mut service = SimpleLanguageService::new();
+        let ext_file = Utf8PathBuf::from("src/StringShout.bt");
+        let use_file = Utf8PathBuf::from("src/UseShout.bt");
+
+        service.update_file(
+            ext_file.clone(),
+            "String >> shoutLouder => self\n".to_string(),
+        );
+        service.update_file(
+            use_file.clone(),
+            "Object subclass: UseShout\n  class demo =>\n    \"abc\" shoutLouder\n".to_string(),
+        );
+
+        let diags = service.diagnostics(&use_file);
+        let dnu: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("shoutLouder"))
+            .collect();
+        assert!(
+            dnu.is_empty(),
+            "cross-file extension `String >> shoutLouder` should resolve, got: {dnu:?}"
+        );
+    }
+
+    /// BT-2795: removing the defining file makes the extension unresolved again.
+    #[test]
+    fn diagnostics_cross_file_extension_gone_after_remove() {
+        let mut service = SimpleLanguageService::new();
+        let ext_file = Utf8PathBuf::from("src/StringShout.bt");
+        let use_file = Utf8PathBuf::from("src/UseShout.bt");
+
+        service.update_file(
+            ext_file.clone(),
+            "String >> shoutLouder => self\n".to_string(),
+        );
+        service.update_file(
+            use_file.clone(),
+            "Object subclass: UseShout\n  class demo =>\n    \"abc\" shoutLouder\n".to_string(),
+        );
+        service.remove_file(&ext_file);
+
+        let diags = service.diagnostics(&use_file);
+        let dnu: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("shoutLouder"))
+            .collect();
+        assert!(
+            !dnu.is_empty(),
+            "after removing the defining file the extension should be unresolved again"
         );
     }
 

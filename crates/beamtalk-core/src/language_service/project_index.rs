@@ -19,6 +19,7 @@
 //! └── stdlib class names (pre-indexed from lib/*.bt)
 //! ```
 
+use crate::compilation::extension_index::ExtensionIndex;
 use crate::semantic_analysis::{ClassHierarchy, SemanticError};
 use crate::source_analysis::{Diagnostic, lex_with_eof, parse};
 use camino::Utf8PathBuf;
@@ -44,6 +45,11 @@ pub struct ProjectIndex {
     stdlib_class_names: HashSet<EcoString>,
     /// Tracks which files were loaded as stdlib sources.
     stdlib_files: HashSet<Utf8PathBuf>,
+    /// Per-file standalone extension definitions (BT-2795, ADR 0066).
+    ///
+    /// Tracked per file so incremental updates can drop a file's stale
+    /// extensions; merged on demand by [`Self::cross_file_extensions_for`].
+    file_extensions: HashMap<Utf8PathBuf, ExtensionIndex>,
 }
 
 impl ProjectIndex {
@@ -56,6 +62,7 @@ impl ProjectIndex {
             file_hierarchies: HashMap::new(),
             stdlib_class_names: HashSet::new(),
             stdlib_files: HashSet::new(),
+            file_extensions: HashMap::new(),
         }
     }
 
@@ -103,6 +110,13 @@ impl ProjectIndex {
                 .file_hierarchies
                 .insert(path.clone(), file_hierarchy.clone());
             index.merged_hierarchy.merge(&file_hierarchy);
+
+            // BT-2795: Track standalone extensions defined in stdlib sources
+            // so they are visible to cross-file diagnostics like any other
+            // indexed file's extensions.
+            let mut extensions = ExtensionIndex::new();
+            extensions.add_module(&module, path.as_std_path());
+            index.set_file_extensions(path.clone(), extensions);
         }
         (Ok(index), all_diagnostics)
     }
@@ -140,6 +154,31 @@ impl ProjectIndex {
         self.merged_hierarchy.merge(hierarchy);
     }
 
+    /// Record the standalone extension definitions contributed by `file`
+    /// (BT-2795). An empty index clears the file's entry. Call after
+    /// [`Self::update_file`] whenever the file is (re)indexed.
+    pub fn set_file_extensions(&mut self, file: Utf8PathBuf, extensions: ExtensionIndex) {
+        if extensions.is_empty() {
+            self.file_extensions.remove(&file);
+        } else {
+            self.file_extensions.insert(file, extensions);
+        }
+    }
+
+    /// Returns a merged extension index over every indexed file except
+    /// `file` (BT-2795) — the extension analogue of
+    /// [`Self::cross_file_class_infos_for`].
+    #[must_use]
+    pub fn cross_file_extensions_for(&self, file: &Utf8PathBuf) -> ExtensionIndex {
+        let mut merged = ExtensionIndex::new();
+        for (path, index) in &self.file_extensions {
+            if path != file {
+                merged.merge(index);
+            }
+        }
+        merged
+    }
+
     /// Remove a file from the index.
     ///
     /// Classes defined only in this file are removed from the merged hierarchy.
@@ -149,6 +188,7 @@ impl ProjectIndex {
             // Stdlib files are never truly removed — preserve their hierarchy
             return;
         }
+        self.file_extensions.remove(file);
         if let Some(old_names) = self.file_classes.remove(file) {
             self.file_hierarchies.remove(file);
 
@@ -563,6 +603,61 @@ mod tests {
             class.superclass.as_deref(),
             Some("Object"),
             "Real class Foo should not be overwritten by protocol Foo from another file"
+        );
+    }
+}
+
+#[cfg(test)]
+mod extension_tests {
+    use super::*;
+
+    fn parse_and_index(index: &mut ProjectIndex, path: &str, source: &str) {
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        index.update_file(Utf8PathBuf::from(path), &hierarchy);
+        let mut extensions = ExtensionIndex::new();
+        extensions.add_module(&module, std::path::Path::new(path));
+        index.set_file_extensions(Utf8PathBuf::from(path), extensions);
+    }
+
+    #[test]
+    fn cross_file_extensions_exclude_own_file() {
+        let mut index = ProjectIndex::new();
+        parse_and_index(&mut index, "a.bt", "String >> fromA => self\n");
+        parse_and_index(&mut index, "b.bt", "String >> fromB => self\n");
+
+        let for_a = index.cross_file_extensions_for(&Utf8PathBuf::from("a.bt"));
+        assert_eq!(for_a.len(), 1, "a.bt should see only b.bt's extension");
+        let for_b = index.cross_file_extensions_for(&Utf8PathBuf::from("b.bt"));
+        assert_eq!(for_b.len(), 1, "b.bt should see only a.bt's extension");
+    }
+
+    #[test]
+    fn removed_file_extensions_disappear() {
+        let mut index = ProjectIndex::new();
+        parse_and_index(&mut index, "a.bt", "String >> fromA => self\n");
+        parse_and_index(&mut index, "b.bt", "Object subclass: B\n  m => 1\n");
+
+        index.remove_file(&Utf8PathBuf::from("a.bt"));
+        let for_b = index.cross_file_extensions_for(&Utf8PathBuf::from("b.bt"));
+        assert!(
+            for_b.is_empty(),
+            "removed file's extensions must not linger"
+        );
+    }
+
+    #[test]
+    fn empty_extension_set_clears_entry() {
+        let mut index = ProjectIndex::new();
+        parse_and_index(&mut index, "a.bt", "String >> fromA => self\n");
+        // Re-index the same file without extensions.
+        parse_and_index(&mut index, "a.bt", "Object subclass: A\n  m => 1\n");
+
+        let for_other = index.cross_file_extensions_for(&Utf8PathBuf::from("other.bt"));
+        assert!(
+            for_other.is_empty(),
+            "re-indexing without extensions must clear the stale entry"
         );
     }
 }

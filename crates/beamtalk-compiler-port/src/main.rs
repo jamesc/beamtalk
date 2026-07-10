@@ -257,6 +257,9 @@ fn parse_class_info_from_meta_term(
         handle_scope: map_get(m, "handle_scope")
             .and_then(term_to_atom)
             .map(ecow::EcoString::from),
+        // BEAM metadata comes from successfully-compiled modules, whose
+        // surfaces are complete by construction (BT-2796).
+        surface_incomplete: false,
         is_typed,
         state,
         state_types,
