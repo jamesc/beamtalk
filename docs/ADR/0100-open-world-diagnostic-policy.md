@@ -3,6 +3,13 @@
 ## Status
 Proposed (2026-06-27)
 
+**Implementation status (2026-07-10):** Rule 1 (BT-2793) and Rule 3 (BT-2793)
+are implemented. Rule 2 was split out to BT-2794 and remains unimplemented,
+blocked on BT-2795 (WS1: project-wide extension visibility) and BT-2796 (WS2:
+project-wide class hierarchy) actually landing and being verified complete —
+see the Rule 2 section and its "Sequencing guard" below. Status stays
+**Proposed** rather than Accepted until Rule 2 also lands.
+
 ## Context
 
 ### Problem statement
@@ -83,6 +90,16 @@ Concretely, three rules:
 
 ### Rule 1 — Knowledge gates severity (the "completeness ladder")
 
+**Implemented (BT-2793):** the classifier lives in
+`crates/beamtalk-core/src/semantic_analysis/receiver_knowledge.rs`
+(`ReceiverKnowledge` / `classify_receiver`), consulted from the four sites
+that previously re-derived the decision independently:
+`type_checker/validation.rs::check_class_side_send` and
+`check_instance_selector`, and `protocol_registry.rs::check_conformance_to_protocol`
+and `check_class_side_conformance`. This was a pure refactor of *where* the
+decision lives — behaviour is unchanged; the `has_cross_file_parent`
+suppression stays until Rule 2 (below) removes it.
+
 Diagnose an unresolved selector only as severely as the checker's certainty
 warrants. Absence of evidence is not evidence of absence in an open world.
 
@@ -130,6 +147,16 @@ Because severity hinges entirely on this classification, the
 
 ### Rule 2 — Completeness improves accuracy, it does not raise severity
 
+**Not implemented — split to BT-2794, blocked on BT-2795 (WS1) and BT-2796
+(WS2).** BT-2251 ("Epic: project-scoped compilation & type-checking") is
+marked Done in Linear but shipped only this ADR and the ADR 0070 amendment
+document (PR #2788), not the WS1/WS2 code — the precondition below does not
+yet hold. Implementing Rule 2 before it does would, per the "Sequencing
+guard" a few paragraphs down, "turn every previously-suppressed site into a
+fresh false positive." BT-2793 implements Rule 1 and Rule 3 only, which have
+no WS1/WS2 dependency, and keeps the `has_cross_file_parent` suppression this
+rule describes removing.
+
 When project-scoped compilation (BT-2251 WS1/WS2) gives the checker complete
 intra-project knowledge, it **replaces the incompleteness workarounds with real
 resolution** — but the *default severity is unchanged*. Specifically:
@@ -167,6 +194,20 @@ landed." A feature flag gates the removal until the corresponding workstream is
 verified, so a partially-landed epic never regresses diagnostics.
 
 ### Rule 3 — Escalation is opt-in and per-category
+
+**Implemented (BT-2793):** the `[diagnostics]` table in `beamtalk.toml`,
+parsed in `crates/beamtalk-cli/src/commands/manifest.rs`
+(`DiagnosticsTable` / `DiagnosticSeverityOverride`) and applied in
+`crates/beamtalk-cli/src/beam_compiler.rs`
+(`apply_diagnostics_table`, ahead of the `--warnings-as-errors` promotion
+pass — precedence steps 2 and 3 below). `apply_diagnostics_table` enforces a
+**severity floor**: it never touches a diagnostic that already carries
+`Severity::Error` (e.g. `ActorNew`, `Inheritance`, `EmptyBody` — hard
+structural errors, not Rule 1 completeness-ladder output), so the table can
+only move the soft diagnostics this rule is about, never silence a
+guaranteed compile error. See the
+[Package Management guide](../beamtalk-packages.md) (`[diagnostics]` Section)
+for the user-facing schema, the severity floor, and examples.
 
 Promotion of soft diagnostics to build-failing `Error`s is never the default. It
 is requested explicitly:
@@ -412,18 +453,25 @@ it rather than inventing it.
 
 This ADR is policy; the code changes ride the BT-2251 workstreams.
 
-- **Semantic analysis** (`crates/beamtalk-core/src/semantic_analysis/type_checker/`):
-  centralise the severity decision behind the completeness ladder (Rule 1) so
-  `validation.rs` / `inference.rs` consult one place rather than scattered
-  `Diagnostic::hint` / `::warning` calls. Introduce an explicit
-  "receiver knowledge" notion (`Dynamic` / `Open` / `ClosedComplete`) that the
-  send-checker switches on.
+- **Semantic analysis** (`crates/beamtalk-core/src/semantic_analysis/`):
+  **done (BT-2793).** The severity decision is centralised behind the
+  completeness ladder (Rule 1) in `receiver_knowledge.rs` — an explicit
+  "receiver knowledge" notion (`Dynamic` / `Open` / `ClosedComplete`,
+  `classify_receiver`) that `type_checker/validation.rs` and
+  `protocol_registry.rs` consult instead of each re-deriving the
+  suppression/severity decision. This was a pure refactor of *where* the
+  decision lives — `has_cross_file_parent` still forces `Open`, so behaviour
+  is unchanged pending Rule 2.
 - **Remove the cross-file-parent suppression** when project-wide hierarchy (WS2)
   and project-wide extension registration (WS1) are in place — resolution
-  replaces suppression (Rule 2).
-- **Escalation** (`crates/beamtalk-cli/src/beam_compiler.rs`): no change to
-  `--warnings-as-errors` now; the `beamtalk.toml` per-category table (Rule 3) is a
-  separate, later issue.
+  replaces suppression (Rule 2). **Not done** — split to BT-2794, blocked on
+  BT-2795 (WS1) and BT-2796 (WS2).
+- **Escalation** (`crates/beamtalk-cli/src/beam_compiler.rs`,
+  `crates/beamtalk-cli/src/commands/manifest.rs`): **done (BT-2793).** The
+  `beamtalk.toml` `[diagnostics]` per-category table (Rule 3) is implemented;
+  `--warnings-as-errors` itself is unchanged (still promotes `Warning`/`Hint`
+  to `Error`, excluding the gradual-migration categories unless the table
+  explicitly overrides one of them).
 - **No runtime/codegen changes.**
 - **Coordination with ADR 0101 (`native:` for stateless Objects):** the
   receiver-knowledge scan must count `self delegate` `native:` methods as
@@ -454,7 +502,8 @@ transitions warrant care:
 
 ## References
 - Related issues: BT-2251 (epic: project-scoped compilation & type-checking;
-  WS5 is this policy), BT-2250, BT-2228
+  WS5 is this policy), BT-2250, BT-2228; BT-2793 (Rule 1 + Rule 3,
+  implemented), BT-2794 (Rule 2, blocked on BT-2795/BT-2796)
 - Related ADRs: ADR 0024 (static-first, live-augmented tooling), ADR 0066 (open
   class extension methods), ADR 0077 (type coverage visibility / `@expect`),
   ADR 0070 (package namespaces & dependencies — cross-package interface)

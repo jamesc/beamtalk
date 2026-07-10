@@ -721,6 +721,13 @@ fn execute_build_passes(
         .full_manifest
         .as_ref()
         .is_some_and(|m| m.package.strict_deps);
+    // ADR 0100 Rule 3 (BT-2793): the package's `[diagnostics]` severity-override
+    // table, empty when there's no manifest or no `[diagnostics]` section.
+    let diagnostics_overrides = env
+        .full_manifest
+        .as_ref()
+        .map(|m| m.diagnostics.clone())
+        .unwrap_or_default();
 
     let registry_ref = if index.dep_registry.is_empty() {
         None
@@ -737,6 +744,7 @@ fn execute_build_passes(
         dep_registry: registry_ref,
         strict_deps,
         native_type_registry,
+        diagnostics_overrides,
     };
     // BT-2014: Collect diagnostics from all compiled files for the summary.
     let mut all_build_diags: Vec<beamtalk_core::source_analysis::Diagnostic> = Vec::new();

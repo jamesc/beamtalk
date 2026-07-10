@@ -421,6 +421,18 @@ fn compile_dependency_with_context(
         dep_registry: None, // No collision detection within dependency compilation
         strict_deps: false, // Dependencies use their own strict-deps setting, not root's
         native_type_registry: None, // Dependencies don't need FFI type checking
+        // ADR 0100 Rule 3 (BT-2793): neither the root package's nor the
+        // dependency's own `[diagnostics]` table is applied here — this path
+        // doesn't load either manifest's `[diagnostics]` section, so
+        // dependency compilation always sees an empty table (today's Rule 1
+        // defaults). Unlike `strict_deps` (a deliberate "use the dep's own
+        // setting, not root's" policy), this is a scoping gap, not a policy
+        // choice: a dependency author's own severity overrides (e.g.
+        // suppressing a known-noisy category) are silently ignored when that
+        // package is compiled as someone else's dependency. Low practical
+        // impact — dependency diagnostics are never surfaced to or promoted
+        // for the consuming build — but worth revisiting if that changes.
+        diagnostics_overrides: crate::commands::manifest::DiagnosticsTable::new(),
     };
 
     let (core_files, module_names) = compile_sources_to_core(
