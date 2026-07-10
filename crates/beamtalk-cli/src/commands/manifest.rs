@@ -9,6 +9,7 @@
 //! See ADR 0026 for the package definition and manifest format.
 
 use beamtalk_core::compilation::{DependencyMap, DependencySource, DependencySpec, GitReference};
+use beamtalk_core::source_analysis::DiagnosticCategory;
 use camino::Utf8Path;
 use miette::{Context, IntoDiagnostic, Result};
 use serde::Deserialize;
@@ -52,6 +53,12 @@ pub struct Manifest {
     /// The optional `[native]` section containing `dependencies` for hex packages.
     #[serde(default)]
     native: Option<NativeSection>,
+    /// The optional `[diagnostics]` section — per-category severity overrides
+    /// (ADR 0100 Rule 3). Stored as raw TOML for lazy parsing.
+    ///
+    /// Use [`parse_manifest_full`] to get a validated [`DiagnosticsTable`].
+    #[serde(default)]
+    diagnostics: Option<toml::Value>,
 }
 
 /// The `[native]` section of `beamtalk.toml`.
@@ -423,6 +430,148 @@ fn parse_native_dependencies(native: Option<&NativeSection>) -> Result<NativeDep
     Ok(result)
 }
 
+/// A per-category diagnostic severity override (ADR 0100 Rule 3).
+///
+/// Values map to the `[diagnostics]` table strings in `beamtalk.toml`:
+/// `"off"` (drop the diagnostic entirely), `"lint"` / `"hint"` / `"warn"` /
+/// `"error"` (set that [`Severity`](beamtalk_core::source_analysis::Severity)
+/// as the category's *base* severity for the package, ahead of Rule 1's
+/// completeness-ladder default and behind site-level `@expect`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiagnosticSeverityOverride {
+    /// Drop diagnostics in this category entirely — never shown, never
+    /// promoted by `--warnings-as-errors`.
+    Off,
+    /// Style/redundancy-lint severity (suppressed outside `beamtalk lint`).
+    Lint,
+    /// Informational-hint severity.
+    Hint,
+    /// Warning severity.
+    Warn,
+    /// Error severity — fails the build unconditionally, independent of
+    /// `--warnings-as-errors`.
+    Error,
+}
+
+impl DiagnosticSeverityOverride {
+    /// Parses one of the four accepted `[diagnostics]` value strings.
+    fn parse(s: &str) -> Result<Self, String> {
+        match s {
+            "off" => Ok(Self::Off),
+            "lint" => Ok(Self::Lint),
+            "hint" => Ok(Self::Hint),
+            "warn" => Ok(Self::Warn),
+            "error" => Ok(Self::Error),
+            other => Err(format!(
+                "invalid diagnostic severity '{other}' — expected one of \
+                 \"off\", \"lint\", \"hint\", \"warn\", \"error\""
+            )),
+        }
+    }
+}
+
+/// A parsed and validated `[diagnostics]` table (ADR 0100 Rule 3): per-category
+/// severity overrides, keyed by [`DiagnosticCategory`]. Empty when the
+/// section is absent — absence preserves today's Rule 1 defaults.
+pub type DiagnosticsTable = BTreeMap<DiagnosticCategory, DiagnosticSeverityOverride>;
+
+/// Maps a `[diagnostics]` table key (kebab-case) to its [`DiagnosticCategory`].
+///
+/// Mirrors the `Debug`-derived `PascalCase` variant names
+/// (`crates/beamtalk-core/src/source_analysis/parser/mod.rs`), converted to
+/// kebab-case for TOML key ergonomics (e.g. `UnresolvedClass` →
+/// `unresolved-class`).
+fn diagnostic_category_from_kebab(key: &str) -> Option<DiagnosticCategory> {
+    Some(match key {
+        "dnu" => DiagnosticCategory::Dnu,
+        "type" => DiagnosticCategory::Type,
+        "unused" => DiagnosticCategory::Unused,
+        "empty-body" => DiagnosticCategory::EmptyBody,
+        "lint" => DiagnosticCategory::Lint,
+        "dead-assignment" => DiagnosticCategory::DeadAssignment,
+        "extension-conflict" => DiagnosticCategory::ExtensionConflict,
+        "deprecation" => DiagnosticCategory::Deprecation,
+        "actor-new" => DiagnosticCategory::ActorNew,
+        "visibility" => DiagnosticCategory::Visibility,
+        "unresolved-class" => DiagnosticCategory::UnresolvedClass,
+        "unresolved-ffi" => DiagnosticCategory::UnresolvedFfi,
+        "arity-mismatch" => DiagnosticCategory::ArityMismatch,
+        "shadowed-class" => DiagnosticCategory::ShadowedClass,
+        "type-annotation" => DiagnosticCategory::TypeAnnotation,
+        "inheritance" => DiagnosticCategory::Inheritance,
+        "sendability" => DiagnosticCategory::Sendability,
+        _ => return None,
+    })
+}
+
+/// All valid `[diagnostics]` table keys, in the same order as
+/// [`diagnostic_category_from_kebab`] — used to build the "did you mean one
+/// of ..." error message for an unrecognised key.
+const DIAGNOSTIC_CATEGORY_KEYS: &[&str] = &[
+    "dnu",
+    "type",
+    "unused",
+    "empty-body",
+    "lint",
+    "dead-assignment",
+    "extension-conflict",
+    "deprecation",
+    "actor-new",
+    "visibility",
+    "unresolved-class",
+    "unresolved-ffi",
+    "arity-mismatch",
+    "shadowed-class",
+    "type-annotation",
+    "inheritance",
+    "sendability",
+];
+
+/// Parse and validate the `[diagnostics]` section of a manifest (ADR 0100 Rule 3).
+///
+/// Returns an empty table if the section is missing or empty — absence
+/// preserves today's Rule 1 completeness-ladder defaults.
+fn parse_diagnostics_table(diagnostics: Option<&toml::Value>) -> Result<DiagnosticsTable> {
+    let Some(raw_value) = diagnostics else {
+        return Ok(BTreeMap::new());
+    };
+
+    let table = raw_value.as_table().ok_or_else(|| {
+        miette::miette!(
+            "[diagnostics] must be a table, not a {}",
+            value_type_name(raw_value)
+        )
+    })?;
+
+    if table.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+
+    let mut result = DiagnosticsTable::new();
+    for (key, value) in table {
+        let Some(category) = diagnostic_category_from_kebab(key) else {
+            miette::bail!(
+                "[diagnostics] has unknown category '{key}' — expected one of: {}",
+                DIAGNOSTIC_CATEGORY_KEYS.join(", ")
+            );
+        };
+
+        let severity_str = value.as_str().ok_or_else(|| {
+            miette::miette!(
+                "[diagnostics] '{key}' must be a severity string, not a {}",
+                value_type_name(value)
+            )
+        })?;
+
+        let severity = DiagnosticSeverityOverride::parse(severity_str)
+            .map_err(|msg| miette::miette!("[diagnostics] '{key}': {msg}"))?;
+
+        result.insert(category, severity);
+    }
+
+    Ok(result)
+}
+
 /// Return a human-readable TOML type name for error messages.
 fn value_type_name(value: &toml::Value) -> &'static str {
     match value {
@@ -463,6 +612,9 @@ pub struct ParsedManifest {
     /// `[native.dependencies]` is absent).
     #[allow(dead_code)] // Used by tests; will be used for rebar.config generation
     pub native_dependencies: NativeDependencyMap,
+    /// The parsed and validated `[diagnostics]` severity overrides (ADR 0100
+    /// Rule 3; empty if the section is absent).
+    pub diagnostics: DiagnosticsTable,
 }
 
 /// Parse a `beamtalk.toml` manifest file.
@@ -497,11 +649,15 @@ pub fn parse_manifest_full(path: &Utf8Path) -> Result<ParsedManifest> {
     let native_dependencies = parse_native_dependencies(manifest.native.as_ref())
         .wrap_err_with(|| format!("Failed to parse [native.dependencies] in '{path}'"))?;
 
+    let diagnostics = parse_diagnostics_table(manifest.diagnostics.as_ref())
+        .wrap_err_with(|| format!("Failed to parse [diagnostics] in '{path}'"))?;
+
     Ok(ParsedManifest {
         package: manifest.package,
         application: manifest.application,
         dependencies,
         native_dependencies,
+        diagnostics,
     })
 }
 
@@ -2070,5 +2226,188 @@ utils = { path = "../utils" }
                 "error for '{constraint}' should contain '{expected_msg}', got: {err}"
             );
         }
+    }
+
+    // --- BT-2793: ADR 0100 Rule 3 `[diagnostics]` table tests ---
+
+    #[test]
+    fn test_parse_no_diagnostics_section() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+"#,
+        );
+
+        let manifest = parse_manifest_full(&path.join("beamtalk.toml")).unwrap();
+        assert!(
+            manifest.diagnostics.is_empty(),
+            "absent [diagnostics] must preserve today's Rule 1 defaults (empty table)"
+        );
+    }
+
+    #[test]
+    fn test_parse_empty_diagnostics_section() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[diagnostics]
+"#,
+        );
+
+        let manifest = parse_manifest_full(&path.join("beamtalk.toml")).unwrap();
+        assert!(manifest.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn test_parse_diagnostics_table_all_categories() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[diagnostics]
+dnu = "hint"
+type = "hint"
+unused = "warn"
+empty-body = "error"
+lint = "off"
+dead-assignment = "warn"
+extension-conflict = "error"
+deprecation = "warn"
+actor-new = "error"
+visibility = "error"
+unresolved-class = "warn"
+unresolved-ffi = "warn"
+arity-mismatch = "warn"
+shadowed-class = "warn"
+type-annotation = "hint"
+inheritance = "error"
+sendability = "hint"
+"#,
+        );
+
+        let manifest = parse_manifest_full(&path.join("beamtalk.toml")).unwrap();
+        assert_eq!(manifest.diagnostics.len(), 17);
+        assert_eq!(
+            manifest.diagnostics[&DiagnosticCategory::Dnu],
+            DiagnosticSeverityOverride::Hint
+        );
+        assert_eq!(
+            manifest.diagnostics[&DiagnosticCategory::UnresolvedClass],
+            DiagnosticSeverityOverride::Warn
+        );
+        assert_eq!(
+            manifest.diagnostics[&DiagnosticCategory::Lint],
+            DiagnosticSeverityOverride::Off
+        );
+        assert_eq!(
+            manifest.diagnostics[&DiagnosticCategory::Inheritance],
+            DiagnosticSeverityOverride::Error
+        );
+    }
+
+    #[test]
+    fn test_reject_diagnostics_unknown_category() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[diagnostics]
+not-a-category = "warn"
+"#,
+        );
+
+        let result = parse_manifest_full(&path.join("beamtalk.toml"));
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("unknown category"),
+            "should mention unknown category: {err}"
+        );
+    }
+
+    #[test]
+    fn test_reject_diagnostics_invalid_severity() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[diagnostics]
+dnu = "critical"
+"#,
+        );
+
+        let result = parse_manifest_full(&path.join("beamtalk.toml"));
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("invalid diagnostic severity"),
+            "should mention invalid severity: {err}"
+        );
+    }
+
+    #[test]
+    fn test_reject_diagnostics_non_string_value() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[diagnostics]
+dnu = 42
+"#,
+        );
+
+        let result = parse_manifest_full(&path.join("beamtalk.toml"));
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("severity string"),
+            "should mention expected string type: {err}"
+        );
+    }
+
+    #[test]
+    fn test_diagnostics_table_does_not_affect_other_sections() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[diagnostics]
+dnu = "error"
+"#,
+        );
+
+        let manifest = parse_manifest_full(&path.join("beamtalk.toml")).unwrap();
+        assert!(manifest.dependencies.is_empty());
+        assert!(manifest.native_dependencies.is_empty());
+        assert_eq!(manifest.diagnostics.len(), 1);
     }
 }

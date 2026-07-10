@@ -700,6 +700,11 @@ pub struct CompileContext<'a> {
     /// so that `Erlang <module> <function>:` calls get return type inference and
     /// argument type checking in build output, not just the LSP.
     pub native_type_registry: Option<std::sync::Arc<NativeTypeRegistry>>,
+    /// Per-category diagnostic severity overrides from `beamtalk.toml`'s
+    /// `[diagnostics]` section (ADR 0100 Rule 3). Empty when the package has
+    /// no manifest or no `[diagnostics]` section — absence preserves today's
+    /// Rule 1 completeness-ladder defaults.
+    pub diagnostics_overrides: crate::commands::manifest::DiagnosticsTable,
 }
 
 /// Writes Core Erlang code with primitive bindings.
@@ -794,6 +799,81 @@ pub fn compile_source(
     .map(|_diags| ())
 }
 
+/// Apply a package's `[diagnostics]` severity-override table (ADR 0100 Rule 3)
+/// to a list of diagnostics.
+///
+/// For each diagnostic whose category has a table entry: `"off"` drops the
+/// diagnostic; `"lint"` / `"hint"` / `"warn"` / `"error"` rewrite its
+/// `severity` in place, becoming the category's *base* severity for the
+/// package. Diagnostics with no category, or whose category has no table
+/// entry, pass through unchanged — an empty table (no manifest, or no
+/// `[diagnostics]` section) is a complete no-op, preserving today's Rule 1
+/// defaults.
+///
+/// **Severity floor:** a diagnostic that already carries `Severity::Error`
+/// is never touched by the table, even if its category has an entry. Rule 3
+/// is an *escalation* mechanism for the soft, open-world diagnostics the
+/// completeness ladder (Rule 1) produces (`Hint`/`Warning`) — it is not a
+/// blanket switch that can quietly turn a hard structural compile error
+/// (e.g. `ActorNew`, `Inheritance`, `EmptyBody`) into a passing build.
+///
+/// Must run after `@expect` suppression (Rule 3 precedence step 1, applied
+/// inside `compute_project_diagnostics`) and before the `--warnings-as-errors`
+/// promotion pass, which is a *final* pass over whatever this step resolves
+/// to (ADR 0100 Rule 3).
+fn apply_diagnostics_table(
+    diagnostics: Vec<beamtalk_core::source_analysis::Diagnostic>,
+    table: &crate::commands::manifest::DiagnosticsTable,
+) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
+    use crate::commands::manifest::DiagnosticSeverityOverride;
+    use beamtalk_core::source_analysis::Severity;
+
+    if table.is_empty() {
+        return diagnostics;
+    }
+
+    diagnostics
+        .into_iter()
+        .filter_map(|mut diagnostic| {
+            let Some(category) = diagnostic.category else {
+                return Some(diagnostic);
+            };
+            // Severity floor: a diagnostic that already arrived as `Error`
+            // (e.g. `ActorNew` — BT-1524's "Actor subclass must use spawn,
+            // not new" — or `Inheritance` / `EmptyBody` hard-error checks) is
+            // never a Rule 1 completeness-ladder soft diagnostic; it's a
+            // structural compile error unrelated to open-world uncertainty.
+            // ADR 0100 Rule 3 frames the table as opt-in *escalation* of soft
+            // diagnostics, not silent de-escalation of hard ones — a `warn`
+            // or `off` entry for one of these categories must not quietly
+            // turn a guaranteed compile error into a passing build.
+            if diagnostic.severity == Severity::Error {
+                return Some(diagnostic);
+            }
+            match table.get(&category) {
+                None => Some(diagnostic),
+                Some(DiagnosticSeverityOverride::Off) => None,
+                Some(DiagnosticSeverityOverride::Lint) => {
+                    diagnostic.severity = Severity::Lint;
+                    Some(diagnostic)
+                }
+                Some(DiagnosticSeverityOverride::Hint) => {
+                    diagnostic.severity = Severity::Hint;
+                    Some(diagnostic)
+                }
+                Some(DiagnosticSeverityOverride::Warn) => {
+                    diagnostic.severity = Severity::Warning;
+                    Some(diagnostic)
+                }
+                Some(DiagnosticSeverityOverride::Error) => {
+                    diagnostic.severity = Severity::Error;
+                    Some(diagnostic)
+                }
+            }
+        })
+        .collect()
+}
+
 /// Compiles a Beamtalk source file to Core Erlang with primitive bindings.
 ///
 /// BT-295 / ADR 0007 Phase 3: Same as [`compile_source`] but accepts a
@@ -865,12 +945,25 @@ pub(crate) fn compile_source_with_bindings(
         &diag_ctx,
     );
 
+    // ADR 0100 Rule 3 (BT-2793): apply the package's `[diagnostics]` table —
+    // precedence step 2, after `@expect` suppression (step 1, applied inside
+    // `compute_project_diagnostics` above) and ahead of the `has_errors`
+    // promotion pass below. A no-op (empty table) when the package has no
+    // manifest or no `[diagnostics]` section.
+    diagnostics = apply_diagnostics_table(diagnostics, &ctx.diagnostics_overrides);
+
     // Check for errors (and optionally treat warnings/hints as errors).
     // Deprecation-category warnings (BT-1529) and structural validation warnings
     // (BT-1726: UnresolvedClass, UnresolvedFfi, ArityMismatch) are excluded from
     // warnings-as-errors because they can produce false positives when compiling
     // single files that reference classes, FFI modules, or arities defined in
     // other compilation units.
+    //
+    // ADR 0100 Rule 3 (BT-2793): that exclusion is itself the Rule 1 default
+    // for those categories — an explicit `[diagnostics]` table entry for one
+    // of them is a deliberate, package-level opt back in to promotion, so it
+    // wins over the exclusion (per the "explicit table value wins over the
+    // exclusion" precedence note).
     let has_errors = diagnostics.iter().any(|d| {
         d.severity == beamtalk_core::source_analysis::Severity::Error
             || (options.warnings_as_errors
@@ -879,7 +972,7 @@ pub(crate) fn compile_source_with_bindings(
                     beamtalk_core::source_analysis::Severity::Warning
                         | beamtalk_core::source_analysis::Severity::Hint
                 )
-                && !matches!(
+                && (!matches!(
                     d.category,
                     Some(
                         beamtalk_core::source_analysis::DiagnosticCategory::Deprecation
@@ -887,7 +980,9 @@ pub(crate) fn compile_source_with_bindings(
                             | beamtalk_core::source_analysis::DiagnosticCategory::UnresolvedFfi
                             | beamtalk_core::source_analysis::DiagnosticCategory::ArityMismatch
                     )
-                ))
+                ) || d
+                    .category
+                    .is_some_and(|c| ctx.diagnostics_overrides.contains_key(&c))))
     });
 
     if !diagnostics.is_empty() {
@@ -2323,6 +2418,431 @@ end
         assert!(
             result.is_err(),
             "warnings_as_errors must override suppress_warnings: compilation should fail"
+        );
+    }
+
+    // ---- BT-2793: ADR 0100 Rule 3 `[diagnostics]` table tests ----
+
+    /// Source with a DNU hint on a known, closed receiver (`String` has no
+    /// `frobnicate`) — mirrors the fixture `lint.rs` uses for the same hint.
+    const DNU_HINT_SOURCE: &str = "\"hello\" frobnicate";
+
+    /// Source with a top-level reference to a class that doesn't exist —
+    /// triggers `DiagnosticCategory::UnresolvedClass` at `Warning` severity
+    /// (see `structural_validators::tests::test_unresolved_class_warns_on_unknown`).
+    const UNRESOLVED_CLASS_SOURCE: &str = "NonExistentClassBt2793";
+
+    fn diagnostics_table_ctx(
+        table: crate::commands::manifest::DiagnosticsTable,
+    ) -> CompileContext<'static> {
+        CompileContext {
+            diagnostics_overrides: table,
+            ..CompileContext::default()
+        }
+    }
+
+    /// Like [`diagnostics_table_ctx`], but with a non-empty
+    /// `pre_loaded_classes` — `check_unresolved_classes` only runs when
+    /// cross-file metadata is present (`semantic_analysis::mod.rs`'s
+    /// `has_cross_file_classes` gate), matching a real multi-file package
+    /// build. A single standalone file otherwise can't tell an unresolved
+    /// class name apart from one defined in a sibling file it hasn't seen.
+    fn diagnostics_table_ctx_with_cross_file_classes(
+        table: crate::commands::manifest::DiagnosticsTable,
+    ) -> CompileContext<'static> {
+        use beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo;
+
+        let sibling = ClassInfo {
+            name: "SiblingBt2793".into(),
+            superclass: Some("Object".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_internal: false,
+            package: None,
+            is_value: false,
+            is_native: false,
+            handle_scope: None,
+            state: vec![],
+            state_types: std::collections::HashMap::new(),
+            state_has_default: std::collections::HashMap::new(),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        };
+
+        CompileContext {
+            hierarchy: ClassHierarchyContext {
+                pre_loaded_classes: vec![sibling],
+                ..ClassHierarchyContext::default()
+            },
+            diagnostics_overrides: table,
+            ..CompileContext::default()
+        }
+    }
+
+    #[test]
+    fn test_diagnostics_table_absent_dnu_hint_does_not_fail_build() {
+        // Baseline: with no [diagnostics] table, a bare Dnu Hint never fails
+        // the build on its own (Rule 1 default).
+        let temp = TempDir::new().unwrap();
+        let temp_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let source_file = temp_path.join("dnu.bt");
+        let core_file = temp_path.join("dnu.core");
+        fs::write(&source_file, DNU_HINT_SOURCE).unwrap();
+
+        let options = beamtalk_core::CompilerOptions::default();
+        let diags = compile_source_with_bindings(
+            &source_file,
+            "dnu",
+            &core_file,
+            &options,
+            &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
+            &diagnostics_table_ctx(crate::commands::manifest::DiagnosticsTable::new()),
+            None,
+        )
+        .expect("Dnu hint alone must not fail the build");
+
+        assert!(
+            diags.iter().any(
+                |d| d.category == Some(beamtalk_core::source_analysis::DiagnosticCategory::Dnu)
+            ),
+            "fixture should still produce a Dnu diagnostic: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_diagnostics_table_off_drops_dnu_diagnostic() {
+        let temp = TempDir::new().unwrap();
+        let temp_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let source_file = temp_path.join("dnu.bt");
+        let core_file = temp_path.join("dnu.core");
+        fs::write(&source_file, DNU_HINT_SOURCE).unwrap();
+
+        let mut table = crate::commands::manifest::DiagnosticsTable::new();
+        table.insert(
+            beamtalk_core::source_analysis::DiagnosticCategory::Dnu,
+            crate::commands::manifest::DiagnosticSeverityOverride::Off,
+        );
+
+        let options = beamtalk_core::CompilerOptions::default();
+        let diags = compile_source_with_bindings(
+            &source_file,
+            "dnu",
+            &core_file,
+            &options,
+            &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
+            &diagnostics_table_ctx(table),
+            None,
+        )
+        .expect("off-category diagnostics must not fail the build");
+
+        assert!(
+            !diags.iter().any(
+                |d| d.category == Some(beamtalk_core::source_analysis::DiagnosticCategory::Dnu)
+            ),
+            "dnu = \"off\" must drop the Dnu diagnostic entirely: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn test_diagnostics_table_expect_directive_wins_over_error_override() {
+        // ADR 0100 Rule 3 precedence step 1: a site-level `@expect dnu`
+        // always wins, regardless of the `[diagnostics]` table. `@expect`
+        // suppression runs inside `compute_project_diagnostics`, *before*
+        // `apply_diagnostics_table` — so even `dnu = "error"` never sees a
+        // diagnostic that `@expect dnu` already removed.
+        let temp = TempDir::new().unwrap();
+        let temp_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let source_file = temp_path.join("dnu.bt");
+        let core_file = temp_path.join("dnu.core");
+        fs::write(&source_file, "@expect dnu\n\"hello\" frobnicate").unwrap();
+
+        let mut table = crate::commands::manifest::DiagnosticsTable::new();
+        table.insert(
+            beamtalk_core::source_analysis::DiagnosticCategory::Dnu,
+            crate::commands::manifest::DiagnosticSeverityOverride::Error,
+        );
+
+        let options = beamtalk_core::CompilerOptions::default();
+        let result = compile_source_with_bindings(
+            &source_file,
+            "dnu",
+            &core_file,
+            &options,
+            &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
+            &diagnostics_table_ctx(table),
+            None,
+        );
+
+        assert!(
+            result.is_ok(),
+            "@expect dnu must suppress the diagnostic before dnu = \"error\" ever sees it: \
+             {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_diagnostics_table_error_fails_build_without_warnings_as_errors() {
+        // dnu = "error" sets the category's *base* severity to Error — this
+        // must fail the build unconditionally, independent of
+        // --warnings-as-errors (ADR 0100 Rule 3 precedence: the table sets
+        // base severity; --warnings-as-errors is a separate, later promotion
+        // pass over whatever the table leaves as Warning/Hint).
+        let temp = TempDir::new().unwrap();
+        let temp_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let source_file = temp_path.join("dnu.bt");
+        let core_file = temp_path.join("dnu.core");
+        fs::write(&source_file, DNU_HINT_SOURCE).unwrap();
+
+        let mut table = crate::commands::manifest::DiagnosticsTable::new();
+        table.insert(
+            beamtalk_core::source_analysis::DiagnosticCategory::Dnu,
+            crate::commands::manifest::DiagnosticSeverityOverride::Error,
+        );
+
+        let options = beamtalk_core::CompilerOptions::default();
+        let result = compile_source_with_bindings(
+            &source_file,
+            "dnu",
+            &core_file,
+            &options,
+            &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
+            &diagnostics_table_ctx(table),
+            None,
+        );
+
+        assert!(
+            result.is_err(),
+            "dnu = \"error\" must fail the build even without --warnings-as-errors: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_diagnostics_table_severity_floor_protects_hard_errors() {
+        // BT-2793 adversarial-review finding: `ActorNew` (BT-1524 — `Actor
+        // subclass new` must always fail the build) is emitted at
+        // Severity::Error unconditionally, not via the Rule 1 completeness
+        // ladder. A table entry like `actor-new = "warn"` must NOT silently
+        // downgrade it — the severity floor keeps hard structural errors
+        // out of reach of Rule 3's escalation-only table.
+        let temp = TempDir::new().unwrap();
+        let temp_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let source_file = temp_path.join("actor_new.bt");
+        let core_file = temp_path.join("actor_new.core");
+        fs::write(&source_file, ACTOR_NEW_SOURCE).unwrap();
+
+        let mut table = crate::commands::manifest::DiagnosticsTable::new();
+        table.insert(
+            beamtalk_core::source_analysis::DiagnosticCategory::ActorNew,
+            crate::commands::manifest::DiagnosticSeverityOverride::Warn,
+        );
+
+        let options = beamtalk_core::CompilerOptions::default();
+        let result = compile_source_with_bindings(
+            &source_file,
+            "actor_new",
+            &core_file,
+            &options,
+            &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
+            &diagnostics_table_ctx(table),
+            None,
+        );
+
+        assert!(
+            result.is_err(),
+            "actor-new = \"warn\" must not downgrade the hard ActorNew error: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_diagnostics_table_severity_floor_ignores_off_on_hard_error() {
+        // Same severity-floor guarantee for "off": must not silently drop a
+        // hard-error diagnostic either.
+        let temp = TempDir::new().unwrap();
+        let temp_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let source_file = temp_path.join("actor_new.bt");
+        let core_file = temp_path.join("actor_new.core");
+        fs::write(&source_file, ACTOR_NEW_SOURCE).unwrap();
+
+        let mut table = crate::commands::manifest::DiagnosticsTable::new();
+        table.insert(
+            beamtalk_core::source_analysis::DiagnosticCategory::ActorNew,
+            crate::commands::manifest::DiagnosticSeverityOverride::Off,
+        );
+
+        let options = beamtalk_core::CompilerOptions::default();
+        let result = compile_source_with_bindings(
+            &source_file,
+            "actor_new",
+            &core_file,
+            &options,
+            &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
+            &diagnostics_table_ctx(table),
+            None,
+        );
+
+        assert!(
+            result.is_err(),
+            "actor-new = \"off\" must not drop the hard ActorNew error: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_diagnostics_table_absent_unresolved_class_excluded_from_warnings_as_errors() {
+        // Baseline (today's default): UnresolvedClass is excluded from
+        // --warnings-as-errors promotion, so this must still succeed.
+        let temp = TempDir::new().unwrap();
+        let temp_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let source_file = temp_path.join("unresolved.bt");
+        let core_file = temp_path.join("unresolved.core");
+        fs::write(&source_file, UNRESOLVED_CLASS_SOURCE).unwrap();
+
+        let options = beamtalk_core::CompilerOptions {
+            warnings_as_errors: true,
+            ..Default::default()
+        };
+        let result = compile_source_with_bindings(
+            &source_file,
+            "unresolved",
+            &core_file,
+            &options,
+            &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
+            &diagnostics_table_ctx_with_cross_file_classes(
+                crate::commands::manifest::DiagnosticsTable::new(),
+            ),
+            None,
+        );
+
+        assert!(
+            result.is_ok(),
+            "UnresolvedClass must stay excluded from --warnings-as-errors with no \
+             [diagnostics] override: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_diagnostics_table_explicit_entry_lifts_gradual_migration_exclusion() {
+        // An explicit [diagnostics] entry for a gradual-migration category
+        // (UnresolvedClass) is a deliberate opt back in to promotion — it
+        // must win over the default --warnings-as-errors exclusion (ADR 0100
+        // Rule 3: "explicit table value wins over the exclusion").
+        let temp = TempDir::new().unwrap();
+        let temp_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let source_file = temp_path.join("unresolved.bt");
+        let core_file = temp_path.join("unresolved.core");
+        fs::write(&source_file, UNRESOLVED_CLASS_SOURCE).unwrap();
+
+        let mut table = crate::commands::manifest::DiagnosticsTable::new();
+        table.insert(
+            beamtalk_core::source_analysis::DiagnosticCategory::UnresolvedClass,
+            crate::commands::manifest::DiagnosticSeverityOverride::Warn,
+        );
+
+        let options = beamtalk_core::CompilerOptions {
+            warnings_as_errors: true,
+            ..Default::default()
+        };
+        let result = compile_source_with_bindings(
+            &source_file,
+            "unresolved",
+            &core_file,
+            &options,
+            &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
+            &diagnostics_table_ctx_with_cross_file_classes(table),
+            None,
+        );
+
+        assert!(
+            result.is_err(),
+            "explicit unresolved-class = \"warn\" + --warnings-as-errors must fail: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_diagnostics_table_hint_override_also_lifts_gradual_migration_exclusion() {
+        // BT-2793 adversarial-review finding: the exclusion-lift keys off
+        // table *presence* for the category, not the chosen severity value —
+        // per ADR 0100 Rule 3's literal precedence note ("the explicit table
+        // value wins over the exclusion"), so `unresolved-class = "hint"`
+        // (not just `"warn"`) also opts the category back into
+        // --warnings-as-errors promotion. This is intentional (see the
+        // `[diagnostics]` section of docs/beamtalk-packages.md) — pinned here
+        // so the behaviour doesn't drift silently.
+        let temp = TempDir::new().unwrap();
+        let temp_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let source_file = temp_path.join("unresolved.bt");
+        let core_file = temp_path.join("unresolved.core");
+        fs::write(&source_file, UNRESOLVED_CLASS_SOURCE).unwrap();
+
+        let mut table = crate::commands::manifest::DiagnosticsTable::new();
+        table.insert(
+            beamtalk_core::source_analysis::DiagnosticCategory::UnresolvedClass,
+            crate::commands::manifest::DiagnosticSeverityOverride::Hint,
+        );
+
+        let options = beamtalk_core::CompilerOptions {
+            warnings_as_errors: true,
+            ..Default::default()
+        };
+        let result = compile_source_with_bindings(
+            &source_file,
+            "unresolved",
+            &core_file,
+            &options,
+            &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
+            &diagnostics_table_ctx_with_cross_file_classes(table),
+            None,
+        );
+
+        assert!(
+            result.is_err(),
+            "unresolved-class = \"hint\" + --warnings-as-errors must also fail \
+             (any explicit entry lifts the exclusion, not just \"warn\"): {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_diagnostics_table_lint_override_stays_inert_under_warnings_as_errors() {
+        // Contrast with the "hint" case above: `"lint"` rewrites the
+        // diagnostic to `Severity::Lint`, which `--warnings-as-errors` never
+        // promotes (it only promotes `Warning`/`Hint`) — so even though the
+        // exclusion is lifted, the build still succeeds. Lint diagnostics are
+        // also suppressed from normal build output entirely (shown only by
+        // `beamtalk lint`).
+        let temp = TempDir::new().unwrap();
+        let temp_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let source_file = temp_path.join("unresolved.bt");
+        let core_file = temp_path.join("unresolved.core");
+        fs::write(&source_file, UNRESOLVED_CLASS_SOURCE).unwrap();
+
+        let mut table = crate::commands::manifest::DiagnosticsTable::new();
+        table.insert(
+            beamtalk_core::source_analysis::DiagnosticCategory::UnresolvedClass,
+            crate::commands::manifest::DiagnosticSeverityOverride::Lint,
+        );
+
+        let options = beamtalk_core::CompilerOptions {
+            warnings_as_errors: true,
+            ..Default::default()
+        };
+        let result = compile_source_with_bindings(
+            &source_file,
+            "unresolved",
+            &core_file,
+            &options,
+            &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new(),
+            &diagnostics_table_ctx_with_cross_file_classes(table),
+            None,
+        );
+
+        assert!(
+            result.is_ok(),
+            "unresolved-class = \"lint\" must stay inert under --warnings-as-errors \
+             (Lint severity is never promoted): {result:?}"
         );
     }
 

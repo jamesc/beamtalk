@@ -18,6 +18,7 @@ use std::collections::HashMap;
 use crate::ast::{Expression, Literal, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
+use crate::semantic_analysis::receiver_knowledge;
 use crate::semantic_analysis::string_utils::edit_distance;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
@@ -118,19 +119,22 @@ impl TypeChecker {
         // BT-1763: Sealed value types (like Erlang) dispatch class-side messages
         // through instance dispatch. Instance-side DNU suppresses class-side
         // warnings only for sealed classes — not all classes with instance DNU,
-        // which would hide valid diagnostics on normal classes.
+        // which would hide valid diagnostics on normal classes. This carve-out
+        // is specific to this call site (see `receiver_knowledge` doc comment
+        // for why it is not folded into the shared classifier).
         let is_sealed_with_instance_dnu = hierarchy.has_instance_dnu_override(class_name)
             && hierarchy
                 .get_class(class_name)
                 .is_some_and(|info| info.is_sealed);
 
+        // ADR 0100 Rule 1 (BT-2793): the completeness-ladder classifier folds
+        // in the class-side DNU override and BT-1736 cross-file-parent
+        // suppression — only a `ClosedComplete` receiver's absent class-side
+        // method is diagnosable.
         if !has_class_method
-            && !hierarchy.has_class_dnu_override(class_name)
             && !is_sealed_with_instance_dnu
-            // BT-1736: Cross-file inheritance — if the parent class is not in
-            // the hierarchy, we can't know the full class-side method set.
-            // Instance-side already checks this; class-side must do the same.
-            && !hierarchy.has_cross_file_parent(class_name)
+            && receiver_knowledge::classify_receiver(class_name, hierarchy, true)
+                .is_closed_complete()
         {
             // Fall back to the Class→Behaviour→Object→ProtoObject instance-method chain.
             // At runtime, class objects dispatch through this chain (ADR 0032 Phase 0
@@ -506,14 +510,12 @@ impl TypeChecker {
         // ADR 0071 Phase 3 (BT-1702): E0403 — cross-package send to internal method
         self.check_internal_method_access(effective_class, selector, span, hierarchy, false);
 
-        // Classes with instance-side doesNotUnderstand: override accept any message
-        if hierarchy.has_instance_dnu_override(effective_class) {
-            return;
-        }
-
-        // Cross-file inheritance: if the parent class is not in the hierarchy,
-        // we can't know the full method set — suppress false-positive DNU hints.
-        if hierarchy.has_cross_file_parent(effective_class) {
+        // ADR 0100 Rule 1 (BT-2793): suppress unless the checker's knowledge
+        // of the receiver's method surface is closed and complete (folds in
+        // the instance-side DNU override and cross-file-parent checks).
+        if !receiver_knowledge::classify_receiver(effective_class, hierarchy, false)
+            .is_closed_complete()
+        {
             return;
         }
 
