@@ -370,13 +370,21 @@ accessor_selectors({retyped, Name, _OldType, _NewType}) ->
 
 -doc """
 The getter (unary, the field name itself) and `with*:` setter selector atoms
-for `NameBin`, as already-interned atoms only — a slot that appears in a
-`removed`/`retyped` field_change() was present in some previous generation,
-so the compiler generated (and `code:load_binary` interned) both accessor
-selectors for it at least once; a selector that somehow was never interned
-(e.g. a slot that existed only fleetingly, never in an installed generation
-— not reachable via `beamtalk_shape_diff:diff/2`'s contract) is silently
-skipped rather than minting a fresh atom from reload-derived text, mirroring
+for `NameBin`, as already-interned atoms only. Only `ClassKind::Value`
+classes get these auto-generated (`value_type_codegen.rs`'s
+`compute_auto_slot_methods` returns `None` for `Object`/`Actor` — see
+`synthetic_selectors.rs`'s moduledoc), so for a `removed`/`retyped` slot on
+an `Actor`/`Object` class neither selector atom was ever interned and both
+lookups fall through the `badarg` clause below, contributing nothing to
+`shape_dependent_selectors/1` beyond the unconditional `spawnWith:` — correct,
+not a gap: those classes have no synthesized accessor for anything external
+to call in the first place, so there is no sender to find. For a `Value`
+class slot, `code:load_binary` interned both accessor selectors the first
+time any generation of the class compiled with that slot present, so the
+lookup here succeeds; a selector that was somehow never interned (e.g. a
+slot that existed only fleetingly, never in an installed generation — not
+reachable via `beamtalk_shape_diff:diff/2`'s contract) is silently skipped
+rather than minting a fresh atom from reload-derived text, mirroring
 `do_trigger/3`'s `binary_to_existing_atom/2` rationale.
 """.
 -spec field_accessor_atoms(binary()) -> [atom()].
@@ -648,7 +656,19 @@ Is `Diagnostic` attributable to this shape change, and if so, which
   `retyped_fallback/1` — the same "not by exact site" precision limit
   `relevant_diagnostic/4`'s moduledoc documents and accepts for
   `signature_change` — attributes any otherwise-unmatched `Dnu` to the
-  *first* `retyped` change in `FieldChanges` when one is present.
+  *first* `retyped` change in `FieldChanges` when one is present. **Known,
+  accepted limitation (adversarial review, BT-2780):** when a single reload
+  retypes *two or more* slots, this picks list order over the true culprit —
+  there is no field-name signal in the `Dnu` message to disambiguate which
+  retyped slot actually caused it (unlike the `Type`/removed-accessor
+  branches above, which match on quoted text). The finding's `note` can
+  therefore name the wrong field when multiple retypes land in one reload.
+  Not fixed here: closing it needs either per-selector call-site tracking
+  (well past what a `class_hierarchy => true` diagnostics round-trip
+  gives) or accepting that ambiguity in the finding itself (a `finding()`
+  shape change) — both bigger than this pass. See
+  `relevant_diagnostic_shape_retyped_fallback_picks_first_when_multiple_test/0`
+  for the pinned behaviour.
 - `error`-severity is always dropped, matching `relevant_diagnostic/4`.
 """.
 -spec relevant_diagnostic_shape(map(), binary(), [shape_field_change()]) ->

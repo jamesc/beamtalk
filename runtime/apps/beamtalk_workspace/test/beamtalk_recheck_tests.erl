@@ -685,6 +685,43 @@ relevant_diagnostic_shape_retyped_fallback_matches_unrelated_dnu_test() ->
         )
     ).
 
+%% Two retyped slots in the same reload — the Dnu carries no field-name
+%% signal (see relevant_diagnostic_shape/3's doc), so retyped_fallback/1
+%% cannot tell which slot actually caused it and picks the first by list
+%% order, not the true culprit. Pinned deliberately (BT-2780 adversarial
+%% review): this is a known, accepted precision limit — the fallback would
+%% attribute this exact diagnostic to `count` even if `label`'s retype were
+%% the real cause, or vice versa. See beamtalk_recheck.erl's
+%% relevant_diagnostic_shape/3 moduledoc.
+relevant_diagnostic_shape_retyped_fallback_picks_first_when_multiple_test() ->
+    Diag = #{
+        category => <<"Dnu">>,
+        message => <<"String does not understand '+'">>,
+        severity => <<"hint">>,
+        start => 0,
+        'end' => 1
+    },
+    ?assertEqual(
+        {true, {retyped, <<"count">>, <<"Integer">>, <<"String">>}},
+        beamtalk_recheck:relevant_diagnostic_shape(
+            Diag, <<"ReCheckCounter">>, [
+                {retyped, <<"count">>, <<"Integer">>, <<"String">>},
+                {retyped, <<"label">>, <<"String">>, <<"Symbol">>}
+            ]
+        )
+    ),
+    %% Order in FieldChanges alone decides the (mis)attribution — swapping
+    %% the list order flips which slot gets blamed for the identical Dnu.
+    ?assertEqual(
+        {true, {retyped, <<"label">>, <<"String">>, <<"Symbol">>}},
+        beamtalk_recheck:relevant_diagnostic_shape(
+            Diag, <<"ReCheckCounter">>, [
+                {retyped, <<"label">>, <<"String">>, <<"Symbol">>},
+                {retyped, <<"count">>, <<"Integer">>, <<"String">>}
+            ]
+        )
+    ).
+
 %% No retyped change in flight — an unrelated Dnu is not attributed at all.
 relevant_diagnostic_shape_no_retyped_fallback_when_only_added_test() ->
     Diag = #{

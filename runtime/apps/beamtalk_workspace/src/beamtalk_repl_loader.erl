@@ -32,7 +32,10 @@ Extracted from beamtalk_repl_eval (BT-863).
     to_snake_case/1,
     verify_class_present/3,
     compute_package_module_name/1,
-    new_class/2
+    new_class/2,
+    %% ADR 0105 Phase 2 (BT-2780): called cross-module by
+    %% beamtalk_workspace_shape_recheck_worker — see activate_module/3's doc.
+    maybe_trigger_shape_recheck/1
 ]).
 
 %% Exported for testing (only in test builds)
@@ -242,27 +245,43 @@ patch, a method removal, a brand-new class, a protocol) the shape store was
 never primed for these classes, so `beamtalk_workspace_shape_store:capture/1`
 self-seeds and always classifies `no_op` — see its moduledoc.
 
-**Asynchronous, unlike the method-signature path's `maybe_trigger_recheck/4`**
-(called synchronously from `load_recompiled_method/8`/`remove_method/3`,
-which only fire on an explicit `>>` patch/removal — comparatively rare
-during bulk loading). `activate_module/3` is the common path for *every*
-class-body install (`:load`, inline `subclass:` redefinition, a file
-reload), so it runs on every ordinary class load, not just explicit patches
-— and `spawnWith:` (always in `trigger_shape/2`'s dependent-selector set,
-ADR 0105 §Mechanism step 2 / this ADR's Alternatives) is close to the
-worst-case common selector, used by every Actor subclass in the image.
-Running the recheck synchronously here measurably regressed a heavy
-sequential-reload scenario (discovered via the `repl_protocol` e2e suite,
-BT-2780 review) — dozens of shape-changing reloads in one session each
-paying the per-reload caller-cap's up-to-20 compiler round trips, serialised
-in front of every subsequent REPL response, enough to trip a client-side
-timeout. `spawn_shape_recheck/1` returns immediately; the re-check and its
-publish (`beamtalk_workspace_findings_store` + the `'ReloadCheckCompleted'`
-announcement) still happen, just off the install's response path — every
-consumer already treats that announcement as an asynchronous push (the
-LSP/REPL/workspace-UI listeners all already `receive`/subscribe rather than
-read a synchronous return value), so this is not a behaviour change for any
-surface, only a latency fix for the trigger.
+**Asynchronous *and serialised*, unlike the method-signature path's
+`maybe_trigger_recheck/4`** (called synchronously from
+`load_recompiled_method/8`/`remove_method/3`, which only fire on an
+explicit `>>` patch/removal — comparatively rare during bulk loading).
+`activate_module/3` is the common path for *every* class-body install
+(`:load`, inline `subclass:` redefinition, a file reload), so it runs on
+every ordinary class load, not just explicit patches — and `spawnWith:`
+(always in `trigger_shape/2`'s dependent-selector set, ADR 0105 §Mechanism
+step 2 / this ADR's Alternatives) is close to the worst-case common
+selector, used by every Actor subclass in the image. Running the recheck
+synchronously here measurably regressed a heavy sequential-reload scenario
+(discovered via the `repl_protocol` e2e suite, BT-2780 review) — dozens of
+shape-changing reloads in one session each paying the per-reload
+caller-cap's up-to-20 compiler round trips, serialised in front of every
+subsequent REPL response, enough to trip a client-side timeout.
+
+Off the response path is not enough on its own, though: a bare `spawn/1`
+per reload would let an unbounded number of these checks run *concurrently*,
+each independently hammering the single, already-serialising
+`beamtalk_compiler_server` (ADR 0022) that also carries the still-synchronous
+method-signature recheck and ordinary editor/LSP diagnostic requests — that
+just relocates the latency risk from "this reload's own response" onto
+"an unrelated concurrent request sharing the same compiler port" (found in
+adversarial review). `spawn_shape_recheck/1` therefore hands off to
+`beamtalk_workspace_shape_recheck_worker:enqueue/1`, a single dedicated
+`gen_server` (started under `beamtalk_workspace_sup`) whose mailbox
+processes one shape re-check at a time — bounding in-flight compiler-port
+contention from this path to 1, same order of magnitude as the synchronous
+method-signature path's own footprint, while still returning immediately to
+the caller. The re-check and its publish
+(`beamtalk_workspace_findings_store` + the `'ReloadCheckCompleted'`
+announcement) still happen, just off the install's response path and queued
+behind any earlier reload's check — every consumer already treats that
+announcement as an asynchronous push (the LSP/REPL/workspace-UI listeners
+all already `receive`/subscribe rather than read a synchronous return
+value), so this is not a behaviour change for any surface, only a latency
+and contention fix for the trigger.
 """.
 -spec activate_module(atom(), [map()], string() | undefined) -> ok.
 activate_module(ModuleName, Classes, SourcePath) ->
@@ -1955,26 +1974,29 @@ prime_shape_capture(Classes) ->
     ok.
 
 -doc """
-Fire `maybe_trigger_shape_recheck/1` in a detached process and return
-immediately — see `activate_module/3`'s doc ("Asynchronous...") for why this
-must not run on the install's response path. Unlinked (a re-check crash must
-never take down the calling session process) and its result is discarded;
-`maybe_trigger_shape_recheck_for_class/1` is already self-swallowing
-end-to-end (store read, `trigger_shape/2`, and publish are each wrapped), so
-there is nothing here for the spawning process to react to.
+Hand `Classes` off to `beamtalk_workspace_shape_recheck_worker` and return
+immediately — see `activate_module/3`'s doc ("Asynchronous *and
+serialised*...") for why this must neither run on the install's response
+path nor run unbounded-concurrently. The worker's mailbox is the queue: a
+`cast` here never blocks the caller, and the worker processes one reload's
+recheck at a time, so this call site never needs to know about ordering or
+backpressure.
 """.
 -spec spawn_shape_recheck([map()]) -> ok.
 spawn_shape_recheck(Classes) ->
-    _ = spawn(fun() -> maybe_trigger_shape_recheck(Classes) end),
-    ok.
+    beamtalk_workspace_shape_recheck_worker:enqueue(Classes).
 
 -doc """
 Capture each class's post-install shape and, on a genuine `shape_change`,
 run the shape re-check orchestration (`beamtalk_recheck:trigger_shape/2`)
-and publish its findings. Called (via `spawn_shape_recheck/1`, off the
-install's response path) for every installed class — see `activate_module/3`'s
-doc for why an un-primed class (a method patch, a new class, a protocol) is
-a harmless `no_op` here.
+and publish its findings. Reached in production only via
+`beamtalk_workspace_shape_recheck_worker`'s single-worker queue (`enqueue/1`
+-> `spawn_shape_recheck/1`, off the install's response path and serialised
+against every other pending shape re-check — see `activate_module/3`'s doc,
+"Asynchronous *and serialised*"), which is also why this is exported outside
+the `-ifdef(TEST)` block: the worker lives in a different module. See
+`activate_module/3`'s doc for why an un-primed class (a method patch, a new
+class, a protocol) is a harmless `no_op` here.
 """.
 -spec maybe_trigger_shape_recheck([map()]) -> ok.
 maybe_trigger_shape_recheck(Classes) ->

@@ -53,6 +53,11 @@ shape_loader_setup() ->
         ShapePid -> gen_server:stop(ShapePid)
     end,
     {ok, _} = beamtalk_workspace_shape_store:start_link(),
+    case whereis(beamtalk_workspace_shape_recheck_worker) of
+        undefined -> ok;
+        WorkerPid -> gen_server:stop(WorkerPid)
+    end,
+    {ok, _} = beamtalk_workspace_shape_recheck_worker:start_link(),
     case whereis(beamtalk_workspace_findings_store) of
         undefined -> ok;
         FindingsPid -> gen_server:stop(FindingsPid)
@@ -72,6 +77,10 @@ shape_loader_teardown(_) ->
     case whereis(beamtalk_workspace_shape_store) of
         undefined -> ok;
         ShapePid -> gen_server:stop(ShapePid)
+    end,
+    case whereis(beamtalk_workspace_shape_recheck_worker) of
+        undefined -> ok;
+        WorkerPid -> gen_server:stop(WorkerPid)
     end,
     case whereis(beamtalk_workspace_findings_store) of
         undefined -> ok;

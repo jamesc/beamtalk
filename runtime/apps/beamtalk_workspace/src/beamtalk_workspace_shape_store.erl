@@ -65,6 +65,31 @@ Mirrors `beamtalk_workspace_signature_store`: state lives in this
 gen_server's `#state{}` map, supervised under `beamtalk_workspace_sup`, so a
 workspace restart starts fresh. `clear/0` gives callers (`Workspace changes
 revert:`, tests) an explicit reset without a restart.
+
+## Known, accepted concurrency gap (adversarial review, BT-2780)
+
+`prime/1` runs synchronously on the reloading session's own process,
+*before* `code:load_binary` — it is not, and cannot be, serialised against a
+second session reloading the *same* class name concurrently (each session's
+install sequence — prime, `code:load_binary`, `capture/1` via
+`beamtalk_workspace_shape_recheck_worker` — runs on its own process; only
+this store's own gen_server calls, and now `capture/1`'s enqueued recheck
+work, are serialised against each other). Two sessions racing to reload the
+same class can therefore interleave their prime/install steps in a way
+where a `capture/1` reads a *different* installed generation than the
+`prime/1` it is nominally diffing against — the same shape of gap
+`beamtalk_workspace_findings_store`'s moduledoc already accepts for its own
+narrower cross-session races, on the same reasoning: a wrong/stale shape
+diff here is advisory noise, not data corruption, and reaching it requires
+two independent sessions genuinely racing an edit to the same class, not a
+single session's normal edit-reload loop. `beamtalk_workspace_shape_recheck_worker`
+(BT-2780 adversarial review) narrows the *capture* half of this considerably
+— every `capture/1` call this store ever sees is now serialised one at a
+time through that worker's mailbox, so two `capture/1` calls can no longer
+race *each other* — but does not and cannot close the outer install-ordering
+race between two concurrently-reloading sessions. Not fixed here; closing it
+fully would need the same source-generation-fenced write the findings store's
+moduledoc already declined for the same complexity/benefit tradeoff.
 """.
 
 -include_lib("kernel/include/logger.hrl").

@@ -49,8 +49,9 @@ supervisor_intensity_test() ->
 children_count_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
 
-    %% Should have 12 children: workspace_meta, workspace_changelog,
-    %% workspace_signature_store, workspace_shape_store, workspace_findings_store,
+    %% Should have 13 children: workspace_meta, workspace_changelog,
+    %% workspace_signature_store, workspace_shape_store,
+    %% workspace_shape_recheck_worker, workspace_findings_store,
     %% transcript_stream, actor_registry, workspace_bootstrap, repl_server,
     %% idle_monitor, actor_sup, session_sup.
     %% BeamtalkInterface and WorkspaceInterface are value singletons (no gen_server).
@@ -59,8 +60,9 @@ children_count_test() ->
     %% bus (`beamtalk_announcements`, supervised under `beamtalk_runtime_sup`).
     %% ADR 0105 Phase 1 (BT-2777): workspace_signature_store added.
     %% ADR 0105 Phase 1 (BT-2779): workspace_findings_store added.
-    %% ADR 0105 Phase 2 (BT-2780): workspace_shape_store added.
-    ?assertEqual(12, length(ChildSpecs)).
+    %% ADR 0105 Phase 2 (BT-2780): workspace_shape_store and
+    %% workspace_shape_recheck_worker added.
+    ?assertEqual(13, length(ChildSpecs)).
 
 children_ids_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
@@ -73,6 +75,7 @@ children_ids_test() ->
     ?assert(lists:member(beamtalk_workspace_changelog, Ids)),
     ?assert(lists:member(beamtalk_workspace_signature_store, Ids)),
     ?assert(lists:member(beamtalk_workspace_shape_store, Ids)),
+    ?assert(lists:member(beamtalk_workspace_shape_recheck_worker, Ids)),
     ?assert(lists:member(beamtalk_workspace_findings_store, Ids)),
     ?assert(lists:member(beamtalk_transcript_stream, Ids)),
     ?assertNot(lists:member('bt@stdlib@beamtalk_interface', Ids)),
@@ -299,6 +302,7 @@ all_children_alive_test() ->
             beamtalk_workspace_signature_store,
             %% ADR 0105 Phase 2 (BT-2780).
             beamtalk_workspace_shape_store,
+            beamtalk_workspace_shape_recheck_worker,
             %% ADR 0105 Phase 1 (BT-2779).
             beamtalk_workspace_findings_store,
             beamtalk_transcript_stream,
