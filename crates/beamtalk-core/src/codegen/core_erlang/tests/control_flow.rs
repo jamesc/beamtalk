@@ -1125,6 +1125,14 @@ fn test_block_with_mixed_local_and_field_mutation_is_compile_error() {
     // but generate_block_value_call and friends call it with only its declared
     // params (no State argument) — `badarity`. The field check must fire
     // before the Tier 2 promotion, not after.
+    //
+    // `outerCount` is used inside the block before its `outerCount := 0`
+    // definition in the enclosing method body — deliberately: block_analysis
+    // only classifies a variable as a *captured* mutation (vs. a fresh local
+    // definition local to the block) when it's read before being locally
+    // defined within the block itself. Defining `outerCount` in the block
+    // first would make it a new local, not a captured one, and the mixed
+    // local+field shape this test targets wouldn't reproduce.
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: item =>\n    blk := [:x | outerCount := outerCount + x. self.total := self.total + outerCount]\n    outerCount := 0\n    blk value: item\n";
     let tokens = crate::source_analysis::lex_with_eof(src);
     let (module, _) = crate::source_analysis::parse(tokens);
