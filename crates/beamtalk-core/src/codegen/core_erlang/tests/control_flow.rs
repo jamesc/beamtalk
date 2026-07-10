@@ -1126,13 +1126,18 @@ fn test_block_with_mixed_local_and_field_mutation_is_compile_error() {
     // params (no State argument) — `badarity`. The field check must fire
     // before the Tier 2 promotion, not after.
     //
-    // `outerCount` is used inside the block before its `outerCount := 0`
-    // definition in the enclosing method body — deliberately: block_analysis
-    // only classifies a variable as a *captured* mutation (vs. a fresh local
-    // definition local to the block) when it's read before being locally
-    // defined within the block itself. Defining `outerCount` in the block
-    // first would make it a new local, not a captured one, and the mixed
-    // local+field shape this test targets wouldn't reproduce.
+    // `outerCount := outerCount + x` is deliberately the block's first use of
+    // `outerCount`: block_analysis classifies a name as a *captured* mutation
+    // only when it's read before being locally defined *within the block*,
+    // and `outerCount + x` on the assignment's right-hand side reads the
+    // name before this statement (the block's only mention of it) defines
+    // it. Writing the block as `outerCount := 0. outerCount := outerCount +
+    // x` instead would make `outerCount` a fresh block-local, not a captured
+    // one, and the mixed local+field shape this test targets wouldn't
+    // reproduce. The outer method's own `outerCount := 0` — appearing after
+    // `blk`'s definition in program order — only needs to exist so the
+    // source parses as a variable Beamtalk program; it has no bearing on the
+    // capture classification itself.
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: item =>\n    blk := [:x | outerCount := outerCount + x. self.total := self.total + outerCount]\n    outerCount := 0\n    blk value: item\n";
     let tokens = crate::source_analysis::lex_with_eof(src);
     let (module, _) = crate::source_analysis::parse(tokens);
