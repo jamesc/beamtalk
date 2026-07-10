@@ -292,7 +292,7 @@ register_candidate(NameStr, Selector, ReceiverClass) ->
     XrefEntry = [
         #{
             class_side => false,
-            selector => go,
+            selector => 'go:',
             line => 2,
             sends => [#{selector => Selector, line => 2, recv_kind => other}],
             references => [#{class => ReceiverClass, line => 2}],
