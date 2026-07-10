@@ -484,7 +484,10 @@ format_error_message({eval_error, _Class, #beamtalk_error{} = Error}) ->
     iolist_to_binary(beamtalk_error:format(Enriched));
 format_error_message({eval_error, Class, Reason}) ->
     iolist_to_binary([
-        <<"Evaluation error: ">>, atom_to_binary(Class, utf8), <<":">>, beamtalk_repl_errors:format_name(Reason)
+        <<"Evaluation error: ">>,
+        atom_to_binary(Class, utf8),
+        <<":">>,
+        beamtalk_repl_errors:format_name(Reason)
     ]);
 format_error_message({load_error, Reason}) ->
     iolist_to_binary([<<"Failed to load bytecode: ">>, beamtalk_repl_errors:format_name(Reason)]);
