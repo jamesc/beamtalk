@@ -69,20 +69,59 @@ pub(crate) struct NarrowingInfo {
     /// type, sets the matching branch to the singleton, and subtracts the
     /// singleton from the union for the complementary branch.
     pub(crate) singleton_eq: Option<SingletonEqInfo>,
-    /// The class name tested in a `x class = ClassName` / `x isKindOf:
-    /// ClassName` narrowing (ADR 0102 §2 group 2, BT-2741).
+    /// The class name (and which idiom tested it) in a `x class = ClassName`
+    /// / `x isKindOf: ClassName` narrowing (ADR 0102 §2 group 2, §5,
+    /// BT-2741, BT-2744).
     ///
     /// When set, `detect` cannot know the variable's current type, so
     /// `true_type` is left provisional (`Dynamic`) and
     /// `refine_class_narrowing` in `inference.rs` resolves the variable's
-    /// current type and narrows the true branch to
-    /// `intersect(current, ClassName)` (hierarchy-aware): a subclass test
-    /// narrows precisely (`x :: Number; x isKindOf: Integer` true branch is
-    /// `Integer`), and a hierarchy-unrelated class test types the
-    /// (unreachable) true branch `Never`, reported via
-    /// `check_impossible_class_comparison`. The false branch stays `None` —
-    /// nominal-class difference is out of scope here (BT-2744).
-    pub(crate) class_test: Option<EcoString>,
+    /// current type and narrows the true branch through the hierarchy-aware
+    /// `intersect(current, ClassName)` — a subclass test narrows precisely
+    /// (`x :: Number; x isKindOf: Integer` true branch is `Integer`), and a
+    /// hierarchy-unrelated class test types the (unreachable) true branch
+    /// `Never`, reported via `check_impossible_class_comparison`. The false
+    /// branch is populated only for `ClassTestKind::KindOf` — see
+    /// [`ClassTestKind`].
+    pub(crate) class_test: Option<ClassTestInfo>,
+}
+
+/// Details of a `x class = ClassName` / `x isKindOf: ClassName` narrowing
+/// (ADR 0102 §2 group 2, §5, BT-2741, BT-2744).
+#[derive(Debug, Clone)]
+pub(crate) struct ClassTestInfo {
+    /// The tested class name.
+    pub(crate) class_name: EcoString,
+    /// Which idiom produced this test — see [`ClassTestKind`] for why only
+    /// `isKindOf:`'s false branch can be narrowed.
+    pub(crate) kind: ClassTestKind,
+}
+
+/// Distinguishes `x isKindOf: ClassName` (subclass-inclusive) from `x class
+/// =:= ClassName` (exact runtime-class equality) — the two idioms that
+/// populate [`NarrowingInfo::class_test`].
+///
+/// **Only `KindOf`'s false branch can be narrowed** via nominal-class
+/// `difference` (ADR 0102 §5, BT-2744): `Negation{base, excluded}` always
+/// excludes `excluded`'s *entire* subtree (§5 Q1 — membership admits `C <:
+/// base` that is *not* `<: excluded`), which matches `isKindOf:`'s negation
+/// ("not `C` and not any subclass of `C`") but **not** `class =:=`'s ("not
+/// exactly `C`" — `C`'s subclasses are still possible). Concretely: `x ::
+/// Number; x class =:= Integer` false does **not** rule out `x` being a
+/// `Character` (a sealed `Integer` subclass) — its `class` is `Character`,
+/// not `Integer`, so the test is false, yet `x` still satisfies `isKindOf:
+/// Integer`. Narrowing that false branch to `Number \ Integer` would
+/// therefore wrongly exclude a live possibility and could produce a false
+/// "comparison can never be true" hint on a subsequent, perfectly satisfiable
+/// `isKindOf: Integer` test. `Exact`'s false branch is left unnarrowed
+/// (`None`), exactly as before BT-2744; only its (already-shipped, BT-2741)
+/// true branch is affected by set-theoretic narrowing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ClassTestKind {
+    /// `x isKindOf: ClassName` — subclass-inclusive.
+    KindOf,
+    /// `x class =:= ClassName` — exact runtime-class equality.
+    Exact,
 }
 
 /// Details of a singleton (in)equality narrowing (`x = #foo`, BT-2617).

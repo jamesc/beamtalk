@@ -3,6 +3,7 @@
 
 //! Control-flow narrowing tests (ADR 0068 Phase 1g) and respondsTo: narrowing (BT-1582, BT-1833).
 
+use super::super::narrowing::ClassTestKind;
 use super::super::*;
 use super::common::*;
 
@@ -410,6 +411,299 @@ fn bt2741_send_on_never_receiver_is_silent() {
     );
 }
 
+/// ADR 0102 §2 group 2 / §5, BT-2744: `x :: Number; x isKindOf: Integer`
+/// narrows the false branch to the nominal complement `Number \ Integer` —
+/// closing the group-2 gap BT-2741 deliberately left open.
+#[test]
+fn bt2744_is_kind_of_subclass_narrows_false_branch_to_nominal_negation() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut env = TypeEnv::new();
+    env.set_local("x", InferredType::known("Number"));
+    let guard = is_kind_of("x", "Integer");
+    let info = TypeChecker::detect_narrowing(&guard).expect("should detect isKindOf:");
+    let mut checker = TypeChecker::new();
+    let refined = checker.refine_class_narrowing(info, &env, &hierarchy, span());
+    assert_eq!(refined.true_type, InferredType::known("Integer"));
+    assert_eq!(
+        refined.false_type,
+        Some(InferredType::Negation {
+            base: Box::new(InferredType::known("Number")),
+            excluded: Box::new(InferredType::known("Integer")),
+            provenance: TypeProvenance::Inferred(Span::default()),
+        })
+    );
+}
+
+/// ADR 0102 §5, BT-2744: an exact class match (`class_eq`/`isKindOf:` against
+/// the receiver's own current type) narrows the false branch to `Never` —
+/// every instance of the current type is also an instance of itself.
+#[test]
+fn bt2744_is_kind_of_exact_match_narrows_false_branch_to_never() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut env = TypeEnv::new();
+    env.set_local("x", InferredType::known("Integer"));
+    let guard = is_kind_of("x", "Integer");
+    let info = TypeChecker::detect_narrowing(&guard).expect("should detect isKindOf:");
+    let mut checker = TypeChecker::new();
+    let refined = checker.refine_class_narrowing(info, &env, &hierarchy, span());
+    assert_eq!(refined.true_type, InferredType::known("Integer"));
+    assert_eq!(refined.false_type, Some(InferredType::Never));
+}
+
+/// ADR 0102 §5, BT-2744 (correctness fix found in adversarial review): `x
+/// class =:= C`'s false branch must stay unnarrowed (`None`), unlike
+/// `isKindOf:`'s. `Negation{base, excluded}` always excludes `excluded`'s
+/// *entire* subtree (§5 Q1), which matches `isKindOf:`'s negation ("not C
+/// and not any subclass of C") but not `class =:=`'s ("not exactly C" — C's
+/// subclasses remain live). Concretely: `Character` is a sealed `Integer`
+/// subclass, so for `x :: Number` holding a `Character`, `x class =:=
+/// Integer` is *false* (its class is `Character`, not `Integer`) yet `x
+/// isKindOf: Integer` is *true*. Narrowing `class =:=`'s false branch to
+/// `Number \ Integer` would wrongly exclude that live `Character`
+/// possibility and could produce a spurious "comparison can never be true"
+/// hint on a subsequent, perfectly satisfiable `isKindOf: Integer` test —
+/// this test pins the fix at the `refine_class_narrowing` level; the
+/// following end-to-end test exercises the exact failure scenario.
+#[test]
+fn bt2744_class_eq_false_branch_stays_unnarrowed() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut env = TypeEnv::new();
+    for (current, tested) in [
+        ("Number", "Integer"),
+        ("Integer", "Integer"),
+        ("Integer", "String"),
+    ] {
+        env.set_local("x", InferredType::known(current));
+        let guard = class_eq("x", tested);
+        let info = TypeChecker::detect_narrowing(&guard).expect("should detect class =:=");
+        let mut checker = TypeChecker::new();
+        let refined = checker.refine_class_narrowing(info, &env, &hierarchy, span());
+        assert!(
+            refined.false_type.is_none(),
+            "class =:= false branch must stay unnarrowed for {current} vs {tested}, got: {:?}",
+            refined.false_type
+        );
+    }
+}
+
+/// ADR 0102 §5, BT-2744 (end-to-end regression for the adversarial-review
+/// finding): inside the false branch of `x class =:= Integer`, a *nested*
+/// `x isKindOf: Integer` test must NOT be flagged as statically impossible —
+/// `x` could still be a `Character` (a sealed `Integer` subclass), which has
+/// `class =:= Integer` false but `isKindOf: Integer` true. Before the fix,
+/// `class =:=`'s false branch narrowed `x` to `Number \ Integer`, making the
+/// nested `isKindOf: Integer` test's `intersect` collapse to `Never` and
+/// spuriously fire `check_impossible_class_comparison`.
+#[test]
+fn bt2744_class_eq_false_branch_does_not_poison_nested_is_kind_of() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    assert!(
+        hierarchy
+            .superclass_chain("Character")
+            .iter()
+            .any(|c| c == "Integer"),
+        "fixture sanity check: Character should be a subclass of Integer"
+    );
+    let mut env = TypeEnv::new();
+    // `x := self makeNumber` — value-flow inferred, so the impossible-class
+    // hint's provenance gate is satisfied and would fire if the bug were
+    // present.
+    env.set_local(
+        "x",
+        InferredType::Known {
+            class_name: "Number".into(),
+            type_args: vec![],
+            provenance: TypeProvenance::Inferred(Span::default()),
+        },
+    );
+    // `(x class =:= Integer) ifFalse: [ (x isKindOf: Integer) ifTrue: [nil] ]`
+    let outer_guard = class_eq("x", "Integer");
+    let nested = if_true(is_kind_of("x", "Integer"), block_expr(vec![var("nil")]));
+    let expr = if_true_if_false(
+        outer_guard,
+        block_expr(vec![var("nil")]),
+        block_expr(vec![nested]),
+    );
+    let mut checker = TypeChecker::new();
+    let _ = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+
+    let hints: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("can never be true"))
+        .collect();
+    assert!(
+        hints.is_empty(),
+        "a nested `isKindOf: Integer` inside `class =:= Integer`'s false \
+         branch is satisfiable (x could be a Character) and must not warn, \
+         got: {:?}",
+        hints.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+/// ADR 0102 §5, BT-2744: a hierarchy-unrelated class test leaves the false
+/// branch unchanged — nothing is provably removable (mirrors `difference`'s
+/// disjoint-classes no-op).
+#[test]
+fn bt2744_is_kind_of_unrelated_class_false_branch_unchanged() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut env = TypeEnv::new();
+    env.set_local("x", InferredType::known("Integer"));
+    let guard = is_kind_of("x", "String");
+    let info = TypeChecker::detect_narrowing(&guard).expect("should detect isKindOf:");
+    let mut checker = TypeChecker::new();
+    let refined = checker.refine_class_narrowing(info, &env, &hierarchy, span());
+    assert_eq!(refined.true_type, InferredType::Never);
+    assert_eq!(refined.false_type, Some(InferredType::known("Integer")));
+}
+
+/// ADR 0102 §5, BT-2744 (Q3 — method lookup / conformance on nominal
+/// `Negation`): inside the `ifFalse:` branch of `x isKindOf: Integer`, `x`
+/// narrows to `Number \ Integer`. Sending `isZero` (declared on `Number`)
+/// must resolve without a DNU warning — method lookup on a nominal
+/// `Negation` resolves through `base`, identically to a bare `base`-typed
+/// receiver.
+#[test]
+fn bt2744_negation_receiver_resolves_method_through_base() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let class = {
+        // process: x :: Number =>
+        //   (x isKindOf: Integer) ifTrue: [nil] ifFalse: [x isZero]
+        let process_method = make_keyword_method(
+            &["process:"],
+            vec![("x", Some("Number"))],
+            vec![if_true_if_false(
+                is_kind_of("x", "Integer"),
+                block_expr(vec![var("nil")]),
+                block_expr(vec![msg_send(
+                    var("x"),
+                    MessageSelector::Unary("isZero".into()),
+                    vec![],
+                )]),
+            )],
+        );
+        ClassDefinition::new(
+            ident("TestClass"),
+            ident("Object"),
+            vec![],
+            vec![process_method],
+            span(),
+        )
+    };
+    let module = make_module_with_classes(vec![], vec![class]);
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    let dnu: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    assert!(
+        dnu.is_empty(),
+        "x isZero inside the `Number \\ Integer` false branch should not DNU \
+         — isZero is declared on Number, got: {:?}",
+        dnu.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+/// ADR 0102 §5, BT-2744 (Q3, conformance parity — the negative case): a
+/// `Negation{base, excluded}` receiver's protocol is exactly `base`'s, never
+/// wider. `isEven` is declared on `Integer` only (not `Number`), so sending
+/// it inside the `Number \ Integer` false branch must still DNU — proving
+/// the false branch is genuinely conformance-checked against `Number`, not
+/// silently left as an unchecked `Dynamic` hole.
+#[test]
+fn bt2744_negation_receiver_dnu_for_selector_only_on_excluded_class() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let class = {
+        // process: x :: Number =>
+        //   (x isKindOf: Integer) ifTrue: [nil] ifFalse: [x isEven]
+        let process_method = make_keyword_method(
+            &["process:"],
+            vec![("x", Some("Number"))],
+            vec![if_true_if_false(
+                is_kind_of("x", "Integer"),
+                block_expr(vec![var("nil")]),
+                block_expr(vec![msg_send(
+                    var("x"),
+                    MessageSelector::Unary("isEven".into()),
+                    vec![],
+                )]),
+            )],
+        );
+        ClassDefinition::new(
+            ident("TestClass"),
+            ident("Object"),
+            vec![],
+            vec![process_method],
+            span(),
+        )
+    };
+    let module = make_module_with_classes(vec![], vec![class]);
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    let dnu: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    assert_eq!(
+        dnu.len(),
+        1,
+        "x isEven inside the `Number \\ Integer` false branch should DNU — \
+         isEven is declared on Integer, not Number, got: {:?}",
+        checker.diagnostics()
+    );
+}
+
+/// ADR 0102 §5, BT-2744 (Q4 — ADR 0100 interaction, open-world/hot-reload
+/// safety): the open-world receiver-knowledge classification for a
+/// `Negation{base, excluded}` receiver is inherited directly from
+/// classifying `base` — no separate rule. `Erlang` has an instance-side
+/// `doesNotUnderstand:` override (accepts any message, BT-1763); that safety
+/// net must carry over to a `Negation` derived from it exactly as it would
+/// for a bare `Erlang`-typed receiver — proving the inheritance is real, not
+/// just documented. (Built by hand rather than via `isKindOf:` narrowing,
+/// since `excluded`'s specific class is irrelevant to this property — only
+/// `base` drives DNU checking, per Q3.)
+#[test]
+fn bt2744_negation_receiver_inherits_dnu_override_from_base() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    assert!(
+        hierarchy.has_instance_dnu_override("Erlang"),
+        "fixture sanity check: Erlang should have an instance DNU override"
+    );
+    let mut env = TypeEnv::new();
+    env.set_local(
+        "x",
+        InferredType::Negation {
+            base: Box::new(InferredType::known("Erlang")),
+            excluded: Box::new(InferredType::known("Integer")),
+            provenance: TypeProvenance::Inferred(Span::default()),
+        },
+    );
+    let mut checker = TypeChecker::new();
+    let send = msg_send(
+        var("x"),
+        MessageSelector::Unary("totallyBogusSelector".into()),
+        vec![],
+    );
+    let _ = checker.infer_expr(&send, &hierarchy, &mut env, false);
+
+    let dnu: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not understand"))
+        .collect();
+    assert!(
+        dnu.is_empty(),
+        "a Negation whose base has a DNU override must not DNU, got: {:?}",
+        dnu.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
 #[test]
 fn test_narrowing_is_nil_early_return() {
     // validate: x :: Object =>
@@ -589,7 +883,9 @@ fn test_detect_narrowing_class_eq_pattern() {
         info.true_type,
         InferredType::Dynamic(DynamicReason::Unknown)
     );
-    assert_eq!(info.class_test.as_deref(), Some("Integer"));
+    let class_test = info.class_test.expect("should record class_test");
+    assert_eq!(class_test.class_name, "Integer");
+    assert_eq!(class_test.kind, ClassTestKind::Exact);
     assert!(!info.is_nil_check);
 }
 
@@ -604,7 +900,9 @@ fn test_detect_narrowing_is_kind_of_pattern() {
         info.true_type,
         InferredType::Dynamic(DynamicReason::Unknown)
     );
-    assert_eq!(info.class_test.as_deref(), Some("Number"));
+    let class_test = info.class_test.expect("should record class_test");
+    assert_eq!(class_test.class_name, "Number");
+    assert_eq!(class_test.kind, ClassTestKind::KindOf);
     assert!(!info.is_nil_check);
 }
 
@@ -1159,8 +1457,11 @@ fn bt2764_singleton_eq_symbol_supertype_union_member_no_hint() {
 /// BT-2764: `refine_singleton_narrowing` on a bare `ProtoObject`-typed
 /// variable — the true branch of `x =:= #foo` narrows to the singleton (via the
 /// hierarchy-aware `intersect`), not to a spurious `Never`; the false branch
-/// keeps `ProtoObject` (nominal-class difference is out of scope, so nothing
-/// is removable).
+/// keeps `ProtoObject` unchanged. This is the *singleton-excluded* `Negation`
+/// flavour (`is_symbol_base` requires an exact `Symbol` base, ADR 0102 §1),
+/// distinct from the *nominal-excluded* flavour BT-2744 added — `ProtoObject`
+/// is not itself the base of a singleton subtraction, so nothing is
+/// removable here regardless.
 #[test]
 fn bt2764_refine_singleton_eq_symbol_supertype_true_branch_is_singleton() {
     let hierarchy = ClassHierarchy::with_builtins();

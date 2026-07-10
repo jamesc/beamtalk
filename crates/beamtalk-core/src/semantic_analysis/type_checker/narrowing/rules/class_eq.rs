@@ -9,7 +9,7 @@ use crate::ast::{Expression, MessageSelector, WellKnownSelector};
 use crate::semantic_analysis::type_checker::{DynamicReason, InferredType};
 
 use super::super::extract::extract_variable_name;
-use super::super::info::NarrowingInfo;
+use super::super::info::{ClassTestInfo, ClassTestKind, NarrowingInfo};
 use super::NarrowingRule;
 
 pub(super) const RULE: NarrowingRule = NarrowingRule { detect };
@@ -59,6 +59,11 @@ fn detect(receiver: &Expression) -> Option<NarrowingInfo> {
         is_result_error_check: false,
         responded_selector: None,
         singleton_eq: None,
-        class_test: Some(name.name.clone()),
+        // Exact runtime-class equality — the false branch cannot be narrowed
+        // via nominal-class `difference` (see `ClassTestKind`, BT-2744).
+        class_test: Some(ClassTestInfo {
+            class_name: name.name.clone(),
+            kind: ClassTestKind::Exact,
+        }),
     })
 }

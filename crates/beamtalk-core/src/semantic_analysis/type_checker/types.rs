@@ -167,25 +167,36 @@ pub enum InferredType {
     /// It is a subtype of every type (bottom of the lattice).
     Never,
     /// A negation type `base \ excluded` — the values of `base` that are *not*
-    /// values of `excluded` (ADR 0102 §1).
+    /// values of `excluded` (ADR 0102 §1, §5).
     ///
     /// Produced by [`difference`](InferredType::difference) when a proper
     /// subtype is subtracted that cannot be expressed by dropping a union
-    /// member — canonically `Symbol \ #foo` (all symbols except `#foo`).
+    /// member. Two flavours, distinguished by what `excluded` holds:
+    /// - **Singleton-excluded** — canonically `Symbol \ #foo` (all symbols
+    ///   except `#foo`); `base` is always exactly `Symbol` (see
+    ///   [`is_symbol_base`](Self::is_symbol_base)).
+    /// - **Nominal-excluded** (ADR 0102 §5, BT-2744) — e.g. `Object \ Number`;
+    ///   `base` is any nominal class and `excluded` a single strict nominal
+    ///   subclass of it (generalising `excluded` to a union of classes is out
+    ///   of scope — see §5's scope note).
     ///
-    /// **Normal form.** `excluded` is always a singleton (`Known("#foo")`) or a
-    /// normalised union of singletons — never another `Negation` and never a
-    /// `Union` containing a `Negation`. Nested negation is flattened at
-    /// construction (`(Symbol \ #a) \ #b = Symbol \ (#a | #b)`), so a
+    /// **Normal form.** For the singleton-excluded flavour, `excluded` is
+    /// always a singleton (`Known("#foo")`) or a normalised union of
+    /// singletons; for the nominal-excluded flavour it is a single nominal
+    /// class name. Either way it is never another `Negation` and never a
+    /// `Union` containing a `Negation`. Nested singleton negation is flattened
+    /// at construction (`(Symbol \ #a) \ #b = Symbol \ (#a | #b)`), so a
     /// `Negation` never appears inside its own `excluded` or `base`.
     ///
     /// **Equality** is order-independent in `excluded` (it delegates to the
     /// order-independent `Union` equality), so `Symbol \ (#a | #b)` equals
     /// `Symbol \ (#b | #a)`.
     Negation {
-        /// The type being narrowed (canonically `Symbol`).
+        /// The type being narrowed (`Symbol` for the singleton-excluded
+        /// flavour; any nominal class for the nominal-excluded flavour).
         base: Box<InferredType>,
-        /// The removed values — a singleton or a normalised union of singletons.
+        /// The removed values — a singleton, a normalised union of
+        /// singletons, or (nominal-excluded flavour) a single nominal class.
         excluded: Box<InferredType>,
         /// Where this negation came from.
         provenance: TypeProvenance,
@@ -647,10 +658,17 @@ impl InferredType {
         name.starts_with('#')
     }
 
-    /// Returns `true` if `ty` is the base of a well-formed [`Negation`] — i.e.
-    /// `Known("Symbol")`. `Symbol` is the sole supertype of singletons the type
-    /// checker models, so it is the only base for which singleton subtraction
-    /// and absorption are sound.
+    /// Returns `true` if `ty` is the base of a well-formed **singleton-excluded**
+    /// [`Negation`] — i.e. `Known("Symbol")`. `Symbol` is the sole supertype of
+    /// singletons the type checker models, so it is the only base for which
+    /// singleton subtraction and absorption are sound.
+    ///
+    /// Distinct from the **nominal-excluded** `Negation` flavour (ADR 0102 §5,
+    /// BT-2744, e.g. `Object \ Number`), whose base is any nominal class — see
+    /// the nominal-class arm of [`difference`](Self::difference). The two
+    /// flavours are distinguished structurally by whether `excluded` is a
+    /// singleton/union-of-singletons or a nominal class name; this predicate
+    /// only ever needs to ask "is this the Symbol-singleton flavour".
     ///
     /// [`Negation`]: InferredType::Negation
     fn is_symbol_base(ty: &Self) -> bool {
@@ -671,10 +689,15 @@ impl InferredType {
     /// hierarchy this is exactly [`is_symbol_base`](Self::is_symbol_base) —
     /// the previous, conservative behaviour.
     ///
-    /// Note this deliberately does **not** widen [`Negation`]
-    /// well-formedness: `is_symbol_base` (exactly `Symbol`) remains the only
-    /// valid `Negation` base, so `difference(ProtoObject, #foo)` stays a
-    /// no-op rather than fabricating a `ProtoObject \ #foo` complement.
+    /// Note this deliberately does **not** widen the *singleton-excluded*
+    /// [`Negation`] well-formedness: `is_symbol_base` (exactly `Symbol`)
+    /// remains the only valid base for subtracting a *singleton*, so
+    /// `difference(ProtoObject, #foo)` stays a no-op rather than fabricating a
+    /// `ProtoObject \ #foo` complement — `ProtoObject` is not itself a
+    /// hierarchy entry above which singleton subtraction was specified. This
+    /// is unrelated to the *nominal-excluded* flavour (ADR 0102 §5, BT-2744),
+    /// which admits any nominal class as `base` when the excluded value is
+    /// itself a nominal class, not a singleton.
     ///
     /// [`Negation`]: InferredType::Negation
     fn admits_symbol_singletons(ty: &Self, hierarchy: Option<&ClassHierarchy>) -> bool {
@@ -940,11 +963,13 @@ impl InferredType {
                 &Self::intersect(base, b, provenance, hierarchy, protocol_registry),
                 excluded,
                 provenance,
+                hierarchy,
             ),
             (_, Self::Negation { base, excluded, .. }) => Self::difference(
                 &Self::intersect(a, base, provenance, hierarchy, protocol_registry),
                 excluded,
                 provenance,
+                hierarchy,
             ),
             // LHS-union distribution.
             (Self::Union { members, .. }, _) => {
@@ -1118,7 +1143,7 @@ impl InferredType {
         sub == sup || hierarchy.superclass_chain(sub).iter().any(|c| c == sup)
     }
 
-    /// Normalising **difference** `A \ B` (ADR 0102 §1).
+    /// Normalising **difference** `A \ B` (ADR 0102 §1, §5).
     ///
     /// Rules:
     /// - Boundary: `difference(Never, P) = Never`; `difference(T, Never) = T`.
@@ -1135,11 +1160,26 @@ impl InferredType {
     /// - **Same-base flattening:** `difference(Negation{Symbol, E}, #bar) =
     ///   Negation{Symbol, union_of(E, #bar)}` — nested negation never escapes
     ///   normal form.
+    /// - **Nominal-class base case** (ADR 0102 §5, BT-2744, `hierarchy = Some`):
+    ///   for two distinct-named, non-singleton nominal classes, `difference(A,
+    ///   B)` ⇒ `Negation{A, B}` when `B` is a strict subclass of `A` (the
+    ///   class-hierarchy analogue of `Symbol \ #foo`); ⇒ `Never` when `A <: B`
+    ///   (every instance of `A` is also a `B`); ⇒ `A` unchanged when
+    ///   hierarchy-unrelated (nothing to remove). Without a hierarchy, or when
+    ///   either operand is a singleton (never a hierarchy entry — that is the
+    ///   dedicated `Symbol \ #foo` arm above), falls through to the structural
+    ///   default. `excluded` stays a single class (never a union of classes —
+    ///   out of scope per ADR 0102 §5 scope note).
     /// - `Meta` and `Dynamic` are opaque to `Negation`.
     /// - Generics compare exactly, including `type_args`.
     // Consumed by the narrowing rules landing later in ADR 0102's epic (BT-2738).
     #[allow(dead_code)]
-    pub(crate) fn difference(a: &Self, b: &Self, provenance: TypeProvenance) -> Self {
+    pub(crate) fn difference(
+        a: &Self,
+        b: &Self,
+        provenance: TypeProvenance,
+        hierarchy: Option<&ClassHierarchy>,
+    ) -> Self {
         match (a, b) {
             // `T \ Dynamic = T` and `T \ Never = T` (subtracting these removes
             // nothing), plus `Dynamic \ P = Dynamic` — here `a` *is* `Dynamic`,
@@ -1149,14 +1189,14 @@ impl InferredType {
             // Boundary: `Never \ P = Never`.
             (Self::Never, _) => Self::Never,
             // RHS-union fold: subtract each removed member in turn.
-            (_, Self::Union { members, .. }) => members
-                .iter()
-                .fold(a.clone(), |acc, m| Self::difference(&acc, m, provenance)),
+            (_, Self::Union { members, .. }) => members.iter().fold(a.clone(), |acc, m| {
+                Self::difference(&acc, m, provenance, hierarchy)
+            }),
             // LHS-union distribution: `(A | B) \ P = (A \ P) | (B \ P)`.
             (Self::Union { members, .. }, _) => {
                 let parts: Vec<Self> = members
                     .iter()
-                    .map(|m| Self::difference(m, b, provenance))
+                    .map(|m| Self::difference(m, b, provenance, hierarchy))
                     .collect();
                 Self::union_of(&parts)
             }
@@ -1188,8 +1228,34 @@ impl InferredType {
             }
             // `T \ T = Never` (exact structural equality, generics included).
             _ if a == b => Self::Never,
-            // Nothing structurally removable — no-op (nominal-class differences
-            // like `Object \ Number` are out of scope; `Meta`/`Dynamic` are
+            // Nominal-class base case (ADR 0102 §5, BT-2744): with a hierarchy,
+            // two distinct-named, non-singleton nominal classes relate via
+            // subtyping — a proper subclass subtraction is irreducible
+            // (`Negation{A, B}`), a supertype/self subtraction removes
+            // everything (`Never`, though `A == B` is already caught above),
+            // and hierarchy-unrelated classes are disjoint (no-op). Singletons
+            // are never hierarchy entries, so they are explicitly excluded —
+            // they are handled by the dedicated `Symbol \ #foo` arm above.
+            (Self::Known { class_name: an, .. }, Self::Known { class_name: bn, .. })
+                if an != bn
+                    && !Self::is_symbol_singleton(an)
+                    && !Self::is_symbol_singleton(bn)
+                    && hierarchy.is_some() =>
+            {
+                let h = hierarchy.unwrap_or_else(|| unreachable!("checked by guard above"));
+                if Self::is_nominal_subtype(h, bn, an) {
+                    // `B <: A` (proper, since `an != bn`).
+                    Self::make_negation(a.clone(), b.clone(), provenance)
+                } else if Self::is_nominal_subtype(h, an, bn) {
+                    // `A <: B` — every instance of `A` is also a `B`.
+                    Self::Never
+                } else {
+                    // Hierarchy-unrelated — disjoint, nothing to remove.
+                    a.clone()
+                }
+            }
+            // Nothing structurally removable — no-op (no hierarchy supplied,
+            // or hierarchy-unrelated nominal classes; `Meta`/`Dynamic` are
             // opaque to `Negation`).
             _ => a.clone(),
         }
