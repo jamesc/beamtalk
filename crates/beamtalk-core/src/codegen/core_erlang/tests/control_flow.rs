@@ -1275,3 +1275,90 @@ fn test_bt2797_field_stored_block_invoked_from_different_method_threads_state_co
          method's State as a trailing argument. Got: {code}"
     );
 }
+
+#[test]
+fn test_bt2797_nonliteral_field_mutating_block_passed_to_self_send_is_compile_error() {
+    // BT-2797 (verification, acceptance criterion 5): a field-mutating block
+    // held in a local var and passed as a *non-literal* argument to a
+    // self-send — `self applyBlock: blk to: x`, where `blk` was assigned
+    // separately — is a case `scan_class_for_tier2_blocks`
+    // (dispatch_codegen.rs) can't see: it only recognizes a *literal* block
+    // at the call site to promote the callee's parameter into
+    // `tier2_method_info`/`tier2_block_params`. If this compiled anyway with
+    // `aBlock value: x` inside `applyBlock:to:` naively applying with no
+    // state, it would badarity-crash at runtime whenever `blk` is actually a
+    // Tier 2 fun.
+    //
+    // Confirms this is instead a compile-time error: `prescan_tier2_local_vars`
+    // only promotes `blk` when every later use is a *safe* value/value: call —
+    // here `blk` is passed as an *argument* to `applyBlock:to:`, not a value:
+    // receiver, so prescan correctly leaves it unpromoted and it falls through
+    // to `generate_block`'s existing `FieldAssignmentInUnsupportedBlock` gate
+    // (BT-2792) — a safe compile-time failure, not a silent runtime crash.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  applyBlock: aBlock to: x =>\n    aBlock value: x\n\n  run: x =>\n    blk := [:y | self.total := self.total + y]\n    self applyBlock: blk to: x\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(CodeGenError::FieldAssignmentInUnsupportedBlock { .. })
+        ),
+        "A field-mutating block passed as a non-literal argument to a \
+         self-send must be a compile-time error, not code that compiles but \
+         risks badarity at runtime. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_bt2797_no_regression_pure_block_value_fast_path() {
+    // BT-2797 (acceptance criterion 7): the zero-cost fast path for a pure
+    // (non-mutating) block literal immediately invoked via `value`/`value:`
+    // must be untouched — no `is_function` runtime check, no state-threading
+    // overhead. BT-2797's new runtime-discrimination codegen
+    // (generate_block_value_call_runtime_discriminated) is deliberately
+    // scoped to `self.field value(:...)` receivers only (see
+    // try_generate_block_value_unary/keyword in intrinsics.rs) — a literal
+    // block receiver is intercepted earlier and takes the plain
+    // generate_block_value_call path regardless.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run =>\n    [42] value\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let code = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    )
+    .expect("should compile");
+
+    assert!(
+        !code.contains("is_function"),
+        "A pure block literal invoked via `value` must not emit any \
+         is_function runtime check. Got: {code}"
+    );
+}
+
+#[test]
+fn test_bt2797_no_regression_pure_local_var_block_value_fast_path() {
+    // BT-2797: a block held in a local var (not a field) that has NO captured
+    // or field mutations must also stay on the pre-existing plain
+    // `is_function` guard (generate_value_keyword_guard, unaffected by
+    // BT-2797) — never the new self.field-scoped runtime-discrimination path,
+    // and never the Tier 2 stateful protocol.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: item =>\n    blk := [:x | x + 1]\n    blk value: item\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let code = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    )
+    .expect("should compile");
+
+    assert!(
+        !code.contains("StateAcc"),
+        "A pure block stored in a local var must not be promoted to the \
+         Tier 2 stateful protocol. Got: {code}"
+    );
+}
