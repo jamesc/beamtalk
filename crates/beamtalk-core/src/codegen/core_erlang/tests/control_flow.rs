@@ -1136,7 +1136,7 @@ fn test_block_with_mixed_local_and_field_mutation_is_compile_error() {
     // one, and the mixed local+field shape this test targets wouldn't
     // reproduce. The outer method's own `outerCount := 0` — appearing after
     // `blk`'s definition in program order — only needs to exist so the
-    // source parses as a variable Beamtalk program; it has no bearing on the
+    // source parses as a valid Beamtalk program; it has no bearing on the
     // capture classification itself.
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: item =>\n    blk := [:x | outerCount := outerCount + x. self.total := self.total + outerCount]\n    outerCount := 0\n    blk value: item\n";
     let tokens = crate::source_analysis::lex_with_eof(src);
