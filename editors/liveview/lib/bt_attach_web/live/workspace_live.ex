@@ -390,10 +390,23 @@ defmodule BtAttachWeb.WorkspaceLive do
       # simply fall back to the re-activation re-read), so a subscribe failure is
       # logged but does not tear down the session.
       subscribe_classes_best_effort(socket)
+      # ADR 0105 Phase 1 (BT-2779): subscribe to the reload-check push stream
+      # so a `ReloadCheckCompleted` announcement (a re-check ran, or a
+      # caller's stale findings were cleared) updates the reload-findings
+      # panel live. Best-effort, same rationale as `subscribe_classes`.
+      subscribe_reload_check_best_effort(socket)
 
       socket
       |> assign(:connected, true)
       |> assign(:node, Workspace.node_name())
+      # ADR 0105 Phase 1 (BT-2779): the initial live snapshot of
+      # reload-induced findings. A plain synchronous dispatch (unlike
+      # `changes`/`browser_classes`, which fold through the async
+      # `start_mount_load` task) — the read is a single in-memory
+      # `gen_server:call` with no git/file I/O, so blocking `bind_session`
+      # briefly for it is the same trade-off `subscribe_transcript`/
+      # `subscribe_bindings` already make just above.
+      |> assign(:reload_findings, initial_reload_findings(socket))
       |> assign(:session_id, session_id)
       |> assign(:session_pid, pid)
       |> assign(:result, nil)
@@ -694,6 +707,7 @@ defmodule BtAttachWeb.WorkspaceLive do
         Workspace.unsubscribe_transcript(self())
         Workspace.unsubscribe_bindings(self())
         Workspace.unsubscribe_classes(self())
+        Workspace.unsubscribe_reload_check(self())
         force_close(socket.assigns[:token], pid)
 
         assign(socket,
@@ -718,6 +732,37 @@ defmodule BtAttachWeb.WorkspaceLive do
         )
 
         :ok
+    end
+  end
+
+  # ADR 0105 Phase 1 (BT-2779): best-effort subscribe to the reload-check push
+  # stream. Same rationale as `subscribe_classes_best_effort/1` — an older
+  # workspace without the wiring, or a transient dist hiccup, degrades the
+  # reload-findings panel to whatever `initial_reload_findings/1` read at
+  # mount (stale until next remount) rather than failing the whole session.
+  defp subscribe_reload_check_best_effort(socket) do
+    case Facade.dispatch(:subscribe_reload_check, %{pid: self()}, ctx(socket)) do
+      :ok ->
+        :ok
+
+      other ->
+        Logger.warning(
+          "subscribe_reload_check failed (reload-findings panel degraded): #{inspect(other)}",
+          domain: [:beamtalk, :liveview]
+        )
+
+        :ok
+    end
+  end
+
+  # ADR 0105 Phase 1 (BT-2779): the initial reload-findings snapshot for a
+  # fresh mount. An unreachable workspace or an unexpected reply degrades to
+  # an empty panel (consistent with `changes`/`browser_classes`'s
+  # graceful-degradation default) rather than failing the mount.
+  defp initial_reload_findings(socket) do
+    case Facade.dispatch(:reload_findings, %{}, ctx(socket)) do
+      {:ok, findings} when is_list(findings) -> findings
+      _other -> []
     end
   end
 
@@ -2128,6 +2173,49 @@ defmodule BtAttachWeb.WorkspaceLive do
       )
       when lifecycle in [:ClassLoaded, :ClassRemoved] do
     {:noreply, schedule_source_refresh(socket)}
+  end
+
+  # ADR 0105 Phase 1 (BT-2779): a reload-induced re-check outcome. Unlike the
+  # `bindings`/`classes` streams (refresh triggers only — the LiveView
+  # re-pulls the data on the signal), this announcement already carries the
+  # new state (`changedClass` + `checkedOwners` + `findings`), so no extra
+  # round-trip is needed: apply clearing-by-replacement (ADR 0105 §Mechanism
+  # step 4) directly.
+  #
+  # The rejection predicate is NOT simply "owner in checked_owners" — that
+  # would let one changed class's reload silently discard a *different*
+  # changed class's still-valid finding for the same caller (a caller
+  # broken by two independently-reloading dependencies must keep both until
+  # each is fixed on its own schedule; see
+  # `beamtalk_workspace_findings_store`'s moduledoc). The server applies two
+  # different clears depending on WHY an owner is in `checked_owners`:
+  #   * `owner == changed_class` — this owner's OWN source just changed, so
+  #     the server unconditionally full-wipes EVERY origin for it
+  #     (`clear_owner/1`), not just the `changed_class` one.
+  #   * any other owner — only THIS changed class's contribution was
+  #     scoped-replaced (`put_owner_origin/3`); a different changed class's
+  #     finding for the same owner is untouched.
+  # Mirroring that: reject a cached finding when its owner is in
+  # `checked_owners` AND (its own owner IS the changed class — full wipe —
+  # OR its `changed_class` matches this event's — scoped wipe). An owner
+  # listed with no findings (a clean re-check, or a plain edit that cleared
+  # its own stale findings) is exactly how a stale row disappears from the
+  # panel without anyone touching it.
+  def handle_info(
+        {:beamtalk_announcement, _sub_ref, :ReloadCheckCompleted, _handler, event},
+        socket
+      ) do
+    {changed_class, checked_owners, findings} = Workspace.normalize_reload_event(event)
+
+    updated =
+      socket.assigns.reload_findings
+      |> Enum.reject(fn f ->
+        f.owner in checked_owners and
+          (f.owner == changed_class or f.changed_class == changed_class)
+      end)
+      |> Kernel.++(findings)
+
+    {:noreply, assign(socket, :reload_findings, updated)}
   end
 
   # BT-2600: the coalesced source refresh fired by a `ClassLoaded`/`ClassRemoved`
@@ -3897,6 +3985,43 @@ defmodule BtAttachWeb.WorkspaceLive do
       changes_error: Workspace.render_error(:unexpected_response),
       expanded_changes: MapSet.new()
     )
+  end
+
+  # ADR 0105 Phase 1 (BT-2779): flatten `reload_findings` (one entry per
+  # finding, each carrying a list of call sites) into one row per site, for
+  # the Reload Checks table. A finding with no recorded sites (defensive —
+  # `beamtalk_recheck` always attaches at least the xref sites it found the
+  # finding against, but a malformed push should still render *something*
+  # rather than silently dropping the row) still renders one row with
+  # `method`/`line` as `nil`, which the template shows as `—`.
+  defp reload_finding_rows(findings) do
+    Enum.flat_map(findings, fn f ->
+      case f.sites do
+        [] ->
+          [
+            %{
+              owner: f.owner,
+              method: nil,
+              line: nil,
+              severity: f.severity,
+              message: f.message,
+              note: f.note
+            }
+          ]
+
+        sites ->
+          Enum.map(sites, fn site ->
+            %{
+              owner: f.owner,
+              method: site.method,
+              line: site.line,
+              severity: f.severity,
+              message: f.message,
+              note: f.note
+            }
+          end)
+      end
+    end)
   end
 
   # BT-2598: the live image changed (a class was (re)loaded or removed). Re-pull
@@ -9018,6 +9143,57 @@ defmodule BtAttachWeb.WorkspaceLive do
                             <tr :if={c[:diff] && expanded} class="diff-row">
                               <td colspan={if @role == :owner, do: 7, else: 6}>
                                 <.unified_diff diff={c[:diff]} />
+                              </td>
+                            </tr>
+                          <% end %>
+                        </tbody>
+                      </table>
+                    <% end %>
+
+                    <%!-- Reload-induced findings (ADR 0105 Phase 1, BT-2779):
+                         live, session-only type-check findings attributed to
+                         a caller whose re-check surfaced a signature-change
+                         or removed-selector diagnostic after a dependency
+                         reloaded. Shares this tab with the ChangeLog table
+                         above — both answer "what does the live image know
+                         is different" — with its own heading + summary, and
+                         clears the same way the ChangeLog row does: a fresh
+                         `ReloadCheckCompleted` push replaces an owner's
+                         findings wholesale (clearing-by-replacement), so a
+                         fixed caller simply drops off this list. --%>
+                    <h3 class="reload-findings-heading">Reload Checks</h3>
+                    <%= if @reload_findings == [] do %>
+                      <p class="muted-note">
+                        No reload-induced findings. A stale caller appears here after a live
+                        signature change or removed selector.
+                      </p>
+                    <% else %>
+                      <table class="bt-table bt-reload-findings-table">
+                        <thead>
+                          <tr>
+                            <th>Caller</th>
+                            <th>Site</th>
+                            <th>Severity</th>
+                            <th>Message</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <%= for row <- reload_finding_rows(@reload_findings) do %>
+                            <tr>
+                              <td class="k">{row.owner}</td>
+                              <td>
+                                <%= if row.method do %>
+                                  {row.owner}&gt;&gt;{row.method} (line {row.line})
+                                <% else %>
+                                  —
+                                <% end %>
+                              </td>
+                              <td>{row.severity}</td>
+                              <td>
+                                {row.message}
+                                <%= if row.note do %>
+                                  <br /><span class="muted-note">{row.note}</span>
+                                <% end %>
                               </td>
                             </tr>
                           <% end %>

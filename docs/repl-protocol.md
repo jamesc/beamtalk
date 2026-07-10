@@ -889,6 +889,56 @@ Actor lifecycle events pushed when actors spawn or stop in the workspace. Client
 | `data.spawned_at` | integer | Unix timestamp (seconds), present on `spawned` events |
 | `data.reason` | string | Termination reason, present on `stopped` events |
 
+### Reload Check Channel (ADR 0105 Phase 1, BT-2779)
+
+Reload-induced re-check outcomes, pushed whenever a live method reload's
+signature diff triggers a dependent re-check (or clears a caller's own
+stale findings because its source just changed — see
+`beamtalk_recheck.erl` and `beamtalk_workspace_findings_store.erl`).
+Clients subscribe automatically on connection.
+
+```json
+{
+  "type": "push",
+  "channel": "reload_check",
+  "event": "completed",
+  "data": {
+    "changedClass": "Counter",
+    "changedSelector": "getCount",
+    "classification": "signature_change",
+    "checked": 2,
+    "notChecked": 0,
+    "capNote": null,
+    "checkedOwners": ["Dashboard", "StatsView"],
+    "findings": [
+      {
+        "owner": "Dashboard",
+        "changedClass": "Counter",
+        "selector": "getCount",
+        "classification": "signature_change",
+        "severity": "warning",
+        "category": "Dnu",
+        "message": "String does not understand '+'",
+        "note": null,
+        "sites": [{"method": "refresh", "line": 14}],
+        "start": 0,
+        "end": 5
+      }
+    ]
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `data.changedClass` / `data.changedSelector` | string | The reloaded method that triggered this re-check |
+| `data.classification` | `"signature_change"` \| `"removal"` \| `"self_edit"` | `self_edit` means no dependent re-check ran — only `changedClass`'s own stale findings-as-caller were cleared |
+| `data.checked` / `data.notChecked` | integer | Distinct caller classes checked vs. skipped by the per-reload cap |
+| `data.capNote` | string \| null | `"N more not checked"` note when the cap was exceeded |
+| `data.checkedOwners` | string[] | **Clearing-by-replacement signal**: every caller class this event's `findings` are authoritative for — a client must replace whatever it is showing for each listed owner with `findings` filtered to that owner (possibly none) |
+| `data.findings[]` | object[] | The stale findings themselves; empty entries for a checked-but-clean owner are implicit (absent from this list, not present with an empty array) |
+| `data.findings[].sites[]` | object[] | Call sites (`method`, 1-based `line`) xref recorded for this finding |
+
 ## Legacy Format (Removed)
 
 The pre-0.5.0 legacy format (`type`-field requests such as

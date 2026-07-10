@@ -1011,6 +1011,30 @@ defmodule BtAttach.Workspace do
   end
 
   @doc """
+  Subscribe `pid` to the reload-check push stream (ADR 0105 Phase 1,
+  BT-2779), mirroring `subscribe_classes/1` exactly. The subscriber receives
+  a native `{:beamtalk_announcement, sub_ref, :ReloadCheckCompleted,
+  handler, event}` message whenever `beamtalk_repl_loader:maybe_trigger_recheck/4`
+  has something for a live surface to act on — a dependent re-check ran, or
+  a caller's stale findings were cleared because its own source changed
+  (including a `Workspace changes revert:` re-install). On that signal the
+  LiveView applies the event's `checkedOwners`/`findings` (clearing-by-
+  replacement, ADR 0105 §Mechanism step 4) to its own `reload_findings`
+  assign — no extra round-trip needed, unlike the `bindings`/`classes`
+  streams, since the announcement already carries the new state, not just a
+  refresh trigger. The bus prunes the subscription on dist disconnect; the
+  LiveView re-subscribes on its next (re)mount.
+  """
+  def subscribe_reload_check(pid) when is_pid(pid) do
+    rpc(:beamtalk_repl_subscriptions, :subscribe, [:reload_check, pid])
+  end
+
+  @doc "Unsubscribe `pid` from the reload-check push stream via the facade."
+  def unsubscribe_reload_check(pid) when is_pid(pid) do
+    rpc(:beamtalk_repl_subscriptions, :unsubscribe, [:reload_check, pid])
+  end
+
+  @doc """
   Subscribe the given `subscriber` (the LiveView process) to *per-object* state
   changes on the inspected actor `term` — the live-Inspector push of Cockpit
   Phase 3 (ADR 0095 §5, BT-2489).
@@ -1572,6 +1596,98 @@ defmodule BtAttach.Workspace do
         {:error, {:unexpected_reply, other}}
     end
   end
+
+  @doc """
+  Current live snapshot of reload-induced findings (ADR 0105 Phase 1,
+  BT-2779): every `beamtalk_recheck:finding()` currently recorded for any
+  caller class, via `beamtalk_workspace_findings_store:all/0` — already
+  flattened and deterministically sorted by the store itself
+  (`{owner, selector, message}`). The workspace/cockpit UI's initial-load /
+  manual-refresh counterpart to the `reload_check` push stream
+  (`subscribe_reload_check/1`), the same relationship `change_history/0` has
+  to `subscribe_classes/1`.
+
+  Returns `{:ok, [map()]}` (possibly empty), or `{:error, reason}` on a
+  dispatch failure, mirroring `change_history/0`. Each map uses the same
+  field names + line-based call-site references the LSP/REPL surfaces
+  render from — not the byte-offset span the workspace re-check computed it
+  against, since there is no on-disk-position mapping for that span (see
+  `beamtalk_recheck.erl`'s `finding()` doc) and every other surface already
+  works from the site's xref-recorded line instead.
+  """
+  @spec reload_findings() :: {:ok, [map()]} | {:error, term()}
+  def reload_findings do
+    case rpc(:beamtalk_workspace_findings_store, :all, []) do
+      findings when is_list(findings) ->
+        {:ok, Enum.map(findings, &normalize_finding/1)}
+
+      {:badrpc, reason} ->
+        {:error, {:unreachable, reason}}
+
+      other ->
+        {:error, {:unexpected_reply, other}}
+    end
+  end
+
+  @doc """
+  Normalize one `beamtalk_recheck:finding()` map (atom keys, straight off
+  `:rpc.call/4`) into the shape `reload_findings/0` and the LiveView's
+  `ReloadCheckCompleted` handler both render from. Public because the
+  `handle_info` clause for the live push (`normalize_reload_event/1`) needs
+  the exact same per-finding shape `reload_findings/0`'s initial read uses —
+  the panel must render identically regardless of which path populated it.
+  """
+  @spec normalize_finding(map()) :: map()
+  def normalize_finding(finding) when is_map(finding) do
+    %{
+      owner: to_string(Map.get(finding, :owner)),
+      changed_class: to_string(Map.get(finding, :changed_class)),
+      selector: to_string(Map.get(finding, :selector)),
+      classification: to_string(Map.get(finding, :classification)),
+      severity: to_string(Map.get(finding, :severity)),
+      category: nilify(Map.get(finding, :category)),
+      message: to_string(Map.get(finding, :message)),
+      note: nilify(Map.get(finding, :note)),
+      sites: Enum.map(Map.get(finding, :sites, []), &normalize_site/1)
+    }
+  end
+
+  defp normalize_site(site) when is_map(site) do
+    %{method: to_string(Map.get(site, :method)), line: Map.get(site, :line, 0)}
+  end
+
+  @doc """
+  Normalize a `'ReloadCheckCompleted'` announcement payload (ADR 0105 Phase
+  1, BT-2779 — built by `beamtalk_repl_loader:publish_recheck_outcome/5`)
+  into `{changed_class, checked_owners, findings}`: `changed_class` as a
+  binary, `checked_owners` as a list of binaries, `findings` normalized via
+  `normalize_finding/1`.
+
+  The LiveView's `handle_info` clause applies these via clearing-by-
+  replacement (ADR 0105 §Mechanism step 4) **scoped to `{owner,
+  changed_class}`**, not to owner alone: drop every currently-held finding
+  whose `owner` is in `checked_owners` *and* whose `changed_class` matches
+  this event's, then append `findings`. Scoping by owner alone would let one
+  changed class's reload silently discard a *different* changed class's
+  still-valid finding for the same caller (a caller broken by two
+  independently-reloading dependencies must keep both findings until each
+  is independently fixed) — mirrors
+  `beamtalk_workspace_findings_store`'s `origin_key()` server-side.
+  """
+  @spec normalize_reload_event(map()) :: {String.t(), [String.t()], [map()]}
+  def normalize_reload_event(event) when is_map(event) do
+    changed_class = event |> Map.get(:changedClass) |> to_string()
+    owners = event |> Map.get(:checkedOwners, []) |> Enum.map(&to_string/1)
+    findings = event |> Map.get(:findings, []) |> Enum.map(&normalize_finding/1)
+    {changed_class, owners, findings}
+  end
+
+  # Erlang's "missing value" idiom (`undefined`) crosses `:rpc.call/4` as the
+  # atom `:undefined`, distinct from Elixir's own `nil` — normalise both to
+  # `nil` for the template.
+  defp nilify(nil), do: nil
+  defp nilify(:undefined), do: nil
+  defp nilify(value), do: to_string(value)
 
   @doc """
   Working-tree git status for the workspace project root (ADR 0082, BT-2586).

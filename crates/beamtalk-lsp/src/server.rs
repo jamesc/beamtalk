@@ -16,7 +16,9 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::runtime::{ClassChangedEvent, FlushEvent, RuntimeClient, RuntimeError};
+use crate::runtime::{
+    ClassChangedEvent, FlushEvent, ReloadCheckEvent, ReloadFinding, RuntimeClient, RuntimeError,
+};
 
 use beamtalk_core::language_service::{
     CallHierarchyTarget, CompletionKind, DocumentSymbolKind, LanguageService,
@@ -83,6 +85,25 @@ struct PreloadConfig {
     stdlib_dirs: Vec<PathBuf>,
 }
 
+/// Live reload-induced diagnostics (ADR 0105 Phase 1, BT-2779), double-keyed
+/// by document URI and then by `(owner class name, changed class name)`.
+/// Both levels of keying are load-bearing, not cosmetic:
+///
+/// * **Owner**: Beamtalk supports multiple classes defined in one `.bt` file
+///   (e.g. `Behaviour.bt`, `WorkspaceInterface.bt`), so two different caller
+///   classes' reload-induced diagnostics can legitimately share a URI. A
+///   flat `HashMap<Url, Vec<Diagnostic>>` would have one owner's `put`/clear
+///   silently clobber a sibling owner's diagnostics in the same file.
+/// * **Changed class**: a single caller can be broken by two *independently
+///   reloading* classes (`Dashboard` calls both `Counter>>getCount` and
+///   `Widget>>size`; each can go stale and get fixed on its own schedule).
+///   Keying only by owner would have a later reload's `insert`/`remove`
+///   clobber an earlier, still-valid finding from a *different* changed
+///   class — mirrors `beamtalk_workspace_findings_store`'s `origin_key()`
+///   (`{Owner, ChangedClass}`) server-side.
+type ReloadDiagnosticsByUriAndOrigin =
+    HashMap<Url, HashMap<(String, String), Vec<tower_lsp::lsp_types::Diagnostic>>>;
+
 #[derive(Default)]
 struct PreloadedFiles {
     user_files: Vec<(PathBuf, String)>,
@@ -107,8 +128,15 @@ pub struct FetchContentResult {
 pub struct Backend {
     /// LSP client handle for sending notifications and responses.
     client: Client,
-    /// The underlying language service, protected by a mutex for concurrent access.
-    service: Mutex<SimpleLanguageService>,
+    /// The underlying language service, protected by a mutex for concurrent
+    /// access. `Arc`-wrapped (ADR 0105 Phase 1, BT-2779) so the detached
+    /// reload-check listener task (spawned once, outlives any single
+    /// request handler's `&self` borrow) can recompute *static* diagnostics
+    /// and merge them with reload-induced ones when it republishes — the
+    /// same reason [`Self::versions`] and [`Self::nav_cache`] are
+    /// `Arc`-wrapped. `self.service.lock()` is unaffected: `Arc<Mutex<T>>`
+    /// derefs to `Mutex<T>`.
+    service: Arc<Mutex<SimpleLanguageService>>,
     /// Last known LSP document version by file path.
     versions: Arc<Mutex<HashMap<Utf8PathBuf, i32>>>,
     /// Paths of documents that have received `didChange` notifications since
@@ -158,6 +186,19 @@ pub struct Backend {
     /// without keeping the `Backend` itself alive (the listener is aborted
     /// on `Drop` via `class_changed_listener`'s `JoinHandle`).
     nav_cache: Arc<std::sync::Mutex<NavCache>>,
+    /// ADR 0105 Phase 1 (BT-2779): handle to the reload-check-event listener
+    /// task that consumes `ReloadCheckEvent`s and publishes/clears
+    /// reload-induced diagnostics.
+    reload_check_listener: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// ADR 0105 Phase 1 (BT-2779): currently-live reload-induced diagnostics,
+    /// keyed by document URI and then by owner class name (see
+    /// [`ReloadDiagnosticsByUriAndOrigin`] for why the owner keying matters).
+    /// Populated/replaced wholesale per owner by [`reload_check_listener`]
+    /// (clearing-by-replacement — an owner with no current findings has its
+    /// entry removed, not left stale), and merged into every
+    /// [`Backend::publish_diagnostics`] call so a subsequent
+    /// `didChange`-triggered republish doesn't silently drop them.
+    reload_diagnostics: Arc<std::sync::Mutex<ReloadDiagnosticsByUriAndOrigin>>,
 }
 
 /// Coarse cache for runtime-attached navigation results (BT-2239).
@@ -201,7 +242,7 @@ impl Backend {
     pub fn new(client: Client) -> Self {
         Self {
             client,
-            service: Mutex::new(SimpleLanguageService::new()),
+            service: Arc::new(Mutex::new(SimpleLanguageService::new())),
             versions: Arc::new(Mutex::new(HashMap::new())),
             dirty_files: Mutex::new(HashSet::new()),
             diagnostic_generation: Mutex::new(HashMap::new()),
@@ -214,6 +255,8 @@ impl Backend {
             class_changed_listener: tokio::sync::Mutex::new(None),
             delegate_to_runtime: std::sync::atomic::AtomicBool::new(false),
             nav_cache: Arc::new(std::sync::Mutex::new(NavCache::default())),
+            reload_check_listener: tokio::sync::Mutex::new(None),
+            reload_diagnostics: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
     }
 
@@ -962,7 +1005,13 @@ impl Backend {
         // attach the real cache to it.
         let (class_changed_tx, class_changed_rx) =
             tokio::sync::mpsc::unbounded_channel::<ClassChangedEvent>();
-        let client = RuntimeClient::connect(&project_root, flush_tx, class_changed_tx).await?;
+        // ADR 0105 Phase 1 (BT-2779): reload-induced re-check outcomes, so
+        // the LSP can publish/clear diagnostics on the affected callers.
+        let (reload_check_tx, reload_check_rx) =
+            tokio::sync::mpsc::unbounded_channel::<ReloadCheckEvent>();
+        let client =
+            RuntimeClient::connect(&project_root, flush_tx, class_changed_tx, reload_check_tx)
+                .await?;
 
         // Re-check the cache under the lock before installing. If a parallel
         // call beat us to it, drop our freshly-connected client (its
@@ -1015,6 +1064,8 @@ impl Backend {
             class_changed_rx,
         ));
 
+        let reload_check_handle = self.spawn_reload_check_listener(client.clone(), reload_check_rx);
+
         {
             let mut runtime_guard = self.runtime.lock().await;
             *runtime_guard = Some(client.clone());
@@ -1034,31 +1085,107 @@ impl Backend {
             }
             *guard = Some(class_changed_handle);
         }
+        {
+            let mut guard = self.reload_check_listener.lock().await;
+            if let Some(prev) = guard.take() {
+                prev.abort();
+            }
+            *guard = Some(reload_check_handle);
+        }
 
         Ok(client)
     }
 
-    async fn publish_diagnostics(&self, uri: &Url) {
-        // Stdlib virtual documents have no user-facing diagnostics.
-        if uri.scheme() == "beamtalk-stdlib" {
-            return;
-        }
-        let Some(path) = uri_to_path(uri) else {
-            return;
+    /// Spawn the reload-check listener task (ADR 0105 Phase 1, BT-2779).
+    /// Extracted out of `ensure_runtime_attached` purely to keep that
+    /// function under the lint's line-count limit — needs a `RuntimeClient`
+    /// clone (to resolve owner class -> URI via `nav-symbols`) plus `Arc`
+    /// clones of `service` and `reload_diagnostics` so it can
+    /// merge-and-republish, mirroring the flush listener's pattern of
+    /// holding only the specific pieces it needs rather than a `Backend`
+    /// back-reference.
+    fn spawn_reload_check_listener(
+        &self,
+        runtime_client: RuntimeClient,
+        reload_check_rx: tokio::sync::mpsc::UnboundedReceiver<ReloadCheckEvent>,
+    ) -> tokio::task::JoinHandle<()> {
+        let roots = {
+            let roots = self
+                .workspace_roots
+                .lock()
+                .expect("workspace_roots lock poisoned");
+            roots.clone()
         };
-        let diagnostics = {
-            let svc = self.service.lock().expect("service lock poisoned");
-            let source = svc.file_source(&path);
-            svc.diagnostics(&path)
-                .into_iter()
-                .map(|d| to_lsp_diagnostic(&d, source.as_deref()))
-                .collect()
-        };
-        let version = self.file_version_for_uri(uri);
-        self.client
-            .publish_diagnostics(uri.clone(), diagnostics, version)
-            .await;
+        tokio::spawn(reload_check_listener(
+            self.client.clone(),
+            runtime_client,
+            roots,
+            Arc::clone(&self.service),
+            Arc::clone(&self.reload_diagnostics),
+            reload_check_rx,
+        ))
     }
+
+    async fn publish_diagnostics(&self, uri: &Url) {
+        let version = self.file_version_for_uri(uri);
+        publish_diagnostics_impl(
+            &self.client,
+            &self.service,
+            &self.reload_diagnostics,
+            uri,
+            version,
+        )
+        .await;
+    }
+}
+
+/// Recompute static diagnostics for `uri`, merge in any live reload-induced
+/// diagnostics (ADR 0105 Phase 1, BT-2779), and publish the combined set.
+///
+/// A free function (not a `&self` method) so both [`Backend::publish_diagnostics`]
+/// and the detached `reload_check_listener` task — which only holds `Arc`
+/// clones of the pieces it needs, not a `Backend` reference, since it
+/// outlives any single request handler's borrow — can share one
+/// implementation. LSP's `publishDiagnostics` fully replaces what the editor
+/// shows for a URI (no incremental-append notification), so every call,
+/// whether triggered by a normal edit/save or by a reload-check push, must
+/// include both sources or one silently clobbers the other.
+async fn publish_diagnostics_impl(
+    client: &Client,
+    service: &Mutex<SimpleLanguageService>,
+    reload_diagnostics: &std::sync::Mutex<ReloadDiagnosticsByUriAndOrigin>,
+    uri: &Url,
+    version: Option<i32>,
+) {
+    // Stdlib virtual documents have no user-facing diagnostics.
+    if uri.scheme() == "beamtalk-stdlib" {
+        return;
+    }
+    let Some(path) = uri_to_path(uri) else {
+        return;
+    };
+    let mut diagnostics: Vec<tower_lsp::lsp_types::Diagnostic> = {
+        let svc = service.lock().expect("service lock poisoned");
+        let source = svc.file_source(&path);
+        svc.diagnostics(&path)
+            .into_iter()
+            .map(|d| to_lsp_diagnostic(&d, source.as_deref()))
+            .collect()
+    };
+    {
+        let reload = reload_diagnostics
+            .lock()
+            .expect("reload_diagnostics lock poisoned");
+        // Flatten every owner's diagnostics for this URI — a file can
+        // define more than one class (see `ReloadDiagnosticsByUriAndOrigin`'s
+        // doc), each with its own independently clearing entry.
+        if let Some(by_owner) = reload.get(uri) {
+            diagnostics.extend(by_owner.values().flatten().cloned());
+        }
+    }
+    client
+        .publish_diagnostics(uri.clone(), diagnostics, version)
+        .await;
 }
 
 #[tower_lsp::async_trait]
@@ -2556,6 +2683,230 @@ async fn class_changed_listener(
         guard.invalidate();
     }
     tracing::debug!("class_changed_listener: channel closed, exiting");
+}
+
+/// ADR 0105 Phase 1 (BT-2779): consume `ReloadCheckEvent`s from the runtime
+/// listener and publish/clear reload-induced diagnostics on the affected
+/// caller classes' documents.
+///
+/// For every owner in the event's `checked_owners` (the clearing-by-
+/// replacement set — see [`ReloadCheckEvent`]'s doc), this:
+/// 1. Resolves the owner class name to a document URI via `nav-symbols`
+///    (one round-trip per event, not per owner — `nav-symbols` already
+///    returns every user class).
+/// 2. Builds LSP diagnostics from the event's findings restricted to that
+///    owner (`reload_finding_to_lsp_diagnostics`), one per call site so a
+///    finding with several sends in the same method surfaces at each line.
+/// 3. Replaces (never merges) that `(owner, changed_class)` origin's entry
+///    within that URI's bucket in `reload_diagnostics` — an origin with no
+///    current findings gets its entry removed, which is exactly how a
+///    clean re-check clears a stale diagnostic, without touching a
+///    *different* class's entry that happens to share the same file, NOR a
+///    *different changed class*'s still-valid findings for the *same*
+///    owner (`ReloadDiagnosticsByUriAndOrigin`) — a caller broken by two
+///    independently-reloading classes must not have one reload's
+///    replacement silently discard the other's still-valid finding.
+/// 4. Republishes the merged (static + every origin's reload) diagnostic
+///    set for that URI.
+///
+/// An owner with no resolvable source file (a REPL-only / dynamically
+/// defined class, or one `nav-symbols` doesn't know about) is skipped — the
+/// LSP has nothing to attach a `publishDiagnostics` notification to.
+/// Silent: this is a normal, expected case (surface-parity is preserved by
+/// the REPL notice and workspace UI, which don't need a `.bt` file to
+/// attribute a finding to).
+async fn reload_check_listener(
+    client: Client,
+    runtime: RuntimeClient,
+    workspace_roots: Vec<PathBuf>,
+    service: Arc<Mutex<SimpleLanguageService>>,
+    reload_diagnostics: Arc<std::sync::Mutex<ReloadDiagnosticsByUriAndOrigin>>,
+    mut reload_check_rx: tokio::sync::mpsc::UnboundedReceiver<ReloadCheckEvent>,
+) {
+    while let Some(event) = reload_check_rx.recv().await {
+        if event.checked_owners.is_empty() {
+            continue;
+        }
+        // Echo the summary line every other surface shows (REPL notice,
+        // workspace UI header — "N callers re-checked, M stale") to the LSP
+        // client's output channel. Squiggles alone don't carry the
+        // clean-recheck count, and `window/logMessage` is the LSP's own
+        // best-effort notice channel (not a `publishDiagnostics` — this
+        // never affects the diagnostic set).
+        let cap_suffix = event
+            .cap_note
+            .as_deref()
+            .map(|n| format!(" ({n})"))
+            .unwrap_or_default();
+        client
+            .log_message(
+                MessageType::INFO,
+                format!(
+                    "reload check: {}>>{} {}; {} checked, {} not checked{cap_suffix}",
+                    event.changed_class,
+                    event.changed_selector,
+                    event.classification,
+                    event.checked,
+                    event.not_checked
+                ),
+            )
+            .await;
+        let classes = match runtime.nav_symbols(Some("user")).await {
+            Ok(classes) => classes,
+            Err(e) => {
+                tracing::warn!(error = %e, "reload_check_listener: nav_symbols failed");
+                continue;
+            }
+        };
+        for owner in &event.checked_owners {
+            let Some(class) = classes.iter().find(|c| c.name.as_str() == owner.as_str()) else {
+                tracing::debug!(
+                    owner,
+                    "reload_check_listener: owner has no known source file, skipping"
+                );
+                continue;
+            };
+            let Some(uri) = resolve_class_uri(class, &workspace_roots) else {
+                tracing::debug!(owner, "reload_check_listener: could not resolve class URI");
+                continue;
+            };
+            let diagnostics: Vec<tower_lsp::lsp_types::Diagnostic> = event
+                .findings
+                .iter()
+                .filter(|f| &f.owner == owner)
+                .flat_map(reload_finding_to_lsp_diagnostics)
+                .collect();
+            {
+                let mut guard = reload_diagnostics
+                    .lock()
+                    .expect("reload_diagnostics lock poisoned");
+                // `owner == changed_class` means this owner's OWN source
+                // just changed — the server unconditionally full-wipes it
+                // (`beamtalk_workspace_findings_store:clear_owner/1`) before
+                // any scoped replace, so every origin bucket for this owner
+                // is stale, not just the one keyed to `changed_class`. Every
+                // *other* owner only had its `(owner, changed_class)` origin
+                // scoped-replaced server-side (`put_owner_origin/3`), so a
+                // different changed class's still-valid finding for the
+                // same owner must survive.
+                if owner == &event.changed_class {
+                    if let Some(by_origin) = guard.get_mut(&uri) {
+                        by_origin.retain(|(o, _cc), _| o != owner);
+                        if by_origin.is_empty() {
+                            guard.remove(&uri);
+                        }
+                    }
+                    if !diagnostics.is_empty() {
+                        guard
+                            .entry(uri.clone())
+                            .or_default()
+                            .insert((owner.clone(), event.changed_class.clone()), diagnostics);
+                    }
+                } else {
+                    let origin_key = (owner.clone(), event.changed_class.clone());
+                    if diagnostics.is_empty() {
+                        if let Some(by_origin) = guard.get_mut(&uri) {
+                            by_origin.remove(&origin_key);
+                            if by_origin.is_empty() {
+                                guard.remove(&uri);
+                            }
+                        }
+                    } else {
+                        guard
+                            .entry(uri.clone())
+                            .or_default()
+                            .insert(origin_key, diagnostics);
+                    }
+                }
+            }
+            // No tracked document version for a URI the editor may not even
+            // have open — `publishDiagnostics`' `version` field is optional
+            // per the LSP spec, so omitting it is correct here (unlike the
+            // flush listener, which only touches already-open buffers).
+            publish_diagnostics_impl(&client, &service, &reload_diagnostics, &uri, None).await;
+        }
+    }
+    tracing::debug!("reload_check_listener: channel closed, exiting");
+}
+
+/// Resolve a `NavSymbolClass`'s `source_file` to a document `Url`, the same
+/// way [`runtime_class_to_document_symbol`] does — reusing
+/// `nav_site_to_location` for the workspace-root canonicalisation via a
+/// synthetic single-site `NavSite`.
+fn resolve_class_uri(class: &NavSymbolClass, workspace_roots: &[PathBuf]) -> Option<Url> {
+    let source_file = class.source_file.as_deref()?;
+    if source_file.is_empty() {
+        return None;
+    }
+    let resolved = nav_site_to_location(
+        &NavSite {
+            class: class.name.clone(),
+            class_side: false,
+            method: class.name.clone(),
+            line: class.line.unwrap_or(1),
+            source_file: Some(source_file.to_string()),
+        },
+        workspace_roots,
+    )?;
+    path_to_uri(&resolved.file)
+}
+
+/// Build one LSP `Diagnostic` per call site in a reload-induced finding
+/// (ADR 0105 Phase 1, BT-2779). Uses the site's xref-recorded line number —
+/// not the finding's `start`/`end` byte-offset span, since those are
+/// offsets into the *live combined class source* the compiler re-checked
+/// against, and there is no existing machinery to map that back onto an
+/// on-disk position the way `nav_site_to_location`/`line_to_position`
+/// already do for a line number (see `ReloadFinding::start`'s doc).
+fn reload_finding_to_lsp_diagnostics(
+    finding: &ReloadFinding,
+) -> Vec<tower_lsp::lsp_types::Diagnostic> {
+    let severity = match finding.severity.as_str() {
+        "error" => DiagnosticSeverity::ERROR,
+        "warning" => DiagnosticSeverity::WARNING,
+        _ => DiagnosticSeverity::HINT,
+    };
+    // `reload check (<classification> of <ChangedClass>>><selector>): …`
+    // attributes the finding the same way the REPL notice / ADR demo do
+    // (`format_reload_check_notice` in `beamtalk-cli`), so a squiggle's
+    // hover text answers "why is this here" without cross-referencing
+    // another surface.
+    let mut message = format!(
+        "reload check ({} of {}>>{}): {}",
+        finding.classification, finding.changed_class, finding.selector, finding.message
+    );
+    if let Some(note) = &finding.note {
+        message.push_str("\n  = ");
+        message.push_str(note);
+    }
+    let code = finding
+        .category
+        .clone()
+        .map(tower_lsp::lsp_types::NumberOrString::String);
+    finding
+        .sites
+        .iter()
+        .map(|site| {
+            let row = site.line.saturating_sub(1);
+            // Highlight the whole line: `character: u32::MAX` is the LSP
+            // convention for "end of line" (the flush listener's
+            // `workspace/applyEdit` uses the same trick for "end of file")
+            // — clients clamp to the line's actual length. Byte-precise
+            // spans aren't available here (see the doc comment above).
+            let range = Range {
+                start: Position::new(row, 0),
+                end: Position::new(row, u32::MAX),
+            };
+            tower_lsp::lsp_types::Diagnostic {
+                range,
+                severity: Some(severity),
+                code: code.clone(),
+                source: Some("beamtalk (reload)".into()),
+                message: format!("{message} (in {})", site.method),
+                ..Default::default()
+            }
+        })
+        .collect()
 }
 
 /// ADR 0082 Phase 3 (BT-2289): consume `FlushEvent`s from the runtime
@@ -5843,6 +6194,109 @@ mod tests {
         let r = zero_width_range_for_line(7);
         assert_eq!(r.start, Position::new(6, 0));
         assert_eq!(r.end, Position::new(6, 0));
+    }
+
+    // -----------------------------------------------------------------
+    // ADR 0105 Phase 1 (BT-2779): reload-induced diagnostics
+    // -----------------------------------------------------------------
+
+    fn sample_reload_finding() -> crate::runtime::ReloadFinding {
+        crate::runtime::ReloadFinding {
+            owner: "Dashboard".to_string(),
+            changed_class: "Counter".to_string(),
+            selector: "getCount".to_string(),
+            classification: "signature_change".to_string(),
+            severity: "warning".to_string(),
+            category: Some("Dnu".to_string()),
+            message: "String does not understand '+'".to_string(),
+            note: None,
+            sites: vec![crate::runtime::ReloadSite {
+                method: "refresh".to_string(),
+                line: 14,
+            }],
+            start: 0,
+            end: 5,
+        }
+    }
+
+    #[test]
+    fn reload_finding_to_lsp_diagnostics_one_per_site() {
+        let mut finding = sample_reload_finding();
+        finding.sites.push(crate::runtime::ReloadSite {
+            method: "render".to_string(),
+            line: 20,
+        });
+        let diags = reload_finding_to_lsp_diagnostics(&finding);
+        assert_eq!(diags.len(), 2);
+        assert_eq!(diags[0].range.start, Position::new(13, 0));
+        assert_eq!(diags[0].range.end, Position::new(13, u32::MAX));
+        assert_eq!(diags[1].range.start, Position::new(19, 0));
+        assert!(diags[0].message.contains("getCount"));
+        assert!(diags[0].message.contains("refresh"));
+        assert!(diags[1].message.contains("render"));
+    }
+
+    #[test]
+    fn reload_finding_to_lsp_diagnostics_maps_severity() {
+        let mut finding = sample_reload_finding();
+        finding.severity = "hint".to_string();
+        let diags = reload_finding_to_lsp_diagnostics(&finding);
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::HINT));
+
+        finding.severity = "warning".to_string();
+        let diags = reload_finding_to_lsp_diagnostics(&finding);
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::WARNING));
+    }
+
+    #[test]
+    fn reload_finding_to_lsp_diagnostics_appends_note() {
+        let mut finding = sample_reload_finding();
+        finding.classification = "removal".to_string();
+        finding.note = Some("removed by the reload of Counter".to_string());
+        let diags = reload_finding_to_lsp_diagnostics(&finding);
+        assert!(
+            diags[0]
+                .message
+                .contains("removed by the reload of Counter")
+        );
+    }
+
+    #[test]
+    fn reload_finding_to_lsp_diagnostics_carries_category_as_code() {
+        let finding = sample_reload_finding();
+        let diags = reload_finding_to_lsp_diagnostics(&finding);
+        assert_eq!(
+            diags[0].code,
+            Some(tower_lsp::lsp_types::NumberOrString::String(
+                "Dnu".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn resolve_class_uri_resolves_absolute_source_file() {
+        let temp = unique_temp_dir("bt-2779-resolve-class-uri");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        let file_path = temp.join("dashboard.bt");
+        fs::write(&file_path, "").expect("write file");
+
+        let class = NSClass::new(
+            "Dashboard",
+            Some(file_path.to_str().expect("utf8").to_string()),
+            Some(1),
+            vec![],
+        );
+        let uri = resolve_class_uri(&class, &[]).expect("resolved uri");
+        assert_eq!(uri.scheme(), "file");
+        assert!(uri.path().ends_with("dashboard.bt"));
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn resolve_class_uri_returns_none_without_source_file() {
+        let class = NSClass::new("Dashboard", None, None, vec![]);
+        assert!(resolve_class_uri(&class, &[]).is_none());
     }
 
     #[test]
