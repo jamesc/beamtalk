@@ -3208,20 +3208,25 @@ impl CoreErlangGenerator {
     ///
     /// Called from `generate_block` (with an already-computed analysis, so callers
     /// that need more than this check don't re-walk the block's AST) to turn that into
-    /// a clear compile-time diagnostic instead. From that call site the local-mutation
-    /// branch below is unreachable in practice — `generate_block` already routes
-    /// captured-local mutations to Tier 2 before reaching this call — but it's kept
-    /// live (and directly unit-tested) since this function checks a block's mutation
-    /// shape in general, not just the field-write case `generate_block` currently cares
-    /// about. BT-2797 tracks lifting the field-write restriction for stored/opaque
-    /// blocks by generalizing Tier 2 the same way; once that lands this function's
-    /// field-write branch should shrink to whatever shapes remain genuinely unsupported.
+    /// a clear compile-time diagnostic instead. `generate_block` only calls this when
+    /// `field_writes` is non-empty (checked *before* the Tier 2 captured-local-mutation
+    /// promotion, so a block with both a field write and a local mutation errors here
+    /// instead of silently reaching Tier 2 for the local mutation alone), so the field
+    /// branch below always fires from that call site and the local-mutation branch is
+    /// unreachable from it — it's kept live (and directly unit-tested) since this
+    /// function checks a block's mutation shape in general, not just the field-write
+    /// case `generate_block` currently cares about. BT-2797 tracks lifting the
+    /// field-write restriction for stored/opaque blocks by generalizing Tier 2 the same
+    /// way; once that lands this function's field-write branch should shrink to
+    /// whatever shapes remain genuinely unsupported.
     ///
-    /// `location` is a lazy thunk rather than a pre-formatted `String`: this is
-    /// called on every block that reaches `generate_block`'s fallback, and the
-    /// overwhelming majority return `Ok(())` here, so formatting the location
-    /// eagerly would allocate on every pure block instead of only on the (rare)
-    /// error path.
+    /// `location` is a lazy thunk rather than a pre-formatted `String`, so formatting
+    /// only happens when an error is actually produced. From `generate_block`'s call
+    /// site this always errors (it's only called when `field_writes` is non-empty), but
+    /// `generate_block` still runs `analyze_block` and checks `field_writes` on every
+    /// block it compiles — the thunk keeps this function itself free of `span_to_line`/
+    /// `format!` cost for callers (present or future) that reach it on a path where an
+    /// `Ok(())` result is actually possible, e.g. this function's own unit tests.
     fn validate_stored_closure(
         analysis: &block_analysis::BlockMutationAnalysis,
         location: impl FnOnce() -> String,
