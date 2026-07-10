@@ -283,7 +283,8 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```beamtalk
   /// Workspace recheckImage          // => _ (checked/stale summary)
   /// ```
-  recheckImage -> Object => (Erlang beamtalk_workspace_interface_primitives) recheckImage
+  recheckImage -> Object =>
+    (Erlang beamtalk_workspace_interface_primitives) recheckImage
 
   /// Run all loaded test classes and return a TestResult.
   ///
