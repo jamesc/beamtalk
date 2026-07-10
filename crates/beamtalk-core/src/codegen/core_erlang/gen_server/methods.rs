@@ -387,12 +387,27 @@ impl CoreErlangGenerator {
     ///
     /// Only considers `var := [block]` assignments that are themselves *flat
     /// top-level statements* of `body` — one that's nested inside e.g. an
-    /// `ifTrue:`/`do:` block argument isn't a candidate here (though
-    /// `scan_var_uses`, which checks the *safety* of a candidate's later
-    /// uses, does recurse into nested blocks/control-flow). Such a nested
+    /// `ifTrue:`/`do:` block argument isn't a candidate here. Such a nested
     /// assignment still falls through to the existing
     /// `generate_block`/`validate_stored_closure` compile-time diagnostic,
     /// which is conservative but correct.
+    ///
+    /// **Safety invariant**: `scan_var_uses` marks *any* reference to `var`
+    /// found inside a nested `Block` literal as unsafe, even a `value:` send
+    /// that would otherwise qualify as safe. A nested block literal compiles
+    /// through a completely separate path
+    /// (`generate_block_body_slice`/`BlockExprKind` in `expressions.rs`, not
+    /// `generate_body_exprs_with_reply`/`BodyExprKind` here) that has no
+    /// Tier2-tuple-unpacking logic and never resets `tier2_local_vars` for
+    /// its own body — so a "safe-looking" `value:` call on a promoted var
+    /// found inside a nested block either leaks an unpacked
+    /// `{Result, NewState}` tuple as the inner block's return value (a Tier 1
+    /// inner block, which never resets `tier2_local_vars`) or calls a
+    /// 2-arity Tier 2 fun with only 1 argument (a Tier 2 inner block, which
+    /// resets `tier2_local_vars` for its own body and never re-adds `var`
+    /// since it isn't assigned there) — `badarity` at runtime either way.
+    /// Only a direct top-level method-body `var value:` statement is
+    /// provably safe.
     ///
     /// This runs as a full pre-scan (like `tier2_block_params`'s class-level
     /// scan) rather than incrementally during codegen, specifically so that a
@@ -493,11 +508,19 @@ impl CoreErlangGenerator {
                 }
                 (unsafe_, safe)
             }
-            Expression::Block(block) => block
-                .body
-                .iter()
-                .map(|stmt| Self::scan_var_uses(&stmt.expression, var_name))
-                .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2)),
+            Expression::Block(block) => {
+                // Any reference to var_name inside a nested block literal is
+                // unsafe — see the safety invariant note on
+                // prescan_tier2_local_vars above (a nested block compiles
+                // through a completely different path with no Tier2-tuple
+                // unpacking and no tier2_local_vars reset of its own).
+                let (any_unsafe, any_safe) = block
+                    .body
+                    .iter()
+                    .map(|stmt| Self::scan_var_uses(&stmt.expression, var_name))
+                    .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2));
+                (any_unsafe || any_safe, false)
+            }
             Expression::Assignment { target, value, .. } => {
                 let (u1, s1) = Self::scan_var_uses(target, var_name);
                 let (u2, s2) = Self::scan_var_uses(value, var_name);

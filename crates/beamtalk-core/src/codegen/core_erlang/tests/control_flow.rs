@@ -1243,6 +1243,59 @@ fn test_bt2797_local_tier2_block_never_invoked_again_is_still_compile_error() {
 }
 
 #[test]
+fn test_bt2797_local_tier2_block_invoked_inside_nested_do_block_is_still_compile_error() {
+    // BT-2797 regression guard (PR review follow-up): `blk value: item` found
+    // only *inside* a nested block literal (here, the `do:` iteration block)
+    // must NOT be treated as a safe use, even though it looks identical to a
+    // safe top-level `value:` call. A nested block compiles through a
+    // completely separate path (`generate_block_body_slice`/`BlockExprKind`,
+    // not `generate_body_exprs_with_reply`/`BodyExprKind`) that has no
+    // Tier2-tuple-unpacking logic and never resets `tier2_local_vars` for its
+    // own body — so wrongly promoting `blk` here would either leak an
+    // unpacked `{Result, NewState}` tuple as the inner block's return value,
+    // or badarity-crash calling a 2-arity Tier 2 fun with 1 argument.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    blk := [:x | self.total := self.total + x]\n    items do: [:item | blk value: item]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(CodeGenError::FieldAssignmentInUnsupportedBlock { .. })
+        ),
+        "A Tier 2 local block invoked only from inside a nested `do:` block \
+         must remain a compile-time error, not silently-broken Core Erlang. \
+         Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_bt2797_local_tier2_block_invoked_inside_nested_if_true_block_is_still_compile_error() {
+    // BT-2797 regression guard (PR review follow-up): same as the `do:` case
+    // above, but for a `ifTrue:` control-flow block — the other concrete
+    // trigger the reviewer flagged.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: n =>\n    blk := [:x | self.total := self.total + x]\n    n > 0 ifTrue: [blk value: n]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(CodeGenError::FieldAssignmentInUnsupportedBlock { .. })
+        ),
+        "A Tier 2 local block invoked only from inside a nested `ifTrue:` \
+         block must remain a compile-time error, not a silent state-mutation \
+         loss at runtime. Got: {result:?}"
+    );
+}
+
+#[test]
 fn test_bt2797_field_stored_block_invoked_from_different_method_threads_state_correctly() {
     // BT-2797: the main real-world motivator — a block with field mutations,
     // assigned to an instance field in one method (`setup`) and invoked via
