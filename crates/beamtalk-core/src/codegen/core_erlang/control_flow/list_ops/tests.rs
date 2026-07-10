@@ -1680,7 +1680,9 @@ fn test_each_with_index_wrong_arity_field_mutating_block_is_compile_error() {
     assert!(
         matches!(
             result,
-            Err(crate::codegen::core_erlang::CodeGenError::FieldAssignmentInStoredClosure { .. })
+            Err(
+                crate::codegen::core_erlang::CodeGenError::FieldAssignmentInUnsupportedBlock { .. }
+            )
         ),
         "A field-mutating block that falls through eachWithIndex:'s arity guard must be a \
          compile-time error (BT-2792), not silently accepted. Got: {result:?}"

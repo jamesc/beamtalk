@@ -345,7 +345,7 @@ fn test_validate_stored_closure_with_field_assignment() {
     let result = CoreErlangGenerator::validate_stored_closure(&analysis, || "test".to_string());
     assert!(result.is_err(), "Field assignment should produce error");
 
-    if let Err(CodeGenError::FieldAssignmentInStoredClosure {
+    if let Err(CodeGenError::FieldAssignmentInUnsupportedBlock {
         field,
         field_capitalized,
         ..
@@ -354,14 +354,21 @@ fn test_validate_stored_closure_with_field_assignment() {
         assert_eq!(field, "value");
         assert_eq!(field_capitalized, "Value");
     } else {
-        panic!("Expected FieldAssignmentInStoredClosure error");
+        panic!("Expected FieldAssignmentInUnsupportedBlock error");
     }
 }
 
 #[test]
 fn test_validate_stored_closure_field_takes_precedence() {
     // Block with both field and local assignment
-    // Field error should be reported first
+    // Field error should be reported first.
+    //
+    // This exercises validate_stored_closure's own contract directly. Through
+    // the production generate_block path this precedence is never actually
+    // observed: a block with both captured-local mutations and field writes
+    // is routed to generate_block_stateful (Tier 2) by the earlier
+    // captured_mutations check, so validate_stored_closure only ever sees the
+    // local-mutation branch when field_writes is already empty.
     let block = Block {
         parameters: vec![],
         body: vec![
@@ -399,7 +406,7 @@ fn test_validate_stored_closure_field_takes_precedence() {
     assert!(
         matches!(
             result,
-            Err(CodeGenError::FieldAssignmentInStoredClosure { .. })
+            Err(CodeGenError::FieldAssignmentInUnsupportedBlock { .. })
         ),
         "Field error should take precedence over local mutation"
     );
@@ -476,7 +483,7 @@ fn test_codegen_rejects_stored_closure_with_field_assignment() {
     assert!(
         matches!(
             result,
-            Err(CodeGenError::FieldAssignmentInStoredClosure { .. })
+            Err(CodeGenError::FieldAssignmentInUnsupportedBlock { .. })
         ),
         "Field assignment in a stored closure must be a compile-time error, not silently \
          accepted (BT-2792). Got: {result:?}"
@@ -1052,7 +1059,7 @@ fn test_actor_conditional_assign_rhs_emit_actor_threaded_assign_rhs() {
 fn test_immediately_invoked_literal_block_with_field_mutation_compiles() {
     // BT-2792: `[self.total := self.total + n] value` — a literal block that is
     // immediately invoked (the block is the *receiver* of `value`, not stored or
-    // passed) — must NOT hit the FieldAssignmentInStoredClosure rejection. The
+    // passed) — must NOT hit the FieldAssignmentInUnsupportedBlock rejection. The
     // compiler inlines this case correctly (state threads through StateAcc, same
     // as ifTrue:/do:), unlike a block bound to a variable and invoked later.
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: n =>\n    [self.total := self.total + n] value\n";
@@ -1082,9 +1089,40 @@ fn test_block_returned_from_method_with_field_mutation_is_compile_error() {
     assert!(
         matches!(
             result,
-            Err(CodeGenError::FieldAssignmentInStoredClosure { .. })
+            Err(CodeGenError::FieldAssignmentInUnsupportedBlock { .. })
         ),
         "A field-mutating block returned as a value must be a compile-time error \
          (BT-2792), not silently accepted. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_block_with_mixed_local_and_field_mutation_is_compile_error() {
+    // BT-2792 (PR review follow-up): a block with BOTH a captured-local
+    // mutation and a field write — e.g. `[:x | outerCount := outerCount + x.
+    // self.total := self.total + outerCount]` stored in a var and invoked
+    // later — used to bypass the field-write check entirely: captured_mutations
+    // is non-empty (from `outerCount`), so generate_block routed straight to
+    // Tier 2 for the local mutation, never reaching validate_stored_closure.
+    // That produced Core Erlang that *compiles* (passes erlc) but crashes at
+    // runtime: the resulting block is a 2-arity stateful fun (params + State),
+    // but generate_block_value_call and friends call it with only its declared
+    // params (no State argument) — `badarity`. The field check must fire
+    // before the Tier 2 promotion, not after.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: item =>\n    blk := [:x | outerCount := outerCount + x. self.total := self.total + outerCount]\n    outerCount := 0\n    blk value: item\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(CodeGenError::FieldAssignmentInUnsupportedBlock { .. })
+        ),
+        "A block with both a local and a field mutation, reaching the opaque \
+         call-site fallback, must be a compile-time error — not code that \
+         compiles but crashes with badarity at runtime. Got: {result:?}"
     );
 }

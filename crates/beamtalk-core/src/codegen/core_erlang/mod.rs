@@ -204,7 +204,7 @@ pub enum CodeGenError {
              \x20 addTo{field_capitalized}: item => self.{field} := self.{field} + item.\n\
              \x20 items do: [:item | self addTo{field_capitalized}: item]."
     )]
-    FieldAssignmentInStoredClosure {
+    FieldAssignmentInUnsupportedBlock {
         /// The field being assigned.
         field: String,
         /// The capitalized field name for method suggestion.
@@ -3241,7 +3241,7 @@ impl CoreErlangGenerator {
                     .unwrap_or_default()
                     + chars.as_str()
             };
-            return Err(CodeGenError::FieldAssignmentInStoredClosure {
+            return Err(CodeGenError::FieldAssignmentInUnsupportedBlock {
                 field: field.clone(),
                 field_capitalized,
                 location: location(),

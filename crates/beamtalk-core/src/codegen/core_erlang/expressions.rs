@@ -727,25 +727,42 @@ impl CoreErlangGenerator {
     pub(super) fn generate_block(&mut self, block: &Block) -> Result<Document<'static>> {
         use crate::codegen::core_erlang::block_analysis::analyze_block;
         let analysis = analyze_block(block);
+
+        // BT-2792: `self.field :=` inside a block that reaches this generic
+        // fallback can't correctly thread state — see `validate_stored_closure`
+        // for why, and BT-2797 for the follow-up that will lift this once
+        // stored/opaque blocks get proper Tier 2 support. Checked *before* the
+        // captured-local-mutation promotion below: a block with both a field
+        // write and a captured-local mutation (e.g. `[:x | outerCount :=
+        // outerCount + x. self.total := self.total + outerCount]`) would
+        // otherwise be routed to Tier 2 for the local mutation alone, which
+        // fixes nothing — `generate_block_value_call` and friends still call
+        // the resulting 2-arity stateful fun with only its declared params
+        // (no `StateAcc` argument), producing a `badarity` crash at runtime
+        // instead of the erlc-time failure this check exists to catch.
+        // Location is a lazy thunk: format!/span_to_line only run on the
+        // (rare) error path, not on every block that reaches this line.
+        //
+        // Guarded on field_writes specifically (not a bare call to
+        // validate_stored_closure) so a block with *only* captured-local
+        // mutations — the legitimate Tier 2 case handled below — doesn't
+        // spuriously trip validate_stored_closure's separate local-mutation
+        // branch, which only applies to blocks that never reach Tier 2 at all.
+        if !analysis.field_writes.is_empty() {
+            Self::validate_stored_closure(&analysis, || {
+                self.span_to_line(block.span).map_or_else(
+                    || format!("offset {}", block.span.start()),
+                    |line| format!("line {line}"),
+                )
+            })?;
+        }
+
         let captured_mutations = Self::captured_mutations_from_analysis(&analysis);
 
         // BT-852: Blocks with captured local mutations use Tier 2 stateful calling convention.
         if !captured_mutations.is_empty() {
             return self.generate_block_stateful(block, &captured_mutations);
         }
-
-        // BT-2792: `self.field :=` inside a block that reaches this generic
-        // fallback can't correctly thread state — see `validate_stored_closure`
-        // for why, and BT-2797 for the follow-up that will lift this once
-        // stored/opaque blocks get proper Tier 2 support. Location is a lazy
-        // thunk: format! only runs on the (rare) error path, not on every
-        // pure block that reaches this line.
-        Self::validate_stored_closure(&analysis, || {
-            self.span_to_line(block.span).map_or_else(
-                || format!("offset {}", block.span.start()),
-                |line| format!("line {line}"),
-            )
-        })?;
 
         // Pure block: plain fun (no mutations to thread via Tier 2)
         self.push_scope();
