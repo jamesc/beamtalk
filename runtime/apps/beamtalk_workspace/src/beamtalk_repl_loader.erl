@@ -1707,12 +1707,13 @@ findings_store_clear_owner(OwnerBin) ->
     try
         beamtalk_workspace_findings_store:clear_owner(OwnerBin)
     catch
-        Class:Reason ->
+        Class:Reason:Stack ->
             ?LOG_WARNING(
                 "Reload-findings store unavailable (clear skipped)",
                 #{
                     error_class => Class,
                     reason => Reason,
+                    stack => Stack,
                     owner => OwnerBin,
                     domain => [
                         beamtalk, runtime
@@ -1738,12 +1739,13 @@ findings_store_put_owner_origin(OwnerBin, ChangedClassBin, Findings) ->
         _ = beamtalk_workspace_findings_store:put_owner_origin(OwnerBin, ChangedClassBin, Findings),
         ok
     catch
-        Class:Reason ->
+        Class:Reason:Stack ->
             ?LOG_WARNING(
                 "Reload-findings store unavailable (publish skipped)",
                 #{
                     error_class => Class,
                     reason => Reason,
+                    stack => Stack,
                     owner => OwnerBin,
                     changed_class => ChangedClassBin,
                     domain => [

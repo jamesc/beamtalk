@@ -256,6 +256,10 @@ impl ProtocolClient {
     /// the ADR's demo shows it — asynchronous, interleaved with whatever the
     /// REPL is doing, since the re-check that produced it runs on the
     /// install path of a *different* session's save as easily as this one's.
+    /// Both are gated on `print_transcript`, same as transcript pushes: when
+    /// multiple clients share a session (e.g. a completion client alongside
+    /// the main REPL connection), only the one client showing transcript
+    /// output should also print reload-check notices, or they double-print.
     /// Other push types (actor lifecycle, etc.) are silently ignored.
     ///
     /// Returns `true` if the message was a push and should be skipped for
@@ -281,7 +285,8 @@ impl ProtocolClient {
                 }
             }
         }
-        if parsed.get("channel").and_then(|v| v.as_str()) == Some("reload_check")
+        if self.print_transcript
+            && parsed.get("channel").and_then(|v| v.as_str()) == Some("reload_check")
             && parsed.get("event").and_then(|v| v.as_str()) == Some("completed")
         {
             if let Some(data) = parsed.get("data") {

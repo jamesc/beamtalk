@@ -2805,7 +2805,25 @@ async fn reload_check_listener(
                 } else {
                     let origin_key = (owner.clone(), event.changed_class.clone());
                     if diagnostics.is_empty() {
-                        if let Some(by_origin) = guard.get_mut(&uri) {
+                        // An empty `diagnostics` list is ambiguous: it means
+                        // either a genuinely clean re-check (no finding at
+                        // all for this owner — safe to clear), or a finding
+                        // that exists but is siteless (no xref call-site
+                        // line to anchor a `Diagnostic` to). Only the first
+                        // case should clear the origin; conflating the two
+                        // would silently drop a real finding whenever it
+                        // happens to have no placeable site.
+                        let has_finding_for_owner =
+                            event.findings.iter().any(|f| &f.owner == owner);
+                        if has_finding_for_owner {
+                            tracing::warn!(
+                                owner,
+                                changed_class = %event.changed_class,
+                                "reload_check_listener: finding present but produced no \
+                                 placeable diagnostics (siteless); leaving prior diagnostics \
+                                 for this origin untouched"
+                            );
+                        } else if let Some(by_origin) = guard.get_mut(&uri) {
                             by_origin.remove(&origin_key);
                             if by_origin.is_empty() {
                                 guard.remove(&uri);
