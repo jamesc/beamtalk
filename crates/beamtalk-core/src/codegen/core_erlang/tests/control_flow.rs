@@ -359,7 +359,7 @@ fn test_validate_stored_closure_with_field_assignment() {
 }
 
 #[test]
-fn test_validate_stored_closure_field_takes_precedence() {
+fn test_validate_stored_closure_field_takes_precedence_contract() {
     // Block with both field and local assignment
     // Field error should be reported first.
     //
