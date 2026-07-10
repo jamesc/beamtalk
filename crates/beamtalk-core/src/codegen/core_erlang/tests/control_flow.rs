@@ -1180,19 +1180,30 @@ fn test_bt2797_same_method_tier2_local_var_threads_state_correctly() {
     )
     .expect("should compile (BT-2797)");
 
+    // Structural checks (not hardcoded fresh-variable counter values, which
+    // shift whenever unrelated codegen changes the counter sequence before
+    // this point).
     assert!(
-        code.contains("let Blk = fun (_x2, StateAcc) ->"),
+        regex::Regex::new(r"let Blk = fun \(_\w+, StateAcc\) ->")
+            .unwrap()
+            .is_match(&code),
         "blk must compile to a 2-arity Tier 2 fun (block param + trailing \
          state accumulator). Got: {code}"
     );
     assert!(
-        code.contains("apply _Fun8 (_item1, State)"),
+        regex::Regex::new(r"apply _Fun\w* \(_item\w*, State\)")
+            .unwrap()
+            .is_match(&code),
         "the `blk value: item` call site must apply the block with the \
          outer method's State as a trailing argument. Got: {code}"
     );
     assert!(
-        code.contains("call 'erlang':'element'(1, _T2Tuple9)")
-            && code.contains("call 'erlang':'element'(2, _T2Tuple9)"),
+        regex::Regex::new(r"call 'erlang':'element'\(1, _T2Tuple\w*\)")
+            .unwrap()
+            .is_match(&code)
+            && regex::Regex::new(r"call 'erlang':'element'\(2, _T2Tuple\w*\)")
+                .unwrap()
+                .is_match(&code),
         "the call site must unpack the returned {{Result, NewState}} tuple \
          rather than treating the raw apply result as the method's return \
          value. Got: {code}"
@@ -1254,8 +1265,12 @@ fn test_bt2797_field_stored_block_invoked_from_different_method_threads_state_co
     )
     .expect("should compile (BT-2797)");
 
+    // Structural checks (not hardcoded fresh-variable counter values).
     assert!(
-        code.contains("fun (_x2, StateAcc) ->") && code.contains("'maps':'put'('onTick',"),
+        regex::Regex::new(r"fun \(_\w+, StateAcc\) ->")
+            .unwrap()
+            .is_match(&code)
+            && code.contains("'maps':'put'('onTick',"),
         "setup must store a 2-arity Tier 2 fun (block param + trailing state \
          accumulator) into the onTick field. Got: {code}"
     );
@@ -1263,16 +1278,28 @@ fn test_bt2797_field_stored_block_invoked_from_different_method_threads_state_co
         code.contains("'maps':'get'('onTick', State)"),
         "tick: must read the block back out of the onTick field. Got: {code}"
     );
+    // The Tier 1 and Tier 2 arity checks, and the Tier 2 apply, must all
+    // reference the *same* captured block variable — tie them together via
+    // the name captured from the arity-1 check rather than three independent
+    // (and therefore looser) pattern matches.
+    let arity_check_re = regex::Regex::new(r"is_function'\((_Fun\w*), 1\)").unwrap();
+    let fun_var = &arity_check_re.captures(&code).unwrap_or_else(|| {
+        panic!(
+            "tick: must runtime-discriminate Tier 1 (arity 1: just the block \
+                 param) before applying. Got: {code}"
+        )
+    })[1];
     assert!(
-        code.contains("call 'erlang':'is_function'(_Fun5, 1)")
-            && code.contains("call 'erlang':'is_function'(_Fun5, 2)"),
-        "tick: must runtime-discriminate Tier 1 (arity 1: just the block param) \
-         vs Tier 2 (arity 2: block param + state) before applying. Got: {code}"
+        code.contains(&format!("is_function'({fun_var}, 2)")),
+        "tick: must also check Tier 2 arity (block param + state) for the \
+         same block variable ({fun_var}). Got: {code}"
     );
     assert!(
-        code.contains("apply _Fun5 (_Arg6, State)"),
-        "the Tier 2 branch must apply the field's block with the calling \
-         method's State as a trailing argument. Got: {code}"
+        regex::Regex::new(&format!(r"apply {fun_var} \(_\w+, State\)"))
+            .unwrap()
+            .is_match(&code),
+        "the Tier 2 branch must apply the field's block ({fun_var}) with the \
+         calling method's State as a trailing argument. Got: {code}"
     );
 }
 

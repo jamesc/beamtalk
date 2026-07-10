@@ -1933,12 +1933,12 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         if self.context == CodeGenContext::Actor {
             if let Expression::Block(block) = value {
-                let needs_tier2 = !Self::captured_mutations_for_block(block).is_empty()
+                let captured_mutations = Self::captured_mutations_for_block(block);
+                let needs_tier2 = !captured_mutations.is_empty()
                     || !super::block_analysis::analyze_block(block)
                         .field_writes
                         .is_empty();
                 if needs_tier2 {
-                    let captured_mutations = Self::captured_mutations_for_block(block);
                     return self.generate_block_stateful(block, &captured_mutations);
                 }
             }

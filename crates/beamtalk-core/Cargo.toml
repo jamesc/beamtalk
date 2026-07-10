@@ -32,6 +32,9 @@ proptest.workspace = true
 criterion.workspace = true
 serde_json.workspace = true
 tempfile = "3.14"
+# why: already present transitively (see Cargo.lock); used in codegen tests to
+# assert on Core Erlang shape without hardcoding fresh-variable counter values.
+regex = "1"
 
 [[bench]]
 name = "compiler_pipeline"

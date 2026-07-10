@@ -965,7 +965,11 @@ impl CoreErlangGenerator {
     ///   (DNU-style dispatch, mirroring `generate_value_keyword_guard`'s
     ///   fallback), wrapped as `{SendResult, State}`.
     ///
-    /// Callers must unpack this tuple — see `BodyExprKind::Tier2ValueCall`.
+    /// Callers must unpack this tuple. `is_tier2_value_call` (extended for
+    /// BT-2797 to recognize `self.field` receivers) is what makes
+    /// `classify_body_expr` route the statement calling this function to
+    /// `BodyExprKind::Tier2ValueCall`/`LocalAssignTier2`, whose codegen
+    /// performs the actual unpack.
     fn generate_block_value_call_runtime_discriminated(
         &mut self,
         receiver: &Expression,

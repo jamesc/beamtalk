@@ -385,6 +385,15 @@ impl CoreErlangGenerator {
     /// is the receiver of a `value`/`value:`/`value:value:`/`value:value:value:`
     /// send, never a bare read (return, argument, reassignment, ...).
     ///
+    /// Only considers `var := [block]` assignments that are themselves *flat
+    /// top-level statements* of `body` — one that's nested inside e.g. an
+    /// `ifTrue:`/`do:` block argument isn't a candidate here (though
+    /// `scan_var_uses`, which checks the *safety* of a candidate's later
+    /// uses, does recurse into nested blocks/control-flow). Such a nested
+    /// assignment still falls through to the existing
+    /// `generate_block`/`validate_stored_closure` compile-time diagnostic,
+    /// which is conservative but correct.
+    ///
     /// This runs as a full pre-scan (like `tier2_block_params`'s class-level
     /// scan) rather than incrementally during codegen, specifically so that a
     /// block which *escapes* this method unsafely (returned, stored elsewhere,
