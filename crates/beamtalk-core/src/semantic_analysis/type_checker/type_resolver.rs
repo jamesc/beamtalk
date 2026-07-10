@@ -60,7 +60,13 @@ pub(in crate::semantic_analysis) type SubstitutionMap = HashMap<EcoString, Infer
 /// * [`TypeAnnotation::FalseOr`] — `inner | False`, using the same union
 ///   machinery.
 /// * [`TypeAnnotation::Difference`] — `base \ excluded`, resolved through
-///   [`InferredType::difference`] (ADR 0102 §1). Reducible cases normalise.
+///   [`InferredType::difference`] (ADR 0102 §1) with `hierarchy = None` (this
+///   resolver never consults the class hierarchy — see below), so only the
+///   singleton flavour (`Symbol \ #foo`) and structurally-reducible cases
+///   normalise; the nominal-class flavour (ADR 0102 §5, BT-2744, `Object \
+///   Number`) requires a hierarchy and is only produced by narrowing
+///   (`refine_class_narrowing` in `inference.rs`), not by annotation
+///   resolution.
 /// * [`TypeAnnotation::Intersection`] — `left & right`, resolved through
 ///   [`InferredType::intersect`] (ADR 0102 §1/§3, BT-2743) with `hierarchy =
 ///   None` (this resolver does not consult the class hierarchy — see below)
@@ -152,7 +158,12 @@ pub(in crate::semantic_analysis) fn resolve_type_annotation(
             // collapsing to `Never`.
             let base_ty = resolve_type_annotation(base, subst, protocol_registry);
             let excluded_ty = resolve_type_annotation(excluded, subst, protocol_registry);
-            InferredType::difference(&base_ty, &excluded_ty, TypeProvenance::Declared(ann.span()))
+            InferredType::difference(
+                &base_ty,
+                &excluded_ty,
+                TypeProvenance::Declared(ann.span()),
+                None,
+            )
         }
         TypeAnnotation::Intersection { left, right, .. } => {
             // ADR 0102 §1/§3, BT-2743: `left & right` resolves through the

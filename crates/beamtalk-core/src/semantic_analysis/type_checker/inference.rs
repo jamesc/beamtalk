@@ -21,12 +21,12 @@ use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::{EcoString, eco_format};
 
-use super::narrowing::NarrowingInfo;
 #[cfg(test)]
 use super::narrowing::extract::extract_variable_name;
 use super::narrowing::extract::unwrap_parens;
 use super::narrowing::refinement::RefinementLayer;
 use super::narrowing::visitors::{block_has_any_return, block_has_return, block_may_reassign};
+use super::narrowing::{ClassTestInfo, ClassTestKind, NarrowingInfo};
 use super::well_known::WellKnownClass;
 use super::{DynamicReason, EnvKey, InferredType, TypeChecker, TypeEnv, narrowing};
 
@@ -696,6 +696,17 @@ impl TypeChecker {
                     let send_ty = self.infer_expr(receiver, hierarchy, env, in_abstract_method);
                     (send_ty.clone(), receiver.as_ref(), send_ty)
                 };
+                // ADR 0102 §5 (BT-2744): resolve a `Negation`-typed cascade
+                // target through `base`, mirroring the same substitution in
+                // `infer_message_send_with_receiver_ty` — without it,
+                // cascaded messages after the first would silently skip
+                // DNU/argument checking entirely (`dispatch_ty` matches
+                // neither the `Known` nor `Union` arms below).
+                let dispatch_ty = if let InferredType::Negation { base, .. } = dispatch_ty {
+                    *base
+                } else {
+                    dispatch_ty
+                };
                 // BT-2158: normalise the cascade target so parenthesised
                 // class references (`(HTTPRouter) build: [...]; ...`) are
                 // treated as class-side both for block-param inference and
@@ -1050,6 +1061,26 @@ impl TypeChecker {
         env: &mut TypeEnv,
         in_abstract_method: bool,
     ) -> InferredType {
+        // ADR 0102 §5 (BT-2744): a `Negation{base, excluded}`-typed receiver's
+        // method lookup / conformance resolves through `base` — "identically
+        // to a bare `base`-typed receiver" (every class admitted by the
+        // negation is, by construction, a subclass of `base`, so it declares
+        // no capability beyond `base`'s). The simplest faithful
+        // implementation dispatches the *entire* send as if the receiver
+        // were typed `base`, which also gives Q4 (ADR 0100 receiver-knowledge
+        // classification) for free — DNU/argument checks below fall through
+        // to exactly the same `hierarchy`/`check_instance_selector` path a
+        // bare `base`-typed receiver would take. One deliberate
+        // simplification: a `Self`-returning method's result widens back to
+        // `base` rather than re-wrapping the exclusion — the ADR specifies
+        // conformance/lookup parity with `base`, not flow-preservation of the
+        // exclusion through `Self`.
+        let receiver_ty = if let InferredType::Negation { base, .. } = receiver_ty {
+            *base
+        } else {
+            receiver_ty
+        };
+
         let selector_name = selector.name();
 
         // Control-flow narrowing (ADR 0068 Phase 1g):
@@ -2413,7 +2444,7 @@ impl TypeChecker {
         // narrowing never intersects with a protocol name, so `None` here.
         let holds =
             InferredType::intersect(&current_ty, &matched, provenance, Some(hierarchy), None);
-        let removed = InferredType::difference(&current_ty, &matched, provenance);
+        let removed = InferredType::difference(&current_ty, &matched, provenance, Some(hierarchy));
         if eq.negated {
             // `x /= #foo`: the true branch removes the singleton; the false
             // branch is the singleton.
@@ -2428,22 +2459,31 @@ impl TypeChecker {
         info
     }
 
-    /// Refines a `class = C` / `isKindOf: C` narrowing true branch (ADR 0102
-    /// §2 group 2, BT-2741).
+    /// Refines a `class = C` / `isKindOf: C` narrowing (ADR 0102 §2 group 2,
+    /// §5, BT-2741, BT-2744).
     ///
     /// `detect` only sees the AST, so it records the tested class name in
     /// `class_test` and leaves `true_type` provisional. Here we resolve the
-    /// variable's current type and route the true branch through the
-    /// hierarchy-aware set-theoretic intersect: `intersect(current, C)`. This
-    /// is a deliberate refinement over the previous unconditional `true_type =
-    /// C` — a subclass test now narrows precisely (`x :: Number; x isKindOf:
-    /// Integer` true branch is `Integer`, not `Number`), and a test against a
-    /// hierarchy-unrelated class types the (unreachable) true branch `Never`,
-    /// reported via `check_impossible_class_comparison`.
+    /// variable's current type and route the **true** branch through the
+    /// hierarchy-aware `intersect(current, C)` for *both* idioms, and the
+    /// **false** branch through `difference(current, C)` for `isKindOf:`
+    /// *only* — see `ClassTestKind` for why `class =:=`'s false branch must
+    /// stay unnarrowed.
     ///
-    /// The false branch is left untouched (`None`) — nominal-class
-    /// difference (`difference(current, C)` over the hierarchy) is out of
-    /// scope here and tracked separately (BT-2744).
+    /// The true branch is a deliberate refinement over the previous
+    /// unconditional `true_type = C` — a subclass test now narrows precisely
+    /// (`x :: Number; x isKindOf: Integer` true branch is `Integer`, not
+    /// `Number`), and a test against a hierarchy-unrelated class types the
+    /// (unreachable) true branch `Never`, reported via
+    /// `check_impossible_class_comparison`.
+    ///
+    /// The `isKindOf:` false branch closes the group-2 gap ADR 0102 §1
+    /// deliberately left open (nominal-class difference needed its own
+    /// design, §5): `x :: Number; x isKindOf: Integer` false branch narrows
+    /// to `Number \ Integer` (previously untouched — `false_type` stayed
+    /// `None`, and `ifFalse:`/the else-arm of `ifTrue:ifFalse:` fell back to
+    /// no narrowing). `class =:=`'s false branch stays `None`, exactly as
+    /// before this issue.
     pub(super) fn refine_class_narrowing(
         &mut self,
         mut info: NarrowingInfo,
@@ -2451,7 +2491,7 @@ impl TypeChecker {
         hierarchy: &ClassHierarchy,
         test_span: Span,
     ) -> NarrowingInfo {
-        let Some(class_name) = info.class_test.clone() else {
+        let Some(ClassTestInfo { class_name, kind }) = info.class_test.clone() else {
             return info;
         };
         let current_ty = Self::resolve_narrowing_variable_type(&info.variable, env, hierarchy);
@@ -2464,6 +2504,22 @@ impl TypeChecker {
             InferredType::intersect(&current_ty, &pattern, provenance, Some(hierarchy), None);
         self.check_impossible_class_comparison(&current_ty, &class_name, &refined, test_span);
         info.true_type = refined;
+        // BT-2744: only `isKindOf:`'s false branch can be narrowed via
+        // nominal-class `difference` — `Negation{base, excluded}` always
+        // excludes `excluded`'s *entire* subtree, which matches `isKindOf:`'s
+        // negation ("not C and not any subclass of C") but not `class =:=`'s
+        // ("not exactly C" — C's subclasses are still live possibilities;
+        // narrowing them away would produce a false "comparison can never be
+        // true" hint on a later, satisfiable `isKindOf:` test). See
+        // `ClassTestKind`.
+        if kind == ClassTestKind::KindOf {
+            info.false_type = Some(InferredType::difference(
+                &current_ty,
+                &pattern,
+                provenance,
+                Some(hierarchy),
+            ));
+        }
         info
     }
 
@@ -2797,7 +2853,10 @@ impl TypeChecker {
 
         let provenance = super::TypeProvenance::Inferred(Span::default());
         let covered_ty = InferredType::union_of(&covered);
-        let residual = InferredType::difference(scrutinee_ty, &covered_ty, provenance);
+        // Singleton scrutinees only (guaranteed by `is_closed_singleton_union`
+        // callers) — singletons are never hierarchy entries, so no hierarchy
+        // is needed here.
+        let residual = InferredType::difference(scrutinee_ty, &covered_ty, provenance, None);
 
         // `Never` residual ⇒ every member is covered ⇒ exhaustive.
         if matches!(residual, InferredType::Never) {
@@ -3117,7 +3176,8 @@ impl TypeChecker {
                 if let Some(arg) = arguments.first() {
                     if let Some(ref false_ty) = info.false_type {
                         // Explicit false type (e.g., Result isOk/isError — BT-1859;
-                        // or singleton (in)equality complement — BT-2617)
+                        // singleton (in)equality complement — BT-2617; or
+                        // class = / isKindOf: nominal-class complement — BT-2744)
                         let ty = self.infer_block_with_narrowing(
                             arg,
                             &info.variable,
@@ -3142,7 +3202,10 @@ impl TypeChecker {
                         );
                         arg_types.push(ty);
                     } else {
-                        // class = / isKindOf: ifFalse: → no useful narrowing
+                        // respondsTo: ifFalse: → no useful narrowing. (isKindOf:
+                        // now populates `false_type` above — BT-2744; class =:=
+                        // still leaves it None, since its false branch can't be
+                        // narrowed via subtree exclusion.)
                         let ty = self.infer_expr(arg, hierarchy, env, in_abstract_method);
                         arg_types.push(ty);
                     }
@@ -3164,7 +3227,8 @@ impl TypeChecker {
                 if let Some(false_arg) = arguments.get(1) {
                     if let Some(ref false_ty) = info.false_type {
                         // Explicit false type (e.g., Result isOk/isError — BT-1859;
-                        // or singleton (in)equality complement — BT-2617)
+                        // singleton (in)equality complement — BT-2617; or
+                        // class = / isKindOf: nominal-class complement — BT-2744)
                         let ty = self.infer_block_with_narrowing(
                             false_arg,
                             &info.variable,
@@ -3189,7 +3253,11 @@ impl TypeChecker {
                         );
                         arg_types.push(ty);
                     } else {
-                        // class = / isKindOf: ifTrue: [...] ifFalse: [...] — no useful narrowing for false block
+                        // respondsTo: ifTrue: [...] ifFalse: [...] — no useful
+                        // narrowing for false block. (isKindOf: now populates
+                        // `false_type` above — BT-2744; class =:= still leaves
+                        // it None, since its false branch can't be narrowed via
+                        // subtree exclusion.)
                         let ty = self.infer_expr(false_arg, hierarchy, env, in_abstract_method);
                         arg_types.push(ty);
                     }
@@ -3704,7 +3772,9 @@ impl TypeChecker {
                 let provenance = super::TypeProvenance::Inferred(Span::default());
                 // `P = UndefinedObject | Nil` (both nil spellings, BT-2016).
                 let nil = InferredType::simple_union(&["nil", "Nil"]);
-                let stripped = InferredType::difference(ty, &nil, provenance);
+                // `nil`/`Nil` are matched by exact equality, not subclassing,
+                // so no hierarchy is needed here.
+                let stripped = InferredType::difference(ty, &nil, provenance, None);
                 // Nil-only union collapses to `Never`; soften to `Dynamic`.
                 if matches!(stripped, InferredType::Never) {
                     InferredType::Dynamic(DynamicReason::Unknown)
@@ -4742,7 +4812,9 @@ mod tests {
             info.true_type,
             InferredType::Dynamic(DynamicReason::Unknown)
         );
-        assert_eq!(info.class_test.as_deref(), Some("Integer"));
+        let class_test = info.class_test.expect("should record class_test");
+        assert_eq!(class_test.class_name, "Integer");
+        assert_eq!(class_test.kind, ClassTestKind::KindOf);
         assert!(!info.is_nil_check);
     }
 
@@ -4769,7 +4841,9 @@ mod tests {
             info.true_type,
             InferredType::Dynamic(DynamicReason::Unknown)
         );
-        assert_eq!(info.class_test.as_deref(), Some("Float"));
+        let class_test = info.class_test.expect("should record class_test");
+        assert_eq!(class_test.class_name, "Float");
+        assert_eq!(class_test.kind, ClassTestKind::Exact);
     }
 
     #[test]
@@ -4854,7 +4928,9 @@ mod tests {
             info.true_type,
             InferredType::Dynamic(DynamicReason::Unknown)
         );
-        assert_eq!(info.class_test.as_deref(), Some("Integer"));
+        let class_test = info.class_test.expect("should record class_test");
+        assert_eq!(class_test.class_name, "Integer");
+        assert_eq!(class_test.kind, ClassTestKind::Exact);
     }
 
     // ---- detect_narrowing: isOk / ok / isError (BT-1859) ----
