@@ -3202,9 +3202,10 @@ impl TypeChecker {
                         );
                         arg_types.push(ty);
                     } else {
-                        // respondsTo: ifFalse: → no useful narrowing (class =
-                        // / isKindOf: now always populate `false_type` above —
-                        // BT-2744).
+                        // respondsTo: ifFalse: → no useful narrowing. (isKindOf:
+                        // now populates `false_type` above — BT-2744; class =:=
+                        // still leaves it None, since its false branch can't be
+                        // narrowed via subtree exclusion.)
                         let ty = self.infer_expr(arg, hierarchy, env, in_abstract_method);
                         arg_types.push(ty);
                     }
@@ -3253,8 +3254,10 @@ impl TypeChecker {
                         arg_types.push(ty);
                     } else {
                         // respondsTo: ifTrue: [...] ifFalse: [...] — no useful
-                        // narrowing for false block (class = / isKindOf: now
-                        // always populate `false_type` above — BT-2744).
+                        // narrowing for false block. (isKindOf: now populates
+                        // `false_type` above — BT-2744; class =:= still leaves
+                        // it None, since its false branch can't be narrowed via
+                        // subtree exclusion.)
                         let ty = self.infer_expr(false_arg, hierarchy, env, in_abstract_method);
                         arg_types.push(ty);
                     }
