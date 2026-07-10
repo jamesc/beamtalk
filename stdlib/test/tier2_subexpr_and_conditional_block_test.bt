@@ -1,0 +1,24 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2797 (PR #2899 review): runtime regression tests for a field-stored
+// block invoked in argument (sub-expression) position, and for a field-stored
+// mutating block invoked as a bare statement inside a conditional branch.
+// See fixtures/tier2_subexpr_and_conditional_block_test_actor.bt for details
+// on why these two call-site shapes needed a dedicated fix beyond the
+// top-level Tier2ValueCall/LocalAssignTier2 codegen.
+
+TestCase subclass: Tier2SubexprAndConditionalBlockTest
+
+  // Tier 1 (pure) field-stored block used in argument position must still
+  // return a plain value, not the raw {Result, NewState} tuple.
+  testStoredPureBlockInArgumentPosition =>
+    actor := Tier2SubexprAndConditionalBlockTestActor spawn
+    self assert: actor testStoredPureBlockInArgumentPosition equals: 10
+
+  // Tier 2 (mutating) field-stored block invoked bare inside an ifTrue:
+  // branch must have its field mutation threaded through: 5 is added
+  // (x > 0), -3 is not (x <= 0), so total ends at 5.
+  testStoredMutatingBlockInvokedBareInsideConditional =>
+    actor := Tier2SubexprAndConditionalBlockTestActor spawn
+    self assert: actor testStoredMutatingBlockInvokedBareInsideConditional equals: 5

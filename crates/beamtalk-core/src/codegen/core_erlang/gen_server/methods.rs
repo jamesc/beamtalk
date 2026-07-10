@@ -773,7 +773,7 @@ impl CoreErlangGenerator {
                             ]);
                         }
                         BodyExprKind::Tier2ValueCall => {
-                            let expr_str = self.expression_doc(value)?;
+                            let expr_str = self.generate_tier2_value_call_doc(value)?;
                             docs.push(self.emit_tuple_unpack_reply("T2Tuple", expr_str));
                         }
                         BodyExprKind::DispatchingSelfSend => {
@@ -1095,7 +1095,7 @@ impl CoreErlangGenerator {
                                 .lookup_var(var_name)
                                 .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
                             let tuple_var = self.fresh_temp_var("T2Tuple");
-                            let value_str = self.expression_doc(value)?;
+                            let value_str = self.generate_tier2_value_call_doc(value)?;
                             self.bind_var(var_name, &core_var);
                             let new_state = self.next_state_var();
                             docs.push(docvec![
@@ -1263,12 +1263,12 @@ impl CoreErlangGenerator {
                 }
                 BodyExprKind::Tier2ValueCall => {
                     if is_last {
-                        let expr_str = self.expression_doc(expr)?;
+                        let expr_str = self.generate_tier2_value_call_doc(expr)?;
                         docs.push(self.emit_tuple_unpack_reply("T2Tuple", expr_str));
                     } else {
                         let tuple_var = self.fresh_temp_var("T2Tuple");
                         let discard_var = self.fresh_temp_var("T2Discard");
-                        let expr_str = self.expression_doc(expr)?;
+                        let expr_str = self.generate_tier2_value_call_doc(expr)?;
                         let new_state = self.next_state_var();
                         let mut doc_parts: Vec<Document<'static>> = vec![docvec![
                             "let ",
@@ -3382,8 +3382,64 @@ impl CoreErlangGenerator {
     }
 
     // BT-1213: Delegates to the shared implementation in expressions.rs.
-    fn get_inline_block_captured_mutations(expr: &Expression) -> Option<Vec<String>> {
+    //
+    // BT-2797 (PR #2899 review fix): widened from private to
+    // `pub(in crate::codegen::core_erlang)` so `control_flow/conditionals.rs`
+    // can rebind captured local-var mutations for a bare `Tier2ValueCall`
+    // statement inside a conditional branch, mirroring this file's own
+    // `Tier2ValueCall` handling.
+    pub(in crate::codegen::core_erlang) fn get_inline_block_captured_mutations(
+        expr: &Expression,
+    ) -> Option<Vec<String>> {
         Self::inline_block_captured_mutations(expr)
+    }
+
+    /// BT-2797 (PR #2899 review fix): generates the `Document` for an
+    /// expression already classified as `BodyExprKind::Tier2ValueCall` or the
+    /// RHS of `BodyExprKind::LocalAssignTier2` — i.e. a `value`/`value:`/etc.
+    /// send that `is_tier2_value_call` proved needs Tier 2 tuple-unpacking
+    /// treatment.
+    ///
+    /// When the receiver is a `self.field` access, this calls
+    /// `generate_block_value_call_runtime_discriminated` directly instead of
+    /// going through the generic `expression_doc` dispatch. That function is
+    /// deliberately NOT reachable from `expression_doc` (see the matching
+    /// comment on it and in `intrinsics.rs`'s `try_generate_block_value_unary`/
+    /// `try_generate_block_value_keyword`): every call site of *this* helper
+    /// unpacks the `{Result, NewState}` tuple it returns, but an arbitrary
+    /// sub-expression reached via plain `expression_doc` would not, silently
+    /// handing the raw tuple to code expecting a plain value.
+    ///
+    /// For every other `Tier2ValueCall` shape (a `tier2_block_params`/
+    /// `tier2_local_vars` identifier receiver, or an inline literal block with
+    /// captured/field mutations), falls through to `expression_doc`, which
+    /// already handles those correctly.
+    ///
+    /// Also called from `control_flow/mod.rs`'s
+    /// `generate_local_var_assignment_in_loop` (the `is_tier2_value_call`
+    /// branch there — BT-912) for the same reason: it unpacks a
+    /// `{Result, NewState}` tuple, so it must reach the same
+    /// runtime-discriminated codegen for a `self.field` receiver.
+    pub(in crate::codegen::core_erlang) fn generate_tier2_value_call_doc(
+        &mut self,
+        expr: &Expression,
+    ) -> Result<Document<'static>> {
+        if let Expression::MessageSend {
+            receiver,
+            selector,
+            arguments,
+            ..
+        } = expr
+        {
+            if self.context == CodeGenContext::Actor && Self::is_self_field_access(receiver) {
+                return self.generate_block_value_call_runtime_discriminated(
+                    receiver,
+                    arguments,
+                    &selector.name(),
+                );
+            }
+        }
+        self.expression_doc(expr)
     }
 
     /// Checks if a control flow expression actually threads state through mutations.

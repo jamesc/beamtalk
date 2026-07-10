@@ -237,14 +237,21 @@ impl CoreErlangGenerator {
                 return Ok(Some(doc));
             }
         }
-        // BT-2797: `self.field value` — the field may hold a Tier 2 block
-        // assigned from a different method, which static tracking can't see.
-        // Discriminate Tier 1 vs Tier 2 at runtime (BT-909 precedent).
-        if self.context == CodeGenContext::Actor && Self::is_self_field_access(receiver) {
-            let doc =
-                self.generate_block_value_call_runtime_discriminated(receiver, &[], "value")?;
-            return Ok(Some(doc));
-        }
+        // BT-2797 (PR #2899 review): deliberately NOT intercepting
+        // `self.field value` here. `generate_block_value_call_runtime_discriminated`
+        // always returns a raw `{Result, NewState}` tuple, but this function
+        // (reached via the generic `expression_doc` dispatch) is called from
+        // *any* expression position — including sub-expressions like
+        // `self log: (self.field value)` — where nothing unpacks that tuple.
+        // The runtime-discriminated path is only reachable from the
+        // TOP-LEVEL `Tier2ValueCall`/`LocalAssignTier2` codegen in
+        // `gen_server/methods.rs` (`generate_tier2_value_call_doc`), which is
+        // the only place that unpacks the tuple. A `self.field value` in
+        // sub-expression position falls through to the plain `is_function`
+        // guard below — correct for a Tier 1 (pure) block (matches
+        // pre-BT-2797 behavior), still unsafe for a genuinely Tier 2 block in
+        // that position — the same *pre-existing*, not-yet-solved limitation
+        // as a `tier2_block_params`/`tier2_local_vars` block used the same way.
         let doc = if matches!(receiver, Expression::Block { .. }) {
             self.generate_block_value_call(receiver, &[])?
         } else {
@@ -379,17 +386,10 @@ impl CoreErlangGenerator {
         if matches!(receiver, Expression::ClassReference { .. }) {
             return Ok(None);
         }
-        // BT-2797: `self.field value: ...` — the field may hold a Tier 2 block
-        // assigned from a different method, which static tracking can't see.
-        // Discriminate Tier 1 vs Tier 2 at runtime (BT-909 precedent).
-        if self.context == CodeGenContext::Actor && Self::is_self_field_access(receiver) {
-            let doc = self.generate_block_value_call_runtime_discriminated(
-                receiver,
-                arguments,
-                selector_name,
-            )?;
-            return Ok(Some(doc));
-        }
+        // BT-2797 (PR #2899 review): deliberately NOT intercepting
+        // `self.field value: ...` here — see the matching comment in
+        // `try_generate_block_value_unary` for why the runtime-discriminated
+        // path must not be reachable from this generic, any-position dispatch.
         // BT-1260: Unknown receiver → runtime is_function guard with fallback
         let doc = self.generate_value_keyword_guard(receiver, arguments, selector_name)?;
         Ok(Some(doc))
@@ -968,9 +968,19 @@ impl CoreErlangGenerator {
     /// Callers must unpack this tuple. `is_tier2_value_call` (extended for
     /// BT-2797 to recognize `self.field` receivers) is what makes
     /// `classify_body_expr` route the statement calling this function to
-    /// `BodyExprKind::Tier2ValueCall`/`LocalAssignTier2`, whose codegen
-    /// performs the actual unpack.
-    fn generate_block_value_call_runtime_discriminated(
+    /// `BodyExprKind::Tier2ValueCall`/`LocalAssignTier2`.
+    ///
+    /// BT-2797 (PR #2899 review): called ONLY from
+    /// `gen_server/methods.rs`'s `generate_tier2_value_call_doc` — the single
+    /// place that actually unpacks this tuple. Deliberately not wired into
+    /// the generic `try_generate_block_value_unary`/`try_generate_block_value_keyword`
+    /// dispatch (reached via `expression_doc` from *any* expression
+    /// position): a `self.field value(:...)` in sub-expression position
+    /// (e.g. an argument to another call) has no tuple-unpacking caller, so
+    /// intercepting it there would silently hand the raw tuple to code
+    /// expecting a plain value — a regression for a Tier 1 (pure) block that
+    /// worked correctly before this function existed.
+    pub(in crate::codegen::core_erlang) fn generate_block_value_call_runtime_discriminated(
         &mut self,
         receiver: &Expression,
         arguments: &[Expression],

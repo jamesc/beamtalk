@@ -1,0 +1,64 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2797 (PR #2899 review): regression fixture for two runtime-discrimination
+// call-site shapes that don't go through the top-level `Tier2ValueCall`/
+// `LocalAssignTier2` codegen handled by `generate_tier2_value_call_doc`
+// directly:
+//
+// 1. A Tier 1 (pure) field-stored block invoked in *argument* (sub-expression)
+//    position, e.g. `self total := self.total + (self.doubler value: x)`.
+//    `generate_block_value_call_runtime_discriminated` always returns a raw
+//    `{Result, NewState}` tuple, so it must never be wired into the generic
+//    any-position `expression_doc` dispatch — only into the top-level
+//    statement dispatch that actually unpacks the tuple. A regression here
+//    would leak the raw tuple where a plain value is expected.
+// 2. A Tier 2 (mutating) field-stored block invoked as a *bare* (non-assigned)
+//    statement inside a conditional branch that also contains an explicit
+//    field assignment (so the branch is already known to need state
+//    threading), e.g. `x > 0 ifTrue: [self.calls := self.calls + 1.
+//    self.onTick value: x]`. The branch-body sequencer in
+//    `control_flow/conditionals.rs` must unpack the Tier2ValueCall's own
+//    returned tuple and thread the new state forward — a regression here
+//    would either drop the field mutation silently or crash with a badarity
+//    error.
+//
+// Note: a *bare* `self.field value:` call with no other field mutation in
+// the same branch does not currently trigger state-threading detection at
+// all (block_analysis only looks for literal `self.slot :=` assignments) —
+// that is a separate, pre-existing gap outside BT-2797's scope, not
+// exercised here.
+
+Actor subclass: Tier2SubexprAndConditionalBlockTestActor
+  state: total = 0
+  state: calls = 0
+  state: doubler = nil
+  state: onTick = nil
+
+  setupDoubler => self.doubler := [:x | x * 2]
+
+  setupOnTick => self.onTick := [:x | self.total := self.total + x]
+
+  // Tier 1 field-stored block invoked in argument position.
+  addDoubled: x => self.total := self.total + (self.doubler value: x)
+
+  // Tier 2 field-stored block invoked bare inside a conditional branch that
+  // already threads state because of the explicit self.calls assignment.
+  tickIfPositive: x =>
+    x > 0
+      ifTrue: [
+        self.calls := self.calls + 1
+        self.onTick value: x
+      ]
+    self.total
+
+  testStoredPureBlockInArgumentPosition =>
+    self setupDoubler
+    self addDoubled: 5
+    self.total
+
+  testStoredMutatingBlockInvokedBareInsideConditional =>
+    self setupOnTick
+    self tickIfPositive: 5
+    self tickIfPositive: -3
+    self.total
