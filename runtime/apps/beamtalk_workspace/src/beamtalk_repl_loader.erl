@@ -231,7 +231,7 @@ Activate a loaded module with an optional source path for workspace metadata.
 Passing SourcePath ensures the source file is recorded in workspace_meta so that
 new VS Code sessions (which have an empty session tracker) can still navigate to source.
 
-ADR 0105 Phase 2 (BT-2780): `maybe_trigger_shape_recheck/1` runs last, after
+ADR 0105 Phase 2 (BT-2780): `spawn_shape_recheck/1` fires last, after
 `register_classes/2` has installed the new `register_class/0` (which is what
 refreshes the compiler port's ambient class-hierarchy cache — see
 `beamtalk_recheck:trigger_shape/2`'s moduledoc) — so a shape-change re-check
@@ -241,6 +241,28 @@ paths that call `prime_shape_capture/1` first: for the others (a method
 patch, a method removal, a brand-new class, a protocol) the shape store was
 never primed for these classes, so `beamtalk_workspace_shape_store:capture/1`
 self-seeds and always classifies `no_op` — see its moduledoc.
+
+**Asynchronous, unlike the method-signature path's `maybe_trigger_recheck/4`**
+(called synchronously from `load_recompiled_method/8`/`remove_method/3`,
+which only fire on an explicit `>>` patch/removal — comparatively rare
+during bulk loading). `activate_module/3` is the common path for *every*
+class-body install (`:load`, inline `subclass:` redefinition, a file
+reload), so it runs on every ordinary class load, not just explicit patches
+— and `spawnWith:` (always in `trigger_shape/2`'s dependent-selector set,
+ADR 0105 §Mechanism step 2 / this ADR's Alternatives) is close to the
+worst-case common selector, used by every Actor subclass in the image.
+Running the recheck synchronously here measurably regressed a heavy
+sequential-reload scenario (discovered via the `repl_protocol` e2e suite,
+BT-2780 review) — dozens of shape-changing reloads in one session each
+paying the per-reload caller-cap's up-to-20 compiler round trips, serialised
+in front of every subsequent REPL response, enough to trip a client-side
+timeout. `spawn_shape_recheck/1` returns immediately; the re-check and its
+publish (`beamtalk_workspace_findings_store` + the `'ReloadCheckCompleted'`
+announcement) still happen, just off the install's response path — every
+consumer already treats that announcement as an asynchronous push (the
+LSP/REPL/workspace-UI listeners all already `receive`/subscribe rather than
+read a synchronous return value), so this is not a behaviour change for any
+surface, only a latency fix for the trigger.
 """.
 -spec activate_module(atom(), [map()], string() | undefined) -> ok.
 activate_module(ModuleName, Classes, SourcePath) ->
@@ -248,7 +270,7 @@ activate_module(ModuleName, Classes, SourcePath) ->
     trigger_hot_reload(ModuleName, Classes),
     beamtalk_workspace_meta:register_module(ModuleName, SourcePath),
     beamtalk_workspace_meta:update_activity(),
-    maybe_trigger_shape_recheck(Classes).
+    spawn_shape_recheck(Classes).
 
 -doc "Register loaded classes by calling the module's register_class/0 function.".
 -spec register_classes([map()], atom()) -> ok.
@@ -1933,11 +1955,26 @@ prime_shape_capture(Classes) ->
     ok.
 
 -doc """
+Fire `maybe_trigger_shape_recheck/1` in a detached process and return
+immediately — see `activate_module/3`'s doc ("Asynchronous...") for why this
+must not run on the install's response path. Unlinked (a re-check crash must
+never take down the calling session process) and its result is discarded;
+`maybe_trigger_shape_recheck_for_class/1` is already self-swallowing
+end-to-end (store read, `trigger_shape/2`, and publish are each wrapped), so
+there is nothing here for the spawning process to react to.
+""".
+-spec spawn_shape_recheck([map()]) -> ok.
+spawn_shape_recheck(Classes) ->
+    _ = spawn(fun() -> maybe_trigger_shape_recheck(Classes) end),
+    ok.
+
+-doc """
 Capture each class's post-install shape and, on a genuine `shape_change`,
 run the shape re-check orchestration (`beamtalk_recheck:trigger_shape/2`)
-and publish its findings. Called from `activate_module/3` for every
-installed class — see that function's doc for why an un-primed class (a
-method patch, a new class, a protocol) is a harmless `no_op` here.
+and publish its findings. Called (via `spawn_shape_recheck/1`, off the
+install's response path) for every installed class — see `activate_module/3`'s
+doc for why an un-primed class (a method patch, a new class, a protocol) is
+a harmless `no_op` here.
 """.
 -spec maybe_trigger_shape_recheck([map()]) -> ok.
 maybe_trigger_shape_recheck(Classes) ->
