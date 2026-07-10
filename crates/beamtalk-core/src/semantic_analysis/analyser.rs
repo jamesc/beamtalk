@@ -131,21 +131,34 @@ impl Analyser {
 
             Assignment { target, value, .. } => {
                 // Handle assignment target
-                match target.as_ref() {
+                let is_self_field_target = match target.as_ref() {
                     Identifier(id) => {
                         // Define in scope for capture tracking (even though diagnostics are in NameResolver)
                         // Use lookup_immut: assigning to a variable is not a "read"
                         if self.scope.lookup_immut(&id.name).is_none() {
                             self.scope.define(&id.name, id.span, BindingKind::Local);
                         }
+                        false
                     }
-                    _ => {
+                    FieldAccess { receiver, .. } => {
                         // For field access, analyze the target (especially the receiver)
                         self.analyse_expression(target, None);
+                        matches!(receiver.as_ref(), Identifier(id) if id.name == "self")
                     }
-                }
-                // Pass Assignment context so blocks know they're being stored
-                self.analyse_expression(value, Some(ExprContext::Assignment));
+                    _ => {
+                        self.analyse_expression(target, None);
+                        false
+                    }
+                };
+                // BT-2797: `self.field := [block]` gets a distinct context from
+                // `localVar := [block]` so a stored block's field-mutation
+                // diagnostic can tell them apart (see block_analyzer.rs).
+                let value_context = if is_self_field_target {
+                    ExprContext::FieldAssignment
+                } else {
+                    ExprContext::Assignment
+                };
+                self.analyse_expression(value, Some(value_context));
             }
 
             Block(block) => {
@@ -392,6 +405,11 @@ pub(super) enum ExprContext {
     ControlFlowArg,
     /// Expression is an argument to a regular message.
     MessageArg,
-    /// Expression is being assigned to a variable.
+    /// Expression is being assigned to a local variable.
     Assignment,
+    /// BT-2797: Expression is being assigned to an instance field
+    /// (`self.field := value`), as distinct from a local variable. A block
+    /// stored this way is unconditionally safe to promote to Tier 2 even with
+    /// field mutations — see `block_analyzer.rs`'s diagnostic for why.
+    FieldAssignment,
 }

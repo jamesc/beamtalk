@@ -1,0 +1,30 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2797: Test fixture for a block with field mutations stored in an
+// instance field in one method and invoked via `value:` from a *different*
+// method. Static per-method tracking (tier2_block_params/tier2_local_vars)
+// can't see across methods, so this relies on the compiler unconditionally
+// promoting a field-assigned Tier 2 block, and on every `self.field value:`
+// call site runtime-discriminating Tier 1 vs Tier 2 (erlang:is_function/2,
+// generalizing the BT-909 Erlang-FFI-interop precedent).
+
+Actor subclass: Tier2FieldStoredBlockTestActor
+  state: total = 0
+  state: onTick = nil
+
+  // Assigns a block with a field mutation to the onTick field. `setup` never
+  // invokes the block itself — only `tick:` (a different method) does.
+  setup => self.onTick := [:x | self.total := self.total + x]
+
+  // Invokes the block stored in onTick — assigned by a different method
+  // (setup) than the one calling it.
+  tick: x => self.onTick value: x
+
+  // BT-2797: end-to-end — assign in setup, invoke (twice) in tick:, confirm
+  // the field mutation inside the block propagates back to actor state.
+  testFieldStoredBlockAcrossMethods =>
+    self setup
+    self tick: 5
+    self tick: 3
+    self.total

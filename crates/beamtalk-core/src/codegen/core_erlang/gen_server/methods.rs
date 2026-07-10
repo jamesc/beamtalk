@@ -408,39 +408,52 @@ impl CoreErlangGenerator {
                 continue;
             }
             let var_name = id.name.as_str();
-            let used_safely = body[i + 1..]
+            let (has_unsafe, has_safe) = body[i + 1..]
                 .iter()
-                .all(|stmt| !Self::expr_has_unsafe_var_use(stmt, var_name));
-            if used_safely {
+                .map(|stmt| Self::scan_var_uses(stmt, var_name))
+                .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2));
+            // Require at least one safe use, not just the absence of unsafe
+            // ones — otherwise a variable that's never referenced again (e.g.
+            // `var := [block]` as the method's last statement, so the block
+            // value implicitly escapes as the return value) would vacuously
+            // pass "no unsafe use found" and be wrongly promoted.
+            if has_safe && !has_unsafe {
                 self.tier2_local_vars.insert(var_name.to_string());
             }
         }
     }
 
-    /// BT-2797: Returns `true` if `expr` contains any reference to `var_name`
-    /// that is *not* the receiver of a `value`/`value:`/`value:value:`/
-    /// `value:value:value:` send — i.e. a use that would let a Tier 2 block
-    /// value escape to a call site that doesn't know to thread state through
-    /// it (a bare return, an argument to another call, a reassignment, ...).
+    /// BT-2797: Scans `expr` for references to `var_name`, returning
+    /// `(has_unsafe_use, has_safe_use)`.
+    ///
+    /// A *safe* use is the receiver of a `value`/`value:`/`value:value:`/
+    /// `value:value:value:` send. Any other reference — a bare return, an
+    /// argument to another call, a reassignment, ... — is *unsafe*, since it
+    /// would let a Tier 2 block value escape to a call site that doesn't know
+    /// to thread state through it. A variable that's *never* referenced at
+    /// all yields `(false, false)`, which the caller must treat as unsafe
+    /// (not "no unsafe use found") — see `prescan_tier2_local_vars`.
     ///
     /// Deliberately conservative: exhaustively matches every `Expression`
     /// variant so a use hidden inside e.g. a map literal or string
     /// interpolation is never silently missed. A shadowing block parameter
     /// with the same name is *not* special-cased — that only makes this
     /// over-conservative (a missed promotion), never unsafe.
-    fn expr_has_unsafe_var_use(expr: &Expression, var_name: &str) -> bool {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "exhaustive match over every Expression variant, kept as one function for locality with its single caller"
+    )]
+    fn scan_var_uses(expr: &Expression, var_name: &str) -> (bool, bool) {
         match expr {
-            Expression::Identifier(id) => id.name == var_name,
+            Expression::Identifier(id) => (id.name == var_name, false),
             Expression::Literal(..)
             | Expression::ClassReference { .. }
             | Expression::Super(_)
             | Expression::Primitive { .. }
             | Expression::ExpectDirective { .. }
-            | Expression::Error { .. } => false,
-            Expression::Spread { name, .. } => name.name == var_name,
-            Expression::FieldAccess { receiver, .. } => {
-                Self::expr_has_unsafe_var_use(receiver, var_name)
-            }
+            | Expression::Error { .. } => (false, false),
+            Expression::Spread { name, .. } => (name.name == var_name, false),
+            Expression::FieldAccess { receiver, .. } => Self::scan_var_uses(receiver, var_name),
             Expression::MessageSend {
                 receiver,
                 selector,
@@ -459,69 +472,92 @@ impl CoreErlangGenerator {
                             | WellKnownSelector::ValueValueValue
                     )
                 );
-                let receiver_unsafe =
-                    !is_safe_value_send && Self::expr_has_unsafe_var_use(receiver, var_name);
-                receiver_unsafe
-                    || arguments
-                        .iter()
-                        .any(|arg| Self::expr_has_unsafe_var_use(arg, var_name))
+                let (mut unsafe_, mut safe) = if is_safe_value_send {
+                    (false, true)
+                } else {
+                    Self::scan_var_uses(receiver, var_name)
+                };
+                for arg in arguments {
+                    let (u, s) = Self::scan_var_uses(arg, var_name);
+                    unsafe_ |= u;
+                    safe |= s;
+                }
+                (unsafe_, safe)
             }
             Expression::Block(block) => block
                 .body
                 .iter()
-                .any(|stmt| Self::expr_has_unsafe_var_use(&stmt.expression, var_name)),
+                .map(|stmt| Self::scan_var_uses(&stmt.expression, var_name))
+                .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2)),
             Expression::Assignment { target, value, .. } => {
-                Self::expr_has_unsafe_var_use(target, var_name)
-                    || Self::expr_has_unsafe_var_use(value, var_name)
+                let (u1, s1) = Self::scan_var_uses(target, var_name);
+                let (u2, s2) = Self::scan_var_uses(value, var_name);
+                (u1 || u2, s1 || s2)
             }
             Expression::DestructureAssignment { value, .. } | Expression::Return { value, .. } => {
-                Self::expr_has_unsafe_var_use(value, var_name)
+                Self::scan_var_uses(value, var_name)
             }
             Expression::Cascade {
                 receiver, messages, ..
             } => {
-                Self::expr_has_unsafe_var_use(receiver, var_name)
-                    || messages.iter().any(|msg| {
-                        msg.arguments
-                            .iter()
-                            .any(|arg| Self::expr_has_unsafe_var_use(arg, var_name))
-                    })
+                let (mut unsafe_, mut safe) = Self::scan_var_uses(receiver, var_name);
+                for msg in messages {
+                    for arg in &msg.arguments {
+                        let (u, s) = Self::scan_var_uses(arg, var_name);
+                        unsafe_ |= u;
+                        safe |= s;
+                    }
+                }
+                (unsafe_, safe)
             }
             Expression::Parenthesized { expression, .. } => {
-                Self::expr_has_unsafe_var_use(expression, var_name)
+                Self::scan_var_uses(expression, var_name)
             }
             Expression::Match { value, arms, .. } => {
-                Self::expr_has_unsafe_var_use(value, var_name)
-                    || arms.iter().any(|arm| {
-                        arm.guard
-                            .as_ref()
-                            .is_some_and(|g| Self::expr_has_unsafe_var_use(g, var_name))
-                            || Self::expr_has_unsafe_var_use(&arm.body, var_name)
-                    })
+                let (mut unsafe_, mut safe) = Self::scan_var_uses(value, var_name);
+                for arm in arms {
+                    if let Some(guard) = &arm.guard {
+                        let (u, s) = Self::scan_var_uses(guard, var_name);
+                        unsafe_ |= u;
+                        safe |= s;
+                    }
+                    let (u, s) = Self::scan_var_uses(&arm.body, var_name);
+                    unsafe_ |= u;
+                    safe |= s;
+                }
+                (unsafe_, safe)
             }
-            Expression::MapLiteral { pairs, .. } => pairs.iter().any(|pair| {
-                Self::expr_has_unsafe_var_use(&pair.key, var_name)
-                    || Self::expr_has_unsafe_var_use(&pair.value, var_name)
-            }),
+            Expression::MapLiteral { pairs, .. } => pairs
+                .iter()
+                .map(|pair| {
+                    let (u1, s1) = Self::scan_var_uses(&pair.key, var_name);
+                    let (u2, s2) = Self::scan_var_uses(&pair.value, var_name);
+                    (u1 || u2, s1 || s2)
+                })
+                .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2)),
             Expression::ListLiteral { elements, tail, .. } => {
-                elements
+                let (mut unsafe_, mut safe) = elements
                     .iter()
-                    .any(|e| Self::expr_has_unsafe_var_use(e, var_name))
-                    || tail
-                        .as_ref()
-                        .is_some_and(|t| Self::expr_has_unsafe_var_use(t, var_name))
+                    .map(|e| Self::scan_var_uses(e, var_name))
+                    .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2));
+                if let Some(t) = tail {
+                    let (u, s) = Self::scan_var_uses(t, var_name);
+                    unsafe_ |= u;
+                    safe |= s;
+                }
+                (unsafe_, safe)
             }
             Expression::ArrayLiteral { elements, .. } => elements
                 .iter()
-                .any(|e| Self::expr_has_unsafe_var_use(e, var_name)),
-            Expression::StringInterpolation { segments, .. } => {
-                segments.iter().any(|seg| match seg {
-                    crate::ast::StringSegment::Interpolation(e) => {
-                        Self::expr_has_unsafe_var_use(e, var_name)
-                    }
-                    crate::ast::StringSegment::Literal(_) => false,
+                .map(|e| Self::scan_var_uses(e, var_name))
+                .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2)),
+            Expression::StringInterpolation { segments, .. } => segments
+                .iter()
+                .map(|seg| match seg {
+                    crate::ast::StringSegment::Interpolation(e) => Self::scan_var_uses(e, var_name),
+                    crate::ast::StringSegment::Literal(_) => (false, false),
                 })
-            }
+                .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2)),
         }
     }
 
@@ -803,7 +839,7 @@ impl CoreErlangGenerator {
                             if let Expression::FieldAccess { field, .. } = target.as_ref() {
                                 let val_var = self.fresh_temp_var("Val");
                                 let current_state = self.current_state_var();
-                                let value_str = self.expression_doc(value)?;
+                                let value_str = self.generate_field_assignment_value_doc(value)?;
                                 let new_state = self.next_state_var();
                                 docs.push(docvec![
                                     "let ",
@@ -3279,6 +3315,17 @@ impl CoreErlangGenerator {
                     {
                         return true;
                     }
+                }
+                // BT-2797: `self.field value(:...)` — the field may hold a Tier 2
+                // block assigned from a different method than this call site, so
+                // it needs the runtime is_function/2 discrimination generated by
+                // generate_block_value_call_runtime_discriminated, which always
+                // returns a {Result, NewState} tuple that this call site must
+                // unpack (same as the statically-known-Tier-2 cases above).
+                if self.context == super::super::CodeGenContext::Actor
+                    && Self::is_self_field_access(receiver)
+                {
+                    return true;
                 }
                 // BT-1213: Inline block literal with captured mutations
                 // (e.g. [errors := errors add: #foo] value)

@@ -1198,3 +1198,80 @@ fn test_bt2797_same_method_tier2_local_var_threads_state_correctly() {
          value. Got: {code}"
     );
 }
+
+#[test]
+fn test_bt2797_local_tier2_block_never_invoked_again_is_still_compile_error() {
+    // BT-2797 regression guard: `blk := [block needing Tier 2]` where `blk` is
+    // never referenced again in the rest of the method — here because the
+    // assignment is the method's *last* statement, so the raw Tier 2 fun value
+    // implicitly escapes as the method's own return value. `prescan_tier2_local_vars`
+    // must NOT promote this: an early, buggy version of the safety check asked
+    // "is there no *unsafe* use of blk afterward?", which is vacuously true
+    // when there's no use at all (`[].iter().all(...)` on an empty slice), so
+    // it wrongly promoted variables that are simply never used again. The fix
+    // requires proof of at least one *safe* use, not just the absence of an
+    // unsafe one. This must keep hitting the compile-time diagnostic instead of
+    // producing Core Erlang that returns a raw 2-arity fun to a caller with no
+    // idea it needs to thread state through it.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: item =>\n    blk := [:x | self.total := self.total + x]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(CodeGenError::FieldAssignmentInUnsupportedBlock { .. })
+        ),
+        "A Tier 2 block stored in a local var and never invoked again (so it \
+         escapes as the method's implicit return value) must remain a \
+         compile-time error. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_bt2797_field_stored_block_invoked_from_different_method_threads_state_correctly() {
+    // BT-2797: the main real-world motivator — a block with field mutations,
+    // assigned to an instance field in one method (`setup`) and invoked via
+    // `value:` from a *different* method (`tick:`). Static per-method tracking
+    // (tier2_block_params / tier2_local_vars) can't see across methods, so this
+    // relies on:
+    // 1. `generate_field_assignment_value_doc` (dispatch_codegen.rs) promoting
+    //    the stored block to Tier 2 unconditionally (safe because every
+    //    `self.field value(:...)` call site now runtime-discriminates), and
+    // 2. `generate_block_value_call_runtime_discriminated` (intrinsics.rs)
+    //    checking the field's *runtime* arity (`is_function/2`) at the call
+    //    site to decide whether to thread state — the BT-909 precedent
+    //    generalized from Erlang FFI interop to Beamtalk-level block calls.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n  state: onTick = nil\n\n  setup =>\n    self.onTick := [:x | self.total := self.total + x]\n\n  tick: x =>\n    self.onTick value: x\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let code = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    )
+    .expect("should compile (BT-2797)");
+
+    assert!(
+        code.contains("fun (_x2, StateAcc) ->") && code.contains("'maps':'put'('onTick',"),
+        "setup must store a 2-arity Tier 2 fun (block param + trailing state \
+         accumulator) into the onTick field. Got: {code}"
+    );
+    assert!(
+        code.contains("'maps':'get'('onTick', State)"),
+        "tick: must read the block back out of the onTick field. Got: {code}"
+    );
+    assert!(
+        code.contains("call 'erlang':'is_function'(_Fun5, 1)")
+            && code.contains("call 'erlang':'is_function'(_Fun5, 2)"),
+        "tick: must runtime-discriminate Tier 1 (arity 1: just the block param) \
+         vs Tier 2 (arity 2: block param + state) before applying. Got: {code}"
+    );
+    assert!(
+        code.contains("apply _Fun5 (_Arg6, State)"),
+        "the Tier 2 branch must apply the field's block with the calling \
+         method's State as a trailing argument. Got: {code}"
+    );
+}
