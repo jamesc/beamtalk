@@ -1173,6 +1173,7 @@ proptest! {
         let _ = InferredType::intersect(&a, &b, prov(), Some(&h), None);
         let _ = InferredType::intersect(&a, &b, prov(), None, None);
         let _ = InferredType::difference(&a, &b, prov(), None);
+        let _ = InferredType::difference(&a, &b, prov(), Some(&h));
     }
 
     /// GAP 3: commutativity — `intersect(a, b) == intersect(b, a)` across the

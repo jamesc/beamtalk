@@ -568,10 +568,10 @@ is left for a future issue if a producer needs it.
 > `isKindOf: Integer` test. **Fixed:** `class_eq`'s false branch is left
 > unnarrowed (`None`), exactly as it was before this issue — only its
 > (already-shipped, BT-2741) true branch is affected by set-theoretic
-> narrowing. `NarrowingInfo` gained a `class_test_is_kind_of: bool` field so
-> `refine_class_narrowing` can distinguish the two idioms, which previously
-> shared the untyped `class_test: Option<EcoString>` field with no way to
-> tell them apart.
+> narrowing. `NarrowingInfo` gained a `ClassTestInfo` carrying a
+> `ClassTestKind::{Exact, KindOf}` tag so `refine_class_narrowing` can
+> distinguish the two idioms, which previously shared the untyped
+> `class_test: Option<EcoString>` field with no way to tell them apart.
 
 ### REPL session
 
