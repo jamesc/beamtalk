@@ -91,6 +91,186 @@ re-introduces the per-call cost the index was meant to remove.
   and logs an `xref_miss` warning. They should be baked into `register_class/0`
   like the rest; tracked as a Phase 2 completeness gap.
 
+## Reload re-check fan-out — xref receiver-type-key decision (ADR 0105 Phase 2, BT-2781)
+
+ADR 0105's re-check orchestration (BT-2778) looks up a changed selector's
+callers via `beamtalk_xref:senders_of/1`, which is selector-keyed with no
+receiver-class component (ADR 0087's schema). The receiver-type filter that
+separates real dependents from same-selector-different-receiver false
+positives is not a pre-filter — it is an emergent property of re-checking
+each candidate through the compiler (`beamtalk_recheck`'s moduledoc). For a
+common selector this means paying a compile per candidate just to discover
+it isn't a real dependent, which is why the per-reload numeric caller cap
+(`recheck_caller_cap`, default 20) exists. This benchmark measures that
+fan-out to decide whether ADR 0087 needs a receiver-type key (ADR 0105
+Alternatives) to make the lookup precise instead of selector-wide.
+
+### Harness
+
+`runtime/perf/bench_recheck_fanout.escript`. Run from the `runtime/`
+directory after `just build`:
+
+```bash
+escript perf/bench_recheck_fanout.escript
+```
+
+Two parts:
+
+- **Part A (large-image survey)** — boots the full loaded stdlib workspace
+  (mirrors `bench_senders_xref.escript`) and ranks every indexed sent
+  selector by its distinct-caller-class count (the unit `beamtalk_recheck`
+  actually caps and re-checks — `group_by_owner/1` collapses multiple sites
+  in one caller class to a single candidate).
+- **Part B (controlled fan-out)** — drives the real
+  `beamtalk_recheck:trigger/4` orchestration (real compiler port, real xref,
+  real `beamtalk_workspace_meta`) over synthetic candidate sets of 5 / 20 /
+  50 / 200, with a fixed 10% real-dependent / 90% false-positive split
+  (modelling a heavily overloaded common selector), at both the default cap
+  (20) and uncapped. Real and false-positive candidates are interleaved by
+  index so alphabetic sort order — what `apply_cap/2` actually keeps under a
+  cap — doesn't systematically favour or penalise either group.
+
+### Workspace
+
+The loaded standard library: **103 classes** (grown from 81 at BT-2299's
+measurement), **1928 indexed send sites**, **416 distinct sent selectors**.
+
+### Results
+
+**Part A — today's real fan-out.** 325 of 416 selectors (78%) have exactly
+one distinct caller class. Ranked by **distinct caller-class count** (not
+raw site count — a selector sent many times by few classes is cheaper to
+re-check than one sent once each by many classes, since `beamtalk_recheck`
+caps and re-checks one candidate *per caller class*, not per site):
+
+| selector | sites | distinct caller classes |
+|---|---|---|
+| `delegate` | 193 | 23 |
+| `ifTrue:ifFalse:` | 114 | 17 |
+| `asString` | 35 | 17 |
+| `error:` | 39 | 13 |
+| `++` | 34 | 13 |
+
+The script also computes this exhaustively rather than by eyeballing the
+top-10 (an earlier draft ranked the "top 10" table by site count while
+claiming distinct-owner order — caught in review, since the two orderings
+disagree): **exactly 1 of 416 selectors** (`delegate`) has a distinct-owner
+count exceeding the default cap of 20, and only by 3.
+
+**Part B — controlled fan-out, default cap (20):**
+
+| candidates | checked | dropped | real findings | wall-clock | ms/checked |
+|---|---|---|---|---|---|
+| 5 | 5 | 0 | 1 of 1 | ~240 ms | ~48 ms |
+| 20 | 20 | 0 | 2 of 2 | ~730 ms | ~37 ms |
+| 50 | 20 | 30 | 2 of 5 | ~750 ms | ~38 ms |
+| 200 | 20 | 180 | 2 of 20 | ~760 ms | ~38 ms |
+
+**Part B — uncapped (full candidate set checked):**
+
+| candidates | checked | real findings | wall-clock | ms/checked |
+|---|---|---|---|---|
+| 5 | 5 | 1 | ~240 ms | ~47 ms |
+| 20 | 20 | 2 | ~790 ms | ~39 ms |
+| 50 | 50 | 5 | ~1980 ms | ~40 ms |
+| 200 | 200 | 20 | ~7580 ms | ~38 ms |
+
+### Interpretation
+
+- **Per-check cost is flat, ~33-48 ms/candidate**, regardless of fan-out size
+  — consistent with the Phase 0 spike's ~18.5 ms warm / ~58 ms cold figures
+  (these synthetic candidates are fresh classes, so nearer the cold end).
+  There is no quadratic or superlinear blowup as candidate count grows; cost
+  scales linearly with candidates checked. **Caveat:** every synthetic
+  candidate is a trivial one-method class, so this is a cost *floor* — real
+  caller classes (multi-method, larger source) will compile slower per
+  candidate. The floor is enough to establish "no superlinear blowup," but
+  not to bound absolute worst-case per-check latency in a large real
+  codebase.
+- **The cap does bound worst-case latency as designed** for this class-size
+  floor: wall-clock plateaus at ~700-760 ms once fan-out reaches/exceeds the
+  cap, regardless of whether the true candidate pool is 20 or 200. In the
+  *healthy* (non-degraded) case this stays comfortably interactive; with
+  larger real caller classes the plateau would sit higher (see caveat
+  above), but the *shape* — bounded regardless of true fan-out size — holds.
+- **The cap silently drops most real findings once fan-out exceeds it by a
+  wide margin.** At 50 candidates (2.5x the cap), only 2 of 5 real findings
+  (40%) survive; at 200 candidates (10x the cap), only 2 of 20 (10%) survive
+  — a **90% loss of genuine stale-caller findings**, because
+  `apply_cap/2` keeps the alphabetically-first N candidates without any
+  relevance ranking (its own documented limitation). This directly
+  undercuts the ADR's headline promise ("only genuinely-affected callers
+  surface") once a selector's real fan-out grows well past the cap.
+  **Caveat:** the fixture interleaves real/false candidates uniformly by
+  index, so this ~proportional loss is an *expected-value* reading; real
+  class-name distributions could cluster real dependents earlier or later
+  in alphabetic order, giving anywhere from ~0% to 100% loss for the same
+  candidate-pool shape — the fixture demonstrates the failure mode exists
+  and is severe on average, not a worst-case bound.
+- **This is not purely a future risk — it is already happening today, at
+  low grade.** `delegate` (23 distinct owners) already exceeds the cap of 20
+  in the live stdlib image, so a reload of a class implementing `delegate`
+  already silently drops re-checks for up to 3 alphabetically-last callers
+  today. It has not been a *visible* problem because `delegate` is an
+  internal proxy-forwarding selector (ADR 0104 territory), not one typical
+  user code sends directly — but the mechanism is live now, not hypothetical.
+- **Today's real stdlib fan-out (Part A) does not yet justify the xref
+  receiver-type-key extension** as an urgent fix: only one real selector
+  exceeds the cap, and only by 3. But the *shape* of the risk is confirmed
+  and quantified by Part B: as the image grows (more classes implementing a
+  common protocol selector like `size`/`at:`), the cap's failure mode is not
+  a graceful latency degradation — it is a silent, severe drop in finding
+  completeness.
+- **Synchronous tail-latency (flagged on BT-2778's issue thread) — not
+  simulated here.** A wedged/degraded compiler port was not reproduced
+  (would require mocking the port's timeout path); the theoretical worst
+  case remains `Cap × 30s` (the `beamtalk_compiler_server` call timeout)
+  under a fully serialized, wedged port, per the BT-2778 comment. The
+  *healthy*-case numbers above (cap=20 always finishes in under 1s) confirm
+  this is a tail-only risk, not a typical-case one.
+- **Methodology notes:** single-run timings, no explicit warmup — the N=5
+  round (first to run) is consistently the slowest per-check (~45-48 ms vs
+  ~33-38 ms for later rounds), most plausibly cold-start compiler-port /
+  ambient-class-hierarchy effects rather than a true N=5 cost difference.
+  Repeated full runs (3x) show the qualitative conclusions (flat per-check
+  cost, cap-bounded latency, severe finding-loss past 2.5x the cap) hold
+  consistently; the specific ms figures above should be read as
+  representative, not as tight bounds. The compiler-server's ambient class
+  cache is never cleared between the 8 rounds in one script run, so later
+  rounds run against a larger accumulated hierarchy — a possible confound
+  for absolute (not relative) timings that a from-scratch-per-round harness
+  would eliminate.
+
+### Decision (ADR 0105 Phase 2, BT-2781)
+
+**The xref receiver-type-key extension is not implemented now, but is
+warranted as a proactive (non-urgent) follow-up.** Rationale:
+
+1. Current real-world fan-out (Part A) is within the existing cap for
+   415 of 416 measured stdlib selectors; the one exception (`delegate`, an
+   internal proxy-forwarding selector) exceeds it by only 3 — a small,
+   already-occurring, low-visibility gap, not an urgent correctness or
+   latency problem.
+2. The controlled benchmark (Part B) proves the interim design's known
+   limitation (cap keeps an arbitrary, non-relevance-ranked subset) is not
+   theoretical: it causes a **quantified 90% loss of real findings** once a
+   selector's fan-out reaches 10x the cap — a plausible future state as the
+   image grows and common protocol selectors (`size`, `at:`, `do:`) accrue
+   more implementors and senders.
+3. The receiver-type key would fix *both* problems the cap only partially
+   addresses today — it shrinks the candidate set to true dependents before
+   the cap is even applied, so it is a completeness win (no more silently
+   dropped real findings) as well as a latency win (fewer wasted compiles).
+4. Given ADR 0105's own phased approach and that this changes ADR 0087's
+   shipped schema/generation lifecycle (non-trivial migration, per ADR 0105
+   Alternatives), the recommendation is to track this as a follow-up rather
+   than block current phases — see BT-2798 for scope.
+
+No regression: `bench_senders_xref.escript` (ADR 0087 Phase 3, BT-2299)
+re-run alongside this benchmark, unaffected (~1400x speedup vs source-scan,
+consistent with prior measurement; workspace grew from 81 to 103 classes in
+the interim, expected).
+
 ## Self-hosting cost: pure-BT enumeration vs native primitives (BT-2692 / BT-2708)
 
 A spike for the de-primitivization direction: how much slower is a pure-BT
