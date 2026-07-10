@@ -44,7 +44,7 @@ main(_) ->
     {ok, _} = application:ensure_all_started(beamtalk_runtime),
     timer:sleep(500),
     %% Force-load the compiled stdlib modules so their on_load hooks register
-    %% the full 81-class workspace (mirrors bench_senders_xref.escript).
+    %% the full loaded stdlib workspace (mirrors bench_senders_xref.escript).
     lists:foreach(
         fun(Beam) ->
             Mod = list_to_atom(filename:basename(Beam, ".beam")),
@@ -166,17 +166,22 @@ part_b_controlled_fanout() ->
     ok.
 
 restart_workspace_meta() ->
+    %% beamtalk_workspace_meta is supervised (permanent, beamtalk_workspace_sup).
+    %% Stopping it races the supervisor's automatic restart, so if it's already
+    %% running just reuse it -- per-round selector names are already unique,
+    %% so there's no cross-round contamination risk from skipping a fresh start.
     case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        Pid -> gen_server:stop(Pid)
-    end,
-    {ok, _} = beamtalk_workspace_meta:start_link(#{
-        workspace_id => <<"bench_recheck_fanout_ws">>,
-        project_path => undefined,
-        created_at => erlang:system_time(second),
-        repl => false
-    }),
-    ok.
+        undefined ->
+            {ok, _} = beamtalk_workspace_meta:start_link(#{
+                workspace_id => <<"bench_recheck_fanout_ws">>,
+                project_path => undefined,
+                created_at => erlang:system_time(second),
+                repl => false
+            }),
+            ok;
+        _Pid ->
+            ok
+    end.
 
 %% One round: register N synthetic candidate classes for a fresh,
 %% round-scoped selector (so rounds never interfere with each other or with
