@@ -168,6 +168,7 @@
 
 ### Internal
 
+- **Per-selector signature-generation store** — new `beamtalk_workspace_signature_store` gen_server and `beamtalk_signature_diff` module for tracking method signature generations across repeated hot-patches (ADR 0105 Phase 1). The compiler port now reports declared return/param types in compile responses; `beamtalk_repl_loader` captures pre-patch signatures and supports rollback on failed installs. No user-visible surface yet — infrastructure for live-image re-checking on hot reload (BT-2777, #2885).
 - Runtime dead-code + idiom consolidation: retire orphaned `beamtalk_behaviour_bt`, five zero-caller `beamtalk_runtime_api` delegators, and `beamtalk_repl_state:set_loaded_modules/2`; consolidate `reraise` (22 sites → `beamtalk_exception_handler`), `try_dispatch` (4 sites → `beamtalk_object_ops`), and ~120 stdlib error-construction sites onto shared helpers. Net −549 lines (#2879).
 - Collapse `beamtalk_error:new/2` + `with_selector/2` chains to `new/3` across 12 runtime modules — 36 call sites, no behavior change (#2814).
 - Consolidate zero-param dispatch BIFs to use `leaf::atom` pattern (BT-2498).
