@@ -723,6 +723,29 @@ impl CoreErlangGenerator {
             return self.generate_block_stateful(block, &captured_mutations);
         }
 
+        // BT-2792: A block reaching this generic fallback that also writes a
+        // `self.<field>` cannot correctly thread state. `self.field := ...`
+        // inside the block's own `fun` body still bumps the *shared*
+        // `state_threading` counter (next_state_var), but the resulting
+        // `let StateN = ... in ...` binding is scoped only inside that `fun` —
+        // it never reaches the enclosing method. The enclosing method then
+        // believes `StateN` is live and references it out of scope, which
+        // erlc rejects with "unbound variable". Every construct that *can*
+        // thread field mutations correctly (ifTrue:/ifFalse:/whileTrue:/do:/
+        // collect:/select:/reject:/inject:into:/timesRepeat:/to:do:, and a
+        // literal block passed directly to a self-send) is inlined or routed
+        // through `generate_block_stateful` before reaching this fallback —
+        // see BT-851's `tier2_method_info` scan and the `with_branch_context`
+        // callers in control_flow/. A block that still reaches here is opaque
+        // to the compiler (stored in a local var, returned, passed to a
+        // user-defined method and invoked later, etc.) and general call-site
+        // state threading for that shape isn't implemented yet. `Tier 2`
+        // (above) only ever promotes on *captured local* mutations, so it was
+        // never actually a fix for this — reinstate the `validate_stored_closure`
+        // diagnostic (its production call sites were removed under the belief
+        // Tier 2 made it obsolete) instead of silently emitting broken Core Erlang.
+        Self::validate_stored_closure(block, format!("offset {}", block.span.start()))?;
+
         // Pure block: plain fun (no mutations to thread via Tier 2)
         self.push_scope();
         // BT-1475: Track block nesting so self-cast sends route through the mailbox

@@ -400,9 +400,16 @@ fn test_validate_stored_closure_field_takes_precedence() {
 }
 
 #[test]
-fn test_codegen_allows_stored_closure_with_field_assignment() {
-    // Integration test: verify the full codegen pipeline allows field assignments
-    // in stored closures and successfully generates code for: test := [ myBlock := [self.value := 1]. myBlock ]
+fn test_codegen_rejects_stored_closure_with_field_assignment() {
+    // BT-2792: Integration test covering the full codegen pipeline for
+    // test := [ myBlock := [self.value := 1]. myBlock ]
+    //
+    // This used to be asserted as allowed (BT-852, "supported via Tier 2 stateful
+    // block protocol"), but Tier 2 promotion only ever triggers on *captured local*
+    // mutations, never on `self.field :=` writes — so this actually produced Core
+    // Erlang that `erlc` rejects with "unbound variable" (the inner block's `fun`
+    // bumps the shared state-version counter, but that binding is scoped inside the
+    // `fun` and never reaches the caller). Must now be a clear compile-time error.
     let module = Module {
         classes: vec![],
         method_definitions: Vec::new(),
@@ -459,11 +466,14 @@ fn test_codegen_allows_stored_closure_with_field_assignment() {
         file_trailing_comments: Vec::new(),
     };
 
-    // BT-852: Stored closures with field assignments are now allowed via Tier 2 protocol.
     let result = generate(&module);
     assert!(
-        result.is_ok(),
-        "Field assignment in stored closure should now be allowed via Tier 2 protocol. Got: {result:?}"
+        matches!(
+            result,
+            Err(CodeGenError::FieldAssignmentInStoredClosure { .. })
+        ),
+        "Field assignment in a stored closure must be a compile-time error, not silently \
+         accepted (BT-2792). Got: {result:?}"
     );
 }
 

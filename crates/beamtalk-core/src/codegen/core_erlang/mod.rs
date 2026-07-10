@@ -3192,10 +3192,16 @@ impl CoreErlangGenerator {
     /// Returns an error for both field assignments and local mutations; the local-mutation
     /// error is phrased as a warning in its message.
     ///
-    /// BT-852: This function is retained for unit tests. Production call sites have been
-    /// removed since stored closures with mutations are now supported via the Tier 2
-    /// stateful block protocol (ADR 0041).
-    #[allow(dead_code)]
+    /// BT-852 claimed production call sites could be removed because stored closures
+    /// with mutations are supported via the Tier 2 stateful block protocol (ADR 0041).
+    /// BT-2792 found that's only true for *captured local* mutations
+    /// (`captured_mutations_for_block` in `expressions.rs`, which promotes to
+    /// `generate_block_stateful`) — Tier 2 promotion never triggers on `self.field :=`
+    /// writes. A block with field writes that reaches the generic "pure fun" fallback
+    /// in `generate_block` silently emits Core Erlang `erlc` rejects with "unbound
+    /// variable" (the block's own `fun` bumps the shared state-version counter, but
+    /// that binding is scoped inside the `fun` and never reaches the caller). Called
+    /// from `generate_block` to turn that into a clear compile-time diagnostic instead.
     fn validate_stored_closure(block: &Block, span_str: String) -> Result<()> {
         use crate::codegen::core_erlang::block_analysis::analyze_block;
 

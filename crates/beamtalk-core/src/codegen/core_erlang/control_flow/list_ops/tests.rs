@@ -1647,8 +1647,10 @@ fn test_each_with_index_pure_block_falls_through() {
 fn test_each_with_index_wrong_arity_block_falls_through() {
     // A 1-arg block (wrong arity for eachWithIndex:) must not desugar; the
     // Collection.bt method will raise the correct runtime error (covers the
-    // arity guard in try_generate_each_with_index).
-    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    items eachWithIndex: [:x | self.total := self.total + x]\n";
+    // arity guard in try_generate_each_with_index). Body is a pure expression
+    // (not a `self.field :=` mutation) — see BT-2792, which made a mutating
+    // block that falls through to normal dispatch a compile-time error.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    items eachWithIndex: [:x | x + 1]\n";
     let code = codegen(src);
     assert!(
         code.contains("'send'(_items1, 'eachWithIndex:', ["),
@@ -1744,8 +1746,10 @@ fn test_each_with_index_degenerate_param_names_falls_through() {
     // `[:x :x | …]` — elem and index sharing a name — must not desugar; the
     // guard in try_generate_each_with_index leaves it to the normal dispatch
     // path's own diagnostics rather than building a fold with a shadowed
-    // accumulator parameter.
-    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    items eachWithIndex: [:x :x | self.total := self.total + x]\n";
+    // accumulator parameter. Body is a pure expression, not a `self.field :=`
+    // mutation — see BT-2792 (a mutating block that falls through to normal
+    // dispatch is now a compile-time error, tested separately).
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    items eachWithIndex: [:x :x | x + 1]\n";
     let code = codegen(src);
     assert!(
         code.contains("'send'(_items1, 'eachWithIndex:', ["),
@@ -1763,12 +1767,11 @@ fn test_each_with_index_non_literal_callable_falls_through() {
     // synthetic AST builders need the actual parameter names and body, so the
     // call dispatches to Collection.bt as an ordinary callable send.
     //
-    // NB: this does NOT mean the field mutation inside `blk` is threaded back
-    // to actor state correctly. It isn't — storing a self-mutating block in a
-    // local and invoking it later is a *pre-existing, general* codegen bug
-    // (unrelated to eachWithIndex:/do:separatedBy:) that produces Core Erlang
-    // `erlc` rejects with "unbound variable" in `dispatch/4`. See BT-2792.
-    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    blk := [:item :i | self.total := self.total + item]\n    items eachWithIndex: blk\n";
+    // Body is a pure expression, not a `self.field :=` mutation: storing a
+    // self-mutating block in a local and invoking it later is now a
+    // compile-time error (BT-2792, tested separately), so it can no longer be
+    // exercised via `codegen()`'s `expect`-success helper here.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    blk := [:item :i | item + i]\n    items eachWithIndex: blk\n";
     let code = codegen(src);
     assert!(
         code.contains("'send'(_items1, 'eachWithIndex:', [Blk]"),
@@ -1783,9 +1786,9 @@ fn test_each_with_index_non_literal_callable_falls_through() {
 #[test]
 fn test_do_separated_by_non_literal_callable_falls_through() {
     // Same non-literal guard as above, but for the `do:separatedBy:` element
-    // block argument. See BT-2792 for the pre-existing state-threading bug
-    // this scenario's field mutation would hit if actually compiled.
-    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    blk := [:x | self.total := self.total + x]\n    items do: blk separatedBy: [nil]\n";
+    // block argument. Body is a pure expression — see BT-2792, which made a
+    // stored self-mutating block invoked this way a compile-time error.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    blk := [:x | x + 1]\n    items do: blk separatedBy: [nil]\n";
     let code = codegen(src);
     // Bracket deliberately left open (no trailing `]`) here, unlike the
     // eachWithIndex: assertion above: do:separatedBy: passes two arguments
@@ -1805,11 +1808,9 @@ fn test_do_separated_by_non_literal_separator_falls_through() {
     // Symmetric with test_do_separated_by_non_literal_callable_falls_through,
     // but the *separator* block (not the element block) is the non-literal
     // variable. Both callable positions must be literal blocks for the
-    // desugar to fire.
-    //
-    // NB: `sep` mutates `self.total`, so the mutation is also subject to the
-    // BT-2792 state-threading bug when this falls through to normal dispatch.
-    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    sep := [self.total := self.total + 1]\n    items do: [:x | x printString] separatedBy: sep\n";
+    // desugar to fire. Body is a pure expression — see BT-2792, which made a
+    // stored self-mutating block invoked this way a compile-time error.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    sep := [nil]\n    items do: [:x | x printString] separatedBy: sep\n";
     let code = codegen(src);
     assert!(
         code.contains("'send'(_items1, 'do:separatedBy:', ["),
@@ -1848,8 +1849,10 @@ fn test_do_separated_by_value_type_desugars_without_reprojection() {
 fn test_each_with_index_zero_arity_block_falls_through() {
     // A 0-arg block is wrong arity too (the guard is `!= 2`, not `== 1`), so it
     // must fall through the same as the 1-arg case covered by
-    // test_each_with_index_wrong_arity_block_falls_through.
-    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    items eachWithIndex: [self.total := self.total + 1]\n";
+    // test_each_with_index_wrong_arity_block_falls_through. Body is a pure
+    // expression — see BT-2792, which made a mutating block that falls
+    // through to normal dispatch a compile-time error.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    items eachWithIndex: [1]\n";
     let code = codegen(src);
     assert!(
         code.contains("'send'(_items1, 'eachWithIndex:', ["),
@@ -1865,8 +1868,10 @@ fn test_each_with_index_zero_arity_block_falls_through() {
 fn test_do_separated_by_separator_with_param_falls_through() {
     // do:separatedBy:'s separator block must be 0-arg (`[…]`); a separator with
     // a parameter (`[:y | …]`) is wrong arity and must fall through, covering
-    // the `!separator_block.parameters.is_empty()` guard.
-    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    items do: [:x | x printString] separatedBy: [:y | self.total := self.total + 1]\n";
+    // the `!separator_block.parameters.is_empty()` guard. Body is a pure
+    // expression — see BT-2792, which made a mutating block that falls
+    // through to normal dispatch a compile-time error.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    items do: [:x | x printString] separatedBy: [:y | y + 1]\n";
     let code = codegen(src);
     assert!(
         code.contains("'send'(_items1, 'do:separatedBy:', ["),
