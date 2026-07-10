@@ -936,8 +936,6 @@ impl InferredType {
     /// - Generics compare exactly, including `type_args`.
     ///
     /// The result is re-normalised through [`union_of`](Self::union_of).
-    // Consumed by the narrowing rules landing later in ADR 0102's epic (BT-2738).
-    #[allow(dead_code)]
     pub(crate) fn intersect(
         a: &Self,
         b: &Self,
@@ -1172,8 +1170,6 @@ impl InferredType {
     ///   out of scope per ADR 0102 §5 scope note).
     /// - `Meta` and `Dynamic` are opaque to `Negation`.
     /// - Generics compare exactly, including `type_args`.
-    // Consumed by the narrowing rules landing later in ADR 0102's epic (BT-2738).
-    #[allow(dead_code)]
     pub(crate) fn difference(
         a: &Self,
         b: &Self,
