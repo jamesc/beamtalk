@@ -461,11 +461,11 @@ pub fn format_transcript_chunk(text: &str, bol: &mut bool) -> String {
 ///    Dashboard>>refresh (line 14): `+` expects a number, `getCount` now returns String
 /// ```
 /// `removal` uses `ℹ` (informational — Hint severity per ADR 0100 Rule 1);
-/// `signature_change` uses `⚠`. A `self_edit` classification means no
-/// dependent re-check ran at all — this call only exists because clearing
-/// this class's own stale findings (its source just changed) was itself
-/// worth telling the user about, so the notice is a single clearing line
-/// with no caller list.
+/// `signature_change` and `shape_change` (ADR 0105 Phase 2, BT-2780) use
+/// `⚠`. A `self_edit` classification means no dependent re-check ran at all
+/// — this call only exists because clearing this class's own stale findings
+/// (its source just changed) was itself worth telling the user about, so
+/// the notice is a single clearing line with no caller list.
 pub fn format_reload_check_notice(data: &serde_json::Value) -> Option<String> {
     use std::fmt::Write as _;
 
@@ -499,10 +499,10 @@ pub fn format_reload_check_notice(data: &serde_json::Value) -> Option<String> {
     } else {
         "⚠"
     };
-    let verb = if classification == "removal" {
-        "was removed"
-    } else {
-        "signature changed"
+    let verb = match classification {
+        "removal" => "was removed",
+        "shape_change" => "state shape changed",
+        _ => "signature changed",
     };
 
     let mut out = format!("{icon} reload check: {changed_class}>>{changed_selector} {verb}");
@@ -692,6 +692,39 @@ mod tests {
             assert!(notice.starts_with("ℹ reload check: Counter>>reset was removed"));
             assert!(notice.contains("1 caller re-checked, 1 stale"));
             assert!(notice.contains("AdminPanel>>onClick (line 9)"));
+        }
+
+        /// ADR 0105 Phase 2 (BT-2780): a shape change has no single changed
+        /// selector — `changedSelector` carries the comma-joined affected
+        /// slot names instead (`beamtalk_repl_loader:shape_change_summary/1`).
+        #[test]
+        fn shape_change_uses_warning_icon_and_shape_verb() {
+            let data = json!({
+                "changedClass": "Counter",
+                "changedSelector": "count",
+                "classification": "shape_change",
+                "checked": 1,
+                "notChecked": 0,
+                "capNote": null,
+                "checkedOwners": ["Dashboard"],
+                "findings": [{
+                    "owner": "Dashboard",
+                    "changedClass": "Counter",
+                    "selector": "count",
+                    "classification": "shape_change",
+                    "severity": "warning",
+                    "category": "Type",
+                    "message": "unknown state key `count` for `Counter`",
+                    "note": "state field `count` removed by the reload of Counter",
+                    "sites": [{"method": "build", "line": 7}],
+                    "start": 0,
+                    "end": 5
+                }]
+            });
+            let notice = format_reload_check_notice(&data).expect("notice");
+            assert!(notice.starts_with("⚠ reload check: Counter>>count state shape changed"));
+            assert!(notice.contains("1 caller re-checked, 1 stale"));
+            assert!(notice.contains("Dashboard>>build (line 7)"));
         }
 
         #[test]

@@ -174,6 +174,12 @@ Returns:
     | {error, term(), beamtalk_repl_state:state()}.
 load_class_module(ClassInfo, Expression, State) ->
     #{binary := Binary, module_name := ClassModName, classes := Classes} = ClassInfo,
+    %% ADR 0105 Phase 2 (BT-2780): seed the shape-generation store from the
+    %% about-to-be-replaced module's CURRENT __beamtalk_meta/0 before this
+    %% class-body reload installs — see
+    %% beamtalk_workspace_shape_store's moduledoc "Two-phase capture" for why
+    %% this must run before code:load_binary, not after.
+    prime_shape_capture(Classes),
     case code:load_binary(ClassModName, "", Binary) of
         {module, ClassModName} ->
             activate_module(ClassModName, Classes),
@@ -224,13 +230,25 @@ activate_module(ModuleName, Classes) ->
 Activate a loaded module with an optional source path for workspace metadata.
 Passing SourcePath ensures the source file is recorded in workspace_meta so that
 new VS Code sessions (which have an empty session tracker) can still navigate to source.
+
+ADR 0105 Phase 2 (BT-2780): `maybe_trigger_shape_recheck/1` runs last, after
+`register_classes/2` has installed the new `register_class/0` (which is what
+refreshes the compiler port's ambient class-hierarchy cache — see
+`beamtalk_recheck:trigger_shape/2`'s moduledoc) — so a shape-change re-check
+always sees the *new* shape when it recompiles a candidate dependent. Runs
+for every `activate_module/3` call, not just the three class-body-reload
+paths that call `prime_shape_capture/1` first: for the others (a method
+patch, a method removal, a brand-new class, a protocol) the shape store was
+never primed for these classes, so `beamtalk_workspace_shape_store:capture/1`
+self-seeds and always classifies `no_op` — see its moduledoc.
 """.
 -spec activate_module(atom(), [map()], string() | undefined) -> ok.
 activate_module(ModuleName, Classes, SourcePath) ->
     register_classes(Classes, ModuleName),
     trigger_hot_reload(ModuleName, Classes),
     beamtalk_workspace_meta:register_module(ModuleName, SourcePath),
-    beamtalk_workspace_meta:update_activity().
+    beamtalk_workspace_meta:update_activity(),
+    maybe_trigger_shape_recheck(Classes).
 
 -doc "Register loaded classes by calling the module's register_class/0 function.".
 -spec register_classes([map()], atom()) -> ok.
@@ -338,6 +356,8 @@ load_compiled_module(Binary, ClassNames, ModuleName, Source, SourcePath, State) 
             undefined -> "";
             _ -> SourcePath
         end,
+    %% ADR 0105 Phase 2 (BT-2780): see load_class_module/3's identical comment.
+    prime_shape_capture(ClassNames),
     case code:load_binary(ModuleName, LoadPath, Binary) of
         {module, ModuleName} ->
             activate_module(ModuleName, ClassNames, SourcePath),
@@ -575,6 +595,15 @@ reload_compile_and_load(Source, Path, ModuleNameOverride, ExpectedClassName) ->
         {ok, Binary, ClassNames, ModuleName} ->
             case verify_class_present(ExpectedClassName, ClassNames, Path) of
                 ok ->
+                    %% ADR 0105 Phase 2 (BT-2780): see load_class_module/3's
+                    %% identical comment. Covers both callers of this helper:
+                    %% reload_class_file_impl/2 (file reload after an
+                    %% on-disk edit) and remove_method/3's "reload the class
+                    %% WITHOUT the removed method" — the latter never changes
+                    %% `state:`/`field:` slots, so priming it is harmless
+                    %% (the subsequent capture/1 always diffs an unchanged
+                    %% shape to itself, `no_op`).
+                    prime_shape_capture(ClassNames),
                     case code:load_binary(ModuleName, Path, Binary) of
                         {module, ModuleName} ->
                             activate_module(ModuleName, ClassNames, Path),
@@ -1863,6 +1892,157 @@ publish_recheck_outcome(
             }),
             ok
     end.
+
+%%====================================================================
+%% Shape-change re-check (ADR 0105 Phase 2, BT-2780)
+%%====================================================================
+
+-doc """
+Seed the shape-generation store from each class's *currently-loaded* module
+(before this class-body reload's `code:load_binary` replaces it) — the
+`prime/1` half of `beamtalk_workspace_shape_store`'s two-phase capture. Call
+sites: `load_class_module/3`, `load_compiled_module/6`,
+`reload_compile_and_load/4` — every path that installs a full class body
+(as opposed to a single-method patch or removal, neither of which can
+change `state:`/`field:` slots). Best-effort and self-swallowing, mirroring
+`capture_signature_generation/1`: priming is diagnostic plumbing for a later
+re-check, never a gate on the install itself.
+""".
+-spec prime_shape_capture([map()]) -> ok.
+prime_shape_capture(Classes) ->
+    lists:foreach(
+        fun(#{name := Name}) ->
+            try
+                ok = beamtalk_workspace_shape_store:prime(normalize_class_source_key(Name))
+            catch
+                Class:Reason:Stack ->
+                    ?LOG_WARNING(
+                        "Failed to prime shape-generation store (install proceeding)",
+                        #{
+                            error_class => Class,
+                            reason => Reason,
+                            stack => Stack,
+                            class => Name,
+                            domain => [beamtalk, runtime]
+                        }
+                    )
+            end
+        end,
+        Classes
+    ),
+    ok.
+
+-doc """
+Capture each class's post-install shape and, on a genuine `shape_change`,
+run the shape re-check orchestration (`beamtalk_recheck:trigger_shape/2`)
+and publish its findings. Called from `activate_module/3` for every
+installed class — see that function's doc for why an un-primed class (a
+method patch, a new class, a protocol) is a harmless `no_op` here.
+""".
+-spec maybe_trigger_shape_recheck([map()]) -> ok.
+maybe_trigger_shape_recheck(Classes) ->
+    lists:foreach(fun maybe_trigger_shape_recheck_for_class/1, Classes),
+    ok.
+
+-spec maybe_trigger_shape_recheck_for_class(map()) -> ok.
+maybe_trigger_shape_recheck_for_class(#{name := Name}) ->
+    ClassNameBin = normalize_class_source_key(Name),
+    try
+        {_Prev, {Classification, FieldChanges}} =
+            beamtalk_workspace_shape_store:capture(ClassNameBin),
+        case Classification of
+            no_op ->
+                ok;
+            shape_change ->
+                Result = beamtalk_recheck:trigger_shape(ClassNameBin, FieldChanges),
+                publish_shape_recheck_outcome(ClassNameBin, FieldChanges, Result)
+        end
+    catch
+        Class:Reason:Stack ->
+            ?LOG_WARNING(
+                "Shape re-check trigger failed (reload unaffected)",
+                #{
+                    error_class => Class,
+                    reason => Reason,
+                    stack => Stack,
+                    class => ClassNameBin,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            ok
+    end.
+
+-doc """
+Publish a shape re-check's outcome — mirrors `maybe_run_recheck/4`'s
+per-owner `put_owner_origin/3` replacement and `publish_recheck_outcome/5`'s
+`'ReloadCheckCompleted'` broadcast, reusing the exact same findings-store and
+announcement schema so every existing surface (LSP / REPL / workspace UI)
+renders a shape-change finding without new wiring. `changedSelector` has no
+single selector to report for a shape change, so it carries
+`shape_change_summary/1`'s comma-joined list of affected slot names instead
+— still meaningful in the generic "`{changed_class}`>>`{changed_selector}`"
+templates every surface already uses.
+""".
+-spec publish_shape_recheck_outcome(
+    binary(), [beamtalk_shape_diff:field_change()], beamtalk_recheck:result()
+) ->
+    ok.
+publish_shape_recheck_outcome(ClassNameBin, FieldChanges, Result) ->
+    #{
+        checked_owners := CheckedOwners,
+        findings := Findings,
+        checked := Checked,
+        not_checked := NotChecked,
+        cap_note := CapNote
+    } = Result,
+    lists:foreach(
+        fun(OwnerBin) ->
+            OwnerFindings = [F || F <- Findings, maps:get(owner, F) =:= OwnerBin],
+            findings_store_put_owner_origin(OwnerBin, ClassNameBin, OwnerFindings)
+        end,
+        CheckedOwners
+    ),
+    case {CheckedOwners, Findings} of
+        {[], _} ->
+            ok;
+        {_, []} ->
+            ok;
+        _ ->
+            ?LOG_INFO(
+                "Shape reload re-check produced findings",
+                #{
+                    class => ClassNameBin,
+                    field_changes => FieldChanges,
+                    callers_checked => Checked,
+                    callers_not_checked => NotChecked,
+                    finding_count => length(Findings),
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            beamtalk_announcements:system_announce('ReloadCheckCompleted', #{
+                changedClass => ClassNameBin,
+                changedSelector => shape_change_summary(FieldChanges),
+                classification => shape_change,
+                checked => Checked,
+                notChecked => NotChecked,
+                capNote => CapNote,
+                checkedOwners => CheckedOwners,
+                findings => Findings
+            }),
+            ok
+    end.
+
+-doc """
+A comma-joined, de-duplicated list of every changed slot's name, e.g.
+`<<"count, name">>` for a reload that both retyped `count` and removed
+`name` — the closest a shape change has to `signature_change`/`removal`'s
+single changed selector, for surfaces that render `changedSelector` as
+free text.
+""".
+-spec shape_change_summary([beamtalk_shape_diff:field_change()]) -> binary().
+shape_change_summary(FieldChanges) ->
+    Names = lists:usort([beamtalk_shape_diff:field_name(FC) || FC <- FieldChanges]),
+    iolist_to_binary(lists:join(<<", ">>, Names)).
 
 -spec patch_side(boolean()) -> instance | class.
 patch_side(true) -> class;

@@ -569,3 +569,310 @@ trigger_never_raises_on_unknown_selector_test_() ->
                 end)
             ]
         end}}.
+
+%%====================================================================
+%% Shape-change re-check (ADR 0105 Phase 2, BT-2780)
+%%====================================================================
+
+%% Pure helper — shape_dependent_selectors/1.
+
+shape_dependent_selectors_always_includes_spawn_with_test() ->
+    Selectors = beamtalk_recheck:shape_dependent_selectors([{added, <<"count">>}]),
+    ?assertEqual(['spawnWith:'], Selectors).
+
+%% Referencing 'count' and 'withCount:' literally interns them as atoms for
+%% this test run, satisfying the `binary_to_existing_atom/2` inside
+%% `field_accessor_atoms/1` — see that function's doc for why an
+%% un-interned selector is skipped rather than minted fresh.
+shape_dependent_selectors_removed_field_includes_accessor_test() ->
+    _ = 'withCount:',
+    Selectors = beamtalk_recheck:shape_dependent_selectors([{removed, <<"count">>}]),
+    ?assert(lists:member('spawnWith:', Selectors)),
+    ?assert(lists:member(count, Selectors)),
+    ?assert(lists:member('withCount:', Selectors)).
+
+shape_dependent_selectors_retyped_field_includes_accessor_test() ->
+    _ = 'withTimeout:',
+    Selectors = beamtalk_recheck:shape_dependent_selectors(
+        [{retyped, <<"timeout">>, <<"Integer">>, <<"String">>}]
+    ),
+    ?assert(lists:member(timeout, Selectors)),
+    ?assert(lists:member('withTimeout:', Selectors)).
+
+shape_dependent_selectors_dedupes_test() ->
+    _ = 'withCount:',
+    Selectors = beamtalk_recheck:shape_dependent_selectors([
+        {removed, <<"count">>}, {retyped, <<"count">>, <<"Integer">>, <<"String">>}
+    ]),
+    ?assertEqual(lists:usort(Selectors), Selectors).
+
+%% Pure helper — with_star_selector/1 (mirrors the Rust naming authority).
+
+with_star_selector_test_() ->
+    [
+        ?_assertEqual(<<"withCount:">>, beamtalk_recheck:with_star_selector(<<"count">>)),
+        ?_assertEqual(
+            <<"withFirstName:">>, beamtalk_recheck:with_star_selector(<<"firstName">>)
+        ),
+        ?_assertEqual(<<"with:">>, beamtalk_recheck:with_star_selector(<<>>))
+    ].
+
+%% Pure helper — relevant_diagnostic_shape/3.
+
+relevant_diagnostic_shape_matches_spawn_with_unknown_key_test() ->
+    Diag = #{
+        category => <<"Type">>,
+        message => <<"unknown state key `name` for `ReCheckCounter`">>,
+        severity => <<"warning">>,
+        start => 0,
+        'end' => 1
+    },
+    ?assertEqual(
+        {true, {removed, <<"name">>}},
+        beamtalk_recheck:relevant_diagnostic_shape(
+            Diag, <<"ReCheckCounter">>, [{removed, <<"name">>}]
+        )
+    ).
+
+relevant_diagnostic_shape_ignores_unrelated_state_key_test() ->
+    %% Names a real "state key" diagnostic, but for a field that is not part
+    %% of this shape change — must not be misattributed.
+    Diag = #{
+        category => <<"Type">>,
+        message => <<"unknown state key `other` for `ReCheckCounter`">>,
+        severity => <<"warning">>,
+        start => 0,
+        'end' => 1
+    },
+    ?assertEqual(
+        false,
+        beamtalk_recheck:relevant_diagnostic_shape(
+            Diag, <<"ReCheckCounter">>, [{removed, <<"name">>}]
+        )
+    ).
+
+relevant_diagnostic_shape_matches_removed_accessor_dnu_test() ->
+    Diag = #{
+        category => <<"Dnu">>,
+        message => <<"'ReCheckCounter' does not understand 'name'">>,
+        severity => <<"hint">>,
+        start => 0,
+        'end' => 1
+    },
+    ?assertEqual(
+        {true, {removed, <<"name">>}},
+        beamtalk_recheck:relevant_diagnostic_shape(
+            Diag, <<"ReCheckCounter">>, [{removed, <<"name">>}]
+        )
+    ).
+
+%% A retyped slot's accessor propagates its new return type downstream as an
+%% ordinary Dnu the checker cannot pin to a quoted selector (see
+%% relevant_diagnostic_shape/3's doc) — falls back to the first retyped
+%% change when no removed-accessor selector matched.
+relevant_diagnostic_shape_retyped_fallback_matches_unrelated_dnu_test() ->
+    Diag = #{
+        category => <<"Dnu">>,
+        message => <<"String does not understand '+'">>,
+        severity => <<"hint">>,
+        start => 0,
+        'end' => 1
+    },
+    ?assertEqual(
+        {true, {retyped, <<"count">>, <<"Integer">>, <<"String">>}},
+        beamtalk_recheck:relevant_diagnostic_shape(
+            Diag, <<"ReCheckCounter">>, [{retyped, <<"count">>, <<"Integer">>, <<"String">>}]
+        )
+    ).
+
+%% No retyped change in flight — an unrelated Dnu is not attributed at all.
+relevant_diagnostic_shape_no_retyped_fallback_when_only_added_test() ->
+    Diag = #{
+        category => <<"Dnu">>,
+        message => <<"String does not understand '+'">>,
+        severity => <<"hint">>,
+        start => 0,
+        'end' => 1
+    },
+    ?assertEqual(
+        false,
+        beamtalk_recheck:relevant_diagnostic_shape(
+            Diag, <<"ReCheckCounter">>, [{added, <<"count">>}]
+        )
+    ).
+
+relevant_diagnostic_shape_never_keeps_error_severity_test() ->
+    Diag = #{
+        category => <<"Dnu">>,
+        message => <<"'ReCheckCounter' does not understand 'name'">>,
+        severity => <<"error">>,
+        start => 0,
+        'end' => 1
+    },
+    ?assertEqual(
+        false,
+        beamtalk_recheck:relevant_diagnostic_shape(
+            Diag, <<"ReCheckCounter">>, [{removed, <<"name">>}]
+        )
+    ).
+
+%%====================================================================
+%% Integration: trigger_shape/2
+%%====================================================================
+
+%% `class_hierarchy` entry for an Actor subclass with the given field types
+%% (ADR 0105 §Mechanism step 1 equivalent for shape — the ambient cache
+%% carries the class's *current* fields/field_types, exactly as
+%% `counter_hierarchy/1` carries `method_info` for the signature path).
+counter_actor_hierarchy(FieldTypes) ->
+    #{
+        superclass => 'Actor',
+        fields => maps:keys(FieldTypes),
+        field_types => FieldTypes
+    }.
+
+%% xref payload: `ReCheckDashboard>>cleanup:` sends the removed accessor
+%% selector `name` to a `ReCheckCounter`-typed parameter.
+dashboard_name_accessor_xref() ->
+    [
+        #{
+            class_side => false,
+            selector => 'cleanup:',
+            line => 2,
+            sends => [#{selector => name, line => 2, recv_kind => other}],
+            references => [#{class => 'ReCheckCounter', line => 2}],
+            source_status => indexed,
+            provenance => class_body
+        }
+    ].
+
+dashboard_name_accessor_source() ->
+    <<
+        "Object subclass: ReCheckDashboard\n"
+        "  cleanup: c :: ReCheckCounter => c name\n"
+    >>.
+
+removed_field_accessor_is_flagged_test_() ->
+    {timeout, 30,
+        {setup, fun recheck_setup/0, fun recheck_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    %% ReCheckCounter's `name` field was removed — only `count`
+                    %% remains in the ambient (post-reload) hierarchy.
+                    beamtalk_compiler_server:register_class(
+                        'ReCheckCounter', counter_actor_hierarchy(#{count => 'Integer'})
+                    ),
+                    ok = beamtalk_xref:register_class(
+                        'ReCheckDashboard', dashboard_name_accessor_xref()
+                    ),
+                    ok = beamtalk_workspace_meta:set_class_source(
+                        <<"ReCheckDashboard">>, dashboard_name_accessor_source()
+                    ),
+
+                    Result = beamtalk_recheck:trigger_shape(
+                        <<"ReCheckCounter">>, [{removed, <<"name">>}]
+                    ),
+                    #{findings := Findings, checked := Checked} = Result,
+
+                    ?assertEqual(1, Checked),
+                    ?assertEqual(1, length(Findings)),
+                    [Finding] = Findings,
+                    ?assertEqual(<<"ReCheckDashboard">>, maps:get(owner, Finding)),
+                    ?assertEqual(shape_change, maps:get(classification, Finding)),
+                    ?assertEqual(<<"name">>, maps:get(selector, Finding)),
+                    ?assertEqual(<<"Dnu">>, maps:get(category, Finding)),
+                    ?assertEqual(
+                        <<"state field `name` removed by the reload of ReCheckCounter">>,
+                        maps:get(note, Finding)
+                    )
+                end)
+            ]
+        end}}.
+
+%% xref payload: `ReCheckDashboard>>build` sends `spawnWith:` to the class
+%% literal `ReCheckCounter`.
+dashboard_spawn_with_xref() ->
+    [
+        #{
+            class_side => false,
+            selector => build,
+            line => 2,
+            sends => [#{selector => 'spawnWith:', line => 2, recv_kind => other}],
+            references => [#{class => 'ReCheckCounter', line => 2}],
+            source_status => indexed,
+            provenance => class_body
+        }
+    ].
+
+dashboard_spawn_with_source() ->
+    <<
+        "Object subclass: ReCheckDashboard\n"
+        "  build => ReCheckCounter spawnWith: #{#count => 1, #name => 'x'}\n"
+    >>.
+
+removed_field_flags_spawn_with_site_test_() ->
+    {timeout, 30,
+        {setup, fun recheck_setup/0, fun recheck_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    beamtalk_compiler_server:register_class(
+                        'ReCheckCounter', counter_actor_hierarchy(#{count => 'Integer'})
+                    ),
+                    ok = beamtalk_xref:register_class(
+                        'ReCheckDashboard', dashboard_spawn_with_xref()
+                    ),
+                    ok = beamtalk_workspace_meta:set_class_source(
+                        <<"ReCheckDashboard">>, dashboard_spawn_with_source()
+                    ),
+
+                    Result = beamtalk_recheck:trigger_shape(
+                        <<"ReCheckCounter">>, [{removed, <<"name">>}]
+                    ),
+                    #{findings := Findings, checked := Checked} = Result,
+
+                    ?assertEqual(1, Checked),
+                    ?assertEqual(1, length(Findings)),
+                    [Finding] = Findings,
+                    ?assertEqual(<<"ReCheckDashboard">>, maps:get(owner, Finding)),
+                    ?assertEqual(shape_change, maps:get(classification, Finding)),
+                    ?assertEqual(<<"name">>, maps:get(selector, Finding)),
+                    ?assertEqual(<<"Type">>, maps:get(category, Finding)),
+                    ?assert(
+                        binary:match(maps:get(message, Finding), <<"unknown state key">>) =/=
+                            nomatch
+                    )
+                end)
+            ]
+        end}}.
+
+%% Added field clears a previously-invalid spawnWith: key — the same class
+%% hierarchy as above but with `name` back in the ambient shape, exercising
+%% the "reload-fixes-reload" clearing story: a clean re-check produces no
+%% findings for this origin, which is what BT-2779's findings-store consumer
+%% needs to replace a stale entry with an empty one.
+added_field_clears_previously_invalid_spawn_with_key_test_() ->
+    {timeout, 30,
+        {setup, fun recheck_setup/0, fun recheck_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    beamtalk_compiler_server:register_class(
+                        'ReCheckCounter',
+                        counter_actor_hierarchy(#{count => 'Integer', name => 'Dynamic'})
+                    ),
+                    ok = beamtalk_xref:register_class(
+                        'ReCheckDashboard', dashboard_spawn_with_xref()
+                    ),
+                    ok = beamtalk_workspace_meta:set_class_source(
+                        <<"ReCheckDashboard">>, dashboard_spawn_with_source()
+                    ),
+
+                    Result = beamtalk_recheck:trigger_shape(
+                        <<"ReCheckCounter">>, [{added, <<"name">>}]
+                    ),
+                    #{findings := Findings, checked := Checked} = Result,
+
+                    ?assertEqual(1, Checked),
+                    ?assertEqual([], Findings)
+                end)
+            ]
+        end}}.

@@ -110,15 +110,25 @@ reload that triggered it (ADR 0105: "advisory, never blocking").
 
 -include_lib("kernel/include/logger.hrl").
 
--export([trigger/4]).
+-export([trigger/4, trigger_shape/2]).
 
 -ifdef(TEST).
--export([group_by_owner/1, apply_cap/2, relevant_diagnostic/4, cap_note/1]).
+-export([
+    group_by_owner/1,
+    apply_cap/2,
+    relevant_diagnostic/4,
+    cap_note/1,
+    shape_dependent_selectors/1,
+    with_star_selector/1,
+    relevant_diagnostic_shape/3
+]).
 -endif.
 
 -export_type([finding/0, result/0, classification/0]).
 
--type classification() :: signature_change | removal.
+-type classification() :: signature_change | removal | shape_change.
+
+-type shape_field_change() :: beamtalk_shape_diff:field_change().
 
 -type site_ref() :: #{method := binary(), line := pos_integer()}.
 
@@ -138,6 +148,12 @@ reload that triggered it (ADR 0105: "advisory, never blocking").
     'end' := non_neg_integer()
 }.
 
+%% For `signature_change`/`removal`, `selector` is the changed method's own
+%% selector. For `shape_change` (BT-2780, `to_finding_shape/5`) there is no
+%% single changed selector — `selector` instead names the specific `state:`/
+%% `field:` slot the finding is attributed to (`beamtalk_shape_diff:field_name/1`
+%% of the matched `field_change()`), which is what a caller broken by e.g. a
+%% removed field's accessor is actually about.
 -type finding() :: #{
     owner := binary(),
     changed_class := binary(),
@@ -201,6 +217,51 @@ trigger(ClassNameBin, SelectorBin, Side, Classification) ->
             empty_result()
     end.
 
+-doc """
+Run the shape-triggered re-check orchestration (ADR 0105 Phase 2, BT-2780)
+for a class-body reload of `ClassNameBin` classified as `shape_change` by
+`beamtalk_workspace_shape_store:capture/1`, with `FieldChanges` the per-field
+detail (`beamtalk_shape_diff:field_change()` list) that produced that
+classification.
+
+Generalises `trigger/4`'s mechanism (ADR 0105 §Mechanism steps 2-3) to a
+class-shape change rather than a single selector: the dependent-lookup
+selector set is not one selector but `spawnWith:` (every field change,
+`added` included — a `spawnWith:` call site's key/value validity depends on
+the class's *whole* current slot set) unioned with the removed/retyped
+slots' own compiler-generated accessor selectors
+(`shape_dependent_selectors/1` — `removed`/`retyped` only; nothing
+references an `added` slot's accessor before the slot exists). Every other
+step — receiver-type filtering by re-checking the whole candidate class
+(reusing the same `class_hierarchy => true` ambient-cache trick, since the
+reload that triggered this already installed the new shape before this runs
+— see `beamtalk_repl_loader:activate_module/3`), the per-reload caller cap,
+`checked_owners` for BT-2779's findings-store consumer — is identical to
+`trigger/4`; see this module's moduledoc.
+
+Never raises: any internal failure is logged and degrades to an empty
+`result()`, exactly like `trigger/4`.
+""".
+-spec trigger_shape(binary(), [shape_field_change()]) -> result().
+trigger_shape(ClassNameBin, FieldChanges) ->
+    try
+        do_trigger_shape(ClassNameBin, FieldChanges)
+    catch
+        Class:Reason:Stack ->
+            ?LOG_WARNING(
+                "Shape re-check orchestration failed (reload unaffected)",
+                #{
+                    error_class => Class,
+                    reason => Reason,
+                    stack => Stack,
+                    class => ClassNameBin,
+                    field_changes => FieldChanges,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            empty_result()
+    end.
+
 %%====================================================================
 %% Internal
 %%====================================================================
@@ -257,6 +318,94 @@ do_trigger(ClassNameBin, SelectorBin, Classification) ->
         cap_note => cap_note(NotChecked),
         checked_owners => CheckedOwners
     }.
+
+-spec do_trigger_shape(binary(), [shape_field_change()]) -> result().
+do_trigger_shape(ClassNameBin, FieldChanges) ->
+    Selectors = shape_dependent_selectors(FieldChanges),
+    Sites = lists:flatmap(fun beamtalk_xref:senders_of/1, Selectors),
+    OwnerGroups = group_by_owner(Sites),
+    Cap = recheck_caller_cap(),
+    {Kept, NotChecked} = apply_cap(OwnerGroups, Cap),
+    Outcomes = [
+        {Owner, recheck_owner_for_shape(Owner, OwnerSites, ClassNameBin, FieldChanges)}
+     || {Owner, OwnerSites} <- Kept
+    ],
+    Findings = lists:flatmap(
+        fun({_Owner, {_Status, OwnerFindings}}) -> OwnerFindings end, Outcomes
+    ),
+    CheckedOwners = [
+        atom_to_binary(Owner, utf8)
+     || {Owner, {ok, _}} <- Outcomes
+    ],
+    #{
+        findings => Findings,
+        checked => length(CheckedOwners),
+        total_candidates => length(OwnerGroups),
+        not_checked => NotChecked,
+        cap_note => cap_note(NotChecked),
+        checked_owners => CheckedOwners
+    }.
+
+-doc """
+The selector set whose senders are candidate dependents of a shape change:
+`spawnWith:` (always — every field change, `added` included, can flip a call
+site's key/value validity), plus the getter and `with*:` setter selectors of
+every `removed`/`retyped` slot (never `added` — nothing could have
+referenced a slot that did not exist in the previous generation).
+Deduplicated (`lists:usort/1`) since `senders_of/1` is otherwise cheap to
+run twice but there is no reason to.
+""".
+-spec shape_dependent_selectors([shape_field_change()]) -> [atom()].
+shape_dependent_selectors(FieldChanges) ->
+    AccessorSelectors = lists:flatmap(fun accessor_selectors/1, FieldChanges),
+    lists:usort(['spawnWith:' | AccessorSelectors]).
+
+-spec accessor_selectors(shape_field_change()) -> [atom()].
+accessor_selectors({added, _Name}) ->
+    [];
+accessor_selectors({removed, Name}) ->
+    field_accessor_atoms(Name);
+accessor_selectors({retyped, Name, _OldType, _NewType}) ->
+    field_accessor_atoms(Name).
+
+-doc """
+The getter (unary, the field name itself) and `with*:` setter selector atoms
+for `NameBin`, as already-interned atoms only — a slot that appears in a
+`removed`/`retyped` field_change() was present in some previous generation,
+so the compiler generated (and `code:load_binary` interned) both accessor
+selectors for it at least once; a selector that somehow was never interned
+(e.g. a slot that existed only fleetingly, never in an installed generation
+— not reachable via `beamtalk_shape_diff:diff/2`'s contract) is silently
+skipped rather than minting a fresh atom from reload-derived text, mirroring
+`do_trigger/3`'s `binary_to_existing_atom/2` rationale.
+""".
+-spec field_accessor_atoms(binary()) -> [atom()].
+field_accessor_atoms(NameBin) ->
+    lists:filtermap(
+        fun(SelBin) ->
+            try
+                {true, binary_to_existing_atom(SelBin, utf8)}
+            catch
+                error:badarg -> false
+            end
+        end,
+        [NameBin, with_star_selector(NameBin)]
+    ).
+
+-doc """
+The `with*:` copy-setter selector name for a slot field (mirrors
+`crate::synthetic_selectors::with_star_selector` on the Rust side — see
+`crates/beamtalk-core/src/synthetic_selectors.rs` — capitalising the first
+byte and wrapping in `with`/`:`). Beamtalk identifiers are ASCII, so a
+byte-wise uppercase of the first character is exact, not an approximation.
+""".
+-spec with_star_selector(binary()) -> binary().
+with_star_selector(<<>>) ->
+    <<"with:">>;
+with_star_selector(<<First, Rest/binary>>) when First >= $a, First =< $z ->
+    <<"with", (First - 32), Rest/binary, ":">>;
+with_star_selector(<<First, Rest/binary>>) ->
+    <<"with", First, Rest/binary, ":">>.
 
 -doc "Read the per-reload caller cap (ADR 0105 §Mechanism step 2).".
 -spec recheck_caller_cap() -> pos_integer().
@@ -426,3 +575,156 @@ base_finding(
         start => Start,
         'end' => End
     }.
+
+%%====================================================================
+%% Shape-change re-check (ADR 0105 Phase 2, BT-2780)
+%%====================================================================
+
+-doc """
+Re-check one candidate caller class against a shape change — structurally
+identical to `recheck_owner/5` (same live-source read, same
+`class_hierarchy => true` diagnostics round-trip, same `{Status, Findings}`
+contract) but filters/attributes via `relevant_diagnostic_shape/3` instead
+of `relevant_diagnostic/4`.
+""".
+-spec recheck_owner_for_shape(atom(), [map()], binary(), [shape_field_change()]) ->
+    {ok | skipped | failed, [finding()]}.
+recheck_owner_for_shape(Owner, OwnerSites, ClassNameBin, FieldChanges) ->
+    OwnerBin = atom_to_binary(Owner, utf8),
+    case beamtalk_workspace_meta:get_class_source(OwnerBin) of
+        undefined ->
+            ?LOG_WARNING(
+                "Shape re-check skipped: no live source recorded for candidate caller",
+                #{owner => OwnerBin, domain => [beamtalk, runtime]}
+            ),
+            {skipped, []};
+        Source ->
+            SourceBin = unicode:characters_to_binary(Source),
+            case
+                beamtalk_compiler:diagnostics(SourceBin, <<"expression">>, #{
+                    class_hierarchy => true
+                })
+            of
+                {ok, Diagnostics} ->
+                    SiteRefs = [site_ref(S) || S <- OwnerSites],
+                    Findings = [
+                        to_finding_shape(OwnerBin, ClassNameBin, SiteRefs, D, Matched)
+                     || D <- Diagnostics,
+                        {true, Matched} <- [
+                            relevant_diagnostic_shape(D, ClassNameBin, FieldChanges)
+                        ]
+                    ],
+                    {ok, Findings};
+                {error, Reason} ->
+                    ?LOG_WARNING(
+                        "Shape re-check compile failed for candidate caller (no findings reported)",
+                        #{owner => OwnerBin, reason => Reason, domain => [beamtalk, runtime]}
+                    ),
+                    {failed, []}
+            end
+    end.
+
+-doc """
+Is `Diagnostic` attributable to this shape change, and if so, which
+`field_change()` is it most specifically about?
+
+- **`spawnWith:` key/value diagnostics** (`check_spawn_with_map_keys`/
+  `check_spawn_with_value` in `crates/beamtalk-core`'s type checker) are
+  always `Type`-category and always name both the class and the literal
+  text `"state key"`, quoting the slot name in backticks — matched by
+  `match_field_change_by_name/2` against every changed slot's name, added
+  slots included (an `added` slot only ever shows up *here*, never in the
+  accessor-removal branch below, since nothing referenced it before).
+- **A removed slot's accessor** (`Dnu` — the getter/setter method just
+  stopped existing, an ordinary unresolved-selector diagnostic like any
+  other) is matched by `match_removed_accessor/2` against the `removed`
+  slots' quoted getter/setter selector names.
+- **A retyped slot's accessor** propagates its new return type into
+  whatever the caller does with it (`self thing count + 1` when `count`'s
+  declared type changed) — confirmed by `relevant_diagnostic/4`'s own
+  moduledoc note to always surface as `Dnu` (an unresolved-selector
+  diagnostic on the new return type, e.g. `'+'` not understood), never
+  `Type`, so it cannot be pinned to a quoted selector the way a removal can.
+  `retyped_fallback/1` — the same "not by exact site" precision limit
+  `relevant_diagnostic/4`'s moduledoc documents and accepts for
+  `signature_change` — attributes any otherwise-unmatched `Dnu` to the
+  *first* `retyped` change in `FieldChanges` when one is present.
+- `error`-severity is always dropped, matching `relevant_diagnostic/4`.
+""".
+-spec relevant_diagnostic_shape(map(), binary(), [shape_field_change()]) ->
+    {true, shape_field_change()} | false.
+relevant_diagnostic_shape(#{severity := <<"error">>}, _ClassNameBin, _FieldChanges) ->
+    false;
+relevant_diagnostic_shape(
+    #{category := <<"Type">>, message := Message}, ClassNameBin, FieldChanges
+) ->
+    case
+        binary:match(Message, <<"state key">>) =/= nomatch andalso
+            binary:match(Message, ClassNameBin) =/= nomatch
+    of
+        true -> match_field_change_by_name(Message, FieldChanges);
+        false -> false
+    end;
+relevant_diagnostic_shape(
+    #{category := <<"Dnu">>, message := Message}, _ClassNameBin, FieldChanges
+) ->
+    case match_removed_accessor(Message, FieldChanges) of
+        {true, _} = Match -> Match;
+        false -> retyped_fallback(FieldChanges)
+    end;
+relevant_diagnostic_shape(_Diagnostic, _ClassNameBin, _FieldChanges) ->
+    false.
+
+-spec match_field_change_by_name(binary(), [shape_field_change()]) ->
+    {true, shape_field_change()} | false.
+match_field_change_by_name(Message, FieldChanges) ->
+    Matches = [
+        FC
+     || FC <- FieldChanges,
+        binary:match(Message, backtick_quoted(beamtalk_shape_diff:field_name(FC))) =/= nomatch
+    ],
+    first_match(Matches).
+
+-spec match_removed_accessor(binary(), [shape_field_change()]) ->
+    {true, shape_field_change()} | false.
+match_removed_accessor(Message, FieldChanges) ->
+    Matches = [
+        FC
+     || {removed, Name} = FC <- FieldChanges,
+        (binary:match(Message, quoted_selector(Name)) =/= nomatch orelse
+            binary:match(Message, quoted_selector(with_star_selector(Name))) =/= nomatch)
+    ],
+    first_match(Matches).
+
+-spec retyped_fallback([shape_field_change()]) -> {true, shape_field_change()} | false.
+retyped_fallback(FieldChanges) ->
+    first_match([FC || {retyped, _, _, _} = FC <- FieldChanges]).
+
+-spec first_match([shape_field_change()]) -> {true, shape_field_change()} | false.
+first_match([First | _]) -> {true, First};
+first_match([]) -> false.
+
+-spec backtick_quoted(binary()) -> binary().
+backtick_quoted(NameBin) ->
+    <<"`", NameBin/binary, "`">>.
+
+-doc """
+Build a shape-change finding, attributing it to `FieldChange` — `selector`
+is `FieldChange`'s slot name (see `finding()`'s doc for why), and `note`
+describes what happened to that slot in the reload.
+""".
+-spec to_finding_shape(binary(), binary(), [site_ref()], map(), shape_field_change()) -> finding().
+to_finding_shape(OwnerBin, ClassNameBin, SiteRefs, Diagnostic, FieldChange) ->
+    SelectorBin = beamtalk_shape_diff:field_name(FieldChange),
+    (base_finding(OwnerBin, ClassNameBin, SelectorBin, shape_change, SiteRefs, Diagnostic))#{
+        note => field_change_note(ClassNameBin, FieldChange)
+    }.
+
+-spec field_change_note(binary(), shape_field_change()) -> binary().
+field_change_note(ClassNameBin, {added, Name}) ->
+    <<"state field `", Name/binary, "` added by the reload of ", ClassNameBin/binary>>;
+field_change_note(ClassNameBin, {removed, Name}) ->
+    <<"state field `", Name/binary, "` removed by the reload of ", ClassNameBin/binary>>;
+field_change_note(ClassNameBin, {retyped, Name, OldType, NewType}) ->
+    <<"state field `", Name/binary, "` retyped by the reload of ", ClassNameBin/binary, " (",
+        OldType/binary, " -> ", NewType/binary, ")">>.
