@@ -365,10 +365,11 @@ fn test_validate_stored_closure_field_takes_precedence() {
     //
     // This exercises validate_stored_closure's own contract directly. Through
     // the production generate_block path this precedence is never actually
-    // observed: a block with both captured-local mutations and field writes
-    // is routed to generate_block_stateful (Tier 2) by the earlier
-    // captured_mutations check, so validate_stored_closure only ever sees the
-    // local-mutation branch when field_writes is already empty.
+    // observed: generate_block only calls validate_stored_closure when
+    // field_writes is non-empty, and the field branch always returns early,
+    // so validate_stored_closure only ever sees the local-mutation branch
+    // when field_writes is already empty (which can only happen via direct
+    // unit-test calls, not through generate_block).
     let block = Block {
         parameters: vec![],
         body: vec![
