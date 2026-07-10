@@ -70,6 +70,32 @@ compile_core_erlang_cerl_malformed_etf_test() ->
     Result = beamtalk_build_worker:compile_core_erlang({cerl, <<0, 1, 2, 3>>}),
     ?assertMatch({error, {cerl_decode_error, _}}, Result).
 
+%% Core Erlang that scans and parses but fails compile:forms (exports foo/0,
+%% defines bar/0) → {error, Errors, _Warnings} → covers compile_core_forms line 313.
+compile_core_erlang_compile_error_test() ->
+    CoreErlang =
+        <<"module 'bt_bw_compile_err' ['foo'/0]\n"
+          "  attributes []\n"
+          "  'bar'/0 = fun () -> 'world'\n"
+          "end\n">>,
+    Result = beamtalk_build_worker:compile_core_erlang(CoreErlang),
+    ?assertMatch({error, {core_compile_error, _}}, Result).
+
+%% {cerl, Etf} path: cerl module that exports foo/0 but only defines bar/0.
+%% Covers the same compile_core_forms error arm via the ETF wire.
+compile_core_erlang_cerl_compile_error_test() ->
+    Foo0Var = cerl:c_var({foo, 0}),
+    Bar0Var = cerl:c_var({bar, 0}),
+    BarFun = cerl:c_fun([], cerl:c_atom(bar_result)),
+    CoreModule = cerl:c_module(
+        cerl:c_atom(bt_bw_cerl_compile_err),
+        [Foo0Var],
+        [],
+        [{Bar0Var, BarFun}]
+    ),
+    Result = beamtalk_build_worker:compile_core_erlang({cerl, term_to_binary(CoreModule)}),
+    ?assertMatch({error, {core_compile_error, _}}, Result).
+
 %%% ---------------------------------------------------------------
 %%% compile_core_file/2 — reads file, compiles, writes .beam
 %%% ---------------------------------------------------------------
