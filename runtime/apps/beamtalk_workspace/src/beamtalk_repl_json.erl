@@ -470,11 +470,11 @@ format_error_message({compile_error, Msg}) when is_list(Msg) ->
         error:badarg -> iolist_to_binary(io_lib:format("~p", [Msg]))
     end;
 format_error_message({undefined_variable, Name}) ->
-    iolist_to_binary([<<"Undefined variable: ">>, format_name(Name)]);
+    iolist_to_binary([<<"Undefined variable: ">>, beamtalk_repl_errors:format_name(Name)]);
 format_error_message({invalid_request, Reason}) ->
-    iolist_to_binary([<<"Invalid request: ">>, format_name(Reason)]);
+    iolist_to_binary([<<"Invalid request: ">>, beamtalk_repl_errors:format_name(Reason)]);
 format_error_message({parse_error, Details}) ->
-    iolist_to_binary([<<"Parse error: ">>, format_name(Details)]);
+    iolist_to_binary([<<"Parse error: ">>, beamtalk_repl_errors:format_name(Details)]);
 format_error_message({eval_error, _Class, #{'$beamtalk_class' := ExClass, error := Error}}) ->
     Enriched = maybe_use_singleton_binding_name(Error),
     ClassName = atom_to_binary(ExClass, utf8),
@@ -484,14 +484,14 @@ format_error_message({eval_error, _Class, #beamtalk_error{} = Error}) ->
     iolist_to_binary(beamtalk_error:format(Enriched));
 format_error_message({eval_error, Class, Reason}) ->
     iolist_to_binary([
-        <<"Evaluation error: ">>, atom_to_binary(Class, utf8), <<":">>, format_name(Reason)
+        <<"Evaluation error: ">>, atom_to_binary(Class, utf8), <<":">>, beamtalk_repl_errors:format_name(Reason)
     ]);
 format_error_message({load_error, Reason}) ->
-    iolist_to_binary([<<"Failed to load bytecode: ">>, format_name(Reason)]);
+    iolist_to_binary([<<"Failed to load bytecode: ">>, beamtalk_repl_errors:format_name(Reason)]);
 format_error_message({file_not_found, Path}) ->
-    iolist_to_binary([<<"File not found: ">>, format_name(Path)]);
+    iolist_to_binary([<<"File not found: ">>, beamtalk_repl_errors:format_name(Path)]);
 format_error_message({read_error, Reason}) ->
-    iolist_to_binary([<<"Failed to read file: ">>, format_name(Reason)]);
+    iolist_to_binary([<<"Failed to read file: ">>, beamtalk_repl_errors:format_name(Reason)]);
 format_error_message({module_not_found, ModuleName}) ->
     iolist_to_binary([<<"Module not loaded: ">>, ModuleName]);
 format_error_message({invalid_module_name, ModuleName}) ->
@@ -544,13 +544,13 @@ format_error_message({no_source_file, Module}) ->
 format_error_message({module_not_loaded, Module}) ->
     iolist_to_binary([
         <<"Module not loaded: ">>,
-        format_name(Module),
+        beamtalk_repl_errors:format_name(Module),
         <<". Use :load <path> to load it first.">>
     ]);
 format_error_message({missing_module_name, reload}) ->
     <<"Usage: :reload <ModuleName> or :reload (to reload last file)">>;
 format_error_message({session_creation_failed, Reason}) ->
-    iolist_to_binary([<<"Failed to create session: ">>, format_name(Reason)]);
+    iolist_to_binary([<<"Failed to create session: ">>, beamtalk_repl_errors:format_name(Reason)]);
 format_error_message(Reason) ->
     iolist_to_binary(io_lib:format("~p", [Reason])).
 
@@ -574,17 +574,6 @@ format_rejection_reason(#beamtalk_error{} = Error) ->
     beamtalk_error:format(Error);
 format_rejection_reason(Reason) ->
     iolist_to_binary(io_lib:format("~p", [Reason])).
-
--doc "Format a term as a binary name for use in error messages.".
--spec format_name(term()) -> binary().
-format_name(Name) when is_atom(Name) ->
-    atom_to_binary(Name, utf8);
-format_name(Name) when is_binary(Name) ->
-    Name;
-format_name(Name) when is_list(Name) ->
-    list_to_binary(Name);
-format_name(Name) ->
-    iolist_to_binary(io_lib:format("~p", [Name])).
 
 -doc "Convert atom or binary to binary.".
 -spec to_binary(atom() | binary()) -> binary().
