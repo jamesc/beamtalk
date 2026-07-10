@@ -715,3 +715,86 @@ mod tests {
         ));
     }
 }
+
+#[cfg(test)]
+mod extension_cache_tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    /// BT-2795: extensions must survive the Pass 1 cache round-trip — first
+    /// build scans and saves them; a second build with unchanged files must
+    /// restore the same project-wide extension index from cache alone, and a
+    /// deleted file's cached extensions must disappear.
+    #[test]
+    fn extensions_survive_incremental_cache_round_trip() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let src = root.join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        let build_dir = root.join("build");
+        std::fs::create_dir_all(&build_dir).unwrap();
+
+        let ext_file = src.join("string_shout.bt");
+        std::fs::write(&ext_file, "String >> shoutLouder => self\n").unwrap();
+        let plain_file = src.join("plain.bt");
+        std::fs::write(&plain_file, "Object subclass: Plain\n  m => 1\n").unwrap();
+
+        let source_files = vec![ext_file.clone(), plain_file.clone()];
+
+        // First build: cache miss, everything scanned.
+        let first = incremental_build_class_module_index(
+            &source_files,
+            Some(&src),
+            "pkg",
+            &build_dir,
+            None,
+            false,
+        )
+        .unwrap();
+        assert_eq!(first.extension_index.len(), 1, "extension scanned");
+
+        // Second build: all files fresh — extensions must come from the cache.
+        let second = incremental_build_class_module_index(
+            &source_files,
+            Some(&src),
+            "pkg",
+            &build_dir,
+            None,
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            second.extension_index.len(),
+            1,
+            "extension restored from cache on a fully-fresh build"
+        );
+        // Regrouping by file must find the entry under its original path
+        // (byte-exact path identity — see ExtensionIndex::entries_for_file).
+        assert_eq!(
+            second
+                .extension_index
+                .entries_for_file(ext_file.as_std_path())
+                .len(),
+            1,
+            "cached extension regroups under its defining file"
+        );
+
+        // Third build: the defining file is deleted — its cached extensions
+        // must not linger.
+        std::fs::remove_file(&ext_file).unwrap();
+        let remaining = vec![plain_file];
+        let third = incremental_build_class_module_index(
+            &remaining,
+            Some(&src),
+            "pkg",
+            &build_dir,
+            None,
+            false,
+        )
+        .unwrap();
+        assert!(
+            third.extension_index.is_empty(),
+            "deleted file's cached extensions must disappear"
+        );
+    }
+}

@@ -764,6 +764,13 @@ impl Backend {
         // is project-complete and diagnostics may say so (ADR 0100 Rule 2
         // sequencing guard). A budget-exhausted preload has partial coverage
         // and must keep the conservative ModuleOnly default.
+        //
+        // "Complete" here means the conventional source layout (`src/`,
+        // `test/`, fetched dep sources, stdlib) was fully walked. Files
+        // outside those directories are not preloaded and are only indexed
+        // when opened — same coverage the ProjectIndex has always had for
+        // classes. Scope claims must stay tied to this walk; do not claim
+        // completeness from any weaker signal.
         svc.set_project_complete(!budget_exhausted);
         // BT-2794 (pre-WS3): fetched deps mean dependency extensions may
         // exist that the checker cannot see. (Declared-but-unfetched deps are

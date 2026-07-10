@@ -1311,3 +1311,71 @@ fn test_split_intersection_type_string() {
         None
     );
 }
+
+/// BT-2794 (pre-WS3 dependency guard): with dependencies declared and
+/// project-complete knowledge, the receiver-knowledge classifier keeps every
+/// receiver `Open`, which also suppresses protocol-conformance warnings —
+/// a dependency could extend the class with the missing required method, so
+/// non-conformance is no longer provable. This is the deliberate,
+/// open-world-conservative blast radius of the guard (ADR 0100 Rule 1,
+/// third downgrade); it reverts to full checking once WS3 loads
+/// cross-package extension metadata.
+#[test]
+fn test_dependency_guard_suppresses_conformance_warning() {
+    use crate::semantic_analysis::KnowledgeScope;
+
+    let (mut hierarchy, registry) = setup_json_class_side_fixture("Serializable");
+    hierarchy.set_knowledge_scope(KnowledgeScope::ProjectComplete);
+    hierarchy.set_dependency_extensions_unknown(true);
+
+    let receiver_span = Span::new(10, 14);
+    let module = make_json_generate_module("n", "Integer", receiver_span);
+
+    let mut checker = TypeChecker::new();
+    checker.check_module_with_protocols(&module, &hierarchy, &registry);
+
+    let conformance_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not conform"))
+        .collect();
+    assert!(
+        conformance_warnings.is_empty(),
+        "with dependencies declared (pre-WS3), conformance warnings are withheld, got: {:?}",
+        conformance_warnings
+            .iter()
+            .map(|d| &d.message)
+            .collect::<Vec<_>>()
+    );
+}
+
+/// Counterpart: the same fixture without the dependency guard still warns —
+/// proving the suppression above comes from the guard, not a fixture change.
+#[test]
+fn test_project_complete_without_deps_still_warns_conformance() {
+    use crate::semantic_analysis::KnowledgeScope;
+
+    let (mut hierarchy, registry) = setup_json_class_side_fixture("Serializable");
+    hierarchy.set_knowledge_scope(KnowledgeScope::ProjectComplete);
+
+    let receiver_span = Span::new(10, 14);
+    let module = make_json_generate_module("n", "Integer", receiver_span);
+
+    let mut checker = TypeChecker::new();
+    checker.check_module_with_protocols(&module, &hierarchy, &registry);
+
+    let conformance_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not conform"))
+        .collect();
+    assert_eq!(
+        conformance_warnings.len(),
+        1,
+        "dependency-free project-complete builds keep conformance warnings, got: {:?}",
+        conformance_warnings
+            .iter()
+            .map(|d| &d.message)
+            .collect::<Vec<_>>()
+    );
+}

@@ -171,7 +171,14 @@ a package that declares dependencies has **no** `ClosedComplete` receivers
 until WS3, because a dependency can extend any class — including `Object`,
 which every receiver's chain reaches. (This supersedes the design note's
 tentative "package-local classes are dependency-extension-free" refinement:
-it is false for *inherited* extensions on shared roots.)
+it is false for *inherited* extensions on shared roots.) Note the guard's
+full blast radius: `classify_receiver` gates all four consumer sites, so a
+dependency-declaring package also skips **protocol-conformance** warnings
+and the class-side dispatch checks pre-WS3 — a dependency extension could
+supply the missing required method, so non-conformance is no longer
+provable. Deliberate and test-covered
+(`test_dependency_guard_suppresses_conformance_warning`); full checking
+returns with WS3.
 
 When project-scoped compilation (BT-2251 WS1/WS2) gives the checker complete
 intra-project knowledge, it **replaces the incompleteness workarounds with real

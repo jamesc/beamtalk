@@ -202,6 +202,12 @@ impl ExtensionIndex {
     /// Returns this index's entries restricted to definitions in `file`
     /// (BT-2795). Used to regroup a project-wide index per file, e.g. when
     /// writing the incremental Pass 1 cache.
+    ///
+    /// Matching is byte-exact on the stored path: callers must pass the same
+    /// path representation used when the module was added (the CLI build
+    /// guarantees this by always walking `source_files` the same way; any
+    /// future path normalisation must be applied on both sides or entries
+    /// silently drop out of the cache).
     #[must_use]
     pub fn entries_for_file(&self, file: &Path) -> Vec<(ExtensionKey, Vec<ExtensionLocation>)> {
         self.entries

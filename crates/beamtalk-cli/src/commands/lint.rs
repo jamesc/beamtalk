@@ -488,16 +488,30 @@ pub(crate) fn find_package_root(start: &Utf8Path) -> Option<Utf8PathBuf> {
 ///
 /// Best-effort: if dependency resolution fails (e.g. network error for a git
 /// dep), lint continues without dep classes rather than failing entirely.
-/// Returns whether the package declares dependencies (BT-2794): true when
-/// resolution yielded any, and — conservatively — when resolution failed
-/// (unknown means the checker cannot prove any receiver's surface complete).
+/// Returns whether the package *declares* dependencies (BT-2794), read from
+/// the manifest rather than the resolution outcome so that a transient
+/// resolution failure (network, git) cannot flip diagnostic behaviour
+/// between runs. Conservatively true when the manifest cannot be parsed.
 fn resolve_dep_class_infos(
     project_root: &Utf8Path,
     all_class_infos: &mut Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
 ) -> bool {
-    if !project_root.join("beamtalk.toml").exists() {
+    let manifest_path = project_root.join("beamtalk.toml");
+    if !manifest_path.exists() {
         return false;
     }
+
+    let has_package_dependencies = match super::manifest::parse_manifest_full(&manifest_path) {
+        Ok(manifest) => !manifest.dependencies.is_empty(),
+        Err(e) => {
+            warn!(
+                error = %e,
+                "Failed to parse beamtalk.toml for lint; \
+                 conservatively assuming dependencies are declared"
+            );
+            true
+        }
+    };
 
     let options = beamtalk_core::CompilerOptions::default();
     match super::deps::ensure_deps_resolved(project_root, &options) {
@@ -505,7 +519,6 @@ fn resolve_dep_class_infos(
             for dep in &resolved_deps {
                 all_class_infos.extend(dep.class_infos.clone());
             }
-            !resolved_deps.is_empty()
         }
         Err(e) => {
             warn!(
@@ -513,9 +526,10 @@ fn resolve_dep_class_infos(
                 "Failed to resolve dependencies for lint; \
                  dependency classes may not be available"
             );
-            true
         }
     }
+
+    has_package_dependencies
 }
 
 /// Output format for lint diagnostics.
