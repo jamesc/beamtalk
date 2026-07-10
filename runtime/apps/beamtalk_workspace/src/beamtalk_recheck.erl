@@ -168,6 +168,11 @@ reload's own success/reply on this.
 -spec trigger(binary(), binary(), instance | class, classification()) -> result().
 trigger(ClassNameBin, SelectorBin, Side, Classification) ->
     try
+        %% `Side` is accepted (matching the signature store's capture/4 key)
+        %% but not threaded into do_trigger/3: beamtalk_xref:senders_of/1 is
+        %% selector-keyed only, with no instance/class-side component, so it
+        %% cannot narrow the dependent lookup. Kept in scope here purely for
+        %% the ?LOG_WARNING context below on a caught failure.
         do_trigger(ClassNameBin, SelectorBin, Classification)
     catch
         Class:Reason:Stack ->

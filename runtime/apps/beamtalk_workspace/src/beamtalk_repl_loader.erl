@@ -877,7 +877,16 @@ remove_method(ClassNameBin, Selector, Side) ->
                         {ok, _} = Ok ->
                             %% ADR 0105 Phase 1 (BT-2778): the removal is
                             %% live — re-check known dependents (mirrors the
-                            %% install success path in load_recompiled_method/8).
+                            %% install success path in load_recompiled_method/8,
+                            %% including that function's ordering-invariant
+                            %% comment: reload_class_without_method above ran
+                            %% through reload_compile_and_load's synchronous
+                            %% activate_module/3 call before returning here, so
+                            %% the compiler port's ambient class cache already
+                            %% reflects this removal by the time
+                            %% maybe_trigger_recheck's diagnostics/3 call reaches
+                            %% it — same invariant, same fragility if that
+                            %% registration path ever becomes async).
                             maybe_trigger_recheck(
                                 ClassNameBin, SelectorBin, Side, RemovalCapture
                             ),
@@ -1046,7 +1055,13 @@ load_recompiled_method(
             maybe_autoflush(maps:get(intent, MethodInfo, durable)),
             %% (5) ADR 0105 Phase 1 (BT-2778): re-check known dependents of a
             %% signature_change/removal now that the new generation is live.
-            %% Best-effort, never affects this reply — see the function doc.
+            %% Best-effort, never affects this reply's *content* — see the
+            %% function doc — but it IS synchronous here, so it does delay
+            %% this reply by the re-check's wall time (bounded by the caller
+            %% cap; ~18.5ms/candidate warm per the Phase 0 spike, so normally
+            %% sub-second even at the default cap of 20). Moving this off the
+            %% install's critical path is BT-2779's concern once findings
+            %% have somewhere to go (publish/clearing across surfaces).
             %%
             %% Ordering invariant this relies on: beamtalk_recheck's re-check
             %% needs the compiler port's ambient class cache

@@ -130,7 +130,10 @@ compile_method(ClassSource, MethodSource, Options) ->
 -doc """
 Get diagnostics for source code (no code generation).
 
-Returns `{ok, [#{message, severity, start, end}]}' or `{error, Diagnostics}'.
+Returns `{ok, [#{message, severity, category, start, end}]}' or `{error,
+Diagnostics}'. `category' (ADR 0105 Phase 1, BT-2778) is a binary label
+(`<<"Dnu">>', `<<"Type">>', ...) when the checker tagged one, or the atom
+`undefined' otherwise.
 """.
 -spec diagnostics(binary()) ->
     {ok, [map()]} | {error, [binary()]}.
@@ -139,8 +142,9 @@ diagnostics(Source) ->
 
 -doc """
 Get diagnostics for source code under a parse `Mode` (no code generation).
-Equivalent to `diagnostics/3` with `#{}` — see its doc for the `Mode` values
-and for the opt-in `class_hierarchy` option.
+Equivalent to `diagnostics/3` with `#{}` — see its doc for the `Mode` values,
+the response shape (`diagnostics/1`'s doc), and the opt-in `class_hierarchy`
+option.
 """.
 -spec diagnostics(binary(), binary()) ->
     {ok, [map()]} | {error, [binary()]}.
