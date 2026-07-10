@@ -45,6 +45,7 @@ fn collect_diagnostics(
     >,
     knowledge_scope: beamtalk_core::semantic_analysis::KnowledgeScope,
     cross_file_extensions: &beamtalk_core::compilation::extension_index::ExtensionIndex,
+    has_package_dependencies: bool,
 ) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
     // Collect parser-level lint diagnostics (e.g. unnecessary `.` — BT-948)
     // plus AST-level lint passes.
@@ -71,6 +72,7 @@ fn collect_diagnostics(
     // with no `@expect` configuration that satisfies both passes.
     let options = beamtalk_core::CompilerOptions {
         knowledge_scope,
+        has_package_dependencies,
         ..Default::default()
     };
     let analysis_result = beamtalk_core::semantic_analysis::analyse_with_natives_and_extensions(
@@ -119,9 +121,11 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
     // Resolve dependency class metadata so lint sees the same class hierarchy
     // as build. Without this, @expect annotations that suppress real cross-package
     // diagnostics would be reported as stale.
-    if let Some(ref project_root) = package_root {
-        resolve_dep_class_infos(project_root, &mut all_class_infos);
-    }
+    let has_package_dependencies = if let Some(ref project_root) = package_root {
+        resolve_dep_class_infos(project_root, &mut all_class_infos)
+    } else {
+        false
+    };
 
     // BT-2134: Load the FFI type registry from `_build/type_cache/` so lint
     // sees Erlang FFI return types the same way build does. The cache is
@@ -161,6 +165,7 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
             native_type_registry.clone(),
             knowledge_scope,
             &extension_index,
+            has_package_dependencies,
         );
 
         for diag in &lint_diags {
@@ -483,12 +488,15 @@ pub(crate) fn find_package_root(start: &Utf8Path) -> Option<Utf8PathBuf> {
 ///
 /// Best-effort: if dependency resolution fails (e.g. network error for a git
 /// dep), lint continues without dep classes rather than failing entirely.
+/// Returns whether the package declares dependencies (BT-2794): true when
+/// resolution yielded any, and — conservatively — when resolution failed
+/// (unknown means the checker cannot prove any receiver's surface complete).
 fn resolve_dep_class_infos(
     project_root: &Utf8Path,
     all_class_infos: &mut Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
-) {
+) -> bool {
     if !project_root.join("beamtalk.toml").exists() {
-        return;
+        return false;
     }
 
     let options = beamtalk_core::CompilerOptions::default();
@@ -497,6 +505,7 @@ fn resolve_dep_class_infos(
             for dep in &resolved_deps {
                 all_class_infos.extend(dep.class_infos.clone());
             }
+            !resolved_deps.is_empty()
         }
         Err(e) => {
             warn!(
@@ -504,6 +513,7 @@ fn resolve_dep_class_infos(
                 "Failed to resolve dependencies for lint; \
                  dependency classes may not be available"
             );
+            true
         }
     }
 }
@@ -580,6 +590,7 @@ fn collect_lint_diagnostics(source: &str) -> Vec<beamtalk_core::source_analysis:
         None,
         beamtalk_core::semantic_analysis::KnowledgeScope::default(),
         &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
+        false,
     )
 }
 
@@ -672,6 +683,7 @@ mod tests {
             None,
             beamtalk_core::semantic_analysis::KnowledgeScope::default(),
             &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
+            false,
         );
         let stale = diags.iter().any(|d| d.message.contains("stale @expect"));
         assert!(
@@ -870,6 +882,7 @@ mod tests {
             None,
             beamtalk_core::semantic_analysis::KnowledgeScope::default(),
             &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
+            false,
         );
 
         let unresolved: Vec<_> = diags
@@ -975,6 +988,7 @@ mod tests {
             None,
             beamtalk_core::semantic_analysis::KnowledgeScope::default(),
             &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
+            false,
         );
 
         let has_untyped_ffi = diags.iter().any(|d| d.message.contains("untyped FFI"));
@@ -1021,6 +1035,7 @@ mod tests {
             Some(std::sync::Arc::new(registry)),
             beamtalk_core::semantic_analysis::KnowledgeScope::default(),
             &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
+            false,
         );
 
         let untyped_ffi: Vec<_> = diags

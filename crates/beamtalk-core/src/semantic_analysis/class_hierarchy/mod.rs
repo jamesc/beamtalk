@@ -51,6 +51,15 @@ pub struct ClassHierarchy {
     /// [`KnowledgeScope::ModuleOnly`]; consulted by the receiver-knowledge
     /// classifier (ADR 0100 Rule 2, BT-2794).
     knowledge_scope: crate::semantic_analysis::receiver_knowledge::KnowledgeScope,
+    /// Whether the compiled package declares dependencies whose extension
+    /// contributions are not yet loaded (BT-2794, pre-WS3 guard).
+    ///
+    /// Until WS3 (ADR 0070 amendment) ships cross-package extension metadata,
+    /// a dependency can extend *any* class — including `Object`, which every
+    /// receiver inherits from — so no receiver's method surface is provably
+    /// complete. When true (and the scope is `ProjectComplete`), the
+    /// receiver-knowledge classifier keeps every receiver `Open`.
+    dependency_extensions_unknown: bool,
 }
 impl ClassHierarchy {
     /// Returns true if the given class name is a built-in class.
@@ -229,6 +238,7 @@ impl ClassHierarchy {
                     protocol_classes: HashSet::new(),
                     knowledge_scope:
                         crate::semantic_analysis::receiver_knowledge::KnowledgeScope::default(),
+                    dependency_extensions_unknown: false,
                 }
             })
             .clone()
@@ -251,6 +261,20 @@ impl ClassHierarchy {
         scope: crate::semantic_analysis::receiver_knowledge::KnowledgeScope,
     ) {
         self.knowledge_scope = scope;
+    }
+
+    /// Whether dependency extension contributions are unknown (BT-2794).
+    #[must_use]
+    pub fn dependency_extensions_unknown(&self) -> bool {
+        self.dependency_extensions_unknown
+    }
+
+    /// Declare that the compiled package has dependencies whose extension
+    /// contributions are not loaded (BT-2794, pre-WS3 guard). Set by
+    /// `analyse_full_with_natives` from
+    /// `CompilerOptions::has_package_dependencies`.
+    pub fn set_dependency_extensions_unknown(&mut self, unknown: bool) {
+        self.dependency_extensions_unknown = unknown;
     }
 
     /// Mark the classes defined in `module` as having a possibly-incomplete

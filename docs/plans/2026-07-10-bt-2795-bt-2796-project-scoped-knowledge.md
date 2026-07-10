@@ -175,7 +175,13 @@ conservative choice and costs nothing. The suppression is thereby "removed" exac
 ADR 0100 demands: per-receiver, only where knowledge is provably complete, with
 `ModuleOnly` contexts (compiler-port, isolated files) automatically unaffected.
 
-**Pre-WS3 guard, with one refinement to ADR 0100's wording.** ADR 0100 says only
+**Pre-WS3 guard, with one refinement to ADR 0100's wording.**
+*(Amendment, post-implementation: this refinement was dropped. A dependency
+can extend `Object` — or any shared ancestor — and every receiver's chain
+reaches a shared root, so a package-local class still inherits
+dependency-contributed selectors. BT-2794 implements the ADR's stricter
+wording: with dependencies declared, no receiver is `ClosedComplete` until
+WS3.)* ADR 0100 says only
 "classes local to a package with no dependencies" reach `ClosedComplete` before WS3.
 We propose the slightly sharper rule: **a class defined in the current package is
 dependency-extension-free by construction** — a dependency cannot name (and so cannot

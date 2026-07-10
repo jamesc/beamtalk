@@ -220,6 +220,7 @@ pub fn analyse(module: &Module) -> AnalysisResult {
         None,
         None,
         KnowledgeScope::default(),
+        false,
     )
 }
 
@@ -243,6 +244,7 @@ pub fn analyse_with_known_vars(module: &Module, known_vars: &[&str]) -> Analysis
         None,
         None,
         KnowledgeScope::default(),
+        false,
     )
 }
 
@@ -260,6 +262,7 @@ pub fn analyse_with_options(module: &Module, options: &crate::CompilerOptions) -
         None,
         options.current_package.as_deref(),
         options.knowledge_scope,
+        options.has_package_dependencies,
     )
 }
 
@@ -282,6 +285,7 @@ pub fn analyse_with_options_and_classes(
         None,
         options.current_package.as_deref(),
         options.knowledge_scope,
+        options.has_package_dependencies,
     )
 }
 
@@ -309,6 +313,7 @@ pub fn analyse_with_natives(
         native_type_registry,
         options.knowledge_scope,
         &crate::compilation::extension_index::ExtensionIndex::new(),
+        options.has_package_dependencies,
     )
 }
 
@@ -339,6 +344,7 @@ pub fn analyse_with_natives_and_extensions(
         native_type_registry,
         options.knowledge_scope,
         cross_file_extensions,
+        options.has_package_dependencies,
     )
 }
 
@@ -369,6 +375,7 @@ pub fn analyse_with_natives_and_protocols(
         native_type_registry,
         options.knowledge_scope,
         cross_file_extensions,
+        options.has_package_dependencies,
     )
 }
 
@@ -391,6 +398,7 @@ pub fn analyse_with_known_vars_and_classes(
         None,
         None,
         KnowledgeScope::default(),
+        false,
     )
 }
 
@@ -415,6 +423,7 @@ pub fn analyse_with_packages(
         Some(known_packages),
         options.current_package.as_deref(),
         options.knowledge_scope,
+        options.has_package_dependencies,
     )
 }
 
@@ -430,6 +439,7 @@ fn analyse_full(
     known_packages: Option<std::collections::HashSet<String>>,
     current_package: Option<&str>,
     knowledge_scope: KnowledgeScope,
+    has_package_dependencies: bool,
 ) -> AnalysisResult {
     analyse_full_with_natives(
         module,
@@ -443,6 +453,7 @@ fn analyse_full(
         None,
         knowledge_scope,
         &crate::compilation::extension_index::ExtensionIndex::new(),
+        has_package_dependencies,
     )
 }
 
@@ -464,6 +475,7 @@ fn analyse_full_with_natives(
     native_type_registry: Option<std::sync::Arc<type_checker::NativeTypeRegistry>>,
     knowledge_scope: KnowledgeScope,
     cross_file_extensions: &crate::compilation::extension_index::ExtensionIndex,
+    has_package_dependencies: bool,
 ) -> AnalysisResult {
     let mut result = AnalysisResult::new();
 
@@ -477,6 +489,9 @@ fn analyse_full_with_natives(
     // BT-2796: Record how complete the injected cross-file knowledge is so
     // the receiver-knowledge classifier can consult it (ADR 0100 Rule 2).
     result.class_hierarchy.set_knowledge_scope(knowledge_scope);
+    result
+        .class_hierarchy
+        .set_dependency_extensions_unknown(has_package_dependencies);
 
     // ADR 0071 BT-1700: Stamp current package on AST-derived classes
     if let Some(pkg) = current_package {

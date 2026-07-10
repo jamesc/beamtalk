@@ -4441,3 +4441,54 @@ fn genuinely_unresolved_selector_still_hints_with_extensions_registered() {
         "a genuine typo must still produce a Dnu hint"
     );
 }
+
+// ── BT-2794: ADR 0100 Rule 2 end-to-end ──────────────────────────────────────
+
+#[test]
+fn typo_hints_in_project_complete_dependency_free_package() {
+    // Rule 2: knowing more makes the Hint trustworthy, not fatal — a genuine
+    // typo on a closed receiver still hints in a project-complete,
+    // dependency-free build.
+    let source = "Object subclass: TypoDemo\n  class demo =>\n    \"abc\" reverssed\n";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let options = crate::CompilerOptions {
+        knowledge_scope: KnowledgeScope::ProjectComplete,
+        has_package_dependencies: false,
+        ..Default::default()
+    };
+    let result = analyse_with_options(&module, &options);
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("reverssed")),
+        "typo must still hint in a dependency-free project-complete build"
+    );
+}
+
+#[test]
+fn dependency_package_suppresses_unresolved_selector_hints_pre_ws3() {
+    // BT-2794 pre-WS3 guard: with dependencies declared, a dependency could
+    // extend any class, so unresolved-selector hints are withheld until WS3
+    // loads cross-package extension metadata (ADR 0100 Rule 1, third
+    // downgrade; hints go down, not up).
+    let source = "Object subclass: DepDemo\n  class demo =>\n    \"abc\" reverssed\n";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let options = crate::CompilerOptions {
+        knowledge_scope: KnowledgeScope::ProjectComplete,
+        has_package_dependencies: true,
+        ..Default::default()
+    };
+    let result = analyse_with_options(&module, &options);
+    let dnu: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.message.contains("reverssed"))
+        .collect();
+    assert!(
+        dnu.is_empty(),
+        "with dependencies present, unresolved-selector hints are withheld pre-WS3, got: {dnu:?}"
+    );
+}

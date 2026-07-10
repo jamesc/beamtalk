@@ -157,6 +157,8 @@ pub struct SimpleLanguageService {
     /// finishes within its file budget; stays `false` if the budget was
     /// exhausted (coverage would be partial).
     project_complete: bool,
+    /// Whether the workspace has package dependencies (BT-2794 pre-WS3 guard).
+    has_package_dependencies: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -178,6 +180,7 @@ impl SimpleLanguageService {
             project_index: ProjectIndex::new(),
             native_types: None,
             project_complete: false,
+            has_package_dependencies: false,
         }
     }
 
@@ -192,6 +195,7 @@ impl SimpleLanguageService {
             project_index,
             native_types: None,
             project_complete: false,
+            has_package_dependencies: false,
         }
     }
 
@@ -204,6 +208,15 @@ impl SimpleLanguageService {
     /// genuinely-unresolved classes.
     pub fn set_project_complete(&mut self, complete: bool) {
         self.project_complete = complete;
+    }
+
+    /// Declare whether the workspace has package dependencies (BT-2794).
+    ///
+    /// Pre-WS3, dependency extension contributions are invisible, so when
+    /// true (and the project is complete) the receiver-knowledge classifier
+    /// keeps every receiver `Open`.
+    pub fn set_has_package_dependencies(&mut self, has_deps: bool) {
+        self.has_package_dependencies = has_deps;
     }
 
     /// Sets the native type registry for Erlang FFI typed completions.
@@ -1459,6 +1472,7 @@ impl LanguageService for SimpleLanguageService {
                     options.knowledge_scope =
                         crate::semantic_analysis::KnowledgeScope::ProjectComplete;
                 }
+                options.has_package_dependencies = self.has_package_dependencies;
                 // BT-2795: Cross-file extensions from the ProjectIndex are
                 // passed so a same-project `ClassName >> selector` defined in
                 // another file resolves instead of producing a false Dnu hint.

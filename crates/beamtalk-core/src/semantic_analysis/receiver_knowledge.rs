@@ -10,14 +10,13 @@
 //! `type_checker/validation.rs` and `protocol_registry.rs` cannot disagree
 //! about the same call site (ADR 0100, "Implementation" section).
 //!
-//! This is a **pure refactor** of where the decision lives — BT-2793 keeps
-//! today's behaviour bit-for-bit. In particular `has_cross_file_parent`
-//! remains a downgrade-to-`Open` reason; removing it is a *separate*, later
-//! change (BT-2794, ADR 0100 Rule 2), gated on project-wide hierarchy
-//! assembly (WS2, BT-2796) and project-wide extension registration (WS1,
-//! BT-2795) actually landing. Doing so here, before that knowledge exists,
-//! would turn every previously-suppressed site into a fresh false positive
-//! (ADR 0100's "Sequencing guard").
+//! History: BT-2793 centralised the decision (pure refactor); BT-2796 added
+//! the parse-error guard and [`KnowledgeScope`]; BT-2795 made project-wide
+//! extensions visible; BT-2794 completed ADR 0100 Rule 2. With WS1/WS2
+//! landed, `has_cross_file_parent` fires only when an ancestor is genuinely
+//! absent from project-complete knowledge (or in `ModuleOnly` contexts) —
+//! suppression replaced by resolution, staying conservative where knowledge
+//! is genuinely incomplete.
 
 use super::class_hierarchy::ClassHierarchy;
 
@@ -91,14 +90,19 @@ impl ReceiverKnowledge {
 /// (`has_class_dnu_override`) and the instance-side DNU rule
 /// (`has_instance_dnu_override`).
 ///
-/// Downgrade reasons folded into `Open` here (today's behaviour, preserved
-/// bit-for-bit per BT-2793):
+/// Downgrade reasons folded into `Open` here:
 /// - A `doesNotUnderstand:args:` override on the relevant side.
 /// - [`ClassHierarchy::has_cross_file_parent`] — the ancestor chain includes
-///   a class the checker cannot see, so its inherited method surface is
-///   unknown. **Sequencing guard (ADR 0100 Rule 2, BT-2794):** stays a
-///   downgrade reason until project-wide hierarchy assembly (WS2) is
-///   verified complete; removing it early is a separate, later change.
+///   a class the checker cannot see. With project-scoped compilation
+///   (WS1/WS2) this fires only for genuinely-unresolved parents or in
+///   `ModuleOnly` contexts; in a project-complete build every intra-project
+///   parent is injected, so resolution has replaced suppression
+///   (ADR 0100 Rule 2, BT-2794).
+/// - [`ClassHierarchy::has_incomplete_surface_in_chain`] — a chain class was
+///   extracted from a file with parse errors (BT-2796).
+/// - The pre-WS3 dependency guard — `ProjectComplete` scope with
+///   `dependency_extensions_unknown` set (BT-2794; see `classify_receiver`
+///   body).
 ///
 /// **Not folded in here:** BT-1763's "sealed value type dispatches
 /// class-side messages through instance dispatch" carve-out
@@ -141,6 +145,18 @@ pub fn classify_receiver(
     // to silence rather than emitting hints against a surface the checker
     // never fully saw.
     if hierarchy.has_incomplete_surface_in_chain(class_name) {
+        return ReceiverKnowledge::Open;
+    }
+
+    // BT-2794 (ADR 0100 Rule 2, pre-WS3 guard): until cross-package
+    // extension metadata is loaded (WS3, ADR 0070 amendment), a dependency
+    // can extend *any* class — including `Object`, which every receiver's
+    // chain reaches — so a package with dependencies has no receiver whose
+    // surface is provably complete. Only applied under `ProjectComplete`:
+    // `ModuleOnly` contexts (REPL, isolated files) keep today's behaviour.
+    if hierarchy.knowledge_scope() == KnowledgeScope::ProjectComplete
+        && hierarchy.dependency_extensions_unknown()
+    {
         return ReceiverKnowledge::Open;
     }
 
@@ -325,6 +341,50 @@ mod tests {
         hierarchy.add_from_beam_meta(vec![parent, child]);
         assert_eq!(
             classify_receiver("CleanChild2", &hierarchy, false),
+            ReceiverKnowledge::ClosedComplete
+        );
+    }
+
+    #[test]
+    fn dependency_guard_opens_everything_under_project_complete() {
+        // BT-2794 pre-WS3 guard: a dependency can extend any class
+        // (including Object), so with deps present no receiver's surface is
+        // provably complete.
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        hierarchy.add_from_beam_meta(vec![base_class_info("LocalThing", "Object")]);
+        hierarchy.set_knowledge_scope(KnowledgeScope::ProjectComplete);
+        hierarchy.set_dependency_extensions_unknown(true);
+        assert_eq!(
+            classify_receiver("LocalThing", &hierarchy, false),
+            ReceiverKnowledge::Open
+        );
+        assert_eq!(
+            classify_receiver("String", &hierarchy, false),
+            ReceiverKnowledge::Open
+        );
+    }
+
+    #[test]
+    fn no_dependencies_stays_closed_complete_under_project_complete() {
+        // BT-2794: dependency-free packages get full Hint precision.
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        hierarchy.add_from_beam_meta(vec![base_class_info("LocalThing", "Object")]);
+        hierarchy.set_knowledge_scope(KnowledgeScope::ProjectComplete);
+        assert_eq!(
+            classify_receiver("LocalThing", &hierarchy, false),
+            ReceiverKnowledge::ClosedComplete
+        );
+    }
+
+    #[test]
+    fn dependency_guard_not_applied_under_module_only() {
+        // BT-2794: ModuleOnly contexts (REPL, isolated files) keep today's
+        // behaviour — the ADR 0100 REPL example (`"hello" reverssed` hints)
+        // must survive even if a deps flag were somehow set.
+        let mut hierarchy = ClassHierarchy::with_builtins();
+        hierarchy.set_dependency_extensions_unknown(true);
+        assert_eq!(
+            classify_receiver("String", &hierarchy, false),
             ReceiverKnowledge::ClosedComplete
         );
     }

@@ -458,6 +458,7 @@ fn compile_fixture(
         warnings_as_errors,
         current_package: None,
         knowledge_scope: beamtalk_core::semantic_analysis::KnowledgeScope::default(),
+        has_package_dependencies: false,
     };
 
     crate::beam_compiler::compile_source(fixture_path, &module_name, &core_file, &options)

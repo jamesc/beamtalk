@@ -229,6 +229,13 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, force: bool) 
     if Utf8Path::new(path).is_dir() && env.full_manifest.is_some() {
         options.knowledge_scope = beamtalk_core::semantic_analysis::KnowledgeScope::ProjectComplete;
     }
+    // BT-2794 (pre-WS3 guard): dependency extension contributions are not
+    // loaded until WS3 (ADR 0070 amendment), so declaring dependencies means
+    // no receiver's method surface is provably complete.
+    options.has_package_dependencies = env
+        .full_manifest
+        .as_ref()
+        .is_some_and(|m| !m.dependencies.is_empty());
     let options = &options;
 
     let dep_ctx = resolve_and_validate_dependencies(&env, options)?;
