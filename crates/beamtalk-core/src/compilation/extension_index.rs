@@ -21,6 +21,7 @@ use std::path::{Path, PathBuf};
 /// Instance-side and class-side methods are distinct and do not conflict:
 /// `String >> json` and `String class >> json` target different dispatch tables.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum MethodSide {
     /// An instance method: `ClassName >> selector => ...`
     Instance,
@@ -32,6 +33,7 @@ pub enum MethodSide {
 ///
 /// Two extensions conflict if and only if they share the same key.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ExtensionKey {
     /// The target class name (e.g., `"String"`, `"Integer"`).
     pub class_name: EcoString,
@@ -43,6 +45,7 @@ pub struct ExtensionKey {
 
 /// Source location of an extension method definition.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ExtensionLocation {
     /// The file containing the extension definition.
     pub file_path: PathBuf,
@@ -59,6 +62,7 @@ pub struct ExtensionLocation {
 /// typed method surface. Unannotated parameters and return types are `None`,
 /// representing `Dynamic` in the gradual type system.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ExtensionTypeInfo {
     /// Number of arguments (0 for unary, 1 for binary, N for keyword).
     pub arity: usize,
@@ -170,6 +174,51 @@ impl ExtensionIndex {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
+    }
+
+    /// Merges all entries from `other` into this index (BT-2795).
+    ///
+    /// Locations accumulate per key, matching `add_module`'s behaviour when
+    /// the same extension is defined in multiple files.
+    pub fn merge(&mut self, other: &ExtensionIndex) {
+        for (key, locs) in &other.entries {
+            self.entries
+                .entry(key.clone())
+                .or_default()
+                .extend(locs.iter().cloned());
+        }
+    }
+
+    /// Inserts pre-collected entries, e.g. restored from a build cache (BT-2795).
+    pub fn add_entries(
+        &mut self,
+        entries: impl IntoIterator<Item = (ExtensionKey, Vec<ExtensionLocation>)>,
+    ) {
+        for (key, locs) in entries {
+            self.entries.entry(key).or_default().extend(locs);
+        }
+    }
+
+    /// Returns this index's entries restricted to definitions in `file`
+    /// (BT-2795). Used to regroup a project-wide index per file, e.g. when
+    /// writing the incremental Pass 1 cache.
+    #[must_use]
+    pub fn entries_for_file(&self, file: &Path) -> Vec<(ExtensionKey, Vec<ExtensionLocation>)> {
+        self.entries
+            .iter()
+            .filter_map(|(key, locs)| {
+                let file_locs: Vec<ExtensionLocation> = locs
+                    .iter()
+                    .filter(|loc| loc.file_path == file)
+                    .cloned()
+                    .collect();
+                if file_locs.is_empty() {
+                    None
+                } else {
+                    Some((key.clone(), file_locs))
+                }
+            })
+            .collect()
     }
 }
 

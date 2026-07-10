@@ -11,6 +11,9 @@
 //! The cache is invalidated entirely when `beamtalk.toml` changes (mtime check)
 //! or when `--force` is used.
 
+use beamtalk_core::compilation::extension_index::{
+    ExtensionIndex, ExtensionKey, ExtensionLocation,
+};
 use beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::Result;
@@ -26,7 +29,8 @@ use super::util::mtime_of;
 const CACHE_FILENAME: &str = ".beamtalk-pass1-cache.json";
 
 /// Current cache format version. Bump when the serialised layout changes.
-/// v2: `ClassInfo` gained `surface_incomplete` (BT-2796).
+/// v2: `ClassInfo` gained `surface_incomplete` (BT-2796); entries gained
+/// per-file extension definitions (BT-2795).
 const CACHE_VERSION: u32 = 2;
 
 /// On-disk representation of the Pass 1 metadata cache.
@@ -66,6 +70,11 @@ pub(crate) struct CacheEntry {
 
     /// Full `ClassInfo` entries extracted from this file.
     class_infos: Vec<ClassInfo>,
+
+    /// Standalone extension definitions in this file (BT-2795),
+    /// keyed by `(class, side, selector)`.
+    #[serde(default)]
+    extensions: Vec<(ExtensionKey, Vec<ExtensionLocation>)>,
 }
 
 /// Result of loading the cache and merging with fresh data.
@@ -76,6 +85,8 @@ pub(crate) struct IncrementalPass1Result {
     pub class_superclass_index: HashMap<String, String>,
     /// Merged `ClassInfo` vector.
     pub all_class_infos: Vec<ClassInfo>,
+    /// Merged project-wide extension index (BT-2795).
+    pub extension_index: ExtensionIndex,
     /// Cached ASTs for files that were re-scanned in this build.
     pub cached_asts: HashMap<Utf8PathBuf, super::build::CachedAst>,
     /// Whether the manifest changed and forced a full cache invalidation.
@@ -200,6 +211,7 @@ pub(crate) fn discard_pass1_cache(build_dir: &Utf8Path) {
 /// and the set of files that were actually re-scanned.
 ///
 /// When `force` is true, the cache is ignored entirely.
+#[allow(clippy::too_many_lines)] // linear merge pipeline — split adds indirection, not clarity
 pub(crate) fn incremental_build_class_module_index(
     source_files: &[Utf8PathBuf],
     source_root: Option<&Utf8Path>,
@@ -211,8 +223,13 @@ pub(crate) fn incremental_build_class_module_index(
     // If forced, skip cache entirely
     if force {
         info!("Force build — ignoring Pass 1 cache");
-        let (class_module_index, class_superclass_index, all_class_infos, cached_asts) =
-            super::build::build_class_module_index(source_files, source_root, pkg_name)?;
+        let (
+            class_module_index,
+            class_superclass_index,
+            all_class_infos,
+            extension_index,
+            cached_asts,
+        ) = super::build::build_class_module_index(source_files, source_root, pkg_name)?;
 
         // Build cache entries for saving later
         let file_entries = build_cache_entries(
@@ -222,6 +239,7 @@ pub(crate) fn incremental_build_class_module_index(
             &class_module_index,
             &class_superclass_index,
             &all_class_infos,
+            &extension_index,
         );
         save_cache(build_dir, manifest_path, file_entries);
 
@@ -229,6 +247,7 @@ pub(crate) fn incremental_build_class_module_index(
             class_module_index,
             class_superclass_index,
             all_class_infos,
+            extension_index,
             cached_asts,
             manifest_invalidated: false,
         });
@@ -268,6 +287,7 @@ pub(crate) fn incremental_build_class_module_index(
     let mut class_module_index = HashMap::new();
     let mut class_superclass_index = HashMap::new();
     let mut all_class_infos = Vec::new();
+    let mut extension_index = ExtensionIndex::new();
 
     if let Some(ref c) = cache {
         for file in &fresh_files {
@@ -279,22 +299,35 @@ pub(crate) fn incremental_build_class_module_index(
                     class_superclass_index.insert(class_name.clone(), superclass.clone());
                 }
                 all_class_infos.extend(entry.class_infos.clone());
+                extension_index.add_entries(entry.extensions.iter().cloned());
             }
         }
     }
 
     // Re-scan stale files
-    let (stale_module_index, stale_superclass_index, stale_class_infos, cached_asts) =
-        if stale_files.is_empty() {
-            (HashMap::new(), HashMap::new(), Vec::new(), HashMap::new())
-        } else {
-            super::build::build_class_module_index(&stale_files, source_root, pkg_name)?
-        };
+    let (
+        stale_module_index,
+        stale_superclass_index,
+        stale_class_infos,
+        stale_extensions,
+        cached_asts,
+    ) = if stale_files.is_empty() {
+        (
+            HashMap::new(),
+            HashMap::new(),
+            Vec::new(),
+            ExtensionIndex::new(),
+            HashMap::new(),
+        )
+    } else {
+        super::build::build_class_module_index(&stale_files, source_root, pkg_name)?
+    };
 
     // Merge stale results
     class_module_index.extend(stale_module_index);
     class_superclass_index.extend(stale_superclass_index);
     all_class_infos.extend(stale_class_infos);
+    extension_index.merge(&stale_extensions);
 
     // Build updated cache entries and save
     let file_entries = build_cache_entries(
@@ -304,6 +337,7 @@ pub(crate) fn incremental_build_class_module_index(
         &class_module_index,
         &class_superclass_index,
         &all_class_infos,
+        &extension_index,
     );
     save_cache(build_dir, manifest_path, file_entries);
 
@@ -311,6 +345,7 @@ pub(crate) fn incremental_build_class_module_index(
         class_module_index,
         class_superclass_index,
         all_class_infos,
+        extension_index,
         cached_asts,
         manifest_invalidated,
     })
@@ -364,6 +399,7 @@ fn build_cache_entries(
     class_module_index: &HashMap<String, String>,
     class_superclass_index: &HashMap<String, String>,
     all_class_infos: &[ClassInfo],
+    extension_index: &ExtensionIndex,
 ) -> HashMap<String, CacheEntry> {
     // Build a reverse index: module_name → Vec<(class_name, module_name)>
     // This avoids O(files * classes) iteration in the loop below.
@@ -418,6 +454,7 @@ fn build_cache_entries(
                 class_module_index: file_class_module_index,
                 class_superclass_index: file_superclass_index,
                 class_infos: file_class_infos,
+                extensions: extension_index.entries_for_file(file.as_std_path()),
             },
         );
     }
@@ -511,6 +548,7 @@ mod tests {
         entries.insert(
             "/src/counter.bt".to_string(),
             CacheEntry {
+                extensions: Vec::new(),
                 mtime: SystemTime::now(),
                 class_module_index: cmi,
                 class_superclass_index: csi,
@@ -608,6 +646,7 @@ mod tests {
         entries.insert(
             file_a.as_str().to_string(),
             CacheEntry {
+                extensions: Vec::new(),
                 mtime: mtime_a,
                 class_module_index: HashMap::new(),
                 class_superclass_index: HashMap::new(),
@@ -617,6 +656,7 @@ mod tests {
         entries.insert(
             file_b.as_str().to_string(),
             CacheEntry {
+                extensions: Vec::new(),
                 mtime: mtime_b,
                 class_module_index: HashMap::new(),
                 class_superclass_index: HashMap::new(),

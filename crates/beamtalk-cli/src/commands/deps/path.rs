@@ -389,12 +389,17 @@ fn compile_dependency_with_context(
         None
     };
 
-    let (own_class_module_index, class_superclass_index, all_class_infos, cached_asts) =
-        crate::commands::build::build_class_module_index(
-            &source_files,
-            source_root.as_deref(),
-            dep_name,
-        )?;
+    let (
+        own_class_module_index,
+        class_superclass_index,
+        all_class_infos,
+        extension_index,
+        cached_asts,
+    ) = crate::commands::build::build_class_module_index(
+        &source_files,
+        source_root.as_deref(),
+        dep_name,
+    )?;
 
     // Build a compilation index that includes this dep's own classes plus
     // classes from already-compiled dependencies, so cross-dependency class
@@ -417,6 +422,10 @@ fn compile_dependency_with_context(
             class_superclass_index: class_superclass_index.clone(),
             pre_loaded_classes: all_class_infos.clone(),
             pre_loaded_protocols: Vec::new(),
+            // BT-2795: The dep's own project-wide extensions — its files see
+            // each other's extensions during its own compilation. (Exporting
+            // them to consumers is WS3 / the ADR 0070 amendment.)
+            extension_index: extension_index.clone(),
         },
         dep_registry: None, // No collision detection within dependency compilation
         strict_deps: false, // Dependencies use their own strict-deps setting, not root's
@@ -609,11 +618,12 @@ pub(crate) fn build_dep_class_index(
         None
     };
 
-    let (class_module_index, _, class_infos, _) = crate::commands::build::build_class_module_index(
-        &source_files,
-        source_root.as_deref(),
-        dep_name,
-    )?;
+    let (class_module_index, _, class_infos, _, _) =
+        crate::commands::build::build_class_module_index(
+            &source_files,
+            source_root.as_deref(),
+            dep_name,
+        )?;
 
     Ok((class_module_index, class_infos))
 }

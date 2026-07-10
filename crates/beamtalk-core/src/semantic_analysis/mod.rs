@@ -308,6 +308,37 @@ pub fn analyse_with_natives(
         options.current_package.as_deref(),
         native_type_registry,
         options.knowledge_scope,
+        &crate::compilation::extension_index::ExtensionIndex::new(),
+    )
+}
+
+/// Analyse a module with compiler options, pre-loaded classes, a native type
+/// registry, and project-wide cross-file extensions (BT-2795, ADR 0066).
+///
+/// `cross_file_extensions` carries standalone extension definitions
+/// (`ClassName >> selector => ...`) collected from the rest of the project,
+/// so a cross-file extension resolves instead of producing a false `Dnu`
+/// hint. It may safely include the current file's own entries — the current
+/// module's extensions are registered first and duplicates are skipped.
+pub fn analyse_with_natives_and_extensions(
+    module: &Module,
+    options: &crate::CompilerOptions,
+    pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
+    native_type_registry: Option<std::sync::Arc<type_checker::NativeTypeRegistry>>,
+    cross_file_extensions: &crate::compilation::extension_index::ExtensionIndex,
+) -> AnalysisResult {
+    analyse_full_with_natives(
+        module,
+        &[],
+        options.stdlib_mode,
+        options.skip_module_expression_lint,
+        pre_loaded_classes,
+        vec![],
+        None,
+        options.current_package.as_deref(),
+        native_type_registry,
+        options.knowledge_scope,
+        cross_file_extensions,
     )
 }
 
@@ -324,6 +355,7 @@ pub fn analyse_with_natives_and_protocols(
     pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
     pre_loaded_protocols: Vec<protocol_registry::ProtocolInfo>,
     native_type_registry: Option<std::sync::Arc<type_checker::NativeTypeRegistry>>,
+    cross_file_extensions: &crate::compilation::extension_index::ExtensionIndex,
 ) -> AnalysisResult {
     analyse_full_with_natives(
         module,
@@ -336,6 +368,7 @@ pub fn analyse_with_natives_and_protocols(
         options.current_package.as_deref(),
         native_type_registry,
         options.knowledge_scope,
+        cross_file_extensions,
     )
 }
 
@@ -409,6 +442,7 @@ fn analyse_full(
         current_package,
         None,
         knowledge_scope,
+        &crate::compilation::extension_index::ExtensionIndex::new(),
     )
 }
 
@@ -429,6 +463,7 @@ fn analyse_full_with_natives(
     current_package: Option<&str>,
     native_type_registry: Option<std::sync::Arc<type_checker::NativeTypeRegistry>>,
     knowledge_scope: KnowledgeScope,
+    cross_file_extensions: &crate::compilation::extension_index::ExtensionIndex,
 ) -> AnalysisResult {
     let mut result = AnalysisResult::new();
 
@@ -490,6 +525,19 @@ fn analyse_full_with_natives(
         let mut ext_index = crate::compilation::extension_index::ExtensionIndex::new();
         ext_index.add_module(module, std::path::Path::new("<current>"));
         result.class_hierarchy.register_extensions(&ext_index);
+    }
+
+    // BT-2795 (ADR 0066 / ADR 0100 Rule 2 WS1): Register project-wide
+    // cross-file extensions so a same-project `ClassName >> selector`
+    // defined in another file resolves instead of producing a false `Dnu`
+    // hint. Registered *after* the current module's own extensions —
+    // `register_extensions` skips selectors the class already defines, so
+    // the current file's definitions win and an index that includes the
+    // current file's own entries is harmless.
+    if !cross_file_extensions.is_empty() {
+        result
+            .class_hierarchy
+            .register_extensions(cross_file_extensions);
     }
 
     // Phase 0.5: Protocol Registration (ADR 0068 Phase 2b)

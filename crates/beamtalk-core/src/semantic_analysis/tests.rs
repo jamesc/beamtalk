@@ -4236,6 +4236,7 @@ fn fixture_sourced_protocol_name_is_not_unresolved() {
         vec![dummy_class],
         vec![fixture_protocol],
         None,
+        &crate::compilation::extension_index::ExtensionIndex::new(),
     );
 
     let unresolved: Vec<_> = result
@@ -4360,5 +4361,83 @@ fn analyse_with_options_stamps_project_complete_scope() {
         result.class_hierarchy.knowledge_scope(),
         KnowledgeScope::ProjectComplete,
         "the orchestrator's completeness claim must reach the hierarchy"
+    );
+}
+
+// ── BT-2795: project-wide cross-file extension visibility ────────────────────
+
+#[test]
+fn cross_file_extension_resolves_instead_of_dnu_hint() {
+    use crate::compilation::extension_index::ExtensionIndex;
+
+    // Another file defines `String >> shoutLouder`.
+    let ext_tokens = crate::source_analysis::lex_with_eof("String >> shoutLouder => self\n");
+    let (ext_module, _) = crate::source_analysis::parse(ext_tokens);
+    let mut cross_file_extensions = ExtensionIndex::new();
+    cross_file_extensions.add_module(&ext_module, std::path::Path::new("other.bt"));
+
+    // The current file sends it to a String receiver.
+    let source = "Object subclass: UseShout\n  class demo =>\n    \"abc\" shoutLouder\n";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, _) = crate::source_analysis::parse(tokens);
+
+    // Without the index: false Dnu hint (today's behaviour).
+    let result = analyse(&module);
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("shoutLouder")),
+        "without cross-file extensions the send must produce a Dnu hint"
+    );
+
+    // With the index: the extension resolves, the hint disappears.
+    let options = crate::CompilerOptions::default();
+    let result = analyse_with_natives_and_extensions(
+        &module,
+        &options,
+        vec![],
+        None,
+        &cross_file_extensions,
+    );
+    let dnu: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.message.contains("shoutLouder"))
+        .collect();
+    assert!(
+        dnu.is_empty(),
+        "cross-file extension should resolve instead of hinting, got: {dnu:?}"
+    );
+}
+
+#[test]
+fn genuinely_unresolved_selector_still_hints_with_extensions_registered() {
+    use crate::compilation::extension_index::ExtensionIndex;
+
+    let ext_tokens = crate::source_analysis::lex_with_eof("String >> shoutLouder => self\n");
+    let (ext_module, _) = crate::source_analysis::parse(ext_tokens);
+    let mut cross_file_extensions = ExtensionIndex::new();
+    cross_file_extensions.add_module(&ext_module, std::path::Path::new("other.bt"));
+
+    // A genuine typo on a closed receiver still hints (ADR 0100 Rule 2:
+    // improved resolution removes false positives, not true ones).
+    let source = "Object subclass: UseTypo\n  class demo =>\n    \"abc\" reverssed\n";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let options = crate::CompilerOptions::default();
+    let result = analyse_with_natives_and_extensions(
+        &module,
+        &options,
+        vec![],
+        None,
+        &cross_file_extensions,
+    );
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("reverssed")),
+        "a genuine typo must still produce a Dnu hint"
     );
 }

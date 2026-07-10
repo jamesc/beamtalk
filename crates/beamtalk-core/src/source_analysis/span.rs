@@ -24,6 +24,7 @@ use std::ops::Range;
 /// assert_eq!(span.len(), 10);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Span {
     start: u32,
     end: u32,

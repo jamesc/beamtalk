@@ -1397,6 +1397,14 @@ impl LanguageService for SimpleLanguageService {
             // Update the project-wide index with this file's class hierarchy
             self.project_index
                 .update_file(file.clone(), &class_hierarchy);
+
+            // BT-2795: Track this file's standalone extension definitions so
+            // other files' diagnostics see them (cross-file extension
+            // visibility, ADR 0066 / ADR 0100 Rule 2 WS1).
+            let mut extensions = crate::compilation::extension_index::ExtensionIndex::new();
+            extensions.add_module(&module, file.as_std_path());
+            self.project_index
+                .set_file_extensions(file.clone(), extensions);
         } else {
             // Hierarchy build failed: store the file with merged diagnostics
             // but do not update the project index for this file.
@@ -1451,9 +1459,14 @@ impl LanguageService for SimpleLanguageService {
                     options.knowledge_scope =
                         crate::semantic_analysis::KnowledgeScope::ProjectComplete;
                 }
+                // BT-2795: Cross-file extensions from the ProjectIndex are
+                // passed so a same-project `ClassName >> selector` defined in
+                // another file resolves instead of producing a false Dnu hint.
+                let cross_file_extensions = self.project_index.cross_file_extensions_for(file);
                 let ctx = crate::queries::diagnostic_provider::ProjectDiagnosticContext {
                     options,
                     cross_file_classes,
+                    cross_file_extensions,
                     native_type_registry: self.native_types.clone(),
                     ..Default::default()
                 };
@@ -3723,6 +3736,63 @@ mod tests {
         assert!(
             unresolved.is_empty(),
             "cross-file class `Foo` should resolve via ProjectIndex, got: {unresolved:?}"
+        );
+    }
+
+    /// BT-2795 (ADR 0100 Rule 2 WS1): a standalone extension defined in one
+    /// file must be visible to another file's diagnostics — the false `Dnu`
+    /// hint on a same-project cross-file extension disappears.
+    #[test]
+    fn diagnostics_resolve_cross_file_extension_via_project_index() {
+        let mut service = SimpleLanguageService::new();
+        let ext_file = Utf8PathBuf::from("src/StringShout.bt");
+        let use_file = Utf8PathBuf::from("src/UseShout.bt");
+
+        service.update_file(
+            ext_file.clone(),
+            "String >> shoutLouder => self\n".to_string(),
+        );
+        service.update_file(
+            use_file.clone(),
+            "Object subclass: UseShout\n  class demo =>\n    \"abc\" shoutLouder\n".to_string(),
+        );
+
+        let diags = service.diagnostics(&use_file);
+        let dnu: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("shoutLouder"))
+            .collect();
+        assert!(
+            dnu.is_empty(),
+            "cross-file extension `String >> shoutLouder` should resolve, got: {dnu:?}"
+        );
+    }
+
+    /// BT-2795: removing the defining file makes the extension unresolved again.
+    #[test]
+    fn diagnostics_cross_file_extension_gone_after_remove() {
+        let mut service = SimpleLanguageService::new();
+        let ext_file = Utf8PathBuf::from("src/StringShout.bt");
+        let use_file = Utf8PathBuf::from("src/UseShout.bt");
+
+        service.update_file(
+            ext_file.clone(),
+            "String >> shoutLouder => self\n".to_string(),
+        );
+        service.update_file(
+            use_file.clone(),
+            "Object subclass: UseShout\n  class demo =>\n    \"abc\" shoutLouder\n".to_string(),
+        );
+        service.remove_file(&ext_file);
+
+        let diags = service.diagnostics(&use_file);
+        let dnu: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("shoutLouder"))
+            .collect();
+        assert!(
+            !dnu.is_empty(),
+            "after removing the defining file the extension should be unresolved again"
         );
     }
 

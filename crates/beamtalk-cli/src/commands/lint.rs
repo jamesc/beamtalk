@@ -44,6 +44,7 @@ fn collect_diagnostics(
         std::sync::Arc<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,
     >,
     knowledge_scope: beamtalk_core::semantic_analysis::KnowledgeScope,
+    cross_file_extensions: &beamtalk_core::compilation::extension_index::ExtensionIndex,
 ) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
     // Collect parser-level lint diagnostics (e.g. unnecessary `.` — BT-948)
     // plus AST-level lint passes.
@@ -72,11 +73,12 @@ fn collect_diagnostics(
         knowledge_scope,
         ..Default::default()
     };
-    let analysis_result = beamtalk_core::semantic_analysis::analyse_with_natives(
+    let analysis_result = beamtalk_core::semantic_analysis::analyse_with_natives_and_extensions(
         module,
         &options,
         cross_file_classes,
         native_type_registry,
+        cross_file_extensions,
     );
     lint_diags.extend(
         analysis_result
@@ -111,7 +113,7 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
     // visible. Otherwise a test file that references a `src/` class produces
     // spurious `Unresolved class` diagnostics.
     let package_root = find_package_root(&source_path);
-    let (mut all_class_infos, parsed_files) =
+    let (mut all_class_infos, extension_index, parsed_files) =
         parse_and_extract_class_infos(&source_files, package_root.as_deref())?;
 
     // Resolve dependency class metadata so lint sees the same class hierarchy
@@ -158,6 +160,7 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
             cross_file_classes,
             native_type_registry.clone(),
             knowledge_scope,
+            &extension_index,
         );
 
         for diag in &lint_diags {
@@ -406,6 +409,7 @@ fn parse_and_extract_class_infos(
     package_root: Option<&Utf8Path>,
 ) -> Result<(
     Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    beamtalk_core::compilation::extension_index::ExtensionIndex,
     Vec<ParsedLintFile>,
 )> {
     let extraction_files = match package_root {
@@ -422,6 +426,7 @@ fn parse_and_extract_class_infos(
         .map(|p| canonicalize_or_clone(p))
         .collect();
     let mut all_class_infos = Vec::new();
+    let mut extension_index = beamtalk_core::compilation::extension_index::ExtensionIndex::new();
     let mut parsed_files: Vec<ParsedLintFile> = Vec::new();
 
     for file in &extraction_files {
@@ -446,12 +451,17 @@ fn parse_and_extract_class_infos(
         }
         all_class_infos.extend(class_infos);
 
+        // BT-2795: Collect standalone extensions package-wide so cross-file
+        // `ClassName >> selector` definitions resolve during lint the same
+        // way they do during build.
+        extension_index.add_module(&module, file.as_std_path());
+
         if source_file_set.contains(&canonicalize_or_clone(file)) {
             parsed_files.push((file.clone(), source, module, parse_diags));
         }
     }
 
-    Ok((all_class_infos, parsed_files))
+    Ok((all_class_infos, extension_index, parsed_files))
 }
 
 /// Walk ancestors from the given path to find the package root (containing `beamtalk.toml`).
@@ -569,6 +579,7 @@ fn collect_lint_diagnostics(source: &str) -> Vec<beamtalk_core::source_analysis:
         vec![],
         None,
         beamtalk_core::semantic_analysis::KnowledgeScope::default(),
+        &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
     )
 }
 
@@ -660,6 +671,7 @@ mod tests {
             cross_file_classes,
             None,
             beamtalk_core::semantic_analysis::KnowledgeScope::default(),
+            &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
         );
         let stale = diags.iter().any(|d| d.message.contains("stale @expect"));
         assert!(
@@ -857,6 +869,7 @@ mod tests {
             cross_file_classes,
             None,
             beamtalk_core::semantic_analysis::KnowledgeScope::default(),
+            &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
         );
 
         let unresolved: Vec<_> = diags
@@ -961,6 +974,7 @@ mod tests {
             vec![],
             None,
             beamtalk_core::semantic_analysis::KnowledgeScope::default(),
+            &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
         );
 
         let has_untyped_ffi = diags.iter().any(|d| d.message.contains("untyped FFI"));
@@ -1006,6 +1020,7 @@ mod tests {
             vec![],
             Some(std::sync::Arc::new(registry)),
             beamtalk_core::semantic_analysis::KnowledgeScope::default(),
+            &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
         );
 
         let untyped_ffi: Vec<_> = diags

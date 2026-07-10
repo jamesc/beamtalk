@@ -51,6 +51,12 @@ pub struct ProjectDiagnosticContext<'a> {
     pub cross_file_classes: Vec<crate::semantic_analysis::class_hierarchy::ClassInfo>,
     /// Pre-loaded protocol definitions from other source files.
     pub pre_loaded_protocols: Vec<crate::semantic_analysis::protocol_registry::ProtocolInfo>,
+    /// Project-wide standalone extension definitions (BT-2795, ADR 0066).
+    /// Registered into the class hierarchy so cross-file
+    /// `ClassName >> selector` extensions resolve instead of producing
+    /// false `Dnu` hints. May include the current file's own entries —
+    /// duplicates are skipped during registration.
+    pub cross_file_extensions: crate::compilation::extension_index::ExtensionIndex,
     /// Native type registry for FFI call inference (ADR 0075).
     pub native_type_registry:
         Option<std::sync::Arc<crate::semantic_analysis::type_checker::NativeTypeRegistry>>,
@@ -94,6 +100,7 @@ pub fn compute_project_diagnostics(
         ctx.cross_file_classes.clone(),
         ctx.pre_loaded_protocols.clone(),
         ctx.native_type_registry.clone(),
+        &ctx.cross_file_extensions,
     );
     diagnostics.extend(analysis_result.diagnostics);
 
