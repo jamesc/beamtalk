@@ -88,6 +88,8 @@ that the Behaviour/Class libraries can rely on.
     %% ADR 0082 Phase 1 (BT-2283): live method patch primitives
     classCompileSource/3,
     classTryCompileSource/3,
+    %% ADR 0105 Phase 3 (BT-2782): pre-save advisory precheck
+    classPrecheckCompileSource/3,
     %% ADR 0068 Phase 2c: Runtime protocol queries
     classConformsTo/2,
     classProtocols/1,
@@ -805,6 +807,134 @@ do_compile_source(Self, Selector, Source, Intent) ->
                 )
             )
     end.
+
+-doc """
+Compile a pending method edit and report would-be-stale dependents,
+**without installing** (ADR 0105 Phase 3, BT-2782).
+
+Backs `@primitive "classPrecheckCompileSource"' (`Behaviour>>precheckCompile:
+source:') — the editor/LSP's "check before save" hook (ADR 0105's Phase 3
+steelman accommodation: non-blocking, the post-reload image check remains
+the authority; this is an early warning against the *pending* edit).
+`Selector' is a Symbol (atom), `Source' the pending method body String
+(binary), same argument shape as `compile:source:'. Nothing installs and
+nothing is recorded to the ChangeLog — this is read-only. Returns a
+Dictionary with keys `#findings` (List of finding Dictionaries: `#owner`,
+`#changedClass`, `#selector`, `#classification`, `#severity`, `#category`,
+`#message`, `#note`, `#sites`, `#start`, `#end`), `#checked`,
+`#totalCandidates`, `#notChecked`, `#capNote`, `#checkedOwners` — mirroring
+`beamtalk_recheck:result()`/`finding()`, camelCased for the Beamtalk surface
+(matching `Workspace flush`'s `#newClasses` convention;
+`precheck_result_to_dictionary/1` is this primitive's own encoder, parallel
+to `beamtalk_ws_handler:encode_reload_check_event/1`'s wire encoder for the
+same underlying shape).
+""".
+-spec classPrecheckCompileSource(#beamtalk_object{}, atom(), binary()) -> map().
+classPrecheckCompileSource(Self, Selector, Source) ->
+    ClassPid = erlang:element(4, Self),
+    ClassName = gen_server:call(ClassPid, class_name),
+    ClassNameBin = atom_to_binary(ClassName, utf8),
+    SourceBin = ensure_precheck_source_binary(Source, ClassName),
+    try
+        %% instance-side only: like classCompileSource/3, the class-side
+        %% patch path (`Class class >> sel') does not route through this
+        %% primitive — see beamtalk_repl_loader's patch_side/1 callers.
+        erlang:apply(beamtalk_repl_eval, precheck_method, [
+            ClassNameBin, Selector, SourceBin, instance
+        ])
+    of
+        {ok, Result} ->
+            precheck_result_to_dictionary(Result);
+        {error, Reason} ->
+            Error0 = beamtalk_error:new(compile_failed, ClassName),
+            Msg = iolist_to_binary(
+                io_lib:format("Could not precheck method: ~p", [Reason])
+            ),
+            beamtalk_error:raise(beamtalk_error:with_message(Error0, Msg))
+    catch
+        error:undef ->
+            Error0 = beamtalk_error:new(runtime_error, ClassName),
+            beamtalk_error:raise(
+                beamtalk_error:with_message(
+                    Error0,
+                    <<
+                        "Workspace not available — pre-save precheck requires a "
+                        "running workspace"
+                    >>
+                )
+            )
+    end.
+
+%% Validate the `Source' argument for `precheckCompile:source:' is a String
+%% (binary). Distinct from ensure_source_binary/4 because there is no
+%% `Intent' to derive the error's selector name from — precheck only ever
+%% backs one public selector.
+-spec ensure_precheck_source_binary(term(), atom()) -> binary().
+ensure_precheck_source_binary(Source, _ClassName) when is_binary(Source) ->
+    Source;
+ensure_precheck_source_binary(Source, ClassName) ->
+    Error0 = beamtalk_error:new(type_error, ClassName),
+    Msg = iolist_to_binary(
+        io_lib:format("precheckCompile:source: expects a String body, got: ~p", [Source])
+    ),
+    beamtalk_error:raise(beamtalk_error:with_message(Error0, Msg)).
+
+%% Encode a `beamtalk_recheck:result()' as a Beamtalk-facing Dictionary,
+%% camelCasing the compound-word keys (`total_candidates' -> `totalCandidates',
+%% etc.) — Beamtalk-facing maps use camelCase (`Workspace flush''s
+%% `newClasses'), while the internal ADR 0105 result/finding shape is
+%% snake_case throughout the Erlang side. Parallels
+%% `beamtalk_ws_handler:encode_reload_check_event/1', which does the same
+%% translation for the `reload_check' WS push frame's JSON wire shape.
+%% `map()`, not `beamtalk_recheck:result()`: beamtalk_runtime has no
+%% compile-time dependency on beamtalk_workspace (same reason do_compile_source/4
+%% dispatches via erlang:apply/3 rather than a direct call) — the shape is
+%% documented above instead of type-referenced.
+-spec precheck_result_to_dictionary(map()) -> map().
+precheck_result_to_dictionary(#{
+    findings := Findings,
+    checked := Checked,
+    total_candidates := TotalCandidates,
+    not_checked := NotChecked,
+    cap_note := CapNote,
+    checked_owners := CheckedOwners
+}) ->
+    #{
+        findings => [precheck_finding_to_dictionary(F) || F <- Findings],
+        checked => Checked,
+        totalCandidates => TotalCandidates,
+        notChecked => NotChecked,
+        capNote => CapNote,
+        checkedOwners => CheckedOwners
+    }.
+
+-spec precheck_finding_to_dictionary(map()) -> map().
+precheck_finding_to_dictionary(#{
+    owner := Owner,
+    changed_class := ChangedClass,
+    selector := Selector,
+    classification := Classification,
+    severity := Severity,
+    category := Category,
+    message := Message,
+    note := Note,
+    sites := Sites,
+    start := Start,
+    'end' := End
+}) ->
+    #{
+        owner => Owner,
+        changedClass => ChangedClass,
+        selector => Selector,
+        classification => Classification,
+        severity => Severity,
+        category => Category,
+        message => Message,
+        note => Note,
+        sites => Sites,
+        start => Start,
+        'end' => End
+    }.
 
 %% Validate the `Source' argument is a String (binary). Raises a typed error for
 %% a non-binary so callers get a clear message instead of a deep crash. The

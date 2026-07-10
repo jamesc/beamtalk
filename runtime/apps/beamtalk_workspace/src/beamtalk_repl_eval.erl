@@ -46,6 +46,12 @@ module loading to beamtalk_repl_loader (BT-863).
 %% dependency on beamtalk_workspace.
 -export([compile_method/4, compile_method/6, compile_method/7]).
 
+%% ADR 0105 Phase 3 (BT-2782) — stateless pre-save advisory precheck backing
+%% `Behaviour precheckCompile:source:'. Called via erlang:apply from
+%% beamtalk_behaviour_intrinsics for the same compile-time-dependency reason
+%% as compile_method/4,6,7.
+-export([precheck_method/4]).
+
 %% ADR 0082 revert completeness (BT-2663/BT-2665) — remove a live method (the
 %% *add* revert case) and remove a live class (new-class revert, BT-2664).
 -export([remove_method/3, remove_class/1]).
@@ -714,6 +720,36 @@ compile_method(ClassNameBin, Selector, Source, Intent, Author, AuthorKind, Side)
             {error, stdlib_method_read_only_error(ClassNameBin, SelectorBin)};
         none ->
             do_compile_method(ClassNameBin, SelectorBin, Source, Intent, Author, AuthorKind, Side)
+    end.
+
+-doc """
+Pre-save advisory precheck (ADR 0105 Phase 3, BT-2782): compile a pending
+method edit and report would-be-stale dependents without installing.
+
+Backs `Behaviour precheckCompile:source:'. `Selector`/`Source` mirror
+`compile_method/6`'s arguments (`Source` is the method body String, with the
+same bare-body-vs-full-definition normalization); there is no `Intent` /
+`Author` / `AuthorKind` because nothing is recorded to the ChangeLog — a
+precheck is read-only. `Side` selects instance vs. class-side, matching
+`compile_method/7`.
+
+Refuses stdlib classes (their methods are read-only in the workspace) the
+same way `compile_method/6,7` does. Returns `{ok, beamtalk_recheck:result()}`
+or `{error, Reason}`.
+""".
+-spec precheck_method(binary(), atom() | binary(), binary(), instance | class) ->
+    {ok, beamtalk_recheck:result()} | {error, term()}.
+precheck_method(ClassNameBin, Selector, Source, Side) ->
+    SelectorBin = beamtalk_repl_protocol:to_binary(Selector),
+    case stdlib_class_module(ClassNameBin) of
+        {ok, _Module} ->
+            {error, stdlib_method_read_only_error(ClassNameBin, SelectorBin)};
+        none ->
+            MethodSource = normalize_method_source(SelectorBin, Source),
+            IsClassMethod = (Side =:= class),
+            beamtalk_repl_loader:precheck_method(
+                ClassNameBin, SelectorBin, MethodSource, IsClassMethod
+            )
     end.
 
 -doc """

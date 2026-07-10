@@ -1,0 +1,85 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for ADR 0105 Phase 3 (BT-2782): the `:recheck image` REPL
+// meta-command / `Workspace recheckImage` message-send, and the
+// `Behaviour>>precheckCompile:source:` pre-save advisory primitive.
+//
+// `:recheck image` desugars to `Workspace recheckImage` — the "complete but
+// unbounded" whole-image re-check kept out of the automatic per-reload
+// trigger (see beamtalk_recheck.erl's moduledoc). `precheckCompile:source:`
+// compiles a pending method edit and reports would-be-stale dependents
+// *without installing it* — the editor/LSP "check before save" hook.
+//
+// These cases exercise cross-surface wiring (both ops are reachable, return
+// the documented report shape, and precheck never installs). The precise
+// "a pending signature change flags a real stale dependent" behavioural
+// contract is covered by the isolated EUnit integration suite
+// (`beamtalk_repl_loader_precheck_tests.erl`,
+// `beamtalk_recheck_tests.erl`'s `trigger_pending_*`/`trigger_image_*`
+// cases), which controls the ambient class-hierarchy/xref state directly
+// rather than relying on this file's shared, long-lived session.
+//
+// IMPORTANT: REPL-protocol cases share one long-lived workspace session
+// (see repl_flush_changes_dirty.btscript's note) — class names here are
+// unique to this file to avoid collisions with other cases.
+
+// ===========================================================================
+// `Workspace recheckImage` — shape of the whole-image report.
+// ===========================================================================
+
+Workspace recheckImage isKindOf: Dictionary
+// => true
+
+// The report carries checked/stale counts and a findings list.
+(Workspace recheckImage) at: #checked
+// => _
+
+(Workspace recheckImage) at: #stale
+// => _
+
+((Workspace recheckImage) at: #findings) isKindOf: List
+// => true
+
+// ===========================================================================
+// `:recheck image` — REPL meta-command alias for `Workspace recheckImage`.
+// ===========================================================================
+
+:recheck image
+// => _
+
+// ===========================================================================
+// `precheckCompile:source:` — pre-save advisory: shape of the report, and
+// proof that a precheck never installs the pending edit.
+// ===========================================================================
+
+Actor subclass: RecheckPrecheckCounter
+  size -> Integer => 42
+// => RecheckPrecheckCounter
+
+// Sanity: the live behaviour before any precheck.
+RecheckPrecheckCounter spawn size
+// => 42
+
+// Pending edit: size -> String. Not yet saved — the report is a Dictionary
+// shaped like the reload-check report (findings/checked/totalCandidates/
+// notChecked/capNote/checkedOwners).
+(RecheckPrecheckCounter precheckCompile: #size source: "size -> String => 42 printString") isKindOf: Dictionary
+// => true
+
+((RecheckPrecheckCounter precheckCompile: #size source: "size -> String => 42 printString") at: #findings) isKindOf: List
+// => true
+
+// Never installed: the real message still runs the ORIGINAL method — the
+// strongest proof the precheck did not patch the live image.
+RecheckPrecheckCounter spawn size
+// => 42
+
+// A pending edit with no type-relevant signature change reports an empty
+// precheck (`#checked` = 0 — nothing was worth dependent-checking).
+((RecheckPrecheckCounter precheckCompile: #size source: "size -> Integer => 43") at: #checked)
+// => 0
+
+// Still never installed, after either precheck above.
+RecheckPrecheckCounter spawn size
+// => 42
