@@ -466,14 +466,38 @@ impl Parser {
         if matches!(self.current_kind(), TokenKind::Keyword(_)) {
             let mut keywords = Vec::new();
             let mut arguments = Vec::new();
+            // BT-2811: mirrors parse_keyword_message's own continuation_indent —
+            // without this, a keyword on a new line that actually starts the next
+            // sibling class member (e.g. `nextMethod: x => ...` right after this
+            // cascade message) gets silently swallowed as another keyword part of
+            // THIS message instead of stopping here.
+            let mut continuation_indent: Option<usize> = None;
 
             while let TokenKind::Keyword(keyword) = self.current_kind() {
+                if self.should_stop_keyword_continuation(
+                    &mut continuation_indent,
+                    !keywords.is_empty(),
+                ) {
+                    break;
+                }
                 let span = self.current_token().span();
                 keywords.push(KeywordPart::new(keyword.clone(), span));
                 self.advance();
 
                 // Parse argument (which is a binary message)
                 arguments.push(self.parse_binary_message());
+            }
+
+            if keywords.is_empty() {
+                // The very first keyword token was itself a class-member boundary
+                // (e.g. a stray trailing `;` in a cascade immediately followed by
+                // the next sibling method) — there is no message here to parse.
+                self.error("Expected message selector in cascade");
+                return CascadeMessage::new(
+                    MessageSelector::Unary("error".into()),
+                    Vec::new(),
+                    start_span,
+                );
             }
 
             let end_span = arguments.last().map_or(start_span, Expression::span);
@@ -513,6 +537,70 @@ impl Parser {
             Vec::new(),
             start_span,
         )
+    }
+
+    /// BT-2811/BT-1294: Returns true if the parser should stop consuming further
+    /// keyword parts of the keyword message currently being parsed, because the
+    /// current token — a `Keyword` with a leading newline — actually begins a new
+    /// sibling class member (or, outside a class body, a new top-level construct)
+    /// rather than continuing this message across multiple lines.
+    ///
+    /// Shared by `parse_keyword_message`'s own multi-keyword loop and
+    /// `parse_cascade_message`'s keyword-message branch — both parse a sequence of
+    /// `keyword: arg` parts and must stop at the same class-member boundary.
+    /// `parse_cascade_message` lacking this check was BT-2811: a keyword on a new
+    /// line that was actually the start of the next sibling method (e.g.
+    /// `nextMethod: x => ...` right after a cascade message) got silently
+    /// swallowed as another keyword part of the cascade message instead.
+    ///
+    /// `continuation_indent` must be a `&mut Option<usize>` local to the caller's
+    /// own keyword-parsing loop (each loop tracks its own establishment of "how
+    /// deep is a genuine continuation line for THIS message"). `has_prior_keywords`
+    /// mirrors `parse_keyword_message`'s pre-existing `!keywords.is_empty()` guard
+    /// for the outside-class-body lookahead path.
+    fn should_stop_keyword_continuation(
+        &self,
+        continuation_indent: &mut Option<usize>,
+        has_prior_keywords: bool,
+    ) -> bool {
+        if !self.current_token().has_leading_newline() {
+            return false;
+        }
+        if self.in_class_body && self.in_method_body {
+            // Inside a class method body: use indentation comparison. Relies on
+            // the canonical ≤ 2 column invariant for class members.
+            let current_indent = self.current_token().indentation_after_newline();
+            match *continuation_indent {
+                None => {
+                    // First keyword on a new line for this message. Stop
+                    // immediately if it is at the class-member level (col ≤ 2),
+                    // otherwise record it as the continuation level.
+                    let col = current_indent.unwrap_or(0);
+                    if col <= 2 {
+                        return true;
+                    }
+                    *continuation_indent = Some(col);
+                    false
+                }
+                Some(ci) => {
+                    // Treat None as col 0: a token with no indentation info (or a
+                    // col-0 newline) is shallower than any continuation.
+                    let ind = current_indent.unwrap_or(0);
+                    ind < ci
+                }
+            }
+        } else {
+            // Outside a class method body: original lookahead-based check.
+            //
+            // Known asymmetry: unlike parse_keyword_message, which has an explicit
+            // pre-loop guard for this same path, this helper alone can't stop on
+            // the very *first* keyword when has_prior_keywords is false (a cascade
+            // followed by a would-be method definition outside any class body).
+            // Not believed reachable — a cascade directly followed by a top-level
+            // method definition isn't a real construct — so left as-is rather than
+            // adding an unreachable-in-practice pre-loop guard to this helper too.
+            has_prior_keywords && self.is_at_method_definition()
+        }
     }
 
     /// Parses a keyword message (lowest precedence).
@@ -587,39 +675,9 @@ impl Parser {
         let mut continuation_indent: Option<usize> = None;
 
         while let TokenKind::Keyword(keyword) = self.current_kind() {
-            if self.current_token().has_leading_newline() {
-                if self.in_class_body && self.in_method_body {
-                    // Inside a class method body: use indentation comparison.
-                    // Relies on the canonical ≤ 2 column invariant for class members
-                    // (see the same assumption in the initial check above).
-                    let current_indent = self.current_token().indentation_after_newline();
-                    match continuation_indent {
-                        None => {
-                            // First keyword on a new line in this message.
-                            // Stop immediately if it is at the class-member level
-                            // (col ≤ 2), otherwise record it as the continuation level.
-                            let col = current_indent.unwrap_or(0);
-                            if col <= 2 {
-                                break;
-                            }
-                            continuation_indent = current_indent;
-                        }
-                        Some(ci) => {
-                            // Treat None as col 0: a token with no indentation info
-                            // (or a col-0 newline) is shallower than any continuation.
-                            let ind = current_indent.unwrap_or(0);
-                            if ind < ci {
-                                // Shallower than the established continuation level:
-                                // this is a sibling method definition, not a continuation.
-                                break;
-                            }
-                        }
-                    }
-                } else if !keywords.is_empty() && self.is_at_method_definition() {
-                    // Outside a class method body: original lookahead-based check.
-                    // Guard with `!keywords.is_empty()` to match previous behaviour.
-                    break;
-                }
+            if self.should_stop_keyword_continuation(&mut continuation_indent, !keywords.is_empty())
+            {
+                break;
             }
             let span = self.current_token().span();
             keywords.push(KeywordPart::new(keyword.clone(), span));
@@ -629,7 +687,10 @@ impl Parser {
             arguments.push(self.parse_binary_message());
         }
 
-        // Safety: arguments is guaranteed non-empty by the while loop above
+        // Safety: the pre-loop guard above returns early for any leading-newline
+        // boundary keyword, so the `TokenKind::Keyword` check at the top of this
+        // function plus that guard together guarantee the while loop consumes at
+        // least one keyword part, making `arguments` non-empty here.
         let span = receiver.span().merge(arguments.last().unwrap().span());
 
         Expression::MessageSend {
