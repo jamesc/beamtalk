@@ -226,6 +226,16 @@ generate_as_json_mutual_cycle_test() ->
         beamtalk_json:'generate:'('bt@json_hook_fixture':new(mutual_a))
     ).
 
+generate_as_json_shared_reference_not_a_cycle_test() ->
+    %% The same asJson object referenced twice as SIBLINGS (a DAG, not a
+    %% cycle) must serialize fine — Seen tracks the ancestor chain only,
+    %% not "every object encountered anywhere in this generate: call".
+    Shared = 'bt@json_hook_fixture':new(plain),
+    Result = beamtalk_json:'generate:'([Shared, Shared]),
+    [First, Second] = json:decode(Result),
+    ?assertEqual(<<"fixture">>, maps:get(<<"kind">>, First)),
+    ?assertEqual(<<"fixture">>, maps:get(<<"kind">>, Second)).
+
 generate_tagged_map_without_as_json_keeps_fields_test() ->
     %% Legacy behaviour: a tagged map whose class has no asJson still encodes
     %% its fields directly with the class tag stripped.
