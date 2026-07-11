@@ -1711,3 +1711,65 @@ fn test_bt2813_bare_tier2_value_call_inside_collect_block_unpacks_tuple() {
          item value. Got: {code}"
     );
 }
+
+#[test]
+fn test_bt2814_local_var_tier2_value_call_in_argument_position_unpacks_result() {
+    // BT-2814: a Tier 2 block held in a local var, invoked via `value:` in
+    // *argument* (sub-expression) position. Before the fix,
+    // `try_generate_block_value_keyword` intercepted this receiver shape
+    // (tier2_local_vars) and called `generate_block_value_call_stateful`
+    // directly, returning the raw {Result, NewState} tuple straight into the
+    // arithmetic — `10 + {Result, NewState}` crashes with badarith at
+    // runtime. `close_tier2_value_subexpr_doc` now unpacks element(1) so the
+    // arithmetic sees a plain value. Structural check only (see
+    // stdlib/test/tier2_stored_block_matrix_test.bt for the runtime
+    // end-to-end check).
+    let src = "Actor subclass: Ctr\n  state: dummy = 0\n\n  run: x =>\n    r := 0\n    blk := [:n | r := r + n]\n    10 + (blk value: x)\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let code = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    )
+    .expect("should compile (BT-2814)");
+
+    assert!(
+        regex::Regex::new(r"call 'erlang':'\+'\(10, let _T2SubTuple\w* = .*apply.*in call 'erlang':'element'\(1, _T2SubTuple")
+            .unwrap()
+            .is_match(&code),
+        "the local-var Tier2 block's value: call in argument position must \
+         be wrapped in a self-contained let-chain that extracts element(1) \
+         of the returned tuple before the addition, not the raw tuple. \
+         Got: {code}"
+    );
+}
+
+#[test]
+fn test_bt2814_field_stored_tier2_value_call_in_argument_position_unpacks_result() {
+    // BT-2814: the self.field variant of the same gap. Before the fix,
+    // `try_generate_block_value_keyword`/`_unary` deliberately did NOT
+    // intercept a self.field receiver in sub-expression position at all,
+    // falling back to a Tier-1-only (arity-N, no State) apply — badarity for
+    // a genuinely Tier 2 block. `close_tier2_value_subexpr_doc` now
+    // intercepts and unpacks it, consistent with the local-var case above.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n  state: onTick = nil\n\n  setup => self.onTick := [:x | self.total := self.total + x]\n\n  addTickResult: x =>\n    self.total := self.total + (self.onTick value: x)\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let code = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    )
+    .expect("should compile (BT-2814)");
+
+    assert!(
+        regex::Regex::new(
+            r"let _T2SubTuple\w* = .*is_function.*in call 'erlang':'element'\(1, _T2SubTuple"
+        )
+        .unwrap()
+        .is_match(&code),
+        "the field-stored Tier2 block's value: call in argument position \
+         must runtime-discriminate the field's block and extract element(1) \
+         of the returned tuple, not leak the raw tuple or fall back to a \
+         Tier-1-only apply. Got: {code}"
+    );
+}

@@ -113,12 +113,12 @@ TestCase subclass: Tier2StoredBlockMatrixTest
 
   // ── P2: Edge cases ─────────────────────────────────────────────────────
 
-  // P2-10 (KNOWN GAP — BT-2814): same-method, captured-LOCAL (not field)
-  // Tier 2 block invoked in argument position — the raw {Result,State}
-  // tuple leaks into the enclosing arithmetic instead of being unpacked.
-  // testLocalBlockInArgumentPosition =>
-  //   result := self.a localBlockInArgumentPosition: 5
-  //   self assert: result equals: 15
+  // P2-10 (BT-2814): same-method, captured-LOCAL (not field) Tier 2 block
+  // invoked in argument position — the raw {Result,State} tuple used to
+  // leak into the enclosing arithmetic instead of being unpacked.
+  testLocalBlockInArgumentPosition =>
+    result := self.a localBlockInArgumentPosition: 5
+    self assert: result equals: 15
 
   // P2-11 (KNOWN GAP — BT-2815): same-method, LOCAL var block with a
   // captured-local-ONLY mutation, invoked via a cascade — the mutation
@@ -146,15 +146,15 @@ TestCase subclass: Tier2StoredBlockMatrixTest
     self.a tickNestedLoop: #(#(1, 2), #(3, 4))
     self assert: self.a getTotal equals: 10
 
-  // P3-15 (KNOWN GAP — BT-2814): a field-stored Tier 2 block's value: call
-  // in argument position drops its field mutation instead of threading it
-  // — the self.field variant of the same tuple-leak gap as P2-10, already
-  // documented as a deliberate BT-2797 limitation. See fixture's
-  // addTickResult: comment for the codegen explanation.
-  // testArgumentPositionFieldStored =>
-  //   self.a setupOnTick
-  //   self.a addTickResult: 5
-  //   self assert: self.a getTotal equals: 5
+  // P3-15 (BT-2814): a field-stored Tier 2 block's value: call in argument
+  // position — the self.field variant of the same tuple-leak gap as P2-10.
+  // See fixture's addTickResult: comment for the codegen explanation of the
+  // (documented, pre-existing) field-mutation-threading limitation that
+  // remains in this position even after BT-2814.
+  testArgumentPositionFieldStored =>
+    self.a setupOnTick
+    self.a addTickResult: 5
+    self assert: self.a getTotal equals: 5
 
   // P2-13: 3-arg field-stored block (value:value:value:) invoked cross-method.
   // Kept as the class's trailing method (not the P3 block above) so

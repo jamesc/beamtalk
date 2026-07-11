@@ -3576,6 +3576,23 @@ impl CoreErlangGenerator {
                     &selector.name(),
                 );
             }
+            // BT-2814: `tier2_local_vars`/`tier2_block_params` receivers must
+            // also bypass `expression_doc` below — since `try_generate_block_value_unary`/
+            // `try_generate_block_value_keyword` now intercept this same
+            // receiver shape from the generic sub-expression dispatch and
+            // (correctly, for THAT position) close the tuple down to just
+            // `Result`. Calling `generate_block_value_call_stateful` directly
+            // here, exactly like the `self.field` case above, keeps this
+            // TOP-LEVEL statement path getting the raw `{Result, NewState}`
+            // tuple its callers (`BodyExprKind::Tier2ValueCall` handling in
+            // this file, `conditionals.rs`, `control_flow/mod.rs`) unpack.
+            if let Expression::Identifier(id) = receiver.as_ref() {
+                if self.tier2_block_params.contains(id.name.as_str())
+                    || self.tier2_local_vars.contains(id.name.as_str())
+                {
+                    return self.generate_block_value_call_stateful(receiver, arguments);
+                }
+            }
         }
         // BT-2808: `blk value: x; value: y` — proved safe by `is_tier2_value_call`'s
         // Cascade branch. Unlike the single-send case, `expression_doc` has no

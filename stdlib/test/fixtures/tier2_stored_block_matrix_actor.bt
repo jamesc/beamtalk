@@ -95,10 +95,13 @@ Actor subclass: Tier2StoredBlockMatrixActor
   // Tier 2 block invoked in *argument* (sub-expression) position. This was
   // originally believed fully supported (only a self.field receiver seemed
   // restricted to top-level statement position — see P3-15 below), but a
-  // plain local/param receiver turns out to have the same limitation: the
-  // raw {Result, State} tuple leaks into the enclosing arithmetic instead
-  // of being unpacked. Kept here, commented out in the TestCase file, as a
-  // tracked gap rather than silently absent from the matrix.
+  // plain local/param receiver turned out to have the same limitation: the
+  // raw {Result, State} tuple leaked into the enclosing arithmetic instead
+  // of being unpacked (BT-2814, fixed). `close_tier2_value_subexpr_doc`
+  // (intrinsics.rs) now unpacks Result for this position — the block's own
+  // field/captured-local mutation is deliberately NOT threaded forward from
+  // here (documented limitation, same as P3-15 below), only the return
+  // value is computed correctly.
   localBlockInArgumentPosition: x =>
     r := 0
     blk := [:n | r := r + n]
@@ -123,15 +126,22 @@ Actor subclass: Tier2StoredBlockMatrixActor
     matrix do: [:row | row do: [:x | self.onTick value: x]]
     self.total
 
-  // P3-15 (KNOWN GAP — BT-2814): a field-stored Tier 2 block's value: call
-  // used in *argument* (sub-expression) position. BT-2797's own design note
-  // says this is deliberately unsupported: generate_block_value_call_runtime_discriminated
+  // P3-15 (BT-2814, fixed): a field-stored Tier 2 block's value: call used
+  // in *argument* (sub-expression) position. BT-2797's own design note
+  // documented this as deliberately unsupported: `generate_block_value_call_runtime_discriminated`
   // is only reachable from the top-level Tier2ValueCall/LocalAssignTier2
   // codegen, never from generic expression_doc sub-expression dispatch — so
-  // this falls back to a Tier-1-only (arity-N, no State) apply, silently
-  // dropping the field mutation instead of threading it. Kept here,
-  // commented out in the TestCase file, so it's visible as a tracked gap
-  // rather than silently absent from the matrix.
+  // this fell back to a Tier-1-only (arity-N, no State) apply and crashed.
+  // `close_tier2_value_subexpr_doc` (intrinsics.rs) now intercepts this
+  // shape too and correctly unpacks Result — but still deliberately does
+  // NOT thread the block's own field mutation forward to this statement's
+  // OUTER `self.total := ...` write, which reads/writes using the state
+  // from BEFORE this sub-expression ran. For this fixture that coincidentally
+  // still lands on the right total (0 + x, since onTick's own internal
+  // update and this outer re-add both start from the same pre-call total of
+  // 0) — a more elaborate call sequence would expose the outer write
+  // clobbering the block's internal update. Full field-mutation threading
+  // through argument position remains a known limitation.
   addTickResult: x => self.total := self.total + (self.onTick value: x)
 
   // ── Cascade-bodied methods ──────────────────────────────────────────────

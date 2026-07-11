@@ -218,8 +218,8 @@ impl CoreErlangGenerator {
             if self.tier2_block_params.contains(id.name.as_str())
                 || self.tier2_local_vars.contains(id.name.as_str())
             {
-                let doc = self.generate_block_value_call_stateful(receiver, arguments)?;
-                return Ok(Some(doc));
+                let tuple_doc = self.generate_block_value_call_stateful(receiver, arguments)?;
+                return Ok(Some(self.close_tier2_value_subexpr_doc(tuple_doc)));
             }
         }
         // BT-1213: Inline Tier 2 block literal with mutations.
@@ -237,21 +237,21 @@ impl CoreErlangGenerator {
                 return Ok(Some(doc));
             }
         }
-        // BT-2797 (PR #2899 review): deliberately NOT intercepting
-        // `self.field value` here. `generate_block_value_call_runtime_discriminated`
-        // always returns a raw `{Result, NewState}` tuple, but this function
+        // BT-2814: `self.field value` in sub-expression position (e.g.
+        // `self log: (self.field value)`). `generate_block_value_call_runtime_discriminated`
+        // always returns a raw `{Result, NewState}` tuple; this function
         // (reached via the generic `expression_doc` dispatch) is called from
-        // *any* expression position — including sub-expressions like
-        // `self log: (self.field value)` — where nothing unpacks that tuple.
-        // The runtime-discriminated path is only reachable from the
-        // TOP-LEVEL `Tier2ValueCall`/`LocalAssignTier2` codegen in
-        // `gen_server/methods.rs` (`generate_tier2_value_call_doc`), which is
-        // the only place that unpacks the tuple. A `self.field value` in
-        // sub-expression position falls through to the plain `is_function`
-        // guard below — correct for a Tier 1 (pure) block (matches
-        // pre-BT-2797 behavior), still unsafe for a genuinely Tier 2 block in
-        // that position — the same *pre-existing*, not-yet-solved limitation
-        // as a `tier2_block_params`/`tier2_local_vars` block used the same way.
+        // *any* expression position, where nothing else would unpack it — so
+        // unpack it here, discarding NewState. The block's own field/local
+        // mutation is NOT threaded forward to later statements in this
+        // position (same documented, pre-existing limitation noted in
+        // `close_tier2_value_subexpr_doc` — a bare Tier2ValueCall *statement*
+        // still gets full state threading via `BodyExprKind::Tier2ValueCall`).
+        if self.context == CodeGenContext::Actor && Self::is_self_field_access(receiver) {
+            let tuple_doc =
+                self.generate_block_value_call_runtime_discriminated(receiver, arguments, "value")?;
+            return Ok(Some(self.close_tier2_value_subexpr_doc(tuple_doc)));
+        }
         let doc = if matches!(receiver, Expression::Block { .. }) {
             self.generate_block_value_call(receiver, &[])?
         } else {
@@ -409,8 +409,8 @@ impl CoreErlangGenerator {
             if self.tier2_block_params.contains(id.name.as_str())
                 || self.tier2_local_vars.contains(id.name.as_str())
             {
-                let doc = self.generate_block_value_call_stateful(receiver, arguments)?;
-                return Ok(Some(doc));
+                let tuple_doc = self.generate_block_value_call_stateful(receiver, arguments)?;
+                return Ok(Some(self.close_tier2_value_subexpr_doc(tuple_doc)));
             }
         }
         // BT-1213: Inline Tier 2 block literal with mutations (keyword variant)
@@ -446,10 +446,17 @@ impl CoreErlangGenerator {
         if matches!(receiver, Expression::ClassReference { .. }) {
             return Ok(None);
         }
-        // BT-2797 (PR #2899 review): deliberately NOT intercepting
-        // `self.field value: ...` here — see the matching comment in
-        // `try_generate_block_value_unary` for why the runtime-discriminated
-        // path must not be reachable from this generic, any-position dispatch.
+        // BT-2814: `self.field value: ...` in sub-expression position — see
+        // the matching comment (and `close_tier2_value_subexpr_doc`) in
+        // `try_generate_block_value_unary`.
+        if self.context == CodeGenContext::Actor && Self::is_self_field_access(receiver) {
+            let tuple_doc = self.generate_block_value_call_runtime_discriminated(
+                receiver,
+                arguments,
+                selector_name,
+            )?;
+            return Ok(Some(self.close_tier2_value_subexpr_doc(tuple_doc)));
+        }
         // BT-1260: Unknown receiver → runtime is_function guard with fallback
         let doc = self.generate_value_keyword_guard(receiver, arguments, selector_name)?;
         Ok(Some(doc))
@@ -972,6 +979,39 @@ impl CoreErlangGenerator {
         }
 
         Ok(Document::Vec(parts))
+    }
+
+    /// BT-2814: Closes a Tier 2 value call's raw `{Result, NewState}` tuple
+    /// doc for use in *sub-expression* position (e.g. `10 + (blk value: x)`,
+    /// `self log: (self.field value)`), where the caller has no place to
+    /// thread `NewState` forward — it can only use a single plain value.
+    /// Extracts and returns just `Result`, in a syntactically self-contained
+    /// (closed) expression: `let T2SubTupleN = <tuple_doc> in
+    /// call 'erlang':'element'(1, T2SubTupleN)`.
+    ///
+    /// This intentionally does NOT thread the block's field/captured-local
+    /// mutation forward to later statements — the same documented,
+    /// pre-existing limitation BT-2797 first called out for
+    /// `self.field value(:...)` in argument position, now also correctly
+    /// computing the right *value* instead of leaking the raw tuple into the
+    /// caller (which crashed with badarith/badarity — BT-2814). A Tier 2
+    /// value call used as a bare STATEMENT (not nested in another
+    /// expression) is unaffected: it's classified as
+    /// `BodyExprKind::Tier2ValueCall` and still gets full state threading via
+    /// `generate_tier2_value_call_doc` at the top-level method-body/
+    /// conditional-branch/loop-body sequencers — this fallback only applies
+    /// where a plain value, not a state-threading statement, is expected.
+    fn close_tier2_value_subexpr_doc(&mut self, tuple_doc: Document<'static>) -> Document<'static> {
+        let tuple_var = self.fresh_temp_var("T2SubTuple");
+        docvec![
+            "let ",
+            leaf::var(tuple_var.clone()),
+            " = ",
+            tuple_doc,
+            " in call 'erlang':'element'(1, ",
+            leaf::var(tuple_var),
+            ")",
+        ]
     }
 
     /// BT-851: Generates a Tier 2 stateful block value call (ADR 0041 Phase 0).
