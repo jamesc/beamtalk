@@ -32,5 +32,11 @@ dispatch(asJson, [], #{mode := self_return} = Self) ->
 dispatch(asJson, [], #{mode := nested}) ->
     %% The hook result itself contains another asJson object.
     #{<<"inner">> => new(plain)};
+dispatch(asJson, [], #{mode := mutual_a}) ->
+    %% Not a literal self-return: a cycle discovered one level down, via a
+    %% distinct partner object whose own asJson embeds this one back.
+    #{<<"partner">> => new(mutual_b)};
+dispatch(asJson, [], #{mode := mutual_b}) ->
+    #{<<"partner">> => new(mutual_a)};
 dispatch(asJson, [], #{mode := plain}) ->
     #{<<"kind">> => <<"fixture">>, <<"ok">> => true}.

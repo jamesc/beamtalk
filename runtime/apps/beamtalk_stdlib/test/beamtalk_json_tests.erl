@@ -218,6 +218,14 @@ generate_as_json_self_return_test() ->
         beamtalk_json:'generate:'('bt@json_hook_fixture':new(self_return))
     ).
 
+generate_as_json_mutual_cycle_test() ->
+    %% Not a literal self-return: A's hook embeds a distinct B, whose hook
+    %% embeds A back. Must raise before the recursion overflows the stack.
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Json'}},
+        beamtalk_json:'generate:'('bt@json_hook_fixture':new(mutual_a))
+    ).
+
 generate_tagged_map_without_as_json_keeps_fields_test() ->
     %% Legacy behaviour: a tagged map whose class has no asJson still encodes
     %% its fields directly with the class tag stripped.
