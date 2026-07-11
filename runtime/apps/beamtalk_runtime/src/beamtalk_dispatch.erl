@@ -247,30 +247,29 @@ the per-class `has_method/2` + `superclass/1` probe and method invocation.
 -spec lookup_in_class_chain(selector(), args(), bt_self(), state(), class_name()) ->
     dispatch_result().
 lookup_in_class_chain(Selector, Args, Self, State, ClassName) ->
-    case beamtalk_class_registry:whereis_class(ClassName) of
-        undefined ->
-            {error, beamtalk_error:new(class_not_found, ClassName, Selector)};
-        _ClassPid ->
-            StepFun = fun(CurrentClass, Depth) ->
-                class_chain_step(Selector, Args, Self, State, CurrentClass, Depth)
-            end,
-            case beamtalk_hierarchy:walk_ancestors(ClassName, StepFun, ?MAX_HIERARCHY_DEPTH) of
-                {found, Result} ->
-                    Result;
-                max_depth_exceeded ->
-                    {error,
-                        beamtalk_error:new(
-                            does_not_understand,
-                            ClassName,
-                            Selector,
-                            <<"Hierarchy depth limit exceeded — possible cycle in class hierarchy">>
-                        )};
-                not_found ->
-                    %% Unreachable: class_chain_step/6 always resolves to
-                    %% {found, _} or {next, _}, never a bare not_found. Kept
-                    %% for exhaustiveness against the generic walker's contract.
-                    {error, beamtalk_error:new(does_not_understand, ClassName, Selector)}
-            end
+    %% No separate whereis_class/1 pre-check here: class_chain_step/6 performs
+    %% that lookup for every node it visits (including ClassName itself, at
+    %% depth 0) and already produces the identical class_not_found error, so
+    %% a pre-check would just be a redundant registry lookup on the hot path.
+    StepFun = fun(CurrentClass, Depth) ->
+        class_chain_step(Selector, Args, Self, State, CurrentClass, Depth)
+    end,
+    case beamtalk_hierarchy:walk_ancestors(ClassName, StepFun, ?MAX_HIERARCHY_DEPTH) of
+        {found, Result} ->
+            Result;
+        max_depth_exceeded ->
+            {error,
+                beamtalk_error:new(
+                    does_not_understand,
+                    ClassName,
+                    Selector,
+                    <<"Hierarchy depth limit exceeded — possible cycle in class hierarchy">>
+                )};
+        not_found ->
+            %% Unreachable: class_chain_step/6 always resolves to
+            %% {found, _} or {next, _}, never a bare not_found. Kept
+            %% for exhaustiveness against the generic walker's contract.
+            {error, beamtalk_error:new(does_not_understand, ClassName, Selector)}
     end.
 
 -doc """

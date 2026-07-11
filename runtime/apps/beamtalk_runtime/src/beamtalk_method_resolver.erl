@@ -92,14 +92,29 @@ Resolve a method, walking the superclass chain if not found locally.
 BT-2786: The walk itself (depth guard, cycle warning, advance-to-superclass)
 is `beamtalk_hierarchy:walk_ancestors/3`; this function supplies only the
 per-class `{method, Selector}` gen_server probe.
+
+`ClassPid`'s own method table is checked here, outside the depth-counted
+walk — matching the pre-BT-2786 behaviour where the receiver's own class was
+"free" and the `?MAX_HIERARCHY_DEPTH` budget applied only to the superclass
+chain above it (the same split `beamtalk_class_dispatch:find_class_method_in_chain/2`
+uses). The walk itself starts at the immediate superclass.
 """.
 -spec resolve_with_hierarchy(pid(), selector()) -> compiled_method() | 'nil'.
 resolve_with_hierarchy(ClassPid, Selector) ->
-    StepFun = fun(Pid, _Depth) -> method_step(Pid, Selector) end,
-    case beamtalk_hierarchy:walk_ancestors(ClassPid, StepFun, ?MAX_HIERARCHY_DEPTH) of
-        {found, Method} -> Method;
-        not_found -> nil;
-        max_depth_exceeded -> nil
+    case gen_server:call(ClassPid, {method, Selector}) of
+        nil ->
+            StepFun = fun(Pid, _Depth) -> method_step(Pid, Selector) end,
+            case
+                beamtalk_hierarchy:walk_ancestors(
+                    superclass_pid(ClassPid), StepFun, ?MAX_HIERARCHY_DEPTH
+                )
+            of
+                {found, Method} -> Method;
+                not_found -> nil;
+                max_depth_exceeded -> nil
+            end;
+        Method ->
+            Method
     end.
 
 -doc """
@@ -124,15 +139,26 @@ superclass's pid as the next node.
 method_step(ClassPid, Selector) ->
     case gen_server:call(ClassPid, {method, Selector}) of
         nil ->
-            case beamtalk_object_class:superclass(ClassPid) of
-                none ->
-                    not_found;
-                SuperName ->
-                    case beamtalk_class_registry:whereis_class(SuperName) of
-                        undefined -> not_found;
-                        SuperPid -> {next, SuperPid}
-                    end
+            case superclass_pid(ClassPid) of
+                none -> not_found;
+                SuperPid -> {next, SuperPid}
             end;
         Method ->
             {found, Method}
+    end.
+
+-doc """
+Resolve `ClassPid`'s immediate superclass to its process pid, or `none` if
+there is no superclass or its process is not registered.
+""".
+-spec superclass_pid(pid()) -> pid() | none.
+superclass_pid(ClassPid) ->
+    case beamtalk_object_class:superclass(ClassPid) of
+        none ->
+            none;
+        SuperName ->
+            case beamtalk_class_registry:whereis_class(SuperName) of
+                undefined -> none;
+                SuperPid -> SuperPid
+            end
     end.
