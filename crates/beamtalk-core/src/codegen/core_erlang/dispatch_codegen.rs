@@ -1911,19 +1911,33 @@ impl CoreErlangGenerator {
     }
 
     /// BT-2797: Generates the RHS `Document` for a `self.field := value`
-    /// assignment, special-casing a block literal that needs Tier 2 (captured-
-    /// local or field mutations): it's generated via `generate_block_stateful`
+    /// assignment, special-casing a block literal with field writes (and no
+    /// captured-local mutations): it's generated via `generate_block_stateful`
     /// directly, bypassing `generate_block`'s "unsupported block" rejection.
     ///
-    /// This is safe unconditionally — no same-method-only safety analysis is
-    /// needed here, unlike the local-var case in `gen_server/methods.rs`'s
-    /// `prescan_tier2_local_vars` — because every `self.field value(:...)` call
-    /// site now runtime-discriminates Tier 1 vs Tier 2
-    /// (`generate_block_value_call_runtime_discriminated`, `intrinsics.rs`),
-    /// regardless of which method performs the call. The residual gap —
-    /// reading the field into a local var and invoking *that* — is the same
-    /// pre-existing class of gap as any other block value flowing through an
-    /// untracked opaque channel.
+    /// This is safe unconditionally for the field-writes-only case — no
+    /// same-method-only safety analysis is needed here, unlike the local-var
+    /// case in `gen_server/methods.rs`'s `prescan_tier2_local_vars` — because
+    /// every `self.field value(:...)` call site now runtime-discriminates
+    /// Tier 1 vs Tier 2 (`generate_block_value_call_runtime_discriminated`,
+    /// `intrinsics.rs`), regardless of which method performs the call. The
+    /// residual gap — reading the field into a local var and invoking *that*
+    /// — is the same pre-existing class of gap as any other block value
+    /// flowing through an untracked opaque channel.
+    ///
+    /// BT-2797 (PR #2899 review fix): a block that *also* captures and
+    /// mutates an outer local (in addition to writing a field) is NOT safe
+    /// here and must fall through to `expression_doc` → `generate_block` →
+    /// `validate_stored_closure`/the block-analyzer diagnostic instead.
+    /// `generate_block_stateful` reads a captured local's
+    /// `'__local__<var>'` key from the calling method's `StateAcc`, falling
+    /// back to the value closed over at block-*definition* time when that
+    /// key is absent. A field-stored block can be invoked from a different
+    /// method than the one that stored it, so that fallback fires forever
+    /// (stale definition-time value) and, once the returned state is merged
+    /// back into the actor's persistent state, the `'__local__<var>'` key
+    /// leaks into it permanently. See the matching fix in
+    /// `semantic_analysis/block_analyzer.rs`.
     ///
     /// Scoped to `Actor` context only, matching the call-site fix: `ValueType`
     /// field-write Tier 2 support has not been verified safe.
@@ -1934,12 +1948,9 @@ impl CoreErlangGenerator {
         if self.context == CodeGenContext::Actor {
             if let Expression::Block(block) = value {
                 let captured_mutations = Self::captured_mutations_for_block(block);
-                let needs_tier2 = !captured_mutations.is_empty()
-                    || !super::block_analysis::analyze_block(block)
-                        .field_writes
-                        .is_empty();
-                if needs_tier2 {
-                    return self.generate_block_stateful(block, &captured_mutations);
+                let field_writes = super::block_analysis::analyze_block(block).field_writes;
+                if captured_mutations.is_empty() && !field_writes.is_empty() {
+                    return self.generate_block_stateful(block, &[]);
                 }
             }
         }

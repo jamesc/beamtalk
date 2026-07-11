@@ -1357,6 +1357,41 @@ fn test_bt2797_field_stored_block_invoked_from_different_method_threads_state_co
 }
 
 #[test]
+fn test_bt2797_field_stored_block_with_captured_local_and_field_write_is_still_compile_error() {
+    // BT-2797 (PR #2899 review fix): a block stored in a field that mutates
+    // BOTH a captured outer local AND a field must still be rejected at
+    // compile time, not silently promoted to Tier 2 like the field-writes-only
+    // case. `generate_block_stateful`'s captured-local handling reads a
+    // `'__local__<var>'` key from the *calling* method's StateAcc, falling
+    // back to the value closed over at block-definition time when absent —
+    // correct only when the block is invoked from the same method it was
+    // defined in. A field-stored block can be invoked from a *different*
+    // method (that's the entire point of BT-2797), so that fallback would
+    // silently return a stale value forever, and the key would then leak
+    // into the actor's persistent state once the returned NewState is merged
+    // back in. This combination was a compile-time error before BT-2797 and
+    // must remain one.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n  state: callback = nil\n\n  setup =>\n    count := 0\n    self.callback := [:n | count := count + n. self.total := self.total + count]\n\n  process: n =>\n    self.callback value: n\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(CodeGenError::FieldAssignmentInUnsupportedBlock { .. })
+        ),
+        "a block stored in a field that also captures and mutates an outer \
+         local must still be rejected at compile time — promoting it would \
+         leak a '__local__<var>' state key into the actor's persistent state \
+         and read a stale definition-time fallback value when invoked from a \
+         different method than the one that stored it. Got: {result:?}"
+    );
+}
+
+#[test]
 fn test_bt2797_nonliteral_field_mutating_block_passed_to_self_send_is_compile_error() {
     // BT-2797 (verification, acceptance criterion 5): a field-mutating block
     // held in a local var and passed as a *non-literal* argument to a
