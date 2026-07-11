@@ -1827,6 +1827,62 @@ fn double_colon_type_annotation_no_diagnostic() {
     );
 }
 
+/// BT-2759: the `=` token still plays its original role as the
+/// field/state/classState default-value separator — only its role as an
+/// equality *binary selector* was removed (BT-2762). Regression-test all
+/// three declaration forms in one place so a future change to `=` handling
+/// can't silently regress the initializer path.
+#[test]
+fn equals_default_value_initializer_all_declaration_forms() {
+    let source = "Actor subclass: Account
+  state: balance = 0
+  classState: rate = 5
+  deposit: amount => nil
+
+Value subclass: Label
+  field: text = \"acct\"";
+    let tokens = lex_with_eof(source);
+    let (module, diagnostics) = parse(tokens);
+    assert!(
+        diagnostics.is_empty(),
+        "Expected no diagnostics for `=` default-value initializers, got: {diagnostics:?}"
+    );
+    assert_eq!(module.classes.len(), 2, "Expected exactly two classes");
+    let account = &module.classes[0];
+
+    // `state: balance = 0`
+    assert_eq!(
+        account.state.len(),
+        1,
+        "Expected exactly one state variable"
+    );
+    assert_eq!(account.state[0].declared_keyword, DeclaredKeyword::State);
+    assert!(
+        account.state[0].default_value.is_some(),
+        "Expected `state: balance = 0` to carry a default value"
+    );
+
+    // `classState: rate = 5`
+    assert_eq!(
+        account.class_variables.len(),
+        1,
+        "Expected exactly one classState variable"
+    );
+    assert!(
+        account.class_variables[0].default_value.is_some(),
+        "Expected `classState: rate = 5` to carry a default value"
+    );
+
+    let label = &module.classes[1];
+    // `field: text = "acct"`
+    assert_eq!(label.state.len(), 1, "Expected exactly one field variable");
+    assert_eq!(label.state[0].declared_keyword, DeclaredKeyword::Field);
+    assert!(
+        label.state[0].default_value.is_some(),
+        "Expected `field: text = \\\"acct\\\"` to carry a default value"
+    );
+}
+
 #[test]
 fn parse_binary_method() {
     let module = parse_ok(

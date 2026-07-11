@@ -1629,7 +1629,7 @@ withTimeout: ms :: Integer | #infinity => ...
 restart: policy :: #temporary | #transient | #permanent => ...
 ```
 
-A singleton receiver resolves methods against `Symbol`'s protocol — `#infinity asString` infers `String`, and an unknown selector produces a DNU hint naming the singleton (e.g. `#infinity does not understand 'frobnicate'`). Binary sends (`=:=`, `=`) are excluded from this redirect so statically-decidable comparison hints still fire.
+A singleton receiver resolves methods against `Symbol`'s protocol — `#infinity asString` infers `String`, and an unknown selector produces a DNU hint naming the singleton (e.g. `#infinity does not understand 'frobnicate'`). Equality comparisons (`=:=`, `==`, `/=`, `=/=`) are excluded from this redirect so statically-decidable comparison hints still fire.
 
 Discriminate a singleton union with `=:=` (identity) and the branches narrow — see [Control Flow Narrowing](#control-flow-narrowing).
 
