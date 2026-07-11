@@ -2120,8 +2120,16 @@ impl CoreErlangGenerator {
                     format!("{n}: {n}")
                 })
                 .collect();
+            // BT-1408: the map *key* must be the same atom the runtime dispatch and
+            // `__beamtalk_meta/0` entry use (`safe_class_method_selector` — hashed
+            // once "class_" + selector would exceed Erlang's 255-char atom limit),
+            // so a many-field Value class's keyword constructor doesn't blow the
+            // atom limit here even though it already gets hashed for dispatch.
+            // The signature/doc *text* keeps the full readable selector — it is a
+            // binary literal, not an atom, so it carries no length limit.
+            let safe_kw_sel = super::super::selector_mangler::safe_class_method_selector(&kw_sel);
             entries.class.push((
-                kw_sel,
+                safe_kw_sel,
                 format!("{} -> {class_name}", sig_parts.join(" ")),
                 format!(
                     "Compiler-derived keyword constructor. Returns a new {class_name} from the given slot values."
@@ -5439,6 +5447,45 @@ mod tests {
             doc,
             "Compiler-derived keyword constructor. Returns a new Point from the given slot values."
         );
+    }
+
+    #[test]
+    fn test_synthetic_keyword_constructor_long_selector_is_hashed() {
+        // Regression guard alongside BT-1408's `value_many_fields.bt` fixture: a
+        // Value class with enough long field names that the raw keyword-
+        // constructor selector exceeds Erlang's 255-char atom limit must not
+        // surface that raw selector as a `classMethodSignatures`/
+        // `classMethodDocs` map *key* atom (it would blow the limit exactly like
+        // the dispatch function name did before BT-1408). The key must match
+        // `safe_class_method_selector`, the same hash the runtime meta entry and
+        // dispatch already use for this selector — the doc/signature *text* still
+        // carries the full readable field names since it is a binary, not atom.
+        let long_field = "a".repeat(60);
+        let field_names: Vec<String> = (0..5).map(|i| format!("{long_field}{i}")).collect();
+        let slots: Vec<StateDeclaration> = field_names
+            .iter()
+            .map(|n| slot(n, Some("Integer")))
+            .collect();
+        let class = value_class("Big", slots);
+        let entries = CoreErlangGenerator::synthetic_value_accessor_entries(&class);
+        assert_eq!(entries.class.len(), 1, "one keyword constructor entry");
+        let (sel, sig, _doc) = &entries.class[0];
+        assert!(
+            sel.len() <= 255,
+            "keyword constructor map key must stay within the atom limit, got {} bytes",
+            sel.len()
+        );
+        let raw_kw_sel = crate::synthetic_selectors::keyword_constructor_selector(
+            field_names.iter().map(String::as_str),
+        );
+        assert_eq!(
+            *sel,
+            crate::codegen::core_erlang::selector_mangler::safe_class_method_selector(&raw_kw_sel),
+            "map key must match the same hash the runtime meta entry/dispatch use"
+        );
+        // The signature text keeps the full readable field names (a binary, not
+        // an atom, so it carries no length limit).
+        assert!(sig.contains(&format!("{long_field}0")));
     }
 
     #[test]
