@@ -1,0 +1,180 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2810: Comprehensive Actor fixture for the field-stored/opaque Tier 2
+// block invocation test matrix. Complements mutation_matrix_actor.bt
+// (BT-1480, direct self.field := ... mutation crossed with control-flow) by
+// covering the newer axis: a block stored in a field or local variable,
+// mutating actor state, invoked later via value:/value:value:/cascade — the
+// pattern BT-2797 introduced and BT-2807/BT-2808/BT-2809 hardened.
+//
+// Every "setup*" method assigns a block to a field WITHOUT invoking it —
+// only a *different* method invokes it, so every field-stored cell in this
+// fixture exercises the cross-method case (the one static per-method
+// tracking can't see, per BT-2797's own design note).
+//
+// Method order note (BT-2811 workaround): a cascade-bodied method
+// immediately followed by any keyword method — including another
+// cascade-bodied one — corrupts that following method's parameter parsing
+// (unrelated parser bug, filed separately). All three cascade-bodied
+// methods here (tickTwice:, tickThrice:, mixedLocalVarCascade:) are
+// grouped at the end of the class, each separated from the next by a
+// trivial unary buffer method (a 0-arg method is never affected).
+
+Actor subclass: Tier2StoredBlockMatrixActor
+  state: total = 0
+  state: calls = 0
+  state: log = #()
+  state: onTick = nil
+  state: onCombine = nil
+  state: onPing = nil
+  state: onTriple = nil
+
+  getTotal => self.total
+
+  reset =>
+    self.total := 0
+    self.calls := 0
+
+  // ── Setup: assign field-stored blocks (never invoked here) ────────────
+
+  // 1-arg block with a field mutation.
+  setupOnTick => self.onTick := [:x | self.total := self.total + x]
+
+  // 2-arg block with a field mutation combining both args.
+  setupOnCombine => self.onCombine := [:a :b | self.total := self.total + a + b]
+
+  // 0-arg block with a field mutation.
+  setupOnPing => self.onPing := [self.total := self.total + 1]
+
+  // 3-arg block with a field mutation.
+  setupOnTriple =>
+    self.onTriple := [:a :b :c | self.total := self.total + a + b + c]
+
+  // Reassigns onTick to a DIFFERENT block than setupOnTick (see P2-12).
+  setupOnTickDoubling =>
+    self.onTick := [:x | self.total := self.total + (x * 2)]
+
+  // ── P0: known bug patterns (BT-2807/BT-2808 regression continuity) ────
+
+  // P0-1 (BT-2807): bare self.field value: alone inside ifTrue:, no other
+  // field mutation in the same branch.
+  tickIfPositive: x =>
+    x > 0 ifTrue: [self.onTick value: x]
+    self.total
+
+  // ── P1: high-risk unexplored combinations ──────────────────────────────
+
+  // P1-4: 2-arg field-stored block invoked cross-method.
+  combine: a and: b => self.onCombine value: a value: b
+
+  // P1-5: 0-arg field-stored block invoked cross-method.
+  ping => self.onPing value
+
+  // P1-6: field-stored block's value: call as the RHS of a local assignment.
+  tickCaptureResult: x =>
+    r := self.onTick value: x
+    r
+
+  // P1-7: bare field-stored call inside a do: loop body.
+  tickEach: items =>
+    items do: [:x | self.onTick value: x]
+    self.total
+
+  // P1-8: bare field-stored call inside a collect: block (block's return
+  // value AND its field mutation both matter).
+  tickEachCollect: items =>
+    result := items
+      collect: [:x |
+        self.onTick value: x
+        x * 2
+      ]
+    self.log := result
+    self.total
+
+  // P1-9: field-stored call nested two levels deep inside conditionals.
+  tickIfPositiveNested: x and: y =>
+    x > 0 ifTrue: [y > 0 ifTrue: [self.onTick value: x]]
+    self.total
+
+  // ── P2: edge cases ──────────────────────────────────────────────────────
+
+  // P2-10 (KNOWN GAP — BT-2814): same-method, captured-LOCAL (not field)
+  // Tier 2 block invoked in *argument* (sub-expression) position. This was
+  // originally believed fully supported (only a self.field receiver seemed
+  // restricted to top-level statement position — see P3-15 below), but a
+  // plain local/param receiver turns out to have the same limitation: the
+  // raw {Result, State} tuple leaks into the enclosing arithmetic instead
+  // of being unpacked. Kept here, commented out in the TestCase file, as a
+  // tracked gap rather than silently absent from the matrix.
+  localBlockInArgumentPosition: x =>
+    r := 0
+    blk := [:n | r := r + n]
+    10 + (blk value: x)
+
+  // P2-12: field reassigned to a DIFFERENT block (setupOnTickDoubling above)
+  // between two invocations — confirms runtime discrimination re-reads the
+  // field each call rather than caching the first block it saw.
+  tick: x => self.onTick value: x
+
+  // P2-13: 3-arg field-stored block (value:value:value:) invoked cross-method.
+  triple: a second: b third: c =>
+    self.onTriple
+      value: a
+      value: b
+      value: c
+
+  // ── P3: lower-risk / exploratory ────────────────────────────────────────
+
+  // P3-14: field-stored call nested inside a loop nested inside another loop.
+  tickNestedLoop: matrix =>
+    matrix do: [:row | row do: [:x | self.onTick value: x]]
+    self.total
+
+  // P3-15 (KNOWN GAP — BT-2814): a field-stored Tier 2 block's value: call
+  // used in *argument* (sub-expression) position. BT-2797's own design note
+  // says this is deliberately unsupported: generate_block_value_call_runtime_discriminated
+  // is only reachable from the top-level Tier2ValueCall/LocalAssignTier2
+  // codegen, never from generic expression_doc sub-expression dispatch — so
+  // this falls back to a Tier-1-only (arity-N, no State) apply, silently
+  // dropping the field mutation instead of threading it. Kept here,
+  // commented out in the TestCase file, so it's visible as a tracked gap
+  // rather than silently absent from the matrix.
+  addTickResult: x => self.total := self.total + (self.onTick value: x)
+
+  // ── Cascade-bodied methods (grouped last — see BT-2811 note above) ─────
+
+  // P0-2 (BT-2808): cascade of two value: sends to the same field-stored block.
+  tickTwice: x => self.onTick value: x; value: x
+
+  // BT-2811 workaround buffer — do not remove or reorder around this.
+  cascadeBuffer1 => nil
+
+  // P0-3 (BT-2808 extension): cascade of three value: sends — exercises the
+  // N>2 case (multiple intermediate {Result, State} tuples threaded in sequence).
+  tickThrice: x => self.onTick value: x; value: x; value: x
+
+  // BT-2811 workaround buffer — do not remove or reorder around this.
+  cascadeBuffer2 => nil
+
+  // P2-11 (KNOWN GAP — BT-2815): same-method, LOCAL var block with a
+  // captured-local-ONLY mutation (no field write), invoked via a cascade.
+  // This was originally believed fully supported — BT-2809's restriction is
+  // specifically about a FIELD-stored captured-local-only block (invoked
+  // cross-method), and this is neither field-stored nor cross-method — but
+  // it turns out a captured-local mutation in a NAMED Tier 2 local var
+  // (as opposed to an inline block literal) never threads back to the
+  // caller's own variable at all, even for a single non-cascade call in the
+  // same method; reproduces independently of the cascade shape tested here.
+  // (A field-write PLUS captured-local mix stored in a local var, unlike
+  // this captured-local-only case, hits a separate pre-existing
+  // semantic-analysis limitation — see block_analyzer.rs's own comment on
+  // why local-var-stored field writes stay conservatively flagged even when
+  // codegen could prove them safe — so that combination isn't exercised
+  // here.) Last method in the class — safe per the BT-2811 workaround note
+  // above.
+  mixedLocalVarCascade: x =>
+    extra := 0
+    blk := [:n | extra := extra + n]
+    blk value: x; value: x
+    extra
