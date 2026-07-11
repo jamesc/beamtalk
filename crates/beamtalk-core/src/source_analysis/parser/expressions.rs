@@ -591,6 +591,14 @@ impl Parser {
             }
         } else {
             // Outside a class method body: original lookahead-based check.
+            //
+            // Known asymmetry: unlike parse_keyword_message, which has an explicit
+            // pre-loop guard for this same path, this helper alone can't stop on
+            // the very *first* keyword when has_prior_keywords is false (a cascade
+            // followed by a would-be method definition outside any class body).
+            // Not believed reachable — a cascade directly followed by a top-level
+            // method definition isn't a real construct — so left as-is rather than
+            // adding an unreachable-in-practice pre-loop guard to this helper too.
             has_prior_keywords && self.is_at_method_definition()
         }
     }
