@@ -1005,7 +1005,9 @@ recheck_owner_for_shape(Owner, OwnerSites, ClassNameBin, FieldChanges) ->
                 {ok, Diagnostics} ->
                     SiteRefs = [site_ref(S) || S <- OwnerSites],
                     Findings = [
-                        to_finding_shape(OwnerBin, ClassNameBin, SiteRefs, D, Matched, AmbiguousWith)
+                        to_finding_shape(
+                            OwnerBin, ClassNameBin, SiteRefs, D, Matched, AmbiguousWith
+                        )
                      || D <- Diagnostics,
                         {true, Matched, AmbiguousWith} <- [
                             relevant_diagnostic_shape(D, ClassNameBin, FieldChanges)
