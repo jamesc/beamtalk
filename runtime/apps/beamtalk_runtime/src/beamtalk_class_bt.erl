@@ -33,7 +33,6 @@ This module provides the 'Class' instance methods entry point.
 """.
 
 -include("beamtalk.hrl").
--include_lib("kernel/include/logger.hrl").
 
 %% API
 -export([dispatch/4, has_method/1, register_class/0]).
@@ -70,8 +69,7 @@ dispatch('classBuilder', _Args, _Self, State) ->
     Error = beamtalk_error:new(does_not_understand, 'Class', 'classBuilder'),
     {error, Error, State};
 dispatch(Selector, _Args, _Self, State) ->
-    Error = beamtalk_error:new(does_not_understand, 'Class', Selector),
-    {error, Error, State}.
+    beamtalk_bootstrap_stub:dnu('Class', Selector, State).
 
 -doc """
 Check if Class has an instance method.
@@ -119,20 +117,11 @@ register_class() ->
         %% has_method/1 below (ADR 0038 Phase 1), not via the instance_methods map.
         instance_methods => #{}
     },
-    case beamtalk_object_class:start('Class', ClassInfo) of
-        {ok, _Pid} ->
-            ?LOG_INFO("Registered Class (ADR 0032 Phase 0 stub)", #{
-                module => ?MODULE, domain => [beamtalk, runtime]
-            }),
-            ok;
-        {error, {already_started, _}} ->
-            %% Class was already registered (compiled stdlib loaded first, or bootstrap
-            %% ran twice). Do nothing — the compiled stdlib module manages instance_methods
-            %% via update_class. classBuilder remains discoverable via has_method/1 below.
-            ok;
-        {error, Reason} ->
-            ?LOG_WARNING("Failed to register Class", #{
-                reason => Reason, domain => [beamtalk, runtime]
-            }),
-            ok
-    end.
+    %% refresh_on_conflict is false: the compiled stdlib module manages
+    %% instance_methods via its own update_class call. classBuilder remains
+    %% discoverable via has_method/1 below regardless.
+    beamtalk_bootstrap_stub:register('Class', ClassInfo, #{
+        module => ?MODULE,
+        registered_msg => "Registered Class (ADR 0032 Phase 0 stub)",
+        refresh_on_conflict => false
+    }).
