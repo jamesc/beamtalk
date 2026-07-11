@@ -23,11 +23,11 @@
 //    would either drop the field mutation silently or crash with a badarity
 //    error.
 //
-// Note: a *bare* `self.field value:` call with no other field mutation in
-// the same branch does not currently trigger state-threading detection at
-// all (block_analysis only looks for literal `self.slot :=` assignments) —
-// that is a separate, pre-existing gap outside BT-2797's scope, not
-// exercised here.
+// BT-2807: a *bare* `self.field value:` call with no other field mutation in
+// the same branch now also triggers state-threading detection (block_analysis
+// treats any `self.field value(:...)` send as a potential mutation source, not
+// just a literal `self.slot :=` assignment) — see
+// testBareFieldStoredBlockValueAloneInsideConditional below.
 
 Actor subclass: Tier2SubexprAndConditionalBlockTestActor
   state: total = 0
@@ -52,6 +52,12 @@ Actor subclass: Tier2SubexprAndConditionalBlockTestActor
       ]
     self.total
 
+  // BT-2807: Tier 2 field-stored block invoked bare inside a conditional
+  // branch with NO other field mutation alongside it in that branch.
+  tickIfPositiveBareOnly: x =>
+    x > 0 ifTrue: [self.onTick value: x]
+    self.total
+
   testStoredPureBlockInArgumentPosition =>
     self setupDoubler
     self addDoubled: 5
@@ -61,4 +67,11 @@ Actor subclass: Tier2SubexprAndConditionalBlockTestActor
     self setupOnTick
     self tickIfPositive: 5
     self tickIfPositive: -3
+    self.total
+
+  // BT-2807: 5 is added (x > 0), -3 is not (x <= 0) — total ends at 5.
+  testBareFieldStoredBlockValueAloneInsideConditional =>
+    self setupOnTick
+    self tickIfPositiveBareOnly: 5
+    self tickIfPositiveBareOnly: -3
     self.total
