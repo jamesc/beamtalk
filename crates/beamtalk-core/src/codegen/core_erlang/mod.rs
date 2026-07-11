@@ -3368,6 +3368,33 @@ impl CoreErlangGenerator {
             }
         }
 
+        // BT-2803 (adversarial review): `blockValueWithArguments`'s compiled
+        // method body is real, not a placeholder — unlike `blockValue`/
+        // `blockValue1`/etc. (which truly are call-site-only, since a Tier 2
+        // block's extra state argument can only come from a calling method's
+        // live `State`/`StateAcc`), a plain `erlang:apply(Self, Args)` is
+        // correct for *any* receiver reached via generic runtime dispatch
+        // (`beamtalk_primitive:send/3`, `perform:withArguments:`, …) — a
+        // Tier 2 block can never correctly reach this path in the first
+        // place (see `is_tier2_value_call`'s scoping in
+        // `gen_server/methods.rs`), so there's no state to thread here.
+        // Restores the exact behaviour `valueWithArguments:`'s `@primitive`
+        // form had before being converted to a call-site-intercepted
+        // `@intrinsic`, fixing `send_block_valueWithArguments_test_` in
+        // `beamtalk_primitive_tests.erl`.
+        if !is_quoted && name == "blockValueWithArguments" {
+            let args_param = self
+                .current_method_params
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "_Args".to_string());
+            return Ok(docvec![
+                "call 'erlang':'apply'(Self, ",
+                leaf::var(args_param),
+                ")",
+            ]);
+        }
+
         // BT-1763: Erlang interop DNU intrinsics — forward selector/args to
         // the handler module's dispatch/3 rather than passing the intrinsic name.
         // doesNotUnderstand:args: receives (Self, Selector, Args) and we need to
@@ -3470,17 +3497,18 @@ impl CoreErlangGenerator {
         // BT-2803 follow-up: for a structural intrinsic, this placeholder body is
         // never a real implementation of the selector's semantics — it self-calls
         // `<runtime_module>:dispatch(<intrinsic_name_atom>, Args, Self)`, passing
-        // the *intrinsic name* (e.g. `blockValueWithArguments`), not the real
-        // selector. Any call path that reaches the compiled method body directly
-        // instead of through the call-site interception — e.g.
-        // `aBlock perform: #valueWithArguments: withArguments: #(...)` — resolves
-        // to this placeholder and raises `does_not_understand` for the intrinsic
-        // name. Confirmed to already affect every existing block-value structural
-        // intrinsic (`value`, `value:`, `value:value:`, …), not just
-        // `valueWithArguments:` — a pre-existing, systemic gap in how structural
-        // intrinsics interact with dynamic dispatch, not something introduced or
-        // fixed here. See BT-2812 (filed from BT-2803's adversarial review) for
-        // perform:-safe structural intrinsic dispatch.
+        // the *intrinsic name* (e.g. `blockValue`), not the real selector. Any
+        // call path that reaches the compiled method body directly instead of
+        // through the call-site interception — e.g.
+        // `[42] perform: #value withArguments: #()` — resolves to this
+        // placeholder and raises `does_not_understand` for the intrinsic name.
+        // Confirmed to already affect every block-value structural intrinsic
+        // EXCEPT `valueWithArguments:` (special-cased above, BT-2803 review) —
+        // `value`/`value:`/`value:value:`/… still hit this gap, a pre-existing,
+        // systemic limitation in how structural intrinsics interact with
+        // dynamic dispatch, not something introduced or fixed here. See BT-2812
+        // (filed from BT-2803's adversarial review) for perform:-safe structural
+        // intrinsic dispatch.
         let runtime_module = PrimitiveBindingTable::runtime_module_for_class(&class_name);
 
         // BT-938: Validate that the target dispatch module exists in the known stdlib
