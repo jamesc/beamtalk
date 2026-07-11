@@ -273,6 +273,8 @@ all_class_sources() ->
         gen_server:call(?MODULE, all_class_sources)
     catch
         exit:{noproc, _} ->
+            #{};
+        exit:{timeout, _} ->
             #{}
     end.
 

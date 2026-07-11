@@ -3173,7 +3173,10 @@ pub(crate) fn build_command_expression(
             let class = expect_string_arg(arguments, 0, "class")?;
             validate_class_name(&class)?;
             let selector = expect_string_arg(arguments, 1, "selector")?;
-            validate_selector(&selector)?;
+            // Accepted with or without a leading '#', mirroring MCP's
+            // `precheck_method` tool so both surfaces agree on input shape.
+            let selector = selector.strip_prefix('#').unwrap_or(&selector);
+            validate_selector(selector)?;
             let source = expect_string_arg(arguments, 2, "source")?;
             if source.is_empty() {
                 return Err(format!("{CMD_PRECHECK_METHOD}: 'source' must not be empty"));
@@ -5419,6 +5422,25 @@ mod tests {
             &[
                 serde_json::json!("Counter"),
                 serde_json::json!("getCount"),
+                serde_json::json!("getCount => \"nope\""),
+            ],
+        )
+        .expect("ok");
+        assert_eq!(
+            expr,
+            "Counter precheckCompile: #getCount source: \"getCount => \\\"nope\\\"\""
+        );
+    }
+
+    #[test]
+    fn build_precheck_method_accepts_leading_hash_selector() {
+        // Mirrors MCP's `precheck_method`: selectors are accepted with or
+        // without a leading '#'.
+        let expr = build_command_expression(
+            CMD_PRECHECK_METHOD,
+            &[
+                serde_json::json!("Counter"),
+                serde_json::json!("#getCount"),
                 serde_json::json!("getCount => \"nope\""),
             ],
         )

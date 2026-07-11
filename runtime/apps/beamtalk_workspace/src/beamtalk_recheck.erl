@@ -621,13 +621,14 @@ recheck_image_class(OwnerBin, Source) ->
             ),
             {failed, []}
     catch
-        Class:Reason ->
+        Class:Reason:Stack ->
             ?LOG_WARNING(
                 "Whole-image re-check compiler-port call failed for class (no findings reported)",
                 #{
                     owner => OwnerBin,
                     error_class => Class,
                     reason => Reason,
+                    stack => Stack,
                     domain => [beamtalk, runtime]
                 }
             ),
