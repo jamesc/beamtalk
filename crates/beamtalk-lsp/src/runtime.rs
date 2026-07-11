@@ -381,30 +381,7 @@ impl RuntimeClient {
             .and_then(|v| v.as_str())
             .ok_or_else(|| RuntimeError::Protocol("eval request missing id".to_string()))?
             .to_string();
-
-        let (reply_tx, reply_rx) = oneshot::channel();
-        let req = EvalRequest {
-            request,
-            id: id.clone(),
-            reply_to: reply_tx,
-        };
-        self.inner
-            .sender
-            .send(req)
-            .await
-            .map_err(|_| RuntimeError::Protocol("runtime client shut down".to_string()))?;
-
-        tokio::time::timeout(IO_TIMEOUT, reply_rx)
-            .await
-            .map_err(|_| {
-                RuntimeError::Protocol(format!(
-                    "eval timed out after {}s waiting for reply (id={id})",
-                    IO_TIMEOUT.as_secs()
-                ))
-            })?
-            .map_err(|_| {
-                RuntimeError::Protocol("eval reply channel dropped before response".to_string())
-            })?
+        self.dispatch_request(request, &id, "eval").await
     }
 
     /// Submit a structured `nav-query` request and decode the typed reply
@@ -436,31 +413,7 @@ impl RuntimeClient {
             .ok_or_else(|| RuntimeError::Protocol("nav-query request missing id".to_string()))?
             .to_string();
 
-        let (reply_tx, reply_rx) = oneshot::channel();
-        let req = EvalRequest {
-            request,
-            id: id.clone(),
-            reply_to: reply_tx,
-        };
-        self.inner
-            .sender
-            .send(req)
-            .await
-            .map_err(|_| RuntimeError::Protocol("runtime client shut down".to_string()))?;
-
-        let response = tokio::time::timeout(IO_TIMEOUT, reply_rx)
-            .await
-            .map_err(|_| {
-                RuntimeError::Protocol(format!(
-                    "nav-query timed out after {}s waiting for reply (id={id})",
-                    IO_TIMEOUT.as_secs()
-                ))
-            })?
-            .map_err(|_| {
-                RuntimeError::Protocol(
-                    "nav-query reply channel dropped before response".to_string(),
-                )
-            })??;
+        let response = self.dispatch_request(request, &id, "nav-query").await?;
 
         if response.is_error() {
             let msg = response
@@ -509,31 +462,7 @@ impl RuntimeClient {
             .ok_or_else(|| RuntimeError::Protocol("nav-symbols request missing id".to_string()))?
             .to_string();
 
-        let (reply_tx, reply_rx) = oneshot::channel();
-        let req = EvalRequest {
-            request,
-            id: id.clone(),
-            reply_to: reply_tx,
-        };
-        self.inner
-            .sender
-            .send(req)
-            .await
-            .map_err(|_| RuntimeError::Protocol("runtime client shut down".to_string()))?;
-
-        let response = tokio::time::timeout(IO_TIMEOUT, reply_rx)
-            .await
-            .map_err(|_| {
-                RuntimeError::Protocol(format!(
-                    "nav-symbols timed out after {}s waiting for reply (id={id})",
-                    IO_TIMEOUT.as_secs()
-                ))
-            })?
-            .map_err(|_| {
-                RuntimeError::Protocol(
-                    "nav-symbols reply channel dropped before response".to_string(),
-                )
-            })??;
+        let response = self.dispatch_request(request, &id, "nav-symbols").await?;
 
         if response.is_error() {
             let msg = response
@@ -550,6 +479,44 @@ impl RuntimeClient {
             RuntimeError::Protocol(format!("nav-symbols: malformed reply payload: {e}"))
         })?;
         Ok(payload.classes)
+    }
+
+    /// Send `request` through the eval channel and wait up to `IO_TIMEOUT` for
+    /// the reply. `op` names the operation (e.g. `"eval"`, `"nav-query"`) and
+    /// is interpolated into every error message so failures are easy to
+    /// diagnose. Returns the inner `Result<ReplResponse, RuntimeError>` carried
+    /// by the oneshot channel, with transport-level failures (timeout, shutdown,
+    /// dropped channel) converted to `Err(RuntimeError::Protocol)` and
+    /// propagated early.
+    async fn dispatch_request(
+        &self,
+        request: serde_json::Value,
+        id: &str,
+        op: &str,
+    ) -> Result<ReplResponse, RuntimeError> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        let req = EvalRequest {
+            request,
+            id: id.to_string(),
+            reply_to: reply_tx,
+        };
+        self.inner
+            .sender
+            .send(req)
+            .await
+            .map_err(|_| RuntimeError::Protocol("runtime client shut down".to_string()))?;
+
+        tokio::time::timeout(IO_TIMEOUT, reply_rx)
+            .await
+            .map_err(|_| {
+                RuntimeError::Protocol(format!(
+                    "{op} timed out after {}s waiting for reply (id={id})",
+                    IO_TIMEOUT.as_secs()
+                ))
+            })?
+            .map_err(|_| {
+                RuntimeError::Protocol(format!("{op} reply channel dropped before response"))
+            })?
     }
 
     /// Close the underlying connection and abort the listener/writer tasks.
