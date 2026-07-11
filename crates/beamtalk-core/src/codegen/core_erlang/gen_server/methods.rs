@@ -119,6 +119,11 @@ pub(in crate::codegen::core_erlang) enum BodyExprKind {
     DestructureAssignmentControlFlow,
     /// `var := expr` where the RHS is a Tier 2 `value:` call.
     LocalAssignTier2,
+    /// `var := [block]` where the block literal itself needs Tier 2 (captured-local
+    /// or field mutations) — BT-2797. Unlike `LocalAssignTier2` (RHS *invokes* a
+    /// Tier 2 block), here the RHS *is* the block literal being stored for later
+    /// invocation (e.g. `blk := [:x | self.total := self.total + x]`).
+    LocalAssignTier2Block,
     /// `var := expr` where the RHS is control flow with field mutations.
     LocalAssignControlFlow,
     /// `var := self method` — local assignment where RHS is a dispatching self-send.
@@ -233,6 +238,12 @@ impl CoreErlangGenerator {
 
         // BT-851: Populate tier2_block_params for this method from pre-scanned info
         self.tier2_block_params.clear();
+        // BT-2797: Reset the same-method local-var tracking. The real
+        // (re-)population happens inside generate_body_exprs_with_reply via
+        // prescan_tier2_local_vars — this clear here is belt-and-suspenders
+        // for the case where a caller inspects the field between the clear
+        // and the body being generated.
+        self.tier2_local_vars.clear();
         let selector_name_for_t2 = selector_name.to_string();
         if let Some(positions) = self.tier2_method_info.get(&selector_name_for_t2).cloned() {
             for pos in &positions {
@@ -367,6 +378,221 @@ impl CoreErlangGenerator {
 
     // ── BT-1422: Unified method body state-threading ──────────────────
 
+    /// BT-2797: Pre-scans a method/block body for `var := [block]` assignments
+    /// where the block itself needs Tier 2 (captured-local or field mutations),
+    /// and populates `self.tier2_local_vars` with the ones that are *provably
+    /// safe* to promote — i.e. every later reference to `var` in this same body
+    /// is the receiver of a `value`/`value:`/`value:value:`/`value:value:value:`
+    /// send, never a bare read (return, argument, reassignment, ...).
+    ///
+    /// Only considers `var := [block]` assignments that are themselves *flat
+    /// top-level statements* of `body` — one that's nested inside e.g. an
+    /// `ifTrue:`/`do:` block argument isn't a candidate here. Such a nested
+    /// assignment still falls through to the existing
+    /// `generate_block`/`validate_stored_closure` compile-time diagnostic,
+    /// which is conservative but correct.
+    ///
+    /// **Safety invariant**: `scan_var_uses` marks *any* reference to `var`
+    /// found inside a nested `Block` literal as unsafe, even a `value:` send
+    /// that would otherwise qualify as safe. A nested block literal compiles
+    /// through a completely separate path
+    /// (`generate_block_body_slice`/`BlockExprKind` in `expressions.rs`, not
+    /// `generate_body_exprs_with_reply`/`BodyExprKind` here) that has no
+    /// Tier2-tuple-unpacking logic and never resets `tier2_local_vars` for
+    /// its own body — so a "safe-looking" `value:` call on a promoted var
+    /// found inside a nested block either leaks an unpacked
+    /// `{Result, NewState}` tuple as the inner block's return value (a Tier 1
+    /// inner block, which never resets `tier2_local_vars`) or calls a
+    /// 2-arity Tier 2 fun with only 1 argument (a Tier 2 inner block, which
+    /// resets `tier2_local_vars` for its own body and never re-adds `var`
+    /// since it isn't assigned there) — `badarity` at runtime either way.
+    /// Only a direct top-level method-body `var value:` statement is
+    /// provably safe.
+    ///
+    /// This runs as a full pre-scan (like `tier2_block_params`'s class-level
+    /// scan) rather than incrementally during codegen, specifically so that a
+    /// block which *escapes* this method unsafely (returned, stored elsewhere,
+    /// passed as an argument) is never promoted — it must keep hitting the
+    /// `generate_block`/`validate_stored_closure` compile-time diagnostic,
+    /// since no known call site would thread state through it correctly.
+    fn prescan_tier2_local_vars(&mut self, body: &[&Expression]) {
+        for (i, expr) in body.iter().enumerate() {
+            let Expression::Assignment { target, value, .. } = expr else {
+                continue;
+            };
+            let (Expression::Identifier(id), Expression::Block(block)) =
+                (target.as_ref(), value.as_ref())
+            else {
+                continue;
+            };
+            let needs_tier2 = !Self::captured_mutations_for_block(block).is_empty()
+                || (self.context == CodeGenContext::Actor
+                    && !block_analysis::analyze_block(block).field_writes.is_empty());
+            if !needs_tier2 {
+                continue;
+            }
+            let var_name = id.name.as_str();
+            let (has_unsafe, has_safe) = body[i + 1..]
+                .iter()
+                .map(|stmt| Self::scan_var_uses(stmt, var_name))
+                .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2));
+            // Require at least one safe use, not just the absence of unsafe
+            // ones — otherwise a variable that's never referenced again (e.g.
+            // `var := [block]` as the method's last statement, so the block
+            // value implicitly escapes as the return value) would vacuously
+            // pass "no unsafe use found" and be wrongly promoted.
+            if has_safe && !has_unsafe {
+                self.tier2_local_vars.insert(var_name.to_string());
+            }
+        }
+    }
+
+    /// BT-2797: Scans `expr` for references to `var_name`, returning
+    /// `(has_unsafe_use, has_safe_use)`.
+    ///
+    /// A *safe* use is the receiver of a `value`/`value:`/`value:value:`/
+    /// `value:value:value:` send. Any other reference — a bare return, an
+    /// argument to another call, a reassignment, ... — is *unsafe*, since it
+    /// would let a Tier 2 block value escape to a call site that doesn't know
+    /// to thread state through it. A variable that's *never* referenced at
+    /// all yields `(false, false)`, which the caller must treat as unsafe
+    /// (not "no unsafe use found") — see `prescan_tier2_local_vars`.
+    ///
+    /// Deliberately conservative: exhaustively matches every `Expression`
+    /// variant so a use hidden inside e.g. a map literal or string
+    /// interpolation is never silently missed. A shadowing block parameter
+    /// with the same name is *not* special-cased — that only makes this
+    /// over-conservative (a missed promotion), never unsafe.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "exhaustive match over every Expression variant, kept as one function for locality with its single caller"
+    )]
+    fn scan_var_uses(expr: &Expression, var_name: &str) -> (bool, bool) {
+        match expr {
+            Expression::Identifier(id) => (id.name == var_name, false),
+            Expression::Literal(..)
+            | Expression::ClassReference { .. }
+            | Expression::Super(_)
+            | Expression::Primitive { .. }
+            | Expression::ExpectDirective { .. }
+            | Expression::Error { .. } => (false, false),
+            Expression::Spread { name, .. } => (name.name == var_name, false),
+            Expression::FieldAccess { receiver, .. } => Self::scan_var_uses(receiver, var_name),
+            Expression::MessageSend {
+                receiver,
+                selector,
+                arguments,
+                ..
+            } => {
+                let is_safe_value_send = matches!(
+                    receiver.as_ref(),
+                    Expression::Identifier(id) if id.name == var_name
+                ) && matches!(
+                    selector.well_known(),
+                    Some(
+                        WellKnownSelector::Value
+                            | WellKnownSelector::ValueColon
+                            | WellKnownSelector::ValueValue
+                            | WellKnownSelector::ValueValueValue
+                    )
+                );
+                let (mut unsafe_, mut safe) = if is_safe_value_send {
+                    (false, true)
+                } else {
+                    Self::scan_var_uses(receiver, var_name)
+                };
+                for arg in arguments {
+                    let (u, s) = Self::scan_var_uses(arg, var_name);
+                    unsafe_ |= u;
+                    safe |= s;
+                }
+                (unsafe_, safe)
+            }
+            Expression::Block(block) => {
+                // Any reference to var_name inside a nested block literal is
+                // unsafe — see the safety invariant note on
+                // prescan_tier2_local_vars above (a nested block compiles
+                // through a completely different path with no Tier2-tuple
+                // unpacking and no tier2_local_vars reset of its own).
+                let (any_unsafe, any_safe) = block
+                    .body
+                    .iter()
+                    .map(|stmt| Self::scan_var_uses(&stmt.expression, var_name))
+                    .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2));
+                (any_unsafe || any_safe, false)
+            }
+            Expression::Assignment { target, value, .. } => {
+                let (u1, s1) = Self::scan_var_uses(target, var_name);
+                let (u2, s2) = Self::scan_var_uses(value, var_name);
+                (u1 || u2, s1 || s2)
+            }
+            Expression::DestructureAssignment { value, .. } | Expression::Return { value, .. } => {
+                Self::scan_var_uses(value, var_name)
+            }
+            Expression::Cascade {
+                receiver, messages, ..
+            } => {
+                let (mut unsafe_, mut safe) = Self::scan_var_uses(receiver, var_name);
+                for msg in messages {
+                    for arg in &msg.arguments {
+                        let (u, s) = Self::scan_var_uses(arg, var_name);
+                        unsafe_ |= u;
+                        safe |= s;
+                    }
+                }
+                (unsafe_, safe)
+            }
+            Expression::Parenthesized { expression, .. } => {
+                Self::scan_var_uses(expression, var_name)
+            }
+            Expression::Match { value, arms, .. } => {
+                let (mut unsafe_, mut safe) = Self::scan_var_uses(value, var_name);
+                for arm in arms {
+                    if let Some(guard) = &arm.guard {
+                        let (u, s) = Self::scan_var_uses(guard, var_name);
+                        unsafe_ |= u;
+                        safe |= s;
+                    }
+                    let (u, s) = Self::scan_var_uses(&arm.body, var_name);
+                    unsafe_ |= u;
+                    safe |= s;
+                }
+                (unsafe_, safe)
+            }
+            Expression::MapLiteral { pairs, .. } => pairs
+                .iter()
+                .map(|pair| {
+                    let (u1, s1) = Self::scan_var_uses(&pair.key, var_name);
+                    let (u2, s2) = Self::scan_var_uses(&pair.value, var_name);
+                    (u1 || u2, s1 || s2)
+                })
+                .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2)),
+            Expression::ListLiteral { elements, tail, .. } => {
+                let (mut unsafe_, mut safe) = elements
+                    .iter()
+                    .map(|e| Self::scan_var_uses(e, var_name))
+                    .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2));
+                if let Some(t) = tail {
+                    let (u, s) = Self::scan_var_uses(t, var_name);
+                    unsafe_ |= u;
+                    safe |= s;
+                }
+                (unsafe_, safe)
+            }
+            Expression::ArrayLiteral { elements, .. } => elements
+                .iter()
+                .map(|e| Self::scan_var_uses(e, var_name))
+                .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2)),
+            Expression::StringInterpolation { segments, .. } => segments
+                .iter()
+                .map(|seg| match seg {
+                    crate::ast::StringSegment::Interpolation(e) => Self::scan_var_uses(e, var_name),
+                    crate::ast::StringSegment::Literal(_) => (false, false),
+                })
+                .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2)),
+        }
+    }
+
     /// Classify a body expression for state-threading dispatch.
     ///
     /// The order of checks matters: more specific patterns (e.g. field assignment)
@@ -402,7 +628,27 @@ impl CoreErlangGenerator {
 
         // var := expr — sub-classify by RHS
         if Self::is_local_var_assignment(expr) {
-            if let Expression::Assignment { value, .. } = expr {
+            if let Expression::Assignment { target, value, .. } = expr {
+                // BT-2797: var := [block] where the block itself needs Tier 2 —
+                // stored for invocation later in this method (`blk value: x`),
+                // not invoked here. Must be classified before is_tier2_value_call
+                // (which detects the opposite shape: RHS *invoking* a Tier 2 block).
+                //
+                // Only takes this path if `tier2_local_vars` already proved (via
+                // `prescan_tier2_local_vars`, run before classification starts) that
+                // every later use of this variable in the method is a safe
+                // `value`/`value:`/etc. call. Otherwise the block may escape (be
+                // returned, passed elsewhere, reassigned) with no call site that
+                // knows to thread state through it — fall through to the plain
+                // `generate_block` path, which raises the compile-time
+                // `FieldAssignmentInUnsupportedBlock` diagnostic for that case.
+                if let (Expression::Identifier(id), Expression::Block(_)) =
+                    (target.as_ref(), value.as_ref())
+                {
+                    if self.tier2_local_vars.contains(id.name.as_str()) {
+                        return BodyExprKind::LocalAssignTier2Block;
+                    }
+                }
                 if self.is_tier2_value_call(value) {
                     return BodyExprKind::LocalAssignTier2;
                 }
@@ -479,6 +725,14 @@ impl CoreErlangGenerator {
             return Ok(docvec!["{'reply', Self, ", leaf::var(state), "}"]);
         }
 
+        // BT-2797: (Re-)populate tier2_local_vars for *this* body before
+        // classification reads it. Cleared here (not just in
+        // generate_method_dispatch) because generate_legacy_method_clause
+        // (top-level `name := [block]` workspace methods) calls into this
+        // function without clearing it first.
+        self.tier2_local_vars.clear();
+        self.prescan_tier2_local_vars(body);
+
         // Phase 1: classify every expression upfront.  Classification is
         // stateless w.r.t. codegen state (state_version, variable bindings),
         // so pre-computing is safe and separates "what" from "how".
@@ -519,7 +773,7 @@ impl CoreErlangGenerator {
                             ]);
                         }
                         BodyExprKind::Tier2ValueCall => {
-                            let expr_str = self.expression_doc(value)?;
+                            let expr_str = self.generate_tier2_value_call_doc(value)?;
                             docs.push(self.emit_tuple_unpack_reply("T2Tuple", expr_str));
                         }
                         BodyExprKind::DispatchingSelfSend => {
@@ -617,7 +871,7 @@ impl CoreErlangGenerator {
                             if let Expression::FieldAccess { field, .. } = target.as_ref() {
                                 let val_var = self.fresh_temp_var("Val");
                                 let current_state = self.current_state_var();
-                                let value_str = self.expression_doc(value)?;
+                                let value_str = self.generate_field_assignment_value_doc(value)?;
                                 let new_state = self.next_state_var();
                                 docs.push(docvec![
                                     "let ",
@@ -841,7 +1095,7 @@ impl CoreErlangGenerator {
                                 .lookup_var(var_name)
                                 .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
                             let tuple_var = self.fresh_temp_var("T2Tuple");
-                            let value_str = self.expression_doc(value)?;
+                            let value_str = self.generate_tier2_value_call_doc(value)?;
                             self.bind_var(var_name, &core_var);
                             let new_state = self.next_state_var();
                             docs.push(docvec![
@@ -916,6 +1170,38 @@ impl CoreErlangGenerator {
                         self.emit_pure_reply(&mut docs);
                     }
                 }
+                // BT-2797: var := [block needing Tier 2], where prescan_tier2_local_vars
+                // already proved every later use of `var` in this body is a safe
+                // `value`/`value:`/etc. call. Generate the block via
+                // generate_block_stateful directly (bypassing generate_block's
+                // "unsupported block" rejection, which is only needed when the
+                // compiler can't prove the later invocation site is safe).
+                BodyExprKind::LocalAssignTier2Block => {
+                    if let Expression::Assignment { target, value, .. } = expr {
+                        if let (Expression::Identifier(id), Expression::Block(block)) =
+                            (target.as_ref(), value.as_ref())
+                        {
+                            let var_name = &id.name;
+                            let core_var = self
+                                .lookup_var(var_name)
+                                .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+                            let captured_mutations = Self::captured_mutations_for_block(block);
+                            let value_str =
+                                self.generate_block_stateful(block, &captured_mutations)?;
+                            self.bind_var(var_name, &core_var);
+                            docs.push(docvec![
+                                "let ",
+                                leaf::var(core_var),
+                                " = ",
+                                value_str,
+                                " in ",
+                            ]);
+                        }
+                    }
+                    if is_last {
+                        self.emit_pure_reply(&mut docs);
+                    }
+                }
                 BodyExprKind::LocalAssignPure => {
                     if let Expression::Assignment { target, value, .. } = expr {
                         if let Expression::Identifier(id) = target.as_ref() {
@@ -977,12 +1263,12 @@ impl CoreErlangGenerator {
                 }
                 BodyExprKind::Tier2ValueCall => {
                     if is_last {
-                        let expr_str = self.expression_doc(expr)?;
+                        let expr_str = self.generate_tier2_value_call_doc(expr)?;
                         docs.push(self.emit_tuple_unpack_reply("T2Tuple", expr_str));
                     } else {
                         let tuple_var = self.fresh_temp_var("T2Tuple");
                         let discard_var = self.fresh_temp_var("T2Discard");
-                        let expr_str = self.expression_doc(expr)?;
+                        let expr_str = self.generate_tier2_value_call_doc(expr)?;
                         let new_state = self.next_state_var();
                         let mut doc_parts: Vec<Document<'static>> = vec![docvec![
                             "let ",
@@ -3053,10 +3339,25 @@ impl CoreErlangGenerator {
             };
             if is_value_selector {
                 // BT-851: Tier 2 block parameter (variable holding a stateful block)
+                // BT-2797: or a local variable this method itself assigned a Tier 2
+                // block literal to earlier in its own body (tier2_local_vars).
                 if let Expression::Identifier(id) = receiver.as_ref() {
-                    if self.tier2_block_params.contains(id.name.as_str()) {
+                    if self.tier2_block_params.contains(id.name.as_str())
+                        || self.tier2_local_vars.contains(id.name.as_str())
+                    {
                         return true;
                     }
+                }
+                // BT-2797: `self.field value(:...)` — the field may hold a Tier 2
+                // block assigned from a different method than this call site, so
+                // it needs the runtime is_function/2 discrimination generated by
+                // generate_block_value_call_runtime_discriminated, which always
+                // returns a {Result, NewState} tuple that this call site must
+                // unpack (same as the statically-known-Tier-2 cases above).
+                if self.context == super::super::CodeGenContext::Actor
+                    && Self::is_self_field_access(receiver)
+                {
+                    return true;
                 }
                 // BT-1213: Inline block literal with captured mutations
                 // (e.g. [errors := errors add: #foo] value)
@@ -3081,8 +3382,64 @@ impl CoreErlangGenerator {
     }
 
     // BT-1213: Delegates to the shared implementation in expressions.rs.
-    fn get_inline_block_captured_mutations(expr: &Expression) -> Option<Vec<String>> {
+    //
+    // BT-2797 (PR #2899 review fix): widened from private to
+    // `pub(in crate::codegen::core_erlang)` so `control_flow/conditionals.rs`
+    // can rebind captured local-var mutations for a bare `Tier2ValueCall`
+    // statement inside a conditional branch, mirroring this file's own
+    // `Tier2ValueCall` handling.
+    pub(in crate::codegen::core_erlang) fn get_inline_block_captured_mutations(
+        expr: &Expression,
+    ) -> Option<Vec<String>> {
         Self::inline_block_captured_mutations(expr)
+    }
+
+    /// BT-2797 (PR #2899 review fix): generates the `Document` for an
+    /// expression already classified as `BodyExprKind::Tier2ValueCall` or the
+    /// RHS of `BodyExprKind::LocalAssignTier2` — i.e. a `value`/`value:`/etc.
+    /// send that `is_tier2_value_call` proved needs Tier 2 tuple-unpacking
+    /// treatment.
+    ///
+    /// When the receiver is a `self.field` access, this calls
+    /// `generate_block_value_call_runtime_discriminated` directly instead of
+    /// going through the generic `expression_doc` dispatch. That function is
+    /// deliberately NOT reachable from `expression_doc` (see the matching
+    /// comment on it and in `intrinsics.rs`'s `try_generate_block_value_unary`/
+    /// `try_generate_block_value_keyword`): every call site of *this* helper
+    /// unpacks the `{Result, NewState}` tuple it returns, but an arbitrary
+    /// sub-expression reached via plain `expression_doc` would not, silently
+    /// handing the raw tuple to code expecting a plain value.
+    ///
+    /// For every other `Tier2ValueCall` shape (a `tier2_block_params`/
+    /// `tier2_local_vars` identifier receiver, or an inline literal block with
+    /// captured/field mutations), falls through to `expression_doc`, which
+    /// already handles those correctly.
+    ///
+    /// Also called from `control_flow/mod.rs`'s
+    /// `generate_local_var_assignment_in_loop` (the `is_tier2_value_call`
+    /// branch there — BT-912) for the same reason: it unpacks a
+    /// `{Result, NewState}` tuple, so it must reach the same
+    /// runtime-discriminated codegen for a `self.field` receiver.
+    pub(in crate::codegen::core_erlang) fn generate_tier2_value_call_doc(
+        &mut self,
+        expr: &Expression,
+    ) -> Result<Document<'static>> {
+        if let Expression::MessageSend {
+            receiver,
+            selector,
+            arguments,
+            ..
+        } = expr
+        {
+            if self.context == CodeGenContext::Actor && Self::is_self_field_access(receiver) {
+                return self.generate_block_value_call_runtime_discriminated(
+                    receiver,
+                    arguments,
+                    &selector.name(),
+                );
+            }
+        }
+        self.expression_doc(expr)
     }
 
     /// Checks if a control flow expression actually threads state through mutations.

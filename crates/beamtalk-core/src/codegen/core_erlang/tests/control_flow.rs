@@ -1113,18 +1113,27 @@ fn test_block_returned_from_method_with_field_mutation_is_compile_error() {
 }
 
 #[test]
-fn test_block_with_mixed_local_and_field_mutation_is_compile_error() {
+fn test_block_with_mixed_local_and_field_mutation_stored_then_invoked_compiles() {
     // BT-2792 (PR review follow-up): a block with BOTH a captured-local
     // mutation and a field write — e.g. `[:x | outerCount := outerCount + x.
     // self.total := self.total + outerCount]` stored in a var and invoked
     // later — used to bypass the field-write check entirely: captured_mutations
     // is non-empty (from `outerCount`), so generate_block routed straight to
     // Tier 2 for the local mutation, never reaching validate_stored_closure.
-    // That produced Core Erlang that *compiles* (passes erlc) but crashes at
+    // That produced Core Erlang that *compiled* (passed erlc) but crashed at
     // runtime: the resulting block is a 2-arity stateful fun (params + State),
-    // but generate_block_value_call and friends call it with only its declared
-    // params (no State argument) — `badarity`. The field check must fire
-    // before the Tier 2 promotion, not after.
+    // but generate_block_value_call and friends called it with only its
+    // declared params (no State argument) — `badarity`. BT-2792 closed that
+    // gap by making it a compile-time error instead.
+    //
+    // BT-2797 replaces the compile-time error with a real fix for exactly
+    // this shape: `blk`'s only use in the rest of the method is the `value:`
+    // call below, which `prescan_tier2_local_vars` proves is safe (BT-2797),
+    // so the block is now compiled via `generate_block_stateful` and invoked
+    // through the Tier 2 calling convention (`apply Fun(Args, State)`,
+    // unpacking the `{Result, NewState}` tuple) — see
+    // `test_bt2797_same_method_tier2_local_var_threads_state_correctly` below
+    // for a check of the generated Core Erlang shape itself.
     //
     // `outerCount := outerCount + x` is deliberately the block's first use of
     // `outerCount`: block_analysis classifies a name as a *captured* mutation
@@ -1146,12 +1155,325 @@ fn test_block_with_mixed_local_and_field_mutation_is_compile_error() {
         crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
     );
     assert!(
+        result.is_ok(),
+        "A block with both a local and a field mutation, stored then invoked \
+         via `value:` later in the same method, must compile now that the \
+         compiler can prove the call site threads state correctly (BT-2797). \
+         Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_bt2797_same_method_tier2_local_var_threads_state_correctly() {
+    // BT-2797: verifies the *shape* of the generated Core Erlang for the
+    // scenario above, not just that codegen returns Ok(..). `blk` must be a
+    // 2-arity fun taking a trailing state accumulator and returning a
+    // `{Result, NewState}` tuple, and the call site must `apply` it with the
+    // outer method's State and unpack the tuple — not naively `apply Fun
+    // (Arg)` (which would compile but badarity-crash at runtime).
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: item =>\n    blk := [:x | outerCount := outerCount + x. self.total := self.total + outerCount]\n    outerCount := 0\n    blk value: item\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let code = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    )
+    .expect("should compile (BT-2797)");
+
+    // Structural checks (not hardcoded fresh-variable counter values, which
+    // shift whenever unrelated codegen changes the counter sequence before
+    // this point).
+    assert!(
+        regex::Regex::new(r"let Blk = fun \(_\w+, StateAcc\) ->")
+            .unwrap()
+            .is_match(&code),
+        "blk must compile to a 2-arity Tier 2 fun (block param + trailing \
+         state accumulator). Got: {code}"
+    );
+    assert!(
+        regex::Regex::new(r"apply _Fun\w* \(_item\w*, State\)")
+            .unwrap()
+            .is_match(&code),
+        "the `blk value: item` call site must apply the block with the \
+         outer method's State as a trailing argument. Got: {code}"
+    );
+    assert!(
+        regex::Regex::new(r"call 'erlang':'element'\(1, _T2Tuple\w*\)")
+            .unwrap()
+            .is_match(&code)
+            && regex::Regex::new(r"call 'erlang':'element'\(2, _T2Tuple\w*\)")
+                .unwrap()
+                .is_match(&code),
+        "the call site must unpack the returned {{Result, NewState}} tuple \
+         rather than treating the raw apply result as the method's return \
+         value. Got: {code}"
+    );
+}
+
+#[test]
+fn test_bt2797_local_tier2_block_never_invoked_again_is_still_compile_error() {
+    // BT-2797 regression guard: `blk := [block needing Tier 2]` where `blk` is
+    // never referenced again in the rest of the method — here because the
+    // assignment is the method's *last* statement, so the raw Tier 2 fun value
+    // implicitly escapes as the method's own return value. `prescan_tier2_local_vars`
+    // must NOT promote this: an early, buggy version of the safety check asked
+    // "is there no *unsafe* use of blk afterward?", which is vacuously true
+    // when there's no use at all (`[].iter().all(...)` on an empty slice), so
+    // it wrongly promoted variables that are simply never used again. The fix
+    // requires proof of at least one *safe* use, not just the absence of an
+    // unsafe one. This must keep hitting the compile-time diagnostic instead of
+    // producing Core Erlang that returns a raw 2-arity fun to a caller with no
+    // idea it needs to thread state through it.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: item =>\n    blk := [:x | self.total := self.total + x]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    );
+    assert!(
         matches!(
             result,
             Err(CodeGenError::FieldAssignmentInUnsupportedBlock { .. })
         ),
-        "A block with both a local and a field mutation, reaching the opaque \
-         call-site fallback, must be a compile-time error — not code that \
-         compiles but crashes with badarity at runtime. Got: {result:?}"
+        "A Tier 2 block stored in a local var and never invoked again (so it \
+         escapes as the method's implicit return value) must remain a \
+         compile-time error. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_bt2797_local_tier2_block_invoked_inside_nested_do_block_is_still_compile_error() {
+    // BT-2797 regression guard (PR review follow-up): `blk value: item` found
+    // only *inside* a nested block literal (here, the `do:` iteration block)
+    // must NOT be treated as a safe use, even though it looks identical to a
+    // safe top-level `value:` call. A nested block compiles through a
+    // completely separate path (`generate_block_body_slice`/`BlockExprKind`,
+    // not `generate_body_exprs_with_reply`/`BodyExprKind`) that has no
+    // Tier2-tuple-unpacking logic and never resets `tier2_local_vars` for its
+    // own body — so wrongly promoting `blk` here would either leak an
+    // unpacked `{Result, NewState}` tuple as the inner block's return value,
+    // or badarity-crash calling a 2-arity Tier 2 fun with 1 argument.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    blk := [:x | self.total := self.total + x]\n    items do: [:item | blk value: item]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(CodeGenError::FieldAssignmentInUnsupportedBlock { .. })
+        ),
+        "A Tier 2 local block invoked only from inside a nested `do:` block \
+         must remain a compile-time error, not silently-broken Core Erlang. \
+         Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_bt2797_local_tier2_block_invoked_inside_nested_if_true_block_is_still_compile_error() {
+    // BT-2797 regression guard (PR review follow-up): same as the `do:` case
+    // above, but for a `ifTrue:` control-flow block — the other concrete
+    // trigger the reviewer flagged.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: n =>\n    blk := [:x | self.total := self.total + x]\n    n > 0 ifTrue: [blk value: n]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(CodeGenError::FieldAssignmentInUnsupportedBlock { .. })
+        ),
+        "A Tier 2 local block invoked only from inside a nested `ifTrue:` \
+         block must remain a compile-time error, not a silent state-mutation \
+         loss at runtime. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_bt2797_field_stored_block_invoked_from_different_method_threads_state_correctly() {
+    // BT-2797: the main real-world motivator — a block with field mutations,
+    // assigned to an instance field in one method (`setup`) and invoked via
+    // `value:` from a *different* method (`tick:`). Static per-method tracking
+    // (tier2_block_params / tier2_local_vars) can't see across methods, so this
+    // relies on:
+    // 1. `generate_field_assignment_value_doc` (dispatch_codegen.rs) promoting
+    //    the stored block to Tier 2 unconditionally (safe because every
+    //    `self.field value(:...)` call site now runtime-discriminates), and
+    // 2. `generate_block_value_call_runtime_discriminated` (intrinsics.rs)
+    //    checking the field's *runtime* arity (`is_function/2`) at the call
+    //    site to decide whether to thread state — the BT-909 precedent
+    //    generalized from Erlang FFI interop to Beamtalk-level block calls.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n  state: onTick = nil\n\n  setup =>\n    self.onTick := [:x | self.total := self.total + x]\n\n  tick: x =>\n    self.onTick value: x\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let code = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    )
+    .expect("should compile (BT-2797)");
+
+    // Structural checks (not hardcoded fresh-variable counter values).
+    assert!(
+        regex::Regex::new(r"fun \(_\w+, StateAcc\) ->")
+            .unwrap()
+            .is_match(&code)
+            && code.contains("'maps':'put'('onTick',"),
+        "setup must store a 2-arity Tier 2 fun (block param + trailing state \
+         accumulator) into the onTick field. Got: {code}"
+    );
+    assert!(
+        code.contains("'maps':'get'('onTick', State)"),
+        "tick: must read the block back out of the onTick field. Got: {code}"
+    );
+    // The Tier 1 and Tier 2 arity checks, and the Tier 2 apply, must all
+    // reference the *same* captured block variable — tie them together via
+    // the name captured from the arity-1 check rather than three independent
+    // (and therefore looser) pattern matches.
+    let arity_check_re = regex::Regex::new(r"is_function'\((_Fun\w*), 1\)").unwrap();
+    let fun_var = &arity_check_re.captures(&code).unwrap_or_else(|| {
+        panic!(
+            "tick: must runtime-discriminate Tier 1 (arity 1: just the block \
+                 param) before applying. Got: {code}"
+        )
+    })[1];
+    assert!(
+        code.contains(&format!("is_function'({fun_var}, 2)")),
+        "tick: must also check Tier 2 arity (block param + state) for the \
+         same block variable ({fun_var}). Got: {code}"
+    );
+    assert!(
+        regex::Regex::new(&format!(r"apply {fun_var} \(_\w+, State\)"))
+            .unwrap()
+            .is_match(&code),
+        "the Tier 2 branch must apply the field's block ({fun_var}) with the \
+         calling method's State as a trailing argument. Got: {code}"
+    );
+}
+
+#[test]
+fn test_bt2797_field_stored_block_with_captured_local_and_field_write_is_still_compile_error() {
+    // BT-2797 (PR #2899 review fix): a block stored in a field that mutates
+    // BOTH a captured outer local AND a field must still be rejected at
+    // compile time, not silently promoted to Tier 2 like the field-writes-only
+    // case. `generate_block_stateful`'s captured-local handling reads a
+    // `'__local__<var>'` key from the *calling* method's StateAcc, falling
+    // back to the value closed over at block-definition time when absent —
+    // correct only when the block is invoked from the same method it was
+    // defined in. A field-stored block can be invoked from a *different*
+    // method (that's the entire point of BT-2797), so that fallback would
+    // silently return a stale value forever, and the key would then leak
+    // into the actor's persistent state once the returned NewState is merged
+    // back in. This combination was a compile-time error before BT-2797 and
+    // must remain one.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n  state: callback = nil\n\n  setup =>\n    count := 0\n    self.callback := [:n | count := count + n. self.total := self.total + count]\n\n  process: n =>\n    self.callback value: n\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(CodeGenError::FieldAssignmentInUnsupportedBlock { .. })
+        ),
+        "a block stored in a field that also captures and mutates an outer \
+         local must still be rejected at compile time — promoting it would \
+         leak a '__local__<var>' state key into the actor's persistent state \
+         and read a stale definition-time fallback value when invoked from a \
+         different method than the one that stored it. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_bt2797_nonliteral_field_mutating_block_passed_to_self_send_is_compile_error() {
+    // BT-2797 (verification, acceptance criterion 5): a field-mutating block
+    // held in a local var and passed as a *non-literal* argument to a
+    // self-send — `self applyBlock: blk to: x`, where `blk` was assigned
+    // separately — is a case `scan_class_for_tier2_blocks`
+    // (dispatch_codegen.rs) can't see: it only recognizes a *literal* block
+    // at the call site to promote the callee's parameter into
+    // `tier2_method_info`/`tier2_block_params`. If this compiled anyway with
+    // `aBlock value: x` inside `applyBlock:to:` naively applying with no
+    // state, it would badarity-crash at runtime whenever `blk` is actually a
+    // Tier 2 fun.
+    //
+    // Confirms this is instead a compile-time error: `prescan_tier2_local_vars`
+    // only promotes `blk` when every later use is a *safe* value/value: call —
+    // here `blk` is passed as an *argument* to `applyBlock:to:`, not a value:
+    // receiver, so prescan correctly leaves it unpromoted and it falls through
+    // to `generate_block`'s existing `FieldAssignmentInUnsupportedBlock` gate
+    // (BT-2792) — a safe compile-time failure, not a silent runtime crash.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  applyBlock: aBlock to: x =>\n    aBlock value: x\n\n  run: x =>\n    blk := [:y | self.total := self.total + y]\n    self applyBlock: blk to: x\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(CodeGenError::FieldAssignmentInUnsupportedBlock { .. })
+        ),
+        "A field-mutating block passed as a non-literal argument to a \
+         self-send must be a compile-time error, not code that compiles but \
+         risks badarity at runtime. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_bt2797_no_regression_pure_block_value_fast_path() {
+    // BT-2797 (acceptance criterion 7): the zero-cost fast path for a pure
+    // (non-mutating) block literal immediately invoked via `value`/`value:`
+    // must be untouched — no `is_function` runtime check, no state-threading
+    // overhead. BT-2797's new runtime-discrimination codegen
+    // (generate_block_value_call_runtime_discriminated) is deliberately
+    // scoped to `self.field value(:...)` receivers only (see
+    // try_generate_block_value_unary/keyword in intrinsics.rs) — a literal
+    // block receiver is intercepted earlier and takes the plain
+    // generate_block_value_call path regardless.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run =>\n    [42] value\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let code = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    )
+    .expect("should compile");
+
+    assert!(
+        !code.contains("is_function"),
+        "A pure block literal invoked via `value` must not emit any \
+         is_function runtime check. Got: {code}"
+    );
+}
+
+#[test]
+fn test_bt2797_no_regression_pure_local_var_block_value_fast_path() {
+    // BT-2797: a block held in a local var (not a field) that has NO captured
+    // or field mutations must also stay on the pre-existing plain
+    // `is_function` guard (generate_value_keyword_guard, unaffected by
+    // BT-2797) — never the new self.field-scoped runtime-discrimination path,
+    // and never the Tier 2 stateful protocol.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: item =>\n    blk := [:x | x + 1]\n    blk value: item\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let code = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    )
+    .expect("should compile");
+
+    assert!(
+        !code.contains("StateAcc"),
+        "A pure block stored in a local var must not be promoted to the \
+         Tier 2 stateful protocol. Got: {code}"
     );
 }

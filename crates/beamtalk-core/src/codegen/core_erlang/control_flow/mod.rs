@@ -2985,7 +2985,7 @@ impl CoreErlangGenerator {
                 if self.is_tier2_value_call(value) {
                     let t2_tuple = self.fresh_temp_var("T2");
                     let t2_state = self.fresh_temp_var("T2St");
-                    let value_code = self.expression_doc(value)?;
+                    let value_code = self.generate_tier2_value_call_doc(value)?;
 
                     let _ = self.next_state_var();
                     let new_state = if self.in_loop_body {

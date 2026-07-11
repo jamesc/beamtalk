@@ -902,6 +902,59 @@ fn test_field_assignment_in_passed_block_no_error() {
 }
 
 #[test]
+fn test_field_assignment_in_field_stored_block_no_error() {
+    // BT-2797: self.onTick := [:x | self.sum := 0] must NOT emit the
+    // stored-closure field error, unlike a *local* var (see
+    // test_field_assignment_in_stored_block_emits_error above, which is
+    // unaffected — this test is specifically about `self.field := [block]`).
+    // Every `self.field value(:...)` call site now runtime-discriminates
+    // Tier 1 vs Tier 2, so a block stored into a field is unconditionally
+    // safe regardless of which method later invokes it.
+    let field_assignment = Expression::Assignment {
+        target: Box::new(Expression::FieldAccess {
+            receiver: Box::new(Expression::Identifier(Identifier::new("self", test_span()))),
+            field: Identifier::new("sum", test_span()),
+            span: test_span(),
+        }),
+        value: Box::new(Expression::Literal(Literal::Integer(0), test_span())),
+        type_annotation: None,
+        span: test_span(),
+    };
+
+    let block = Expression::Block(crate::ast::Block {
+        parameters: vec![crate::ast::BlockParameter::new("x", test_span())],
+        body: vec![bare(field_assignment)],
+        span: test_span(),
+    });
+
+    // self.onTick := [:x | self.sum := 0] — block stored into a field.
+    let assignment = Expression::Assignment {
+        target: Box::new(Expression::FieldAccess {
+            receiver: Box::new(Expression::Identifier(Identifier::new("self", test_span()))),
+            field: Identifier::new("onTick", test_span()),
+            span: test_span(),
+        }),
+        value: Box::new(block),
+        type_annotation: None,
+        span: test_span(),
+    };
+
+    let module = Module::new(vec![bare(assignment)], test_span());
+    let result = analyse(&module);
+
+    let has_field_error = result
+        .diagnostics
+        .iter()
+        .any(|d| d.message.contains("cannot assign to field 'sum'"));
+    assert!(
+        !has_field_error,
+        "Should not have field-in-stored-block error for a block stored into \
+         a field (BT-2797), got: {:?}",
+        result.diagnostics
+    );
+}
+
+#[test]
 fn test_captured_variable_mutation_in_stored_block_no_warning() {
     // BT-856 (ADR 0041 Phase 3): Captured variable mutations in stored blocks are
     // now valid and supported via the Tier 2 stateful block protocol (BT-852).

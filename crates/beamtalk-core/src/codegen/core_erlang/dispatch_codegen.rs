@@ -1707,6 +1707,21 @@ impl CoreErlangGenerator {
         false
     }
 
+    /// BT-2797: Checks if an expression is a self-field access (`self.field`).
+    ///
+    /// Used to scope the runtime Tier 1/Tier 2 discrimination for block value
+    /// calls (`self.field value: ...`) to exactly the shape that needs it — a
+    /// block stored in an instance field, whose Tier-ness can't be known
+    /// statically since it may have been assigned from a different method.
+    pub(super) fn is_self_field_access(expr: &Expression) -> bool {
+        if let Expression::FieldAccess { receiver, .. } = expr {
+            if let Expression::Identifier(recv_id) = receiver.as_ref() {
+                return recv_id.name == "self";
+            }
+        }
+        false
+    }
+
     /// Checks if an expression is a class variable assignment (`self.classVar := value`).
     pub(super) fn is_class_var_assignment(&self, expr: &Expression) -> bool {
         if !self.in_class_method() {
@@ -1895,6 +1910,53 @@ impl CoreErlangGenerator {
         false
     }
 
+    /// BT-2797: Generates the RHS `Document` for a `self.field := value`
+    /// assignment, special-casing a block literal with field writes (and no
+    /// captured-local mutations): it's generated via `generate_block_stateful`
+    /// directly, bypassing `generate_block`'s "unsupported block" rejection.
+    ///
+    /// This is safe unconditionally for the field-writes-only case — no
+    /// same-method-only safety analysis is needed here, unlike the local-var
+    /// case in `gen_server/methods.rs`'s `prescan_tier2_local_vars` — because
+    /// every `self.field value(:...)` call site now runtime-discriminates
+    /// Tier 1 vs Tier 2 (`generate_block_value_call_runtime_discriminated`,
+    /// `intrinsics.rs`), regardless of which method performs the call. The
+    /// residual gap — reading the field into a local var and invoking *that*
+    /// — is the same pre-existing class of gap as any other block value
+    /// flowing through an untracked opaque channel.
+    ///
+    /// BT-2797 (PR #2899 review fix): a block that *also* captures and
+    /// mutates an outer local (in addition to writing a field) is NOT safe
+    /// here and must fall through to `expression_doc` → `generate_block` →
+    /// `validate_stored_closure`/the block-analyzer diagnostic instead.
+    /// `generate_block_stateful` reads a captured local's
+    /// `'__local__<var>'` key from the calling method's `StateAcc`, falling
+    /// back to the value closed over at block-*definition* time when that
+    /// key is absent. A field-stored block can be invoked from a different
+    /// method than the one that stored it, so that fallback fires forever
+    /// (stale definition-time value) and, once the returned state is merged
+    /// back into the actor's persistent state, the `'__local__<var>'` key
+    /// leaks into it permanently. See the matching fix in
+    /// `semantic_analysis/block_analyzer.rs`.
+    ///
+    /// Scoped to `Actor` context only, matching the call-site fix: `ValueType`
+    /// field-write Tier 2 support has not been verified safe.
+    pub(super) fn generate_field_assignment_value_doc(
+        &mut self,
+        value: &Expression,
+    ) -> Result<Document<'static>> {
+        if self.context == CodeGenContext::Actor {
+            if let Expression::Block(block) = value {
+                let captured_mutations = Self::captured_mutations_for_block(block);
+                let field_writes = super::block_analysis::analyze_block(block).field_writes;
+                if captured_mutations.is_empty() && !field_writes.is_empty() {
+                    return self.generate_block_stateful(block, &[]);
+                }
+            }
+        }
+        self.expression_doc(value)
+    }
+
     /// Generates the opening part of a field assignment with state threading.
     ///
     /// For `self.field := value`, generates:
@@ -1946,7 +2008,7 @@ impl CoreErlangGenerator {
 
                 let val_var = self.fresh_temp_var("Val");
                 let current_state = self.current_state_var();
-                let val_doc = self.expression_doc(value)?;
+                let val_doc = self.generate_field_assignment_value_doc(value)?;
 
                 let new_state = self.next_state_var();
 

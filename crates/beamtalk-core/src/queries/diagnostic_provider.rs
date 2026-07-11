@@ -584,6 +584,30 @@ mod tests {
     }
 
     #[test]
+    fn compute_diagnostics_no_error_for_field_assignment_in_field_stored_block() {
+        // BT-2797: self.onTick := [:x | self.sum := 0] must NOT emit the
+        // stored-closure field error — unlike the local-var case above
+        // (compute_diagnostics_emits_error_for_field_assignment_in_stored_block,
+        // still unaffected), a block stored into a *field* is unconditionally
+        // safe: every self.field value(:...) call site now runtime-discriminates
+        // Tier 1 vs Tier 2, regardless of which method later invokes it.
+        let source = "self.onTick := [:x | self.sum := 0]";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+
+        let diagnostics = compute_diagnostics(&module, parse_diags);
+
+        let has_field_error = diagnostics.iter().any(|d| {
+            d.message.contains("cannot assign to field") && d.message.contains("stored closure")
+        });
+        assert!(
+            !has_field_error,
+            "Should not have field-in-stored-block error for a block stored \
+             into a field (BT-2797), got: {diagnostics:?}"
+        );
+    }
+
+    #[test]
     fn compute_diagnostics_no_warning_for_captured_variable_mutation_in_stored_block() {
         // BT-856 (ADR 0041 Phase 3): Captured variable mutations in stored blocks are
         // now supported via the Tier 2 stateful block protocol (BT-852). No warning needed.

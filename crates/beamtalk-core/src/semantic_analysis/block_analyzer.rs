@@ -30,7 +30,7 @@ impl Analyser {
         let context = match parent_context {
             Some(ExprContext::ControlFlowArg) => BlockContext::ControlFlow,
             Some(ExprContext::MessageArg) => BlockContext::Passed,
-            Some(ExprContext::Assignment) => BlockContext::Stored,
+            Some(ExprContext::Assignment | ExprContext::FieldAssignment) => BlockContext::Stored,
             None => BlockContext::Unknown,
         };
 
@@ -69,10 +69,41 @@ impl Analyser {
                     // Tier 2 state threading — the actor State IS the StateAcc, so
                     // field reads/writes inside the block propagate back to the caller.
                     //
-                    // Error: Field assignment in Stored blocks remains unsupported because
-                    // the compiler cannot track the Tier 2 type of a block stored in a
-                    // variable (see BT-909 for future tracking of block variable types).
-                    if matches!(context, BlockContext::Stored) {
+                    // BT-2797: Field assignments in blocks stored into an instance
+                    // field (`self.field := [block]`) are also now supported —
+                    // every `self.field value(:...)` call site runtime-discriminates
+                    // Tier 1 vs Tier 2 (generalizing the BT-909 is_function/2
+                    // precedent from Erlang FFI interop to Beamtalk-level block
+                    // calls), regardless of which method performs the call.
+                    //
+                    // Error: Field assignment in blocks stored into a *local
+                    // variable* remains flagged here — codegen's
+                    // `prescan_tier2_local_vars` can prove per-method that a
+                    // specific local's later uses are safe, but this pass has no
+                    // equivalent whole-body lookahead, so it stays conservative.
+                    //
+                    // BT-2797 (PR #2899 review fix): the field-stored exemption
+                    // is only safe when the block does NOT also capture and
+                    // mutate an outer local. `generate_block_stateful` reads a
+                    // captured local's `'__local__<var>'` key from the calling
+                    // method's `StateAcc` with a fallback to the value closed
+                    // over at block-*definition* time — correct for a block
+                    // invoked from the same method (BT-856), but wrong here: a
+                    // field-stored block can be invoked from a *different*
+                    // method whose `StateAcc` never had that key seeded, so the
+                    // fallback silently returns the stale definition-time value
+                    // forever, and the key then leaks into the actor's
+                    // persistent gen_server state once the call site merges the
+                    // returned `NewState` back in. Keep flagging the mixed case
+                    // so it still hits the same compile-time diagnostic as a
+                    // captured-local-only stored block.
+                    let has_captured_local_mutations = mutations
+                        .iter()
+                        .any(|m| matches!(m.kind, MutationKind::CapturedVariable { .. }));
+                    let is_field_stored =
+                        matches!(parent_context, Some(ExprContext::FieldAssignment))
+                            && !has_captured_local_mutations;
+                    if matches!(context, BlockContext::Stored) && !is_field_stored {
                         self.result.diagnostics.push(Diagnostic::error(
                             format!(
                                 "cannot assign to field '{name}' inside a stored closure\n\
