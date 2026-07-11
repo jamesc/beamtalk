@@ -1164,12 +1164,8 @@ impl CoreErlangGenerator {
 
         let recv_var =
             self.hoist_open_scope_receiver(receiver, "ValRecv", &mut parts, &mut any_open_scope)?;
-        let args_var = self.hoist_open_scope_argument(
-            args_expr,
-            "ValArgs",
-            &mut parts,
-            &mut any_open_scope,
-        )?;
+        let args_var =
+            self.hoist_open_scope_argument(args_expr, "ValArgs", &mut parts, &mut any_open_scope)?;
 
         let case_doc = docvec![
             "case call 'erlang':'is_function'(",
