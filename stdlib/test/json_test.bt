@@ -97,6 +97,47 @@ TestCase subclass: JsonTest
       "a" => 1
     })) unwrap at: "a") equals: 1
 
+  // =========================================================================
+  // asJson HOOK (BT-2818)
+  // Fixtures: json_user.bt (JsonUser), json_team.bt (JsonTeam)
+  // =========================================================================
+
+  testGenerateDispatchesAsJson =>
+    // A Value class implementing asJson controls its own JSON shape
+    u := JsonUser fullName: "Ada Lovelace" age: 36
+    parsed := (Json parse: (Json generate: u)) unwrap
+    self assert: (parsed at: "full_name") equals: "Ada Lovelace"
+    self assert: (parsed at: "age") equals: 36
+
+  testGenerateAsJsonInsideCollections =>
+    // asJson objects nested in Lists and Dictionaries convert recursively
+    u := JsonUser fullName: "Ada" age: 36
+    fromList := (Json parse: (Json generate: #(u))) unwrap
+    self assert: ((fromList at: 1) at: "full_name") equals: "Ada"
+    fromDict := (Json parse: (Json generate: #{"author" => u})) unwrap
+    self assert: ((fromDict at: "author") at: "age") equals: 36
+
+  testGenerateAsJsonRecursesIntoResult =>
+    // An asJson result containing another asJson object converts recursively
+    team := JsonTeam teamName: "Analytical Engines" lead: (JsonUser fullName: "Ada" age: 36)
+    parsed := (Json parse: (Json generate: team)) unwrap
+    self assert: (parsed at: "team_name") equals: "Analytical Engines"
+    self assert: ((parsed at: "lead") at: "full_name") equals: "Ada"
+
+  testPrettyPrintDispatchesAsJson =>
+    // prettyPrint: shares the asJson hook with generate:
+    u := JsonUser fullName: "Ada" age: 36
+    parsed := (Json parse: (Json prettyPrint: u)) unwrap
+    self assert: (parsed at: "full_name") equals: "Ada"
+
+  testGenerateValueWithoutAsJsonKeepsFieldEncoding =>
+    // Legacy behaviour: a Value class with no asJson still encodes its
+    // fields directly as a JSON object (tag stripped)
+    p := ValuePoint x: 3 y: 4
+    parsed := (Json parse: (Json generate: p)) unwrap
+    self assert: (parsed at: "x") equals: 3
+    self assert: (parsed at: "y") equals: 4
+
   testErrorHandling =>
     // Parse invalid JSON returns a Result error with parse_error kind
     result := Json parse: "not json"

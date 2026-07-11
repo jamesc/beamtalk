@@ -182,6 +182,57 @@ generate_unsupported_type_test() ->
     ).
 
 %%% ============================================================================
+%%% generate:/1 — asJson hook (BT-2818)
+%%%
+%%% 'bt@json_hook_fixture' stands in for a compiled Value class named
+%%% 'JsonHookFixture' whose instances implement asJson.
+%%% ============================================================================
+
+generate_as_json_hook_test() ->
+    Result = beamtalk_json:'generate:'('bt@json_hook_fixture':new(plain)),
+    Decoded = json:decode(Result),
+    ?assertEqual(<<"fixture">>, maps:get(<<"kind">>, Decoded)),
+    ?assertEqual(true, maps:get(<<"ok">>, Decoded)).
+
+generate_as_json_hook_in_list_test() ->
+    Result = beamtalk_json:'generate:'([1, 'bt@json_hook_fixture':new(plain)]),
+    [1, Decoded] = json:decode(Result),
+    ?assertEqual(<<"fixture">>, maps:get(<<"kind">>, Decoded)).
+
+generate_as_json_hook_in_map_value_test() ->
+    Result = beamtalk_json:'generate:'(#{<<"item">> => 'bt@json_hook_fixture':new(plain)}),
+    Decoded = json:decode(Result),
+    ?assertEqual(<<"fixture">>, maps:get(<<"kind">>, maps:get(<<"item">>, Decoded))).
+
+generate_as_json_hook_recursive_test() ->
+    %% The hook's own result contains another asJson object — converted recursively.
+    Result = beamtalk_json:'generate:'('bt@json_hook_fixture':new(nested)),
+    Decoded = json:decode(Result),
+    Inner = maps:get(<<"inner">>, Decoded),
+    ?assertEqual(<<"fixture">>, maps:get(<<"kind">>, Inner)).
+
+generate_as_json_self_return_test() ->
+    %% A hook returning the receiver itself must raise, not loop forever.
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Json'}},
+        beamtalk_json:'generate:'('bt@json_hook_fixture':new(self_return))
+    ).
+
+generate_tagged_map_without_as_json_keeps_fields_test() ->
+    %% Legacy behaviour: a tagged map whose class has no asJson still encodes
+    %% its fields directly with the class tag stripped.
+    Value = #{'$beamtalk_class' => 'NoSuchHookClass', <<"a">> => 1},
+    Decoded = json:decode(beamtalk_json:'generate:'(Value)),
+    ?assertNot(maps:is_key(<<"$beamtalk_class">>, Decoded)),
+    ?assertEqual(1, maps:get(<<"a">>, Decoded)).
+
+pretty_print_as_json_hook_test() ->
+    %% prettyPrint: shares the asJson hook with generate:.
+    Result = beamtalk_json:'prettyPrint:'('bt@json_hook_fixture':new(plain)),
+    Decoded = json:decode(Result),
+    ?assertEqual(<<"fixture">>, maps:get(<<"kind">>, Decoded)).
+
+%%% ============================================================================
 %%% prettyPrint:/1
 %%% ============================================================================
 

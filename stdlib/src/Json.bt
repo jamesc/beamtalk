@@ -19,6 +19,26 @@
 /// | true/false    | true/false   |
 /// | null          | nil          |
 ///
+/// ## The `asJson` Convention
+///
+/// Custom classes (typically `Value subclass:`) opt into `generate:` and
+/// `prettyPrint:` by implementing an `asJson` instance method that returns
+/// a JSON-representable value — usually a Dictionary with explicit keys.
+/// The result is converted recursively, so it may itself contain objects
+/// that implement `asJson`. This mirrors how `Printable` documents
+/// `asString`/`printString`: any class implementing `asJson` conforms.
+///
+/// Explicit key naming is deliberate — wire formats are often snake_case
+/// while Beamtalk fields are camelCase, so `asJson` is where that mapping
+/// lives, next to the fields it mirrors.
+///
+/// ```beamtalk
+/// Value subclass: User
+///   field: fullName = ""
+///
+///   asJson => #{"full_name" => self.fullName}
+/// ```
+///
 /// ## Examples
 /// ```beamtalk
 /// (Json parse: "42") unwrap                 // => 42
@@ -48,7 +68,9 @@ sealed typed Object subclass: Json native: beamtalk_json
   ///
   /// Dictionaries become JSON objects, Lists become arrays, Strings
   /// become JSON strings, Integer/Float become numbers, true/false
-  /// become JSON booleans, nil becomes null.
+  /// become JSON booleans, nil becomes null. Custom objects that
+  /// implement `asJson` are converted via that hook (see the class
+  /// comment for the convention).
   ///
   /// ## Examples
   /// ```beamtalk
