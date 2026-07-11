@@ -141,4 +141,10 @@ TestCase subclass: Tier2StoredBlockMatrixTest
   testArgumentPositionFieldStored =>
     self.a setupOnTick
     self.a addTickResult: 5
+    // `equals: 5` is coincidentally correct because total starts at 0 — the
+    // block's own field mutation is discarded (see fixture comment), and
+    // the outer write reads the pre-call total (0) + Result (5) = 5. This
+    // is NOT proof of full mutation threading; with a nonzero starting
+    // total the outer write would read stale state and land on the wrong
+    // answer.
     self assert: self.a getTotal equals: 5
