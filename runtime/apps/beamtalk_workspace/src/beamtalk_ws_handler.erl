@@ -944,34 +944,17 @@ encode_reload_check_event(Event) ->
         <<"classification">> => atom_to_binary(maps:get(classification, Event, self_edit), utf8),
         <<"checked">> => maps:get(checked, Event, 0),
         <<"notChecked">> => maps:get(notChecked, Event, 0),
-        <<"capNote">> => undefined_to_null(maps:get(capNote, Event, undefined)),
+        <<"capNote">> => beamtalk_repl_protocol:undefined_to_null(
+            maps:get(capNote, Event, undefined)
+        ),
         <<"checkedOwners">> => maps:get(checkedOwners, Event, []),
-        <<"findings">> => [encode_reload_finding(F) || F <- maps:get(findings, Event, [])]
-    }.
-
--doc "Encode one `beamtalk_recheck:finding()` map for the `reload_check` push frame.".
--spec encode_reload_finding(map()) -> map().
-encode_reload_finding(Finding) ->
-    #{
-        <<"owner">> => maps:get(owner, Finding, <<>>),
-        <<"changedClass">> => maps:get(changed_class, Finding, <<>>),
-        <<"selector">> => maps:get(selector, Finding, <<>>),
-        <<"classification">> => atom_to_binary(maps:get(classification, Finding, removal), utf8),
-        <<"severity">> => maps:get(severity, Finding, <<"hint">>),
-        <<"category">> => undefined_to_null(maps:get(category, Finding, undefined)),
-        <<"message">> => maps:get(message, Finding, <<>>),
-        <<"note">> => undefined_to_null(maps:get(note, Finding, undefined)),
-        <<"sites">> => [encode_reload_site(S) || S <- maps:get(sites, Finding, [])],
-        <<"start">> => maps:get(start, Finding, 0),
-        <<"end">> => maps:get('end', Finding, 0)
-    }.
-
--doc "Encode one call-site reference (`#{method, line}`) for a reload finding.".
--spec encode_reload_site(map()) -> map().
-encode_reload_site(Site) ->
-    #{
-        <<"method">> => maps:get(method, Site, <<>>),
-        <<"line">> => maps:get(line, Site, 0)
+        %% BT-2801: shared with the `reload-findings` op response
+        %% (`beamtalk_repl_ops_dev:handle_term/4`) so the push and
+        %% request/response wire shapes can never drift apart.
+        <<"findings">> => [
+            beamtalk_repl_protocol:encode_reload_finding(F)
+         || F <- maps:get(findings, Event, [])
+        ]
     }.
 
 -doc "Encode an announcement event pid for JSON, mapping a `nil` pid to `null`.".
@@ -979,21 +962,16 @@ encode_reload_site(Site) ->
 encode_event_pid(Pid) when is_pid(Pid) -> list_to_binary(pid_to_list(Pid));
 encode_event_pid(_) -> null.
 
--doc "Map a `nil` value to JSON `null`, passing any other value through.".
+-doc """
+Map a `nil` value to JSON `null`, passing any other value through. Distinct
+from `beamtalk_repl_protocol:undefined_to_null/1` (BT-2801), which maps the
+Erlang "missing value" idiom `undefined` instead — `json:encode/1` has no
+default clause for an arbitrary atom, so encoding either unconverted would
+raise.
+""".
 -spec nullable(term()) -> term().
 nullable(nil) -> null;
 nullable(Value) -> Value.
-
--doc """
-Map the Erlang "missing value" idiom `undefined` (used by `beamtalk_recheck`'s
-optional finding fields — `category`, `note`, `cap_note` — none of which are
-Beamtalk-side `nil`) to JSON `null`. Distinct from `nullable/1`, which maps
-Beamtalk's own `nil` atom instead — `json:encode/1` has no default clause for
-an arbitrary atom, so encoding `undefined` unconverted would raise.
-""".
--spec undefined_to_null(term()) -> term().
-undefined_to_null(undefined) -> null;
-undefined_to_null(Value) -> Value.
 
 -doc """
 BT-1235: Extract line/hint metadata from a compile error for inclusion in JSON response.

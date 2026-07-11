@@ -1132,6 +1132,34 @@ impl Backend {
             *guard = Some(reload_check_handle);
         }
 
+        // BT-2801 (ADR 0105 surface-parity gap): seed `reload_diagnostics`
+        // with any findings that already existed in
+        // `beamtalk_workspace_findings_store` before this attach — the
+        // `reload_check_handle` listener above only ever delivers *new*
+        // outcomes, so without this a fresh LSP session (or one reconnecting
+        // after a crash) would show nothing for a caller until the next
+        // reload happens to touch it again. Best-effort; see
+        // `seed_reload_diagnostics`'s doc for the accepted narrow race with
+        // a concurrently-arriving push. Re-reads `workspace_roots` (rather
+        // than reusing `listener_roots`, moved into `flush_event_listener`
+        // above) — same pattern as `spawn_reload_check_listener`'s own
+        // fresh clone.
+        let seed_roots = {
+            let roots = self
+                .workspace_roots
+                .lock()
+                .expect("workspace_roots lock poisoned");
+            roots.clone()
+        };
+        seed_reload_diagnostics(
+            &self.client,
+            &client,
+            &seed_roots,
+            &self.service,
+            &self.reload_diagnostics,
+        )
+        .await;
+
         Ok(client)
     }
 
@@ -2884,6 +2912,161 @@ async fn reload_check_listener(
         }
     }
     tracing::debug!("reload_check_listener: channel closed, exiting");
+}
+
+/// Seed `reload_diagnostics` with any reload-induced findings that already
+/// existed in `beamtalk_workspace_findings_store` before this client
+/// attached (BT-2801, ADR 0105 surface-parity gap) — the `reload_check`
+/// push channel [`reload_check_listener`] consumes only ever delivers *new*
+/// outcomes, so a fresh LSP process attaching for the first time (e.g. the
+/// editor just started, or restarted the language server after a crash)
+/// would otherwise show nothing for a caller until the next reload happens
+/// to touch it again.
+///
+/// Called once from [`Backend::ensure_runtime_attached`], after the push
+/// listener is spawned but before the runtime client is handed back to
+/// callers, so the first [`Backend::publish_diagnostics`] for any
+/// already-open document picks the snapshot up through the normal merge
+/// path (`publish_diagnostics_impl`). Findings are grouped by `(owner,
+/// changed_class)` — the same origin key `reload_diagnostics` uses — so each
+/// independent contribution to an owner's diagnostics stays an
+/// independently-clearing entry once live pushes start arriving, exactly
+/// mirroring [`reload_check_listener`]'s per-origin bucketing.
+///
+/// A document already open when the seed completes would otherwise have to
+/// wait for an unrelated edit to surface its pre-existing findings, so any
+/// URI touched by the seed is republished immediately.
+///
+/// Best-effort: a transport failure here only means the LSP starts cold —
+/// exactly the behaviour before this feature existed — so it must not fail
+/// the attach itself, only log and return.
+///
+/// **Additive-only, and only correct because it runs at most once per
+/// `Backend`:** this never *clears* `reload_diagnostics`, it only inserts.
+/// That is sound today because `ensure_runtime_attached` caches `self.runtime`
+/// forever once set (nothing ever resets it back to `None`), so this
+/// function's single call site only ever runs against an empty
+/// `reload_diagnostics` map — there is no live LSP *process* reconnect path
+/// today, only a fresh process attaching once. If a same-process reconnect
+/// path is ever added, this must change to clear stale entries for origins
+/// no longer in the fresh snapshot (not a blanket clear — a concurrent
+/// `reload_check` push landing first, see the race note below, must not be
+/// wiped) rather than staying purely additive, or a finding cleared while
+/// disconnected could remain stuck forever. Two concurrent
+/// `ensure_runtime_attached` callers *can* both pass the attach-cache's
+/// `None` check and both reach this function (the existing "loser client"
+/// race), but that is harmless here: both compute the same snapshot and the
+/// inserts are idempotent over the same keys.
+///
+/// **Known narrow race, accepted:** the `reload-findings` RPC and the
+/// `reload_check` push listener are two independent round-trips against the
+/// same live store, so a real reload that clears an origin can have its
+/// `ReloadCheckCompleted` push processed by [`reload_check_listener`]
+/// *before* this function's own (slightly earlier) snapshot finishes being
+/// written — in which case this seed re-inserts the origin the push had
+/// already correctly cleared. This mirrors the "loser client" race
+/// [`Backend::ensure_runtime_attached`] already documents and accepts for
+/// the same reason: it needs a reload to land in the exact window between
+/// attach and seed completion. It is not as fully self-healing as it may
+/// first look: a re-inserted *clearing* finding only disappears the next
+/// time `changed_class` (not just any reload touching `owner`) is reloaded
+/// again — which may not happen again in the session — so the practical
+/// effect is a stale squiggle that behaves exactly like the pre-BT-2801
+/// baseline (nothing seeded) for that one origin, not a regression beyond
+/// it. A fully race-free version would need the findings store to expose a
+/// generation/version the client could compare against, which is out of
+/// scope here.
+async fn seed_reload_diagnostics(
+    client: &Client,
+    runtime_client: &RuntimeClient,
+    workspace_roots: &[PathBuf],
+    service: &Mutex<SimpleLanguageService>,
+    reload_diagnostics: &std::sync::Mutex<ReloadDiagnosticsByUriAndOrigin>,
+) {
+    // Awaited inline in the attach path (not `tokio::spawn`ed) so that by the
+    // time `ensure_runtime_attached` returns, any already-open document has
+    // already been republished with the seeded findings — a spawned version
+    // would race the caller's own next `publish_diagnostics` call for no
+    // real benefit, since first-attach latency here is bounded by two RPC
+    // round-trips (`reload-findings` + `nav-symbols`) against a workspace
+    // already proven reachable by the connect this immediately follows.
+    let findings = match runtime_client.reload_findings().await {
+        Ok(findings) => findings,
+        Err(e) => {
+            tracing::warn!(error = %e, "seed_reload_diagnostics: reload-findings failed");
+            return;
+        }
+    };
+    if findings.is_empty() {
+        return;
+    }
+    let classes = match runtime_client.nav_symbols(Some("user")).await {
+        Ok(classes) => classes,
+        Err(e) => {
+            tracing::warn!(error = %e, "seed_reload_diagnostics: nav_symbols failed");
+            return;
+        }
+    };
+    let by_origin = group_findings_by_origin(findings);
+    let mut touched_uris: HashSet<Url> = HashSet::new();
+    for ((owner, changed_class), owner_findings) in by_origin {
+        let Some(class) = classes.iter().find(|c| c.name.as_str() == owner.as_str()) else {
+            tracing::debug!(
+                owner,
+                "seed_reload_diagnostics: owner has no known source file, skipping"
+            );
+            continue;
+        };
+        let Some(uri) = resolve_class_uri(class, workspace_roots) else {
+            tracing::debug!(
+                owner,
+                "seed_reload_diagnostics: could not resolve class URI"
+            );
+            continue;
+        };
+        let diagnostics: Vec<tower_lsp::lsp_types::Diagnostic> = owner_findings
+            .iter()
+            .flat_map(reload_finding_to_lsp_diagnostics)
+            .collect();
+        if diagnostics.is_empty() {
+            continue;
+        }
+        {
+            let mut guard = reload_diagnostics
+                .lock()
+                .expect("reload_diagnostics lock poisoned");
+            guard
+                .entry(uri.clone())
+                .or_default()
+                .insert((owner, changed_class), diagnostics);
+        }
+        touched_uris.insert(uri);
+    }
+    for uri in touched_uris {
+        publish_diagnostics_impl(client, service, reload_diagnostics, &uri, None).await;
+    }
+}
+
+/// Group a flat findings snapshot by `(owner, changed_class)` — the same
+/// origin key [`ReloadDiagnosticsByUriAndOrigin`] uses — so
+/// [`seed_reload_diagnostics`] can seed each independent contribution to an
+/// owner's diagnostics as its own independently-clearing entry, exactly
+/// mirroring [`reload_check_listener`]'s per-origin bucketing. Pulled out as
+/// a pure function (no I/O) so this grouping — the one piece of genuinely
+/// new logic `seed_reload_diagnostics` adds beyond what
+/// [`reload_check_listener`] already does per-event — is unit-testable
+/// without a live `RuntimeClient`.
+fn group_findings_by_origin(
+    findings: Vec<ReloadFinding>,
+) -> HashMap<(String, String), Vec<ReloadFinding>> {
+    let mut by_origin: HashMap<(String, String), Vec<ReloadFinding>> = HashMap::new();
+    for finding in findings {
+        by_origin
+            .entry((finding.owner.clone(), finding.changed_class.clone()))
+            .or_default()
+            .push(finding);
+    }
+    by_origin
 }
 
 /// Resolve a `NavSymbolClass`'s `source_file` to a document `Url`, the same
@@ -6504,6 +6687,59 @@ mod tests {
                 "Dnu".to_string()
             ))
         );
+    }
+
+    #[test]
+    fn group_findings_by_origin_splits_same_owner_different_changed_class() {
+        // BT-2801: `seed_reload_diagnostics` must seed independently-clearing
+        // entries — two findings attributed to the same owner but from
+        // *different* reloaded classes are two distinct origins, not one
+        // merged bucket, exactly mirroring `reload_check_listener`'s
+        // per-origin bucketing (`ReloadDiagnosticsByUriAndOrigin`'s doc).
+        let mut from_counter = sample_reload_finding();
+        from_counter.owner = "Dashboard".to_string();
+        from_counter.changed_class = "Counter".to_string();
+        let mut from_widget = sample_reload_finding();
+        from_widget.owner = "Dashboard".to_string();
+        from_widget.changed_class = "Widget".to_string();
+
+        let by_origin = group_findings_by_origin(vec![from_counter.clone(), from_widget.clone()]);
+
+        assert_eq!(by_origin.len(), 2);
+        assert_eq!(
+            by_origin[&("Dashboard".to_string(), "Counter".to_string())],
+            vec![from_counter]
+        );
+        assert_eq!(
+            by_origin[&("Dashboard".to_string(), "Widget".to_string())],
+            vec![from_widget]
+        );
+    }
+
+    #[test]
+    fn group_findings_by_origin_merges_same_owner_and_changed_class() {
+        // Two findings sharing the exact same origin (e.g. two removed
+        // selectors on the same reloaded class) must land in one bucket, so
+        // `seed_reload_diagnostics` seeds one origin entry covering both —
+        // matching `reload_check_listener`'s per-event grouping, which never
+        // splits a single `(owner, changed_class)` origin across entries.
+        let mut first = sample_reload_finding();
+        first.selector = "getCount".to_string();
+        let mut second = sample_reload_finding();
+        second.selector = "reset".to_string();
+
+        let by_origin = group_findings_by_origin(vec![first.clone(), second.clone()]);
+
+        assert_eq!(by_origin.len(), 1);
+        let bucket = &by_origin[&("Dashboard".to_string(), "Counter".to_string())];
+        assert_eq!(bucket.len(), 2);
+        assert_eq!(bucket[0].selector, "getCount");
+        assert_eq!(bucket[1].selector, "reset");
+    }
+
+    #[test]
+    fn group_findings_by_origin_empty_input_returns_empty_map() {
+        assert!(group_findings_by_origin(vec![]).is_empty());
     }
 
     #[test]

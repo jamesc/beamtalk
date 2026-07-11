@@ -83,8 +83,9 @@ Term-returning handler for the developer read-surface ops (BT-2402, ADR 0085).
 Returns `{completions, [binary()]}`, `{docs, binary()}`,
 `{codegen, CoreErlang, Warnings}`, `{methods, Methods, StateVars}`,
 `{class_list, [ClassInfo]}`, `{test_results, TestResult}`,
-`{describe, Ops, Versions}`, or `{error, #beamtalk_error{}}` — no JSON in this
-path.
+`{describe, Ops, Versions}`, `{value, JsonValue}` (`list-tests`,
+`reload-findings` — BT-2801), or `{error, #beamtalk_error{}}` — no JSON in
+this path.
 """.
 -spec handle_term(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) ->
     beamtalk_repl_ops:op_result().
@@ -164,6 +165,30 @@ handle_term(<<"diagnostics">>, Params, _Msg, _SessionPid) ->
     %% still degrades to `[]` via the `diagnostics_for/2` catch-all (BT-2569).
     Mode = normalize_diagnostics_mode(maps:get(<<"mode">>, Params, <<"expression">>)),
     {diagnostics, diagnostics_for(Code, Mode)};
+handle_term(<<"reload-findings">>, _Params, _Msg, _SessionPid) ->
+    %% BT-2801 (ADR 0105 surface-parity gap): request/response snapshot read
+    %% of the live reload-induced findings store, mirroring the
+    %% workspace/cockpit UI's dist-attached `reload_findings` initial-mount
+    %% read (`editors/liveview/lib/bt_attach/workspace.ex:reload_findings/0`,
+    %% a raw `:rpc.call/4` to `beamtalk_workspace_findings_store:all/0`). This
+    %% is the curated op-layer equivalent for surfaces that are *not*
+    %% dist-attached (LSP) so they can seed pre-existing findings on attach
+    %% instead of only ever receiving new ones via the `reload_check` push —
+    %% see `beamtalk_workspace_findings_store`'s moduledoc for why the store
+    %% is the sole source of truth every surface publishes from.
+    %%
+    %% Projected to the binary-keyed wire shape up front (like `list-tests`,
+    %% BT-2557) so the result travels as a `{value, _}` term — consumed live
+    %% over distribution, or encoded as JSON identity at the WebSocket edge —
+    %% reusing `encode_reload_finding/1`, the exact per-finding shape the
+    %% `reload_check` push frame's `findings` field already uses, so a client
+    %% that reads this snapshot and then applies live pushes never sees the
+    %% two disagree on shape.
+    Findings = [
+        beamtalk_repl_protocol:encode_reload_finding(F)
+     || F <- beamtalk_workspace_findings_store:all()
+    ],
+    {value, #{<<"findings">> => Findings}};
 handle_term(<<"erlang-complete">>, Params, _Msg, _SessionPid) ->
     %% BT-1903: Tab completion for `:h Erlang <module>` and `:h Erlang <mod> <fn>`.
     Prefix = maps:get(<<"prefix">>, Params, <<>>),
@@ -1920,6 +1945,9 @@ base_ops() ->
         <<"list-tests">> => #{<<"params">> => []},
         %% BT-2557: load the project's test/ files so the runner/browser see them.
         <<"load-tests">> => #{<<"params">> => []},
+        %% BT-2801: request/response snapshot of live reload-induced findings
+        %% (ADR 0105 surface-parity gap).
+        <<"reload-findings">> => #{<<"params">> => []},
         <<"load-source">> => #{<<"params">> => [<<"source">>]},
         <<"load-project">> => #{
             <<"params">> => [],

@@ -414,6 +414,17 @@ impl RequestBuilder {
         req
     }
 
+    /// Build a `reload-findings` request (BT-2801, ADR 0105 surface-parity
+    /// gap): a snapshot read of every currently-live reload-induced finding
+    /// (`beamtalk_workspace_findings_store:all/0`), the request/response
+    /// counterpart to the `reload_check`/`completed` push frame — for
+    /// surfaces (e.g. the LSP on attach) that need the findings that already
+    /// existed before they connected, not just new ones pushed afterward.
+    #[must_use]
+    pub fn reload_findings() -> serde_json::Value {
+        Self::no_param("reload-findings")
+    }
+
     // --- Tracing operations (ADR 0069) ---
 
     /// Build an `enable-tracing` request.
@@ -874,6 +885,13 @@ mod tests {
         let req = RequestBuilder::nav_symbols(Some("all"));
         assert_eq!(req["op"], "nav-symbols");
         assert_eq!(req["scope"], "all");
+    }
+
+    #[test]
+    fn reload_findings_request_has_correct_shape() {
+        let req = RequestBuilder::reload_findings();
+        assert_eq!(req["op"], "reload-findings");
+        assert!(req["id"].as_str().unwrap().starts_with("msg-"));
     }
 
     #[test]

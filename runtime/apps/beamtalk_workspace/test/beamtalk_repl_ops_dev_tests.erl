@@ -1751,6 +1751,79 @@ handle_list_tests_returns_classes_term_test() ->
     {value, Value} = beamtalk_repl_ops_dev:handle_term(<<"list-tests">>, #{}, Msg, self()),
     ?assert(is_list(maps:get(<<"classes">>, Value))).
 
+%% BT-2801: lazily start `beamtalk_workspace_findings_store` for the
+%% duration of `TestFun`, mirroring the `case whereis(...)` precedent used
+%% by `beamtalk_repl_loader_recheck_tests.erl` for the same gen_server. This
+%% file's tests otherwise don't require a running workspace (see the module
+%% doc), so the reload-findings tests must bring their own dependency up —
+%% and, critically, tear it back down in an `after` (even on assertion
+%% failure) so a store *this helper* started never leaks into
+%% `beamtalk_workspace_findings_store_tests.erl`'s own `setup/0`, which
+%% unconditionally `start_link/0`s and badmatches on `{already_started, _}`
+%% if a prior test in the same `rebar3 eunit` run left one behind. A store
+%% that was already running (owned by some other test) is left alone.
+with_findings_store(TestFun) ->
+    Started =
+        case whereis(beamtalk_workspace_findings_store) of
+            undefined ->
+                {ok, _} = beamtalk_workspace_findings_store:start_link(),
+                true;
+            _Pid ->
+                false
+        end,
+    try
+        TestFun()
+    after
+        case Started of
+            true -> catch gen_server:stop(beamtalk_workspace_findings_store);
+            false -> ok
+        end
+    end.
+
+handle_reload_findings_returns_empty_snapshot_test() ->
+    with_findings_store(fun() ->
+        %% BT-2801: reload-findings is a request/response snapshot read of
+        %% `beamtalk_workspace_findings_store:all/0`. With no findings
+        %% recorded (the store's initial state), the op still exercises op
+        %% routing + the `{value, _}` term shape and returns an empty list,
+        %% not an error.
+        Msg = make_msg(<<"reload-findings">>, <<"rf-1">>, undefined),
+        {value, Value} = beamtalk_repl_ops_dev:handle_term(<<"reload-findings">>, #{}, Msg, self()),
+        ?assertEqual([], maps:get(<<"findings">>, Value))
+    end).
+
+handle_reload_findings_returns_wire_shaped_finding_test() ->
+    with_findings_store(fun() ->
+        %% BT-2801: a recorded finding must round-trip through the op in the
+        %% same wire shape `encode_reload_finding/1` produces for the
+        %% `reload_check` push frame — binary keys, atom
+        %% `classification`/`category` fields stringified, `undefined`
+        %% optional fields mapped to `null`.
+        Finding = #{
+            owner => <<"Caller">>,
+            changed_class => <<"Changed">>,
+            selector => <<"foo">>,
+            classification => removal,
+            severity => <<"hint">>,
+            category => undefined,
+            message => <<"foo was removed">>,
+            note => undefined,
+            sites => [#{method => <<"bar">>, line => 3}],
+            start => 0,
+            'end' => 0
+        },
+        _ = beamtalk_workspace_findings_store:put_owner_origin(
+            <<"Caller">>, <<"Changed">>, [Finding]
+        ),
+        Msg = make_msg(<<"reload-findings">>, <<"rf-2">>, undefined),
+        {value, Value} = beamtalk_repl_ops_dev:handle_term(<<"reload-findings">>, #{}, Msg, self()),
+        [Wire] = maps:get(<<"findings">>, Value),
+        ?assertEqual(<<"Caller">>, maps:get(<<"owner">>, Wire)),
+        ?assertEqual(<<"Changed">>, maps:get(<<"changedClass">>, Wire)),
+        ?assertEqual(<<"removal">>, maps:get(<<"classification">>, Wire)),
+        ?assertEqual(null, maps:get(<<"category">>, Wire))
+    end).
+
 validate_list_classes_filter_user_test() ->
     %% list-classes with the "user" filter takes the not-stdlib branch and must
     %% include the (non-stdlib) WidgetDev fixture-free path: here we only assert
