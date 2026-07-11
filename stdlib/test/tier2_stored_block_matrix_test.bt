@@ -161,7 +161,7 @@ TestCase subclass: Tier2StoredBlockMatrixTest
   // P2-13: 3-arg field-stored block (value:value:value:) invoked cross-method.
   // Kept as the class's trailing method (not the P3 block above) so
   // just fmt doesn't dedent the comment-only P3 section — see the file
-  // header note.
+  // header note before adding any method below this one.
   testThreeArgBlockCrossMethod =>
     self.a setupOnTriple
     result := self.a
