@@ -22,3 +22,9 @@ TestCase subclass: Tier2SubexprAndConditionalBlockTest
   testStoredMutatingBlockInvokedBareInsideConditional =>
     actor := Tier2SubexprAndConditionalBlockTestActor spawn
     self assert: actor testStoredMutatingBlockInvokedBareInsideConditional equals: 5
+
+  // BT-2807: a bare `self.field value:` with NO other field mutation in the
+  // same conditional branch must still trigger state threading.
+  testBareFieldStoredBlockValueAloneInsideConditional =>
+    actor := Tier2SubexprAndConditionalBlockTestActor spawn
+    self assert: actor testBareFieldStoredBlockValueAloneInsideConditional equals: 5
