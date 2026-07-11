@@ -101,7 +101,6 @@ TestCase subclass: JsonTest
   // asJson HOOK (BT-2818)
   // Fixtures: json_user.bt (JsonUser), json_team.bt (JsonTeam)
   // =========================================================================
-
   testGenerateDispatchesAsJson =>
     // A Value class implementing asJson controls its own JSON shape
     u := JsonUser fullName: "Ada Lovelace" age: 36
