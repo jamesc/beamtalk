@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2816: Fixture for testing that a self-send forwarding into a method
+// that raises `self error:` propagates the real error instead of crashing
+// with `function_clause` (safe_dispatch's error-tuple mis-unwrapping).
+
+typed Actor subclass: SelfCallErrorActor
+
+  // Direct call: raises without going through a self-send forwarding hop.
+  doItLong -> Object => self error: "boom"
+
+  // Forwarded call: a plain self-send into a method that raises.
+  doIt -> Object => self doItLong
+
+  // Forwarded call through a keyword self-send (unary vs. keyword selector shape).
+  doItWith: aReason :: String -> Object => self doItLongWith: aReason
+
+  doItLongWith: aReason :: String -> Object => self error: aReason

@@ -2791,6 +2791,57 @@ fn test_self_call_as_last_expression_threads_state() {
     );
 }
 
+#[test]
+fn test_self_call_error_branch_handles_both_error_shapes() {
+    // BT-2816: A self-send's error branch must handle TWO distinct shapes
+    // returned by safe_dispatch/dispatch, not just one:
+    //
+    // 1. A caught exception: safe_dispatch/3's try/catch packs it as the
+    //    3-tuple {'error', {Type, Reason, Stacktrace}, State} — must be
+    //    destructured and routed through beamtalk_exception_handler:reraise/3
+    //    (passing the whole triple straight to beamtalk_error:raise/1 crashes
+    //    with function_clause, since raise/1 only accepts a raw
+    //    #beamtalk_error{} record — the original BT-2816 bug).
+    // 2. A plain returned error: dispatch/4's DNU fallback (and other
+    //    non-exception error paths) *return* {'error', Error, State} where
+    //    Error is a bare #beamtalk_error{} record — never reaching
+    //    safe_dispatch's try/catch at all. This shape must still fall through
+    //    to a `call 'beamtalk_error':'raise'(Error)` clause, mirroring the
+    //    two-clause pattern already used at the handle_cast/handle_info
+    //    boundary (gen_server/callbacks.rs) — dropping this fallback clause
+    //    would crash a self-send that resolves to DNU with case_clause.
+    let src = concat!(
+        "Actor subclass: Srv\n",
+        "  state: value = 0\n\n",
+        "  setup =>\n",
+        "    self.value := 42\n\n",
+        "  doWork =>\n",
+        "    self setup\n",
+        "    self.value\n",
+    );
+    let code = codegen_source(src);
+
+    // Clause 1: destructured triple routed through reraise/3.
+    assert!(
+        code.contains("call 'beamtalk_exception_handler':'reraise'("),
+        "Self-dispatch error branch must destructure the caught-exception \
+         triple via beamtalk_exception_handler:reraise/3. Got:\n{code}"
+    );
+    // Clause 2: fallback for a plain #beamtalk_error{} returned (not caught).
+    assert!(
+        code.contains("call 'beamtalk_error':'raise'("),
+        "Self-dispatch error branch must keep the plain-error fallback clause \
+         (e.g. DNU returns from dispatch/4 that never reach safe_dispatch's \
+         try/catch). Got:\n{code}"
+    );
+    // The buggy pre-fix form (raising the whole triple directly) must be gone.
+    assert!(
+        !code.contains("call 'beamtalk_error':'raise'(SelfError"),
+        "Self-dispatch must not pass the raw {{Type, Reason, Stacktrace}} \
+         triple straight to beamtalk_error:raise/1. Got:\n{code}"
+    );
+}
+
 // --- ADR 0070 Phase 2: Package-qualified class reference codegen tests ---
 
 #[test]

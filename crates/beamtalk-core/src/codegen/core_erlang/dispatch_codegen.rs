@@ -43,6 +43,65 @@ use crate::ast::{Expression, Literal, MessageSelector, WellKnownSelector};
 use crate::docvec;
 
 impl CoreErlangGenerator {
+    /// BT-2816: Generates the `<{'error', ..., _}>` case clauses shared by all
+    /// self-dispatch call sites (`safe_dispatch`/`dispatch` error branches).
+    ///
+    /// The dispatched call's error branch has two distinct shapes, mirroring the
+    /// two `<{'error', ...}>` clauses already used at the `handle_cast`/
+    /// `handle_info` boundary (see `gen_server/callbacks.rs`):
+    ///
+    /// 1. **Caught exception**: `safe_dispatch/3` packs a caught exception as a
+    ///    3-tuple `{Type, Reason, Stacktrace}` in the middle element of its
+    ///    `{'error', ..., State}` return (see `generate_safe_dispatch`). Passing
+    ///    that whole triple straight to `beamtalk_error:'raise'/1` — which only
+    ///    accepts a raw `#beamtalk_error{}` record — crashes with
+    ///    `function_clause` instead of propagating the real error (BT-2816).
+    ///    Destructuring the triple and routing it through
+    ///    `beamtalk_exception_handler:'reraise'/3` mirrors the cross-actor call
+    ///    boundary (`beamtalk_actor:sync_send_remote/3`), which correctly
+    ///    classifies raw Erlang errors and preserves already-wrapped
+    ///    `#beamtalk_error{}` values.
+    /// 2. **Plain returned error**: `dispatch/4`'s DNU fallback (and other
+    ///    non-exception error paths) *returns* `{'error', Error, State}` where
+    ///    `Error` is a bare `#beamtalk_error{}` record — not a 3-tuple, so it
+    ///    never reaches `safe_dispatch`'s try/catch at all. This fallback clause
+    ///    must stay, or a self-send that resolves to DNU crashes with
+    ///    `case_clause` instead of raising the DNU error.
+    ///
+    /// # Generated Code
+    ///
+    /// ```erlang
+    /// <{'error', {Type, Reason, Stacktrace}, _}> when 'true' ->
+    ///     call 'beamtalk_exception_handler':'reraise'(Type, Reason, Stacktrace)
+    /// <{'error', Error, _}> when 'true' -> call 'beamtalk_error':'raise'(Error)
+    /// ```
+    fn generate_self_dispatch_error_clause(&mut self, var_prefix: &str) -> Document<'static> {
+        let type_var = self.fresh_var(&format!("{var_prefix}Type"));
+        let reason_var = self.fresh_var(&format!("{var_prefix}Reason"));
+        let stack_var = self.fresh_var(&format!("{var_prefix}Stack"));
+        let plain_error_var = self.fresh_var(&format!("{var_prefix}Plain"));
+        docvec![
+            "<{'error', {",
+            leaf::var(type_var.clone()),
+            ", ",
+            leaf::var(reason_var.clone()),
+            ", ",
+            leaf::var(stack_var.clone()),
+            "}, _}> when 'true' -> call 'beamtalk_exception_handler':'reraise'(",
+            leaf::var(type_var),
+            ", ",
+            leaf::var(reason_var),
+            ", ",
+            leaf::var(stack_var),
+            ") ",
+            "<{'error', ",
+            leaf::var(plain_error_var.clone()),
+            ", _}> when 'true' -> call 'beamtalk_error':'raise'(",
+            leaf::var(plain_error_var),
+            ") "
+        ]
+    }
+
     /// Generates a comma-separated argument list for function/message calls.
     ///
     /// This is a shared helper that eliminates the repeated pattern of iterating
@@ -1379,6 +1438,8 @@ impl CoreErlangGenerator {
     /// ```erlang
     /// case call 'module':'safe_dispatch'('selector', [Args], State) of
     ///   <{'reply', Result, _NewState}> when 'true' -> Result
+    ///   <{'error', {Type, Reason, Stacktrace}, _}> when 'true' ->
+    ///       call 'beamtalk_exception_handler':'reraise'(Type, Reason, Stacktrace)
     ///   <{'error', Error, _}> when 'true' -> call 'beamtalk_error':'raise'(Error)
     /// end
     /// ```
@@ -1389,6 +1450,8 @@ impl CoreErlangGenerator {
     /// let Self = call 'beamtalk_actor':'make_self'(State) in
     /// case call 'module':'dispatch'('selector', [Args], Self, State) of
     ///   <{'reply', Result, _NewState}> when 'true' -> Result
+    ///   <{'error', {Type, Reason, Stacktrace}, _}> when 'true' ->
+    ///       call 'beamtalk_exception_handler':'reraise'(Type, Reason, Stacktrace)
     ///   <{'error', Error, _}> when 'true' -> call 'beamtalk_error':'raise'(Error)
     /// end
     /// ```
@@ -1405,11 +1468,11 @@ impl CoreErlangGenerator {
         let selector_atom = selector.to_erlang_atom();
         let result_var = self.fresh_var("SelfResult");
         let state_var = self.fresh_var("SelfState");
-        let error_var = self.fresh_var("SelfError");
         let current_state = self.current_state_var();
         let module = self.module_name.clone();
 
         let args_doc = self.capture_argument_list_doc(arguments)?;
+        let error_clause = self.generate_self_dispatch_error_clause("SelfError");
 
         let doc = docvec![
             "case call ",
@@ -1428,11 +1491,7 @@ impl CoreErlangGenerator {
             "}> when 'true' -> ",
             leaf::var(result_var),
             " ",
-            "<{'error', ",
-            leaf::var(error_var.clone()),
-            ", _}> when 'true' -> call 'beamtalk_error':'raise'(",
-            leaf::var(error_var),
-            ") ",
+            error_clause,
             "end"
         ];
 
@@ -1450,7 +1509,9 @@ impl CoreErlangGenerator {
     /// ```erlang
     /// let _SD0 = case call 'module':'safe_dispatch'('sel', [Args], State) of
     ///   <{'reply', R, S}> when 'true' -> {R, S}
-    ///   <{'error', E, _}> when 'true' -> call 'beamtalk_error':'raise'(E)
+    ///   <{'error', {Type, Reason, Stacktrace}, _}> when 'true' ->
+    ///       call 'beamtalk_exception_handler':'reraise'(Type, Reason, Stacktrace)
+    ///   <{'error', Error, _}> when 'true' -> call 'beamtalk_error':'raise'(Error)
     /// end in let State1 = call 'erlang':'element'(2, _SD0) in
     /// ```
     ///
@@ -1473,7 +1534,6 @@ impl CoreErlangGenerator {
             let dispatch_var = self.fresh_temp_var("SD");
             let result_var = self.fresh_var("SDResult");
             let state_var = self.fresh_var("SDState");
-            let error_var = self.fresh_var("SDError");
             let current_state = self.current_state_var();
 
             // Capture arguments via bridge (ADR 0018 Phase 0)
@@ -1552,6 +1612,7 @@ impl CoreErlangGenerator {
 
             // Result/error clauses + state extraction
             let new_state = self.next_state_var();
+            let error_clause = self.generate_self_dispatch_error_clause("SDError");
             let doc = docvec![
                 call_doc,
                 "<{'reply', ",
@@ -1563,11 +1624,7 @@ impl CoreErlangGenerator {
                 ", ",
                 leaf::var(state_var),
                 "} ",
-                "<{'error', ",
-                leaf::var(error_var.clone()),
-                ", _}> when 'true' -> call 'beamtalk_error':'raise'(",
-                leaf::var(error_var),
-                ") ",
+                error_clause,
                 "end in ",
                 "let ",
                 leaf::var(new_state),
@@ -1603,12 +1660,12 @@ impl CoreErlangGenerator {
         // Level 2: Direct dispatch/4 call (skip safe_dispatch try/catch)
         let selector_atom = selector.to_erlang_atom();
         let result_var = self.fresh_var("SealedResult");
-        let error_var = self.fresh_var("SealedError");
         let self_var = self.fresh_temp_var("SealedSelf");
         let current_state = self.current_state_var();
         let module = self.module_name.clone();
 
         let args_doc = self.capture_argument_list_doc(arguments)?;
+        let error_clause = self.generate_self_dispatch_error_clause("SealedError");
 
         let doc = docvec![
             "let ",
@@ -1632,11 +1689,7 @@ impl CoreErlangGenerator {
             ", _}> when 'true' -> ",
             leaf::var(result_var),
             " ",
-            "<{'error', ",
-            leaf::var(error_var.clone()),
-            ", _}> when 'true' -> call 'beamtalk_error':'raise'(",
-            leaf::var(error_var),
-            ") ",
+            error_clause,
             "end"
         ];
 
@@ -1653,13 +1706,13 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
         let result_var = self.fresh_var("SealedResult");
-        let error_var = self.fresh_var("SealedError");
         let self_var = self.fresh_temp_var("SealedSelf");
         let current_state = self.current_state_var();
         let module = self.module_name.clone();
 
         let args_doc = self.capture_argument_list_doc(arguments)?;
         let comma = if arguments.is_empty() { "" } else { ", " };
+        let error_clause = self.generate_self_dispatch_error_clause("SealedDirectError");
 
         let doc = docvec![
             "let ",
@@ -1683,11 +1736,7 @@ impl CoreErlangGenerator {
             ", _}> when 'true' -> ",
             leaf::var(result_var),
             " ",
-            "<{'error', ",
-            leaf::var(error_var.clone()),
-            ", _}> when 'true' -> call 'beamtalk_error':'raise'(",
-            leaf::var(error_var),
-            ") ",
+            error_clause,
             "end"
         ];
 
@@ -2932,7 +2981,9 @@ impl CoreErlangGenerator {
     /// let _SD0 = case call 'module':'safe_dispatch'('applyBlock:to:',
     ///     [fun (X, StateAcc) -> ... {Result, StateAcc1} end, 5], State1) of
     ///   <{'reply', R, S}> when 'true' -> {R, S}
-    ///   <{'error', E, _}> when 'true' -> call 'beamtalk_error':'raise'(E)
+    ///   <{'error', {Type, Reason, Stacktrace}, _}> when 'true' ->
+    ///       call 'beamtalk_exception_handler':'reraise'(Type, Reason, Stacktrace)
+    ///   <{'error', Error, _}> when 'true' -> call 'beamtalk_error':'raise'(Error)
     /// end in let State2 = call 'erlang':'element'(2, _SD0) in
     /// let Count = call 'maps':'get'('__local__count', State2) in
     /// ```
@@ -2978,7 +3029,6 @@ impl CoreErlangGenerator {
             let dispatch_var = self.fresh_temp_var("SD");
             let result_var = self.fresh_var("SDResult");
             let state_var = self.fresh_var("SDState");
-            let error_var = self.fresh_var("SDError");
             let current_state = self.current_state_var();
             let module = self.module_name.clone();
             let args_doc = self.generate_tier2_args(arguments, tier2_args)?;
@@ -2996,6 +3046,7 @@ impl CoreErlangGenerator {
 
             // Result/error clauses + state extraction
             let new_state = self.next_state_var();
+            let error_clause = self.generate_self_dispatch_error_clause("SDError");
             docs.push(docvec![
                 call_doc,
                 "<{'reply', ",
@@ -3006,11 +3057,9 @@ impl CoreErlangGenerator {
                 leaf::var(result_var),
                 ", ",
                 leaf::var(state_var),
-                "} <{'error', ",
-                leaf::var(error_var.clone()),
-                ", _}> when 'true' -> call 'beamtalk_error':'raise'(",
-                leaf::var(error_var),
-                ") end in let ",
+                "} ",
+                error_clause,
+                "end in let ",
                 leaf::var(new_state),
                 " = call 'erlang':'element'(2, ",
                 leaf::var(dispatch_var.clone()),
