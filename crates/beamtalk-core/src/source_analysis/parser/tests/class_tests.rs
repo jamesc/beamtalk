@@ -449,9 +449,10 @@ fn bt2811_cascade_method_immediately_followed_by_keyword_method() {
     );
     assert_eq!(class.methods[1].parameters[0].name.name.as_str(), "x");
 
-    // The cascade itself must still be exactly 2 messages (show: "a" folded
-    // into the receiver per parse_cascade, plus show: "b") — not polluted
-    // with a spurious third keyword part from the next method.
+    // The cascade's explicit `messages` list must still be exactly 1 entry
+    // (show: "a" is folded into the receiver by parse_cascade, leaving only
+    // show: "b" as an explicit cascade message) — not polluted with a
+    // spurious extra keyword part from the next method.
     if let Expression::Cascade { messages, .. } = &class.methods[0].body[0].expression {
         assert_eq!(
             messages.len(),
@@ -512,6 +513,76 @@ fn bt2811_cascade_method_followed_by_binary_selector_method() {
     assert_eq!(class.methods[1].selector.name(), "+");
     assert_eq!(class.methods[1].parameters.len(), 1);
     assert_eq!(class.methods[1].parameters[0].name.name.as_str(), "other");
+}
+
+#[test]
+fn bt2811_consecutive_cascade_bodied_methods() {
+    // BT-2811 completeness check: two cascade-bodied methods immediately
+    // adjacent to each other (the exact topology the fix enables — see the
+    // removed cascadeBuffer1/cascadeBuffer2 workaround methods in
+    // stdlib/test/fixtures/tier2_stored_block_matrix_actor.bt). Each
+    // cascade's own keyword-parsing loop must stop at the next method's
+    // boundary without a buffer method in between.
+    let source = "Object subclass: C\n  tickTwice: x => self.onTick value: x; value: x\n\n  tickThrice: x => self.onTick value: x; value: x; value: x";
+    let tokens = lex_with_eof(source);
+    let (module, diagnostics) = parse(tokens);
+
+    assert!(
+        diagnostics.is_empty(),
+        "Expected no parse diagnostics, got: {diagnostics:?}"
+    );
+    assert_eq!(module.classes.len(), 1);
+    let class = &module.classes[0];
+    assert_eq!(
+        class.methods.len(),
+        2,
+        "Both cascade-bodied methods must parse"
+    );
+    assert_eq!(class.methods[0].selector.name(), "tickTwice:");
+    assert_eq!(class.methods[0].parameters.len(), 1);
+    assert_eq!(class.methods[0].parameters[0].name.name.as_str(), "x");
+    assert_eq!(class.methods[1].selector.name(), "tickThrice:");
+    assert_eq!(class.methods[1].parameters.len(), 1);
+    assert_eq!(class.methods[1].parameters[0].name.name.as_str(), "x");
+
+    if let Expression::Cascade { messages, .. } = &class.methods[0].body[0].expression {
+        assert_eq!(
+            messages.len(),
+            1,
+            "tickTwice:'s cascade has 1 explicit message"
+        );
+    } else {
+        panic!("Expected tickTwice:'s body to be a Cascade expression");
+    }
+    if let Expression::Cascade { messages, .. } = &class.methods[1].body[0].expression {
+        assert_eq!(
+            messages.len(),
+            2,
+            "tickThrice:'s cascade has 2 explicit messages"
+        );
+    } else {
+        panic!("Expected tickThrice:'s body to be a Cascade expression");
+    }
+}
+
+#[test]
+fn bt2811_trailing_semicolon_before_sibling_method_reports_error() {
+    // BT-2811 follow-up: parse_cascade_message's keyword branch lacked the
+    // pre-loop guard parse_keyword_message has, so a stray trailing `;` in a
+    // cascade immediately followed by the next sibling method's keyword
+    // would hit the class-member boundary on the loop's very first
+    // iteration and silently produce a malformed empty-keyword
+    // CascadeMessage instead of a parse error. It must now report an error
+    // rather than fabricate an empty message.
+    let source =
+        "Object subclass: D\n  cascadeMethod => Transcript show: \"a\";\n\n  nextMethod: x => x";
+    let tokens = lex_with_eof(source);
+    let (_module, diagnostics) = parse(tokens);
+
+    assert!(
+        !diagnostics.is_empty(),
+        "Expected a parse diagnostic for the dangling cascade semicolon"
+    );
 }
 
 #[test]

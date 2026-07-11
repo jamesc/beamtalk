@@ -488,6 +488,18 @@ impl Parser {
                 arguments.push(self.parse_binary_message());
             }
 
+            if keywords.is_empty() {
+                // The very first keyword token was itself a class-member boundary
+                // (e.g. a stray trailing `;` in a cascade immediately followed by
+                // the next sibling method) — there is no message here to parse.
+                self.error("Expected message selector in cascade");
+                return CascadeMessage::new(
+                    MessageSelector::Unary("error".into()),
+                    Vec::new(),
+                    start_span,
+                );
+            }
+
             let end_span = arguments.last().map_or(start_span, Expression::span);
             let span = start_span.merge(end_span);
 
@@ -668,9 +680,9 @@ impl Parser {
         }
 
         // Safety: the pre-loop guard above returns early for any leading-newline
-        // boundary keyword, so line 604's `TokenKind::Keyword` check plus that
-        // guard together guarantee the while loop consumes at least one keyword
-        // part, making `arguments` non-empty here.
+        // boundary keyword, so the `TokenKind::Keyword` check at the top of this
+        // function plus that guard together guarantee the while loop consumes at
+        // least one keyword part, making `arguments` non-empty here.
         let span = receiver.span().merge(arguments.last().unwrap().span());
 
         Expression::MessageSend {
