@@ -579,7 +579,7 @@ impl Parser {
                     if col <= 2 {
                         return true;
                     }
-                    *continuation_indent = current_indent;
+                    *continuation_indent = Some(col);
                     false
                 }
                 Some(ci) => {

@@ -577,12 +577,21 @@ fn bt2811_trailing_semicolon_before_sibling_method_reports_error() {
     let source =
         "Object subclass: D\n  cascadeMethod => Transcript show: \"a\";\n\n  nextMethod: x => x";
     let tokens = lex_with_eof(source);
-    let (_module, diagnostics) = parse(tokens);
+    let (module, diagnostics) = parse(tokens);
 
     assert!(
         !diagnostics.is_empty(),
         "Expected a parse diagnostic for the dangling cascade semicolon"
     );
+
+    // Error recovery must not corrupt the following method: nextMethod:
+    // still parses with its own parameter correctly bound.
+    assert_eq!(module.classes.len(), 1);
+    let class = &module.classes[0];
+    assert_eq!(class.methods.len(), 2, "Both methods must still parse");
+    assert_eq!(class.methods[1].selector.name(), "nextMethod:");
+    assert_eq!(class.methods[1].parameters.len(), 1);
+    assert_eq!(class.methods[1].parameters[0].name.name.as_str(), "x");
 }
 
 #[test]
