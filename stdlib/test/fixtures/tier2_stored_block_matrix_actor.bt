@@ -99,10 +99,14 @@ Actor subclass: Tier2StoredBlockMatrixActor
 
   // ── P2: edge cases ──────────────────────────────────────────────────────
 
-  // P2-10: same-method, captured-LOCAL (not field) Tier 2 block invoked in
-  // *argument* (sub-expression) position — contrast case for P3-15 below:
-  // this shape is fully supported (only a self.field receiver is restricted
-  // to top-level statement position; a plain local/param receiver is not).
+  // P2-10 (KNOWN GAP — BT-2814): same-method, captured-LOCAL (not field)
+  // Tier 2 block invoked in *argument* (sub-expression) position. This was
+  // originally believed fully supported (only a self.field receiver seemed
+  // restricted to top-level statement position — see P3-15 below), but a
+  // plain local/param receiver turns out to have the same limitation: the
+  // raw {Result, State} tuple leaks into the enclosing arithmetic instead
+  // of being unpacked. Kept here, commented out in the TestCase file, as a
+  // tracked gap rather than silently absent from the matrix.
   localBlockInArgumentPosition: x =>
     r := 0
     blk := [:n | r := r + n]
@@ -153,12 +157,17 @@ Actor subclass: Tier2StoredBlockMatrixActor
   // BT-2811 workaround buffer — do not remove or reorder around this.
   cascadeBuffer2 => nil
 
-  // P2-11: same-method, LOCAL var block with a captured-local-ONLY mutation
-  // (no field write), invoked via a cascade. Fully supported — BT-2809's
-  // restriction is specifically about a FIELD-stored captured-local-only
-  // block (invoked cross-method); this is neither field-stored nor
-  // cross-method. (A field-write PLUS captured-local mix stored in a local
-  // var, unlike this captured-local-only case, hits a separate pre-existing
+  // P2-11 (KNOWN GAP — BT-2815): same-method, LOCAL var block with a
+  // captured-local-ONLY mutation (no field write), invoked via a cascade.
+  // This was originally believed fully supported — BT-2809's restriction is
+  // specifically about a FIELD-stored captured-local-only block (invoked
+  // cross-method), and this is neither field-stored nor cross-method — but
+  // it turns out a captured-local mutation in a NAMED Tier 2 local var
+  // (as opposed to an inline block literal) never threads back to the
+  // caller's own variable at all, even for a single non-cascade call in the
+  // same method; reproduces independently of the cascade shape tested here.
+  // (A field-write PLUS captured-local mix stored in a local var, unlike
+  // this captured-local-only case, hits a separate pre-existing
   // semantic-analysis limitation — see block_analyzer.rs's own comment on
   // why local-var-stored field writes stay conservatively flagged even when
   // codegen could prove them safe — so that combination isn't exercised
