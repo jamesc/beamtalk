@@ -767,9 +767,17 @@ find_class_method_in_chain(Selector, ClassName) ->
         end
     end,
     case beamtalk_hierarchy:walk_ancestors(SuperclassName, StepFun, ?MAX_HIERARCHY_DEPTH) of
-        {found, {AncestorName, AncestorModule}} -> {ok, AncestorName, AncestorModule};
-        not_found -> not_found;
-        max_depth_exceeded -> not_found
+        {found, {AncestorName, AncestorModule}} ->
+            {ok, AncestorName, AncestorModule};
+        not_found ->
+            not_found;
+        max_depth_exceeded ->
+            ?LOG_WARNING(
+                "find_class_method_in_ancestors: max hierarchy depth ~p exceeded at ~p — possible cycle",
+                [?MAX_HIERARCHY_DEPTH, ClassName],
+                #{domain => [beamtalk, runtime]}
+            ),
+            not_found
     end.
 
 -doc "Read the superclass name from the hierarchy table (no gen_server call).".

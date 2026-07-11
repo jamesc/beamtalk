@@ -36,14 +36,13 @@ early (mirrors "no superclass").
 - `not_found` — stop, nothing found anywhere in the chain.
 
 Callers that need caller-specific behaviour at the max-depth boundary (e.g.
-a structured `#beamtalk_error{}` naming the class that triggered it) inspect
-the `max_depth_exceeded` return and build their own error; this module only
-owns the generic cycle-guard log line.
+a structured `#beamtalk_error{}` naming the class that triggered it, or a
+contextual `?LOG_WARNING` naming the selector) inspect the
+`max_depth_exceeded` return and build their own error/log line; this module
+only owns the depth guard itself, not the logging.
 """.
 
 -export([walk_ancestors/3]).
-
--include_lib("kernel/include/logger.hrl").
 
 -type node_id() :: term().
 -type step_result(Result) :: {found, Result} | {next, node_id() | none} | not_found.
@@ -70,14 +69,7 @@ walk_ancestors(StartNode, StepFun, MaxDepth) ->
     walk_result(Result).
 walk_ancestors(none, _StepFun, _MaxDepth, _Depth) ->
     not_found;
-walk_ancestors(Node, _StepFun, MaxDepth, Depth) when Depth > MaxDepth ->
-    ?LOG_WARNING(
-        "walk_ancestors: max hierarchy depth ~p exceeded at ~p — possible cycle",
-        [
-            MaxDepth, Node
-        ],
-        #{domain => [beamtalk, runtime]}
-    ),
+walk_ancestors(_Node, _StepFun, MaxDepth, Depth) when Depth > MaxDepth ->
     max_depth_exceeded;
 walk_ancestors(Node, StepFun, MaxDepth, Depth) ->
     case StepFun(Node, Depth) of

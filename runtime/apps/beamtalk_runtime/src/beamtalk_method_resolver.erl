@@ -21,6 +21,7 @@ See also: beamtalk_compiled_method_ops for CompiledMethod field access
 """.
 
 -include("beamtalk.hrl").
+-include_lib("kernel/include/logger.hrl").
 
 -export([resolve/2]).
 
@@ -109,9 +110,15 @@ resolve_with_hierarchy(ClassPid, Selector) ->
                     superclass_pid(ClassPid), StepFun, ?MAX_HIERARCHY_DEPTH
                 )
             of
-                {found, Method} -> Method;
-                not_found -> nil;
-                max_depth_exceeded -> nil
+                {found, Method} ->
+                    Method;
+                not_found ->
+                    nil;
+                max_depth_exceeded ->
+                    ?LOG_WARNING(">> hierarchy walk exceeded ~p levels", [?MAX_HIERARCHY_DEPTH], #{
+                        domain => [beamtalk, runtime]
+                    }),
+                    nil
             end;
         Method ->
             Method

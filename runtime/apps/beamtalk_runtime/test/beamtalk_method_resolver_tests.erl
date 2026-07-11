@@ -156,7 +156,7 @@ start_superclass_chain(NumClasses, Selector) ->
         list_to_atom("ResolverDepthTestClass" ++ integer_to_list(I))
      || I <- lists:seq(1, NumClasses)
     ],
-    Pids = lists:foldl(
+    RevPids = lists:foldl(
         fun(I, AccPids) ->
             ClassName = lists:nth(I, ClassNames),
             Super =
@@ -176,12 +176,12 @@ start_superclass_chain(NumClasses, Selector) ->
                 instance_methods => InstanceMethods,
                 instance_variables => []
             }),
-            AccPids ++ [Pid]
+            [Pid | AccPids]
         end,
         [],
         lists:seq(1, NumClasses)
     ),
-    {hd(ClassNames), Pids}.
+    {hd(ClassNames), lists:reverse(RevPids)}.
 
 test_resolve_at_depth_boundary_found() ->
     Selector = resolverDepthBoundaryMethod,

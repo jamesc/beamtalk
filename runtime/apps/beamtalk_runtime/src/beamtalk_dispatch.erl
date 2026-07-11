@@ -258,6 +258,12 @@ lookup_in_class_chain(Selector, Args, Self, State, ClassName) ->
         {found, Result} ->
             Result;
         max_depth_exceeded ->
+            ?LOG_WARNING("Max hierarchy depth exceeded — possible cycle", #{
+                max_depth => ?MAX_HIERARCHY_DEPTH,
+                class => ClassName,
+                selector => Selector,
+                domain => [beamtalk, runtime]
+            }),
             {error,
                 beamtalk_error:new(
                     does_not_understand,
@@ -267,9 +273,12 @@ lookup_in_class_chain(Selector, Args, Self, State, ClassName) ->
                 )};
         not_found ->
             %% Unreachable: class_chain_step/6 always resolves to
-            %% {found, _} or {next, _}, never a bare not_found. Kept
-            %% for exhaustiveness against the generic walker's contract.
-            {error, beamtalk_error:new(does_not_understand, ClassName, Selector)}
+            %% {found, _} or {next, _}, never a bare not_found. Assert the
+            %% invariant instead of silently returning a plausible-looking
+            %% does_not_understand — if class_chain_step/6 is ever changed to
+            %% violate its contract, this must fail loudly, not hide the bug
+            %% behind a normal-looking DNU.
+            erlang:error({unreachable, not_found, ClassName, Selector})
     end.
 
 -doc """
