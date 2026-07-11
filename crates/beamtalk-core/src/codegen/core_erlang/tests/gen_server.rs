@@ -2245,6 +2245,72 @@ fn test_value_subclass_has_method_includes_auto_methods() {
     );
 }
 
+/// BT-2734: Extracts the body between a `<key> => ~{` marker and its closing
+/// `}~`. Map entry values are Core Erlang binary literals (`#{...}#`), which
+/// never contain the `}~` map terminator, so the first `}~` after the marker is
+/// the map close.
+fn map_body<'a>(code: &'a str, key: &str) -> &'a str {
+    let start = code
+        .find(key)
+        .unwrap_or_else(|| panic!("no `{key}` in:\n{code}"));
+    let after = &code[start + key.len()..];
+    let end = after
+        .find("}~")
+        .unwrap_or_else(|| panic!("no map close after `{key}`"));
+    &after[..end]
+}
+
+#[test]
+fn test_value_subclass_synthetic_accessor_metadata_injected() {
+    // BT-2734: auto-generated getters / setters / keyword constructor gain
+    // `__signature__` + `__doc__` entries in the builder-state selector maps, so
+    // every reflective surface can resolve their docs uniformly.
+    let module = make_value_subclass_point();
+    let code = generate_module(&module, CodegenOptions::new("bt@point")).unwrap();
+
+    let sigs = map_body(&code, "'methodSignatures' => ~{");
+    assert!(
+        sigs.contains("'x' =>") && sigs.contains("'y' =>"),
+        "instance signatures should carry synthetic getters. Got:\n{sigs}"
+    );
+    assert!(
+        sigs.contains("'withX:' =>") && sigs.contains("'withY:' =>"),
+        "instance signatures should carry synthetic setters. Got:\n{sigs}"
+    );
+
+    let docs = map_body(&code, "'methodDocs' => ~{");
+    assert!(
+        docs.contains("'x' =>") && docs.contains("'withX:' =>"),
+        "instance docs should carry synthetic accessor docs. Got:\n{docs}"
+    );
+
+    let class_sigs = map_body(&code, "'classMethodSignatures' => ~{");
+    assert!(
+        class_sigs.contains("'x:y:' =>"),
+        "class-side signatures should carry the keyword constructor. Got:\n{class_sigs}"
+    );
+    let class_docs = map_body(&code, "'classMethodDocs' => ~{");
+    assert!(
+        class_docs.contains("'x:y:' =>"),
+        "class-side docs should carry the keyword constructor doc. Got:\n{class_docs}"
+    );
+}
+
+#[test]
+fn test_value_subclass_synthetic_accessor_metadata_gated_to_value_kind() {
+    // BT-2734: only `Value subclass:` classes get synthetic accessor metadata.
+    // An `Object subclass:` with the same slot must not synthesize `withX:`.
+    let mut module = make_value_subclass_point();
+    module.classes[0].class_kind = ClassKind::Object;
+    module.classes[0].superclass = Some(Identifier::new("Object", Span::new(0, 0)));
+    let code = generate_module(&module, CodegenOptions::new("bt@widget")).unwrap();
+    let sigs = map_body(&code, "'methodSignatures' => ~{");
+    assert!(
+        !sigs.contains("'withX:' =>"),
+        "object subclass should not synthesize accessor signatures. Got:\n{sigs}"
+    );
+}
+
 #[test]
 fn test_object_subclass_no_auto_getters() {
     // BT-923: `Object subclass:` (ClassKind::Object) must NOT generate auto-getters.
