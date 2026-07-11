@@ -117,46 +117,22 @@ send({beamtalk_supervisor, ClassName, _Module, _Pid} = Self, Selector, Args) ->
             beamtalk_exception_handler:reraise(Error)
     end;
 send(Receiver, Selector, Args) ->
-    case is_actor(Receiver) of
-        true ->
-            case element(2, Receiver) of
-                'Metaclass' ->
-                    %% ADR 0036 (BT-802): Metaclass objects dispatch synchronously via
-                    %% the Metaclass → Class → Behaviour chain. They must NOT be treated
-                    %% as regular actor instances.
-                    beamtalk_primitive:send(Receiver, Selector, Args);
-                _ ->
-                    case beamtalk_class_registry:is_class_object(Receiver) of
-                        true ->
-                            ClassPid = element(4, Receiver),
-                            beamtalk_object_class:class_send(ClassPid, Selector, Args);
-                        false ->
-                            Ref = element(4, Receiver),
-                            %% BT-886: Validate PID before dispatching.
-                            %% When class registration is incomplete, the actor
-                            %% record may contain an invalid PID (e.g., undefined).
-                            %% ADR 0079 / BT-1990: Ref may also be a
-                            %% `{registered, Name}` tuple for name-resolving
-                            %% proxies; sync_send/3 handles both shapes.
-                            case is_actor_ref(Ref) of
-                                true ->
-                                    %% BT-918 / ADR 0043: sync-by-default — use gen_server:call
-                                    %% so the send returns the value directly, not a Future.
-                                    beamtalk_actor:sync_send(Ref, Selector, Args);
-                                false ->
-                                    ClassName = element(2, Receiver),
-                                    Error = beamtalk_error:new(
-                                        actor_dead,
-                                        ClassName,
-                                        Selector,
-                                        <<"Actor process is not available — class may not be fully registered">>
-                                    ),
-                                    beamtalk_exception_handler:reraise(Error)
-                            end
-                    end
-            end;
-        false ->
-            beamtalk_primitive:send(Receiver, Selector, Args)
+    case classify_receiver(Receiver) of
+        primitive ->
+            beamtalk_primitive:send(Receiver, Selector, Args);
+        metaclass ->
+            %% ADR 0036 (BT-802): Metaclass objects dispatch synchronously via
+            %% the Metaclass → Class → Behaviour chain. They must NOT be treated
+            %% as regular actor instances.
+            beamtalk_primitive:send(Receiver, Selector, Args);
+        {class, ClassPid} ->
+            beamtalk_object_class:class_send(ClassPid, Selector, Args);
+        {actor, Ref} ->
+            %% BT-918 / ADR 0043: sync-by-default — use gen_server:call
+            %% so the send returns the value directly, not a Future.
+            beamtalk_actor:sync_send(Ref, Selector, Args);
+        {dead, ClassName} ->
+            reraise_actor_dead(ClassName, Selector)
     end.
 
 -doc """
@@ -177,36 +153,18 @@ send({beamtalk_supervisor, _, _, _} = Sup, Selector, Args, _Timeout) ->
     %% so timeout is irrelevant. Delegate to send/3.
     send(Sup, Selector, Args);
 send(Receiver, Selector, Args, Timeout) ->
-    case is_actor(Receiver) of
-        true ->
-            case element(2, Receiver) of
-                'Metaclass' ->
-                    beamtalk_primitive:send(Receiver, Selector, Args);
-                _ ->
-                    case beamtalk_class_registry:is_class_object(Receiver) of
-                        true ->
-                            ClassPid = element(4, Receiver),
-                            beamtalk_object_class:class_send(ClassPid, Selector, Args);
-                        false ->
-                            Ref = element(4, Receiver),
-                            case is_actor_ref(Ref) of
-                                true ->
-                                    beamtalk_actor:sync_send(Ref, Selector, Args, Timeout);
-                                false ->
-                                    ClassName = element(2, Receiver),
-                                    Error = beamtalk_error:new(
-                                        actor_dead,
-                                        ClassName,
-                                        Selector,
-                                        <<"Actor process is not available — class may not be fully registered">>
-                                    ),
-                                    beamtalk_exception_handler:reraise(Error)
-                            end
-                    end
-            end;
-        false ->
+    case classify_receiver(Receiver) of
+        primitive ->
             %% Value types have no timeout semantics — dispatch is synchronous in-process.
-            beamtalk_primitive:send(Receiver, Selector, Args)
+            beamtalk_primitive:send(Receiver, Selector, Args);
+        metaclass ->
+            beamtalk_primitive:send(Receiver, Selector, Args);
+        {class, ClassPid} ->
+            beamtalk_object_class:class_send(ClassPid, Selector, Args);
+        {actor, Ref} ->
+            beamtalk_actor:sync_send(Ref, Selector, Args, Timeout);
+        {dead, ClassName} ->
+            reraise_actor_dead(ClassName, Selector)
     end.
 
 -doc """
@@ -222,32 +180,67 @@ cast({beamtalk_future, _} = Future, Selector, Args) ->
     Value = beamtalk_future:await(Future),
     cast(Value, Selector, Args);
 cast(Receiver, Selector, Args) ->
+    case classify_receiver(Receiver) of
+        primitive ->
+            %% Primitive receiver: cast has no effect
+            ok;
+        metaclass ->
+            %% Metaclass objects cannot receive cast messages
+            ok;
+        {class, _ClassPid} ->
+            %% Class objects cannot receive cast messages
+            ok;
+        {actor, Ref} ->
+            beamtalk_actor:cast_send(Ref, Selector, Args);
+        {dead, _ClassName} ->
+            %% Dead actor: cast is fire-and-forget, silently ignore
+            ok
+    end.
+
+-doc """
+Classify a receiver for dispatch, shared by send/3, send/4, cast/3 (BT-2787).
+`{actor, Ref}` covers live actors (Ref: `pid()` or `{registered, Name}`,
+ADR 0079). `{dead, ClassName}` covers an invalid PID slot (BT-886).
+""".
+-spec classify_receiver(term()) ->
+    primitive | metaclass | {class, pid()} | {actor, term()} | {dead, atom()}.
+classify_receiver(Receiver) ->
     case is_actor(Receiver) of
+        false ->
+            primitive;
         true ->
             case element(2, Receiver) of
                 'Metaclass' ->
-                    %% Metaclass objects cannot receive cast messages
-                    ok;
+                    metaclass;
                 _ ->
                     case beamtalk_class_registry:is_class_object(Receiver) of
                         true ->
-                            %% Class objects cannot receive cast messages
-                            ok;
+                            {class, element(4, Receiver)};
                         false ->
                             Ref = element(4, Receiver),
                             case is_actor_ref(Ref) of
                                 true ->
-                                    beamtalk_actor:cast_send(Ref, Selector, Args);
+                                    {actor, Ref};
                                 false ->
-                                    %% Dead actor: cast is fire-and-forget, silently ignore
-                                    ok
+                                    {dead, element(2, Receiver)}
                             end
                     end
-            end;
-        false ->
-            %% Primitive receiver: cast has no effect
-            ok
+            end
     end.
+
+-doc """
+Raise the structured `actor_dead` error (BT-886), shared by send/3 and
+send/4 so the error shape stays byte-identical.
+""".
+-spec reraise_actor_dead(atom(), atom()) -> no_return().
+reraise_actor_dead(ClassName, Selector) ->
+    Error = beamtalk_error:new(
+        actor_dead,
+        ClassName,
+        Selector,
+        <<"Actor process is not available — class may not be fully registered">>
+    ),
+    beamtalk_exception_handler:reraise(Error).
 
 -doc """
 Check if a value is a beamtalk actor (beamtalk_object record).
