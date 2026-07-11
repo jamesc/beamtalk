@@ -12,14 +12,6 @@
 // only a *different* method invokes it, so every field-stored cell in this
 // fixture exercises the cross-method case (the one static per-method
 // tracking can't see, per BT-2797's own design note).
-//
-// Method order note (BT-2811 workaround): a cascade-bodied method
-// immediately followed by any keyword method — including another
-// cascade-bodied one — corrupts that following method's parameter parsing
-// (unrelated parser bug, filed separately). All three cascade-bodied
-// methods here (tickTwice:, tickThrice:, mixedLocalVarCascade:) are
-// grouped at the end of the class, each separated from the next by a
-// trivial unary buffer method (a 0-arg method is never affected).
 
 Actor subclass: Tier2StoredBlockMatrixActor
   state: total = 0
@@ -142,20 +134,14 @@ Actor subclass: Tier2StoredBlockMatrixActor
   // rather than silently absent from the matrix.
   addTickResult: x => self.total := self.total + (self.onTick value: x)
 
-  // ── Cascade-bodied methods (grouped last — see BT-2811 note above) ─────
+  // ── Cascade-bodied methods ──────────────────────────────────────────────
 
   // P0-2 (BT-2808): cascade of two value: sends to the same field-stored block.
   tickTwice: x => self.onTick value: x; value: x
 
-  // BT-2811 workaround buffer — do not remove or reorder around this.
-  cascadeBuffer1 => nil
-
   // P0-3 (BT-2808 extension): cascade of three value: sends — exercises the
   // N>2 case (multiple intermediate {Result, State} tuples threaded in sequence).
   tickThrice: x => self.onTick value: x; value: x; value: x
-
-  // BT-2811 workaround buffer — do not remove or reorder around this.
-  cascadeBuffer2 => nil
 
   // P2-11 (KNOWN GAP — BT-2815): same-method, LOCAL var block with a
   // captured-local-ONLY mutation (no field write), invoked via a cascade.
@@ -171,8 +157,7 @@ Actor subclass: Tier2StoredBlockMatrixActor
   // semantic-analysis limitation — see block_analyzer.rs's own comment on
   // why local-var-stored field writes stay conservatively flagged even when
   // codegen could prove them safe — so that combination isn't exercised
-  // here.) Last method in the class — safe per the BT-2811 workaround note
-  // above.
+  // here.)
   mixedLocalVarCascade: x =>
     extra := 0
     blk := [:n | extra := extra + n]

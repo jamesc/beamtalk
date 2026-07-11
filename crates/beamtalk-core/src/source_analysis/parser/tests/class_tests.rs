@@ -416,6 +416,105 @@ fn parse_cascade_simple() {
 }
 
 #[test]
+fn bt2811_cascade_method_immediately_followed_by_keyword_method() {
+    // BT-2811: a cascade-bodied method immediately followed (no method in
+    // between) by a keyword method used to corrupt the keyword method's own
+    // parameter parsing — parse_cascade_message's keyword-parsing loop had no
+    // boundary check for "this keyword actually starts the next sibling class
+    // member", unlike parse_keyword_message's equivalent loop, so it silently
+    // swallowed the next method's `nextMethod:` keyword and `x` parameter as
+    // additional keyword parts/arguments of the cascade message.
+    let source = "Object subclass: MinimalRepro\n  cascadeMethod => Transcript show: \"a\"; show: \"b\"\n\n  nextMethod: x => x";
+    let tokens = lex_with_eof(source);
+    let (module, diagnostics) = parse(tokens);
+
+    assert!(
+        diagnostics.is_empty(),
+        "Expected no parse diagnostics, got: {diagnostics:?}"
+    );
+    assert_eq!(module.classes.len(), 1);
+    let class = &module.classes[0];
+    assert_eq!(
+        class.methods.len(),
+        2,
+        "Both cascadeMethod and nextMethod: must parse as separate methods"
+    );
+    assert_eq!(class.methods[0].selector.name(), "cascadeMethod");
+    assert_eq!(class.methods[1].selector.name(), "nextMethod:");
+    assert_eq!(
+        class.methods[1].parameters.len(),
+        1,
+        "nextMethod:'s own parameter must be bound to it, not swallowed by the \
+         preceding cascade"
+    );
+    assert_eq!(class.methods[1].parameters[0].name.name.as_str(), "x");
+
+    // The cascade itself must still be exactly 2 messages (show: "a" folded
+    // into the receiver per parse_cascade, plus show: "b") — not polluted
+    // with a spurious third keyword part from the next method.
+    if let Expression::Cascade { messages, .. } = &class.methods[0].body[0].expression {
+        assert_eq!(
+            messages.len(),
+            1,
+            "cascadeMethod's cascade must have exactly 1 explicit message (show: \"b\")"
+        );
+    } else {
+        panic!(
+            "Expected cascadeMethod's body to be a Cascade expression, got: {:?}",
+            class.methods[0].body[0].expression
+        );
+    }
+}
+
+#[test]
+fn bt2811_cascade_method_followed_by_keyword_method_in_middle_of_class() {
+    // BT-2811: the corruption is not specific to the class's LAST method — a
+    // keyword method in the middle of the class, immediately after a cascade
+    // method, is affected identically, and (pre-fix) the desync propagated
+    // further and corrupted the method after that too.
+    let source = "Object subclass: MinimalRepro2\n  cascadeMethod => Transcript show: \"a\"; show: \"b\"\n\n  middleMethod: x => x\n\n  lastMethod => 1";
+    let tokens = lex_with_eof(source);
+    let (module, diagnostics) = parse(tokens);
+
+    assert!(
+        diagnostics.is_empty(),
+        "Expected no parse diagnostics, got: {diagnostics:?}"
+    );
+    assert_eq!(module.classes.len(), 1);
+    let class = &module.classes[0];
+    assert_eq!(class.methods.len(), 3, "All three methods must parse");
+    assert_eq!(class.methods[0].selector.name(), "cascadeMethod");
+    assert_eq!(class.methods[1].selector.name(), "middleMethod:");
+    assert_eq!(class.methods[1].parameters.len(), 1);
+    assert_eq!(class.methods[1].parameters[0].name.name.as_str(), "x");
+    assert_eq!(class.methods[2].selector.name(), "lastMethod");
+    assert!(class.methods[2].parameters.is_empty());
+}
+
+#[test]
+fn bt2811_cascade_method_followed_by_binary_selector_method() {
+    // BT-2811 completeness check: a binary-selector method immediately after
+    // a cascade method (not exercised by the original bug report, which only
+    // covered keyword methods) — binary selectors don't loop over multiple
+    // parts the way keyword messages do, so this was never actually at risk,
+    // but is worth a regression test given how surprising the keyword case was.
+    let source = "Object subclass: BinaryRepro\n  cascadeMethod => Transcript show: \"a\"; show: \"b\"\n\n  + other => other";
+    let tokens = lex_with_eof(source);
+    let (module, diagnostics) = parse(tokens);
+
+    assert!(
+        diagnostics.is_empty(),
+        "Expected no parse diagnostics, got: {diagnostics:?}"
+    );
+    assert_eq!(module.classes.len(), 1);
+    let class = &module.classes[0];
+    assert_eq!(class.methods.len(), 2);
+    assert_eq!(class.methods[1].selector.name(), "+");
+    assert_eq!(class.methods[1].parameters.len(), 1);
+    assert_eq!(class.methods[1].parameters[0].name.name.as_str(), "other");
+}
+
+#[test]
 fn parse_statement_with_period() {
     // Test that unary messages followed by period work correctly
     let module = parse_ok("obj foo.");
