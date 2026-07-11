@@ -37,7 +37,6 @@ This module provides the 'Metaclass' instance methods entry point.
 """.
 
 -include("beamtalk.hrl").
--include_lib("kernel/include/logger.hrl").
 
 %% API
 -export([dispatch/4, has_method/1, register_class/0]).
@@ -69,8 +68,7 @@ dispatch('isClass', [], _Self, State) ->
 dispatch('isMetaclass', [], _Self, State) ->
     {reply, true, State};
 dispatch(Selector, _Args, _Self, State) ->
-    Error = beamtalk_error:new(does_not_understand, 'Metaclass', Selector),
-    {error, Error, State}.
+    beamtalk_bootstrap_stub:dnu('Metaclass', Selector, State).
 
 -doc """
 Check if Metaclass has an instance method.
@@ -117,20 +115,11 @@ register_class() ->
             'isMetaclass' => #{arity => 0}
         }
     },
-    case beamtalk_object_class:start('Metaclass', ClassInfo) of
-        {ok, _Pid} ->
-            ?LOG_INFO("Registered Metaclass (ADR 0036 Phase 1 stub)", #{
-                module => ?MODULE, domain => [beamtalk, runtime]
-            }),
-            ok;
-        {error, {already_started, _}} ->
-            %% Metaclass was already registered (e.g., bootstrap ran twice or a prior
-            %% test registered it). Refresh the metadata to keep it consistent.
-            beamtalk_object_class:update_class('Metaclass', ClassInfo),
-            ok;
-        {error, Reason} ->
-            ?LOG_WARNING("Failed to register Metaclass", #{
-                reason => Reason, domain => [beamtalk, runtime]
-            }),
-            ok
-    end.
+    %% refresh_on_conflict is true: Metaclass was already registered (e.g.
+    %% bootstrap ran twice or a prior test registered it) — refresh the
+    %% metadata to keep it consistent.
+    beamtalk_bootstrap_stub:register('Metaclass', ClassInfo, #{
+        module => ?MODULE,
+        registered_msg => "Registered Metaclass (ADR 0036 Phase 1 stub)",
+        refresh_on_conflict => true
+    }).

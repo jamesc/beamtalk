@@ -44,7 +44,6 @@ This module provides the 'ClassBuilder' instance methods entry point (stub).
 """.
 
 -include("beamtalk.hrl").
--include_lib("kernel/include/logger.hrl").
 
 %% API
 -export([dispatch/4, has_method/1, register_class/0]).
@@ -66,8 +65,7 @@ ClassBuilder.bt exports.
 -spec dispatch(atom(), list(), term(), map()) ->
     {reply, term(), map()} | {error, #beamtalk_error{}, map()}.
 dispatch(Selector, _Args, _Self, State) ->
-    Error = beamtalk_error:new(does_not_understand, 'ClassBuilder', Selector),
-    {error, Error, State}.
+    beamtalk_bootstrap_stub:dnu('ClassBuilder', Selector, State).
 
 -doc """
 Check if ClassBuilder has an instance method.
@@ -109,20 +107,11 @@ register_class() ->
         class_methods => #{},
         instance_methods => #{}
     },
-    case beamtalk_object_class:start('ClassBuilder', ClassInfo) of
-        {ok, _Pid} ->
-            ?LOG_INFO("Registered ClassBuilder (ADR 0038 Phase 1 stub)", #{
-                module => ?MODULE, domain => [beamtalk, runtime]
-            }),
-            ok;
-        {error, {already_started, _}} ->
-            %% ClassBuilder was already registered (e.g., bootstrap ran twice or a prior
-            %% test registered it). Refresh the metadata to keep it consistent.
-            beamtalk_object_class:update_class('ClassBuilder', ClassInfo),
-            ok;
-        {error, Reason} ->
-            ?LOG_WARNING("Failed to register ClassBuilder", #{
-                reason => Reason, domain => [beamtalk, runtime]
-            }),
-            ok
-    end.
+    %% refresh_on_conflict is true: ClassBuilder was already registered (e.g.
+    %% bootstrap ran twice or a prior test registered it) — refresh the
+    %% metadata to keep it consistent.
+    beamtalk_bootstrap_stub:register('ClassBuilder', ClassInfo, #{
+        module => ?MODULE,
+        registered_msg => "Registered ClassBuilder (ADR 0038 Phase 1 stub)",
+        refresh_on_conflict => true
+    }).
