@@ -1117,11 +1117,16 @@ impl TypeChecker {
             self.infer_args_for_on_do(arguments, hierarchy, env, in_abstract_method)
         } else if matches!(
             selector_name.as_str(),
-            "ifNotNil:" | "ifNil:ifNotNil:" | "ifNotNil:ifNil:"
+            "ifNil:" | "ifNotNil:" | "ifNil:ifNotNil:" | "ifNotNil:ifNil:"
         ) {
             // BT-2046: Narrow block parameter of `ifNotNil: [:x | ...]` to the
             // non-nil branch of the receiver's type. Dual of the receiver-side
             // `isNil ifFalse:` narrowing (BT-2048).
+            // BT-2824: Solo `ifNil:` is routed through here too, purely so its
+            // niladic block's `Block(..., R)` return type is preserved — the
+            // generic `infer_args_with_block_context` path requires a `Known`
+            // receiver to resolve block param types from a method signature,
+            // which a `T | Nil` union receiver never is.
             self.infer_args_for_if_not_nil(
                 &selector_name,
                 arguments,
@@ -1172,14 +1177,28 @@ impl TypeChecker {
         // still emits DNU. The helper unwraps parens so `(ClassName) ifNil: ...`
         // and `(self) ifNil: ...` aren't accidentally treated as non-class-side.
         let is_class_side_receiver = Self::is_class_side_receiver(receiver, env);
-        if !is_class_side_receiver
-            && matches!(
+        if !is_class_side_receiver {
+            if matches!(
                 selector_name.as_str(),
                 "ifNil:ifNotNil:" | "ifNotNil:ifNil:"
-            )
-        {
-            if let Some(ty) = Self::if_nil_branch_union_ret_ty(arguments, &arg_types) {
-                return ty;
+            ) {
+                if let Some(ty) = Self::if_nil_branch_union_ret_ty(arguments, &arg_types) {
+                    return ty;
+                }
+            } else if matches!(selector_name.as_str(), "ifNil:" | "ifNotNil:") {
+                // BT-2824: Solo `ifNil:` / `ifNotNil:` on a `T | Nil` union
+                // receiver infer as `T | R` / `R | Nil` — the union of the
+                // "self" branch (executed when the nil-check doesn't match)
+                // and the block branch's inferred return type.
+                if let Some(ty) = Self::if_nil_solo_union_ret_ty(
+                    &selector_name,
+                    &receiver_ty,
+                    arguments,
+                    &arg_types,
+                    hierarchy,
+                ) {
+                    return ty;
+                }
             }
         }
 
@@ -2971,7 +2990,9 @@ impl TypeChecker {
     /// prior behaviour, which also produced `Dynamic`).
     ///
     /// Nil-branch blocks (`ifNil:`) and blocks with no declared parameter get
-    /// the default inference path.
+    /// the default inference path — solo `ifNil:` (BT-2824) also lands here
+    /// (`not_nil_index` is `None` for it) purely to reuse that default path,
+    /// which preserves the block's `Block(..., R)` return type.
     fn infer_args_for_if_not_nil(
         &mut self,
         selector_name: &str,
@@ -3136,6 +3157,105 @@ impl TypeChecker {
         let a = branch_ret(&arguments[0], &arg_types[0])?;
         let b = branch_ret(&arguments[1], &arg_types[1])?;
         Some(InferredType::union_of(&[a, b]))
+    }
+
+    /// BT-2824: Compute the return type of a solo `ifNil:` / `ifNotNil:` send
+    /// on a `T | Nil` union receiver as the union of the "self" branch
+    /// (executed when the nil-check condition doesn't hold) and the block
+    /// branch's inferred return type `R`.
+    ///
+    /// For `ifNil:`, the self branch is the receiver's non-nil type `T`
+    /// (`Object>>ifNil:` returns `Self` when not nil) and the block branch is
+    /// the nil block's `R`. For `ifNotNil:`, the self branch is `Nil`
+    /// (`UndefinedObject>>ifNotNil:` returns `self`) and the block branch is
+    /// the not-nil block's `R` (already narrowed to the non-nil receiver type
+    /// by `infer_if_not_nil_block`).
+    ///
+    /// Only fires when `receiver_ty` is actually a `Nil`-containing union — a
+    /// plain `Known` receiver (nilable or not) falls through to the
+    /// pre-existing dispatch path unchanged, since the "impossible" branch
+    /// can't be ruled out generically for those without risking a
+    /// false-positive widening (e.g. `NonNilT ifNotNil: [...]` must not gain
+    /// a spurious `Nil` member).
+    ///
+    /// The "self branch" semantics (`Object>>ifNil: -> Self`,
+    /// `UndefinedObject>>ifNotNil: -> Nil`) are verified against the actual
+    /// resolved stdlib signature rather than assumed, so a future edit to
+    /// either method's declared return type in `Object.bt` / `UndefinedObject.bt`
+    /// falls back to the generic dispatch path instead of silently going stale.
+    ///
+    /// Returns `None` when the block argument isn't a well-formed `Block(...)`
+    /// type, the receiver doesn't qualify, or the stdlib contract this
+    /// function relies on no longer matches, so the caller falls back to the
+    /// generic dispatch path for those cases.
+    fn if_nil_solo_union_ret_ty(
+        selector_name: &str,
+        receiver_ty: &InferredType,
+        arguments: &[Expression],
+        arg_types: &[InferredType],
+        hierarchy: &ClassHierarchy,
+    ) -> Option<InferredType> {
+        let InferredType::Union { members, .. } = receiver_ty else {
+            return None;
+        };
+        let has_nil = members.iter().any(|m| {
+            m.as_known().is_some_and(|n| {
+                WellKnownClass::from_str(n).is_some_and(WellKnownClass::is_nil_class)
+            })
+        });
+        if !has_nil {
+            return None;
+        }
+        let non_nil_ty = Self::non_nil_type(receiver_ty);
+        if matches!(non_nil_ty, InferredType::Dynamic(_)) {
+            return None;
+        }
+
+        let arg = arguments.first()?;
+        let ty = arg_types.first()?;
+        let InferredType::Known {
+            class_name,
+            type_args,
+            ..
+        } = ty
+        else {
+            return None;
+        };
+        if class_name.as_str() != "Block" {
+            return None;
+        }
+        let block_ret = if let Expression::Block(block) = unwrap_parens(arg) {
+            if block_has_any_return(block) {
+                InferredType::Never
+            } else {
+                type_args.last().cloned()?
+            }
+        } else {
+            type_args.last().cloned()?
+        };
+
+        let self_branch = match selector_name {
+            "ifNil:" => {
+                let ret_ty = hierarchy
+                    .find_method(WellKnownClass::Object.as_str(), "ifNil:")?
+                    .return_type?;
+                if ret_ty.as_str() != "Self" {
+                    return None;
+                }
+                non_nil_ty
+            }
+            "ifNotNil:" => {
+                let ret_ty = hierarchy
+                    .find_method(WellKnownClass::UndefinedObject.as_str(), "ifNotNil:")?
+                    .return_type?;
+                if WellKnownClass::from_str(&ret_ty).is_none_or(|c| !c.is_nil_class()) {
+                    return None;
+                }
+                InferredType::known(WellKnownClass::UndefinedObject.as_str())
+            }
+            _ => return None,
+        };
+        Some(InferredType::union_of(&[self_branch, block_ret]))
     }
 
     /// Infer argument types for `ifTrue:` / `ifFalse:` / `ifTrue:ifFalse:` with

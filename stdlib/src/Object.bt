@@ -58,7 +58,7 @@ ProtoObject subclass: Object
   /// 42 ifNil: [0]         // => 42
   /// nil ifNil: [0]        // => 0
   /// ```
-  ifNil: _nilBlock :: Block => self
+  ifNil: _nilBlock :: Block -> Self => self
 
   /// If the receiver is not nil, evaluate `notNilBlock` with self.
   ///

@@ -1759,6 +1759,21 @@ value := name ifNil: [^nil] ifNotNil: [:n | n]
 // value is inferred as String (nil branch contributes Never, skipped)
 ```
 
+The solo forms — `ifNil: [...]` and `ifNotNil: [:v | ...]` — infer the same way, unioning the block's return type with the "self" branch (executed when the nil-check doesn't match):
+
+```beamtalk
+name :: String | nil := dictionary at: "name"
+name ifNil: ["unknown"]
+// inferred as String (T | R, where T = String and R = String both dedup)
+
+count :: Integer | nil := dictionary at: "count"
+count ifNil: ["none"]
+// inferred as Integer | String (T | R)
+
+name ifNotNil: [:n | n size]
+// inferred as Integer | Nil (R | Nil)
+```
+
 ### Union + Narrowing Compose
 
 ```beamtalk
