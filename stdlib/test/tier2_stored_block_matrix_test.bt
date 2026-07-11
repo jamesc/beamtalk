@@ -1,0 +1,162 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2810: Field-stored/opaque Tier 2 block invocation test matrix — proves
+// the compiler handles the {mutation kind × call-site shape × invocation
+// relationship × nesting × block arity} space for a block stored in a field
+// or local variable and invoked later via value:/value:value:/cascade.
+//
+// Complements mutation_matrix_test.bt (BT-1480), which densely covers
+// *direct* self.field := ... mutation crossed with control-flow/collection
+// combinators but never covers a block being stored then invoked. Built
+// after BT-2807/BT-2808/BT-2809 landed (three bugs found reactively, one
+// hand-written regression test per bug) specifically to catch remaining
+// gaps in this axis proactively instead — and it did: four more genuine
+// gaps below, each commented out with its own follow-up issue, exactly the
+// outcome this matrix was built to produce.
+//
+// Commented-out cells and their tracked follow-ups:
+//   - testBareCallInsideDoLoop, testBareCallInsideCollectBlock,
+//     testNestedLoopBareCall: BT-2813 (field-stored value: call inside a
+//     loop body crashes with badarity — the outer loop correctly detects
+//     it needs threading per BT-2807, but the loop body's own statement
+//     codegen doesn't emit the runtime-discriminated call)
+//   - testLocalBlockInArgumentPosition: BT-2814 (Tier 2 block value: call
+//     in argument/sub-expression position leaks the raw {Result,State}
+//     tuple instead of unpacking it — generalizes BT-2797's documented
+//     self.field-only limitation to local-var receivers too)
+//   - testMixedLocalVarCascade: BT-2815 (a captured-local-only mutation in
+//     a NAMED Tier 2 local var, not an inline block literal, never threads
+//     back to the caller's own variable — reproduces even without a
+//     cascade, so unrelated to BT-2808 despite surfacing here)
+//   - testArgumentPositionFieldStored: BT-2814 (the self.field variant of
+//     the same argument-position gap, already documented as a deliberate
+//     BT-2797 limitation)
+
+TestCase subclass: Tier2StoredBlockMatrixTest
+  field: a = nil
+
+  setUp => self.a := Tier2StoredBlockMatrixActor spawn
+
+  // ── P0: Known bug patterns (BT-2807/BT-2808 regression continuity) ────
+
+  // P0-1 (BT-2807): bare self.field value: alone inside ifTrue:.
+  testBareValueAloneInConditional =>
+    self.a setupOnTick
+    self.a tickIfPositive: 5
+    self assert: self.a getTotal equals: 5
+    self.a tickIfPositive: -3
+    self assert: self.a getTotal equals: 5
+
+  // P0-2 (BT-2808): cascade of two value: sends to the same field-stored block.
+  testCascadeTwoSends =>
+    self.a setupOnTick
+    self.a tickTwice: 5
+    self assert: self.a getTotal equals: 10
+
+  // P0-3 (BT-2808 extension): cascade of three value: sends.
+  testCascadeThreeSends =>
+    self.a setupOnTick
+    self.a tickThrice: 4
+    self assert: self.a getTotal equals: 12
+
+  // ── P1: High-risk unexplored combinations ──────────────────────────────
+
+  // P1-4: 2-arg field-stored block invoked cross-method.
+  testTwoArgBlockCrossMethod =>
+    self.a setupOnCombine
+    result := self.a combine: 3 and: 7
+    self assert: result equals: 10
+    self assert: self.a getTotal equals: 10
+
+  // P1-5: 0-arg field-stored block invoked cross-method, twice.
+  testZeroArgBlockCrossMethod =>
+    self.a setupOnPing
+    self.a ping
+    self.a ping
+    self assert: self.a getTotal equals: 2
+
+  // P1-6: field-stored block's value: call as the RHS of a local assignment.
+  testValueCallAsAssignmentRhs =>
+    self.a setupOnTick
+    result := self.a tickCaptureResult: 5
+    self assert: result equals: 5
+    self assert: self.a getTotal equals: 5
+
+  // P1-7 (KNOWN GAP — BT-2813): bare field-stored call inside a do: loop
+  // body crashes with badarity.
+  // testBareCallInsideDoLoop =>
+  //   self.a setupOnTick
+  //   self.a tickEach: #(1, 2, 3)
+  //   self assert: self.a getTotal equals: 6
+
+  // P1-8 (KNOWN GAP — BT-2813): bare field-stored call inside a collect:
+  // block crashes with badarity.
+  // testBareCallInsideCollectBlock =>
+  //   self.a setupOnTick
+  //   result := self.a tickEachCollect: #(1, 2, 3)
+  //   self assert: result equals: 6
+
+  // P1-9: field-stored call nested two levels deep inside conditionals.
+  testNestedConditionalBareCall =>
+    self.a setupOnTick
+    self.a tickIfPositiveNested: 5 and: 5
+    self assert: self.a getTotal equals: 5
+    self.a tickIfPositiveNested: 5 and: -5
+    self assert: self.a getTotal equals: 5
+    self.a tickIfPositiveNested: -5 and: 5
+    self assert: self.a getTotal equals: 5
+
+  // ── P2: Edge cases ─────────────────────────────────────────────────────
+
+  // P2-10 (KNOWN GAP — BT-2814): same-method, captured-LOCAL (not field)
+  // Tier 2 block invoked in argument position — the raw {Result,State}
+  // tuple leaks into the enclosing arithmetic instead of being unpacked.
+  // testLocalBlockInArgumentPosition =>
+  //   result := self.a localBlockInArgumentPosition: 5
+  //   self assert: result equals: 15
+
+  // P2-11 (KNOWN GAP — BT-2815): same-method, LOCAL var block with a
+  // captured-local-ONLY mutation, invoked via a cascade — the mutation
+  // never threads back to the caller's own variable.
+  // testMixedLocalVarCascade =>
+  //   result := self.a mixedLocalVarCascade: 4
+  //   self assert: result equals: 8
+
+  // P2-12: field reassigned to a different block between two invocations —
+  // confirms runtime discrimination re-reads the field each call.
+  testFieldReassignedBetweenCalls =>
+    self.a setupOnTick
+    self.a tick: 5
+    self assert: self.a getTotal equals: 5
+    self.a setupOnTickDoubling
+    self.a tick: 5
+    self assert: self.a getTotal equals: 15
+
+  // P2-13: 3-arg field-stored block (value:value:value:) invoked cross-method.
+  testThreeArgBlockCrossMethod =>
+    self.a setupOnTriple
+    result := self.a
+      triple: 1
+      second: 2
+      third: 3
+    self assert: result equals: 6
+
+// ── P3: Lower-risk / exploratory ────────────────────────────────────────
+
+// P3-14 (KNOWN GAP — BT-2813): field-stored call nested inside a loop
+// nested inside another loop — same badarity crash as P1-7/P1-8.
+// testNestedLoopBareCall =>
+//   self.a setupOnTick
+//   self.a tickNestedLoop: #(#(1, 2), #(3, 4))
+//   self assert: self.a getTotal equals: 10
+
+// P3-15 (KNOWN GAP — BT-2814): a field-stored Tier 2 block's value: call
+// in argument position drops its field mutation instead of threading it
+// — the self.field variant of the same tuple-leak gap as P2-10, already
+// documented as a deliberate BT-2797 limitation. See fixture's
+// addTickResult: comment for the codegen explanation.
+// testArgumentPositionFieldStored =>
+//   self.a setupOnTick
+//   self.a addTickResult: 5
+//   self assert: self.a getTotal equals: 5
