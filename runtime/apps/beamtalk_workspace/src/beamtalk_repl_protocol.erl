@@ -44,6 +44,11 @@ requests, "type"-keyed responses) was removed in BT-2789.
     encode_class_list/2,
     encode_health/3,
     encode_load_project/5,
+    %% BT-2801: per-finding encoder for the `reload-findings` op response,
+    %% shared with `beamtalk_ws_handler`'s `reload_check` push frame so the
+    %% two wire shapes can never drift apart.
+    encode_reload_finding/1,
+    undefined_to_null/1,
     get_op/1,
     get_id/1,
     get_session/1,
@@ -480,6 +485,47 @@ encode_diagnostics(Diagnostics, Msg) ->
     iolist_to_binary(
         json:encode(Base#{<<"diagnostics">> => Wire, <<"status">> => [<<"done">>]})
     ).
+
+-doc """
+Encode one `beamtalk_recheck:finding()` map for the `reload_check` push
+frame (`beamtalk_ws_handler:encode_reload_check_event/1`) and the
+`reload-findings` op response (`beamtalk_repl_ops_dev:handle_term/4`,
+BT-2801) — the one shared wire shape both surfaces rely on, so a client that
+reads the initial snapshot via the op and then applies live `reload_check`
+pushes never sees the two disagree on shape.
+""".
+-spec encode_reload_finding(map()) -> map().
+encode_reload_finding(Finding) ->
+    #{
+        <<"owner">> => maps:get(owner, Finding, <<>>),
+        <<"changedClass">> => maps:get(changed_class, Finding, <<>>),
+        <<"selector">> => maps:get(selector, Finding, <<>>),
+        <<"classification">> => atom_to_binary(maps:get(classification, Finding, removal), utf8),
+        <<"severity">> => maps:get(severity, Finding, <<"hint">>),
+        <<"category">> => undefined_to_null(maps:get(category, Finding, undefined)),
+        <<"message">> => maps:get(message, Finding, <<>>),
+        <<"note">> => undefined_to_null(maps:get(note, Finding, undefined)),
+        <<"sites">> => [encode_reload_site(S) || S <- maps:get(sites, Finding, [])],
+        <<"start">> => maps:get(start, Finding, 0),
+        <<"end">> => maps:get('end', Finding, 0)
+    }.
+
+-doc "Encode one call-site reference (`#{method, line}`) for a reload finding.".
+-spec encode_reload_site(map()) -> map().
+encode_reload_site(Site) ->
+    #{
+        <<"method">> => maps:get(method, Site, <<>>),
+        <<"line">> => maps:get(line, Site, 0)
+    }.
+
+-doc """
+Map the Erlang "missing value" idiom `undefined` (used by `beamtalk_recheck`'s
+optional finding fields — `category`, `note`, `cap_note` — none of which are
+Beamtalk-side `nil`) to JSON `null`.
+""".
+-spec undefined_to_null(term()) -> term().
+undefined_to_null(undefined) -> null;
+undefined_to_null(Value) -> Value.
 
 -doc """
 Encode a show-codegen response (BT-2402).

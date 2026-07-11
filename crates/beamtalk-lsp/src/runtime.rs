@@ -106,7 +106,7 @@ pub struct ClassChangedEvent {
 /// (`runtime/apps/beamtalk_workspace/src/beamtalk_recheck.erl`). `line` is
 /// the 1-based line xref recorded for the call site, not a byte offset —
 /// same precedent as [`beamtalk_core::language_service::NavSite`].
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct ReloadSite {
     /// Selector of the caller method containing the site.
     pub method: String,
@@ -117,7 +117,7 @@ pub struct ReloadSite {
 /// One reload-induced finding — a caller whose re-check surfaced a
 /// signature-change or removed-selector diagnostic attributable to a live
 /// reload. Mirrors `beamtalk_recheck:finding()`.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct ReloadFinding {
     /// Caller class this finding is attributed to (the document the LSP
     /// publishes the diagnostic against).
@@ -195,6 +195,16 @@ pub struct ReloadCheckEvent {
     /// The stale findings themselves (empty when every checked owner came
     /// back clean).
     pub findings: Vec<ReloadFinding>,
+}
+
+/// Snapshot payload for the `reload-findings` op response (BT-2801, ADR 0105
+/// surface-parity gap) — deserializes the op's `{"findings": [...]}` `value`
+/// payload. `ReloadFinding` is the exact per-finding shape shared with
+/// [`ReloadCheckEvent::findings`]; the Erlang side produces both from the
+/// same `encode_reload_finding/1`, so the two never disagree on shape.
+#[derive(Debug, Clone, Deserialize)]
+struct ReloadFindingsResponse {
+    findings: Vec<ReloadFinding>,
 }
 
 /// WebSocket client to a running Beamtalk workspace.
@@ -479,6 +489,52 @@ impl RuntimeClient {
             RuntimeError::Protocol(format!("nav-symbols: malformed reply payload: {e}"))
         })?;
         Ok(payload.classes)
+    }
+
+    /// One-shot snapshot read of every currently-live reload-induced finding
+    /// (BT-2801, ADR 0105 surface-parity gap) — the request/response
+    /// counterpart to the `reload_check`/`completed` push frame
+    /// [`ReloadCheckEvent`] arrives on. Callers use this to seed state on
+    /// attach (findings that already existed in
+    /// `beamtalk_workspace_findings_store` before this client connected are
+    /// otherwise invisible until the next reload happens to touch a given
+    /// caller again).
+    ///
+    /// Returns:
+    /// * `Ok(Vec<ReloadFinding>)` on success (possibly empty).
+    /// * `Err(RuntimeError::Protocol)` for transport-level failures or a
+    ///   structured `#beamtalk_error{}` reply.
+    pub async fn reload_findings(&self) -> Result<Vec<ReloadFinding>, RuntimeError> {
+        let request = RequestBuilder::reload_findings();
+        let id = request
+            .get("id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                RuntimeError::Protocol("reload-findings request missing id".to_string())
+            })?
+            .to_string();
+
+        let response = self
+            .dispatch_request(request, &id, "reload-findings")
+            .await?;
+
+        if response.is_error() {
+            let msg = response
+                .error
+                .or(response.message)
+                .unwrap_or_else(|| "unknown error".to_string());
+            return Err(RuntimeError::Protocol(format!(
+                "reload-findings error: {msg}"
+            )));
+        }
+
+        let value = response.value.ok_or_else(|| {
+            RuntimeError::Protocol("reload-findings: reply missing `value`".to_string())
+        })?;
+        let payload: ReloadFindingsResponse = serde_json::from_value(value).map_err(|e| {
+            RuntimeError::Protocol(format!("reload-findings: malformed reply payload: {e}"))
+        })?;
+        Ok(payload.findings)
     }
 
     /// Send `request` through the eval channel and wait up to `IO_TIMEOUT` for
