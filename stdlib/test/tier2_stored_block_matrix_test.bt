@@ -89,19 +89,17 @@ TestCase subclass: Tier2StoredBlockMatrixTest
     self assert: result equals: 5
     self assert: self.a getTotal equals: 5
 
-  // P1-7 (KNOWN GAP — BT-2813): bare field-stored call inside a do: loop
-  // body crashes with badarity.
-  // testBareCallInsideDoLoop =>
-  //   self.a setupOnTick
-  //   self.a tickEach: #(1, 2, 3)
-  //   self assert: self.a getTotal equals: 6
+  // P1-7 (BT-2813): bare field-stored call inside a do: loop body.
+  testBareCallInsideDoLoop =>
+    self.a setupOnTick
+    self.a tickEach: #(1, 2, 3)
+    self assert: self.a getTotal equals: 6
 
-  // P1-8 (KNOWN GAP — BT-2813): bare field-stored call inside a collect:
-  // block crashes with badarity.
-  // testBareCallInsideCollectBlock =>
-  //   self.a setupOnTick
-  //   result := self.a tickEachCollect: #(1, 2, 3)
-  //   self assert: result equals: 6
+  // P1-8 (BT-2813): bare field-stored call inside a collect: block.
+  testBareCallInsideCollectBlock =>
+    self.a setupOnTick
+    result := self.a tickEachCollect: #(1, 2, 3)
+    self assert: result equals: 6
 
   // P1-9: field-stored call nested two levels deep inside conditionals.
   testNestedConditionalBareCall =>
@@ -141,12 +139,12 @@ TestCase subclass: Tier2StoredBlockMatrixTest
 
   // ── P3: Lower-risk / exploratory ─────────────────────────────────────
 
-  // P3-14 (KNOWN GAP — BT-2813): field-stored call nested inside a loop
-  // nested inside another loop — same badarity crash as P1-7/P1-8.
-  // testNestedLoopBareCall =>
-  //   self.a setupOnTick
-  //   self.a tickNestedLoop: #(#(1, 2), #(3, 4))
-  //   self assert: self.a getTotal equals: 10
+  // P3-14 (BT-2813): field-stored call nested inside a loop nested inside
+  // another loop.
+  testNestedLoopBareCall =>
+    self.a setupOnTick
+    self.a tickNestedLoop: #(#(1, 2), #(3, 4))
+    self assert: self.a getTotal equals: 10
 
   // P3-15 (KNOWN GAP — BT-2814): a field-stored Tier 2 block's value: call
   // in argument position drops its field mutation instead of threading it

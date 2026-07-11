@@ -1656,3 +1656,58 @@ fn test_bt2803_no_regression_pure_local_var_value_with_arguments_fast_path() {
          the Tier 1/Tier 2 discriminated path. Got: {code}"
     );
 }
+
+#[test]
+fn test_bt2813_bare_tier2_value_call_inside_do_loop_body_unpacks_tuple() {
+    // BT-2813: a bare (non-assigned) `self.field value:` statement inside a
+    // `do:` loop body. Before the fix, the outer loop was correctly routed
+    // into the state-threading (StateAcc) path by `block_needs_mutation_threading`
+    // (BT-2807's `has_field_value_call` fact), but the loop body's own
+    // statement codegen (`generate_threaded_loop_body_inner`) had no case for
+    // a bare Tier2ValueCall — it fell through to `emit_non_assign_expr`,
+    // which emitted a plain (Tier-1-only) apply and crashed with badarity for
+    // a genuinely Tier 2 (2-arity) field-stored block. Structural check only
+    // (see stdlib/test/tier2_stored_block_matrix_test.bt for the runtime
+    // end-to-end check).
+    let src = "Actor subclass: Ctr\n  state: total = 0\n  state: onTick = nil\n\n  setup => self.onTick := [:x | self.total := self.total + x]\n\n  tickEach: items =>\n    items do: [:x | self.onTick value: x]\n    self.total\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let code = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    )
+    .expect("should compile (BT-2813)");
+
+    assert!(
+        regex::Regex::new(r"let _T2LoopTuple\w* = .*is_function.*in let StateAcc\w* = call 'erlang':'element'\(2, _T2LoopTuple")
+            .unwrap()
+            .is_match(&code),
+        "the bare Tier2ValueCall statement inside the do: loop body must \
+         runtime-discriminate the field's block and unpack the returned \
+         {{Result, NewState}} tuple via element/2, threading the new state \
+         forward into the next fold iteration. Got: {code}"
+    );
+}
+
+#[test]
+fn test_bt2813_bare_tier2_value_call_inside_collect_block_unpacks_tuple() {
+    // BT-2813: same gap as the do: case above, but for collect: — the loop
+    // body must also extract element(1) of the tuple as the collected value.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n  state: onTick = nil\n\n  setup => self.onTick := [:x | self.total := self.total + x]\n\n  tickEachCollect: items =>\n    items collect: [:x | self.onTick value: x]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let code = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    )
+    .expect("should compile (BT-2813)");
+
+    assert!(
+        regex::Regex::new(r"let _T2LoopVal\w* = call 'erlang':'element'\(1, _T2LoopTuple\w*\) in \{\[_T2LoopVal\w* \| AccList\]")
+            .unwrap()
+            .is_match(&code),
+        "the bare Tier2ValueCall statement inside the collect: loop body \
+         must extract element(1) of the returned tuple as the collected \
+         item value. Got: {code}"
+    );
+}
