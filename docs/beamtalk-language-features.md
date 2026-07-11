@@ -1725,6 +1725,7 @@ validate: x :: Object =>
 |---|---|---|
 | `x class =:= Foo ifTrue: [...]` | `x` is `Foo` in true block | True block only |
 | `x isKindOf: Foo ifTrue: [...]` | `x` is `Foo` in true block | True block only |
+| `x isKindOf: Foo ifFalse: [...]` | `x` is `T \ Foo` in false block | False block only |
 | `x isNil ifTrue: [^...]` | `x` is non-nil after the statement | Rest of method |
 | `x isNil ifTrue: [self error: "..."]` | `x` is non-nil after the statement | Rest of method |
 | `x isNil ifFalse: [...]` | `x` is non-nil in false block | False block |
