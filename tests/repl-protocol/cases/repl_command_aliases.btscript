@@ -25,7 +25,7 @@
 
 // Load counter fixture via :load (alias for Workspace load:)
 :load tests/repl-protocol/fixtures/counter.bt
-// => _
+// => Loaded: Counter
 
 // The Workspace load: direct form also works
 Workspace load: "tests/repl-protocol/fixtures/reload_counter.bt"
@@ -37,7 +37,7 @@ Workspace load: "tests/repl-protocol/fixtures/reload_counter.bt"
 
 // Load a test fixture
 :load tests/repl-protocol/fixtures/counter_test.bt
-// => _
+// => Loaded: CounterTest
 
 // :test CounterTest → Workspace test: CounterTest
 :test CounterTest
@@ -55,9 +55,9 @@ Workspace load: "tests/repl-protocol/fixtures/reload_counter.bt"
 :reload Counter
 // => Counter
 
-// :reload (no arg) → reload last loaded file
+// :reload (no arg) → reload last loaded file (counter_test.bt, last :load target)
 :reload
-// => _
+// => Reloaded: CounterTest
 
 // After reload, Counter still works
 c := Counter spawn
