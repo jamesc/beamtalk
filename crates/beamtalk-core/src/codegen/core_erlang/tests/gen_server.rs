@@ -4982,3 +4982,62 @@ fn test_bt_2720_native_object_class_delegate_omits_self() {
         "class-side native_call must omit ClassSelf from the arg list. Got:\n{code}"
     );
 }
+
+/// BT-nightly: When an Actor subclass has BOTH an intermediate parent (`has_parent_init=true`)
+/// AND its own `initialize` method (`has_initialize=true`), `init/1` must call the parent's
+/// init, merge state, and then use the `__skip_initialize__` guard to defer initialize
+/// dispatch to `handle_continue` — not call it inline.
+#[test]
+fn test_actor_with_parent_init_and_initialize_defers_to_handle_continue() {
+    let src = concat!(
+        "Counter subclass: LoggingInitCounter\n",
+        "  state: logCount = 0\n\n",
+        "  initialize =>\n",
+        "    self.logCount := 0\n\n",
+        "  increment =>\n",
+        "    self.logCount := self.logCount + 1\n",
+        "    super increment\n\n",
+        "  getLogCount => self.logCount\n",
+    );
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let code = generate_module(&module, CodegenOptions::new("logging_init_counter"))
+        .expect("codegen should succeed");
+
+    // init/1 must delegate to the parent module's init/1.
+    assert!(
+        code.contains("'bt@counter':'init'("),
+        "init/1 must call parent bt@counter:init/1. Got:\n{code}"
+    );
+
+    // Parent state must be merged with child fields.
+    assert!(
+        code.contains("ParentState"),
+        "init/1 must bind parent state as ParentState. Got:\n{code}"
+    );
+    assert!(
+        code.contains("FinalState"),
+        "init/1 must produce FinalState. Got:\n{code}"
+    );
+
+    // Because initialize is defined, init/1 must use the __skip_initialize__ guard
+    // and defer to handle_continue — NOT call initialize inline.
+    assert!(
+        code.contains("'__skip_initialize__'"),
+        "init/1 must guard initialize dispatch with __skip_initialize__. Got:\n{code}"
+    );
+    assert!(
+        code.contains("{'continue', 'initialize'}"),
+        "init/1 must return {{continue, initialize}} to defer initialize. Got:\n{code}"
+    );
+
+    // handle_continue must exist and dispatch initialize.
+    assert!(
+        code.contains("'handle_continue'/2"),
+        "Module must export handle_continue/2. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'safe_dispatch'('initialize'"),
+        "handle_continue must dispatch initialize via safe_dispatch. Got:\n{code}"
+    );
+}
