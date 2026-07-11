@@ -731,7 +731,7 @@ relevant_diagnostic_shape_matches_spawn_with_unknown_key_test() ->
         'end' => 1
     },
     ?assertEqual(
-        {true, {removed, <<"name">>}},
+        {true, {removed, <<"name">>}, []},
         beamtalk_recheck:relevant_diagnostic_shape(
             Diag, <<"ReCheckCounter">>, [{removed, <<"name">>}]
         )
@@ -763,7 +763,7 @@ relevant_diagnostic_shape_matches_removed_accessor_dnu_test() ->
         'end' => 1
     },
     ?assertEqual(
-        {true, {removed, <<"name">>}},
+        {true, {removed, <<"name">>}, []},
         beamtalk_recheck:relevant_diagnostic_shape(
             Diag, <<"ReCheckCounter">>, [{removed, <<"name">>}]
         )
@@ -782,7 +782,7 @@ relevant_diagnostic_shape_retyped_fallback_matches_unrelated_dnu_test() ->
         'end' => 1
     },
     ?assertEqual(
-        {true, {retyped, <<"count">>, <<"Integer">>, <<"String">>}},
+        {true, {retyped, <<"count">>, <<"Integer">>, <<"String">>}, []},
         beamtalk_recheck:relevant_diagnostic_shape(
             Diag, <<"ReCheckCounter">>, [{retyped, <<"count">>, <<"Integer">>, <<"String">>}]
         )
@@ -790,13 +790,13 @@ relevant_diagnostic_shape_retyped_fallback_matches_unrelated_dnu_test() ->
 
 %% Two retyped slots in the same reload — the Dnu carries no field-name
 %% signal (see relevant_diagnostic_shape/3's doc), so retyped_fallback/1
-%% cannot tell which slot actually caused it and picks the first by list
-%% order, not the true culprit. Pinned deliberately (BT-2780 adversarial
-%% review): this is a known, accepted precision limit — the fallback would
-%% attribute this exact diagnostic to `count` even if `label`'s retype were
-%% the real cause, or vice versa. See beamtalk_recheck.erl's
-%% relevant_diagnostic_shape/3 moduledoc.
-relevant_diagnostic_shape_retyped_fallback_picks_first_when_multiple_test() ->
+%% cannot tell which slot actually caused it. Rather than silently blaming
+%% the first by list order (BT-2780 adversarial review; fixed in BT-2805),
+%% the other candidate(s) come back as the triple's third element so the
+%% caller can render the attribution as ambiguous. See
+%% field_change_note_retyped_with_ambiguous_candidates_renders_all_names_test/0
+%% for how the finding's `note` surfaces this.
+relevant_diagnostic_shape_retyped_fallback_notes_ambiguity_when_multiple_test() ->
     Diag = #{
         category => <<"Dnu">>,
         message => <<"String does not understand '+'">>,
@@ -805,7 +805,9 @@ relevant_diagnostic_shape_retyped_fallback_picks_first_when_multiple_test() ->
         'end' => 1
     },
     ?assertEqual(
-        {true, {retyped, <<"count">>, <<"Integer">>, <<"String">>}},
+        {true, {retyped, <<"count">>, <<"Integer">>, <<"String">>}, [
+            {retyped, <<"label">>, <<"String">>, <<"Symbol">>}
+        ]},
         beamtalk_recheck:relevant_diagnostic_shape(
             Diag, <<"ReCheckCounter">>, [
                 {retyped, <<"count">>, <<"Integer">>, <<"String">>},
@@ -813,14 +815,41 @@ relevant_diagnostic_shape_retyped_fallback_picks_first_when_multiple_test() ->
             ]
         )
     ),
-    %% Order in FieldChanges alone decides the (mis)attribution — swapping
-    %% the list order flips which slot gets blamed for the identical Dnu.
+    %% Order in FieldChanges still decides which slot is `selector`'s
+    %% primary attribution, but the other slot is now surfaced too instead
+    %% of silently dropped.
     ?assertEqual(
-        {true, {retyped, <<"label">>, <<"String">>, <<"Symbol">>}},
+        {true, {retyped, <<"label">>, <<"String">>, <<"Symbol">>}, [
+            {retyped, <<"count">>, <<"Integer">>, <<"String">>}
+        ]},
         beamtalk_recheck:relevant_diagnostic_shape(
             Diag, <<"ReCheckCounter">>, [
                 {retyped, <<"label">>, <<"String">>, <<"Symbol">>},
                 {retyped, <<"count">>, <<"Integer">>, <<"String">>}
+            ]
+        )
+    ).
+
+%% Pure helper — field_change_note/3.
+
+field_change_note_retyped_unambiguous_names_the_field_test() ->
+    ?assertEqual(
+        <<"state field `count` retyped by the reload of ReCheckCounter (Integer -> String)">>,
+        beamtalk_recheck:field_change_note(
+            <<"ReCheckCounter">>, {retyped, <<"count">>, <<"Integer">>, <<"String">>}, []
+        )
+    ).
+
+field_change_note_retyped_with_ambiguous_candidates_renders_all_names_test() ->
+    ?assertEqual(
+        <<"state field `count` retyped by the reload of ReCheckCounter (Integer -> String) ",
+            "— ambiguous: could also be caused by the retyping of `label`, `flag`">>,
+        beamtalk_recheck:field_change_note(
+            <<"ReCheckCounter">>,
+            {retyped, <<"count">>, <<"Integer">>, <<"String">>},
+            [
+                {retyped, <<"label">>, <<"String">>, <<"Symbol">>},
+                {retyped, <<"flag">>, <<"Boolean">>, <<"Symbol">>}
             ]
         )
     ).
