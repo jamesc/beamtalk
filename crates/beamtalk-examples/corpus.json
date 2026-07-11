@@ -576,7 +576,20 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-136",
+      "id": "docs-beamtalk-language-features-block-138",
+      "title": "Live Re-Checking on Reload (ADR 0105) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features",
+        "string conversion",
+        "toString",
+        "to_string"
+      ],
+      "source": "(Counter precheckCompile: #getCount source: \"getCount -> String => self.value printString\")\n// => a Dictionary shaped like the reload_check report — findings without installing\n\nWorkspace recheckImage\n// => _  (checked/stale summary across the whole live image)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-139",
       "title": "Extension Methods (Open Classes) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -587,54 +600,6 @@
         "string join"
       ],
       "source": "// Instance method\nString >> shout => self uppercase ++ \"!\"\n\n// Class-side method\nString class >> fromJson: s => // ...parse JSON string\n\n// Keyword method with typed parameter\nArray >> chunksOf: n :: Integer => // ...split into n-sized chunks\n\n// Binary method\nPoint >> + other :: Point => Point x: self x + other x y: self y + other y",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-137",
-      "title": "Type annotations on extensions (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "async",
-        "beamtalk-language-features",
-        "branch",
-        "concurrent",
-        "conditional",
-        "gen_server",
-        "genserver",
-        "if",
-        "if not",
-        "negation",
-        "process",
-        "unless"
-      ],
-      "source": "// Standard return type syntax (same as inside a class)\nString >> reversed -> String => self reverse\n\n// Extension-style: `:: ->` separates selector from return type\nInteger >> factorial :: -> Integer =>\n  self <= 1\n    ifTrue: [1]\n    ifFalse: [self * (self - 1) factorial]\n\nString >> words :: -> Array => self split: \" \"\n\n// Typed parameters with :: -> return type\nMap >> at: key :: String put: value :: Integer :: -> Map => // ...",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-138",
-      "title": "Cross-file extensions (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "append",
-        "beamtalk-language-features",
-        "concat",
-        "concatenate",
-        "string conversion",
-        "string join",
-        "toString",
-        "to_string"
-      ],
-      "source": "// In helpers.bt — String is defined in stdlib, not this file\nString >> shoutIt => super printString uppercase ++ \"!\"\n\n// Class-side foreign extension\nString class >> banner => \"=== String ===\"",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-139",
-      "title": "Beamtalk — System reflection (BeamtalkInterface) (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features"
-      ],
-      "source": "Beamtalk version\n// => \"0.4.0\"\n\nBeamtalk allClasses includes: Integer\n// => true\n\nBeamtalk classNamed: #Counter\n// => Counter (or nil if not loaded)\n\n(Beamtalk globals) at: #Integer\n// => Integer\n\n(Beamtalk help: Integer)\n// => \"== Integer < Number ==\\n...\"\n\n(Beamtalk help: Integer selector: #+)\n// => \"Integer >> +\\n...\"",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -664,6 +629,54 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-140",
+      "title": "Type annotations on extensions (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "async",
+        "beamtalk-language-features",
+        "branch",
+        "concurrent",
+        "conditional",
+        "gen_server",
+        "genserver",
+        "if",
+        "if not",
+        "negation",
+        "process",
+        "unless"
+      ],
+      "source": "// Standard return type syntax (same as inside a class)\nString >> reversed -> String => self reverse\n\n// Extension-style: `:: ->` separates selector from return type\nInteger >> factorial :: -> Integer =>\n  self <= 1\n    ifTrue: [1]\n    ifFalse: [self * (self - 1) factorial]\n\nString >> words :: -> Array => self split: \" \"\n\n// Typed parameters with :: -> return type\nMap >> at: key :: String put: value :: Integer :: -> Map => // ...",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-141",
+      "title": "Cross-file extensions (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "append",
+        "beamtalk-language-features",
+        "concat",
+        "concatenate",
+        "string conversion",
+        "string join",
+        "toString",
+        "to_string"
+      ],
+      "source": "// In helpers.bt — String is defined in stdlib, not this file\nString >> shoutIt => super printString uppercase ++ \"!\"\n\n// Class-side foreign extension\nString class >> banner => \"=== String ===\"",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-142",
+      "title": "Beamtalk — System reflection (BeamtalkInterface) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "Beamtalk version\n// => \"0.4.0\"\n\nBeamtalk allClasses includes: Integer\n// => true\n\nBeamtalk classNamed: #Counter\n// => Counter (or nil if not loaded)\n\n(Beamtalk globals) at: #Integer\n// => Integer\n\n(Beamtalk help: Integer)\n// => \"== Integer < Number ==\\n...\"\n\n(Beamtalk help: Integer selector: #+)\n// => \"Integer >> +\\n...\"",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-143",
       "title": "Workspace — Project operations (WorkspaceInterface) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -678,7 +691,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-141",
+      "id": "docs-beamtalk-language-features-block-144",
       "title": "Class-based reload via Behaviour >> reload (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -691,7 +704,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-142",
+      "id": "docs-beamtalk-language-features-block-145",
       "title": "SystemNavigation — Cross-class code queries (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -714,7 +727,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-143",
+      "id": "docs-beamtalk-language-features-block-146",
       "title": "Session — a first-class session value (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -732,62 +745,13 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-145",
+      "id": "docs-beamtalk-language-features-block-148",
       "title": "BindingsView — a live, write-through Dictionary view (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
         "beamtalk-language-features"
       ],
       "source": "// Session-local write — DEFERRED to end of eval, visible on the NEXT line:\nSession current bindings at: #y put: 99\n// => 99\ny\n// => 99\n\n// Workspace-global write — SYNCHRONOUS (routes through bind:as:),\n// visible immediately on the next line:\nWorkspace globals at: #answer put: 42\n// => 42\nanswer\n// => 42",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-147",
-      "title": "Cross-session access (read-only) (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "exception",
-        "find",
-        "first match",
-        "map",
-        "mapping",
-        "mutate",
-        "mutation",
-        "raise",
-        "search",
-        "set",
-        "throw",
-        "transform"
-      ],
-      "source": "// Pick a session that is NOT this one — session ordering is not guaranteed, so\n// `sessions first` could be the current session, where a write would succeed\n// (self-session) rather than raise. Tooling normally already knows the target id.\nmyId    := Session current id\notherId := (Workspace sessions collect: [:s | s id]) detect: [:each | each /= myId]\nother   := Session withId: otherId\n\nother bindings keys          // => cross-session READ, allowed\nother bindings at: #x put: 9 // => Error: Cannot mutate another session's bindings",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-148",
-      "title": "Tracing Lifecycle (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features"
-      ],
-      "source": "// Enable detailed trace capture\nTracing enable\n// => nil\n\n// Check if tracing is active\nTracing isEnabled\n// => true\n\n// Disable trace capture (aggregates continue)\nTracing disable\n// => nil\n\n// Clear all trace events and aggregate stats\nTracing clear\n// => nil",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-149",
-      "title": "Aggregate Stats (Always-On) (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "async",
-        "beamtalk-language-features",
-        "concurrent",
-        "gen_server",
-        "genserver",
-        "process"
-      ],
-      "source": "// All per-actor, per-method stats\nTracing stats\n// => #{...}  (Dictionary keyed by actor/selector)\n\n// Stats for a specific actor\nTracing statsFor: myCounter\n// => #{...}",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -812,6 +776,55 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-150",
+      "title": "Cross-session access (read-only) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "exception",
+        "find",
+        "first match",
+        "map",
+        "mapping",
+        "mutate",
+        "mutation",
+        "raise",
+        "search",
+        "set",
+        "throw",
+        "transform"
+      ],
+      "source": "// Pick a session that is NOT this one — session ordering is not guaranteed, so\n// `sessions first` could be the current session, where a write would succeed\n// (self-session) rather than raise. Tooling normally already knows the target id.\nmyId    := Session current id\notherId := (Workspace sessions collect: [:s | s id]) detect: [:each | each /= myId]\nother   := Session withId: otherId\n\nother bindings keys          // => cross-session READ, allowed\nother bindings at: #x put: 9 // => Error: Cannot mutate another session's bindings",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-151",
+      "title": "Tracing Lifecycle (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "// Enable detailed trace capture\nTracing enable\n// => nil\n\n// Check if tracing is active\nTracing isEnabled\n// => true\n\n// Disable trace capture (aggregates continue)\nTracing disable\n// => nil\n\n// Clear all trace events and aggregate stats\nTracing clear\n// => nil",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-152",
+      "title": "Aggregate Stats (Always-On) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "async",
+        "beamtalk-language-features",
+        "concurrent",
+        "gen_server",
+        "genserver",
+        "process"
+      ],
+      "source": "// All per-actor, per-method stats\nTracing stats\n// => #{...}  (Dictionary keyed by actor/selector)\n\n// Stats for a specific actor\nTracing statsFor: myCounter\n// => #{...}",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-153",
       "title": "Trace Event Queries (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -829,7 +842,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-151",
+      "id": "docs-beamtalk-language-features-block-154",
       "title": "Analysis Methods (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -844,7 +857,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-152",
+      "id": "docs-beamtalk-language-features-block-155",
       "title": "Live Health (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -859,7 +872,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-153",
+      "id": "docs-beamtalk-language-features-block-156",
       "title": "Configuration (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -869,7 +882,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-154",
+      "id": "docs-beamtalk-language-features-block-157",
       "title": "Typical Workflow (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -889,7 +902,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-155",
+      "id": "docs-beamtalk-language-features-block-158",
       "title": "Events — subclass Announcement (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -918,7 +931,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-156",
+      "id": "docs-beamtalk-language-features-block-159",
       "title": "Announcer — a per-instance dispatcher (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -949,7 +962,17 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-158",
+      "id": "docs-beamtalk-language-features-block-16",
+      "title": "Message Sends (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "// Unary message\ncounter increment\n\n// Binary message (standard math precedence: 2 + 3 * 4 = 14)\n2 + 3 * 4\n\n// Keyword message\ndict at: #name put: \"hello\"\n\n// Cascade - multiple messages to same receiver\nTranscript show: \"Hello\"; cr; show: \"World\"",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-161",
       "title": "Synchronous vs asynchronous (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -968,7 +991,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-159",
+      "id": "docs-beamtalk-language-features-block-162",
       "title": "MRO matching — subscribe to a superclass (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -996,17 +1019,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-16",
-      "title": "Message Sends (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features"
-      ],
-      "source": "// Unary message\ncounter increment\n\n// Binary message (standard math precedence: 2 + 3 * 4 = 14)\n2 + 3 * 4\n\n// Keyword message\ndict at: #name put: \"hello\"\n\n// Cascade - multiple messages to same receiver\nTranscript show: \"Hello\"; cr; show: \"World\"",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-160",
+      "id": "docs-beamtalk-language-features-block-163",
       "title": "SystemAnnouncer — watch the runtime live (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1027,7 +1040,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-162",
+      "id": "docs-beamtalk-language-features-block-165",
       "title": "Introspection — the third navigation sibling (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1037,7 +1050,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-163",
+      "id": "docs-beamtalk-language-features-block-166",
       "title": "Introspection — the third navigation sibling (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1052,7 +1065,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-164",
+      "id": "docs-beamtalk-language-features-block-167",
       "title": "Introspection — the third navigation sibling (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1067,7 +1080,22 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-167",
+      "id": "docs-beamtalk-language-features-block-17",
+      "title": "Short-circuit boolean operators (and:/or:) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "// Short-circuit AND - second block only evaluated if first is true\nresult := condition and: [self expensiveCheck]\n\n// Short-circuit OR - second block only evaluated if first is false  \nresult := condition or: [self fallbackValue]",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-170",
       "title": "Protected stdlib class names (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1088,7 +1116,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-168",
+      "id": "docs-beamtalk-language-features-block-171",
       "title": "Protected stdlib class names (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1109,22 +1137,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-17",
-      "title": "Short-circuit boolean operators (and:/or:) (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "// Short-circuit AND - second block only evaluated if first is true\nresult := condition and: [self expensiveCheck]\n\n// Short-circuit OR - second block only evaluated if first is false  \nresult := condition or: [self fallbackValue]",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-173",
+      "id": "docs-beamtalk-language-features-block-176",
       "title": "Binary — Byte-Level Data (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1145,7 +1158,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-174",
+      "id": "docs-beamtalk-language-features-block-177",
       "title": "Interval — Arithmetic Sequences (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1161,7 +1174,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-175",
+      "id": "docs-beamtalk-language-features-block-178",
       "title": "Bag(E) — Multisets (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1185,7 +1198,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-176",
+      "id": "docs-beamtalk-language-features-block-179",
       "title": "Constructors (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1201,56 +1214,6 @@
         "loop"
       ],
       "source": "// Infinite stream starting from a value, incrementing by 1\nStream from: 1                     // 1, 2, 3, 4, ...\n\n// Infinite stream with custom step function\nStream from: 1 by: [:n | n * 2]   // 1, 2, 4, 8, ...\n\n// Stream from a collection (List, String, Set)\nStream on: #(1, 2, 3)             // wraps collection lazily\n\n// Collection shorthand — List, String, and Set respond to `stream`\n#(1, 2, 3) stream                  // same as Stream on: #(1, 2, 3)\n\"hello\" stream                     // Stream over characters\n(Set new add: 1) stream            // Stream over set elements\n\n// Dictionary iteration — use doWithKey: instead of stream\n#{#a => 1} doWithKey: [:k :v | Transcript show: k]\n\n// File streaming — lazy, constant memory\nFile lines: \"data.csv\"            // Stream of lines\nFile open: \"data.csv\" do: [:handle |\n  handle lines take: 10           // block-scoped handle\n]",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-177",
-      "title": "Lazy Operations (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "filter",
-        "filtering",
-        "map",
-        "mapping",
-        "mutate",
-        "mutation",
-        "set",
-        "transform",
-        "where"
-      ],
-      "source": "// Build a pipeline — nothing computes yet\ns := Stream from: 1\ns := s select: [:n | n isEven]\ns := s collect: [:n | n * n]\n// s is still a Stream — no values computed",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-178",
-      "title": "Terminal Operations (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features",
-        "filter",
-        "filtering",
-        "where"
-      ],
-      "source": "// Terminal forces computation through the pipeline\n((Stream from: 1) select: [:n | n isEven]) take: 5\n// => [2,4,6,8,10]\n\n(Stream on: #(1, 2, 3, 4)) inject: 0 into: [:sum :n | sum + n]\n// => 10",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-179",
-      "title": "printString — Pipeline Inspection (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features",
-        "filter",
-        "filtering",
-        "string conversion",
-        "toString",
-        "to_string",
-        "where"
-      ],
-      "source": "(Stream from: 1) printString\n// => Stream(from: 1)\n\n(Stream on: #(1, 2, 3)) printString\n// => Stream(on: [...])\n\n((Stream from: 1) select: [:n | n isEven]) printString\n// => Stream(from: 1) | select: [...]",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -1275,6 +1238,56 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-180",
+      "title": "Lazy Operations (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "filter",
+        "filtering",
+        "map",
+        "mapping",
+        "mutate",
+        "mutation",
+        "set",
+        "transform",
+        "where"
+      ],
+      "source": "// Build a pipeline — nothing computes yet\ns := Stream from: 1\ns := s select: [:n | n isEven]\ns := s collect: [:n | n * n]\n// s is still a Stream — no values computed",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-181",
+      "title": "Terminal Operations (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features",
+        "filter",
+        "filtering",
+        "where"
+      ],
+      "source": "// Terminal forces computation through the pipeline\n((Stream from: 1) select: [:n | n isEven]) take: 5\n// => [2,4,6,8,10]\n\n(Stream on: #(1, 2, 3, 4)) inject: 0 into: [:sum :n | sum + n]\n// => 10",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-182",
+      "title": "printString — Pipeline Inspection (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features",
+        "filter",
+        "filtering",
+        "string conversion",
+        "toString",
+        "to_string",
+        "where"
+      ],
+      "source": "(Stream from: 1) printString\n// => Stream(from: 1)\n\n(Stream on: #(1, 2, 3)) printString\n// => Stream(on: [...])\n\n((Stream from: 1) select: [:n | n isEven]) printString\n// => Stream(from: 1) | select: [...]",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-183",
       "title": "Eager vs Lazy — The Boundary (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1287,7 +1300,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-181",
+      "id": "docs-beamtalk-language-features-block-184",
       "title": "File Streaming (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1306,7 +1319,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-182",
+      "id": "docs-beamtalk-language-features-block-185",
       "title": "File I/O and Directory Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1316,7 +1329,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-183",
+      "id": "docs-beamtalk-language-features-block-186",
       "title": "Side-Effect Timing ⚠️ (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1334,7 +1347,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-184",
+      "id": "docs-beamtalk-language-features-block-187",
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1349,7 +1362,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-185",
+      "id": "docs-beamtalk-language-features-block-188",
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1359,7 +1372,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-186",
+      "id": "docs-beamtalk-language-features-block-189",
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1377,7 +1390,22 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-189",
+      "id": "docs-beamtalk-language-features-block-19",
+      "title": "Field Access and Assignment (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "// Assignment as expression (returns 6)\n(self.x := 5) + 1\n\n// Field assignments as sequential statements\nself.x := 5\nself.y := self.x + 1\nself.y",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-192",
       "title": "Creating a Table (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1400,22 +1428,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-19",
-      "title": "Field Access and Assignment (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "// Assignment as expression (returns 6)\n(self.x := 5) + 1\n\n// Field assignments as sequential statements\nself.x := 5\nself.y := self.x + 1\nself.y",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-190",
+      "id": "docs-beamtalk-language-features-block-193",
       "title": "Reading and Writing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1425,7 +1438,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-191",
+      "id": "docs-beamtalk-language-features-block-194",
       "title": "Other Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1435,7 +1448,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-192",
+      "id": "docs-beamtalk-language-features-block-195",
       "title": "Cross-Actor Sharing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1458,7 +1471,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-194",
+      "id": "docs-beamtalk-language-features-block-197",
       "title": "Enqueueing and Dequeueing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1473,72 +1486,13 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-195",
+      "id": "docs-beamtalk-language-features-block-198",
       "title": "Other Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
         "beamtalk-language-features"
       ],
       "source": "q peek                        // => front element without removing (raises empty_queue if empty)\nq isEmpty                     // => true or false\nq size                        // => number of elements (O(n))",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-197",
-      "title": "Atomic Operations (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features",
-        "constructor",
-        "create",
-        "instantiate"
-      ],
-      "source": "c increment                    // atomically add 1, return new value\nc incrementBy: 5               // atomically add N, return new value\nc decrement                    // atomically subtract 1, return new value\nc decrementBy: 3               // atomically subtract N, return new value\nc value                        // instantaneous read; may observe a stale value under concurrent updates or reset\nc reset                        // set to 0, return nil (not atomic with concurrent increments/decrements)\nc delete                       // destroy the backing ETS table",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-198",
-      "title": "Cross-Actor Sharing (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "async",
-        "beamtalk-language-features",
-        "concurrent",
-        "constructor",
-        "create",
-        "gen_server",
-        "genserver",
-        "instantiate",
-        "mutate",
-        "mutation",
-        "process",
-        "set"
-      ],
-      "source": "// Actor A — create\nc := AtomicCounter new: #hits\n\n// Actor B — look up by name and increment\nc := AtomicCounter named: #hits\nc increment",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-199",
-      "title": "TestCase — BUnit Testing (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "CounterTest",
-        "TestCase",
-        "beamtalk-language-features",
-        "extends",
-        "field",
-        "inherit",
-        "inheritance",
-        "instance variable",
-        "member",
-        "object",
-        "property",
-        "setUp",
-        "subclassing",
-        "testIncrement"
-      ],
-      "source": "TestCase subclass: CounterTest\n  field: counter = nil\n\n  setUp => self withCounter: (Counter spawn)\n\n  testIncrement =>\n    self.counter increment.\n    self assert: (self.counter getValue) equals: 1",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -1578,6 +1532,65 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-200",
+      "title": "Atomic Operations (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features",
+        "constructor",
+        "create",
+        "instantiate"
+      ],
+      "source": "c increment                    // atomically add 1, return new value\nc incrementBy: 5               // atomically add N, return new value\nc decrement                    // atomically subtract 1, return new value\nc decrementBy: 3               // atomically subtract N, return new value\nc value                        // instantaneous read; may observe a stale value under concurrent updates or reset\nc reset                        // set to 0, return nil (not atomic with concurrent increments/decrements)\nc delete                       // destroy the backing ETS table",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-201",
+      "title": "Cross-Actor Sharing (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "async",
+        "beamtalk-language-features",
+        "concurrent",
+        "constructor",
+        "create",
+        "gen_server",
+        "genserver",
+        "instantiate",
+        "mutate",
+        "mutation",
+        "process",
+        "set"
+      ],
+      "source": "// Actor A — create\nc := AtomicCounter new: #hits\n\n// Actor B — look up by name and increment\nc := AtomicCounter named: #hits\nc increment",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-202",
+      "title": "TestCase — BUnit Testing (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "CounterTest",
+        "TestCase",
+        "beamtalk-language-features",
+        "extends",
+        "field",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "object",
+        "property",
+        "setUp",
+        "subclassing",
+        "testIncrement"
+      ],
+      "source": "TestCase subclass: CounterTest\n  field: counter = nil\n\n  setUp => self withCounter: (Counter spawn)\n\n  testIncrement =>\n    self.counter increment.\n    self assert: (self.counter getValue) equals: 1",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-203",
       "title": "TestCase — BUnit Testing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1600,7 +1613,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-201",
+      "id": "docs-beamtalk-language-features-block-204",
       "title": "Suite-Level Setup — setUpOnce / tearDownOnce (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1631,7 +1644,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-202",
+      "id": "docs-beamtalk-language-features-block-205",
       "title": "Parallel Test Execution (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -21549,11 +21562,132 @@
         "setup",
         "subclassing",
         "testFieldStoredBlockAcrossMethods",
+        "testFieldStoredBlockCascadeInvocation",
         "tick:",
+        "tickTwice:",
         "tier2_field_stored_block_test_actor"
       ],
-      "source": "// BT-2797: Test fixture for a block with field mutations stored in an\n// instance field in one method and invoked via `value:` from a *different*\n// method. Static per-method tracking (tier2_block_params/tier2_local_vars)\n// can't see across methods, so this relies on the compiler unconditionally\n// promoting a field-assigned Tier 2 block, and on every `self.field value:`\n// call site runtime-discriminating Tier 1 vs Tier 2 (erlang:is_function/2,\n// generalizing the BT-909 Erlang-FFI-interop precedent).\n\nActor subclass: Tier2FieldStoredBlockTestActor\n  state: total = 0\n  state: onTick = nil\n\n  // Assigns a block with a field mutation to the onTick field. `setup` never\n  // invokes the block itself — only `tick:` (a different method) does.\n  setup => self.onTick := [:x | self.total := self.total + x]\n\n  // Invokes the block stored in onTick — assigned by a different method\n  // (setup) than the one calling it.\n  tick: x => self.onTick value: x\n\n  // BT-2797: end-to-end — assign in setup, invoke (twice) in tick:, confirm\n  // the field mutation inside the block propagates back to actor state.\n  testFieldStoredBlockAcrossMethods =>\n    self setup\n    self tick: 5\n    self tick: 3\n    self.total",
+      "source": "// BT-2797: Test fixture for a block with field mutations stored in an\n// instance field in one method and invoked via `value:` from a *different*\n// method. Static per-method tracking (tier2_block_params/tier2_local_vars)\n// can't see across methods, so this relies on the compiler unconditionally\n// promoting a field-assigned Tier 2 block, and on every `self.field value:`\n// call site runtime-discriminating Tier 1 vs Tier 2 (erlang:is_function/2,\n// generalizing the BT-909 Erlang-FFI-interop precedent).\n\nActor subclass: Tier2FieldStoredBlockTestActor\n  state: total = 0\n  state: onTick = nil\n\n  // Assigns a block with a field mutation to the onTick field. `setup` never\n  // invokes the block itself — only `tick:` (a different method) does.\n  setup => self.onTick := [:x | self.total := self.total + x]\n\n  // Invokes the block stored in onTick — assigned by a different method\n  // (setup) than the one calling it.\n  tick: x => self.onTick value: x\n\n  // BT-2808: cascades two safe `value:` sends to the same field-stored block\n  // in one statement — the parser folds the first send into Cascade.receiver\n  // as a whole MessageSend (`self.onTick value: x`), leaving only the second\n  // `value: x` in Cascade.messages.\n  tickTwice: x => self.onTick value: x; value: x\n\n  // BT-2797: end-to-end — assign in setup, invoke (twice) in tick:, confirm\n  // the field mutation inside the block propagates back to actor state.\n  testFieldStoredBlockAcrossMethods =>\n    self setup\n    self tick: 5\n    self tick: 3\n    self.total\n\n  // BT-2808: end-to-end — a cascade of two value: sends to the same\n  // field-stored Tier 2 block must thread state through BOTH sends: 5 + 5 = 10.\n  testFieldStoredBlockCascadeInvocation =>\n    self setup\n    self tickTwice: 5\n    self.total",
       "explanation": "BT-2797: Test fixture for a block with field mutations stored in an instance field in one method and invoked via `value:` from a *different* method. Static per-method tracking (tier2_block_params/tier2_local_vars) can't see across methods, so this relies on the compiler unconditionally promoting a field-assigned Tier 2 block, and on every `self.field value:` call site runtime-discriminating Tier 1 vs Tier 2 (erlang:is_function/2, generalizing the BT-909 Erlang-FFI-interop precedent)."
+    },
+    {
+      "id": "stdlib-test-fixtures-tier2-stored-block-matrix-actor",
+      "title": "Tier2StoredBlockMatrixActor",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Actor",
+        "Tier2StoredBlockMatrixActor",
+        "actor",
+        "addTickResult:",
+        "anonymous function",
+        "assign",
+        "assignment",
+        "async",
+        "branch",
+        "callback",
+        "cascadeBuffer1",
+        "cascadeBuffer2",
+        "closure",
+        "combine:and:",
+        "concurrent",
+        "conditional",
+        "constructor",
+        "create",
+        "extends",
+        "field",
+        "for each",
+        "for-each",
+        "forEach",
+        "gen_server",
+        "genserver",
+        "getTotal",
+        "if",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "instantiate",
+        "iterate",
+        "iteration",
+        "lambda",
+        "localBlockInArgumentPosition:",
+        "loop",
+        "map",
+        "mapping",
+        "member",
+        "mixedLocalVarCascade:",
+        "mutate",
+        "mutation",
+        "ping",
+        "process",
+        "property",
+        "reset",
+        "set",
+        "setupOnCombine",
+        "setupOnPing",
+        "setupOnTick",
+        "setupOnTickDoubling",
+        "setupOnTriple",
+        "subclassing",
+        "tick:",
+        "tickCaptureResult:",
+        "tickEach:",
+        "tickEachCollect:",
+        "tickIfPositive:",
+        "tickIfPositiveNested:and:",
+        "tickNestedLoop:",
+        "tickThrice:",
+        "tickTwice:",
+        "tier2_stored_block_matrix_actor",
+        "transform",
+        "triple:second:third:"
+      ],
+      "source": "// BT-2810: Comprehensive Actor fixture for the field-stored/opaque Tier 2\n// block invocation test matrix. Complements mutation_matrix_actor.bt\n// (BT-1480, direct self.field := ... mutation crossed with control-flow) by\n// covering the newer axis: a block stored in a field or local variable,\n// mutating actor state, invoked later via value:/value:value:/cascade — the\n// pattern BT-2797 introduced and BT-2807/BT-2808/BT-2809 hardened.\n//\n// Every \"setup*\" method assigns a block to a field WITHOUT invoking it —\n// only a *different* method invokes it, so every field-stored cell in this\n// fixture exercises the cross-method case (the one static per-method\n// tracking can't see, per BT-2797's own design note).\n//\n// Method order note (BT-2811 workaround): a cascade-bodied method\n// immediately followed by any keyword method — including another\n// cascade-bodied one — corrupts that following method's parameter parsing\n// (unrelated parser bug, filed separately). All three cascade-bodied\n// methods here (tickTwice:, tickThrice:, mixedLocalVarCascade:) are\n// grouped at the end of the class, each separated from the next by a\n// trivial unary buffer method (a 0-arg method is never affected).\n\nActor subclass: Tier2StoredBlockMatrixActor\n  state: total = 0\n  state: calls = 0\n  state: log = #()\n  state: onTick = nil\n  state: onCombine = nil\n  state: onPing = nil\n  state: onTriple = nil\n\n  getTotal => self.total\n\n  reset =>\n    self.total := 0\n    self.calls := 0\n\n  // ── Setup: assign field-stored blocks (never invoked here) ────────────\n\n  // 1-arg block with a field mutation.\n  setupOnTick => self.onTick := [:x | self.total := self.total + x]\n\n  // 2-arg block with a field mutation combining both args.\n  setupOnCombine => self.onCombine := [:a :b | self.total := self.total + a + b]\n\n  // 0-arg block with a field mutation.\n  setupOnPing => self.onPing := [self.total := self.total + 1]\n\n  // 3-arg block with a field mutation.\n  setupOnTriple =>\n    self.onTriple := [:a :b :c | self.total := self.total + a + b + c]\n\n  // Reassigns onTick to a DIFFERENT block than setupOnTick (see P2-12).\n  setupOnTickDoubling =>\n    self.onTick := [:x | self.total := self.total + (x * 2)]\n\n  // ── P0: known bug patterns (BT-2807/BT-2808 regression continuity) ────\n\n  // P0-1 (BT-2807): bare self.field value: alone inside ifTrue:, no other\n  // field mutation in the same branch.\n  tickIfPositive: x =>\n    x > 0 ifTrue: [self.onTick value: x]\n    self.total\n\n  // ── P1: high-risk unexplored combinations ──────────────────────────────\n\n  // P1-4: 2-arg field-stored block invoked cross-method.\n  combine: a and: b => self.onCombine value: a value: b\n\n  // P1-5: 0-arg field-stored block invoked cross-method.\n  ping => self.onPing value\n\n  // P1-6: field-stored block's value: call as the RHS of a local assignment.\n  tickCaptureResult: x =>\n    r := self.onTick value: x\n    r\n\n  // P1-7: bare field-stored call inside a do: loop body.\n  tickEach: items =>\n    items do: [:x | self.onTick value: x]\n    self.total\n\n  // P1-8: bare field-stored call inside a collect: block (block's return\n  // value AND its field mutation both matter).\n  tickEachCollect: items =>\n    result := items\n      collect: [:x |\n        self.onTick value: x\n        x * 2\n      ]\n    self.log := result\n    self.total\n\n  // P1-9: field-stored call nested two levels deep inside conditionals.\n  tickIfPositiveNested: x and: y =>\n    x > 0 ifTrue: [y > 0 ifTrue: [self.onTick value: x]]\n    self.total\n\n  // ── P2: edge cases ──────────────────────────────────────────────────────\n\n  // P2-10: same-method, captured-LOCAL (not field) Tier 2 block invoked in\n  // *argument* (sub-expression) position — contrast case for P3-15 below:\n  // this shape is fully supported (only a self.field receiver is restricted\n  // to top-level statement position; a plain local/param receiver is not).\n  localBlockInArgumentPosition: x =>\n    r := 0\n    blk := [:n | r := r + n]\n    10 + (blk value: x)\n\n  // P2-12: field reassigned to a DIFFERENT block (setupOnTickDoubling above)\n  // between two invocations — confirms runtime discrimination re-reads the\n  // field each call rather than caching the first block it saw.\n  tick: x => self.onTick value: x\n\n  // P2-13: 3-arg field-stored block (value:value:value:) invoked cross-method.\n  triple: a second: b third: c =>\n    self.onTriple\n      value: a\n      value: b\n      value: c\n\n  // ── P3: lower-risk / exploratory ────────────────────────────────────────\n\n  // P3-14: field-stored call nested inside a loop nested inside another loop.\n  tickNestedLoop: matrix =>\n    matrix do: [:row | row do: [:x | self.onTick value: x]]\n    self.total\n\n  // P3-15 (KNOWN GAP — BT-2814): a field-stored Tier 2 block's value: call\n  // used in *argument* (sub-expression) position. BT-2797's own design note\n  // says this is deliberately unsupported: generate_block_value_call_runtime_discriminated\n  // is only reachable from the top-level Tier2ValueCall/LocalAssignTier2\n  // codegen, never from generic expression_doc sub-expression dispatch — so\n  // this falls back to a Tier-1-only (arity-N, no State) apply, silently\n  // dropping the field mutation instead of threading it. Kept here,\n  // commented out in the TestCase file, so it's visible as a tracked gap\n  // rather than silently absent from the matrix.\n  addTickResult: x => self.total := self.total + (self.onTick value: x)\n\n  // ── Cascade-bodied methods (grouped last — see BT-2811 note above) ─────\n\n  // P0-2 (BT-2808): cascade of two value: sends to the same field-stored block.\n  tickTwice: x => self.onTick value: x; value: x\n\n  // BT-2811 workaround buffer — do not remove or reorder around this.\n  cascadeBuffer1 => nil\n\n  // P0-3 (BT-2808 extension): cascade of three value: sends — exercises the\n  // N>2 case (multiple intermediate {Result, State} tuples threaded in sequence).\n  tickThrice: x => self.onTick value: x; value: x; value: x\n\n  // BT-2811 workaround buffer — do not remove or reorder around this.\n  cascadeBuffer2 => nil\n\n  // P2-11: same-method, LOCAL var block with a captured-local-ONLY mutation\n  // (no field write), invoked via a cascade. Fully supported — BT-2809's\n  // restriction is specifically about a FIELD-stored captured-local-only\n  // block (invoked cross-method); this is neither field-stored nor\n  // cross-method. (A field-write PLUS captured-local mix stored in a local\n  // var, unlike this captured-local-only case, hits a separate pre-existing\n  // semantic-analysis limitation — see block_analyzer.rs's own comment on\n  // why local-var-stored field writes stay conservatively flagged even when\n  // codegen could prove them safe — so that combination isn't exercised\n  // here.) Last method in the class — safe per the BT-2811 workaround note\n  // above.\n  mixedLocalVarCascade: x =>\n    extra := 0\n    blk := [:n | extra := extra + n]\n    blk value: x; value: x\n    extra",
+      "explanation": "BT-2810: Comprehensive Actor fixture for the field-stored/opaque Tier 2 block invocation test matrix. Complements mutation_matrix_actor.bt (BT-1480, direct self.field := ... mutation crossed with control-flow) by covering the newer axis: a block stored in a field or local variable, mutating actor state, invoked later via value:/value:value:/cascade — the pattern BT-2797 introduced and BT-2807/BT-2808/BT-2809 hardened.  Every \"setup*\" method assigns a block to a field WITHOUT invoking it — only a *different* method invokes it, so every field-stored cell in this fixture exercises the cross-method case (the one static per-method tracking can't see, per BT-2797's own design note).  Method order note (BT-2811 workaround): a cascade-bodied method immediately followed by any keyword method — including another cascade-bodied one — corrupts that following method's parameter parsing (unrelated parser bug, filed separately). All three cascade-bodied methods here (tickTwice:, tickThrice:, mixedLocalVarCascade:) are grouped at the end of the class, each separated from the next by a trivial unary buffer method (a 0-arg method is never affected)."
+    },
+    {
+      "id": "stdlib-test-fixtures-tier2-subexpr-and-conditional-block-test-actor",
+      "title": "Tier2SubexprAndConditionalBlockTestActor",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Actor",
+        "Tier2SubexprAndConditionalBlockTestActor",
+        "actor",
+        "addDoubled:",
+        "assign",
+        "assignment",
+        "async",
+        "branch",
+        "concurrent",
+        "conditional",
+        "constructor",
+        "create",
+        "extends",
+        "field",
+        "gen_server",
+        "genserver",
+        "if",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "instantiate",
+        "member",
+        "mutate",
+        "mutation",
+        "process",
+        "property",
+        "set",
+        "setupDoubler",
+        "setupOnTick",
+        "subclassing",
+        "testBareFieldStoredBlockValueAloneInsideConditional",
+        "testStoredMutatingBlockInvokedBareInsideConditional",
+        "testStoredPureBlockInArgumentPosition",
+        "tickIfPositive:",
+        "tickIfPositiveBareOnly:",
+        "tier2_subexpr_and_conditional_block_test_actor"
+      ],
+      "source": "// BT-2797 (PR #2899 review): regression fixture for two runtime-discrimination\n// call-site shapes that don't go through the top-level `Tier2ValueCall`/\n// `LocalAssignTier2` codegen handled by `generate_tier2_value_call_doc`\n// directly:\n//\n// 1. A Tier 1 (pure) field-stored block invoked in *argument* (sub-expression)\n//    position, e.g. `self total := self.total + (self.doubler value: x)`.\n//    `generate_block_value_call_runtime_discriminated` always returns a raw\n//    `{Result, NewState}` tuple, so it must never be wired into the generic\n//    any-position `expression_doc` dispatch — only into the top-level\n//    statement dispatch that actually unpacks the tuple. A regression here\n//    would leak the raw tuple where a plain value is expected.\n// 2. A Tier 2 (mutating) field-stored block invoked as a *bare* (non-assigned)\n//    statement inside a conditional branch that also contains an explicit\n//    field assignment (so the branch is already known to need state\n//    threading), e.g. `x > 0 ifTrue: [self.calls := self.calls + 1.\n//    self.onTick value: x]`. The branch-body sequencer in\n//    `control_flow/conditionals.rs` must unpack the Tier2ValueCall's own\n//    returned tuple and thread the new state forward — a regression here\n//    would either drop the field mutation silently or crash with a badarity\n//    error.\n//\n// BT-2807: a *bare* `self.field value:` call with no other field mutation in\n// the same branch now also triggers state-threading detection (block_analysis\n// treats any `self.field value(:...)` send as a potential mutation source, not\n// just a literal `self.slot :=` assignment) — see\n// testBareFieldStoredBlockValueAloneInsideConditional below.\n\nActor subclass: Tier2SubexprAndConditionalBlockTestActor\n  state: total = 0\n  state: calls = 0\n  state: doubler = nil\n  state: onTick = nil\n\n  setupDoubler => self.doubler := [:x | x * 2]\n\n  setupOnTick => self.onTick := [:x | self.total := self.total + x]\n\n  // Tier 1 field-stored block invoked in argument position.\n  addDoubled: x => self.total := self.total + (self.doubler value: x)\n\n  // Tier 2 field-stored block invoked bare inside a conditional branch that\n  // already threads state because of the explicit self.calls assignment.\n  tickIfPositive: x =>\n    x > 0\n      ifTrue: [\n        self.calls := self.calls + 1\n        self.onTick value: x\n      ]\n    self.total\n\n  // BT-2807: Tier 2 field-stored block invoked bare inside a conditional\n  // branch with NO other field mutation alongside it in that branch.\n  tickIfPositiveBareOnly: x =>\n    x > 0 ifTrue: [self.onTick value: x]\n    self.total\n\n  testStoredPureBlockInArgumentPosition =>\n    self setupDoubler\n    self addDoubled: 5\n    self.total\n\n  testStoredMutatingBlockInvokedBareInsideConditional =>\n    self setupOnTick\n    self tickIfPositive: 5\n    self tickIfPositive: -3\n    self.total\n\n  // BT-2807: 5 is added (x > 0), -3 is not (x <= 0) — total ends at 5.\n  testBareFieldStoredBlockValueAloneInsideConditional =>\n    self setupOnTick\n    self tickIfPositiveBareOnly: 5\n    self tickIfPositiveBareOnly: -3\n    self.total",
+      "explanation": "BT-2797 (PR #2899 review): regression fixture for two runtime-discrimination call-site shapes that don't go through the top-level `Tier2ValueCall`/ `LocalAssignTier2` codegen handled by `generate_tier2_value_call_doc` directly:  1. A Tier 1 (pure) field-stored block invoked in *argument* (sub-expression)    position, e.g. `self total := self.total + (self.doubler value: x)`.    `generate_block_value_call_runtime_discriminated` always returns a raw    `{Result, NewState}` tuple, so it must never be wired into the generic    any-position `expression_doc` dispatch — only into the top-level    statement dispatch that actually unpacks the tuple. A regression here    would leak the raw tuple where a plain value is expected. 2. A Tier 2 (mutating) field-stored block invoked as a *bare* (non-assigned)    statement inside a conditional branch that also contains an explicit    field assignment (so the branch is already known to need state    threading), e.g. `x > 0 ifTrue: [self.calls := self.calls + 1.    self.onTick value: x]`. The branch-body sequencer in    `control_flow/conditionals.rs` must unpack the Tier2ValueCall's own    returned tuple and thread the new state forward — a regression here    would either drop the field mutation silently or crash with a badarity    error.  BT-2807: a *bare* `self.field value:` call with no other field mutation in the same branch now also triggers state-threading detection (block_analysis treats any `self.field value(:...)` send as a potential mutation source, not just a literal `self.slot :=` assignment) — see testBareFieldStoredBlockValueAloneInsideConditional below."
     },
     {
       "id": "stdlib-test-fixtures-timer-self-send-actor",
@@ -26841,11 +26975,101 @@
         "process",
         "set",
         "subclassing",
+        "testFieldStoredBlockCascadeInvocation",
         "testFieldStoredBlockInvokedFromDifferentMethod",
         "tier2_field_stored_block_test"
       ],
-      "source": "// BT-2797: Verifies field mutations inside a block, stored in an instance\n// field in one method and invoked via value: from a *different* method, work\n// correctly at *runtime* (not just compile-time).\n//\n// Note: the same-method case (a Tier 2 block stored in a *local variable*\n// and invoked later in the same method) is covered at the Rust codegen unit\n// test level (crates/beamtalk-core/src/codegen/core_erlang/tests/control_flow.rs),\n// not here — the compiler can prove that case's safety per-method\n// (prescan_tier2_local_vars), but the semantic-analysis pass that runs ahead\n// of codegen doesn't yet have an equivalent whole-body lookahead, so it still\n// conservatively flags it at the source level.\n\nTestCase subclass: Tier2FieldStoredBlockTest\n\n  // BT-2797: the main real-world motivator — a block assigned to an instance\n  // field in one method (setup), invoked via value: from a different method\n  // (tick:), twice. total starts at 0, tick: 5 adds 5 (total=5), tick: 3\n  // adds 3 (total=8).\n  testFieldStoredBlockInvokedFromDifferentMethod =>\n    actor := Tier2FieldStoredBlockTestActor spawn\n    self assert: actor testFieldStoredBlockAcrossMethods equals: 8",
+      "source": "// BT-2797: Verifies field mutations inside a block, stored in an instance\n// field in one method and invoked via value: from a *different* method, work\n// correctly at *runtime* (not just compile-time).\n//\n// Note: the same-method case (a Tier 2 block stored in a *local variable*\n// and invoked later in the same method) is covered at the Rust codegen unit\n// test level (crates/beamtalk-core/src/codegen/core_erlang/tests/control_flow.rs),\n// not here — the compiler can prove that case's safety per-method\n// (prescan_tier2_local_vars), but the semantic-analysis pass that runs ahead\n// of codegen doesn't yet have an equivalent whole-body lookahead, so it still\n// conservatively flags it at the source level.\n\nTestCase subclass: Tier2FieldStoredBlockTest\n\n  // BT-2797: the main real-world motivator — a block assigned to an instance\n  // field in one method (setup), invoked via value: from a different method\n  // (tick:), twice. total starts at 0, tick: 5 adds 5 (total=5), tick: 3\n  // adds 3 (total=8).\n  testFieldStoredBlockInvokedFromDifferentMethod =>\n    actor := Tier2FieldStoredBlockTestActor spawn\n    self assert: actor testFieldStoredBlockAcrossMethods equals: 8\n\n  // BT-2808: `self.onTick value: x; value: x` — a cascade of two safe value:\n  // sends to the same field-stored Tier 2 block, both must thread state.\n  testFieldStoredBlockCascadeInvocation =>\n    actor := Tier2FieldStoredBlockTestActor spawn\n    self assert: actor testFieldStoredBlockCascadeInvocation equals: 10",
       "explanation": "BT-2797: Verifies field mutations inside a block, stored in an instance field in one method and invoked via value: from a *different* method, work correctly at *runtime* (not just compile-time).  Note: the same-method case (a Tier 2 block stored in a *local variable* and invoked later in the same method) is covered at the Rust codegen unit test level (crates/beamtalk-core/src/codegen/core_erlang/tests/control_flow.rs), not here — the compiler can prove that case's safety per-method (prescan_tier2_local_vars), but the semantic-analysis pass that runs ahead of codegen doesn't yet have an equivalent whole-body lookahead, so it still conservatively flags it at the source level."
+    },
+    {
+      "id": "stdlib-test-tier2-stored-block-matrix-test",
+      "title": "Tier2StoredBlockMatrixTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "TestCase",
+        "Tier2StoredBlockMatrixTest",
+        "assign",
+        "assignment",
+        "async",
+        "branch",
+        "concurrent",
+        "conditional",
+        "extends",
+        "field",
+        "for each",
+        "for-each",
+        "forEach",
+        "gen_server",
+        "genserver",
+        "if",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "iterate",
+        "iteration",
+        "loop",
+        "map",
+        "mapping",
+        "member",
+        "mutate",
+        "mutation",
+        "object",
+        "process",
+        "property",
+        "set",
+        "setUp",
+        "subclassing",
+        "testBareValueAloneInConditional",
+        "testCascadeThreeSends",
+        "testCascadeTwoSends",
+        "testFieldReassignedBetweenCalls",
+        "testNestedConditionalBareCall",
+        "testThreeArgBlockCrossMethod",
+        "testTwoArgBlockCrossMethod",
+        "testValueCallAsAssignmentRhs",
+        "testZeroArgBlockCrossMethod",
+        "tier2_stored_block_matrix_test",
+        "transform"
+      ],
+      "source": "// BT-2810: Field-stored/opaque Tier 2 block invocation test matrix — proves\n// the compiler handles the {mutation kind × call-site shape × invocation\n// relationship × nesting × block arity} space for a block stored in a field\n// or local variable and invoked later via value:/value:value:/cascade.\n//\n// Complements mutation_matrix_test.bt (BT-1480), which densely covers\n// *direct* self.field := ... mutation crossed with control-flow/collection\n// combinators but never covers a block being stored then invoked. Built\n// after BT-2807/BT-2808/BT-2809 landed (three bugs found reactively, one\n// hand-written regression test per bug) specifically to catch remaining\n// gaps in this axis proactively instead — and it did: four more genuine\n// gaps below, each commented out with its own follow-up issue, exactly the\n// outcome this matrix was built to produce.\n//\n// Commented-out cells and their tracked follow-ups:\n//   - testBareCallInsideDoLoop, testBareCallInsideCollectBlock,\n//     testNestedLoopBareCall: BT-2813 (field-stored value: call inside a\n//     loop body crashes with badarity — the outer loop correctly detects\n//     it needs threading per BT-2807, but the loop body's own statement\n//     codegen doesn't emit the runtime-discriminated call)\n//   - testLocalBlockInArgumentPosition: BT-2814 (Tier 2 block value: call\n//     in argument/sub-expression position leaks the raw {Result,State}\n//     tuple instead of unpacking it — generalizes BT-2797's documented\n//     self.field-only limitation to local-var receivers too)\n//   - testMixedLocalVarCascade: BT-2815 (a captured-local-only mutation in\n//     a NAMED Tier 2 local var, not an inline block literal, never threads\n//     back to the caller's own variable — reproduces even without a\n//     cascade, so unrelated to BT-2808 despite surfacing here)\n//   - testArgumentPositionFieldStored: BT-2814 (the self.field variant of\n//     the same argument-position gap, already documented as a deliberate\n//     BT-2797 limitation)\n\nTestCase subclass: Tier2StoredBlockMatrixTest\n  field: a = nil\n\n  setUp => self.a := Tier2StoredBlockMatrixActor spawn\n\n  // ── P0: Known bug patterns (BT-2807/BT-2808 regression continuity) ────\n\n  // P0-1 (BT-2807): bare self.field value: alone inside ifTrue:.\n  testBareValueAloneInConditional =>\n    self.a setupOnTick\n    self.a tickIfPositive: 5\n    self assert: self.a getTotal equals: 5\n    self.a tickIfPositive: -3\n    self assert: self.a getTotal equals: 5\n\n  // P0-2 (BT-2808): cascade of two value: sends to the same field-stored block.\n  testCascadeTwoSends =>\n    self.a setupOnTick\n    self.a tickTwice: 5\n    self assert: self.a getTotal equals: 10\n\n  // P0-3 (BT-2808 extension): cascade of three value: sends.\n  testCascadeThreeSends =>\n    self.a setupOnTick\n    self.a tickThrice: 4\n    self assert: self.a getTotal equals: 12\n\n  // ── P1: High-risk unexplored combinations ──────────────────────────────\n\n  // P1-4: 2-arg field-stored block invoked cross-method.\n  testTwoArgBlockCrossMethod =>\n    self.a setupOnCombine\n    result := self.a combine: 3 and: 7\n    self assert: result equals: 10\n    self assert: self.a getTotal equals: 10\n\n  // P1-5: 0-arg field-stored block invoked cross-method, twice.\n  testZeroArgBlockCrossMethod =>\n    self.a setupOnPing\n    self.a ping\n    self.a ping\n    self assert: self.a getTotal equals: 2\n\n  // P1-6: field-stored block's value: call as the RHS of a local assignment.\n  testValueCallAsAssignmentRhs =>\n    self.a setupOnTick\n    result := self.a tickCaptureResult: 5\n    self assert: result equals: 5\n    self assert: self.a getTotal equals: 5\n\n  // P1-7 (KNOWN GAP — BT-2813): bare field-stored call inside a do: loop\n  // body crashes with badarity.\n  // testBareCallInsideDoLoop =>\n  //   self.a setupOnTick\n  //   self.a tickEach: #(1, 2, 3)\n  //   self assert: self.a getTotal equals: 6\n\n  // P1-8 (KNOWN GAP — BT-2813): bare field-stored call inside a collect:\n  // block crashes with badarity.\n  // testBareCallInsideCollectBlock =>\n  //   self.a setupOnTick\n  //   result := self.a tickEachCollect: #(1, 2, 3)\n  //   self assert: result equals: 6\n\n  // P1-9: field-stored call nested two levels deep inside conditionals.\n  testNestedConditionalBareCall =>\n    self.a setupOnTick\n    self.a tickIfPositiveNested: 5 and: 5\n    self assert: self.a getTotal equals: 5\n    self.a tickIfPositiveNested: 5 and: -5\n    self assert: self.a getTotal equals: 5\n    self.a tickIfPositiveNested: -5 and: 5\n    self assert: self.a getTotal equals: 5\n\n  // ── P2: Edge cases ─────────────────────────────────────────────────────\n\n  // P2-10 (KNOWN GAP — BT-2814): same-method, captured-LOCAL (not field)\n  // Tier 2 block invoked in argument position — the raw {Result,State}\n  // tuple leaks into the enclosing arithmetic instead of being unpacked.\n  // testLocalBlockInArgumentPosition =>\n  //   result := self.a localBlockInArgumentPosition: 5\n  //   self assert: result equals: 15\n\n  // P2-11 (KNOWN GAP — BT-2815): same-method, LOCAL var block with a\n  // captured-local-ONLY mutation, invoked via a cascade — the mutation\n  // never threads back to the caller's own variable.\n  // testMixedLocalVarCascade =>\n  //   result := self.a mixedLocalVarCascade: 4\n  //   self assert: result equals: 8\n\n  // P2-12: field reassigned to a different block between two invocations —\n  // confirms runtime discrimination re-reads the field each call.\n  testFieldReassignedBetweenCalls =>\n    self.a setupOnTick\n    self.a tick: 5\n    self assert: self.a getTotal equals: 5\n    self.a setupOnTickDoubling\n    self.a tick: 5\n    self assert: self.a getTotal equals: 15\n\n  // P2-13: 3-arg field-stored block (value:value:value:) invoked cross-method.\n  testThreeArgBlockCrossMethod =>\n    self.a setupOnTriple\n    result := self.a\n      triple: 1\n      second: 2\n      third: 3\n    self assert: result equals: 6\n\n// ── P3: Lower-risk / exploratory ────────────────────────────────────────\n\n// P3-14 (KNOWN GAP — BT-2813): field-stored call nested inside a loop\n// nested inside another loop — same badarity crash as P1-7/P1-8.\n// testNestedLoopBareCall =>\n//   self.a setupOnTick\n//   self.a tickNestedLoop: #(#(1, 2), #(3, 4))\n//   self assert: self.a getTotal equals: 10\n\n// P3-15 (KNOWN GAP — BT-2814): a field-stored Tier 2 block's value: call\n// in argument position drops its field mutation instead of threading it\n// — the self.field variant of the same tuple-leak gap as P2-10, already\n// documented as a deliberate BT-2797 limitation. See fixture's\n// addTickResult: comment for the codegen explanation.\n// testArgumentPositionFieldStored =>\n//   self.a setupOnTick\n//   self.a addTickResult: 5\n//   self assert: self.a getTotal equals: 5",
+      "explanation": "BT-2810: Field-stored/opaque Tier 2 block invocation test matrix — proves the compiler handles the {mutation kind × call-site shape × invocation relationship × nesting × block arity} space for a block stored in a field or local variable and invoked later via value:/value:value:/cascade.  Complements mutation_matrix_test.bt (BT-1480), which densely covers *direct* self.field := ... mutation crossed with control-flow/collection combinators but never covers a block being stored then invoked. Built after BT-2807/BT-2808/BT-2809 landed (three bugs found reactively, one hand-written regression test per bug) specifically to catch remaining gaps in this axis proactively instead — and it did: four more genuine gaps below, each commented out with its own follow-up issue, exactly the outcome this matrix was built to produce.  Commented-out cells and their tracked follow-ups:   - testBareCallInsideDoLoop, testBareCallInsideCollectBlock,     testNestedLoopBareCall: BT-2813 (field-stored value: call inside a     loop body crashes with badarity — the outer loop correctly detects     it needs threading per BT-2807, but the loop body's own statement     codegen doesn't emit the runtime-discriminated call)   - testLocalBlockInArgumentPosition: BT-2814 (Tier 2 block value: call     in argument/sub-expression position leaks the raw {Result,State}     tuple instead of unpacking it — generalizes BT-2797's documented     self.field-only limitation to local-var receivers too)   - testMixedLocalVarCascade: BT-2815 (a captured-local-only mutation in     a NAMED Tier 2 local var, not an inline block literal, never threads     back to the caller's own variable — reproduces even without a     cascade, so unrelated to BT-2808 despite surfacing here)   - testArgumentPositionFieldStored: BT-2814 (the self.field variant of     the same argument-position gap, already documented as a deliberate     BT-2797 limitation)"
+    },
+    {
+      "id": "stdlib-test-tier2-subexpr-and-conditional-block-test",
+      "title": "Tier2SubexprAndConditionalBlockTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "TestCase",
+        "Tier2SubexprAndConditionalBlockTest",
+        "assign",
+        "assignment",
+        "async",
+        "branch",
+        "concurrent",
+        "conditional",
+        "constructor",
+        "create",
+        "extends",
+        "gen_server",
+        "genserver",
+        "if",
+        "inherit",
+        "inheritance",
+        "instantiate",
+        "mutate",
+        "mutation",
+        "object",
+        "process",
+        "set",
+        "subclassing",
+        "testBareFieldStoredBlockValueAloneInsideConditional",
+        "testStoredMutatingBlockInvokedBareInsideConditional",
+        "testStoredPureBlockInArgumentPosition",
+        "tier2_subexpr_and_conditional_block_test"
+      ],
+      "source": "// BT-2797 (PR #2899 review): runtime regression tests for a field-stored\n// block invoked in argument (sub-expression) position, and for a field-stored\n// mutating block invoked as a bare statement inside a conditional branch.\n// See fixtures/tier2_subexpr_and_conditional_block_test_actor.bt for details\n// on why these two call-site shapes needed a dedicated fix beyond the\n// top-level Tier2ValueCall/LocalAssignTier2 codegen.\n\nTestCase subclass: Tier2SubexprAndConditionalBlockTest\n\n  // Tier 1 (pure) field-stored block used in argument position must still\n  // return a plain value, not the raw {Result, NewState} tuple.\n  testStoredPureBlockInArgumentPosition =>\n    actor := Tier2SubexprAndConditionalBlockTestActor spawn\n    self assert: actor testStoredPureBlockInArgumentPosition equals: 10\n\n  // Tier 2 (mutating) field-stored block invoked bare inside an ifTrue:\n  // branch must have its field mutation threaded through: 5 is added\n  // (x > 0), -3 is not (x <= 0), so total ends at 5.\n  testStoredMutatingBlockInvokedBareInsideConditional =>\n    actor := Tier2SubexprAndConditionalBlockTestActor spawn\n    self assert: actor testStoredMutatingBlockInvokedBareInsideConditional equals: 5\n\n  // BT-2807: a bare `self.field value:` with NO other field mutation in the\n  // same conditional branch must still trigger state threading.\n  testBareFieldStoredBlockValueAloneInsideConditional =>\n    actor := Tier2SubexprAndConditionalBlockTestActor spawn\n    self assert: actor testBareFieldStoredBlockValueAloneInsideConditional equals: 5",
+      "explanation": "BT-2797 (PR #2899 review): runtime regression tests for a field-stored block invoked in argument (sub-expression) position, and for a field-stored mutating block invoked as a bare statement inside a conditional branch. See fixtures/tier2_subexpr_and_conditional_block_test_actor.bt for details on why these two call-site shapes needed a dedicated fix beyond the top-level Tier2ValueCall/LocalAssignTier2 codegen."
     },
     {
       "id": "stdlib-test-time-test",
