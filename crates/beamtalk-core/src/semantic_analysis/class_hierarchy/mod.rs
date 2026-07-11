@@ -46,7 +46,7 @@ pub struct ClassHierarchy {
     protocol_classes: HashSet<EcoString>,
     /// How complete the knowledge injected into this hierarchy is (BT-2796).
     ///
-    /// Stamped by `analyse_full_with_natives` from the orchestrator's
+    /// Stamped by `analyse_full` from the orchestrator's
     /// `CompilerOptions::knowledge_scope`. Defaults to
     /// [`KnowledgeScope::ModuleOnly`]; consulted by the receiver-knowledge
     /// classifier (ADR 0100 Rule 2, BT-2794).
@@ -271,7 +271,7 @@ impl ClassHierarchy {
 
     /// Declare that the compiled package has dependencies whose extension
     /// contributions are not loaded (BT-2794, pre-WS3 guard). Set by
-    /// `analyse_full_with_natives` from
+    /// `analyse_full` from
     /// `CompilerOptions::has_package_dependencies`.
     pub fn set_dependency_extensions_unknown(&mut self, unknown: bool) {
         self.dependency_extensions_unknown = unknown;
