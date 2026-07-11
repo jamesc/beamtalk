@@ -26,7 +26,8 @@
 /// a JSON-representable value — usually a Dictionary with explicit keys.
 /// The result is converted recursively, so it may itself contain objects
 /// that implement `asJson`. This mirrors how `Printable` documents
-/// `asString`/`printString`: any class implementing `asJson` conforms.
+/// `asString`/`printString`: any class implementing `asJson` conforms —
+/// see `JsonRepresentable`, the structural protocol for this convention.
 ///
 /// Explicit key naming is deliberate — wire formats are often snake_case
 /// while Beamtalk fields are camelCase, so `asJson` is where that mapping

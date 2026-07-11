@@ -23060,6 +23060,34 @@
       "explanation": "Tests for Object >> isKindOf: (BT-1229)"
     },
     {
+      "id": "stdlib-test-json-representable-protocol-test",
+      "title": "JsonRepresentableProtocolTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "JsonRepresentableProtocolTest",
+        "TestCase",
+        "assign",
+        "assignment",
+        "extends",
+        "inherit",
+        "inheritance",
+        "json_representable_protocol_test",
+        "mutate",
+        "mutation",
+        "object",
+        "set",
+        "subclassing",
+        "testAllProtocolsIncludesJsonRepresentable",
+        "testJsonRepresentableIsRegistered",
+        "testJsonUserConforms",
+        "testJsonUserProtocolsIncludesJsonRepresentable",
+        "testRequiredMethods",
+        "testValuePointDoesNotConform"
+      ],
+      "source": "// BT-2818: JsonRepresentable protocol conformance tests.\n// Verifies that the protocol is registered and that classes implementing\n// asJson conform structurally (ADR 0068).\n//\n// Fixtures: stdlib/test/fixtures/json_user.bt (JsonUser — implements asJson)\n//           stdlib/test/fixtures/value_point.bt (ValuePoint — no asJson)\n\nTestCase subclass: JsonRepresentableProtocolTest\n\n  testJsonRepresentableIsRegistered =>\n    self assert: (Protocol isProtocol: #JsonRepresentable)\n\n  testRequiredMethods =>\n    methods := Protocol requiredMethods: #JsonRepresentable\n    self assert: methods size equals: 1\n    self assert: (methods includes: #asJson)\n\n  testAllProtocolsIncludesJsonRepresentable =>\n    self assert: (Protocol allProtocols includes: #JsonRepresentable)\n\n  // --- Conforming class (implements asJson) ---\n  testJsonUserConforms => self assert: (JsonUser conformsTo: #JsonRepresentable)\n\n  testJsonUserProtocolsIncludesJsonRepresentable =>\n    self assert: (JsonUser protocols includes: #JsonRepresentable)\n\n  // --- Non-conforming class (no asJson) ---\n  testValuePointDoesNotConform =>\n    self deny: (ValuePoint conformsTo: #JsonRepresentable)",
+      "explanation": "BT-2818: JsonRepresentable protocol conformance tests. Verifies that the protocol is registered and that classes implementing asJson conform structurally (ADR 0068).  Fixtures: stdlib/test/fixtures/json_user.bt (JsonUser — implements asJson)           stdlib/test/fixtures/value_point.bt (ValuePoint — no asJson)"
+    },
+    {
       "id": "stdlib-test-json-test",
       "title": "JsonTest",
       "category": "stdlib-tests",
