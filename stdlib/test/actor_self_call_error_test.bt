@@ -1,0 +1,43 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2816: Tests that a self-send forwarding into a method that raises
+// `self error:` propagates the structured error to the caller instead of
+// crashing with `function_clause` (safe_dispatch's error-tuple path mis-
+// unwrapped the caught `{Type, Error, Stacktrace}` triple before handing it
+// to `beamtalk_error:raise/1`, which only accepts a raw `#beamtalk_error{}`).
+//
+// Sibling regression coverage to BT-1420/1421 (actor_self_call_state_test.bt),
+// which cover the success-path counterpart of this same generated case.
+//
+// Fixtures: stdlib/test/fixtures/self_call_error_actor.bt
+
+TestCase subclass: ActorSelfCallErrorTest
+  field: a = nil
+
+  setUp => self withA: SelfCallErrorActor spawn
+
+  tearDown => self.a isNil ifFalse: [self.a stop]
+
+  // Direct call (no forwarding hop) raises correctly — sanity baseline.
+  testDirectCallRaisesUserError =>
+    self should: [self.a doItLong] raise: #user_error
+    self assert: ([
+      self.a doItLong
+    ] on: Exception do: [:e | e message]) equals: "boom"
+
+  // Forwarded call via a plain unary self-send must raise the same error,
+  // not crash with an internal function_clause error.
+  testForwardedSelfSendRaisesUserError =>
+    self should: [self.a doIt] raise: #user_error
+    self assert: ([
+      self.a doIt
+    ] on: Exception do: [:e | e message]) equals: "boom"
+
+  // Forwarded call via a keyword self-send, with an argument threaded
+  // through to the raising method's message.
+  testForwardedKeywordSelfSendRaisesUserError =>
+    self should: [self.a doItWith: "kaboom"] raise: #user_error
+    self assert: ([
+      self.a doItWith: "kaboom"
+    ] on: Exception do: [:e | e message]) equals: "kaboom"
