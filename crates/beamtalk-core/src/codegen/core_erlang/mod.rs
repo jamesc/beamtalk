@@ -3466,6 +3466,21 @@ impl CoreErlangGenerator {
         // This path is used for:
         // - Structural intrinsics (unquoted) — handled at call site, body is placeholder
         // - Selector-based primitives with no known BIF (unimplemented or complex)
+        //
+        // BT-2803 follow-up: for a structural intrinsic, this placeholder body is
+        // never a real implementation of the selector's semantics — it self-calls
+        // `<runtime_module>:dispatch(<intrinsic_name_atom>, Args, Self)`, passing
+        // the *intrinsic name* (e.g. `blockValueWithArguments`), not the real
+        // selector. Any call path that reaches the compiled method body directly
+        // instead of through the call-site interception — e.g.
+        // `aBlock perform: #valueWithArguments: withArguments: #(...)` — resolves
+        // to this placeholder and raises `does_not_understand` for the intrinsic
+        // name. Confirmed to already affect every existing block-value structural
+        // intrinsic (`value`, `value:`, `value:value:`, …), not just
+        // `valueWithArguments:` — a pre-existing, systemic gap in how structural
+        // intrinsics interact with dynamic dispatch, not something introduced or
+        // fixed here. See BT-2812 (filed from BT-2803's adversarial review) for
+        // perform:-safe structural intrinsic dispatch.
         let runtime_module = PrimitiveBindingTable::runtime_module_for_class(&class_name);
 
         // BT-938: Validate that the target dispatch module exists in the known stdlib

@@ -844,6 +844,68 @@ impl CoreErlangGenerator {
     /// end
     /// ```
     ///
+    /// BT-1942: Hoists a receiver operand that may open a class-method
+    /// self-send scope, binding it to a fresh `prefix`-named temp var.
+    /// Appends the necessary `let`-binding(s) to `parts` and sets
+    /// `any_open_scope` if this operand's evaluation opened a class-method
+    /// scope. Shared by `generate_value_keyword_guard` and
+    /// `generate_block_value_with_arguments_call` (BT-2803) — both hoist
+    /// their receiver the same way, before any argument hoisting.
+    fn hoist_open_scope_receiver(
+        &mut self,
+        receiver: &Expression,
+        prefix: &str,
+        parts: &mut Vec<Document<'static>>,
+        any_open_scope: &mut bool,
+    ) -> Result<String> {
+        let (preamble, mut docs) = self.capture_subexpr_sequence(&[receiver], prefix)?;
+        let code = docs.remove(0);
+        if !matches!(preamble, Document::Nil) {
+            *any_open_scope = true;
+            parts.push(preamble);
+        }
+        let var = self.fresh_temp_var(prefix);
+        parts.push(docvec!["let ", leaf::var(var.clone()), " = ", code, " in ",]);
+        Ok(var)
+    }
+
+    /// BT-1270/BT-1942: Hoists an argument-position operand, special-casing a
+    /// field-assignment argument (`self.field := x`) so its `StateN` binding
+    /// lands outside the let-chain rather than nested inside it. Appends the
+    /// necessary `let`-binding(s) to `parts` and sets `any_open_scope` if
+    /// this operand's evaluation opened a class-method scope. Shared by
+    /// `generate_value_keyword_guard` and
+    /// `generate_block_value_with_arguments_call` (BT-2803).
+    fn hoist_open_scope_argument(
+        &mut self,
+        arg: &Expression,
+        prefix: &str,
+        parts: &mut Vec<Document<'static>>,
+        any_open_scope: &mut bool,
+    ) -> Result<String> {
+        let var = self.fresh_temp_var(prefix);
+        if Self::is_field_assignment(arg) {
+            let (doc, val_var) = self.generate_field_assignment_open(arg)?;
+            parts.push(doc);
+            parts.push(docvec![
+                "let ",
+                leaf::var(var.clone()),
+                " = ",
+                leaf::var(val_var),
+                " in ",
+            ]);
+        } else {
+            let (preamble, mut docs) = self.capture_subexpr_sequence(&[arg], prefix)?;
+            let code = docs.remove(0);
+            if !matches!(preamble, Document::Nil) {
+                *any_open_scope = true;
+                parts.push(preamble);
+            }
+            parts.push(docvec!["let ", leaf::var(var.clone()), " = ", code, " in ",]);
+        }
+        Ok(var)
+    }
+
     /// This mirrors the runtime guard emitted for the unary `value` case (BT-335).
     fn generate_value_keyword_guard(
         &mut self,
@@ -859,53 +921,14 @@ impl CoreErlangGenerator {
         // Each sub-expression is bound sequentially, so per-sub-expression inline
         // hoisting preserves left-to-right evaluation order.
         let mut any_open_scope = false;
-        let (recv_preamble, mut recv_docs) =
-            self.capture_subexpr_sequence(&[receiver], "ValRecv")?;
-        let recv_doc = recv_docs.remove(0);
-        if !matches!(recv_preamble, Document::Nil) {
-            any_open_scope = true;
-            parts.push(recv_preamble);
-        }
-        let recv_var = self.fresh_temp_var("ValRecv");
-        parts.push(docvec![
-            "let ",
-            leaf::var(recv_var.clone()),
-            " = ",
-            recv_doc,
-            " in ",
-        ]);
+        let recv_var =
+            self.hoist_open_scope_receiver(receiver, "ValRecv", &mut parts, &mut any_open_scope)?;
 
         // BT-1270: Hoist field-assignment arguments before their _ValArgN bindings so
         // the StateN binding is in scope after the let-chain, not nested inside it.
         for arg in arguments {
-            let arg_var = self.fresh_temp_var("ValArg");
-            if Self::is_field_assignment(arg) {
-                let (doc, val_var) = self.generate_field_assignment_open(arg)?;
-                parts.push(doc);
-                parts.push(docvec![
-                    "let ",
-                    leaf::var(arg_var.clone()),
-                    " = ",
-                    leaf::var(val_var),
-                    " in ",
-                ]);
-            } else {
-                // BT-1942: Hoist open-scope arg (e.g. class method self-send).
-                let (arg_preamble, mut arg_docs) =
-                    self.capture_subexpr_sequence(&[arg], "ValArg")?;
-                let arg_code = arg_docs.remove(0);
-                if !matches!(arg_preamble, Document::Nil) {
-                    any_open_scope = true;
-                    parts.push(arg_preamble);
-                }
-                parts.push(docvec![
-                    "let ",
-                    leaf::var(arg_var.clone()),
-                    " = ",
-                    arg_code,
-                    " in ",
-                ]);
-            }
+            let arg_var =
+                self.hoist_open_scope_argument(arg, "ValArg", &mut parts, &mut any_open_scope)?;
             arg_vars.push(arg_var);
         }
 
@@ -1139,49 +1162,14 @@ impl CoreErlangGenerator {
         let mut parts: Vec<Document<'static>> = Vec::with_capacity(4);
         let mut any_open_scope = false;
 
-        let (recv_preamble, mut recv_docs) =
-            self.capture_subexpr_sequence(&[receiver], "ValRecv")?;
-        let recv_doc = recv_docs.remove(0);
-        if !matches!(recv_preamble, Document::Nil) {
-            any_open_scope = true;
-            parts.push(recv_preamble);
-        }
-        let recv_var = self.fresh_temp_var("ValRecv");
-        parts.push(docvec![
-            "let ",
-            leaf::var(recv_var.clone()),
-            " = ",
-            recv_doc,
-            " in ",
-        ]);
-
-        let args_var = self.fresh_temp_var("ValArgs");
-        if Self::is_field_assignment(args_expr) {
-            let (doc, val_var) = self.generate_field_assignment_open(args_expr)?;
-            parts.push(doc);
-            parts.push(docvec![
-                "let ",
-                leaf::var(args_var.clone()),
-                " = ",
-                leaf::var(val_var),
-                " in ",
-            ]);
-        } else {
-            let (args_preamble, mut args_docs) =
-                self.capture_subexpr_sequence(&[args_expr], "ValArgs")?;
-            let args_code = args_docs.remove(0);
-            if !matches!(args_preamble, Document::Nil) {
-                any_open_scope = true;
-                parts.push(args_preamble);
-            }
-            parts.push(docvec![
-                "let ",
-                leaf::var(args_var.clone()),
-                " = ",
-                args_code,
-                " in ",
-            ]);
-        }
+        let recv_var =
+            self.hoist_open_scope_receiver(receiver, "ValRecv", &mut parts, &mut any_open_scope)?;
+        let args_var = self.hoist_open_scope_argument(
+            args_expr,
+            "ValArgs",
+            &mut parts,
+            &mut any_open_scope,
+        )?;
 
         let case_doc = docvec![
             "case call 'erlang':'is_function'(",
