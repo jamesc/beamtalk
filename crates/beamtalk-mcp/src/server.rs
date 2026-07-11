@@ -235,6 +235,19 @@ fn save_method_expr(class: &str, selector: &str, body: &str) -> String {
     )
 }
 
+/// Build the Beamtalk expression for the `precheck_method` MCP tool — the
+/// pre-save advisory precheck (ADR 0105 Phase 3, BT-2782). Selector is the
+/// bare form (no leading `#`). Nothing installs; `Behaviour>>precheckCompile:
+/// source:` is read-only.
+fn precheck_method_expr(class: &str, selector: &str, body: &str) -> String {
+    format!(
+        "{} precheckCompile: #{} source: \"{}\"",
+        class,
+        selector,
+        escape_string_literal(body),
+    )
+}
+
 /// Build the Beamtalk expression for the `try_method` MCP tool — ephemeral
 /// patch path (ADR 0082 Phase 3). Selector is the bare form (no leading `#`).
 fn try_method_expr(class: &str, selector: &str, body: &str) -> String {
@@ -603,6 +616,26 @@ pub struct DiagnosticSummaryParams {
         description = "Path to a .bt source file or directory. Defaults to the current directory."
     )]
     pub path: Option<String>,
+}
+
+/// Parameters for the `precheck_method` MCP tool (ADR 0105 Phase 3, BT-2782).
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct PrecheckMethodParams {
+    /// Name of the Beamtalk class the pending edit targets.
+    #[schemars(
+        description = "Name of the Beamtalk class the pending edit targets (e.g. \"Counter\")."
+    )]
+    pub class: String,
+    /// Method selector — accepted with or without a leading `#`.
+    #[schemars(
+        description = "Method selector the pending edit targets (e.g. \"increment\", \"at:put:\", \"+\"). Accepted with or without a leading '#'."
+    )]
+    pub selector: String,
+    /// Pending method source body as a String value (the right-hand side of `=>`).
+    #[schemars(
+        description = "The pending method body source as a String value (the right-hand side of '=>'). Nothing installs — this is a read-only pre-save check."
+    )]
+    pub body: String,
 }
 
 /// Parameters for the `save_method` MCP tool (ADR 0082 Phase 3, BT-2288).
@@ -2176,6 +2209,89 @@ impl BeamtalkMcp {
         timer.mark_ok();
         Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
     }
+
+    /// Pre-save advisory precheck (ADR 0105 Phase 3, BT-2782).
+    ///
+    /// Compiles to `aClass precheckCompile: #selector source: body`. Nothing
+    /// installs and nothing is recorded to the `ChangeLog` — this is a
+    /// read-only "check before save" report of would-be-stale callers.
+    #[tool(
+        description = "Compile a pending method edit and report would-be-stale dependents, without installing it. Compiles to 'aClass precheckCompile: #selector source: body' — the editor/LSP pre-save advisory (ADR 0105 Phase 3): non-blocking, the post-reload image check that runs automatically on 'save_method' remains the authority. The 'body' argument is the source on the right-hand side of '=>', passed as a String value — no escaping required by the caller. Returns a report Dictionary (findings/checked/totalCandidates/notChecked/capNote/checkedOwners); an edit with no type-relevant signature change reports empty. (ADR 0105 Phase 3, BT-2782.)"
+    )]
+    async fn precheck_method(
+        &self,
+        Parameters(params): Parameters<PrecheckMethodParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let mut timer = ToolTimer::new("precheck_method");
+        validate_class_name(&params.class)?;
+        let selector = params
+            .selector
+            .strip_prefix('#')
+            .unwrap_or(&params.selector);
+        validate_selector(selector)?;
+        tracing::debug!(
+            tool = "precheck_method",
+            class = %params.class,
+            selector = %selector,
+            body_len = params.body.len(),
+            "tool invoked"
+        );
+
+        let expr = precheck_method_expr(&params.class, selector, &params.body);
+        let response = self
+            .client
+            .evaluate_with_options(&expr, false)
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+
+        check_response!(response, "Failed to precheck method");
+
+        let text = {
+            let v = response.value_string();
+            if v.is_empty() {
+                format!("Precheck for {}>>#{}: no findings", params.class, selector)
+            } else {
+                v
+            }
+        };
+
+        timer.mark_ok();
+        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+    }
+
+    /// Whole-image re-check (ADR 0105 Phase 3, BT-2782).
+    ///
+    /// Compiles to `Workspace recheckImage` — the "complete but unbounded"
+    /// path kept out of the automatic per-reload check: re-checks every live
+    /// class the workspace has a recorded source for, not just the
+    /// xref-filtered dependents of one changed selector.
+    #[tool(
+        description = "Re-check every live class in the workspace against the current image, not just the dependents of the last reload. Compiles to 'Workspace recheckImage' — the explicit, on-demand, unbounded sweep (ADR 0105 Phase 3), as opposed to the automatic post-reload check which only re-checks xref-filtered dependents of one changed selector, capped per reload. Returns a report Dictionary (checked/stale/findings). (ADR 0105 Phase 3, BT-2782.)"
+    )]
+    async fn recheck_image(&self) -> Result<CallToolResult, rmcp::ErrorData> {
+        let mut timer = ToolTimer::new("recheck_image");
+        tracing::debug!(tool = "recheck_image", "tool invoked");
+
+        let response = self
+            .client
+            .evaluate_with_options("Workspace recheckImage", false)
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+
+        check_response!(response, "Failed to recheck image");
+
+        let text = {
+            let v = response.value_string();
+            if v.is_empty() {
+                "Whole-image re-check: no findings".to_string()
+            } else {
+                v
+            }
+        };
+
+        timer.mark_ok();
+        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+    }
 }
 
 // --- Lint helpers ---
@@ -3336,6 +3452,22 @@ mod tests {
     }
 
     #[test]
+    fn precheck_method_and_recheck_image_tools_registered() {
+        // ADR 0105 Phase 3 (BT-2782): surface-parity entries for MCP.
+        let router = BeamtalkMcp::tool_router();
+        let tools = router.list_all();
+        let tool_names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
+        assert!(
+            tool_names.contains(&"precheck_method"),
+            "precheck_method should be in tool list, found: {tool_names:?}"
+        );
+        assert!(
+            tool_names.contains(&"recheck_image"),
+            "recheck_image should be in tool list, found: {tool_names:?}"
+        );
+    }
+
+    #[test]
     fn list_modules_tool_not_registered() {
         let router = BeamtalkMcp::tool_router();
         let tools = router.list_all();
@@ -3457,6 +3589,23 @@ mod tests {
         assert_eq!(
             save_method_expr("Dict", "at:put:", "..."),
             "Dict compile: #at:put: source: \"...\"",
+        );
+    }
+
+    #[test]
+    fn precheck_method_expr_compiles_precheck_compile_source() {
+        // `precheck_method` → `aClass precheckCompile: #selector source: body`.
+        assert_eq!(
+            precheck_method_expr("Counter", "getCount", "getCount => \"nope\""),
+            "Counter precheckCompile: #getCount source: \"getCount => \\\"nope\\\"\"",
+        );
+    }
+
+    #[test]
+    fn precheck_method_expr_preserves_keyword_selectors() {
+        assert_eq!(
+            precheck_method_expr("Dict", "at:put:", "..."),
+            "Dict precheckCompile: #at:put: source: \"...\"",
         );
     }
 

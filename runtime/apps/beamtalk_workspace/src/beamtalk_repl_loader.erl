@@ -35,7 +35,8 @@ Extracted from beamtalk_repl_eval (BT-863).
     new_class/2,
     %% ADR 0105 Phase 2 (BT-2780): called cross-module by
     %% beamtalk_workspace_shape_recheck_worker — see activate_module/3's doc.
-    maybe_trigger_shape_recheck/1
+    maybe_trigger_shape_recheck/1,
+    precheck_method/4
 ]).
 
 %% Exported for testing (only in test builds)
@@ -900,6 +901,109 @@ install_method_with_source(
         {error, Reason} ->
             {error, Reason, <<>>, Warnings, State}
     end.
+
+-doc """
+Pre-save advisory (ADR 0105 Phase 3, BT-2782): compile a pending method edit
+and report would-be-stale dependents **without installing** — the read-only
+sibling of `install_method_with_source/10`. Backs `Behaviour>>precheckCompile:
+source:', the editor/LSP's "check before save" hook (the ADR's Phase 3
+steelman accommodation: the post-reload image check stays the authority;
+this is a non-blocking early warning against the *pending* edit).
+
+Shares `install_method_with_source/10`'s compile step
+(`beamtalk_repl_compiler:compile_method_reload/3`) up to the point that
+function would call `load_recompiled_method/8` — this function stops there
+and never calls `code:load_binary/3`, never emits a ChangeLog entry, and
+never touches `beamtalk_workspace_signature_store`'s recorded generation
+(`previous/3` is a **read-only** peek, unlike the real install's `capture/4`,
+which would consume a generation slot for an edit that never happened).
+
+Diffs the pending signature against `beamtalk_workspace_signature_store:
+previous/3` (the same baseline a real install would capture against) via the
+same `beamtalk_signature_diff:diff/2` classification `capture/4` uses; a
+`no_op` diff (nothing type-relevant changed, or no baseline to compare
+against) short-circuits to an empty report — there is nothing pending worth
+dependent-checking. Otherwise delegates to `beamtalk_recheck:trigger_pending/5`.
+
+Returns `{ok, beamtalk_recheck:result()}` on a successful compile (`result()`
+is empty for a `no_op` diff) or `{error, Reason}` on a compile failure — the
+same failure shape `install_method_with_source/10` returns, since the
+compile step is identical.
+""".
+-spec precheck_method(binary(), binary(), binary(), boolean()) ->
+    {ok, beamtalk_recheck:result()} | {error, term()}.
+precheck_method(ClassNameBin, SelectorBin, MethodSource, IsClassMethod) ->
+    case beamtalk_workspace_meta:get_class_source(ClassNameBin) of
+        undefined ->
+            ErrorMsg =
+                <<"Class source not available for ", ClassNameBin/binary,
+                    " (source not recorded or workspace metadata unavailable)">>,
+            {error, {compile_error, ErrorMsg}};
+        ClassSource ->
+            precheck_method_with_source(
+                ClassNameBin, SelectorBin, MethodSource, ClassSource, IsClassMethod
+            )
+    end.
+
+-spec precheck_method_with_source(binary(), binary(), binary(), string(), boolean()) ->
+    {ok, beamtalk_recheck:result()} | {error, term()}.
+precheck_method_with_source(ClassNameBin, SelectorBin, MethodSource, ClassSource, IsClassMethod) ->
+    ClassSourceBin = unicode:characters_to_binary(ClassSource),
+    MethodSourceBin = unicode:characters_to_binary(MethodSource),
+    {ModuleNameOverride, SourcePath} = patch_module_target(ClassNameBin),
+    SuperclassIndex = beamtalk_repl_compiler:build_class_superclass_index(),
+    ModuleIndex = beamtalk_repl_compiler:build_class_module_index(),
+    Options = #{
+        class_name => ClassNameBin,
+        is_class_method => IsClassMethod,
+        workspace_mode => true,
+        module_name => ModuleNameOverride,
+        source_path => source_path_binary(SourcePath),
+        class_superclass_index => SuperclassIndex,
+        class_module_index => ModuleIndex
+    },
+    case beamtalk_repl_compiler:compile_method_reload(ClassSourceBin, MethodSourceBin, Options) of
+        {ok, #{selector := Selector}} when Selector =/= SelectorBin ->
+            ErrorMsg =
+                <<"Method selector mismatch: asked to precheck '", SelectorBin/binary,
+                    "' but the source defines '", Selector/binary, "'">>,
+            {error, {compile_error, ErrorMsg}};
+        {ok, Result} ->
+            #{
+                selector := Selector,
+                is_class_method := ActualIsClassMethod
+            } = Result,
+            ReturnType = maps:get(return_type, Result, <<"Dynamic">>),
+            ParamTypes = maps:get(param_types, Result, []),
+            Side = patch_side(ActualIsClassMethod),
+            PendingSignature = #{return_type => ReturnType, param_types => ParamTypes},
+            Prev = beamtalk_workspace_signature_store:previous(ClassNameBin, Selector, Side),
+            case beamtalk_signature_diff:diff(Prev, PendingSignature) of
+                no_op ->
+                    {ok, no_pending_change_result()};
+                Classification ->
+                    {ok,
+                        beamtalk_recheck:trigger_pending(
+                            ClassNameBin, Selector, Side, Classification, PendingSignature
+                        )}
+            end;
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+%% Mirrors `beamtalk_recheck`'s internal `empty_result/0` shape (not exported
+%% — this is the "nothing pending is worth checking" case, distinct from that
+%% module's "the check ran and found nothing").
+-spec no_pending_change_result() -> beamtalk_recheck:result().
+no_pending_change_result() ->
+    #{
+        findings => [],
+        checked => 0,
+        total_candidates => 0,
+        not_checked => 0,
+        cap_note => undefined,
+        checked_owners => []
+    }.
 
 -doc """
 Remove a live method from a class by recompiling the class without it (BT-2663,

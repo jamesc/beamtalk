@@ -160,6 +160,109 @@ relevant_diagnostic_ignores_undefined_category_test() ->
     ).
 
 %%====================================================================
+%% Pure helper — override_method_signature/4 (ADR 0105 Phase 3, BT-2782)
+%%====================================================================
+
+override_method_signature_splices_pending_type_test() ->
+    AmbientMeta = #{
+        superclass => 'Object',
+        method_info => #{
+            size => #{arity => 0, param_types => [], return_type => 'Integer'}
+        }
+    },
+    NewMeta = beamtalk_recheck:override_method_signature(
+        AmbientMeta, instance, size, #{return_type => <<"String">>, param_types => []}
+    ),
+    #{method_info := #{size := Entry}} = NewMeta,
+    ?assertEqual('String', maps:get(return_type, Entry)),
+    %% arity is preserved from the existing entry, not clobbered.
+    ?assertEqual(0, maps:get(arity, Entry)),
+    %% Every other field of the ambient meta is untouched.
+    ?assertEqual('Object', maps:get(superclass, NewMeta)).
+
+override_method_signature_dynamic_becomes_none_test() ->
+    AmbientMeta = #{
+        method_info => #{foo => #{arity => 0, param_types => [], return_type => 'Integer'}}
+    },
+    NewMeta = beamtalk_recheck:override_method_signature(
+        AmbientMeta, instance, foo, #{return_type => <<"Dynamic">>, param_types => [<<"Dynamic">>]}
+    ),
+    #{method_info := #{foo := Entry}} = NewMeta,
+    ?assertEqual(none, maps:get(return_type, Entry)),
+    ?assertEqual([none], maps:get(param_types, Entry)).
+
+override_method_signature_unknown_type_name_falls_back_to_none_test() ->
+    %% A type name with no existing atom (never loaded this session) must not
+    %% mint a fresh atom — falls back to `none` (Dynamic) instead.
+    AmbientMeta = #{
+        method_info => #{foo => #{arity => 0, param_types => [], return_type => 'Integer'}}
+    },
+    NewMeta = beamtalk_recheck:override_method_signature(
+        AmbientMeta,
+        instance,
+        foo,
+        #{return_type => <<"ThisAtomSurelyDoesNotExistYet12345">>, param_types => []}
+    ),
+    #{method_info := #{foo := Entry}} = NewMeta,
+    ?assertEqual(none, maps:get(return_type, Entry)).
+
+override_method_signature_class_side_uses_class_method_info_test() ->
+    AmbientMeta = #{
+        class_method_info => #{new => #{arity => 0, param_types => [], return_type => 'Counter'}}
+    },
+    NewMeta = beamtalk_recheck:override_method_signature(
+        AmbientMeta, class, new, #{return_type => <<"String">>, param_types => []}
+    ),
+    #{class_method_info := #{new := Entry}} = NewMeta,
+    ?assertEqual('String', maps:get(return_type, Entry)),
+    %% instance-side method_info is untouched (absent, in this fixture).
+    ?assertEqual(error, maps:find(method_info, NewMeta)).
+
+override_method_signature_brand_new_selector_gets_bare_entry_test() ->
+    %% A selector with no existing ambient entry (never installed) gets a
+    %% bare entry with just the overridden type fields — no arity. Harmless:
+    %% a brand-new method has no dependents for xref to find anyway.
+    AmbientMeta = #{method_info => #{}},
+    NewMeta = beamtalk_recheck:override_method_signature(
+        AmbientMeta, instance, brandNew, #{return_type => <<"Integer">>, param_types => []}
+    ),
+    #{method_info := #{brandNew := Entry}} = NewMeta,
+    ?assertEqual('Integer', maps:get(return_type, Entry)),
+    ?assertEqual(error, maps:find(arity, Entry)).
+
+%%====================================================================
+%% Pure helper — relevant_image_diagnostic/1 (ADR 0105 Phase 3, BT-2782)
+%%====================================================================
+
+relevant_image_diagnostic_keeps_dnu_test() ->
+    ?assert(
+        beamtalk_recheck:relevant_image_diagnostic(#{
+            category => <<"Dnu">>, severity => <<"hint">>
+        })
+    ).
+
+relevant_image_diagnostic_keeps_type_test() ->
+    ?assert(
+        beamtalk_recheck:relevant_image_diagnostic(#{
+            category => <<"Type">>, severity => <<"warning">>
+        })
+    ).
+
+relevant_image_diagnostic_drops_error_severity_test() ->
+    ?assertNot(
+        beamtalk_recheck:relevant_image_diagnostic(#{
+            category => <<"Dnu">>, severity => <<"error">>
+        })
+    ).
+
+relevant_image_diagnostic_drops_unrelated_category_test() ->
+    ?assertNot(
+        beamtalk_recheck:relevant_image_diagnostic(#{
+            category => <<"Unused">>, severity => <<"lint">>
+        })
+    ).
+
+%%====================================================================
 %% Integration fixture: real compiler port + xref + workspace_meta
 %%====================================================================
 
@@ -911,5 +1014,134 @@ added_field_clears_previously_invalid_spawn_with_key_test_() ->
                     ?assertEqual(1, Checked),
                     ?assertEqual([], Findings)
                 end)
+            ]
+        end}}.
+
+%%====================================================================
+%% Integration — trigger_pending/5 (ADR 0105 Phase 3, BT-2782, pre-save advisory)
+%%====================================================================
+
+trigger_pending_finds_stale_dependent_without_installing_test_() ->
+    {timeout, 30,
+        {setup, fun recheck_setup/0, fun recheck_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    %% Currently-live (installed) signature: size -> Integer.
+                    beamtalk_compiler_server:register_class(
+                        'ReCheckCounter',
+                        counter_hierarchy(#{
+                            size => #{arity => 0, param_types => [], return_type => 'Integer'}
+                        })
+                    ),
+                    ok = beamtalk_xref:register_class('ReCheckDashboard', dashboard_xref()),
+                    ok = beamtalk_workspace_meta:set_class_source(
+                        <<"ReCheckDashboard">>, dashboard_source()
+                    ),
+
+                    %% Pending, NOT YET installed edit: size -> String.
+                    PendingSignature = #{return_type => <<"String">>, param_types => []},
+                    Result = beamtalk_recheck:trigger_pending(
+                        <<"ReCheckCounter">>,
+                        <<"size">>,
+                        instance,
+                        signature_change,
+                        PendingSignature
+                    ),
+                    #{findings := Findings, checked := Checked} = Result,
+                    ?assertEqual(1, Checked),
+                    ?assertEqual(1, length(Findings)),
+                    [Finding] = Findings,
+                    ?assertEqual(<<"ReCheckDashboard">>, maps:get(owner, Finding)),
+                    ?assertEqual(signature_change, maps:get(classification, Finding)),
+
+                    %% Never installed: the ambient class cache is restored to
+                    %% the real, still-live signature afterward — a pending
+                    %% edit that never saved must not leave the compiler's
+                    %% shared class cache holding a hypothetical signature.
+                    #{'ReCheckCounter' := RestoredMeta} = beamtalk_compiler_server:get_classes(),
+                    #{method_info := #{size := RestoredEntry}} = RestoredMeta,
+                    ?assertEqual('Integer', maps:get(return_type, RestoredEntry))
+                end)
+            ]
+        end}}.
+
+trigger_pending_no_ambient_meta_is_empty_result_test_() ->
+    {timeout, 30,
+        {setup, fun recheck_setup/0, fun recheck_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    %% ReCheckCounter was never registered this session at
+                    %% all — no baseline to splice a pending signature into.
+                    Result = beamtalk_recheck:trigger_pending(
+                        <<"ReCheckCounter">>,
+                        <<"size">>,
+                        instance,
+                        signature_change,
+                        #{return_type => <<"String">>, param_types => []}
+                    ),
+                    ?assertEqual(
+                        #{
+                            findings => [],
+                            checked => 0,
+                            total_candidates => 0,
+                            not_checked => 0,
+                            cap_note => undefined,
+                            checked_owners => []
+                        },
+                        Result
+                    )
+                end)
+            ]
+        end}}.
+
+%%====================================================================
+%% Integration — trigger_image/0 (ADR 0105 Phase 3, BT-2782, :recheck image)
+%%====================================================================
+
+recheck_image_clean_source() ->
+    <<"Object subclass: ReCheckImageClean\n  ok -> Integer => 42\n">>.
+
+recheck_image_broken_source() ->
+    <<"Object subclass: ReCheckImageBroken\n  boom -> Integer => 42 totallyNotARealSelector\n">>.
+
+trigger_image_reports_checked_and_stale_across_the_image_test_() ->
+    {timeout, 30,
+        {setup, fun recheck_setup/0, fun recheck_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    ok = beamtalk_workspace_meta:set_class_source(
+                        <<"ReCheckImageClean">>, recheck_image_clean_source()
+                    ),
+                    ok = beamtalk_workspace_meta:set_class_source(
+                        <<"ReCheckImageBroken">>, recheck_image_broken_source()
+                    ),
+
+                    Result = beamtalk_recheck:trigger_image(),
+                    #{findings := Findings, checked := Checked, stale := Stale} = Result,
+
+                    %% Both live classes' diagnostics round-trips completed...
+                    ?assertEqual(2, Checked),
+                    %% ...but only the genuinely-broken one is stale.
+                    ?assertEqual(1, Stale),
+                    ?assert(length(Findings) >= 1),
+                    ?assert(
+                        lists:all(
+                            fun(F) -> maps:get(owner, F) =:= <<"ReCheckImageBroken">> end, Findings
+                        )
+                    )
+                end)
+            ]
+        end}}.
+
+trigger_image_empty_when_no_classes_test_() ->
+    {timeout, 30,
+        {setup, fun recheck_setup/0, fun recheck_teardown/1, fun(_) ->
+            [
+                ?_test(
+                    ?assertEqual(
+                        #{findings => [], checked => 0, stale => 0},
+                        beamtalk_recheck:trigger_image()
+                    )
+                )
             ]
         end}}.

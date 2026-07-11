@@ -1369,6 +1369,9 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
         } else if case.expression == ":dirty" {
             // BT-2287 / ADR 0082 Phase 3: `:dirty` → `Workspace changes notEmpty`.
             client.eval("Workspace changes notEmpty")
+        } else if case.expression == ":recheck image" {
+            // ADR 0105 Phase 3 (BT-2782): `:recheck image` → `Workspace recheckImage`.
+            client.eval("Workspace recheckImage")
         } else {
             client.eval(&case.expression)
         };

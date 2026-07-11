@@ -89,6 +89,33 @@ receiver-identity) matching is a documented refinement, not built here —
 consistent with the ADR's other accepted-gap tradeoffs (one level of
 fan-out only, the proxy-routed-call miss).
 
+## Pre-save advisory (`trigger_pending/5`, ADR 0105 Phase 3, BT-2782)
+
+`trigger/4` re-checks dependents against the changed class's *installed*
+signature, read from the compiler port's ambient class-hierarchy cache
+(`beamtalk_compiler_server`'s `classes` map). A pre-save advisory needs the
+same dependent re-check run against a *pending* edit that has not installed
+— so the cache still holds the old generation. `trigger_pending/5` bridges
+this by temporarily overwriting the changed class's ambient entry with the
+pending signature spliced in, running the unmodified `do_trigger/3` used by
+`trigger/4`, then restoring the original entry — see `trigger_pending/5`'s
+own doc for the exact mechanism and its accepted concurrency tradeoff. Never
+installs anything and never touches `beamtalk_workspace_findings_store`
+(BT-2779) — there is nothing to publish or clear until an actual install
+happens; the caller (`beamtalk_repl_eval:precheck_method/5`) returns the
+`result()` directly to whichever surface asked.
+
+## Whole-image re-check (`trigger_image/0`, ADR 0105 Phase 3, BT-2782)
+
+`Workspace recheckImage` / `:recheck image` is the "complete but unbounded"
+path ADR 0105's Alternatives section keeps out of the default per-reload
+trigger: re-check every live class the workspace has a source for, not just
+the xref-filtered dependents of one changed selector. `trigger_image/0` is a
+separate, simpler entry point — there is no single changed selector to
+attribute findings to or cap candidates against (the whole point is
+"complete"), so it returns `image_result()` (`checked`/`stale`/`findings`),
+not `result()`.
+
 ## Scope
 
 Produces and returns findings; publishing them to a surface (LSP / REPL
@@ -110,7 +137,7 @@ reload that triggered it (ADR 0105: "advisory, never blocking").
 
 -include_lib("kernel/include/logger.hrl").
 
--export([trigger/4, trigger_shape/2]).
+-export([trigger/4, trigger_shape/2, trigger_pending/5, trigger_image/0]).
 
 -ifdef(TEST).
 -export([
@@ -120,11 +147,13 @@ reload that triggered it (ADR 0105: "advisory, never blocking").
     cap_note/1,
     shape_dependent_selectors/1,
     with_star_selector/1,
-    relevant_diagnostic_shape/3
+    relevant_diagnostic_shape/3,
+    override_method_signature/4,
+    relevant_image_diagnostic/1
 ]).
 -endif.
 
--export_type([finding/0, result/0, classification/0]).
+-export_type([finding/0, result/0, classification/0, image_finding/0, image_result/0]).
 
 -type classification() :: signature_change | removal | shape_change.
 
@@ -175,6 +204,26 @@ reload that triggered it (ADR 0105: "advisory, never blocking").
     not_checked := non_neg_integer(),
     cap_note := binary() | undefined,
     checked_owners := [binary()]
+}.
+
+%% A whole-image finding (`trigger_image/0`) — lighter than `finding()`: no
+%% single changed selector to attribute it to, so there is no
+%% `changed_class`/`selector`/`classification`/`note`/`sites` (a class's own
+%% diagnostic already carries its own `start`/`end` span; there is no xref
+%% call-site to translate against, unlike `finding()`'s `sites`).
+-type image_finding() :: #{
+    owner := binary(),
+    severity := binary(),
+    category := binary() | undefined,
+    message := binary(),
+    start := non_neg_integer(),
+    'end' := non_neg_integer()
+}.
+
+-type image_result() :: #{
+    findings := [image_finding()],
+    checked := non_neg_integer(),
+    stale := non_neg_integer()
 }.
 
 %%====================================================================
@@ -262,6 +311,168 @@ trigger_shape(ClassNameBin, FieldChanges) ->
             empty_result()
     end.
 
+-doc """
+Pre-save advisory (ADR 0105 Phase 3, BT-2782): re-check `{ClassNameBin,
+SelectorBin, Side}`'s known dependents against `PendingSignature` — a
+freshly-compiled but **not-yet-installed** signature — instead of the
+already-live one `trigger/4` relies on.
+
+`PendingSignature` is the same `#{return_type := binary(), param_types :=
+[binary()]}` shape `beamtalk_workspace_signature_store:capture/4` records,
+computed by compiling the pending edit (e.g.
+`beamtalk_repl_compiler:compile_method_reload/2`) without calling
+`code:load_binary/3`.
+
+## Mechanism: a scoped, temporary ambient-cache swap
+
+`recheck_owner/5` (reused unchanged via `do_trigger/3`) sees the changed
+class's signature through the compiler port's ambient class-hierarchy cache
+(`beamtalk_compiler_server`'s `classes` map, injected by `diagnostics/3`'s
+`class_hierarchy => true`). That cache reflects whatever last *installed* —
+for a pending edit, nothing has, so it still holds the old generation. This
+function:
+
+1. Reads the changed class's current ambient meta
+   (`beamtalk_compiler_server:get_classes/0`).
+2. Splices `PendingSignature` into that meta's `method_info` (or
+   `class_method_info` for `Side =:= class`) entry for `SelectorBin`,
+   preserving every other field (arity, other methods, fields, superclass).
+3. Casts the spliced meta into the ambient cache
+   (`beamtalk_compiler_server:register_class/2`), runs the *exact* same
+   `do_trigger/3` `trigger/4` uses, then restores the original meta —
+   `after` guarantees the restore runs even if `do_trigger/3` raises (caught
+   one level up by `trigger_pending/5`'s own try/catch, which still needs the
+   real generation back in place for the next request).
+
+**Ordering invariant this relies on** (same shape as
+`beamtalk_repl_loader:load_recompiled_method/8`'s documented invariant): the
+cast in step 3 and every `diagnostics/3` call `do_trigger/3` subsequently
+makes go to the *same* `beamtalk_compiler_server` process from this *same*
+calling process — Erlang's per-sender mailbox ordering guarantees the cast
+is processed before any of those calls, so every candidate's diagnostics
+round-trip sees the spliced (pending) meta, never a race against the cast
+itself. This would break only if `register_class/2` or `diagnostics/3` ever
+routed through a different process/mailbox than a direct `gen_server`
+send to `beamtalk_compiler_server`.
+
+No ambient meta at all for the changed class (never registered this
+session — brand new class, or the workspace just restarted) means there is
+no baseline to splice into and no `class_hierarchy` context for the
+checker to resolve receivers against either; this degrades to
+`empty_result()` rather than guess.
+
+**Accepted race (advisory-only, same risk tolerance as the rest of ADR
+0105):** the swap is not synchronised against `beamtalk_compiler_server`'s
+other callers. A concurrent compile/diagnostics request that lands inside
+the swap window sees the hypothetical pending signature instead of the real
+live one — a wrong-but-momentary result on an advisory-only surface, not a
+build/runtime failure. Not fixed here; mirrors
+`beamtalk_workspace_findings_store`'s and
+`beamtalk_workspace_signature_store`'s own documented concurrency gaps.
+
+A sharper variant of the same gap: the `after`-block restore always writes
+back the *snapshot* taken in step 1, not "whatever is ambient now". If a
+real `compile:source:`/`reload` for this same class commits a genuine
+`register_class/2` from a different process while this swap window is open,
+the restore overwrites that real commit with the stale pre-swap snapshot —
+unlike the read-only race above, this one is not self-healing (the next
+real compile/diagnostics call sees the reverted, stale generation until
+something re-registers it). Accepted for the same reason: both classes of
+race require a concurrent write to this *specific* class landing in a
+narrow, single-request window, on an advisory surface where the ADR's own
+risk tolerance is "momentary noise, not corruption" — not fixed here.
+
+Never installs anything and never touches `beamtalk_workspace_findings_store`
+— nothing has changed on the live image yet, so there is nothing to publish
+or clear. Never raises: degrades to `empty_result()` on any internal failure,
+mirroring `trigger/4`.
+""".
+-spec trigger_pending(
+    binary(),
+    binary(),
+    instance | class,
+    classification(),
+    beamtalk_workspace_signature_store:signature()
+) -> result().
+trigger_pending(ClassNameBin, SelectorBin, Side, Classification, PendingSignature) ->
+    try
+        do_trigger_pending(ClassNameBin, SelectorBin, Side, Classification, PendingSignature)
+    catch
+        Class:Reason:Stack ->
+            ?LOG_WARNING(
+                "Pre-save re-check orchestration failed (advisory only, save unaffected)",
+                #{
+                    error_class => Class,
+                    reason => Reason,
+                    stack => Stack,
+                    class => ClassNameBin,
+                    selector => SelectorBin,
+                    side => Side,
+                    classification => Classification,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            empty_result()
+    end.
+
+-doc """
+Whole-image re-check (ADR 0105 Phase 3, BT-2782) backing `Workspace
+recheckImage` / `:recheck image` — the "complete but unbounded" path ADR
+0105's Alternatives section keeps out of the default per-reload trigger.
+Re-checks every live class the workspace has a recorded source for
+(`beamtalk_workspace_meta:all_class_sources/0`) against the **current**
+ambient class hierarchy — the same `diagnostics/3` call `recheck_owner/5`
+makes for one candidate, just applied to every live class rather than an
+xref-filtered subset, and against the class's own already-installed
+signature (unlike `trigger_pending/5`, there is nothing pending here).
+
+There is no single changed selector to attribute findings to or cap
+candidates against (completeness is the point), so relevance is just "any
+non-`error` `Dnu`/`Type` diagnostic" (`relevant_image_diagnostic/1`) — no
+selector-name matching, no classification, no per-site translation.
+
+`checked` counts classes whose diagnostics round-trip completed (mirrors
+`trigger/4`'s `checked` semantics: a compiler-port failure for one class
+degrades that class to "not checked" rather than aborting the whole scan —
+`recheck_image_class/2` catches both an `{error, Reason}` compile result
+and the compiler port's `gen_server:call/3` itself exiting, e.g. `timeout`).
+`stale` counts distinct classes with at least one finding. Never raises:
+degrades to `#{findings => [], checked => 0, stale => 0}` on any internal
+failure.
+
+**Cost, beyond "unbounded latency" for the caller:** each class's
+diagnostics round-trip is one more synchronous `gen_server:call` against
+the single, shared, workspace-wide `beamtalk_compiler_server` — the same
+process every other surface's compiles/diagnostics/completions go through.
+`trigger_image/0` makes these calls serially, one live class at a time, for
+the duration of the whole sweep. On an image with many live classes this is
+not just "the `:recheck image` caller waits a while" — every other
+connected client's hover/completion/save requests queue up behind it on
+the same server for that whole window, since `beamtalk_compiler_server`
+processes one request at a time. Not fixed here (ADR 0105 accepts
+`trigger_image/0`'s latency as a deliberate unbounded-but-explicit,
+on-demand tradeoff); a future revision batching/parallelising the sweep
+would need to weigh that against `beamtalk_compiler_server`'s own
+single-process-serialises-everything design.
+""".
+-spec trigger_image() -> image_result().
+trigger_image() ->
+    try
+        do_trigger_image()
+    catch
+        Class:Reason:Stack ->
+            ?LOG_WARNING(
+                "Whole-image re-check failed",
+                #{
+                    error_class => Class,
+                    reason => Reason,
+                    stack => Stack,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            #{findings => [], checked => 0, stale => 0}
+    end.
+
 %%====================================================================
 %% Internal
 %%====================================================================
@@ -275,6 +486,183 @@ empty_result() ->
         not_checked => 0,
         cap_note => undefined,
         checked_owners => []
+    }.
+
+-spec do_trigger_pending(
+    binary(),
+    binary(),
+    instance | class,
+    classification(),
+    beamtalk_workspace_signature_store:signature()
+) -> result().
+do_trigger_pending(ClassNameBin, SelectorBin, Side, Classification, PendingSignature) ->
+    %% Same existing-atom-only conversion `do_trigger/3` uses — by the time a
+    %% pending edit reaches here it has already compiled successfully, so its
+    %% class/selector atoms already exist.
+    ClassAtom = binary_to_existing_atom(ClassNameBin, utf8),
+    SelectorAtom = binary_to_existing_atom(SelectorBin, utf8),
+    AmbientClasses = beamtalk_compiler_server:get_classes(),
+    case maps:find(ClassAtom, AmbientClasses) of
+        error ->
+            %% No ambient meta at all for the changed class this session — no
+            %% baseline to splice the pending signature into, and no
+            %% `class_hierarchy` context for the checker to resolve candidate
+            %% receivers against either. Degrade rather than guess.
+            empty_result();
+        {ok, AmbientMeta} ->
+            PendingMeta = override_method_signature(
+                AmbientMeta, Side, SelectorAtom, PendingSignature
+            ),
+            ok = beamtalk_compiler_server:register_class(ClassAtom, PendingMeta),
+            try
+                do_trigger(ClassNameBin, SelectorBin, Classification)
+            after
+                %% Restore the real (installed) generation regardless of
+                %% whether do_trigger/3 succeeded or raised — the ambient
+                %% cache is shared workspace-wide state and must never be
+                %% left holding a hypothetical, never-installed signature.
+                ok = beamtalk_compiler_server:register_class(ClassAtom, AmbientMeta)
+            end
+    end.
+
+-doc """
+Splice `PendingSignature` into `AmbientMeta`'s `method_info` (or
+`class_method_info`) entry for `SelectorAtom`, preserving every other field
+of both the class meta and (if `SelectorAtom` already has an entry) the
+method entry itself — only `return_type`/`param_types` change. A selector
+with no existing entry (a brand-new, never-installed method) gets a bare
+entry with just the overridden type fields; it has no arity, so the
+compiler-port's ETF parser (`parse_method_infos_from_map`,
+`beamtalk-compiler-port/src/main.rs`) silently drops it rather than fail —
+harmless here, since a brand-new method has no existing dependents for xref
+to find anyway.
+""".
+-spec override_method_signature(
+    map(), instance | class, atom(), beamtalk_workspace_signature_store:signature()
+) -> map().
+override_method_signature(
+    AmbientMeta, Side, SelectorAtom, #{return_type := ReturnTypeBin, param_types := ParamTypeBins}
+) ->
+    InfoKey = method_info_key(Side),
+    MethodInfoMap = maps:get(InfoKey, AmbientMeta, #{}),
+    ExistingEntry = maps:get(SelectorAtom, MethodInfoMap, #{}),
+    NewEntry = ExistingEntry#{
+        return_type => meta_type_from_binary(ReturnTypeBin),
+        param_types => [meta_type_from_binary(P) || P <- ParamTypeBins]
+    },
+    AmbientMeta#{InfoKey => MethodInfoMap#{SelectorAtom => NewEntry}}.
+
+-spec method_info_key(instance | class) -> method_info | class_method_info.
+method_info_key(instance) -> method_info;
+method_info_key(class) -> class_method_info.
+
+-doc """
+Inverse of `beamtalk_workspace_signature_store`'s `meta_type_to_binary/1`:
+`<<"Dynamic">>` is the un-annotated sentinel (`none` in `__beamtalk_meta/0`
+terms); anything else round-trips through `binary_to_existing_atom/2` — the
+type name is always either a builtin type atom or an already-loaded class
+name, both already atoms by the time a method compiles clean against them.
+Falls back to `none` on a name with no existing atom rather than mint one
+from patch-source-derived text (same atom-table-safety reasoning as
+`do_trigger/3`'s selector conversion).
+""".
+-spec meta_type_from_binary(binary()) -> atom().
+meta_type_from_binary(<<"Dynamic">>) ->
+    none;
+meta_type_from_binary(Bin) ->
+    try
+        binary_to_existing_atom(Bin, utf8)
+    catch
+        error:badarg -> none
+    end.
+
+-spec do_trigger_image() -> image_result().
+do_trigger_image() ->
+    Sources = beamtalk_workspace_meta:all_class_sources(),
+    Outcomes = [
+        {OwnerBin, recheck_image_class(OwnerBin, Source)}
+     || {OwnerBin, Source} <- lists:keysort(1, maps:to_list(Sources))
+    ],
+    Findings = lists:flatmap(
+        fun({_Owner, {_Status, OwnerFindings}}) -> OwnerFindings end, Outcomes
+    ),
+    Checked = length([ok || {_Owner, {ok, _}} <- Outcomes]),
+    Stale = length(lists:usort([maps:get(owner, F) || F <- Findings])),
+    #{findings => Findings, checked => Checked, stale => Stale}.
+
+-doc """
+Re-check one live class's own current source against the ambient class
+hierarchy (mirrors `recheck_owner/5`'s compiler call, minus the xref
+site-cap/attribution machinery a single changed selector needs). Returns
+`{Status, Findings}` — `Status` is `ok` only when the diagnostics round-trip
+completed, so `do_trigger_image/0` can count `checked` accurately; a
+compiler-port failure (a `{error, Reason}' tuple, or the compiler port's
+`gen_server:call/3' exiting on `noproc`/`timeout` — unlike the `{error,
+Reason}' case, `beamtalk_compiler_server:diagnostics/3' does not itself
+catch these) degrades this one class to `failed` (no findings for it)
+rather than aborting the whole scan — a thousand-class image should not
+lose its entire sweep because one class's diagnostics call outlives the
+compiler port's 30s timeout.
+""".
+-spec recheck_image_class(binary(), string()) -> {ok | failed, [image_finding()]}.
+recheck_image_class(OwnerBin, Source) ->
+    SourceBin = unicode:characters_to_binary(Source),
+    try beamtalk_compiler:diagnostics(SourceBin, <<"expression">>, #{class_hierarchy => true}) of
+        {ok, Diagnostics} ->
+            Findings = [
+                image_finding(OwnerBin, D)
+             || D <- Diagnostics, relevant_image_diagnostic(D)
+            ],
+            {ok, Findings};
+        {error, Reason} ->
+            ?LOG_WARNING(
+                "Whole-image re-check compile failed for class (no findings reported)",
+                #{owner => OwnerBin, reason => Reason, domain => [beamtalk, runtime]}
+            ),
+            {failed, []}
+    catch
+        Class:Reason:Stack ->
+            ?LOG_WARNING(
+                "Whole-image re-check compiler-port call failed for class (no findings reported)",
+                #{
+                    owner => OwnerBin,
+                    error_class => Class,
+                    reason => Reason,
+                    stack => Stack,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            {failed, []}
+    end.
+
+-doc """
+Is `Diagnostic` relevant to a whole-image scan? Unlike `relevant_diagnostic/4`
+there is no changed selector to match against, so this is simply "a
+non-`error` `Dnu` or `Type` diagnostic" — the same two categories `trigger/4`
+treats as reload-relevant, minus the selector-name/classification narrowing
+that only makes sense relative to one specific change.
+""".
+-spec relevant_image_diagnostic(map()) -> boolean().
+relevant_image_diagnostic(#{severity := <<"error">>}) ->
+    false;
+relevant_image_diagnostic(#{category := Category}) when
+    Category =:= <<"Dnu">>; Category =:= <<"Type">>
+->
+    true;
+relevant_image_diagnostic(_Diagnostic) ->
+    false.
+
+-spec image_finding(binary(), map()) -> image_finding().
+image_finding(
+    OwnerBin, #{message := Message, severity := Severity, start := Start, 'end' := End} = Diagnostic
+) ->
+    #{
+        owner => OwnerBin,
+        severity => Severity,
+        category => maps:get(category, Diagnostic, undefined),
+        message => Message,
+        start => Start,
+        'end' => End
     }.
 
 -spec do_trigger(binary(), binary(), classification()) -> result().

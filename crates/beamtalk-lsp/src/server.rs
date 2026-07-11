@@ -67,6 +67,15 @@ pub(crate) const CMD_FLUSH_CLASS: &str = "beamtalk.flush.class";
 pub(crate) const CMD_FLUSH_FILE: &str = "beamtalk.flush.file";
 pub(crate) const CMD_FLUSH_KIND: &str = "beamtalk.flush.kind";
 pub(crate) const CMD_SAVE_CLASS: &str = "beamtalk.saveClass";
+/// ADR 0105 Phase 3 (BT-2782): the editor's "check before save" pre-save
+/// advisory hook — compiles a pending method edit and reports would-be-stale
+/// dependents without installing it. Non-blocking; the caller decides
+/// whether/when to follow up with the real save (`compile:source:` via
+/// whichever surface the editor uses for that).
+pub(crate) const CMD_PRECHECK_METHOD: &str = "beamtalk.precheckMethod";
+/// ADR 0105 Phase 3 (BT-2782): the explicit whole-image re-check
+/// (`Workspace recheckImage` / REPL `:recheck image`).
+pub(crate) const CMD_RECHECK_IMAGE: &str = "beamtalk.recheckImage";
 
 /// All commands surfaced via `executeCommand`. Wired into
 /// `ServerCapabilities::execute_command_provider` and used by the LSP→runtime
@@ -77,6 +86,8 @@ pub(crate) const BEAMTALK_LSP_COMMANDS: &[&str] = &[
     CMD_FLUSH_FILE,
     CMD_FLUSH_KIND,
     CMD_SAVE_CLASS,
+    CMD_PRECHECK_METHOD,
+    CMD_RECHECK_IMAGE,
 ];
 
 #[derive(Clone)]
@@ -3158,6 +3169,34 @@ pub(crate) fn build_command_expression(
                 escape_string_literal(&path)
             ))
         }
+        CMD_PRECHECK_METHOD => {
+            let class = expect_string_arg(arguments, 0, "class")?;
+            validate_class_name(&class)?;
+            let selector = expect_string_arg(arguments, 1, "selector")?;
+            // Accepted with or without a leading '#', mirroring MCP's
+            // `precheck_method` tool so both surfaces agree on input shape.
+            let selector = selector.strip_prefix('#').unwrap_or(&selector);
+            validate_selector(selector)?;
+            let source = expect_string_arg(arguments, 2, "source")?;
+            if source.is_empty() {
+                return Err(format!("{CMD_PRECHECK_METHOD}: 'source' must not be empty"));
+            }
+            // Mirrors `CMD_SAVE_CLASS`'s / `save_method_expr`'s shape:
+            // `ClassName precheckCompile: #selector source: "body"`.
+            Ok(format!(
+                "{class} precheckCompile: #{selector} source: \"{}\"",
+                escape_string_literal(&source)
+            ))
+        }
+        CMD_RECHECK_IMAGE => {
+            if !arguments.is_empty() {
+                return Err(format!(
+                    "{CMD_RECHECK_IMAGE}: expected no arguments, got {}",
+                    arguments.len()
+                ));
+            }
+            Ok("Workspace recheckImage".to_string())
+        }
         _ => Err(format!("unknown LSP command: {command}")),
     }
 }
@@ -3220,6 +3259,42 @@ fn validate_class_name(name: &str) -> std::result::Result<(), String> {
     Err(format!(
         "class name '{name}' contains invalid character '{c}' (allowed: letters, digits, underscore)"
     ))
+}
+
+/// Validate a Beamtalk selector (unary, keyword, or binary) before splicing
+/// it unescaped into a `#selector` literal in a built expression (ADR 0105
+/// Phase 3, BT-2782's `CMD_PRECHECK_METHOD`) — mirrors `beamtalk-mcp`'s
+/// `validate_selector` (there is no shared crate for this; both surfaces
+/// need the same shape check before string-building an expression).
+fn validate_selector(sel: &str) -> std::result::Result<(), String> {
+    fn is_binary_selector_char(c: char) -> bool {
+        matches!(
+            c,
+            '+' | '-' | '*' | '/' | '<' | '>' | '=' | '~' | '%' | '&' | '?' | ',' | '\\'
+        )
+    }
+
+    if sel.is_empty() {
+        return Err("selector must not be empty".to_string());
+    }
+
+    let first = sel.chars().next().expect("checked non-empty above");
+    if is_binary_selector_char(first) {
+        return if sel.chars().all(is_binary_selector_char) {
+            Ok(())
+        } else {
+            Err(format!("invalid binary selector: '{sel}'"))
+        };
+    }
+
+    if sel
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == ':')
+    {
+        return Ok(());
+    }
+
+    Err(format!("invalid selector: '{sel}'"))
 }
 
 fn workspace_roots(params: &InitializeParams) -> Vec<PathBuf> {
@@ -5341,6 +5416,97 @@ mod tests {
     }
 
     #[test]
+    fn build_precheck_method_emits_precheck_compile_source_expression() {
+        let expr = build_command_expression(
+            CMD_PRECHECK_METHOD,
+            &[
+                serde_json::json!("Counter"),
+                serde_json::json!("getCount"),
+                serde_json::json!("getCount => \"nope\""),
+            ],
+        )
+        .expect("ok");
+        assert_eq!(
+            expr,
+            "Counter precheckCompile: #getCount source: \"getCount => \\\"nope\\\"\""
+        );
+    }
+
+    #[test]
+    fn build_precheck_method_accepts_leading_hash_selector() {
+        // Mirrors MCP's `precheck_method`: selectors are accepted with or
+        // without a leading '#'.
+        let expr = build_command_expression(
+            CMD_PRECHECK_METHOD,
+            &[
+                serde_json::json!("Counter"),
+                serde_json::json!("#getCount"),
+                serde_json::json!("getCount => \"nope\""),
+            ],
+        )
+        .expect("ok");
+        assert_eq!(
+            expr,
+            "Counter precheckCompile: #getCount source: \"getCount => \\\"nope\\\"\""
+        );
+    }
+
+    #[test]
+    fn build_precheck_method_rejects_bad_class_name() {
+        let err = build_command_expression(
+            CMD_PRECHECK_METHOD,
+            &[
+                serde_json::json!("not a class"),
+                serde_json::json!("getCount"),
+                serde_json::json!("getCount => 1"),
+            ],
+        )
+        .expect_err("err");
+        assert!(err.contains("class name"));
+    }
+
+    #[test]
+    fn build_precheck_method_rejects_bad_selector() {
+        let err = build_command_expression(
+            CMD_PRECHECK_METHOD,
+            &[
+                serde_json::json!("Counter"),
+                serde_json::json!("bad selector!"),
+                serde_json::json!("getCount => 1"),
+            ],
+        )
+        .expect_err("err");
+        assert!(err.contains("selector"));
+    }
+
+    #[test]
+    fn build_precheck_method_rejects_empty_source() {
+        let err = build_command_expression(
+            CMD_PRECHECK_METHOD,
+            &[
+                serde_json::json!("Counter"),
+                serde_json::json!("getCount"),
+                serde_json::json!(""),
+            ],
+        )
+        .expect_err("err");
+        assert!(err.contains("source"));
+    }
+
+    #[test]
+    fn build_recheck_image_emits_workspace_recheckimage_expression() {
+        let expr = build_command_expression(CMD_RECHECK_IMAGE, &[]).expect("ok");
+        assert_eq!(expr, "Workspace recheckImage");
+    }
+
+    #[test]
+    fn build_recheck_image_rejects_arguments() {
+        let err = build_command_expression(CMD_RECHECK_IMAGE, &[serde_json::json!("x")])
+            .expect_err("err");
+        assert!(err.contains("expected no arguments"));
+    }
+
+    #[test]
     fn build_unknown_command_returns_error() {
         let err = build_command_expression("not.a.real.command", &[]).expect_err("err");
         assert!(err.contains("unknown LSP command"));
@@ -5373,7 +5539,24 @@ mod tests {
         assert!(listed.contains(CMD_FLUSH_FILE));
         assert!(listed.contains(CMD_FLUSH_KIND));
         assert!(listed.contains(CMD_SAVE_CLASS));
-        assert_eq!(listed.len(), 5);
+        assert!(listed.contains(CMD_PRECHECK_METHOD));
+        assert!(listed.contains(CMD_RECHECK_IMAGE));
+        assert_eq!(listed.len(), 7);
+    }
+
+    #[test]
+    fn validate_selector_accepts_unary_keyword_and_binary() {
+        assert!(validate_selector("size").is_ok());
+        assert!(validate_selector("at:put:").is_ok());
+        assert!(validate_selector("+").is_ok());
+        assert!(validate_selector(">=").is_ok());
+    }
+
+    #[test]
+    fn validate_selector_rejects_bad_shapes() {
+        assert!(validate_selector("").is_err());
+        assert!(validate_selector("bad selector!").is_err());
+        assert!(validate_selector("+foo").is_err());
     }
 
     #[test]

@@ -425,6 +425,34 @@ abstract Object subclass: Behaviour
   sealed tryCompile: aSelector :: Symbol source: aSource :: String -> Behaviour =>
     @primitive "classTryCompileSource"
 
+  /// Compile a pending method edit and report would-be-stale dependents,
+  /// **without installing it** (ADR 0105 Phase 3).
+  ///
+  /// The pre-save advisory: an editor/LSP can call this before actually
+  /// saving (`compile:source:`), to warn on callers that would go stale if
+  /// this edit were installed — non-blocking, since the post-reload image
+  /// check (triggered automatically by `compile:source:` itself) remains
+  /// the authority. Nothing installs and nothing is recorded to the
+  /// ChangeLog, so repeated calls never accumulate state — but each call
+  /// does run a real compile (plus one per candidate dependent, capped),
+  /// so a caller driving this from every keystroke should debounce.
+  ///
+  /// Returns a Dictionary: `#findings` (a List of finding Dictionaries —
+  /// `#owner`, `#changedClass`, `#selector`, `#classification`,
+  /// `#severity`, `#category`, `#message`, `#note`, `#sites`, `#start`,
+  /// `#end`), `#checked` (candidates a re-check completed for),
+  /// `#totalCandidates`, `#notChecked`, `#capNote`, `#checkedOwners`. A
+  /// pending edit with no type-relevant signature change (e.g. only the
+  /// body changed, not the signature) returns an empty report.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Counter precheckCompile: #getCount source: "getCount => \"nope\""
+  /// // => _ (a Dictionary; #findings lists any would-be-stale callers)
+  /// ```
+  sealed precheckCompile: aSelector :: Symbol source: aSource :: String -> Dictionary =>
+    @primitive "classPrecheckCompileSource"
+
   // --- Class removal ---
 
   /// Remove this class from the system, cleaning up all associated state.
