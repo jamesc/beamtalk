@@ -60,6 +60,44 @@ cap_note_nonzero_test() ->
     ?assertEqual(<<"3 more not checked">>, beamtalk_recheck:cap_note(3)).
 
 %%====================================================================
+%% Pure helper — not_verified_owners/2 (BT-2828)
+%%
+%% `not_checked_owners/2` (cap-dropped candidates) already has coverage via
+%% `trigger/4`'s integration tests. `not_verified_owners/2` is the new
+%% BT-2828 merge on top of it: cap-dropped owners unioned with any `Kept`
+%% candidate whose outcome status was not `ok` — `skipped` (no live source)
+%% or `failed` (compile/compiler-port error). Both statuses collapse to the
+%% same "never actually re-verified" bucket, so one pure test covers both
+%% without needing an integration fixture that can force a genuine
+%% compiler-port failure (not reachable via source content alone — see
+%% `beamtalk-compiler-port/src/main.rs`'s `handle_diagnostics/1`, which
+%% always returns a `status => ok` response with parse errors folded into
+%% the diagnostics list, never a port-level `{error, _}`).
+%%====================================================================
+
+not_verified_owners_is_cap_dropped_when_all_outcomes_ok_test() ->
+    Outcomes = [{'Alpha', {ok, []}}, {'Beta', {ok, []}}],
+    ?assertEqual(
+        [<<"Zeta">>],
+        beamtalk_recheck:not_verified_owners([<<"Zeta">>], Outcomes)
+    ).
+
+not_verified_owners_includes_skipped_and_failed_outcomes_test() ->
+    Outcomes = [
+        {'Alpha', {ok, []}},
+        {'Beta', {skipped, []}},
+        {'Gamma', {failed, []}}
+    ],
+    ?assertEqual(
+        [<<"Beta">>, <<"Gamma">>, <<"Zeta">>],
+        beamtalk_recheck:not_verified_owners([<<"Zeta">>], Outcomes)
+    ).
+
+not_verified_owners_empty_when_nothing_dropped_or_unverified_test() ->
+    Outcomes = [{'Alpha', {ok, []}}],
+    ?assertEqual([], beamtalk_recheck:not_verified_owners([], Outcomes)).
+
+%%====================================================================
 %% Pure helper — relevant_diagnostic/4 (attribution filter)
 %%====================================================================
 
@@ -628,7 +666,10 @@ no_live_source_is_skipped_not_checked_test_() ->
                         findings := Findings,
                         checked := Checked,
                         total_candidates := Total,
-                        not_checked := NotChecked
+                        not_checked := NotChecked,
+                        checked_owners := CheckedOwners,
+                        not_checked_owners := NotCheckedOwners,
+                        not_verified_owners := NotVerifiedOwners
                     } = Result,
 
                     %% The candidate was a total candidate and NOT cap-dropped
@@ -638,7 +679,16 @@ no_live_source_is_skipped_not_checked_test_() ->
                     ?assertEqual(1, Total),
                     ?assertEqual(0, Checked),
                     ?assertEqual(0, NotChecked),
-                    ?assertEqual([], Findings)
+                    ?assertEqual([], Findings),
+
+                    %% BT-2828: a `skipped` outcome (no live source) is not
+                    %% cap-dropped, so `not_checked_owners` stays empty — but
+                    %% it must still show up in `not_verified_owners`, or
+                    %% `beamtalk_repl_loader` would neither replace nor mark
+                    %% stale any pre-existing finding for it.
+                    ?assertEqual([], CheckedOwners),
+                    ?assertEqual([], NotCheckedOwners),
+                    ?assertEqual([<<"ReCheckDashboard">>], NotVerifiedOwners)
                 end)
             ]
         end}}.
@@ -666,7 +716,8 @@ trigger_never_raises_on_unknown_selector_test_() ->
                             not_checked => 0,
                             cap_note => undefined,
                             checked_owners => [],
-                            not_checked_owners => []
+                            not_checked_owners => [],
+                            not_verified_owners => []
                         },
                         Result
                     )
@@ -1117,7 +1168,8 @@ trigger_pending_no_ambient_meta_is_empty_result_test_() ->
                             not_checked => 0,
                             cap_note => undefined,
                             checked_owners => [],
-                            not_checked_owners => []
+                            not_checked_owners => [],
+                            not_verified_owners => []
                         },
                         Result
                     )

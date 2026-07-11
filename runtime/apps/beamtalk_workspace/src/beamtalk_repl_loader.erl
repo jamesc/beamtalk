@@ -1003,7 +1003,8 @@ no_pending_change_result() ->
         not_checked => 0,
         cap_note => undefined,
         checked_owners => [],
-        not_checked_owners => []
+        not_checked_owners => [],
+        not_verified_owners => []
     }.
 
 -doc """
@@ -1957,8 +1958,11 @@ maybe_run_recheck(_ClassNameBin, _SelectorBin, _Side, {captured, _Prev, no_op}) 
     {self_edit, undefined};
 maybe_run_recheck(ClassNameBin, SelectorBin, Side, {captured, _Prev, Classification}) ->
     Result = beamtalk_recheck:trigger(ClassNameBin, SelectorBin, Side, Classification),
-    #{checked_owners := CheckedOwners, findings := Findings, not_checked_owners := NotCheckedOwners} =
-        Result,
+    #{
+        checked_owners := CheckedOwners,
+        findings := Findings,
+        not_verified_owners := NotVerifiedOwners
+    } = Result,
     lists:foreach(
         fun(OwnerBin) ->
             OwnerFindings = [F || F <- Findings, maps:get(owner, F) =:= OwnerBin],
@@ -1966,23 +1970,26 @@ maybe_run_recheck(ClassNameBin, SelectorBin, Side, {captured, _Prev, Classificat
         end,
         CheckedOwners
     ),
-    mark_capped_out_findings_stale(ClassNameBin, NotCheckedOwners),
+    mark_unverified_findings_stale(ClassNameBin, NotVerifiedOwners),
     {Classification, Result}.
 
-%% BT-2802: a candidate the caller cap dropped this reload (`NotCheckedOwners`
-%% — `beamtalk_recheck:result()`'s complement of `checked_owners`) never went
-%% through `put_owner_origin/3` above, so any finding it already carries *for
-%% this changed class* is left exactly as a previous, possibly-now-stale
-%% reload wrote it — nothing here re-verified whether the caller's problem
-%% still holds. Rather than let that finding keep asserting itself as
-%% current forever (the BT-2802 bug) or silently drop it (could hide a real,
-%% still-live problem), overwrite its `note` in place, still through
-%% `put_owner_origin/3`'s ordinary replace semantics, to say so. A candidate
-%% with no existing finding for this origin has nothing to mark — most
-%% cap-dropped candidates, every reload — so this is a no-op for them
-%% (`findings_store_get_origin/2` returns `[]`).
--spec mark_capped_out_findings_stale(binary(), [binary()]) -> ok.
-mark_capped_out_findings_stale(ClassNameBin, NotCheckedOwners) ->
+%% BT-2802/BT-2828: a candidate whose diagnostics round-trip never completed
+%% this reload (`NotVerifiedOwners` — `beamtalk_recheck:result()`'s
+%% `not_verified_owners`, covering the caller-cap-dropped candidates AND any
+%% `Kept` candidate that came back `skipped` (no live source recorded) or
+%% `failed` (compile/compiler-port error)) never went through
+%% `put_owner_origin/3` above, so any finding it already carries *for this
+%% changed class* is left exactly as a previous, possibly-now-stale reload
+%% wrote it — nothing here re-verified whether the caller's problem still
+%% holds. Rather than let that finding keep asserting itself as current
+%% forever (the BT-2802 bug, and its BT-2828 skipped/failed-outcome sibling)
+%% or silently drop it (could hide a real, still-live problem), overwrite its
+%% `note` in place, still through `put_owner_origin/3`'s ordinary replace
+%% semantics, to say so. A candidate with no existing finding for this origin
+%% has nothing to mark — most unverified candidates, every reload — so this
+%% is a no-op for them (`findings_store_get_origin/2` returns `[]`).
+-spec mark_unverified_findings_stale(binary(), [binary()]) -> ok.
+mark_unverified_findings_stale(ClassNameBin, NotVerifiedOwners) ->
     lists:foreach(
         fun(OwnerBin) ->
             case findings_store_get_origin(OwnerBin, ClassNameBin) of
@@ -1993,7 +2000,7 @@ mark_capped_out_findings_stale(ClassNameBin, NotCheckedOwners) ->
                     findings_store_put_owner_origin(OwnerBin, ClassNameBin, Stale)
             end
         end,
-        NotCheckedOwners
+        NotVerifiedOwners
     ),
     ok.
 
@@ -2023,14 +2030,14 @@ findings_store_get_origin(OwnerBin, ChangedClassBin) ->
     end.
 
 %% The marker substring `stale_note/2` looks for to avoid re-wrapping a note
-%% that is already marked — a candidate parked outside the cap for many
-%% consecutive reloads must not accumulate one "not re-checked" suffix per
-%% reload.
+%% that is already marked — a candidate parked outside the cap (or
+%% repeatedly skipped/failed, BT-2828) for many consecutive reloads must not
+%% accumulate one "not re-checked" suffix per reload.
 -define(RECHECK_STALE_MARKER, <<"not re-checked against the latest reload">>).
 
 %% Overwrite `Finding`'s `note` to flag it as not re-verified this reload,
 %% unless it is already so marked (idempotent across consecutive
-%% cap-dropped reloads — see `?RECHECK_STALE_MARKER`).
+%% not-verified reloads — see `?RECHECK_STALE_MARKER`).
 -spec mark_stale_finding(binary(), beamtalk_recheck:finding()) -> beamtalk_recheck:finding().
 mark_stale_finding(ClassNameBin, Finding = #{note := Note}) when is_binary(Note) ->
     case binary:match(Note, ?RECHECK_STALE_MARKER) of
@@ -2040,13 +2047,19 @@ mark_stale_finding(ClassNameBin, Finding = #{note := Note}) when is_binary(Note)
 mark_stale_finding(ClassNameBin, Finding) ->
     Finding#{note => stale_note(ClassNameBin, undefined)}.
 
+%% BT-2828: the reason a candidate went unverified is deliberately not named
+%% here (caller-cap limit vs. no live source vs. a compiler-port failure) —
+%% `mark_unverified_findings_stale/2` is fed one merged
+%% `not_verified_owners` set with no per-owner reason attached, and inventing
+%% one back out would either guess or need threading three more outcome
+%% tags through `beamtalk_recheck:result()` for a note string alone. "May be
+%% stale" is accurate and reason-agnostic for all three causes.
 -spec stale_note(binary(), binary() | undefined) -> binary().
 stale_note(ClassNameBin, undefined) ->
-    <<"not re-checked against the latest reload of ", ClassNameBin/binary,
-        " (caller-cap limit reached) — may be stale">>;
+    <<"not re-checked against the latest reload of ", ClassNameBin/binary, " — may be stale">>;
 stale_note(ClassNameBin, PrevNote) ->
     <<PrevNote/binary, " — not re-checked against the latest reload of ", ClassNameBin/binary,
-        " (caller-cap limit reached) — may be stale">>.
+        " — may be stale">>.
 
 %% Log + broadcast the outcome of one `maybe_trigger_recheck/4` call — but
 %% only when a live surface has something to act on: either a dependent
@@ -2250,7 +2263,7 @@ publish_shape_recheck_outcome(ClassNameBin, FieldChanges, Result) ->
         checked := Checked,
         not_checked := NotChecked,
         cap_note := CapNote,
-        not_checked_owners := NotCheckedOwners
+        not_verified_owners := NotVerifiedOwners
     } = Result,
     lists:foreach(
         fun(OwnerBin) ->
@@ -2259,10 +2272,11 @@ publish_shape_recheck_outcome(ClassNameBin, FieldChanges, Result) ->
         end,
         CheckedOwners
     ),
-    %% BT-2802: same caller-cap staleness marking as `maybe_run_recheck/4`
-    %% (see that function's doc) — a shape change's candidates go through the
-    %% same `apply_cap/2` limit.
-    mark_capped_out_findings_stale(ClassNameBin, NotCheckedOwners),
+    %% BT-2802/BT-2828: same not-verified staleness marking as
+    %% `maybe_run_recheck/4` (see `mark_unverified_findings_stale/2`'s doc) —
+    %% a shape change's candidates go through the same `apply_cap/2` limit
+    %% and the same `recheck_owner_for_shape/4` skipped/failed outcomes.
+    mark_unverified_findings_stale(ClassNameBin, NotVerifiedOwners),
     case CheckedOwners of
         [] ->
             ok;

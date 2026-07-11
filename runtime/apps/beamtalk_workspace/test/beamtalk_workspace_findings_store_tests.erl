@@ -251,7 +251,7 @@ clear_resets_every_owner(_Pid) ->
         ?_assertEqual([], beamtalk_workspace_findings_store:for_owner(<<"StatsView">>))
     ].
 
-%% get_origin/2 (BT-2802) — the read side `mark_capped_out_findings_stale/2`
+%% get_origin/2 (BT-2802) — the read side `mark_unverified_findings_stale/2`
 %% (beamtalk_repl_loader) needs to check "does this exact origin already
 %% have a finding worth marking stale" without pulling in a different
 %% changed class's contribution the way for_owner/1 deliberately does.
