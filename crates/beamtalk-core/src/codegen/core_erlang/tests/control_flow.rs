@@ -1656,3 +1656,183 @@ fn test_bt2803_no_regression_pure_local_var_value_with_arguments_fast_path() {
          the Tier 1/Tier 2 discriminated path. Got: {code}"
     );
 }
+
+#[test]
+fn test_bt2813_bare_tier2_value_call_inside_do_loop_body_unpacks_tuple() {
+    // BT-2813: a bare (non-assigned) `self.field value:` statement inside a
+    // `do:` loop body. Before the fix, the outer loop was correctly routed
+    // into the state-threading (StateAcc) path by `block_needs_mutation_threading`
+    // (BT-2807's `has_field_value_call` fact), but the loop body's own
+    // statement codegen (`generate_threaded_loop_body_inner`) had no case for
+    // a bare Tier2ValueCall — it fell through to `emit_non_assign_expr`,
+    // which emitted a plain (Tier-1-only) apply and crashed with badarity for
+    // a genuinely Tier 2 (2-arity) field-stored block. Structural check only
+    // (see stdlib/test/tier2_stored_block_matrix_test.bt for the runtime
+    // end-to-end check).
+    let src = "Actor subclass: Ctr\n  state: total = 0\n  state: onTick = nil\n\n  setup => self.onTick := [:x | self.total := self.total + x]\n\n  tickEach: items =>\n    items do: [:x | self.onTick value: x]\n    self.total\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let code = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    )
+    .expect("should compile (BT-2813)");
+
+    assert!(
+        regex::Regex::new(r"let _T2LoopTuple\w* = .*is_function.*in let StateAcc\w* = call 'erlang':'element'\(2, _T2LoopTuple")
+            .unwrap()
+            .is_match(&code),
+        "the bare Tier2ValueCall statement inside the do: loop body must \
+         runtime-discriminate the field's block and unpack the returned \
+         {{Result, NewState}} tuple via element/2, threading the new state \
+         forward into the next fold iteration. Got: {code}"
+    );
+}
+
+#[test]
+fn test_bt2813_bare_tier2_value_call_inside_collect_block_unpacks_tuple() {
+    // BT-2813: same gap as the do: case above, but for collect: — the loop
+    // body must also extract element(1) of the tuple as the collected value.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n  state: onTick = nil\n\n  setup => self.onTick := [:x | self.total := self.total + x]\n\n  tickEachCollect: items =>\n    items collect: [:x | self.onTick value: x]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let code = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    )
+    .expect("should compile (BT-2813)");
+
+    assert!(
+        regex::Regex::new(r"let _T2LoopVal\w* = call 'erlang':'element'\(1, _T2LoopTuple\w*\) in \{\[_T2LoopVal\w* \| AccList\]")
+            .unwrap()
+            .is_match(&code),
+        "the bare Tier2ValueCall statement inside the collect: loop body \
+         must extract element(1) of the returned tuple as the collected \
+         item value. Got: {code}"
+    );
+}
+
+#[test]
+fn test_bt2814_local_var_tier2_value_call_in_argument_position_unpacks_result() {
+    // BT-2814: a Tier 2 block held in a local var, invoked via `value:` in
+    // *argument* (sub-expression) position. Before the fix,
+    // `try_generate_block_value_keyword` intercepted this receiver shape
+    // (tier2_local_vars) and called `generate_block_value_call_stateful`
+    // directly, returning the raw {Result, NewState} tuple straight into the
+    // arithmetic — `10 + {Result, NewState}` crashes with badarith at
+    // runtime. `close_tier2_value_subexpr_doc` now unpacks element(1) so the
+    // arithmetic sees a plain value. Structural check only (see
+    // stdlib/test/tier2_stored_block_matrix_test.bt for the runtime
+    // end-to-end check).
+    let src = "Actor subclass: Ctr\n  state: dummy = 0\n\n  run: x =>\n    r := 0\n    blk := [:n | r := r + n]\n    10 + (blk value: x)\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let code = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    )
+    .expect("should compile (BT-2814)");
+
+    assert!(
+        regex::Regex::new(r"call 'erlang':'\+'\(10, let _T2SubTuple\w* = .*apply.*in call 'erlang':'element'\(1, _T2SubTuple")
+            .unwrap()
+            .is_match(&code),
+        "the local-var Tier2 block's value: call in argument position must \
+         be wrapped in a self-contained let-chain that extracts element(1) \
+         of the returned tuple before the addition, not the raw tuple. \
+         Got: {code}"
+    );
+}
+
+#[test]
+fn test_bt2814_field_stored_tier2_value_call_in_argument_position_unpacks_result() {
+    // BT-2814: the self.field variant of the same gap. Before the fix,
+    // `try_generate_block_value_keyword`/`_unary` deliberately did NOT
+    // intercept a self.field receiver in sub-expression position at all,
+    // falling back to a Tier-1-only (arity-N, no State) apply — badarity for
+    // a genuinely Tier 2 block. `close_tier2_value_subexpr_doc` now
+    // intercepts and unpacks it, consistent with the local-var case above.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n  state: onTick = nil\n\n  setup => self.onTick := [:x | self.total := self.total + x]\n\n  addTickResult: x =>\n    self.total := self.total + (self.onTick value: x)\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let code = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    )
+    .expect("should compile (BT-2814)");
+
+    assert!(
+        regex::Regex::new(
+            r"let _T2SubTuple\w* = .*is_function.*in call 'erlang':'element'\(1, _T2SubTuple"
+        )
+        .unwrap()
+        .is_match(&code),
+        "the field-stored Tier2 block's value: call in argument position \
+         must runtime-discriminate the field's block and extract element(1) \
+         of the returned tuple, not leak the raw tuple or fall back to a \
+         Tier-1-only apply. Got: {code}"
+    );
+}
+#[test]
+fn test_bt2815_named_local_var_captured_mutation_rebinds_after_call() {
+    // BT-2815: a block assigned to a LOCAL variable (not a field) whose only
+    // mutation is a captured outer local, invoked later via `value:` in the
+    // same method. Before the fix, `get_inline_block_captured_mutations`
+    // only recognized an INLINE block literal receiver (the original BT-1213
+    // scope) — a NAMED `tier2_local_vars` identifier receiver fell through
+    // with no rebinding, so the caller's own `outer` variable silently kept
+    // its stale pre-call value even though the call itself succeeded and
+    // internally computed the right value. `prescan_tier2_local_vars` now
+    // records the captured-mutation var names keyed by variable name
+    // (`tier2_local_var_captured_mutations`) so the call site can rebind
+    // them the same way it already does for an inline literal. Structural
+    // check only (see stdlib/test/tier2_stored_block_matrix_test.bt for the
+    // runtime end-to-end check).
+    let src = "Actor subclass: Ctr\n  state: dummy = 0\n\n  run =>\n    outer := 0\n    blk := [:n | outer := outer + n]\n    blk value: 5\n    outer\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let code = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    )
+    .expect("should compile (BT-2815)");
+
+    assert!(
+        regex::Regex::new(
+            r"let State1 = call 'erlang':'element'\(2, _T2Tuple\w*\) in let Outer\w* = call 'maps':'get'\('__local__outer', State1\)"
+        )
+        .unwrap()
+        .is_match(&code),
+        "after the named-local-var Tier2 block's value: call, the caller's \
+         own `outer` binding must be rebound from '__local__outer' in the \
+         call's returned NewState, mirroring the inline-block-literal case. \
+         Got: {code}"
+    );
+}
+
+#[test]
+fn test_bt2815_named_local_var_cascade_captured_mutation_rebinds_after_call() {
+    // BT-2815 acceptance criteria: verify the cascade variant too —
+    // `blk value: x; value: x` (BT-2808's cascade codegen) invoked twice
+    // must also rebind the caller's `outer` var from the cascade's final
+    // NewState, not just the single-send case above.
+    let src = "Actor subclass: Ctr\n  state: dummy = 0\n\n  run =>\n    outer := 0\n    blk := [:n | outer := outer + n]\n    blk value: 4; value: 4\n    outer\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let code = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    )
+    .expect("should compile (BT-2815)");
+
+    assert!(
+        regex::Regex::new(
+            r"let Outer\w* = call 'maps':'get'\('__local__outer', State\w*\) in let _Result = Outer"
+        )
+        .unwrap()
+        .is_match(&code),
+        "after the named-local-var Tier2 block's cascade (value: x; value: \
+         x), the caller's own `outer` binding must be rebound from \
+         '__local__outer' in the cascade's final NewState. Got: {code}"
+    );
+}
