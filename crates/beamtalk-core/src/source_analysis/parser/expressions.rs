@@ -667,7 +667,10 @@ impl Parser {
             arguments.push(self.parse_binary_message());
         }
 
-        // Safety: arguments is guaranteed non-empty by the while loop above
+        // Safety: the pre-loop guard above returns early for any leading-newline
+        // boundary keyword, so line 604's `TokenKind::Keyword` check plus that
+        // guard together guarantee the while loop consumes at least one keyword
+        // part, making `arguments` non-empty here.
         let span = receiver.span().merge(arguments.last().unwrap().span());
 
         Expression::MessageSend {
