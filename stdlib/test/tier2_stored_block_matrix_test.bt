@@ -141,8 +141,12 @@ TestCase subclass: Tier2StoredBlockMatrixTest
       second: 2
       third: 3
     self assert: result equals: 6
+    self assert: self.a getTotal equals: 6
 
-// ── P3: Lower-risk / exploratory ────────────────────────────────────────
+// ── P3: Lower-risk / exploratory ─────────────────────────────────────
+// NOTE: uncomment these inside the Tier2StoredBlockMatrixTest class body
+// above (they're indented to match) once the referenced issue lands —
+// don't paste them in at column 0, they'd land outside the class.
 
 // P3-14 (KNOWN GAP — BT-2813): field-stored call nested inside a loop
 // nested inside another loop — same badarity crash as P1-7/P1-8.
