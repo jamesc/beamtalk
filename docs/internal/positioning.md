@@ -110,7 +110,7 @@ section of the north-star doc). Small ADR, distinctive capability.
 
 ### Seed 3 — Types × hot reload: the killer demo
 
-*Drafted as [ADR 0105](../ADR/0105-live-image-recheck-on-reload.md).*
+*Shipped as [ADR 0105](../ADR/0105-live-image-recheck-on-reload.md) (Accepted, Epic BT-2775).*
 
 The unsolved question in the whole ecosystem: what happens to "checked" when a
 module is redefined live? ADR 0100's knowledge-graded severity is the

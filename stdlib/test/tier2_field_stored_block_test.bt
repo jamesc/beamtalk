@@ -29,3 +29,9 @@ TestCase subclass: Tier2FieldStoredBlockTest
   testFieldStoredBlockInvokedFromDifferentMethodViaValueWithArguments =>
     actor := Tier2FieldStoredBlockTestActor spawn
     self assert: actor testFieldStoredBlockAcrossMethodsViaValueWithArguments equals: 8
+
+  // BT-2808: `self.onTick value: x; value: x` — a cascade of two safe value:
+  // sends to the same field-stored Tier 2 block, both must thread state.
+  testFieldStoredBlockCascadeInvocation =>
+    actor := Tier2FieldStoredBlockTestActor spawn
+    self assert: actor testFieldStoredBlockCascadeInvocation equals: 10

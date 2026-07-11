@@ -1,0 +1,207 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E "killer demo" for ADR 0105 (Live Image Re-Checking on Hot Reload,
+// Epic BT-2775, this issue BT-2783): load a class, spawn/use it, change a
+// live method's return type via a real method-level hot reload (ADR 0082),
+// and watch the stale caller light up — from the running image, no rebuild.
+//
+// This drives the exact mechanism the ADR's "demo" and "removal" examples
+// describe (`docs/ADR/0105-live-image-recheck-on-reload.md`): every `>>`
+// redefinition below goes through the real reload path
+// (`beamtalk_repl_loader:maybe_trigger_recheck/4`) and fires the same
+// `reload_check`/`completed` push the CLI prints inline. The REPL-protocol
+// test harness intentionally discards push frames (see
+// `crates/beamtalk-cli/tests/repl_protocol.rs`, `handle_push`) — there is no
+// `// =>`-assertable request/response pair for an asynchronous push — so,
+// following the precedent set by `recheck_image_and_precheck.btscript`
+// (BT-2782), this file observes outcomes through `Workspace recheckImage`,
+// a synchronous whole-image re-check that recomputes live findings on
+// demand (`beamtalk_recheck:trigger_image/0`). It shares the exact
+// Dnu/Type-category, non-error-severity filter the automatic per-reload
+// check uses, so a finding here is a finding the real push would also have
+// reported. Store-level mechanics this surface cannot observe directly
+// (per-origin clearing-by-replacement, concurrent-reload edge cases) are
+// covered by the isolated EUnit suites: `beamtalk_workspace_findings_store_tests.erl`,
+// `beamtalk_repl_loader_recheck_tests.erl` (incl.
+// `supersession_replaces_not_accumulates_test_`), `beamtalk_recheck_tests.erl`.
+//
+// IMPORTANT: REPL-protocol cases share one long-lived workspace session
+// (see `repl_flush_changes_dirty.btscript`'s note) — class names here are
+// unique to this file to avoid collisions with other cases, and every
+// assertion filters `Workspace recheckImage`'s findings down to this file's
+// `KillerDemo*` classes before counting, since the shared image may carry
+// unrelated findings from other test files.
+
+// ===========================================================================
+// SETUP — the callee (spawned actor) and its typed dependents.
+// ===========================================================================
+
+// The callee: an actor with a typed accessor, matching the ADR's `Counter`.
+Actor subclass: KillerDemoCounter
+  state: count = 0
+  increment => self.count := self.count + 1
+// => _
+
+KillerDemoCounter >> getCount -> Integer => self.count
+// => _
+
+KillerDemoCounter >> cleanup => self.count := 0
+// => _
+
+// The stale caller: assumes `getCount` still answers an Integer (`+ 1`) —
+// the ADR's `Dashboard>>refresh`.
+Object subclass: KillerDemoDashboard
+  refresh: c :: KillerDemoCounter -> Integer => (c getCount) + 1
+// => _
+
+// The genuinely-unaffected caller: only stringifies the result, so it
+// re-checks clean whatever `getCount` returns — the ADR's `StatsView>>render`.
+Object subclass: KillerDemoStatsView
+  render: c :: KillerDemoCounter -> String => (c getCount) printString
+// => _
+
+// The removal target: calls a selector that will be deleted from the class —
+// the ADR's `AdminPanel>>onClick` / `Counter>>reset` example.
+Object subclass: KillerDemoAdminPanel
+  onClick: c :: KillerDemoCounter -> Object => c cleanup
+// => _
+
+// ===========================================================================
+// LOAD + SPAWN + USE — the live image before any edit.
+// ===========================================================================
+
+counter := KillerDemoCounter spawn
+// => Actor(KillerDemoCounter, _)
+
+counter increment
+// => 1
+
+counter getCount + 1
+// => 2
+
+// Helper: this file's findings, freshly recomputed each call (`recheckImage`
+// re-runs diagnostics against the *current* live source of every class with
+// a recorded source — nothing here is read from a cache or accumulated
+// across calls).
+killerDemoFindings := [((Workspace recheckImage) at: #findings) select: [:f | (f at: #owner) printString includesSubstring: "KillerDemo"]]
+// => _
+
+// Baseline: every KillerDemo* class type-checks clean before any live edit.
+(killerDemoFindings value) size
+// => 0
+
+// ===========================================================================
+// THE DEMO — change `getCount`'s return type live (method save); the stale
+// caller lights up, with location + wording; the unaffected caller stays
+// silent (only the summary count below proves it was even considered).
+// ===========================================================================
+
+KillerDemoCounter >> getCount -> String => self.count printString
+// => _
+
+// Existing actor picks up the new method immediately — no restart, no rebuild.
+// count is still 1 (untouched by this edit); now stringified.
+counter getCount
+// => 1
+
+// Exactly one stale caller: Dashboard. StatsView and AdminPanel stay silent —
+// this count would be 2 or 3 if either had also lit up.
+(killerDemoFindings value) size
+// => 1
+
+((killerDemoFindings value) first at: #owner) printString includesSubstring: "KillerDemoDashboard"
+// => true
+
+// Wording: the checker reports the now-`String` return breaking `+` as an
+// unresolved-selector (Dnu) diagnostic on the new type — confirmed empirically
+// in `beamtalk_recheck.erl`'s moduledoc ("String does not understand '+'").
+((killerDemoFindings value) first at: #message) includesSubstring: "does not understand"
+// => true
+
+((killerDemoFindings value) first at: #message) includesSubstring: "String"
+// => true
+
+((killerDemoFindings value) first at: #category) printString includesSubstring: "Dnu"
+// => true
+
+// Location: a byte-offset span into Dashboard's own live source, `start < end`.
+((killerDemoFindings value) first at: #start) < ((killerDemoFindings value) first at: #end)
+// => true
+
+// ===========================================================================
+// SUPERSESSION — a second, back-to-back reload of the SAME method replaces
+// the finding; it does not accumulate alongside the first one.
+// ===========================================================================
+
+KillerDemoCounter >> getCount -> Symbol => #done
+// => _
+
+// Still exactly one Dashboard finding — generation B replaced generation A,
+// it did not stack a second contradictory finding on top of it.
+(killerDemoFindings value) size
+// => 1
+
+// The wording now reflects the CURRENT (Symbol) generation, not the stale
+// (String) one — proof this is a replacement, not a leftover.
+((killerDemoFindings value) first at: #message) includesSubstring: "Symbol"
+// => true
+
+((killerDemoFindings value) first at: #message) includesSubstring: "String"
+// => false
+
+// ===========================================================================
+// RELOAD-FIXES-RELOAD — restoring the original signature clears the finding
+// with no edit to the caller at all.
+// ===========================================================================
+
+KillerDemoCounter >> getCount -> Integer => self.count
+// => _
+
+(killerDemoFindings value) size
+// => 0
+
+// ===========================================================================
+// REMOVAL — deleting a selector flags its caller as DNU-at-runtime, at
+// `Hint` severity (ADR 0100 Rule 1: a single statically-known receiver).
+// A full class-body redefinition (dropping `cleanup`) is how a selector is
+// actually removed from a live class — `>>` only adds/replaces, matching
+// `MethodDropActor`'s pattern in `inline_class_hot_reload.btscript`.
+// ===========================================================================
+
+Actor subclass: KillerDemoCounter
+  state: count = 0
+  increment => self.count := self.count + 1
+// => _
+
+KillerDemoCounter >> getCount -> Integer => self.count
+// => _
+
+// AdminPanel is now the sole stale caller — Dashboard/StatsView are clean
+// again (both survived the `getCount` round-trip back to `Integer`).
+(killerDemoFindings value) size
+// => 1
+
+((killerDemoFindings value) first at: #owner) printString includesSubstring: "KillerDemoAdminPanel"
+// => true
+
+((killerDemoFindings value) first at: #message) includesSubstring: "does not understand"
+// => true
+
+((killerDemoFindings value) first at: #message) includesSubstring: "cleanup"
+// => true
+
+// Hint severity — never escalated just because a reload caused it (ADR
+// 0105 §Severity: "Reload adds attribution, not severity").
+((killerDemoFindings value) first at: #severity) printString includesSubstring: "hint"
+// => true
+
+// The actor spawned before any of this still runs, with its state intact —
+// hot reload never restarts a live instance (count was 1 all along; the
+// full class-body redefinition above only resets the *default* for new
+// instances, not this actor's own field).
+counter increment
+// => 2
+
+counter getCount
+// => 2

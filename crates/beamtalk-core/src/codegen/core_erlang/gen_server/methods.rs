@@ -13,9 +13,9 @@ use super::super::document::{Document, INDENT, join, leaf, line, nest};
 use super::super::selector_mangler::safe_class_method_fn_name;
 use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{
-    Block, ClassDefinition, ClassKind, Expression, Identifier, Literal, MapPair, MessageSelector,
-    MethodDefinition, MethodKind, Module, ParameterDefinition, StateDeclaration, TypeAnnotation,
-    TypeParamDecl, WellKnownSelector,
+    Block, CascadeMessage, ClassDefinition, ClassKind, Expression, Identifier, Literal, MapPair,
+    MessageSelector, MethodDefinition, MethodKind, Module, ParameterDefinition, StateDeclaration,
+    TypeAnnotation, TypeParamDecl, WellKnownSelector,
 };
 use crate::docvec;
 use crate::unparse::unparse_method_display_signature;
@@ -447,6 +447,60 @@ impl CoreErlangGenerator {
         }
     }
 
+    /// BT-2808: Normalizes a `Cascade` into its true underlying receiver and the
+    /// full ordered list of messages sent to it.
+    ///
+    /// The parser (`parse_cascade`) folds the cascade's *first* message into
+    /// `Cascade.receiver` as a whole `MessageSend` — e.g. for `blk value: x;
+    /// value: y`, `receiver` is `MessageSend(blk, value:, [x])` and `messages`
+    /// holds only the remaining `value: y`. Every safety/codegen decision needs
+    /// the TRUE receiver (`blk`) and ALL messages sent to it (both `value: x`
+    /// and `value: y`), so this mirrors the same normalization
+    /// `generate_cascade` (expressions.rs) already performs for ordinary
+    /// (non-Tier-2) cascade codegen.
+    fn normalize_cascade<'a>(
+        receiver: &'a Expression,
+        messages: &'a [CascadeMessage],
+    ) -> (&'a Expression, Vec<(&'a MessageSelector, &'a [Expression])>) {
+        if let Expression::MessageSend {
+            receiver: inner,
+            selector: first_selector,
+            arguments: first_arguments,
+            ..
+        } = receiver
+        {
+            let mut all: Vec<(&MessageSelector, &[Expression])> =
+                Vec::with_capacity(messages.len() + 1);
+            all.push((first_selector, first_arguments.as_slice()));
+            for msg in messages {
+                all.push((&msg.selector, msg.arguments.as_slice()));
+            }
+            (inner.as_ref(), all)
+        } else {
+            let all: Vec<(&MessageSelector, &[Expression])> = messages
+                .iter()
+                .map(|msg| (&msg.selector, msg.arguments.as_slice()))
+                .collect();
+            (receiver, all)
+        }
+    }
+
+    /// BT-2797/BT-2808: Returns true if `selector` is a `value`/`value:`/
+    /// `value:value:`/`value:value:value:` send — the "safe" family that lets a
+    /// Tier 2 block value be invoked without escaping to a call site that
+    /// doesn't know to thread state through it.
+    fn is_safe_value_family_selector(selector: &MessageSelector) -> bool {
+        matches!(
+            selector.well_known(),
+            Some(
+                WellKnownSelector::Value
+                    | WellKnownSelector::ValueColon
+                    | WellKnownSelector::ValueValue
+                    | WellKnownSelector::ValueValueValue
+            )
+        )
+    }
+
     /// BT-2797: Scans `expr` for references to `var_name`, returning
     /// `(has_unsafe_use, has_safe_use)`.
     ///
@@ -487,15 +541,7 @@ impl CoreErlangGenerator {
                 let is_safe_value_send = matches!(
                     receiver.as_ref(),
                     Expression::Identifier(id) if id.name == var_name
-                ) && matches!(
-                    selector.well_known(),
-                    Some(
-                        WellKnownSelector::Value
-                            | WellKnownSelector::ValueColon
-                            | WellKnownSelector::ValueValue
-                            | WellKnownSelector::ValueValueValue
-                    )
-                );
+                ) && Self::is_safe_value_family_selector(selector);
                 let (mut unsafe_, mut safe) = if is_safe_value_send {
                     (false, true)
                 } else {
@@ -532,9 +578,33 @@ impl CoreErlangGenerator {
             Expression::Cascade {
                 receiver, messages, ..
             } => {
-                let (mut unsafe_, mut safe) = Self::scan_var_uses(receiver, var_name);
-                for msg in messages {
-                    for arg in &msg.arguments {
+                // BT-2808: when the cascade's true underlying receiver (see
+                // `normalize_cascade`) *is* var_name itself (e.g. `blk value: x;
+                // value: y`), the generic recursive scan would hit the plain
+                // `Identifier` arm and unconditionally report it unsafe. Mirror the
+                // `MessageSend` arm's `is_safe_value_send` check instead: if EVERY
+                // message sent to that receiver (including the one folded into
+                // `receiver` by the parser) is itself a safe
+                // `value`/`value:`/`value:value:`/`value:value:value:` send, the
+                // whole cascade is as safe as a single safe value send would be.
+                let (underlying_receiver, all_messages) =
+                    Self::normalize_cascade(receiver, messages);
+                let receiver_is_var = matches!(
+                    underlying_receiver,
+                    Expression::Identifier(id) if id.name == var_name
+                );
+                let all_messages_safe_value_sends = receiver_is_var
+                    && !all_messages.is_empty()
+                    && all_messages
+                        .iter()
+                        .all(|(sel, _)| Self::is_safe_value_family_selector(sel));
+                let (mut unsafe_, mut safe) = if all_messages_safe_value_sends {
+                    (false, true)
+                } else {
+                    Self::scan_var_uses(underlying_receiver, var_name)
+                };
+                for (_, args) in &all_messages {
+                    for arg in *args {
                         let (u, s) = Self::scan_var_uses(arg, var_name);
                         unsafe_ |= u;
                         safe |= s;
@@ -3390,6 +3460,37 @@ impl CoreErlangGenerator {
                 }
             }
         }
+        // BT-2808: `blk value: x; value: y` — a cascade where every message
+        // (including the one the parser folds into `receiver` — see
+        // `normalize_cascade`) is itself a safe value-family send on a receiver
+        // that (by the same rules as the single-send case above) may hold a
+        // Tier 2 block. Each message needs the same tuple-unpacking treatment
+        // as a single Tier2ValueCall, sequenced through
+        // `generate_tier2_cascade_doc`.
+        if let Expression::Cascade {
+            receiver, messages, ..
+        } = expr
+        {
+            let (underlying_receiver, all_messages) = Self::normalize_cascade(receiver, messages);
+            let all_safe_value_sends = !all_messages.is_empty()
+                && all_messages
+                    .iter()
+                    .all(|(sel, _)| Self::is_safe_value_family_selector(sel));
+            if all_safe_value_sends {
+                if let Expression::Identifier(id) = underlying_receiver {
+                    if self.tier2_block_params.contains(id.name.as_str())
+                        || self.tier2_local_vars.contains(id.name.as_str())
+                    {
+                        return true;
+                    }
+                }
+                if self.context == super::super::CodeGenContext::Actor
+                    && Self::is_self_field_access(underlying_receiver)
+                {
+                    return true;
+                }
+            }
+        }
         false
     }
 
@@ -3468,7 +3569,95 @@ impl CoreErlangGenerator {
                 );
             }
         }
+        // BT-2808: `blk value: x; value: y` — proved safe by `is_tier2_value_call`'s
+        // Cascade branch. Unlike the single-send case, `expression_doc` has no
+        // generic Tier 2 cascade handling to fall through to, so this must be
+        // generated directly regardless of receiver kind.
+        if let Expression::Cascade {
+            receiver, messages, ..
+        } = expr
+        {
+            let (underlying_receiver, all_messages) = Self::normalize_cascade(receiver, messages);
+            return self.generate_tier2_cascade_doc(underlying_receiver, &all_messages);
+        }
         self.expression_doc(expr)
+    }
+
+    /// BT-2808: Generates a sequential Tier 2 tuple-unpacking cascade
+    /// (`blk value: x; value: y`), reached only for a `Cascade` expression that
+    /// `is_tier2_value_call` already proved is entirely safe `value`-family
+    /// sends on a receiver that may hold a Tier 2 block.
+    ///
+    /// The receiver is evaluated once per message rather than hoisted into a
+    /// single shared binding — harmless here since a `tier2_block_params`/
+    /// `tier2_local_vars`/`self.field` receiver is always a pure variable or
+    /// field read, never an expression with side effects. Each message is
+    /// generated with the *current* threaded state (via
+    /// `generate_block_value_call_stateful`/`generate_block_value_call_runtime_discriminated`,
+    /// both of which read `self.current_state_var()` internally), then its
+    /// returned `{Result, NewState}` tuple is unpacked and `NewState` becomes
+    /// the current state for the next message — mirroring the sequencing the
+    /// bare (non-cascade) `Tier2ValueCall`/`LocalAssignTier2` call sites already
+    /// use between statements.
+    ///
+    /// Matching ordinary (non-Tier-2) cascade semantics, the overall value is
+    /// the result of the LAST message. Returns a `{Result, NewState}` tuple
+    /// with that contract — callers unpack it exactly like a single
+    /// `Tier2ValueCall` (see `generate_tier2_value_call_doc`'s own callers).
+    fn generate_tier2_cascade_doc(
+        &mut self,
+        receiver: &Expression,
+        all_messages: &[(&MessageSelector, &[Expression])],
+    ) -> Result<Document<'static>> {
+        let use_runtime_discrimination =
+            self.context == CodeGenContext::Actor && Self::is_self_field_access(receiver);
+
+        let mut parts: Vec<Document<'static>> = Vec::with_capacity(all_messages.len() + 1);
+        let mut result_var: Option<String> = None;
+        let mut state_var: Option<String> = None;
+        for (selector, args) in all_messages {
+            let call_doc = if use_runtime_discrimination {
+                self.generate_block_value_call_runtime_discriminated(
+                    receiver,
+                    args,
+                    &selector.name(),
+                )?
+            } else {
+                self.generate_block_value_call_stateful(receiver, args)?
+            };
+            let tuple_var = self.fresh_temp_var("CascTuple");
+            let this_result = self.fresh_temp_var("CascResult");
+            let this_state = self.next_state_var();
+            parts.push(docvec![
+                "let ",
+                leaf::var(tuple_var.clone()),
+                " = ",
+                call_doc,
+                " in let ",
+                leaf::var(this_result.clone()),
+                " = call 'erlang':'element'(1, ",
+                leaf::var(tuple_var.clone()),
+                ") in let ",
+                leaf::var(this_state.clone()),
+                " = call 'erlang':'element'(2, ",
+                leaf::var(tuple_var),
+                ") in ",
+            ]);
+            result_var = Some(this_result);
+            state_var = Some(this_state);
+        }
+        // is_tier2_value_call requires a non-empty message list before ever
+        // routing here, so both are always populated by the loop above.
+        let result_var = result_var.expect("BT-2808: cascade must have at least one message");
+        let state_var = state_var.expect("BT-2808: cascade must have at least one message");
+        parts.push(docvec![
+            "{",
+            leaf::var(result_var),
+            ", ",
+            leaf::var(state_var),
+            "}"
+        ]);
+        Ok(Document::Vec(parts))
     }
 
     /// Checks if a control flow expression actually threads state through mutations.

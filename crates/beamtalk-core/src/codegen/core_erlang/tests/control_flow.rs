@@ -1211,6 +1211,51 @@ fn test_bt2797_same_method_tier2_local_var_threads_state_correctly() {
 }
 
 #[test]
+fn test_bt2808_cascade_on_tier2_local_var_compiles_and_threads_state() {
+    // BT-2808: `blk value: item; value: item` — a cascade sending two safe
+    // `value:` sends to the SAME Tier 2 local var. Before the fix,
+    // `scan_var_uses`'s `Cascade` arm hit the generic `Identifier` arm on the
+    // receiver (since the receiver *is* `blk`) and unconditionally reported it
+    // unsafe, so `prescan_tier2_local_vars` never promoted `blk` and this hit
+    // the `FieldAssignmentInUnsupportedBlock` compile-time diagnostic even
+    // though the pattern is exactly as safe as a single `blk value: item`.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: item =>\n    blk := [:x | self.total := self.total + x]\n    blk value: item; value: item\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let code = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    )
+    .expect("cascade of safe value: sends on a Tier 2 local var must compile (BT-2808)");
+
+    // Both cascaded `value:` sends must apply the block with a threaded state
+    // argument, and each must unpack its own {Result, NewState} tuple — not
+    // just the first message (which would silently drop the second mutation).
+    let apply_count = regex::Regex::new(r"apply _Fun\w* \(_item\w*, \w*State\w*\)")
+        .unwrap()
+        .find_iter(&code)
+        .count();
+    assert_eq!(
+        apply_count, 2,
+        "both cascaded value: sends must apply the block with a threaded \
+         state argument. Got: {code}"
+    );
+    let element1_count = regex::Regex::new(r"call 'erlang':'element'\(1, _\w+\)")
+        .unwrap()
+        .find_iter(&code)
+        .count();
+    let element2_count = regex::Regex::new(r"call 'erlang':'element'\(2, _\w+\)")
+        .unwrap()
+        .find_iter(&code)
+        .count();
+    assert!(
+        element1_count >= 2 && element2_count >= 2,
+        "each cascaded value: send's {{Result, NewState}} tuple must be \
+         unpacked separately so both mutations thread through. Got: {code}"
+    );
+}
+
+#[test]
 fn test_bt2797_local_tier2_block_never_invoked_again_is_still_compile_error() {
     // BT-2797 regression guard: `blk := [block needing Tier 2]` where `blk` is
     // never referenced again in the rest of the method — here because the

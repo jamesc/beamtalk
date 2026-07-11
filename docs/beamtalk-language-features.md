@@ -29,6 +29,7 @@ Language features for Beamtalk. See [beamtalk-principles.md](beamtalk-principles
 - [Live Patching](#live-patching)
   - [Keyword Method Patching — `compile:source:` and `tryCompile:source:` (ADR 0082)](#keyword-method-patching--compilesource-and-trycompilesource-adr-0082)
   - [ChangeLog — Tracking In-Memory Changes (ADR 0082)](#changelog--tracking-in-memory-changes-adr-0082)
+  - [Live Re-Checking on Reload (ADR 0105)](#live-re-checking-on-reload-adr-0105)
 - [Actor Observability and Tracing (ADR 0069)](#actor-observability-and-tracing-adr-0069)
 - [Announcements — Typed Events (ADR 0093)](#announcements--typed-events-adr-0093)
 - [Namespace and Class Visibility](#namespace-and-class-visibility)
@@ -1725,6 +1726,7 @@ validate: x :: Object =>
 |---|---|---|
 | `x class =:= Foo ifTrue: [...]` | `x` is `Foo` in true block | True block only |
 | `x isKindOf: Foo ifTrue: [...]` | `x` is `Foo` in true block | True block only |
+| `x isKindOf: Foo ifFalse: [...]` | `x` is `T \ Foo` in false block | False block only |
 | `x isNil ifTrue: [^...]` | `x` is non-nil after the statement | Rest of method |
 | `x isNil ifTrue: [self error: "..."]` | `x` is non-nil after the statement | Rest of method |
 | `x isNil ifFalse: [...]` | `x` is non-nil in false block | False block |
@@ -3132,6 +3134,87 @@ Every operation above is reachable via the REPL meta-commands, MCP tools, LSP
 over the Beamtalk language — see [REPL shortcuts](#repl-shortcuts--commands-are-thin-wrappers)
 below and the [Tooling guide](beamtalk-tooling.md#changelog-and-flush-adr-0082)
 for the surface tables.
+
+### Live Re-Checking on Reload (ADR 0105)
+
+A live edit doesn't just change the class being patched — it can invalidate
+every existing caller in the image. Every save above (`>>`, class-body
+redefinition, `:load`) triggers an **incremental re-check of known
+dependents**: the compiler re-checks the callers `beamtalk_xref` (ADR 0087)
+already knows about, using the same type checker that runs at compile time,
+and publishes what it finds as live diagnostics — no rebuild, no manual
+"find senders" required.
+
+```beamtalk
+:load counter.bt
+counter := Counter spawn
+counter getCount + 1          // => 1
+
+// ... change `getCount -> Integer` to `getCount -> String`, save
+// (a plain `Counter >> getCount -> String => ...` live patch) ...
+
+⚠ reload check: Counter>>getCount signature changed;
+   2 callers re-checked, 1 stale
+   Dashboard>>refresh (dashboard.bt:14): `+` expects a number, `getCount` now returns String
+```
+
+Only genuinely-affected callers surface. If `StatsView>>render` also calls
+`getCount` but only stringifies the result, it re-checks *clean* against the
+new signature and stays silent — the header's "2 re-checked, 1 stale" is its
+only trace.
+
+A **removed** selector is a `does_not_understand` waiting to happen, reported
+at `Hint` severity (ADR 0100 Rule 1 — a single closed-complete receiver):
+
+```beamtalk
+ℹ reload check: Counter>>reset was removed; 1 caller remains
+   AdminPanel>>onClick (admin.bt:9): `counter reset` will raise
+   does_not_understand at runtime
+   (Hint severity per ADR 0100 Rule 1 — single closed receiver)
+```
+
+A `state:`/`field:` slot added, removed, or retyped re-checks `spawnWith:`
+call sites and the changed slots' generated accessors the same way, under a
+`shape_change` classification.
+
+**Advisory, never blocking.** The reload already happened — a finding informs,
+it never vetoes. Findings are workspace-session state (LSP diagnostics,
+REPL/workspace-UI notices), never persisted, and never fail a build; they
+disappear on workspace restart. **Clearing is by replacement**: every
+re-check of a caller replaces *all* of its findings attributed to that
+changed class with the fresh result — clean or different — so back-to-back
+reloads of the same method never leave a stale finding sitting alongside a
+current one (supersession), and a later reload that fixes the callee clears
+the caller's finding with no edit to the caller at all.
+
+Two related, on-demand operations round out the surface:
+
+- **Pre-save advisory** — `aClass precheckCompile: #selector source: "..."`
+  compiles a *pending* edit and reports would-be-stale dependents without
+  installing it, so an editor can warn before you save. Never touches the
+  live image, the ChangeLog, or the findings store.
+- **`Workspace recheckImage`** (also `:recheck image`) — the "complete but
+  unbounded" whole-image sweep kept out of the automatic per-reload trigger:
+  re-checks every live class the workspace has a recorded source for and
+  returns a `checked`/`stale`/`findings` report, on demand.
+
+```beamtalk
+(Counter precheckCompile: #getCount source: "getCount -> String => self.value printString")
+// => a Dictionary shaped like the reload_check report — findings without installing
+
+Workspace recheckImage
+// => _  (checked/stale summary across the whole live image)
+```
+
+The dependent lookup is selector-keyed (ADR 0087's xref schema has no
+receiver-class component), so it re-checks every candidate caller and lets
+the checker's own type inference decide relevance — a `size` sender on an
+unrelated class simply re-checks clean. Fan-out is capped per reload (with a
+"N more not checked" note); one level of fan-out only, not transitive; and
+proxy-routed calls (ADR 0104 §4 forwarding) are invisible to xref, so a
+proxy-wrapped caller can go unflagged — see
+[ADR 0105](ADR/0105-live-image-recheck-on-reload.md) for the full mechanism,
+severity rules, and accepted gaps.
 
 ---
 
