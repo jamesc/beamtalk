@@ -4,6 +4,8 @@
 
 ### Language
 
+- **Bare `=` equality alias fully removed (breaking)** — `=` used as an equality comparison (`x = y`) was already rejected by the parser as of BT-2762; this closes the remaining loose ends: the redundant `beamtalk lint` warning on `x = true` / `x = false` is gone (superseded by the parser diagnostic), and the spec no longer describes `=` as a "legacy alias." The `=` token's other role — the `state:` / `field:` / `classState:` default-value separator (`state: count = 0`) — is unaffected and unchanged. Use `=:=` for value equality or `==` for reference equality (BT-2759).
+
 - **Character literal dispatch** — character literals (`$A`, `$a`, etc.) now dispatch through the Character method table instead of Integer's. `$A asString` returns `"A"` (not `"65"`), `$A class` returns `Character`, and methods like `uppercase`, `lowercase`, `printString` work correctly on character literals. `Character value: 65` class-method sends also work (BT-2095).
 - **`@expect inheritance` diagnostic category** — sealed-class and sealed-method constraint diagnostics are now categorized as `Inheritance`, so they reach CLI and MCP lint surfaces that filter to categorized diagnostics. Previously these diagnostics were uncategorized and only appeared in the LSP (BT-2087).
 - **Class-side block parameter type propagation** — the type checker now infers block parameter types from class-side method signatures (e.g., `ClassName build: [:r | ...]` where the method declares `Block(RouteBuilder, R)` correctly types `r` as `RouteBuilder`), eliminating the need for `@expect type` pragmas on class-side sends and cascades (BT-2158).
