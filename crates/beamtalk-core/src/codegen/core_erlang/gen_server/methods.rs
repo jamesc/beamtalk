@@ -3326,18 +3326,21 @@ impl CoreErlangGenerator {
             receiver, selector, ..
         } = expr
         {
-            let is_value_selector = match selector {
-                crate::ast::MessageSelector::Unary(name) => name == "value",
+            let (is_positional_value_selector, is_value_with_arguments) = match selector {
+                crate::ast::MessageSelector::Unary(name) => (name == "value", false),
                 crate::ast::MessageSelector::Keyword(parts) => {
                     let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
-                    matches!(
-                        selector_name.as_str(),
-                        "value:" | "value:value:" | "value:value:value:"
+                    (
+                        matches!(
+                            selector_name.as_str(),
+                            "value:" | "value:value:" | "value:value:value:"
+                        ),
+                        selector_name == "valueWithArguments:",
                     )
                 }
-                crate::ast::MessageSelector::Binary(_) => false,
+                crate::ast::MessageSelector::Binary(_) => (false, false),
             };
-            if is_value_selector {
+            if is_positional_value_selector || is_value_with_arguments {
                 // BT-851: Tier 2 block parameter (variable holding a stateful block)
                 // BT-2797: or a local variable this method itself assigned a Tier 2
                 // block literal to earlier in its own body (tier2_local_vars).
@@ -3354,11 +3357,20 @@ impl CoreErlangGenerator {
                 // generate_block_value_call_runtime_discriminated, which always
                 // returns a {Result, NewState} tuple that this call site must
                 // unpack (same as the statically-known-Tier-2 cases above).
+                // BT-2803: `valueWithArguments:` gets the same treatment via
+                // generate_block_value_with_arguments_call_runtime_discriminated.
                 if self.context == super::super::CodeGenContext::Actor
                     && Self::is_self_field_access(receiver)
                 {
                     return true;
                 }
+            }
+            // BT-2803: literal-block-with-mutations receivers stay scoped to the
+            // positional value/value:/... selectors — generate_block_value_inline_with_mutations
+            // binds `arguments` directly to the block's own parameters, which
+            // doesn't hold for valueWithArguments: (a single runtime list, not
+            // per-parameter positional args). Not a motivating shape for BT-2803.
+            if is_positional_value_selector {
                 // BT-1213: Inline block literal with captured mutations
                 // (e.g. [errors := errors add: #foo] value)
                 // Only in Actor/REPL context — ValueType inlines as plain value (no tuple).
@@ -3420,6 +3432,16 @@ impl CoreErlangGenerator {
     /// branch there — BT-912) for the same reason: it unpacks a
     /// `{Result, NewState}` tuple, so it must reach the same
     /// runtime-discriminated codegen for a `self.field` receiver.
+    ///
+    /// BT-2803: `valueWithArguments:` has no compile-time-known-Tier-2
+    /// "stateful" fast path the way `value`/`value:` do
+    /// (`generate_block_value_call_stateful`) — `is_tier2_value_call` only
+    /// ever proves a `valueWithArguments:` send needs Tier 2 handling at
+    /// all, never which arity branch statically applies, so every match
+    /// (`self.field`, `tier2_block_params`, `tier2_local_vars`) routes
+    /// through the same runtime-discriminated codegen here, unconditionally
+    /// — unlike the positional selectors' `self.field`-only special case
+    /// below.
     pub(in crate::codegen::core_erlang) fn generate_tier2_value_call_doc(
         &mut self,
         expr: &Expression,
@@ -3431,6 +3453,13 @@ impl CoreErlangGenerator {
             ..
         } = expr
         {
+            if selector.name() == "valueWithArguments:" {
+                if let Some(args_expr) = arguments.first() {
+                    return self.generate_block_value_with_arguments_call_runtime_discriminated(
+                        receiver, args_expr,
+                    );
+                }
+            }
             if self.context == CodeGenContext::Actor && Self::is_self_field_access(receiver) {
                 return self.generate_block_value_call_runtime_discriminated(
                     receiver,

@@ -6,12 +6,9 @@
 //! **DDD Context:** Compilation — Code Generation
 
 use super::super::document::Document;
-use super::super::document::leaf;
-use super::param;
-use crate::docvec;
 
 /// Block primitive implementations.
-pub(crate) fn generate_block_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
+pub(crate) fn generate_block_bif(selector: &str, _params: &[String]) -> Option<Document<'static>> {
     match selector {
         "arity" => {
             // erlang:fun_info(Self, arity) returns {arity, N}
@@ -20,16 +17,11 @@ pub(crate) fn generate_block_bif(selector: &str, params: &[String]) -> Option<Do
                  call 'erlang':'element'(2, ArityTuple)",
             ))
         }
-        "valueWithArguments:" => {
-            let p0 = param(params, 0, "_Args");
-            Some(docvec![
-                "call 'erlang':'apply'(Self, ",
-                leaf::var(p0.to_string()),
-                ")"
-            ])
-        }
-        // on:do: and ensure: are structural intrinsics handled at the call site
-        // (see control_flow/exception_handling.rs), not here.
+        // valueWithArguments: is a structural intrinsic (BT-2803) handled at
+        // the call site (see intrinsics.rs's
+        // try_generate_block_value_with_arguments_keyword /
+        // generate_block_value_with_arguments_call_runtime_discriminated),
+        // like on:do: and ensure: below — not here.
         _ => None,
     }
 }
@@ -53,30 +45,12 @@ mod tests {
     }
 
     #[test]
-    fn test_value_with_arguments() {
-        let result = doc_to_string(generate_block_bif(
-            "valueWithArguments:",
-            &["MyArgs".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'erlang':'apply'(Self, MyArgs)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_value_with_arguments_uses_default_when_no_params() {
-        let result = doc_to_string(generate_block_bif("valueWithArguments:", &[]));
-        assert_eq!(
-            result,
-            Some("call 'erlang':'apply'(Self, _Args)".to_string())
-        );
-    }
-
-    #[test]
     fn test_unknown_selector_returns_none() {
         assert!(generate_block_bif("on:do:", &[]).is_none());
         assert!(generate_block_bif("ensure:", &[]).is_none());
         assert!(generate_block_bif("value", &[]).is_none());
+        // BT-2803: valueWithArguments: is now a call-site-intercepted
+        // intrinsic (intrinsics.rs), no longer a bare-primitive bif.
+        assert!(generate_block_bif("valueWithArguments:", &[]).is_none());
     }
 }

@@ -48,6 +48,7 @@ const STRUCTURAL_INTRINSICS: &[&str] = &[
     "blockValue1",
     "blockValue2",
     "blockValue3",
+    "blockValueWithArguments",
     "whileTrue",
     "whileFalse",
     "repeat",

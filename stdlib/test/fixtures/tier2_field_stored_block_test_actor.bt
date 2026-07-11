@@ -21,10 +21,24 @@ Actor subclass: Tier2FieldStoredBlockTestActor
   // (setup) than the one calling it.
   tick: x => self.onTick value: x
 
+  // BT-2803: same shape as tick:, but via valueWithArguments: — the
+  // runtime-length generalization of the value:/value runtime-discriminated
+  // path (generate_block_value_with_arguments_call_runtime_discriminated).
+  tickWithArgs: x => self.onTick valueWithArguments: #(x)
+
   // BT-2797: end-to-end — assign in setup, invoke (twice) in tick:, confirm
   // the field mutation inside the block propagates back to actor state.
   testFieldStoredBlockAcrossMethods =>
     self setup
     self tick: 5
     self tick: 3
+    self.total
+
+  // BT-2803: end-to-end — assign in setup, invoke (twice) via
+  // tickWithArgs: (valueWithArguments:), confirm the field mutation inside
+  // the block propagates back to actor state the same way tick: does.
+  testFieldStoredBlockAcrossMethodsViaValueWithArguments =>
+    self setup
+    self tickWithArgs: 5
+    self tickWithArgs: 3
     self.total
