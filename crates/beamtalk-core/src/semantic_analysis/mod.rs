@@ -217,8 +217,7 @@ pub struct AnalysisContext<'a> {
     /// The package the module being analysed belongs to (ADR 0071).
     pub current_package: Option<&'a str>,
     /// Native type registry for FFI call inference (ADR 0075).
-    pub native_type_registry:
-        Option<std::sync::Arc<type_checker::NativeTypeRegistry>>,
+    pub native_type_registry: Option<std::sync::Arc<type_checker::NativeTypeRegistry>>,
     /// How complete the injected cross-file class knowledge is (BT-2796,
     /// ADR 0100 Rule 2). Defaults to the conservative `ModuleOnly`.
     pub knowledge_scope: KnowledgeScope,

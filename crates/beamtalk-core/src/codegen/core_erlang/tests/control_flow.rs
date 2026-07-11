@@ -1529,7 +1529,9 @@ fn test_bt2803_field_stored_block_invoked_via_value_with_arguments_threads_state
          same block variable ({fun_var}). Got: {code}"
     );
     assert!(
-        code.contains(&format!("{{call 'erlang':'apply'({fun_var}, {args_var}), State}}")),
+        code.contains(&format!(
+            "{{call 'erlang':'apply'({fun_var}, {args_var}), State}}"
+        )),
         "the Tier 1 branch must apply the field's block ({fun_var}) with the \
          plain Args list, leaving State unchanged. Got: {code}"
     );
