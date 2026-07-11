@@ -21,7 +21,6 @@ See also: beamtalk_compiled_method_ops for CompiledMethod field access
 """.
 
 -include("beamtalk.hrl").
--include_lib("kernel/include/logger.hrl").
 
 -export([resolve/2]).
 
@@ -87,12 +86,33 @@ resolve(Other, _Selector) ->
     ),
     beamtalk_error:raise(Error2).
 
--doc "Resolve a method, walking the superclass chain if not found locally.".
+-doc """
+Resolve a method, walking the superclass chain if not found locally.
+
+BT-2786: The walk itself (depth guard, cycle warning, advance-to-superclass)
+is `beamtalk_hierarchy:walk_ancestors/3`; this function supplies only the
+per-class `{method, Selector}` gen_server probe.
+
+`ClassPid`'s own method table is checked here, outside the depth-counted
+walk — matching the pre-BT-2786 behaviour where the receiver's own class was
+"free" and the `?MAX_HIERARCHY_DEPTH` budget applied only to the superclass
+chain above it (the same split `beamtalk_class_dispatch:find_class_method_in_chain/2`
+uses). The walk itself starts at the immediate superclass.
+""".
 -spec resolve_with_hierarchy(pid(), selector()) -> compiled_method() | 'nil'.
 resolve_with_hierarchy(ClassPid, Selector) ->
     case gen_server:call(ClassPid, {method, Selector}) of
         nil ->
-            walk_superclass_chain(ClassPid, Selector, 0);
+            StepFun = fun(Pid, _Depth) -> method_step(Pid, Selector) end,
+            case
+                beamtalk_hierarchy:walk_ancestors(
+                    superclass_pid(ClassPid), StepFun, ?MAX_HIERARCHY_DEPTH
+                )
+            of
+                {found, Method} -> Method;
+                not_found -> nil;
+                max_depth_exceeded -> nil
+            end;
         Method ->
             Method
     end.
@@ -111,33 +131,34 @@ resolve_class_side(ClassPid, Selector) ->
     gen_server:call(ClassPid, {class_method, Selector}).
 
 -doc """
-Walk the superclass chain to find an inherited method.
-
-Gets the superclass name from the current class, looks up its pid,
-and checks for the method. Recurses until the method is found or
-the chain is exhausted (superclass = none). Guarded by
-MAX_HIERARCHY_DEPTH to prevent infinite recursion on corrupted hierarchies.
+Per-node probe for the `beamtalk_hierarchy:walk_ancestors/3` walk: check
+`ClassPid`'s own method table for `Selector`, and if absent, resolve its
+superclass's pid as the next node.
 """.
--spec walk_superclass_chain(pid(), selector(), non_neg_integer()) -> compiled_method() | 'nil'.
-walk_superclass_chain(_ClassPid, _Selector, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
-    ?LOG_WARNING(">> hierarchy walk exceeded ~p levels", [?MAX_HIERARCHY_DEPTH], #{
-        domain => [beamtalk, runtime]
-    }),
-    nil;
-walk_superclass_chain(ClassPid, Selector, Depth) ->
+-spec method_step(pid(), selector()) -> beamtalk_hierarchy:step_result(compiled_method()).
+method_step(ClassPid, Selector) ->
+    case gen_server:call(ClassPid, {method, Selector}) of
+        nil ->
+            case superclass_pid(ClassPid) of
+                none -> not_found;
+                SuperPid -> {next, SuperPid}
+            end;
+        Method ->
+            {found, Method}
+    end.
+
+-doc """
+Resolve `ClassPid`'s immediate superclass to its process pid, or `none` if
+there is no superclass or its process is not registered.
+""".
+-spec superclass_pid(pid()) -> pid() | none.
+superclass_pid(ClassPid) ->
     case beamtalk_object_class:superclass(ClassPid) of
         none ->
-            nil;
+            none;
         SuperName ->
             case beamtalk_class_registry:whereis_class(SuperName) of
-                undefined ->
-                    nil;
-                SuperPid ->
-                    case gen_server:call(SuperPid, {method, Selector}) of
-                        nil ->
-                            walk_superclass_chain(SuperPid, Selector, Depth + 1);
-                        Method ->
-                            Method
-                    end
+                undefined -> none;
+                SuperPid -> SuperPid
             end
     end.

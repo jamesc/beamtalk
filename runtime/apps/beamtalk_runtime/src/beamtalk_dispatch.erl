@@ -239,84 +239,107 @@ chain walk via has_method/2 + superclass/1. At max hierarchy depth of 6
 (typical 4), this means at most ~12 gen_server calls — microseconds on a
 local node. The flattened table cache was removed to eliminate BT-510's
 race window and O(N) rebuild broadcast cascade.
+
+BT-2786: The walk itself (depth guard, cycle warning, advance-to-superclass)
+is `beamtalk_hierarchy:walk_ancestors/3`; `class_chain_step/6` supplies only
+the per-class `has_method/2` + `superclass/1` probe and method invocation.
 """.
 -spec lookup_in_class_chain(selector(), args(), bt_self(), state(), class_name()) ->
     dispatch_result().
 lookup_in_class_chain(Selector, Args, Self, State, ClassName) ->
-    case beamtalk_class_registry:whereis_class(ClassName) of
-        undefined ->
-            {error, beamtalk_error:new(class_not_found, ClassName, Selector)};
-        ClassPid ->
-            lookup_in_class_chain_slow(Selector, Args, Self, State, ClassName, ClassPid, 0)
+    %% No separate whereis_class/1 pre-check here: class_chain_step/6 performs
+    %% that lookup for every node it visits (including ClassName itself, at
+    %% depth 0) and already produces the identical class_not_found error, so
+    %% a pre-check would just be a redundant registry lookup on the hot path.
+    StepFun = fun(CurrentClass, Depth) ->
+        class_chain_step(Selector, Args, Self, State, CurrentClass, Depth)
+    end,
+    case beamtalk_hierarchy:walk_ancestors(ClassName, StepFun, ?MAX_HIERARCHY_DEPTH) of
+        {found, Result} ->
+            Result;
+        max_depth_exceeded ->
+            {error,
+                beamtalk_error:new(
+                    does_not_understand,
+                    ClassName,
+                    Selector,
+                    <<"Hierarchy depth limit exceeded — possible cycle in class hierarchy">>
+                )};
+        not_found ->
+            %% Unreachable: class_chain_step/6 always resolves to
+            %% {found, _} or {next, _}, never a bare not_found. Kept
+            %% for exhaustiveness against the generic walker's contract.
+            {error, beamtalk_error:new(does_not_understand, ClassName, Selector)}
     end.
 
 -doc """
-Slow path: recursive hierarchy walk (O(depth)).
-
-Used when flattened table is missing, stale, or incomplete.
-This is the original ADR 0006 Phase 1 implementation.
+Per-node probe for the `beamtalk_hierarchy:walk_ancestors/3` walk: check
+whether `ClassName` has `Selector` locally and, if so, invoke it; otherwise
+advance to its superclass. Always resolves to `{found, dispatch_result()}` —
+this module never lets the generic walker's bare `not_found` escape, since
+every "not found here" branch already knows how to build a structured
+`#beamtalk_error{}`.
 """.
--spec lookup_in_class_chain_slow(
-    selector(), args(), bt_self(), state(), class_name(), pid(), non_neg_integer()
-) -> dispatch_result().
-lookup_in_class_chain_slow(Selector, _Args, _Self, _State, ClassName, _ClassPid, Depth) when
-    Depth > ?MAX_HIERARCHY_DEPTH
-->
-    ?LOG_WARNING("Max hierarchy depth exceeded — possible cycle", #{
-        max_depth => ?MAX_HIERARCHY_DEPTH,
-        class => ClassName,
-        selector => Selector,
-        domain => [beamtalk, runtime]
-    }),
-    {error,
-        beamtalk_error:new(
-            does_not_understand,
-            ClassName,
-            Selector,
-            <<"Hierarchy depth limit exceeded — possible cycle in class hierarchy">>
-        )};
-lookup_in_class_chain_slow(Selector, Args, Self, State, ClassName, ClassPid, Depth) ->
-    %% Check if this class has the method
-    case beamtalk_object_class:has_method(ClassPid, Selector) of
-        true ->
-            %% Found the method - invoke it
-            invoke_method(ClassName, ClassPid, Selector, Args, Self, State, Depth);
-        false ->
-            %% Not found in this class - try superclass
-            case beamtalk_object_class:superclass(ClassPid) of
-                none ->
-                    %% Reached root without finding method
-                    ?LOG_DEBUG("Method not found in hierarchy", #{
-                        selector => Selector,
-                        root => ClassName,
-                        domain => [beamtalk, runtime]
-                    }),
-                    %% BT-753: Derive class from Self when State is empty (class objects).
-                    ErrorClass = class_name_from(Self, State, ClassName),
-                    Error = beamtalk_error:new(
-                        does_not_understand,
-                        ErrorClass,
-                        Selector,
-                        <<"Check spelling or use 'respondsTo:' to verify method exists">>
-                    ),
-                    {error, Error};
-                SuperclassName ->
-                    %% Recurse to superclass
-                    case beamtalk_class_registry:whereis_class(SuperclassName) of
-                        undefined ->
-                            {error, beamtalk_error:new(class_not_found, SuperclassName, Selector)};
-                        SuperclassPid ->
-                            lookup_in_class_chain_slow(
+-spec class_chain_step(selector(), args(), bt_self(), state(), class_name(), non_neg_integer()) ->
+    beamtalk_hierarchy:step_result(dispatch_result()).
+class_chain_step(Selector, Args, Self, State, ClassName, _Depth) ->
+    case beamtalk_class_registry:whereis_class(ClassName) of
+        undefined ->
+            {found, {error, beamtalk_error:new(class_not_found, ClassName, Selector)}};
+        ClassPid ->
+            case beamtalk_object_class:has_method(ClassPid, Selector) of
+                true ->
+                    %% Found the method - invoke it
+                    invoke_step(ClassName, ClassPid, Selector, Args, Self, State);
+                false ->
+                    %% Not found in this class - try superclass
+                    case beamtalk_object_class:superclass(ClassPid) of
+                        none ->
+                            %% Reached root without finding method
+                            ?LOG_DEBUG("Method not found in hierarchy", #{
+                                selector => Selector,
+                                root => ClassName,
+                                domain => [beamtalk, runtime]
+                            }),
+                            %% BT-753: Derive class from Self when State is empty (class objects).
+                            ErrorClass = class_name_from(Self, State, ClassName),
+                            Error = beamtalk_error:new(
+                                does_not_understand,
+                                ErrorClass,
                                 Selector,
-                                Args,
-                                Self,
-                                State,
-                                SuperclassName,
-                                SuperclassPid,
-                                Depth + 1
-                            )
+                                <<"Check spelling or use 'respondsTo:' to verify method exists">>
+                            ),
+                            {found, {error, Error}};
+                        SuperclassName ->
+                            {next, SuperclassName}
                     end
             end
+    end.
+
+-doc """
+Invoke a method found in the hierarchy, adapting `invoke_method/6`'s
+`{continue, SuperclassName}` escape hatch (module-less / dispatch-less
+classes, BT-427) to the walker's step protocol.
+""".
+-spec invoke_step(class_name(), pid(), selector(), args(), bt_self(), state()) ->
+    beamtalk_hierarchy:step_result(dispatch_result()).
+invoke_step(ClassName, ClassPid, Selector, Args, Self, State) ->
+    case invoke_method(ClassName, ClassPid, Selector, Args, Self, State) of
+        {continue, none} ->
+            %% Reached root without finding a dispatchable method (BT-427).
+            %% BT-753: Derive class from Self when State is empty (class objects).
+            ErrorClass = class_name_from(Self, State, unknown),
+            Error = beamtalk_error:new(
+                does_not_understand,
+                ErrorClass,
+                Selector,
+                <<"Check spelling or use 'respondsTo:' to verify method exists">>
+            ),
+            {found, {error, Error}};
+        {continue, SuperclassName} ->
+            {next, SuperclassName};
+        Result ->
+            {found, Result}
     end.
 
 -doc """
@@ -328,16 +351,18 @@ This function handles invocation for both compiled and dynamic classes:
 
 The class process knows the module name, so we can determine which strategy to use.
 ClassPid is passed from the caller to avoid a redundant whereis_class lookup.
-Depth is threaded through for cycle detection in continue_to_superclass.
+Returns `{continue, SuperclassName | none}` when this class has no
+dispatchable module (BT-427) — the caller (`invoke_step/6`) advances the
+walk or raises `does_not_understand` accordingly.
 """.
--spec invoke_method(class_name(), pid(), selector(), args(), bt_self(), state(), non_neg_integer()) ->
-    dispatch_result().
-invoke_method(MethodOwner, ClassPid, Selector, Args, Self, State, Depth) ->
+-spec invoke_method(class_name(), pid(), selector(), args(), bt_self(), state()) ->
+    dispatch_result() | {continue, class_name() | none}.
+invoke_method(MethodOwner, ClassPid, Selector, Args, Self, State) ->
     %% Get the module name for this class
     case beamtalk_object_class:module_name(ClassPid) of
         undefined ->
             %% Dynamic class or no module — continue to superclass (BT-427)
-            continue_to_superclass(Selector, Args, Self, State, ClassPid, Depth);
+            {continue, beamtalk_object_class:superclass(ClassPid)};
         ModuleName ->
             %% Ensure the module is loaded before checking exports.
             %% BEAM lazy-loads modules, and function_exported/3 only checks
@@ -349,7 +374,7 @@ invoke_method(MethodOwner, ClassPid, Selector, Args, Self, State, Depth) ->
             case erlang:function_exported(ModuleName, dispatch, 4) of
                 false ->
                     %% Module exists but lacks dispatch/4 — continue to superclass (BT-427)
-                    continue_to_superclass(Selector, Args, Self, State, ClassPid, Depth);
+                    {continue, beamtalk_object_class:superclass(ClassPid)};
                 true ->
                     %% Intercept printString/displayString/inspect for actor
                     %% instances and route them to beamtalk_object_ops — but only
@@ -449,36 +474,6 @@ invoke_method(MethodOwner, ClassPid, Selector, Args, Self, State, Depth) ->
 -spec dispatch_context(selector(), bt_self(), state(), class_name()) -> map().
 dispatch_context(Selector, Self, State, MethodOwner) ->
     #{selector => Selector, class => class_name_from(Self, State, MethodOwner)}.
-
--doc """
-Continue hierarchy walk to superclass when current class can't dispatch.
-Used when a class has no module or its module lacks dispatch/4 (abstract classes).
-""".
--spec continue_to_superclass(selector(), args(), bt_self(), state(), pid(), non_neg_integer()) ->
-    dispatch_result().
-continue_to_superclass(Selector, Args, Self, State, ClassPid, Depth) ->
-    case beamtalk_object_class:superclass(ClassPid) of
-        none ->
-            %% Reached root without finding dispatchable method
-            %% BT-753: Derive class from Self when State is empty (class objects).
-            ClassName = class_name_from(Self, State, unknown),
-            Error = beamtalk_error:new(
-                does_not_understand,
-                ClassName,
-                Selector,
-                <<"Check spelling or use 'respondsTo:' to verify method exists">>
-            ),
-            {error, Error};
-        SuperclassName ->
-            case beamtalk_class_registry:whereis_class(SuperclassName) of
-                undefined ->
-                    {error, beamtalk_error:new(class_not_found, SuperclassName, Selector)};
-                SuperclassPid ->
-                    lookup_in_class_chain_slow(
-                        Selector, Args, Self, State, SuperclassName, SuperclassPid, Depth + 1
-                    )
-            end
-    end.
 
 -doc """
 Invoke an extension method.

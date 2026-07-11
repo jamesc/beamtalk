@@ -746,36 +746,30 @@ without a matching methods entry is not reachable from normal dispatch.
 
 Safe to call from within a gen_server `handle_call` because we only walk
 UP the hierarchy (no circular dependency possible).
+
+BT-2786: The walk itself (depth guard, cycle warning, advance-to-superclass)
+is `beamtalk_hierarchy:walk_ancestors/3`; this function supplies only the
+per-ancestor ETS probe.
 """.
 -spec find_class_method_in_chain(selector(), class_name()) ->
     {ok, class_name(), atom()} | not_found.
 find_class_method_in_chain(Selector, ClassName) ->
     SuperclassName = superclass_from_ets(ClassName),
-    find_class_method_in_ancestors(Selector, SuperclassName, 0).
-
--spec find_class_method_in_ancestors(selector(), class_name() | none, non_neg_integer()) ->
-    {ok, class_name(), atom()} | not_found.
-find_class_method_in_ancestors(_Selector, none, _Depth) ->
-    not_found;
-find_class_method_in_ancestors(_Selector, AncestorName, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
-    ?LOG_WARNING(
-        "find_class_method_in_ancestors: max hierarchy depth ~p exceeded at ~p — possible cycle",
-        [?MAX_HIERARCHY_DEPTH, AncestorName],
-        #{domain => [beamtalk, runtime]}
-    ),
-    not_found;
-find_class_method_in_ancestors(Selector, AncestorName, Depth) ->
-    case beamtalk_class_metadata:lookup_methods(AncestorName) of
-        {ok, AncestorModule, Selectors} ->
-            case lists:member(Selector, Selectors) of
-                true ->
-                    {ok, AncestorName, AncestorModule};
-                false ->
-                    Next = superclass_from_ets(AncestorName),
-                    find_class_method_in_ancestors(Selector, Next, Depth + 1)
-            end;
-        not_found ->
-            not_found
+    StepFun = fun(AncestorName, _Depth) ->
+        case beamtalk_class_metadata:lookup_methods(AncestorName) of
+            {ok, AncestorModule, Selectors} ->
+                case lists:member(Selector, Selectors) of
+                    true -> {found, {AncestorName, AncestorModule}};
+                    false -> {next, superclass_from_ets(AncestorName)}
+                end;
+            not_found ->
+                not_found
+        end
+    end,
+    case beamtalk_hierarchy:walk_ancestors(SuperclassName, StepFun, ?MAX_HIERARCHY_DEPTH) of
+        {found, {AncestorName, AncestorModule}} -> {ok, AncestorName, AncestorModule};
+        not_found -> not_found;
+        max_depth_exceeded -> not_found
     end.
 
 -doc "Read the superclass name from the hierarchy table (no gen_server call).".
