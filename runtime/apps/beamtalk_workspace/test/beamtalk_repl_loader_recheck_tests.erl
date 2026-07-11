@@ -467,3 +467,197 @@ no_op_install_with_nothing_to_clear_announces_nothing_test_() ->
                 end)
             ]
         end}}.
+
+%%====================================================================
+%% Caller-cap staleness marking (ADR 0105, BT-2802)
+%%====================================================================
+
+%% Second dependent, alphabetically AFTER Dashboard — with `recheck_caller_cap`
+%% set to 1, `apply_cap/2`'s alphabetically-first-N rule always keeps
+%% Dashboard and drops ListView.
+listview_xref() ->
+    [
+        #{
+            class_side => false,
+            selector => 'render:',
+            line => 2,
+            sends => [#{selector => size, line => 2, recv_kind => other}],
+            references => [#{class => 'LoaderReCheckCounter', line => 2}],
+            source_status => indexed,
+            provenance => class_body
+        }
+    ].
+
+listview_source() ->
+    <<
+        "Object subclass: LoaderReCheckListView\n"
+        "  render: c :: LoaderReCheckCounter -> Integer => (c size) + 1\n"
+    >>.
+
+%% Installs both dependents of `size`, with the caller cap set to 1 so
+%% Dashboard (alphabetically first) is always kept and ListView is always
+%% dropped. Restores the previous cap in a `try/after`.
+with_capped_fixture(ReturnType, Fun) ->
+    PrevCap = application:get_env(beamtalk_workspace, recheck_caller_cap, 20),
+    application:set_env(beamtalk_workspace, recheck_caller_cap, 1),
+    try
+        install_fixture(ReturnType),
+        ok = beamtalk_xref:register_class('LoaderReCheckListView', listview_xref()),
+        ok = beamtalk_workspace_meta:set_class_source(
+            <<"LoaderReCheckListView">>, listview_source()
+        ),
+        Fun()
+    after
+        application:set_env(beamtalk_workspace, recheck_caller_cap, PrevCap)
+    end.
+
+%% BT-2802 core bug scenario: ListView was flagged by an earlier reload of
+%% Counter (when it was still inside the cap, or the cap was higher then).
+%% This reload's candidate set is capped to 1, so ListView is dropped —
+%% never re-checked. Without the fix, ListView's stale, generation-A
+%% finding would sit in the store unchanged forever, indistinguishable from
+%% a freshly-verified one. With the fix, `maybe_trigger_recheck/4` marks it
+%% in place (same message/severity/classification, `note` now says it was
+%% not re-verified this reload).
+capped_out_candidate_with_existing_finding_gets_marked_stale_test_() ->
+    {timeout, 30,
+        {setup, fun loader_recheck_setup/0, fun loader_recheck_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    with_capped_fixture('String', fun() ->
+                        %% Seed ListView's origin bucket as if an earlier
+                        %% reload of Counter had already checked it and
+                        %% found it stale.
+                        SeedFinding = #{
+                            owner => <<"LoaderReCheckListView">>,
+                            changed_class => <<"LoaderReCheckCounter">>,
+                            selector => <<"size">>,
+                            classification => signature_change,
+                            severity => <<"warning">>,
+                            category => <<"Dnu">>,
+                            message => <<"stale generation-A finding">>,
+                            note => undefined,
+                            sites => [#{method => <<"render:">>, line => 2}],
+                            start => 0,
+                            'end' => 5
+                        },
+                        _ = beamtalk_workspace_findings_store:put_owner_origin(
+                            <<"LoaderReCheckListView">>, <<"LoaderReCheckCounter">>, [SeedFinding]
+                        ),
+
+                        ok = beamtalk_repl_loader:maybe_trigger_recheck(
+                            <<"LoaderReCheckCounter">>,
+                            <<"size">>,
+                            instance,
+                            {captured, undefined, signature_change}
+                        ),
+
+                        %% Dashboard (kept by the cap) got a real, fresh
+                        %% re-check.
+                        DashboardFindings = beamtalk_workspace_findings_store:for_owner(
+                            <<"LoaderReCheckDashboard">>
+                        ),
+                        ?assertEqual(1, length(DashboardFindings)),
+
+                        %% ListView (dropped by the cap) keeps its original
+                        %% finding's message/severity/classification —
+                        %% untouched, since nothing re-verified it — but its
+                        %% `note` is overwritten to flag it as not
+                        %% re-checked this reload.
+                        [ListViewFinding] = beamtalk_workspace_findings_store:get_origin(
+                            <<"LoaderReCheckListView">>, <<"LoaderReCheckCounter">>
+                        ),
+                        ?assertEqual(
+                            <<"stale generation-A finding">>, maps:get(message, ListViewFinding)
+                        ),
+                        ?assertEqual(<<"warning">>, maps:get(severity, ListViewFinding)),
+                        Note = maps:get(note, ListViewFinding),
+                        ?assert(is_binary(Note)),
+                        ?assert(
+                            binary:match(Note, <<"not re-checked against the latest reload">>) =/=
+                                nomatch
+                        )
+                    end)
+                end)
+            ]
+        end}}.
+
+%% A cap-dropped candidate with NO existing finding for this origin (the
+%% common case — most candidates never had a problem) is left alone: no
+%% spurious entry is created just because the cap excluded it.
+capped_out_candidate_with_no_existing_finding_stays_absent_test_() ->
+    {timeout, 30,
+        {setup, fun loader_recheck_setup/0, fun loader_recheck_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    with_capped_fixture('String', fun() ->
+                        ok = beamtalk_repl_loader:maybe_trigger_recheck(
+                            <<"LoaderReCheckCounter">>,
+                            <<"size">>,
+                            instance,
+                            {captured, undefined, signature_change}
+                        ),
+                        ?assertEqual(
+                            [],
+                            beamtalk_workspace_findings_store:get_origin(
+                                <<"LoaderReCheckListView">>, <<"LoaderReCheckCounter">>
+                            )
+                        )
+                    end)
+                end)
+            ]
+        end}}.
+
+%% A stale note is not re-wrapped on every consecutive capped-out reload —
+%% otherwise a candidate parked outside the cap for many reloads in a row
+%% would accumulate one "not re-checked" suffix per reload.
+capped_out_stale_note_is_idempotent_across_reloads_test_() ->
+    {timeout, 30,
+        {setup, fun loader_recheck_setup/0, fun loader_recheck_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    with_capped_fixture('String', fun() ->
+                        SeedFinding = #{
+                            owner => <<"LoaderReCheckListView">>,
+                            changed_class => <<"LoaderReCheckCounter">>,
+                            selector => <<"size">>,
+                            classification => signature_change,
+                            severity => <<"warning">>,
+                            category => <<"Dnu">>,
+                            message => <<"stale generation-A finding">>,
+                            note => undefined,
+                            sites => [#{method => <<"render:">>, line => 2}],
+                            start => 0,
+                            'end' => 5
+                        },
+                        _ = beamtalk_workspace_findings_store:put_owner_origin(
+                            <<"LoaderReCheckListView">>, <<"LoaderReCheckCounter">>, [SeedFinding]
+                        ),
+
+                        %% Two consecutive reloads of Counter, both capping
+                        %% ListView out.
+                        ok = beamtalk_repl_loader:maybe_trigger_recheck(
+                            <<"LoaderReCheckCounter">>,
+                            <<"size">>,
+                            instance,
+                            {captured, undefined, signature_change}
+                        ),
+                        [FirstMarked] = beamtalk_workspace_findings_store:get_origin(
+                            <<"LoaderReCheckListView">>, <<"LoaderReCheckCounter">>
+                        ),
+                        ok = beamtalk_repl_loader:maybe_trigger_recheck(
+                            <<"LoaderReCheckCounter">>,
+                            <<"size">>,
+                            instance,
+                            {captured, 'String', signature_change}
+                        ),
+                        [SecondMarked] = beamtalk_workspace_findings_store:get_origin(
+                            <<"LoaderReCheckListView">>, <<"LoaderReCheckCounter">>
+                        ),
+                        ?assertEqual(
+                            maps:get(note, FirstMarked), maps:get(note, SecondMarked)
+                        )
+                    end)
+                end)
+            ]
+        end}}.

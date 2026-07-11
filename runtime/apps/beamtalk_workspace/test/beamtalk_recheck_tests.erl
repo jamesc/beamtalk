@@ -665,7 +665,8 @@ trigger_never_raises_on_unknown_selector_test_() ->
                             total_candidates => 0,
                             not_checked => 0,
                             cap_note => undefined,
-                            checked_owners => []
+                            checked_owners => [],
+                            not_checked_owners => []
                         },
                         Result
                     )
@@ -1115,7 +1116,8 @@ trigger_pending_no_ambient_meta_is_empty_result_test_() ->
                             total_candidates => 0,
                             not_checked => 0,
                             cap_note => undefined,
-                            checked_owners => []
+                            checked_owners => [],
+                            not_checked_owners => []
                         },
                         Result
                     )

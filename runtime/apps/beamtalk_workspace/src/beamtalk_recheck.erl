@@ -133,6 +133,18 @@ and `findings` alone omits clean classes entirely). `trigger/4` is
 synchronous and best-effort: any internal failure degrades to an empty
 result rather than raising, since a re-check failure must never affect the
 reload that triggered it (ADR 0105: "advisory, never blocking").
+
+`result()`'s `not_checked_owners` field exists for the same consumer, as
+`checked_owners`'s complement: it is the caller-cap-dropped candidates (the
+alphabetically-last owners `apply_cap/2` excluded from `Kept`), named rather
+than only counted (`not_checked`). BT-2802: a candidate dropped by the cap
+this reload may already have a stored finding from an earlier reload where
+it *was* checked — that finding was never re-verified against the current
+generation and must not keep asserting itself as current forever.
+`beamtalk_repl_loader:maybe_run_recheck/4` uses this field to mark any such
+pre-existing finding's `note` as possibly-stale in place, rather than either
+silently dropping it (could hide a real, still-live problem) or leaving it
+looking freshly-verified (the BT-2802 bug).
 """.
 
 -include_lib("kernel/include/logger.hrl").
@@ -204,7 +216,8 @@ reload that triggered it (ADR 0105: "advisory, never blocking").
     total_candidates := non_neg_integer(),
     not_checked := non_neg_integer(),
     cap_note := binary() | undefined,
-    checked_owners := [binary()]
+    checked_owners := [binary()],
+    not_checked_owners := [binary()]
 }.
 
 %% A whole-image finding (`trigger_image/0`) — lighter than `finding()`: no
@@ -486,7 +499,8 @@ empty_result() ->
         total_candidates => 0,
         not_checked => 0,
         cap_note => undefined,
-        checked_owners => []
+        checked_owners => [],
+        not_checked_owners => []
     }.
 
 -spec do_trigger_pending(
@@ -705,7 +719,8 @@ do_trigger(ClassNameBin, SelectorBin, Classification) ->
         total_candidates => length(OwnerGroups),
         not_checked => NotChecked,
         cap_note => cap_note(NotChecked),
-        checked_owners => CheckedOwners
+        checked_owners => CheckedOwners,
+        not_checked_owners => not_checked_owners(OwnerGroups, Kept)
     }.
 
 -spec do_trigger_shape(binary(), [shape_field_change()]) -> result().
@@ -732,8 +747,21 @@ do_trigger_shape(ClassNameBin, FieldChanges) ->
         total_candidates => length(OwnerGroups),
         not_checked => NotChecked,
         cap_note => cap_note(NotChecked),
-        checked_owners => CheckedOwners
+        checked_owners => CheckedOwners,
+        not_checked_owners => not_checked_owners(OwnerGroups, Kept)
     }.
+
+-doc """
+The candidates the caller cap dropped this trigger — `Candidates` (every
+group `group_by_owner/1` found) minus `Kept` (`apply_cap/2`'s survivors),
+named as owner binaries. `Candidates` arrives as `Kept`'s superset with
+`Kept` as its prefix (`apply_cap/2`'s contract), so list subtraction is exact
+and does not need a set datatype. See `result()`'s `not_checked_owners` doc
+(BT-2802) for why this is exposed rather than just counted.
+""".
+-spec not_checked_owners([{atom(), [map()]}], [{atom(), [map()]}]) -> [binary()].
+not_checked_owners(Candidates, Kept) ->
+    [atom_to_binary(Owner, utf8) || {Owner, _} <- Candidates -- Kept].
 
 -doc """
 The selector set whose senders are candidate dependents of a shape change:

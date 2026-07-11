@@ -84,7 +84,9 @@ store_test_() ->
         fun for_owner_flattens_every_origin/1,
         fun all_flattens_every_owner_and_origin/1,
         fun all_is_sorted_deterministically/1,
-        fun clear_resets_every_owner/1
+        fun clear_resets_every_owner/1,
+        fun get_origin_returns_empty_for_unknown_pair/1,
+        fun get_origin_is_scoped_to_exact_owner_and_changed_class/1
     ]}.
 
 fresh_store_has_no_findings(_Pid) ->
@@ -247,4 +249,43 @@ clear_resets_every_owner(_Pid) ->
         ?_assertEqual([], beamtalk_workspace_findings_store:all()),
         ?_assertEqual([], beamtalk_workspace_findings_store:for_owner(<<"Dashboard">>)),
         ?_assertEqual([], beamtalk_workspace_findings_store:for_owner(<<"StatsView">>))
+    ].
+
+%% get_origin/2 (BT-2802) — the read side `mark_capped_out_findings_stale/2`
+%% (beamtalk_repl_loader) needs to check "does this exact origin already
+%% have a finding worth marking stale" without pulling in a different
+%% changed class's contribution the way for_owner/1 deliberately does.
+get_origin_returns_empty_for_unknown_pair(_Pid) ->
+    [
+        ?_assertEqual(
+            [], beamtalk_workspace_findings_store:get_origin(<<"Dashboard">>, <<"Counter">>)
+        )
+    ].
+
+get_origin_is_scoped_to_exact_owner_and_changed_class(_Pid) ->
+    CounterFinding = finding(<<"Dashboard">>, <<"Counter">>, <<"getCount">>, <<"counter msg">>),
+    WidgetFinding = finding(<<"Dashboard">>, <<"Widget">>, <<"size">>, <<"widget msg">>),
+    OtherOwnerFinding = finding(<<"StatsView">>, <<"Counter">>, <<"getCount">>, <<"stats msg">>),
+    _ = beamtalk_workspace_findings_store:put_owner_origin(<<"Dashboard">>, <<"Counter">>, [
+        CounterFinding
+    ]),
+    _ = beamtalk_workspace_findings_store:put_owner_origin(<<"Dashboard">>, <<"Widget">>, [
+        WidgetFinding
+    ]),
+    _ = beamtalk_workspace_findings_store:put_owner_origin(<<"StatsView">>, <<"Counter">>, [
+        OtherOwnerFinding
+    ]),
+    [
+        ?_assertEqual(
+            [CounterFinding],
+            beamtalk_workspace_findings_store:get_origin(<<"Dashboard">>, <<"Counter">>)
+        ),
+        ?_assertEqual(
+            [WidgetFinding],
+            beamtalk_workspace_findings_store:get_origin(<<"Dashboard">>, <<"Widget">>)
+        ),
+        ?_assertEqual(
+            [],
+            beamtalk_workspace_findings_store:get_origin(<<"StatsView">>, <<"Widget">>)
+        )
     ].

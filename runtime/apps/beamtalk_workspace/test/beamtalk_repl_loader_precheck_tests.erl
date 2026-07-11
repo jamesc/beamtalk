@@ -255,7 +255,8 @@ precheck_no_op_signature_reports_empty_test_() ->
                             total_candidates => 0,
                             not_checked => 0,
                             cap_note => undefined,
-                            checked_owners => []
+                            checked_owners => [],
+                            not_checked_owners => []
                         },
                         Result
                     )
