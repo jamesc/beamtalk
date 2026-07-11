@@ -44,6 +44,23 @@ now correctly scoped:
   second call's replacement is unconditional, so generation-A findings can
   never survive alongside generation-B ones for that origin.
 
+## Caller-cap staleness marking (ADR 0105, BT-2802)
+
+`beamtalk_recheck:apply_cap/2` keeps only the alphabetically-first N
+candidates per reload; a candidate the cap drops is never re-checked that
+reload, so `put_owner_origin/3` above is never called for it. Left alone,
+an origin bucket recorded while that owner *was* within the cap would
+silently keep asserting itself as current forever, even after whatever it
+flagged is fixed upstream — the cap is a re-check *capacity* limit, not a
+statement that the dropped candidates are fine. `get_origin/2` exists so
+`beamtalk_repl_loader:maybe_run_recheck/4` can check, for each cap-dropped
+candidate (`beamtalk_recheck:result()`'s `not_checked_owners`), whether this
+changed class already left a finding on it — and if so, overwrite that
+finding's `note` in place (still via `put_owner_origin/3`, same replace
+semantics) to say it was not re-verified this reload, rather than either
+deleting it (could hide a real, still-live problem) or leaving it looking
+freshly-verified.
+
 `clear_owner/1` is the *other*, deliberately un-scoped operation: it wipes
 **every** origin bucket for one caller class, fired whenever that caller's
 *own* source changes (`beamtalk_repl_loader:maybe_trigger_recheck/4` calls
@@ -125,7 +142,7 @@ edge case on an already-advisory-only feature.
 
 -include_lib("kernel/include/logger.hrl").
 
--export([start_link/0, put_owner_origin/3, clear_owner/1, for_owner/1, all/0, clear/0]).
+-export([start_link/0, put_owner_origin/3, clear_owner/1, get_origin/2, for_owner/1, all/0, clear/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -183,6 +200,20 @@ for_owner(OwnerBin) when is_binary(OwnerBin) ->
     gen_server:call(?MODULE, {for_owner, OwnerBin}).
 
 -doc """
+Read-only lookup of the single `{OwnerBin, ChangedClassBin}` origin bucket
+(BT-2802) — `[]` when nothing is stored for that exact pair. Unlike
+`for_owner/1`, this does not flatten across origins: a caller
+(`beamtalk_repl_loader:maybe_run_recheck/4`) needs to know whether *this
+specific* changed class already left a finding on `OwnerBin` before deciding
+whether there is anything to mark stale when `OwnerBin` gets dropped by the
+caller cap on a later reload of the same changed class. Does not mutate the
+store.
+""".
+-spec get_origin(binary(), binary()) -> [finding()].
+get_origin(OwnerBin, ChangedClassBin) when is_binary(OwnerBin), is_binary(ChangedClassBin) ->
+    gen_server:call(?MODULE, {get_origin, OwnerBin, ChangedClassBin}).
+
+-doc """
 Every currently-live finding across every caller class and origin,
 flattened. Sorted by `{owner, selector, message}` for a deterministic order
 — callers that render this list (REPL notice, workspace UI) should not
@@ -232,6 +263,11 @@ handle_call({for_owner, OwnerBin}, _From, State = #state{by_origin = ByOrigin}) 
         F
      || {{Owner, _ChangedClass}, F} <- maps:to_list(ByOrigin), Owner =:= OwnerBin
     ]),
+    {reply, Findings, State};
+handle_call(
+    {get_origin, OwnerBin, ChangedClassBin}, _From, State = #state{by_origin = ByOrigin}
+) ->
+    Findings = maps:get({OwnerBin, ChangedClassBin}, ByOrigin, []),
     {reply, Findings, State};
 handle_call(all, _From, State = #state{by_origin = ByOrigin}) ->
     All = lists:append(maps:values(ByOrigin)),

@@ -1002,7 +1002,8 @@ no_pending_change_result() ->
         total_candidates => 0,
         not_checked => 0,
         cap_note => undefined,
-        checked_owners => []
+        checked_owners => [],
+        not_checked_owners => []
     }.
 
 -doc """
@@ -1956,7 +1957,8 @@ maybe_run_recheck(_ClassNameBin, _SelectorBin, _Side, {captured, _Prev, no_op}) 
     {self_edit, undefined};
 maybe_run_recheck(ClassNameBin, SelectorBin, Side, {captured, _Prev, Classification}) ->
     Result = beamtalk_recheck:trigger(ClassNameBin, SelectorBin, Side, Classification),
-    #{checked_owners := CheckedOwners, findings := Findings} = Result,
+    #{checked_owners := CheckedOwners, findings := Findings, not_checked_owners := NotCheckedOwners} =
+        Result,
     lists:foreach(
         fun(OwnerBin) ->
             OwnerFindings = [F || F <- Findings, maps:get(owner, F) =:= OwnerBin],
@@ -1964,7 +1966,87 @@ maybe_run_recheck(ClassNameBin, SelectorBin, Side, {captured, _Prev, Classificat
         end,
         CheckedOwners
     ),
+    mark_capped_out_findings_stale(ClassNameBin, NotCheckedOwners),
     {Classification, Result}.
+
+%% BT-2802: a candidate the caller cap dropped this reload (`NotCheckedOwners`
+%% — `beamtalk_recheck:result()`'s complement of `checked_owners`) never went
+%% through `put_owner_origin/3` above, so any finding it already carries *for
+%% this changed class* is left exactly as a previous, possibly-now-stale
+%% reload wrote it — nothing here re-verified whether the caller's problem
+%% still holds. Rather than let that finding keep asserting itself as
+%% current forever (the BT-2802 bug) or silently drop it (could hide a real,
+%% still-live problem), overwrite its `note` in place, still through
+%% `put_owner_origin/3`'s ordinary replace semantics, to say so. A candidate
+%% with no existing finding for this origin has nothing to mark — most
+%% cap-dropped candidates, every reload — so this is a no-op for them
+%% (`findings_store_get_origin/2` returns `[]`).
+-spec mark_capped_out_findings_stale(binary(), [binary()]) -> ok.
+mark_capped_out_findings_stale(ClassNameBin, NotCheckedOwners) ->
+    lists:foreach(
+        fun(OwnerBin) ->
+            case findings_store_get_origin(OwnerBin, ClassNameBin) of
+                [] ->
+                    ok;
+                Existing ->
+                    Stale = [mark_stale_finding(ClassNameBin, F) || F <- Existing],
+                    findings_store_put_owner_origin(OwnerBin, ClassNameBin, Stale)
+            end
+        end,
+        NotCheckedOwners
+    ),
+    ok.
+
+%% Best-effort wrapper around `beamtalk_workspace_findings_store:get_origin/2`
+%% — mirrors `findings_store_clear_owner/1`'s "store may legitimately be
+%% absent, degrade rather than crash" reasoning.
+-spec findings_store_get_origin(binary(), binary()) -> [beamtalk_recheck:finding()].
+findings_store_get_origin(OwnerBin, ChangedClassBin) ->
+    try
+        beamtalk_workspace_findings_store:get_origin(OwnerBin, ChangedClassBin)
+    catch
+        Class:Reason:Stack ->
+            ?LOG_WARNING(
+                "Reload-findings store unavailable (staleness check skipped)",
+                #{
+                    error_class => Class,
+                    reason => Reason,
+                    stack => Stack,
+                    owner => OwnerBin,
+                    changed_class => ChangedClassBin,
+                    domain => [
+                        beamtalk, runtime
+                    ]
+                }
+            ),
+            []
+    end.
+
+%% The marker substring `stale_note/2` looks for to avoid re-wrapping a note
+%% that is already marked — a candidate parked outside the cap for many
+%% consecutive reloads must not accumulate one "not re-checked" suffix per
+%% reload.
+-define(RECHECK_STALE_MARKER, <<"not re-checked against the latest reload">>).
+
+%% Overwrite `Finding`'s `note` to flag it as not re-verified this reload,
+%% unless it is already so marked (idempotent across consecutive
+%% cap-dropped reloads — see `?RECHECK_STALE_MARKER`).
+-spec mark_stale_finding(binary(), beamtalk_recheck:finding()) -> beamtalk_recheck:finding().
+mark_stale_finding(ClassNameBin, Finding = #{note := Note}) when is_binary(Note) ->
+    case binary:match(Note, ?RECHECK_STALE_MARKER) of
+        nomatch -> Finding#{note => stale_note(ClassNameBin, Note)};
+        _ -> Finding
+    end;
+mark_stale_finding(ClassNameBin, Finding) ->
+    Finding#{note => stale_note(ClassNameBin, undefined)}.
+
+-spec stale_note(binary(), binary() | undefined) -> binary().
+stale_note(ClassNameBin, undefined) ->
+    <<"not re-checked against the latest reload of ", ClassNameBin/binary,
+        " (caller-cap limit reached) — may be stale">>;
+stale_note(ClassNameBin, PrevNote) ->
+    <<PrevNote/binary, " — not re-checked against the latest reload of ", ClassNameBin/binary,
+        " (caller-cap limit reached) — may be stale">>.
 
 %% Log + broadcast the outcome of one `maybe_trigger_recheck/4` call — but
 %% only when a live surface has something to act on: either a dependent
@@ -2167,7 +2249,8 @@ publish_shape_recheck_outcome(ClassNameBin, FieldChanges, Result) ->
         findings := Findings,
         checked := Checked,
         not_checked := NotChecked,
-        cap_note := CapNote
+        cap_note := CapNote,
+        not_checked_owners := NotCheckedOwners
     } = Result,
     lists:foreach(
         fun(OwnerBin) ->
@@ -2176,6 +2259,10 @@ publish_shape_recheck_outcome(ClassNameBin, FieldChanges, Result) ->
         end,
         CheckedOwners
     ),
+    %% BT-2802: same caller-cap staleness marking as `maybe_run_recheck/4`
+    %% (see that function's doc) — a shape change's candidates go through the
+    %% same `apply_cap/2` limit.
+    mark_capped_out_findings_stale(ClassNameBin, NotCheckedOwners),
     case CheckedOwners of
         [] ->
             ok;
