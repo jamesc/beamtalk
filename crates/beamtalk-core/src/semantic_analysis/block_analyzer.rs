@@ -137,7 +137,18 @@ impl Analyser {
                     // this is flagged the same way a field-write-plus-captured-local mix
                     // already is above (`has_captured_local_mutations`) — just for the
                     // captured-local-only case that arm never reaches.
-                    if matches!(parent_context, Some(ExprContext::FieldAssignment)) {
+                    //
+                    // Only fire for the captured-local-ONLY case: when a field write
+                    // *also* exists in the same block, the Field arm above already emits
+                    // its own diagnostic for this exact mix (that's what its
+                    // `has_captured_local_mutations` check is for), so skip here to avoid
+                    // reporting two separate errors for one closure.
+                    let has_field_mutation = mutations
+                        .iter()
+                        .any(|m| matches!(m.kind, MutationKind::Field { .. }));
+                    if matches!(parent_context, Some(ExprContext::FieldAssignment))
+                        && !has_field_mutation
+                    {
                         self.result.diagnostics.push(Diagnostic::error(
                             format!(
                                 "cannot mutate captured variable '{name}' inside a closure stored in a field\n\
@@ -450,6 +461,32 @@ mod tests {
                 .iter()
                 .any(|d| d.message.contains("cannot mutate captured variable")),
             "Expected captured-local-in-field-stored-block error, got: {:?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn bt2809_mixed_field_and_captured_local_in_field_stored_block_produces_one_error() {
+        // Code review follow-up: a field-stored block with BOTH a field write and
+        // a captured-local mutation must produce exactly ONE diagnostic (the
+        // Field arm's "cannot assign to field"), not two — the CapturedVariable
+        // arm's own diagnostic is for the captured-local-ONLY case; firing both
+        // for the same closure would be confusing, redundant double-reporting.
+        let src = "Actor subclass: Ctr\n  state: total = 0\n\n  setup =>\n    count := 0\n    self.callback := [:n | self.total := n. count := count + n]\n";
+        let module = parse_module(src);
+        let result = analyse(&module);
+        assert_eq!(
+            result.diagnostics.len(),
+            1,
+            "Expected exactly one diagnostic for a field-stored block with both a \
+             field write and a captured-local mutation, got: {:?}",
+            result.diagnostics
+        );
+        assert!(
+            result.diagnostics[0]
+                .message
+                .contains("cannot assign to field"),
+            "Expected the field-write diagnostic to be the one reported, got: {:?}",
             result.diagnostics
         );
     }

@@ -269,8 +269,33 @@ fn analyze_expression(
         Expression::Cascade {
             receiver, messages, ..
         } => {
+            // `analyze_expression(receiver, ..)` below already checks whether the
+            // cascade's FIRST message is a `self.field value(:...)` send: the
+            // parser folds it into `receiver` as a whole `MessageSend` (see
+            // `parse_cascade`), so `receiver` here IS that MessageSend, and the
+            // `MessageSend` arm's own `is_self_field_value_send` check covers it.
+            //
+            // Code review follow-up (BT-2807): the SECOND and later cascaded
+            // messages are sent to that same underlying receiver too — cascade
+            // semantics evaluate the receiver once and send every message to it —
+            // but `messages` here only stores their selector/arguments, not a
+            // re-wrapped MessageSend, so nothing before this fix ever checked
+            // whether one of THEM was a `self.field value(:...)` send. Extract the
+            // one true underlying receiver shared by every cascaded message (the
+            // inner receiver of the folded first-message MessageSend, or
+            // `receiver` itself if there was no message to fold) and check each
+            // later message's own selector against it directly.
             analyze_expression(receiver, analysis, ctx);
+            let cascade_receiver = match receiver.as_ref() {
+                Expression::MessageSend {
+                    receiver: inner, ..
+                } => inner.as_ref(),
+                other => other,
+            };
             for msg in messages {
+                if is_self_field_value_send(cascade_receiver, &msg.selector) {
+                    analysis.has_field_value_call = true;
+                }
                 for arg in &msg.arguments {
                     analyze_expression(arg, analysis, ctx);
                 }
@@ -662,6 +687,49 @@ mod tests {
         );
         let analysis = analyze_block(&block);
         assert!(!analysis.has_field_value_call);
+    }
+
+    #[test]
+    fn test_analyze_self_field_value_call_as_non_first_cascade_message() {
+        // Code review follow-up (BT-2807): [self.onTick displayString; value: x] —
+        // the parser folds the cascade's FIRST message ("displayString") into
+        // Cascade.receiver as a whole MessageSend, so the true underlying
+        // receiver ("self.onTick") is one level deeper than Cascade.receiver
+        // itself. A self.field value(:...) send appearing as the SECOND (or
+        // later) cascaded message must still be detected, not just a first-message
+        // self.field value(:...) send.
+        let block = Block::new(
+            vec![],
+            vec![bare(Expression::Cascade {
+                receiver: Box::new(Expression::MessageSend {
+                    receiver: Box::new(Expression::FieldAccess {
+                        receiver: Box::new(make_expr_id("self")),
+                        field: make_id("onTick"),
+                        span: Span::new(0, 14),
+                    }),
+                    selector: MessageSelector::Unary("displayString".into()),
+                    arguments: vec![],
+                    is_cast: false,
+                    span: Span::new(0, 28),
+                }),
+                messages: vec![crate::ast::CascadeMessage::new(
+                    MessageSelector::Keyword(vec![crate::ast::KeywordPart::new(
+                        "value:",
+                        Span::new(30, 36),
+                    )]),
+                    vec![make_expr_id("x")],
+                    Span::new(30, 38),
+                )],
+                span: Span::new(0, 38),
+            })],
+            Span::new(0, 40),
+        );
+        let analysis = analyze_block(&block);
+        assert!(
+            analysis.has_field_value_call,
+            "a self.field value(:...) send as the second cascade message must \
+             still set has_field_value_call"
+        );
     }
 
     #[test]
