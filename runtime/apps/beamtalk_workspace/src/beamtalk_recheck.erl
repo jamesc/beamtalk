@@ -149,7 +149,8 @@ reload that triggered it (ADR 0105: "advisory, never blocking").
     with_star_selector/1,
     relevant_diagnostic_shape/3,
     override_method_signature/4,
-    relevant_image_diagnostic/1
+    relevant_image_diagnostic/1,
+    field_change_note/3
 ]).
 -endif.
 
@@ -1004,9 +1005,11 @@ recheck_owner_for_shape(Owner, OwnerSites, ClassNameBin, FieldChanges) ->
                 {ok, Diagnostics} ->
                     SiteRefs = [site_ref(S) || S <- OwnerSites],
                     Findings = [
-                        to_finding_shape(OwnerBin, ClassNameBin, SiteRefs, D, Matched)
+                        to_finding_shape(
+                            OwnerBin, ClassNameBin, SiteRefs, D, Matched, AmbiguousWith
+                        )
                      || D <- Diagnostics,
-                        {true, Matched} <- [
+                        {true, Matched, AmbiguousWith} <- [
                             relevant_diagnostic_shape(D, ClassNameBin, FieldChanges)
                         ]
                     ],
@@ -1022,7 +1025,8 @@ recheck_owner_for_shape(Owner, OwnerSites, ClassNameBin, FieldChanges) ->
 
 -doc """
 Is `Diagnostic` attributable to this shape change, and if so, which
-`field_change()` is it most specifically about?
+`field_change()` is it most specifically about — and, when the attribution
+itself is ambiguous, which *other* changes could equally be the true cause?
 
 - **`spawnWith:` key/value diagnostics** (`check_spawn_with_map_keys`/
   `check_spawn_with_value` in `crates/beamtalk-core`'s type checker) are
@@ -1044,23 +1048,23 @@ Is `Diagnostic` attributable to this shape change, and if so, which
   `retyped_fallback/1` — the same "not by exact site" precision limit
   `relevant_diagnostic/4`'s moduledoc documents and accepts for
   `signature_change` — attributes any otherwise-unmatched `Dnu` to the
-  *first* `retyped` change in `FieldChanges` when one is present. **Known,
-  accepted limitation (adversarial review, BT-2780):** when a single reload
-  retypes *two or more* slots, this picks list order over the true culprit —
-  there is no field-name signal in the `Dnu` message to disambiguate which
-  retyped slot actually caused it (unlike the `Type`/removed-accessor
-  branches above, which match on quoted text). The finding's `note` can
-  therefore name the wrong field when multiple retypes land in one reload.
-  Not fixed here: closing it needs either per-selector call-site tracking
-  (well past what a `class_hierarchy => true` diagnostics round-trip
-  gives) or accepting that ambiguity in the finding itself (a `finding()`
-  shape change) — both bigger than this pass. See
-  `relevant_diagnostic_shape_retyped_fallback_picks_first_when_multiple_test/0`
+  *first* `retyped` change in `FieldChanges` when one is present. **When a
+  single reload retypes two or more slots** (BT-2780 adversarial review,
+  BT-2805), there is no field-name signal in the `Dnu` message to
+  disambiguate which retyped slot actually caused it (unlike the
+  `Type`/removed-accessor branches above, which match on quoted text), so
+  `retyped_fallback/1` cannot pin the finding to a single slot with
+  confidence. Rather than silently naming the wrong field, the third
+  element of the returned triple carries the *other* equally-plausible
+  `retyped` changes, and `field_change_note/3` renders the ambiguity
+  explicitly in the finding's `note` instead of asserting one slot as the
+  cause. See
+  `relevant_diagnostic_shape_retyped_fallback_notes_ambiguity_when_multiple_test/0`
   for the pinned behaviour.
 - `error`-severity is always dropped, matching `relevant_diagnostic/4`.
 """.
 -spec relevant_diagnostic_shape(map(), binary(), [shape_field_change()]) ->
-    {true, shape_field_change()} | false.
+    {true, shape_field_change(), [shape_field_change()]} | false.
 relevant_diagnostic_shape(#{severity := <<"error">>}, _ClassNameBin, _FieldChanges) ->
     false;
 relevant_diagnostic_shape(
@@ -1070,18 +1074,23 @@ relevant_diagnostic_shape(
         binary:match(Message, <<"state key">>) =/= nomatch andalso
             binary:match(Message, ClassNameBin) =/= nomatch
     of
-        true -> match_field_change_by_name(Message, FieldChanges);
+        true -> unambiguous(match_field_change_by_name(Message, FieldChanges));
         false -> false
     end;
 relevant_diagnostic_shape(
     #{category := <<"Dnu">>, message := Message}, _ClassNameBin, FieldChanges
 ) ->
     case match_removed_accessor(Message, FieldChanges) of
-        {true, _} = Match -> Match;
+        {true, _} = Match -> unambiguous(Match);
         false -> retyped_fallback(FieldChanges)
     end;
 relevant_diagnostic_shape(_Diagnostic, _ClassNameBin, _FieldChanges) ->
     false.
+
+-spec unambiguous({true, shape_field_change()} | false) ->
+    {true, shape_field_change(), [shape_field_change()]} | false.
+unambiguous(false) -> false;
+unambiguous({true, FC}) -> {true, FC, []}.
 
 -spec match_field_change_by_name(binary(), [shape_field_change()]) ->
     {true, shape_field_change()} | false.
@@ -1104,9 +1113,21 @@ match_removed_accessor(Message, FieldChanges) ->
     ],
     first_match(Matches).
 
--spec retyped_fallback([shape_field_change()]) -> {true, shape_field_change()} | false.
+-doc """
+Falls back to the *first* `retyped` change in `FieldChanges` when no
+removed-accessor selector matched (see `relevant_diagnostic_shape/3`'s
+moduledoc). When more than one `retyped` change is in flight, the other
+candidates are returned alongside it so the caller can render the
+attribution as ambiguous instead of asserting a single, possibly-wrong,
+slot.
+""".
+-spec retyped_fallback([shape_field_change()]) ->
+    {true, shape_field_change(), [shape_field_change()]} | false.
 retyped_fallback(FieldChanges) ->
-    first_match([FC || {retyped, _, _, _} = FC <- FieldChanges]).
+    case [FC || {retyped, _, _, _} = FC <- FieldChanges] of
+        [] -> false;
+        [First | Rest] -> {true, First, Rest}
+    end.
 
 -spec first_match([shape_field_change()]) -> {true, shape_field_change()} | false.
 first_match([First | _]) -> {true, First};
@@ -1119,20 +1140,42 @@ backtick_quoted(NameBin) ->
 -doc """
 Build a shape-change finding, attributing it to `FieldChange` — `selector`
 is `FieldChange`'s slot name (see `finding()`'s doc for why), and `note`
-describes what happened to that slot in the reload.
+describes what happened to that slot in the reload. `AmbiguousWith` is the
+non-empty list of other `retyped` changes that could equally have caused
+this diagnostic (see `relevant_diagnostic_shape/3`'s moduledoc), or `[]`
+when the attribution is exact.
 """.
--spec to_finding_shape(binary(), binary(), [site_ref()], map(), shape_field_change()) -> finding().
-to_finding_shape(OwnerBin, ClassNameBin, SiteRefs, Diagnostic, FieldChange) ->
+-spec to_finding_shape(
+    binary(), binary(), [site_ref()], map(), shape_field_change(), [shape_field_change()]
+) -> finding().
+to_finding_shape(OwnerBin, ClassNameBin, SiteRefs, Diagnostic, FieldChange, AmbiguousWith) ->
     SelectorBin = beamtalk_shape_diff:field_name(FieldChange),
     (base_finding(OwnerBin, ClassNameBin, SelectorBin, shape_change, SiteRefs, Diagnostic))#{
-        note => field_change_note(ClassNameBin, FieldChange)
+        note => field_change_note(ClassNameBin, FieldChange, AmbiguousWith)
     }.
 
--spec field_change_note(binary(), shape_field_change()) -> binary().
-field_change_note(ClassNameBin, {added, Name}) ->
+%% `AmbiguousWith` is only ever non-empty for `retyped` (see
+%% `retyped_fallback/1` — the only producer of ambiguity); `added`/`removed`
+%% always come from `unambiguous/1`, which pins it to `[]`. The `added`/
+%% `removed` clauses match any `AmbiguousWith` value (not just `[]`) so an
+%% unexpected non-empty list is silently ignored rather than crashing with
+%% `function_clause` — those change kinds have no ambiguity to render either
+%% way.
+-spec field_change_note(binary(), shape_field_change(), [shape_field_change()]) -> binary().
+field_change_note(ClassNameBin, {added, Name}, _AmbiguousWith) ->
     <<"state field `", Name/binary, "` added by the reload of ", ClassNameBin/binary>>;
-field_change_note(ClassNameBin, {removed, Name}) ->
+field_change_note(ClassNameBin, {removed, Name}, _AmbiguousWith) ->
     <<"state field `", Name/binary, "` removed by the reload of ", ClassNameBin/binary>>;
-field_change_note(ClassNameBin, {retyped, Name, OldType, NewType}) ->
+field_change_note(ClassNameBin, {retyped, Name, OldType, NewType}, []) ->
     <<"state field `", Name/binary, "` retyped by the reload of ", ClassNameBin/binary, " (",
-        OldType/binary, " -> ", NewType/binary, ")">>.
+        OldType/binary, " -> ", NewType/binary, ")">>;
+field_change_note(ClassNameBin, {retyped, Name, OldType, NewType}, AmbiguousWith) ->
+    OtherNamesBin = retyped_names_bin(AmbiguousWith),
+    <<"state field `", Name/binary, "` retyped by the reload of ", ClassNameBin/binary, " (",
+        OldType/binary, " -> ", NewType/binary,
+        ") — ambiguous: could also be caused by the retyping of ", OtherNamesBin/binary>>.
+
+-spec retyped_names_bin([shape_field_change()]) -> binary().
+retyped_names_bin(FieldChanges) ->
+    Names = [backtick_quoted(beamtalk_shape_diff:field_name(FC)) || FC <- FieldChanges],
+    iolist_to_binary(lists:join(<<", ">>, Names)).

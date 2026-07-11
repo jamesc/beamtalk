@@ -187,6 +187,49 @@ pub enum MutationKind {
     Field { name: EcoString },
 }
 
+/// Bundles the knobs threaded through `analyse_full` (BT-2804).
+///
+/// Every public `analyse_*` entry point builds one of these and passes it to
+/// `analyse_full` instead of threading positional parameters through ~6
+/// wrappers. Each field's `Default` reproduces today's most conservative
+/// behaviour (empty cross-file knowledge, `ModuleOnly` scope, no package
+/// context) — so a new entry point that forgets to set a field degrades
+/// safely (quietly loses precision) rather than silently misbehaving.
+#[derive(Debug, Default)]
+pub struct AnalysisContext<'a> {
+    /// Pre-defined variables treated as already bound (REPL context).
+    pub known_vars: &'a [&'a str],
+    /// Permits built-in classes to subclass sealed classes (BT-791);
+    /// only set when compiling stdlib sources.
+    pub stdlib_mode: bool,
+    /// Suppresses the effect-free module-level expression lint
+    /// (bootstrap-test compilation).
+    pub skip_module_expression_lint: bool,
+    /// Cross-file class metadata injected into the class hierarchy before
+    /// type checking (BT-1523, ADR 0050 Phase 4).
+    pub pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
+    /// Protocol definitions extracted from other source files, e.g. `BUnit`
+    /// fixtures (BT-2006).
+    pub pre_loaded_protocols: Vec<protocol_registry::ProtocolInfo>,
+    /// Known package names for package-qualifier validation (ADR 0070
+    /// Phase 2). `None` skips the check entirely.
+    pub known_packages: Option<std::collections::HashSet<String>>,
+    /// The package the module being analysed belongs to (ADR 0071).
+    pub current_package: Option<&'a str>,
+    /// Native type registry for FFI call inference (ADR 0075).
+    pub native_type_registry: Option<std::sync::Arc<type_checker::NativeTypeRegistry>>,
+    /// How complete the injected cross-file class knowledge is (BT-2796,
+    /// ADR 0100 Rule 2). Defaults to the conservative `ModuleOnly`.
+    pub knowledge_scope: KnowledgeScope,
+    /// Project-wide standalone extension definitions (BT-2795, ADR 0066).
+    /// `None`/empty means only the current module's own extensions are
+    /// visible.
+    pub cross_file_extensions: Option<&'a crate::compilation::extension_index::ExtensionIndex>,
+    /// Whether the current package has dependencies whose extensions are
+    /// not visible here (BT-2794, ADR 0100 Rule 2).
+    pub has_package_dependencies: bool,
+}
+
 /// Perform semantic analysis on a module.
 ///
 /// This is the main entry point for semantic analysis. It orchestrates the
@@ -211,17 +254,7 @@ pub enum MutationKind {
 /// assert_eq!(result.diagnostics.len(), 0);
 /// ```
 pub fn analyse(module: &Module) -> AnalysisResult {
-    analyse_full(
-        module,
-        &[],
-        false,
-        false,
-        vec![],
-        None,
-        None,
-        KnowledgeScope::default(),
-        false,
-    )
+    analyse_full(module, AnalysisContext::default())
 }
 
 /// Analyse a module with pre-defined variables (for REPL context).
@@ -237,14 +270,10 @@ pub fn analyse(module: &Module) -> AnalysisResult {
 pub fn analyse_with_known_vars(module: &Module, known_vars: &[&str]) -> AnalysisResult {
     analyse_full(
         module,
-        known_vars,
-        false,
-        false,
-        vec![],
-        None,
-        None,
-        KnowledgeScope::default(),
-        false,
+        AnalysisContext {
+            known_vars,
+            ..Default::default()
+        },
     )
 }
 
@@ -255,14 +284,14 @@ pub fn analyse_with_known_vars(module: &Module, known_vars: &[&str]) -> Analysis
 pub fn analyse_with_options(module: &Module, options: &crate::CompilerOptions) -> AnalysisResult {
     analyse_full(
         module,
-        &[],
-        options.stdlib_mode,
-        options.skip_module_expression_lint,
-        vec![],
-        None,
-        options.current_package.as_deref(),
-        options.knowledge_scope,
-        options.has_package_dependencies,
+        AnalysisContext {
+            stdlib_mode: options.stdlib_mode,
+            skip_module_expression_lint: options.skip_module_expression_lint,
+            current_package: options.current_package.as_deref(),
+            knowledge_scope: options.knowledge_scope,
+            has_package_dependencies: options.has_package_dependencies,
+            ..Default::default()
+        },
     )
 }
 
@@ -278,14 +307,15 @@ pub fn analyse_with_options_and_classes(
 ) -> AnalysisResult {
     analyse_full(
         module,
-        &[],
-        options.stdlib_mode,
-        options.skip_module_expression_lint,
-        pre_loaded_classes,
-        None,
-        options.current_package.as_deref(),
-        options.knowledge_scope,
-        options.has_package_dependencies,
+        AnalysisContext {
+            stdlib_mode: options.stdlib_mode,
+            skip_module_expression_lint: options.skip_module_expression_lint,
+            pre_loaded_classes,
+            current_package: options.current_package.as_deref(),
+            knowledge_scope: options.knowledge_scope,
+            has_package_dependencies: options.has_package_dependencies,
+            ..Default::default()
+        },
     )
 }
 
@@ -301,19 +331,18 @@ pub fn analyse_with_natives(
     pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
     native_type_registry: Option<std::sync::Arc<type_checker::NativeTypeRegistry>>,
 ) -> AnalysisResult {
-    analyse_full_with_natives(
+    analyse_full(
         module,
-        &[],
-        options.stdlib_mode,
-        options.skip_module_expression_lint,
-        pre_loaded_classes,
-        vec![],
-        None,
-        options.current_package.as_deref(),
-        native_type_registry,
-        options.knowledge_scope,
-        &crate::compilation::extension_index::ExtensionIndex::new(),
-        options.has_package_dependencies,
+        AnalysisContext {
+            stdlib_mode: options.stdlib_mode,
+            skip_module_expression_lint: options.skip_module_expression_lint,
+            pre_loaded_classes,
+            current_package: options.current_package.as_deref(),
+            native_type_registry,
+            knowledge_scope: options.knowledge_scope,
+            has_package_dependencies: options.has_package_dependencies,
+            ..Default::default()
+        },
     )
 }
 
@@ -332,19 +361,19 @@ pub fn analyse_with_natives_and_extensions(
     native_type_registry: Option<std::sync::Arc<type_checker::NativeTypeRegistry>>,
     cross_file_extensions: &crate::compilation::extension_index::ExtensionIndex,
 ) -> AnalysisResult {
-    analyse_full_with_natives(
+    analyse_full(
         module,
-        &[],
-        options.stdlib_mode,
-        options.skip_module_expression_lint,
-        pre_loaded_classes,
-        vec![],
-        None,
-        options.current_package.as_deref(),
-        native_type_registry,
-        options.knowledge_scope,
-        cross_file_extensions,
-        options.has_package_dependencies,
+        AnalysisContext {
+            stdlib_mode: options.stdlib_mode,
+            skip_module_expression_lint: options.skip_module_expression_lint,
+            pre_loaded_classes,
+            current_package: options.current_package.as_deref(),
+            native_type_registry,
+            knowledge_scope: options.knowledge_scope,
+            cross_file_extensions: Some(cross_file_extensions),
+            has_package_dependencies: options.has_package_dependencies,
+            ..Default::default()
+        },
     )
 }
 
@@ -363,19 +392,20 @@ pub fn analyse_with_natives_and_protocols(
     native_type_registry: Option<std::sync::Arc<type_checker::NativeTypeRegistry>>,
     cross_file_extensions: &crate::compilation::extension_index::ExtensionIndex,
 ) -> AnalysisResult {
-    analyse_full_with_natives(
+    analyse_full(
         module,
-        &[],
-        options.stdlib_mode,
-        options.skip_module_expression_lint,
-        pre_loaded_classes,
-        pre_loaded_protocols,
-        None,
-        options.current_package.as_deref(),
-        native_type_registry,
-        options.knowledge_scope,
-        cross_file_extensions,
-        options.has_package_dependencies,
+        AnalysisContext {
+            stdlib_mode: options.stdlib_mode,
+            skip_module_expression_lint: options.skip_module_expression_lint,
+            pre_loaded_classes,
+            pre_loaded_protocols,
+            current_package: options.current_package.as_deref(),
+            native_type_registry,
+            knowledge_scope: options.knowledge_scope,
+            cross_file_extensions: Some(cross_file_extensions),
+            has_package_dependencies: options.has_package_dependencies,
+            ..Default::default()
+        },
     )
 }
 
@@ -391,14 +421,11 @@ pub fn analyse_with_known_vars_and_classes(
 ) -> AnalysisResult {
     analyse_full(
         module,
-        known_vars,
-        false,
-        false,
-        pre_loaded_classes,
-        None,
-        None,
-        KnowledgeScope::default(),
-        false,
+        AnalysisContext {
+            known_vars,
+            pre_loaded_classes,
+            ..Default::default()
+        },
     )
 }
 
@@ -416,67 +443,39 @@ pub fn analyse_with_packages(
 ) -> AnalysisResult {
     analyse_full(
         module,
-        &[],
-        options.stdlib_mode,
-        options.skip_module_expression_lint,
-        pre_loaded_classes,
-        Some(known_packages),
-        options.current_package.as_deref(),
-        options.knowledge_scope,
-        options.has_package_dependencies,
+        AnalysisContext {
+            stdlib_mode: options.stdlib_mode,
+            skip_module_expression_lint: options.skip_module_expression_lint,
+            pre_loaded_classes,
+            known_packages: Some(known_packages),
+            current_package: options.current_package.as_deref(),
+            knowledge_scope: options.knowledge_scope,
+            has_package_dependencies: options.has_package_dependencies,
+            ..Default::default()
+        },
     )
 }
 
-/// Internal: full analysis with all knobs.
+/// Internal: full analysis with all knobs, bundled into `ctx` (BT-2804).
+///
+/// ADR 0075: When `ctx.native_type_registry` is `Some`, FFI calls (`Erlang <module> <function>:`)
+/// get return type inference and keyword mismatch warnings from the registry.
 #[allow(clippy::too_many_lines)] // orchestration function — one call per analysis phase
-#[allow(clippy::too_many_arguments)]
-fn analyse_full(
-    module: &Module,
-    known_vars: &[&str],
-    stdlib_mode: bool,
-    skip_module_expression_lint: bool,
-    pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
-    known_packages: Option<std::collections::HashSet<String>>,
-    current_package: Option<&str>,
-    knowledge_scope: KnowledgeScope,
-    has_package_dependencies: bool,
-) -> AnalysisResult {
-    analyse_full_with_natives(
-        module,
+fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult {
+    let AnalysisContext {
         known_vars,
         stdlib_mode,
         skip_module_expression_lint,
         pre_loaded_classes,
-        vec![],
+        pre_loaded_protocols,
         known_packages,
         current_package,
-        None,
+        native_type_registry,
         knowledge_scope,
-        &crate::compilation::extension_index::ExtensionIndex::new(),
+        cross_file_extensions,
         has_package_dependencies,
-    )
-}
+    } = ctx;
 
-/// Internal: full analysis with all knobs, including native type registry.
-///
-/// ADR 0075: When `native_type_registry` is `Some`, FFI calls (`Erlang <module> <function>:`)
-/// get return type inference and keyword mismatch warnings from the registry.
-#[allow(clippy::too_many_lines)] // orchestration function — one call per analysis phase
-#[allow(clippy::too_many_arguments)]
-fn analyse_full_with_natives(
-    module: &Module,
-    known_vars: &[&str],
-    stdlib_mode: bool,
-    skip_module_expression_lint: bool,
-    pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
-    pre_loaded_protocols: Vec<protocol_registry::ProtocolInfo>,
-    known_packages: Option<std::collections::HashSet<String>>,
-    current_package: Option<&str>,
-    native_type_registry: Option<std::sync::Arc<type_checker::NativeTypeRegistry>>,
-    knowledge_scope: KnowledgeScope,
-    cross_file_extensions: &crate::compilation::extension_index::ExtensionIndex,
-    has_package_dependencies: bool,
-) -> AnalysisResult {
     let mut result = AnalysisResult::new();
 
     // Phase 0: Build Class Hierarchy (ADR 0006 Phase 1a)
@@ -549,10 +548,12 @@ fn analyse_full_with_natives(
     // `register_extensions` skips selectors the class already defines, so
     // the current file's definitions win and an index that includes the
     // current file's own entries is harmless.
-    if !cross_file_extensions.is_empty() {
-        result
-            .class_hierarchy
-            .register_extensions(cross_file_extensions);
+    if let Some(cross_file_extensions) = cross_file_extensions {
+        if !cross_file_extensions.is_empty() {
+            result
+                .class_hierarchy
+                .register_extensions(cross_file_extensions);
+        }
     }
 
     // Phase 0.5: Protocol Registration (ADR 0068 Phase 2b)

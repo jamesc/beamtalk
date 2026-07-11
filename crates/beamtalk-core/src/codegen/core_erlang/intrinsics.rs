@@ -332,8 +332,68 @@ impl CoreErlangGenerator {
 
             "to:by:do:" if arguments.len() == 3 => self.try_generate_to_by_do(receiver, arguments),
 
+            // BT-2803: valueWithArguments: (call-site-intercepted @intrinsic,
+            // was previously a bare @primitive with no access to the calling
+            // method's state — see stdlib/src/Block.bt).
+            "valueWithArguments:" if arguments.len() == 1 => {
+                self.try_generate_block_value_with_arguments_keyword(receiver, &arguments[0])
+            }
+
             _ => Ok(None),
         }
+    }
+
+    /// Generates code for `valueWithArguments:` on a block receiver.
+    ///
+    /// BT-2803: mirrors `try_generate_block_value_keyword`'s generic
+    /// (non-Tier2) fallback path. Deliberately does NOT special-case
+    /// `tier2_block_params`/`tier2_local_vars`/`self.field` receivers here —
+    /// `generate_block_value_with_arguments_call_runtime_discriminated`
+    /// always returns a raw `{Result, NewState}` tuple, and this function is
+    /// reached from the generic, any-position `expression_doc` dispatch,
+    /// which has nothing to unpack it. Those shapes are intercepted before
+    /// reaching here by the top-level `Tier2ValueCall` classification in
+    /// `gen_server/methods.rs` (`is_tier2_value_call`/
+    /// `generate_tier2_value_call_doc`), the only place that unpacks the
+    /// tuple (same scoping as `try_generate_block_value_keyword`'s BT-2797
+    /// comment for `self.field value:`).
+    fn try_generate_block_value_with_arguments_keyword(
+        &mut self,
+        receiver: &Expression,
+        args_expr: &Expression,
+    ) -> Result<Option<Document<'static>>> {
+        // BT-2095: A bare class name as receiver is a class-method send, not
+        // block application — fall through (mirrors `value:`'s bypass).
+        if matches!(receiver, Expression::ClassReference { .. }) {
+            return Ok(None);
+        }
+        // BT-1260: Compile-time Erlang FFI receiver → fall through.
+        if Self::is_erlang_ffi_receiver(receiver) {
+            return Ok(None);
+        }
+        // Fast path: block literal receiver never needs the runtime
+        // is_function guard. Literal-block-with-mutations is out of scope
+        // (BT-2803) — valueWithArguments: on a literal block is an
+        // unmotivated shape; use value:/value:value:/... for those instead.
+        if matches!(receiver, Expression::Block(_)) {
+            let fun_var = self.fresh_temp_var("Fun");
+            let recv_code = self.expression_doc(receiver)?;
+            let args_code = self.expression_doc(args_expr)?;
+            let doc = docvec![
+                "let ",
+                leaf::var(fun_var.clone()),
+                " = ",
+                recv_code,
+                " in call 'erlang':'apply'(",
+                leaf::var(fun_var),
+                ", ",
+                args_code,
+                ")",
+            ];
+            return Ok(Some(doc));
+        }
+        let doc = self.generate_block_value_with_arguments_call(receiver, args_expr)?;
+        Ok(Some(doc))
     }
 
     /// Generates code for keyword `value:` variants on a block receiver.
@@ -784,6 +844,68 @@ impl CoreErlangGenerator {
     /// end
     /// ```
     ///
+    /// BT-1942: Hoists a receiver operand that may open a class-method
+    /// self-send scope, binding it to a fresh `prefix`-named temp var.
+    /// Appends the necessary `let`-binding(s) to `parts` and sets
+    /// `any_open_scope` if this operand's evaluation opened a class-method
+    /// scope. Shared by `generate_value_keyword_guard` and
+    /// `generate_block_value_with_arguments_call` (BT-2803) — both hoist
+    /// their receiver the same way, before any argument hoisting.
+    fn hoist_open_scope_receiver(
+        &mut self,
+        receiver: &Expression,
+        prefix: &str,
+        parts: &mut Vec<Document<'static>>,
+        any_open_scope: &mut bool,
+    ) -> Result<String> {
+        let (preamble, mut docs) = self.capture_subexpr_sequence(&[receiver], prefix)?;
+        let code = docs.remove(0);
+        if !matches!(preamble, Document::Nil) {
+            *any_open_scope = true;
+            parts.push(preamble);
+        }
+        let var = self.fresh_temp_var(prefix);
+        parts.push(docvec!["let ", leaf::var(var.clone()), " = ", code, " in ",]);
+        Ok(var)
+    }
+
+    /// BT-1270/BT-1942: Hoists an argument-position operand, special-casing a
+    /// field-assignment argument (`self.field := x`) so its `StateN` binding
+    /// lands outside the let-chain rather than nested inside it. Appends the
+    /// necessary `let`-binding(s) to `parts` and sets `any_open_scope` if
+    /// this operand's evaluation opened a class-method scope. Shared by
+    /// `generate_value_keyword_guard` and
+    /// `generate_block_value_with_arguments_call` (BT-2803).
+    fn hoist_open_scope_argument(
+        &mut self,
+        arg: &Expression,
+        prefix: &str,
+        parts: &mut Vec<Document<'static>>,
+        any_open_scope: &mut bool,
+    ) -> Result<String> {
+        let var = self.fresh_temp_var(prefix);
+        if Self::is_field_assignment(arg) {
+            let (doc, val_var) = self.generate_field_assignment_open(arg)?;
+            parts.push(doc);
+            parts.push(docvec![
+                "let ",
+                leaf::var(var.clone()),
+                " = ",
+                leaf::var(val_var),
+                " in ",
+            ]);
+        } else {
+            let (preamble, mut docs) = self.capture_subexpr_sequence(&[arg], prefix)?;
+            let code = docs.remove(0);
+            if !matches!(preamble, Document::Nil) {
+                *any_open_scope = true;
+                parts.push(preamble);
+            }
+            parts.push(docvec!["let ", leaf::var(var.clone()), " = ", code, " in ",]);
+        }
+        Ok(var)
+    }
+
     /// This mirrors the runtime guard emitted for the unary `value` case (BT-335).
     fn generate_value_keyword_guard(
         &mut self,
@@ -799,53 +921,14 @@ impl CoreErlangGenerator {
         // Each sub-expression is bound sequentially, so per-sub-expression inline
         // hoisting preserves left-to-right evaluation order.
         let mut any_open_scope = false;
-        let (recv_preamble, mut recv_docs) =
-            self.capture_subexpr_sequence(&[receiver], "ValRecv")?;
-        let recv_doc = recv_docs.remove(0);
-        if !matches!(recv_preamble, Document::Nil) {
-            any_open_scope = true;
-            parts.push(recv_preamble);
-        }
-        let recv_var = self.fresh_temp_var("ValRecv");
-        parts.push(docvec![
-            "let ",
-            leaf::var(recv_var.clone()),
-            " = ",
-            recv_doc,
-            " in ",
-        ]);
+        let recv_var =
+            self.hoist_open_scope_receiver(receiver, "ValRecv", &mut parts, &mut any_open_scope)?;
 
         // BT-1270: Hoist field-assignment arguments before their _ValArgN bindings so
         // the StateN binding is in scope after the let-chain, not nested inside it.
         for arg in arguments {
-            let arg_var = self.fresh_temp_var("ValArg");
-            if Self::is_field_assignment(arg) {
-                let (doc, val_var) = self.generate_field_assignment_open(arg)?;
-                parts.push(doc);
-                parts.push(docvec![
-                    "let ",
-                    leaf::var(arg_var.clone()),
-                    " = ",
-                    leaf::var(val_var),
-                    " in ",
-                ]);
-            } else {
-                // BT-1942: Hoist open-scope arg (e.g. class method self-send).
-                let (arg_preamble, mut arg_docs) =
-                    self.capture_subexpr_sequence(&[arg], "ValArg")?;
-                let arg_code = arg_docs.remove(0);
-                if !matches!(arg_preamble, Document::Nil) {
-                    any_open_scope = true;
-                    parts.push(arg_preamble);
-                }
-                parts.push(docvec![
-                    "let ",
-                    leaf::var(arg_var.clone()),
-                    " = ",
-                    arg_code,
-                    " in ",
-                ]);
-            }
+            let arg_var =
+                self.hoist_open_scope_argument(arg, "ValArg", &mut parts, &mut any_open_scope)?;
             arg_vars.push(arg_var);
         }
 
@@ -1053,6 +1136,155 @@ impl CoreErlangGenerator {
         parts.push(case_doc);
 
         Ok(Document::Vec(parts))
+    }
+
+    /// BT-2803: Generates a runtime `erlang:is_function/1` guard for
+    /// `valueWithArguments:` sends.
+    ///
+    /// Mirrors `generate_value_keyword_guard`, but the argument is a single
+    /// runtime list rather than N individually-hoisted arguments, so the
+    /// true branch uses `erlang:apply/2` (fun + arg-list) instead of a
+    /// positional `apply`.
+    ///
+    /// ```erlang
+    /// let _ValRecv = <recv> in
+    /// let _ValArgs = <args> in
+    /// case call 'erlang':'is_function'(_ValRecv) of
+    ///   'true' when 'true' -> call 'erlang':'apply'(_ValRecv, _ValArgs)
+    ///   'false' when 'true' -> call 'beamtalk_primitive':'send'(_ValRecv, 'valueWithArguments:', [_ValArgs])
+    /// end
+    /// ```
+    fn generate_block_value_with_arguments_call(
+        &mut self,
+        receiver: &Expression,
+        args_expr: &Expression,
+    ) -> Result<Document<'static>> {
+        let mut parts: Vec<Document<'static>> = Vec::with_capacity(4);
+        let mut any_open_scope = false;
+
+        let recv_var =
+            self.hoist_open_scope_receiver(receiver, "ValRecv", &mut parts, &mut any_open_scope)?;
+        let args_var =
+            self.hoist_open_scope_argument(args_expr, "ValArgs", &mut parts, &mut any_open_scope)?;
+
+        let case_doc = docvec![
+            "case call 'erlang':'is_function'(",
+            leaf::var(recv_var.clone()),
+            ") of 'true' when 'true' -> call 'erlang':'apply'(",
+            leaf::var(recv_var.clone()),
+            ", ",
+            leaf::var(args_var.clone()),
+            ") 'false' when 'true' -> call 'beamtalk_primitive':'send'(",
+            leaf::var(recv_var),
+            ", ",
+            leaf::atom("valueWithArguments:"),
+            ", [",
+            leaf::var(args_var),
+            "]) end",
+        ];
+
+        if any_open_scope {
+            let result_var = self.fresh_temp_var("ValRes");
+            parts.push(docvec![
+                "let ",
+                leaf::var(result_var.clone()),
+                " = ",
+                case_doc,
+                " in ",
+            ]);
+            self.last_open_scope_result = Some(result_var);
+        } else {
+            parts.push(case_doc);
+        }
+
+        Ok(Document::Vec(parts))
+    }
+
+    /// BT-2803: Generalizes `generate_block_value_call_runtime_discriminated`
+    /// to `valueWithArguments:`, whose argument count is a runtime list
+    /// length rather than a compile-time-known static arity.
+    ///
+    /// Same contract and scoping as
+    /// `generate_block_value_call_runtime_discriminated` — reached only from
+    /// `gen_server/methods.rs`'s `generate_tier2_value_call_doc` (the tuple
+    /// unpacker), never from generic `expression_doc` dispatch. Always
+    /// returns a raw `{Result, NewState}` tuple:
+    /// - Tier 1 (`is_function(Fun, length(Args))`): synthesizes
+    ///   `{erlang:apply(Fun, Args), State}` — state unchanged.
+    /// - Tier 2 (`is_function(Fun, length(Args) + 1)`): appends the calling
+    ///   method's live state as the trailing element of `Args` and returns
+    ///   the block's own `{Result, NewState}` tuple directly (Tier 2 funs
+    ///   already return this shape).
+    /// - Non-function receiver: falls back to `beamtalk_primitive:send/3`,
+    ///   wrapped as `{SendResult, State}`.
+    pub(in crate::codegen::core_erlang) fn generate_block_value_with_arguments_call_runtime_discriminated(
+        &mut self,
+        receiver: &Expression,
+        args_expr: &Expression,
+    ) -> Result<Document<'static>> {
+        let fun_var = self.fresh_temp_var("Fun");
+        let recv_code = self.expression_doc(receiver)?;
+        let args_var = self.fresh_temp_var("Args");
+        let args_code = self.expression_doc(args_expr)?;
+        let current_state = self.current_state_var();
+        let tier1_arity_var = self.fresh_temp_var("ArgsLen");
+        let tier2_arity_var = self.fresh_temp_var("ArgsLenPlusOne");
+
+        let preamble = docvec![
+            "let ",
+            leaf::var(fun_var.clone()),
+            " = ",
+            recv_code,
+            " in let ",
+            leaf::var(args_var.clone()),
+            " = ",
+            args_code,
+            " in let ",
+            leaf::var(tier1_arity_var.clone()),
+            " = call 'erlang':'length'(",
+            leaf::var(args_var.clone()),
+            ") in let ",
+            leaf::var(tier2_arity_var.clone()),
+            " = call 'erlang':'+'(",
+            leaf::var(tier1_arity_var.clone()),
+            ", ",
+            leaf::int_lit(1),
+            ") in ",
+        ];
+
+        let case_doc = docvec![
+            "case call 'erlang':'is_function'(",
+            leaf::var(fun_var.clone()),
+            ", ",
+            leaf::var(tier1_arity_var),
+            ") of 'true' when 'true' -> {call 'erlang':'apply'(",
+            leaf::var(fun_var.clone()),
+            ", ",
+            leaf::var(args_var.clone()),
+            "), ",
+            leaf::var(current_state.clone()),
+            "} 'false' when 'true' -> case call 'erlang':'is_function'(",
+            leaf::var(fun_var.clone()),
+            ", ",
+            leaf::var(tier2_arity_var),
+            ") of 'true' when 'true' -> call 'erlang':'apply'(",
+            leaf::var(fun_var.clone()),
+            ", call 'erlang':'++'(",
+            leaf::var(args_var.clone()),
+            ", [",
+            leaf::var(current_state.clone()),
+            "])) 'false' when 'true' -> {call 'beamtalk_primitive':'send'(",
+            leaf::var(fun_var),
+            ", ",
+            leaf::atom("valueWithArguments:"),
+            ", [",
+            leaf::var(args_var),
+            "]), ",
+            leaf::var(current_state),
+            "} end end",
+        ];
+
+        Ok(docvec![preamble, case_doc])
     }
 
     /// BT-1213: Generates inline code for `[block_with_mutations] value` (or `value:`).

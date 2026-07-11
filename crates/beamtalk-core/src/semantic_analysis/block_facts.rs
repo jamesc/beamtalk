@@ -436,11 +436,20 @@ fn is_self_reference(expr: &Expression) -> bool {
 /// send — a `value`/`value:`/`value:value:`/`value:value:value:` message sent
 /// directly to a field access on `self`. Used to detect a stored (possibly Tier 2)
 /// block being invoked, which `analyze_block` otherwise has no visibility into.
+///
+/// BT-2803 (adversarial review): also recognizes `valueWithArguments:` —
+/// without this, a `self.field valueWithArguments: #(...)` send nested inside
+/// another block (e.g. a `do:` body) wouldn't mark the enclosing block as
+/// needing state threading, silently discarding the mutated state the Tier 2
+/// runtime discrimination at the call site itself still correctly computes.
+/// `valueWithArguments:` has no `WellKnownSelector` variant (see
+/// `gen_server/methods.rs`'s `is_tier2_value_call`), so it needs an explicit
+/// name check alongside the `well_known()` match.
 fn is_self_field_value_send(receiver: &Expression, selector: &MessageSelector) -> bool {
     matches!(
         receiver,
         Expression::FieldAccess { receiver: r, .. } if is_self_reference(r)
-    ) && matches!(
+    ) && (matches!(
         selector.well_known(),
         Some(
             WellKnownSelector::Value
@@ -448,7 +457,7 @@ fn is_self_field_value_send(receiver: &Expression, selector: &MessageSelector) -
                 | WellKnownSelector::ValueValue
                 | WellKnownSelector::ValueValueValue
         )
-    )
+    ) || selector.name() == "valueWithArguments:")
 }
 
 /// Returns true if the selector is an inline conditional (`ifTrue:`, `ifFalse:`, or

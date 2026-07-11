@@ -1522,3 +1522,137 @@ fn test_bt2797_no_regression_pure_local_var_block_value_fast_path() {
          Tier 2 stateful protocol. Got: {code}"
     );
 }
+
+#[test]
+fn test_bt2803_field_stored_block_invoked_via_value_with_arguments_threads_state_correctly() {
+    // BT-2803: valueWithArguments: on a self.field receiver needs the same
+    // runtime Tier 1/Tier 2 discrimination as `value:` (BT-2797), but the
+    // argument count is a runtime list length instead of a compile-time-known
+    // static arity —
+    // generate_block_value_with_arguments_call_runtime_discriminated
+    // generalizes generate_block_value_call_runtime_discriminated for this.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n  state: onTick = nil\n\n  setup =>\n    self.onTick := [:x | self.total := self.total + x]\n\n  tick =>\n    self.onTick valueWithArguments: #(5)\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let code = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    )
+    .expect("should compile (BT-2803)");
+
+    assert!(
+        code.contains("'maps':'get'('onTick', State)"),
+        "tick must read the block back out of the onTick field. Got: {code}"
+    );
+
+    // Tie the length computation, both arity checks, and both applies
+    // together via the captured fun/args/length variable names rather than
+    // three independent (and therefore looser) pattern matches.
+    let len_re =
+        regex::Regex::new(r"let (_Fun\w*) = .*'onTick', State\) in let (_Args\w*) = \[5\] in let (_ArgsLen\w*) = call 'erlang':'length'\((_Args\w*)\) in let (_ArgsLenPlusOne\w*) = call 'erlang':'\+'\((_ArgsLen\w*), 1\)")
+            .unwrap();
+    let caps = len_re.captures(&code).unwrap_or_else(|| {
+        panic!(
+            "tick must bind the field's block, hoist Args to a runtime list, \
+             and compute both length(Args) and length(Args) + 1 before \
+             discriminating. Got: {code}"
+        )
+    });
+    let fun_var = &caps[1];
+    let args_var = &caps[2];
+    let tier1_len_var = &caps[3];
+    let tier2_len_var = &caps[5];
+
+    assert!(
+        code.contains(&format!("is_function'({fun_var}, {tier1_len_var})")),
+        "tick must runtime-discriminate Tier 1 arity (length(Args)) for the \
+         field's block ({fun_var}). Got: {code}"
+    );
+    assert!(
+        code.contains(&format!("is_function'({fun_var}, {tier2_len_var})")),
+        "tick must also check the Tier 2 arity (length(Args) + 1) for the \
+         same block variable ({fun_var}). Got: {code}"
+    );
+    assert!(
+        code.contains(&format!(
+            "{{call 'erlang':'apply'({fun_var}, {args_var}), State}}"
+        )),
+        "the Tier 1 branch must apply the field's block ({fun_var}) with the \
+         plain Args list, leaving State unchanged. Got: {code}"
+    );
+    assert!(
+        code.contains(&format!(
+            "call 'erlang':'apply'({fun_var}, call 'erlang':'++'({args_var}, [State]))"
+        )),
+        "the Tier 2 branch must apply the field's block ({fun_var}) with the \
+         calling method's State appended to the Args list. Got: {code}"
+    );
+    assert!(
+        code.contains(&format!(
+            "{{call 'beamtalk_primitive':'send'({fun_var}, 'valueWithArguments:', [{args_var}]), State}}"
+        )),
+        "the non-function fallback must DNU-dispatch valueWithArguments: with \
+         State unchanged. Got: {code}"
+    );
+}
+
+#[test]
+fn test_bt2803_no_regression_pure_block_value_with_arguments_fast_path() {
+    // BT-2803 (mirrors BT-2797's fast-path regression guard): a literal
+    // block receiver never needs the runtime is_function guard —
+    // try_generate_block_value_with_arguments_keyword's literal-block fast
+    // path applies Args directly via erlang:apply, no runtime check at all.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run =>\n    [:x :y | x + y] valueWithArguments: #(3, 4)\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let code = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    )
+    .expect("should compile");
+
+    assert!(
+        !code.contains("is_function"),
+        "A block literal invoked via valueWithArguments: must not emit any \
+         is_function runtime check. Got: {code}"
+    );
+    assert!(
+        code.contains("call 'erlang':'apply'("),
+        "must still apply the block to the runtime Args list. Got: {code}"
+    );
+}
+
+#[test]
+fn test_bt2803_no_regression_pure_local_var_value_with_arguments_fast_path() {
+    // BT-2803: a block held in a local var (not a field, no captured/field
+    // mutations) reaches the generic is_function/1 guard
+    // (generate_block_value_with_arguments_call) — never the Tier 2 runtime-
+    // discriminated path, and never the stateful protocol.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run =>\n    blk := [:x | x + 1]\n    blk valueWithArguments: #(5)\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let code = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    )
+    .expect("should compile");
+
+    assert!(
+        !code.contains("StateAcc"),
+        "A pure block stored in a local var must not be promoted to the \
+         Tier 2 stateful protocol. Got: {code}"
+    );
+    assert!(
+        regex::Regex::new(r"is_function'\(_ValRecv\w*\) of")
+            .unwrap()
+            .is_match(&code),
+        "must use the plain is_function/1 guard on the hoisted receiver \
+         (generate_block_value_with_arguments_call), not the runtime-length \
+         Tier 1/Tier 2 discrimination. Got: {code}"
+    );
+    assert!(
+        !code.contains("'erlang':'length'("),
+        "must not compute a runtime Args length — that's only needed for \
+         the Tier 1/Tier 2 discriminated path. Got: {code}"
+    );
+}

@@ -21,6 +21,11 @@ Actor subclass: Tier2FieldStoredBlockTestActor
   // (setup) than the one calling it.
   tick: x => self.onTick value: x
 
+  // BT-2803: same shape as tick:, but via valueWithArguments: — the
+  // runtime-length generalization of the value:/value runtime-discriminated
+  // path (generate_block_value_with_arguments_call_runtime_discriminated).
+  tickWithArgs: x => self.onTick valueWithArguments: #(x)
+
   // BT-2808: cascades two safe `value:` sends to the same field-stored block
   // in one statement — the parser folds the first send into Cascade.receiver
   // as a whole MessageSend (`self.onTick value: x`), leaving only the second
@@ -33,6 +38,15 @@ Actor subclass: Tier2FieldStoredBlockTestActor
     self setup
     self tick: 5
     self tick: 3
+    self.total
+
+  // BT-2803: end-to-end — assign in setup, invoke (twice) via
+  // tickWithArgs: (valueWithArguments:), confirm the field mutation inside
+  // the block propagates back to actor state the same way tick: does.
+  testFieldStoredBlockAcrossMethodsViaValueWithArguments =>
+    self setup
+    self tickWithArgs: 5
+    self tickWithArgs: 3
     self.total
 
   // BT-2808: end-to-end — a cascade of two value: sends to the same
