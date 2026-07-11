@@ -50,7 +50,7 @@ owns the generic cycle-guard log line.
 -type step_fun(Result) :: fun((node_id(), non_neg_integer()) -> step_result(Result)).
 -type walk_result(Result) :: {found, Result} | not_found | max_depth_exceeded.
 
--export_type([step_fun/1, walk_result/1]).
+-export_type([step_result/1, step_fun/1, walk_result/1]).
 
 -doc """
 Walk an ancestor chain starting at `StartNode`, applying `StepFun` at each
@@ -71,9 +71,13 @@ walk_ancestors(StartNode, StepFun, MaxDepth) ->
 walk_ancestors(none, _StepFun, _MaxDepth, _Depth) ->
     not_found;
 walk_ancestors(Node, _StepFun, MaxDepth, Depth) when Depth > MaxDepth ->
-    ?LOG_WARNING("walk_ancestors: max hierarchy depth ~p exceeded at ~p — possible cycle", [
-        MaxDepth, Node
-    ], #{domain => [beamtalk, runtime]}),
+    ?LOG_WARNING(
+        "walk_ancestors: max hierarchy depth ~p exceeded at ~p — possible cycle",
+        [
+            MaxDepth, Node
+        ],
+        #{domain => [beamtalk, runtime]}
+    ),
     max_depth_exceeded;
 walk_ancestors(Node, StepFun, MaxDepth, Depth) ->
     case StepFun(Node, Depth) of
