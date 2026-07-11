@@ -1154,10 +1154,17 @@ to_finding_shape(OwnerBin, ClassNameBin, SiteRefs, Diagnostic, FieldChange, Ambi
         note => field_change_note(ClassNameBin, FieldChange, AmbiguousWith)
     }.
 
+%% `AmbiguousWith` is only ever non-empty for `retyped` (see
+%% `retyped_fallback/1` — the only producer of ambiguity); `added`/`removed`
+%% always come from `unambiguous/1`, which pins it to `[]`. The `added`/
+%% `removed` clauses match any `AmbiguousWith` value (not just `[]`) so an
+%% unexpected non-empty list is silently ignored rather than crashing with
+%% `function_clause` — those change kinds have no ambiguity to render either
+%% way.
 -spec field_change_note(binary(), shape_field_change(), [shape_field_change()]) -> binary().
-field_change_note(ClassNameBin, {added, Name}, []) ->
+field_change_note(ClassNameBin, {added, Name}, _AmbiguousWith) ->
     <<"state field `", Name/binary, "` added by the reload of ", ClassNameBin/binary>>;
-field_change_note(ClassNameBin, {removed, Name}, []) ->
+field_change_note(ClassNameBin, {removed, Name}, _AmbiguousWith) ->
     <<"state field `", Name/binary, "` removed by the reload of ", ClassNameBin/binary>>;
 field_change_note(ClassNameBin, {retyped, Name, OldType, NewType}, []) ->
     <<"state field `", Name/binary, "` retyped by the reload of ", ClassNameBin/binary, " (",

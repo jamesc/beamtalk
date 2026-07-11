@@ -3555,11 +3555,19 @@ impl CoreErlangGenerator {
         } = expr
         {
             if selector.name() == "valueWithArguments:" {
-                if let Some(args_expr) = arguments.first() {
-                    return self.generate_block_value_with_arguments_call_runtime_discriminated(
-                        receiver, args_expr,
-                    );
-                }
+                // The parser always gives a keyword message at least one
+                // argument, so `arguments` is never empty here — but fail
+                // loudly instead of silently falling through to the
+                // `self.field` positional-value: branch below, which would
+                // emit a malformed 0-arity value call for this selector.
+                let args_expr = arguments.first().ok_or_else(|| {
+                    CodeGenError::Internal(
+                        "valueWithArguments: with no argument expression".to_string(),
+                    )
+                })?;
+                return self.generate_block_value_with_arguments_call_runtime_discriminated(
+                    receiver, args_expr,
+                );
             }
             if self.context == CodeGenContext::Actor && Self::is_self_field_access(receiver) {
                 return self.generate_block_value_call_runtime_discriminated(

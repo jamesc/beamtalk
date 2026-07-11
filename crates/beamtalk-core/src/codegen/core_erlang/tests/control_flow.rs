@@ -1643,8 +1643,16 @@ fn test_bt2803_no_regression_pure_local_var_value_with_arguments_fast_path() {
          Tier 2 stateful protocol. Got: {code}"
     );
     assert!(
-        code.contains("is_function'(") && !code.contains("'erlang':'length'("),
-        "must use the plain is_function/1 guard, not the runtime-length \
+        regex::Regex::new(r"is_function'\(_ValRecv\w*\) of")
+            .unwrap()
+            .is_match(&code),
+        "must use the plain is_function/1 guard on the hoisted receiver \
+         (generate_block_value_with_arguments_call), not the runtime-length \
          Tier 1/Tier 2 discrimination. Got: {code}"
+    );
+    assert!(
+        !code.contains("'erlang':'length'("),
+        "must not compute a runtime Args length — that's only needed for \
+         the Tier 1/Tier 2 discriminated path. Got: {code}"
     );
 }
