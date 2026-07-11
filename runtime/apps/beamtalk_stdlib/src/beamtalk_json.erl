@@ -249,15 +249,18 @@ encode_map_fields(Map) ->
 -doc """
 Dispatch the `asJson` conversion hook on a custom object (BT-2818).
 
-Returns `{ok, Prepared}` when the object's class implements `asJson`,
-`no_hook` otherwise. A hook that returns the receiver unchanged raises a
-type error rather than recursing forever.
+Returns `{ok, Prepared}` when the object understands `asJson`, `no_hook`
+otherwise. Uses `beamtalk_message_dispatch` (the unified send entry point)
+so the check and the call behave exactly like Beamtalk-level
+`value respondsTo: #asJson` / `value asJson` for every receiver shape —
+value-type tagged maps and live actors alike. A hook that returns the
+receiver unchanged raises a type error rather than recursing forever.
 """.
 -spec try_as_json_hook(term()) -> {ok, term()} | no_hook.
 try_as_json_hook(Value) ->
-    case beamtalk_primitive:responds_to(Value, 'asJson') of
+    case beamtalk_message_dispatch:send(Value, 'respondsTo:', ['asJson']) of
         true ->
-            Json = beamtalk_primitive:send(Value, 'asJson', []),
+            Json = beamtalk_message_dispatch:send(Value, 'asJson', []),
             case Json =:= Value of
                 true ->
                     Error0 = beamtalk_error:new(type_error, 'Json'),
@@ -270,7 +273,7 @@ try_as_json_hook(Value) ->
                 false ->
                     {ok, prepare_for_encode(Json)}
             end;
-        false ->
+        _ ->
             no_hook
     end.
 

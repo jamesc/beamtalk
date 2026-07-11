@@ -21,6 +21,10 @@ has_method(asJson) -> true;
 has_method(_) -> false.
 
 -spec dispatch(atom(), list(), map()) -> term().
+dispatch('respondsTo:', [Selector], _Self) ->
+    %% Real compiled modules answer respondsTo: via generated reflection
+    %% branches; the stub mirrors that against its has_method/1.
+    has_method(Selector);
 dispatch(asJson, [], #{mode := self_return} = Self) ->
     %% Pathological hook: returns the receiver unchanged. beamtalk_json must
     %% raise a type error instead of recursing forever.

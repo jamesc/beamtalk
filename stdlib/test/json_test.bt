@@ -123,6 +123,13 @@ TestCase subclass: JsonTest
     self assert: (parsed at: "team_name") equals: "Analytical Engines"
     self assert: ((parsed at: "lead") at: "full_name") equals: "Ada"
 
+  testGenerateDispatchesAsJsonOnActor =>
+    // Actors implementing asJson serialize via a sync send
+    a := JsonStatusActor spawn
+    parsed := (Json parse: (Json generate: a)) unwrap
+    self assert: (parsed at: "hits") equals: 0
+    a stop
+
   testPrettyPrintDispatchesAsJson =>
     // prettyPrint: shares the asJson hook with generate:
     u := JsonUser fullName: "Ada" age: 36

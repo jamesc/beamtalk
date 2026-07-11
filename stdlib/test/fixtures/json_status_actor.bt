@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for BT-2818: Actor implementing the `asJson` hook. Exercises the
+// non-map dispatch path in Json generate: (actor refs reach the fallback
+// clause of prepare_for_encode, which sends asJson via a sync call).
+
+Actor subclass: JsonStatusActor
+  state: hits = 0
+
+  asJson => #{"hits" => self.hits}
