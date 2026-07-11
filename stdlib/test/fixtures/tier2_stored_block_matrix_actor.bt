@@ -153,15 +153,19 @@ Actor subclass: Tier2StoredBlockMatrixActor
   // N>2 case (multiple intermediate {Result, State} tuples threaded in sequence).
   tickThrice: x => self.onTick value: x; value: x; value: x
 
-  // P2-11 (KNOWN GAP — BT-2815): same-method, LOCAL var block with a
+  // P2-11 (BT-2815, fixed): same-method, LOCAL var block with a
   // captured-local-ONLY mutation (no field write), invoked via a cascade.
   // This was originally believed fully supported — BT-2809's restriction is
   // specifically about a FIELD-stored captured-local-only block (invoked
   // cross-method), and this is neither field-stored nor cross-method — but
-  // it turns out a captured-local mutation in a NAMED Tier 2 local var
-  // (as opposed to an inline block literal) never threads back to the
-  // caller's own variable at all, even for a single non-cascade call in the
-  // same method; reproduces independently of the cascade shape tested here.
+  // it turned out a captured-local mutation in a NAMED Tier 2 local var (as
+  // opposed to an inline block literal) never threaded back to the caller's
+  // own variable at all, even for a single non-cascade call in the same
+  // method — reproduced independently of the cascade shape tested here.
+  // `tier2_local_var_captured_mutations` (gen_server/methods.rs) now records
+  // the captured-mutation var names at the `blk := [block]` assignment site,
+  // keyed by variable name, so `get_inline_block_captured_mutations` can
+  // rebind them at any later call site for that name — cascade or not.
   // (A field-write PLUS captured-local mix stored in a local var, unlike
   // this captured-local-only case, hits a separate pre-existing
   // semantic-analysis limitation — see block_analyzer.rs's own comment on

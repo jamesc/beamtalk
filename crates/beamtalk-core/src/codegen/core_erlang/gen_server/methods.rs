@@ -244,6 +244,7 @@ impl CoreErlangGenerator {
         // for the case where a caller inspects the field between the clear
         // and the body being generated.
         self.tier2_local_vars.clear();
+        self.tier2_local_var_captured_mutations.clear();
         let selector_name_for_t2 = selector_name.to_string();
         if let Some(positions) = self.tier2_method_info.get(&selector_name_for_t2).cloned() {
             for pos in &positions {
@@ -425,7 +426,8 @@ impl CoreErlangGenerator {
             else {
                 continue;
             };
-            let needs_tier2 = !Self::captured_mutations_for_block(block).is_empty()
+            let captured_mutations = Self::captured_mutations_for_block(block);
+            let needs_tier2 = !captured_mutations.is_empty()
                 || (self.context == CodeGenContext::Actor
                     && !block_analysis::analyze_block(block).field_writes.is_empty());
             if !needs_tier2 {
@@ -443,6 +445,14 @@ impl CoreErlangGenerator {
             // pass "no unsafe use found" and be wrongly promoted.
             if has_safe && !has_unsafe {
                 self.tier2_local_vars.insert(var_name.to_string());
+                // BT-2815: record which outer locals this var's block captures
+                // and mutates, so a later `value(:...)` call site — which only
+                // has the variable name, not the block AST — can still rebind
+                // them after the call (mirroring the inline-block-literal case).
+                if !captured_mutations.is_empty() {
+                    self.tier2_local_var_captured_mutations
+                        .insert(var_name.to_string(), captured_mutations);
+                }
             }
         }
     }
@@ -801,6 +811,7 @@ impl CoreErlangGenerator {
         // (top-level `name := [block]` workspace methods) calls into this
         // function without clearing it first.
         self.tier2_local_vars.clear();
+        self.tier2_local_var_captured_mutations.clear();
         self.prescan_tier2_local_vars(body);
 
         // Phase 1: classify every expression upfront.  Classification is
@@ -1357,7 +1368,7 @@ impl CoreErlangGenerator {
                         ]];
 
                         // BT-1213: Extract captured local mutations from NewState
-                        if let Some(mutations) = Self::get_inline_block_captured_mutations(expr) {
+                        if let Some(mutations) = self.get_inline_block_captured_mutations(expr) {
                             for var in &mutations {
                                 let core_var = self
                                     .lookup_var(var)
@@ -3494,7 +3505,24 @@ impl CoreErlangGenerator {
         false
     }
 
-    // BT-1213: Delegates to the shared implementation in expressions.rs.
+    /// BT-1213/BT-2815: Returns captured mutation variable names for a Tier 2
+    /// value-call statement (`expr` already classified/proven
+    /// `BodyExprKind::Tier2ValueCall` by `is_tier2_value_call`) whose receiver
+    /// mutates outer locals, so the caller can rebind them after the call.
+    ///
+    /// Handles both:
+    /// - An inline block literal receiver (`[block] value`/`value:`/... —
+    ///   the original BT-1213 scope), via `captured_mutations_for_block` on
+    ///   the literal directly.
+    /// - BT-2815: a NAMED `tier2_local_vars` identifier receiver (`blk value:
+    ///   x`) whose block literal was assigned earlier in the same method —
+    ///   the call site only has the identifier, not the block AST, so this
+    ///   looks up the mutations `prescan_tier2_local_vars` already recorded
+    ///   for that variable name in `tier2_local_var_captured_mutations`.
+    ///
+    /// Also handles a `Cascade` expression (`blk value: x; value: x`) by
+    /// normalizing to its true underlying receiver first — the same
+    /// receiver-shape checks then apply.
     //
     // BT-2797 (PR #2899 review fix): widened from private to
     // `pub(in crate::codegen::core_erlang)` so `control_flow/conditionals.rs`
@@ -3502,8 +3530,24 @@ impl CoreErlangGenerator {
     // statement inside a conditional branch, mirroring this file's own
     // `Tier2ValueCall` handling.
     pub(in crate::codegen::core_erlang) fn get_inline_block_captured_mutations(
+        &self,
         expr: &Expression,
     ) -> Option<Vec<String>> {
+        let receiver = match expr {
+            Expression::MessageSend { receiver, .. } => receiver.as_ref(),
+            Expression::Cascade {
+                receiver, messages, ..
+            } => Self::normalize_cascade(receiver, messages).0,
+            _ => return None,
+        };
+        if let Expression::Identifier(id) = receiver {
+            if let Some(mutations) = self
+                .tier2_local_var_captured_mutations
+                .get(id.name.as_str())
+            {
+                return Some(mutations.clone());
+            }
+        }
         Self::inline_block_captured_mutations(expr)
     }
 

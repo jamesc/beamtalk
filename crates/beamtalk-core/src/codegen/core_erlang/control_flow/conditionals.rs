@@ -695,7 +695,7 @@ impl CoreErlangGenerator {
                         // NewState so a later read in this branch sees the
                         // mutated value (mirrors the top-level Tier2ValueCall
                         // handling in gen_server/methods.rs).
-                        if let Some(mutations) = Self::get_inline_block_captured_mutations(expr) {
+                        if let Some(mutations) = self.get_inline_block_captured_mutations(expr) {
                             for var in &mutations {
                                 let core_var = self
                                     .lookup_var(var)

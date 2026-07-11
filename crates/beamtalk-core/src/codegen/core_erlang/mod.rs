@@ -1256,6 +1256,17 @@ pub(crate) struct CoreErlangGenerator {
     /// `generate_block`/`validate_stored_closure` compile-time diagnostic
     /// instead, since no known call site would thread state through it.
     tier2_local_vars: std::collections::HashSet<String>,
+    /// BT-2815: For each name in `tier2_local_vars` whose assigned block's
+    /// only mutation is a captured outer local (not a field write), the
+    /// names of those captured locals — mirrors what `captured_mutations_for_block`
+    /// computes for an inline block literal, but keyed by variable name so a
+    /// later `value(:...)` call site (which only has an identifier, not the
+    /// block AST) can still find them. Populated alongside `tier2_local_vars`
+    /// in `prescan_tier2_local_vars`; consulted by
+    /// `get_inline_block_captured_mutations` to rebind the caller's own
+    /// variable after the call, the same way it already does for an inline
+    /// block literal receiver.
+    tier2_local_var_captured_mutations: std::collections::HashMap<String, Vec<String>>,
     /// BT-851: Pre-scanned Tier 2 block info for the current class.
     ///
     /// Maps method selector → list of parameter indices that receive Tier 2 blocks
@@ -1335,6 +1346,7 @@ impl CoreErlangGenerator {
             source_path: None,
             tier2_block_params: std::collections::HashSet::new(),
             tier2_local_vars: std::collections::HashSet::new(),
+            tier2_local_var_captured_mutations: std::collections::HashMap::new(),
             tier2_method_info: std::collections::HashMap::new(),
             codegen_warnings: Vec::new(),
             semantic_facts: crate::semantic_analysis::SemanticFacts::default(),

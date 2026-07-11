@@ -1773,3 +1773,66 @@ fn test_bt2814_field_stored_tier2_value_call_in_argument_position_unpacks_result
          Tier-1-only apply. Got: {code}"
     );
 }
+#[test]
+fn test_bt2815_named_local_var_captured_mutation_rebinds_after_call() {
+    // BT-2815: a block assigned to a LOCAL variable (not a field) whose only
+    // mutation is a captured outer local, invoked later via `value:` in the
+    // same method. Before the fix, `get_inline_block_captured_mutations`
+    // only recognized an INLINE block literal receiver (the original BT-1213
+    // scope) — a NAMED `tier2_local_vars` identifier receiver fell through
+    // with no rebinding, so the caller's own `outer` variable silently kept
+    // its stale pre-call value even though the call itself succeeded and
+    // internally computed the right value. `prescan_tier2_local_vars` now
+    // records the captured-mutation var names keyed by variable name
+    // (`tier2_local_var_captured_mutations`) so the call site can rebind
+    // them the same way it already does for an inline literal. Structural
+    // check only (see stdlib/test/tier2_stored_block_matrix_test.bt for the
+    // runtime end-to-end check).
+    let src = "Actor subclass: Ctr\n  state: dummy = 0\n\n  run =>\n    outer := 0\n    blk := [:n | outer := outer + n]\n    blk value: 5\n    outer\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let code = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    )
+    .expect("should compile (BT-2815)");
+
+    assert!(
+        regex::Regex::new(
+            r"let State1 = call 'erlang':'element'\(2, _T2Tuple\w*\) in let Outer\w* = call 'maps':'get'\('__local__outer', State1\)"
+        )
+        .unwrap()
+        .is_match(&code),
+        "after the named-local-var Tier2 block's value: call, the caller's \
+         own `outer` binding must be rebound from '__local__outer' in the \
+         call's returned NewState, mirroring the inline-block-literal case. \
+         Got: {code}"
+    );
+}
+
+#[test]
+fn test_bt2815_named_local_var_cascade_captured_mutation_rebinds_after_call() {
+    // BT-2815 acceptance criteria: verify the cascade variant too —
+    // `blk value: x; value: x` (BT-2808's cascade codegen) invoked twice
+    // must also rebind the caller's `outer` var from the cascade's final
+    // NewState, not just the single-send case above.
+    let src = "Actor subclass: Ctr\n  state: dummy = 0\n\n  run =>\n    outer := 0\n    blk := [:n | outer := outer + n]\n    blk value: 4; value: 4\n    outer\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let code = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    )
+    .expect("should compile (BT-2815)");
+
+    assert!(
+        regex::Regex::new(
+            r"let Outer\w* = call 'maps':'get'\('__local__outer', State\w*\) in let _Result = Outer"
+        )
+        .unwrap()
+        .is_match(&code),
+        "after the named-local-var Tier2 block's cascade (value: x; value: \
+         x), the caller's own `outer` binding must be rebound from \
+         '__local__outer' in the cascade's final NewState. Got: {code}"
+    );
+}
