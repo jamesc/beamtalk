@@ -1811,28 +1811,24 @@ impl CoreErlangGenerator {
             let synth = Self::build_synthetic_value_accessor_metadata(class);
             let method_sigs_doc = Self::extend_selector_map_doc(
                 method_sigs_doc,
-                instance_methods.len(),
+                instance_methods.is_empty(),
                 synth.instance_sigs,
             );
             let method_docs_doc = Self::extend_selector_map_doc(
                 method_docs_doc,
-                instance_methods
-                    .iter()
-                    .filter(|m| m.doc_comment.is_some())
-                    .count(),
+                !instance_methods.iter().any(|m| m.doc_comment.is_some()),
                 synth.instance_docs,
             );
             let class_method_sigs_doc = Self::extend_selector_map_doc(
                 class_method_sigs_doc,
-                class_methods_primary.len(),
+                class_methods_primary.is_empty(),
                 synth.class_sigs,
             );
             let class_method_docs_doc = Self::extend_selector_map_doc(
                 class_method_docs_doc,
-                class_methods_primary
+                !class_methods_primary
                     .iter()
-                    .filter(|m| m.doc_comment.is_some())
-                    .count(),
+                    .any(|m| m.doc_comment.is_some()),
                 synth.class_docs,
             );
 
@@ -1993,12 +1989,13 @@ impl CoreErlangGenerator {
     /// selector-map body document, inserting `, ` separators so the combined
     /// interior remains a valid comma-separated `~{ ... }~` map body.
     ///
-    /// `base_len` is the number of entries already present in `base` (0 when it
-    /// is empty) — used solely to decide whether the first appended entry needs a
-    /// leading separator. Returns `base` unchanged when there are no extras.
+    /// `base_is_empty` tells the caller's own builder result — not a re-derived
+    /// count — whether `base` renders any entries, so the first appended entry
+    /// knows whether it needs a leading separator. Returns `base` unchanged when
+    /// there are no extras.
     fn extend_selector_map_doc(
         base: Document<'static>,
-        base_len: usize,
+        base_is_empty: bool,
         extra: Vec<Document<'static>>,
     ) -> Document<'static> {
         if extra.is_empty() {
@@ -2006,7 +2003,7 @@ impl CoreErlangGenerator {
         }
         let mut parts: Vec<Document<'static>> = vec![base];
         for (i, entry) in extra.into_iter().enumerate() {
-            if base_len > 0 || i > 0 {
+            if !base_is_empty || i > 0 {
                 parts.push(Document::Str(", "));
             }
             parts.push(entry);
@@ -4730,8 +4727,8 @@ impl CoreErlangGenerator {
 mod tests {
     use super::{MetaProvenance, MetaTypeRepr, extract_package_from_module_name};
     use crate::ast::{
-        ClassDefinition, ClassKind, Expression, ExpressionStatement, Identifier, Literal,
-        MessageSelector, MethodDefinition, Module, TypeParamDecl,
+        ClassDefinition, ClassKind, Expression, ExpressionStatement, Identifier, KeywordPart,
+        Literal, MessageSelector, MethodDefinition, Module, ParameterDefinition, TypeParamDecl,
     };
     use crate::codegen::core_erlang::CoreErlangGenerator;
     use crate::source_analysis::Span;
@@ -5520,6 +5517,37 @@ mod tests {
         assert!(
             entries.instance.iter().any(|(sel, _, _)| sel == "withX:"),
             "the copy-setter is still auto-generated"
+        );
+    }
+
+    #[test]
+    fn test_synthetic_skips_user_overridden_keyword_constructor() {
+        // A user-defined `x:y:` class-side method shadows the auto keyword
+        // constructor, so no synthetic class-side entry is injected.
+        let mut class = value_class(
+            "Point",
+            vec![slot("x", Some("Integer")), slot("y", Some("Integer"))],
+        );
+        class.class_methods.push({
+            let mut m = MethodDefinition::new(
+                MessageSelector::Keyword(vec![
+                    KeywordPart::new("x:", s()),
+                    KeywordPart::new("y:", s()),
+                ]),
+                vec![
+                    ParameterDefinition::new(Identifier::new("x", s())),
+                    ParameterDefinition::new(Identifier::new("y", s())),
+                ],
+                vec![bare(Expression::Literal(Literal::Integer(42), s()))],
+                s(),
+            );
+            m.is_class_method = true;
+            m
+        });
+        let entries = CoreErlangGenerator::synthetic_value_accessor_entries(&class);
+        assert!(
+            entries.class.is_empty(),
+            "user-defined keyword constructor must suppress the synthetic class-side entry"
         );
     }
 }
