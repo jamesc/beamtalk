@@ -1,7 +1,7 @@
 # ADR 0107: Nil and Type Patterns in `match:`
 
 ## Status
-Proposed (2026-07-12)
+Accepted (2026-07-12)
 
 ## Context
 
@@ -181,7 +181,18 @@ coll match: [
   Handling nil outside `match:` (`raw ifNil: [default] ifNotNil: [:v | v
   match: [...]]`) reintroduces exactly the nested-dispatch shape this ADR
   exists to eliminate; that nesting cost is why `nil` earns a place in the
-  arm list rather than staying purely a guard/message idiom.
+  arm list rather than staying purely a guard/message idiom. *Runtime
+  representation hazard:* `nil`, `true`/`false` (`Boolean`), and `Symbol`
+  values are all plain Erlang atoms with no further runtime tag distinguishing
+  them from each other — a naive `is_atom(X)` guard for `s :: Symbol` would
+  also match `nil` and both booleans. This must not be an arm-ordering
+  hazard (silently shadowing a later `nil ->`/`b :: Boolean` arm depending on
+  where `s :: Symbol` happens to sit): `Symbol`'s compiled guard excludes the
+  other atom values explicitly (`is_atom(X) andalso X =/= 'nil' andalso X
+  =/= 'true' andalso X =/= 'false'`), and `Boolean`'s guard is an exact
+  literal match on `'true'`/`'false'`, not a bare `is_atom`. This makes all
+  four atom-representation patterns (`nil`, `true`/`false`, `Symbol`)
+  mutually exclusive regardless of arm order.
 - **Type pattern (`binding :: ClassName`):** matches if the scrutinee's
   runtime class is `ClassName`, binding the value (narrowed to `ClassName`
   for the arm body) to `binding`. Reuses the `::` token already established
@@ -190,8 +201,13 @@ coll match: [
   position.
 - **Phase A scope is deliberately concrete/leaf types only**: stdlib
   primitives (`String`, `Integer`, `Float`, `List`, `Dictionary`, `Boolean`,
-  `Symbol`) and exact tagged `Value`/sealed classes. `binding :: SomeClass`
-  where `SomeClass` has subclasses is a **compile error in Phase A**
+  `Symbol`) and exact tagged `Value`/sealed classes. `Character` is excluded
+  from Phase A even though it's an existing `Literal` pattern kind: it
+  compiles to a plain Erlang integer with no distinct runtime tag from
+  `Integer` (`expressions.rs:73`), so `x :: Character` cannot be
+  distinguished from `x :: Integer` at runtime — use `x :: Integer` instead.
+  `binding :: SomeClass` where `SomeClass` has subclasses is a **compile
+  error in Phase A**
   ("`SomeClass` has subclasses; type patterns are not yet supported for
   non-leaf classes — see ADR 0107 Phase B"), not silently-wrong behaviour.
   This keeps Phase A's runtime semantics identical to an exact class-tag
@@ -524,7 +540,10 @@ to work.
   `crates/beamtalk-core/src/semantic_analysis/pattern_bindings.rs` and
   `analyser.rs`/`block_facts.rs` (the same files that already handle
   `Constructor`'s keyword bindings) — extend to define `Pattern::Type`'s
-  `binding` in the arm's scope, narrowed to `class`.
+  `binding` in the arm's scope, narrowed to `class`. This scope includes the
+  arm's `when:` guard, not just its body — `path :: String when: [path
+  startsWith: "$"] -> ...` requires `path` (narrowed to `String`) to already
+  be bound and visible while the guard block itself is evaluated.
 - **Semantic analysis (narrowing):**
   `crates/beamtalk-core/src/semantic_analysis/type_checker/narrowing/rules/`
   — a new rule (or extension of `is_kind_of.rs`'s existing algebra) applies
@@ -550,7 +569,14 @@ to work.
   `generate_array_match_arm`'s (line 2350) nested-`case`-wrapping-a-guard-BIF-test
   shape (the `is_map` check at line 2411 is its concrete instance) generalized
   to a class-name → BIF table (`is_binary`,
-  `is_integer`, `is_float`, `is_list`, `is_boolean`, ...); exact tagged
+  `is_integer`, `is_float`, `is_list`, ...) — with two classes needing a
+  compound rather than single-BIF guard: `Dictionary` is a bare Erlang map
+  with **no** `'$beamtalk_class'` key (`value_type_codegen.rs:630`), while
+  every tagged `Value`/sealed-class instance is *also* a map, but *with* one
+  — so `x :: Dictionary` must compile to `is_map(X) andalso maps:get(
+  '$beamtalk_class', X, undefined) =:= undefined`, not a bare `is_map`, to
+  avoid false-positiving on every `Value` instance; and `Symbol`'s guard
+  excludes `nil`/`true`/`false` as described above. Exact tagged
   `Value`/sealed classes reuse `generate_constructor_pattern`'s
   `'$beamtalk_class'` map-key check (~line 2761), generalized from
   hardcoded `Result` to the pattern's `class` field. Non-leaf classes in
