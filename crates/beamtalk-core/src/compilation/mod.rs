@@ -11,10 +11,15 @@
 //! and conflict detection.
 
 pub mod dependency;
+pub mod diagnostics_policy;
 pub mod extension_conflicts;
 pub mod extension_index;
 
 pub use dependency::{DependencyMap, DependencySource, DependencySpec, GitReference};
+pub use diagnostics_policy::{
+    DiagnosticSeverityOverride, DiagnosticsTable, DiagnosticsTableError, apply_diagnostics_table,
+    parse_diagnostics_table, parse_diagnostics_table_from_manifest_toml,
+};
 pub use extension_conflicts::{
     ExtensionConflict, conflict_diagnostics, detect_extension_conflicts, shadowing_diagnostics,
 };

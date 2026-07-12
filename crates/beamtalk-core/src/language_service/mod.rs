@@ -159,6 +159,13 @@ pub struct SimpleLanguageService {
     project_complete: bool,
     /// Whether the workspace has package dependencies (BT-2794 pre-WS3 guard).
     has_package_dependencies: bool,
+    /// Per-category diagnostic severity overrides from the workspace's
+    /// `beamtalk.toml` `[diagnostics]` section (ADR 0100 Rule 3, BT-2800).
+    /// Empty (the default) preserves today's Rule 1 completeness-ladder
+    /// defaults — the same behaviour as before this field existed. Set by
+    /// the LSP server after loading `beamtalk.toml` from each workspace
+    /// root, so the LSP agrees with `beamtalk build` on diagnostic severity.
+    diagnostics_overrides: crate::compilation::diagnostics_policy::DiagnosticsTable,
 }
 
 #[derive(Debug, Clone)]
@@ -181,6 +188,7 @@ impl SimpleLanguageService {
             native_types: None,
             project_complete: false,
             has_package_dependencies: false,
+            diagnostics_overrides: crate::compilation::diagnostics_policy::DiagnosticsTable::new(),
         }
     }
 
@@ -196,6 +204,7 @@ impl SimpleLanguageService {
             native_types: None,
             project_complete: false,
             has_package_dependencies: false,
+            diagnostics_overrides: crate::compilation::diagnostics_policy::DiagnosticsTable::new(),
         }
     }
 
@@ -217,6 +226,19 @@ impl SimpleLanguageService {
     /// keeps every receiver `Open`.
     pub fn set_has_package_dependencies(&mut self, has_deps: bool) {
         self.has_package_dependencies = has_deps;
+    }
+
+    /// Sets the `[diagnostics]` severity-override table loaded from the
+    /// workspace's `beamtalk.toml` (ADR 0100 Rule 3, BT-2800).
+    ///
+    /// Called by the LSP server once per workspace root after loading and
+    /// parsing `beamtalk.toml`. An empty table (the default) is a no-op —
+    /// diagnostics keep today's Rule 1 completeness-ladder severities.
+    pub fn set_diagnostics_overrides(
+        &mut self,
+        table: crate::compilation::diagnostics_policy::DiagnosticsTable,
+    ) {
+        self.diagnostics_overrides = table;
     }
 
     /// Sets the native type registry for Erlang FFI typed completions.
@@ -1482,6 +1504,11 @@ impl LanguageService for SimpleLanguageService {
                     cross_file_classes,
                     cross_file_extensions,
                     native_type_registry: self.native_types.clone(),
+                    // BT-2800: apply the same `beamtalk.toml` `[diagnostics]`
+                    // severity-override table `beamtalk build` uses, so the
+                    // LSP never disagrees with the CLI about a diagnostic's
+                    // severity.
+                    diagnostics_overrides: self.diagnostics_overrides.clone(),
                     ..Default::default()
                 };
                 crate::queries::diagnostic_provider::compute_project_diagnostics(
@@ -3750,6 +3777,44 @@ mod tests {
         assert!(
             unresolved.is_empty(),
             "cross-file class `Foo` should resolve via ProjectIndex, got: {unresolved:?}"
+        );
+    }
+
+    /// BT-2800 (ADR 0100 Rule 3 surface-parity gap): `SimpleLanguageService`
+    /// must apply the `[diagnostics]` table set via `set_diagnostics_overrides`
+    /// exactly like `beamtalk build` does — a `dnu = "error"` override
+    /// promotes the default `Hint` on an unresolved selector to `Error`.
+    #[test]
+    fn diagnostics_applies_severity_overrides() {
+        use crate::compilation::diagnostics_policy::{
+            DiagnosticSeverityOverride, DiagnosticsTable,
+        };
+        use crate::source_analysis::{DiagnosticCategory, Severity};
+
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("src/Dnu.bt");
+        service.update_file(file.clone(), "\"hello\" frobnicate".to_string());
+
+        // Baseline: no overrides set, Rule 1 default is Hint.
+        let baseline = service.diagnostics(&file);
+        assert!(
+            baseline.iter().any(
+                |d| d.category == Some(DiagnosticCategory::Dnu) && d.severity == Severity::Hint
+            ),
+            "expected a Dnu Hint before any override: {baseline:?}"
+        );
+
+        let mut table = DiagnosticsTable::new();
+        table.insert(DiagnosticCategory::Dnu, DiagnosticSeverityOverride::Error);
+        service.set_diagnostics_overrides(table);
+
+        let overridden = service.diagnostics(&file);
+        assert!(
+            overridden
+                .iter()
+                .any(|d| d.category == Some(DiagnosticCategory::Dnu)
+                    && d.severity == Severity::Error),
+            "dnu = \"error\" override must promote the Dnu diagnostic to Error: {overridden:?}"
         );
     }
 

@@ -8,7 +8,10 @@
 //! Parses `beamtalk.toml` manifests that define a package's identity and metadata.
 //! See ADR 0026 for the package definition and manifest format.
 
-use beamtalk_core::compilation::{DependencyMap, DependencySource, DependencySpec, GitReference};
+use beamtalk_core::compilation::{
+    DependencyMap, DependencySource, DependencySpec, GitReference, parse_diagnostics_table,
+};
+#[cfg(test)]
 use beamtalk_core::source_analysis::DiagnosticCategory;
 use camino::Utf8Path;
 use miette::{Context, IntoDiagnostic, Result};
@@ -430,147 +433,21 @@ fn parse_native_dependencies(native: Option<&NativeSection>) -> Result<NativeDep
     Ok(result)
 }
 
-/// A per-category diagnostic severity override (ADR 0100 Rule 3).
-///
-/// Values map to the `[diagnostics]` table strings in `beamtalk.toml`:
-/// `"off"` (drop the diagnostic entirely), `"lint"` / `"hint"` / `"warn"` /
-/// `"error"` (set that [`Severity`](beamtalk_core::source_analysis::Severity)
-/// as the category's *base* severity for the package, ahead of Rule 1's
-/// completeness-ladder default and behind site-level `@expect`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DiagnosticSeverityOverride {
-    /// Drop diagnostics in this category entirely — never shown, never
-    /// promoted by `--warnings-as-errors`.
-    Off,
-    /// Style/redundancy-lint severity (suppressed outside `beamtalk lint`).
-    Lint,
-    /// Informational-hint severity.
-    Hint,
-    /// Warning severity.
-    Warn,
-    /// Error severity — fails the build unconditionally, independent of
-    /// `--warnings-as-errors`.
-    Error,
-}
-
-impl DiagnosticSeverityOverride {
-    /// Parses one of the four accepted `[diagnostics]` value strings.
-    fn parse(s: &str) -> Result<Self, String> {
-        match s {
-            "off" => Ok(Self::Off),
-            "lint" => Ok(Self::Lint),
-            "hint" => Ok(Self::Hint),
-            "warn" => Ok(Self::Warn),
-            "error" => Ok(Self::Error),
-            other => Err(format!(
-                "invalid diagnostic severity '{other}' — expected one of \
-                 \"off\", \"lint\", \"hint\", \"warn\", \"error\""
-            )),
-        }
-    }
-}
-
-/// A parsed and validated `[diagnostics]` table (ADR 0100 Rule 3): per-category
-/// severity overrides, keyed by [`DiagnosticCategory`]. Empty when the
-/// section is absent — absence preserves today's Rule 1 defaults.
-pub type DiagnosticsTable = BTreeMap<DiagnosticCategory, DiagnosticSeverityOverride>;
-
-/// Maps a `[diagnostics]` table key (kebab-case) to its [`DiagnosticCategory`].
-///
-/// Mirrors the `Debug`-derived `PascalCase` variant names
-/// (`crates/beamtalk-core/src/source_analysis/parser/mod.rs`), converted to
-/// kebab-case for TOML key ergonomics (e.g. `UnresolvedClass` →
-/// `unresolved-class`).
-fn diagnostic_category_from_kebab(key: &str) -> Option<DiagnosticCategory> {
-    Some(match key {
-        "dnu" => DiagnosticCategory::Dnu,
-        "type" => DiagnosticCategory::Type,
-        "unused" => DiagnosticCategory::Unused,
-        "empty-body" => DiagnosticCategory::EmptyBody,
-        "lint" => DiagnosticCategory::Lint,
-        "dead-assignment" => DiagnosticCategory::DeadAssignment,
-        "extension-conflict" => DiagnosticCategory::ExtensionConflict,
-        "deprecation" => DiagnosticCategory::Deprecation,
-        "actor-new" => DiagnosticCategory::ActorNew,
-        "visibility" => DiagnosticCategory::Visibility,
-        "unresolved-class" => DiagnosticCategory::UnresolvedClass,
-        "unresolved-ffi" => DiagnosticCategory::UnresolvedFfi,
-        "arity-mismatch" => DiagnosticCategory::ArityMismatch,
-        "shadowed-class" => DiagnosticCategory::ShadowedClass,
-        "type-annotation" => DiagnosticCategory::TypeAnnotation,
-        "inheritance" => DiagnosticCategory::Inheritance,
-        "sendability" => DiagnosticCategory::Sendability,
-        _ => return None,
-    })
-}
-
-/// All valid `[diagnostics]` table keys, in the same order as
-/// [`diagnostic_category_from_kebab`] — used to build the "did you mean one
-/// of ..." error message for an unrecognised key.
-const DIAGNOSTIC_CATEGORY_KEYS: &[&str] = &[
-    "dnu",
-    "type",
-    "unused",
-    "empty-body",
-    "lint",
-    "dead-assignment",
-    "extension-conflict",
-    "deprecation",
-    "actor-new",
-    "visibility",
-    "unresolved-class",
-    "unresolved-ffi",
-    "arity-mismatch",
-    "shadowed-class",
-    "type-annotation",
-    "inheritance",
-    "sendability",
-];
-
-/// Parse and validate the `[diagnostics]` section of a manifest (ADR 0100 Rule 3).
-///
-/// Returns an empty table if the section is missing or empty — absence
-/// preserves today's Rule 1 completeness-ladder defaults.
-fn parse_diagnostics_table(diagnostics: Option<&toml::Value>) -> Result<DiagnosticsTable> {
-    let Some(raw_value) = diagnostics else {
-        return Ok(BTreeMap::new());
-    };
-
-    let table = raw_value.as_table().ok_or_else(|| {
-        miette::miette!(
-            "[diagnostics] must be a table, not a {}",
-            value_type_name(raw_value)
-        )
-    })?;
-
-    if table.is_empty() {
-        return Ok(BTreeMap::new());
-    }
-
-    let mut result = DiagnosticsTable::new();
-    for (key, value) in table {
-        let Some(category) = diagnostic_category_from_kebab(key) else {
-            miette::bail!(
-                "[diagnostics] has unknown category '{key}' — expected one of: {}",
-                DIAGNOSTIC_CATEGORY_KEYS.join(", ")
-            );
-        };
-
-        let severity_str = value.as_str().ok_or_else(|| {
-            miette::miette!(
-                "[diagnostics] '{key}' must be a severity string, not a {}",
-                value_type_name(value)
-            )
-        })?;
-
-        let severity = DiagnosticSeverityOverride::parse(severity_str)
-            .map_err(|msg| miette::miette!("[diagnostics] '{key}': {msg}"))?;
-
-        result.insert(category, severity);
-    }
-
-    Ok(result)
-}
+// ADR 0100 Rule 3 (BT-2793) / BT-2800: `DiagnosticSeverityOverride` and
+// `DiagnosticsTable` — plus the `[diagnostics]`-table parser
+// (`parse_diagnostics_table`) — moved to `beamtalk-core`
+// (`beamtalk_core::compilation::diagnostics_policy`) so that `beamtalk-lsp`
+// can apply the same table `beamtalk build` does without depending on
+// `beamtalk-cli` (dependencies flow downward only — see
+// `docs/development/architecture-principles.md`). Re-exported here so
+// existing `crate::commands::manifest::{DiagnosticsTable,
+// DiagnosticSeverityOverride}` references throughout this crate keep working
+// unchanged. `DiagnosticSeverityOverride` is only referenced from test code
+// in this crate today, so its re-export is `#[cfg(test)]`-gated to avoid an
+// unused-import warning in non-test builds.
+#[cfg(test)]
+pub use beamtalk_core::compilation::DiagnosticSeverityOverride;
+pub use beamtalk_core::compilation::DiagnosticsTable;
 
 /// Return a human-readable TOML type name for error messages.
 fn value_type_name(value: &toml::Value) -> &'static str {

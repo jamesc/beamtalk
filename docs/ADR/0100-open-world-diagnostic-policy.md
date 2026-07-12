@@ -3,7 +3,7 @@
 ## Status
 Accepted (2026-07-10; proposed 2026-06-27)
 
-**Implementation status (2026-07-10):** all three rules are implemented.
+**Implementation status (2026-07-12):** all three rules are implemented.
 Rule 1 and Rule 3 landed via BT-2793. Rule 2 landed via BT-2796 (WS2:
 `KnowledgeScope` completeness contract + parse-error guard), BT-2795 (WS1:
 project-wide extension visibility), and BT-2794 (pre-WS3 dependency guard) —
@@ -11,7 +11,10 @@ see the Rule 2 section for how "removal" of the cross-file-parent
 suppression was realised. WS3 (cross-package extension metadata, ADR 0070
 amendment) remains future work; until it lands, packages that declare
 dependencies get no unresolved-selector hints in project-complete builds
-(the Rule 1 third downgrade, implemented as the BT-2794 guard).
+(the Rule 1 third downgrade, implemented as the BT-2794 guard). BT-2800
+closed a surface-parity gap BT-2793 left behind: the LSP now applies the
+Rule 3 `[diagnostics]` table too, not just `beamtalk build` (see the
+Escalation implementation note below).
 
 ## Context
 
@@ -349,6 +352,10 @@ escalation (Rule 3). What we reject: Gleam's closed-world fatality as a default.
 - **Tooling developer (LSP/MCP):** a stable `(severity, category)` contract per
   diagnostic, with `Dnu` clearly separated, makes it trivial to render hints
   distinctly from errors and to offer "create method" / "did you mean" actions.
+  The Rule 3 `[diagnostics]` table (below) is honoured identically by
+  `beamtalk build` and the LSP (BT-2800) — a category escalated to `Error`
+  shows as an editor error, not a quiet hint, so the build and the IDE never
+  disagree about a diagnostic's severity.
 
 ### Discoverability
 
@@ -490,12 +497,24 @@ This ADR is policy; the code changes ride the BT-2251 workstreams.
   replaces suppression (Rule 2). **Done** (BT-2796, BT-2795, BT-2794); see the
   Rule 2 section for the realised mechanism (`KnowledgeScope`, per-receiver
   parse-error guard, pre-WS3 dependency guard).
-- **Escalation** (`crates/beamtalk-cli/src/beam_compiler.rs`,
-  `crates/beamtalk-cli/src/commands/manifest.rs`): **done (BT-2793).** The
-  `beamtalk.toml` `[diagnostics]` per-category table (Rule 3) is implemented;
-  `--warnings-as-errors` itself is unchanged (still promotes `Warning`/`Hint`
-  to `Error`, excluding the gradual-migration categories unless the table
-  explicitly overrides one of them).
+- **Escalation** (`crates/beamtalk-core/src/compilation/diagnostics_policy.rs`):
+  **done (BT-2793, moved to `beamtalk-core` and wired into the LSP by
+  BT-2800).** The `beamtalk.toml` `[diagnostics]` per-category table (Rule 3)
+  is implemented; `--warnings-as-errors` itself is unchanged (still promotes
+  `Warning`/`Hint` to `Error`, excluding the gradual-migration categories
+  unless the table explicitly overrides one of them). BT-2793 first landed
+  the table and its application (`apply_diagnostics_table`) in
+  `crates/beamtalk-cli/src/beam_compiler.rs` — `beamtalk build`-only. BT-2800
+  closed the resulting surface-parity gap (the LSP silently ignored the
+  table) by moving the table type, parser, and `apply_diagnostics_table` into
+  `beamtalk-core`'s `compilation::diagnostics_policy` module and applying it
+  inside the shared `compute_project_diagnostics` pipeline
+  (`crates/beamtalk-core/src/queries/diagnostic_provider.rs`) that both the
+  CLI and the LSP (`SimpleLanguageService::diagnostics`,
+  `crates/beamtalk-core/src/language_service/mod.rs`) already called — so the
+  two surfaces cannot drift again by construction. The LSP
+  (`crates/beamtalk-lsp/src/server.rs`, `Backend::load_diagnostics_table`)
+  loads and parses each workspace root's `beamtalk.toml` once at startup.
 - **No runtime/codegen changes.**
 - **Coordination with ADR 0101 (`native:` for stateless Objects):** the
   receiver-knowledge scan must count `self delegate` `native:` methods as
@@ -527,7 +546,9 @@ transitions warrant care:
 ## References
 - Related issues: BT-2251 (epic: project-scoped compilation & type-checking;
   WS5 is this policy), BT-2250, BT-2228; BT-2793 (Rule 1 + Rule 3,
-  implemented), BT-2794 (Rule 2, blocked on BT-2795/BT-2796)
+  implemented), BT-2794 (Rule 2, blocked on BT-2795/BT-2796); BT-2800 (Rule 3
+  LSP surface-parity fix — the `[diagnostics]` table moved to `beamtalk-core`
+  and is now applied by the LSP, not just `beamtalk build`)
 - Related ADRs: ADR 0024 (static-first, live-augmented tooling), ADR 0066 (open
   class extension methods), ADR 0077 (type coverage visibility / `@expect`),
   ADR 0070 (package namespaces & dependencies — cross-package interface)
