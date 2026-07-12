@@ -2839,15 +2839,11 @@ mod tests {
     #[test]
     fn run_lint_structured_non_bt_file() {
         // Use a temp file so the test is portable across platforms.
-        let path = Utf8PathBuf::from_path_buf(std::env::temp_dir())
-            .expect("temp dir should be UTF-8")
-            .join(format!(
-                "beamtalk-mcp-lint-non-bt-{}.txt",
-                std::process::id()
-            ));
+        let temp = tempfile::TempDir::new().unwrap();
+        let path = Utf8PathBuf::from_path_buf(temp.path().join("non_bt.txt"))
+            .expect("temp dir should be UTF-8");
         std::fs::write(path.as_std_path(), "not beamtalk").unwrap();
         let result = run_lint_structured(path.as_str());
-        let _ = std::fs::remove_file(path.as_std_path());
         assert_eq!(result.total, 1);
         assert!(result.errors.len() == 1);
         assert!(result.errors[0].message.contains(".bt file"));
@@ -2857,10 +2853,8 @@ mod tests {
     fn run_lint_structured_includes_dnu_diagnostics() {
         // BT-1587: MCP lint must include DNU diagnostics from semantic analysis,
         // matching CLI `beamtalk lint` behavior.
-        let dir =
-            std::env::temp_dir().join(format!("beamtalk-mcp-lint-dnu-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let file = dir.join("dnu_test.bt");
+        let temp = tempfile::TempDir::new().unwrap();
+        let file = temp.path().join("dnu_test.bt");
         std::fs::write(
             &file,
             r#"Object subclass: DnuTest
@@ -2873,7 +2867,6 @@ mod tests {
         )
         .unwrap();
         let result = run_lint_structured(file.to_str().unwrap());
-        let _ = std::fs::remove_dir_all(&dir);
         let has_dnu = result
             .warnings
             .iter()
@@ -2889,10 +2882,8 @@ mod tests {
     fn run_lint_structured_expect_type_suppresses_dnu() {
         // BT-1587: @expect type should suppress DNU diagnostics in MCP lint,
         // just as it does in CLI lint.
-        let dir =
-            std::env::temp_dir().join(format!("beamtalk-mcp-lint-expect-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let file = dir.join("expect_test.bt");
+        let temp = tempfile::TempDir::new().unwrap();
+        let file = temp.path().join("expect_test.bt");
         std::fs::write(
             &file,
             r#"Object subclass: ExpectTest
@@ -2906,7 +2897,6 @@ mod tests {
         )
         .unwrap();
         let result = run_lint_structured(file.to_str().unwrap());
-        let _ = std::fs::remove_dir_all(&dir);
         let has_dnu = result
             .warnings
             .iter()
@@ -2924,10 +2914,8 @@ mod tests {
     /// package are falsely reported as stale.
     #[test]
     fn run_lint_structured_cross_file_classes() {
-        let dir = std::env::temp_dir().join(format!(
-            "beamtalk-mcp-lint-cross-file-{}",
-            std::process::id()
-        ));
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = temp.path();
         let src_dir = dir.join("src");
         let test_dir = dir.join("test");
         std::fs::create_dir_all(&src_dir).unwrap();
@@ -2961,7 +2949,6 @@ mod tests {
         // MyActor from src/.
         let test_file = test_dir.join("my_actor_test.bt");
         let result = run_lint_structured(test_file.to_str().unwrap());
-        let _ = std::fs::remove_dir_all(&dir);
 
         let stale = result
             .warnings
@@ -2979,15 +2966,12 @@ mod tests {
     /// `_build/deps/http/src/` (simulating the state left by a prior
     /// `beamtalk build`, matching BT-2823's repro). The project's own
     /// `src/app.bt` references the dependency's `HTTPServer` class. Returns
-    /// the project directory and the path to `src/app.bt`.
-    ///
-    /// `label` disambiguates the temp directory between the two callers of
-    /// this helper so parallel test execution doesn't collide.
-    fn write_git_dependency_fixture(label: &str) -> (std::path::PathBuf, std::path::PathBuf) {
-        let dir = std::env::temp_dir().join(format!(
-            "beamtalk-mcp-lint-git-dep-{label}-{}",
-            std::process::id()
-        ));
+    /// the fixture's `TempDir` (keep it alive for the duration of the test —
+    /// it removes the project directory on drop) and the path to
+    /// `src/app.bt`.
+    fn write_git_dependency_fixture() -> (tempfile::TempDir, std::path::PathBuf) {
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = temp.path();
         let src_dir = dir.join("src");
         std::fs::create_dir_all(&src_dir).unwrap();
 
@@ -3022,7 +3006,7 @@ mod tests {
         )
         .unwrap();
 
-        (dir, app_file)
+        (temp, app_file)
     }
 
     /// BT-2823: MCP `lint` must resolve classes from a project's git
@@ -3032,9 +3016,8 @@ mod tests {
     /// `Unresolved class` diagnostic.
     #[test]
     fn run_lint_structured_resolves_git_dependency_classes() {
-        let (dir, app_file) = write_git_dependency_fixture("lint");
+        let (_temp, app_file) = write_git_dependency_fixture();
         let result = run_lint_structured(app_file.to_str().unwrap());
-        let _ = std::fs::remove_dir_all(&dir);
 
         let unresolved = result
             .warnings
@@ -3051,9 +3034,8 @@ mod tests {
     /// but for the `diagnostic_summary` tool.
     #[test]
     fn compute_diagnostic_summary_resolves_git_dependency_classes() {
-        let (dir, app_file) = write_git_dependency_fixture("summary");
+        let (_temp, app_file) = write_git_dependency_fixture();
         let result = compute_diagnostic_summary(app_file.to_str().unwrap());
-        let _ = std::fs::remove_dir_all(&dir);
 
         let unresolved_class_total = result["totals_by_category"]["UnresolvedClass"]["total"]
             .as_u64()
@@ -3078,10 +3060,8 @@ mod tests {
             return;
         }
 
-        let dir = std::env::temp_dir().join(format!(
-            "beamtalk-mcp-lint-unreadable-{}",
-            std::process::id()
-        ));
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = temp.path();
         let src_dir = dir.join("src");
         std::fs::create_dir_all(&src_dir).unwrap();
 
@@ -3103,9 +3083,9 @@ mod tests {
 
         let result = run_lint_structured(target.to_str().unwrap());
 
-        // Restore permissions before cleanup so remove_dir_all succeeds.
+        // Restore permissions so the TempDir's Drop cleanup can remove the
+        // sibling file.
         let _ = std::fs::set_permissions(&sibling, std::fs::Permissions::from_mode(0o644));
-        let _ = std::fs::remove_dir_all(&dir);
 
         let has_unreadable_warning = result.warnings.iter().any(|d| {
             d.message
@@ -3129,10 +3109,8 @@ mod tests {
             return;
         }
 
-        let dir = std::env::temp_dir().join(format!(
-            "beamtalk-mcp-summary-unreadable-{}",
-            std::process::id()
-        ));
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = temp.path();
         let src_dir = dir.join("src");
         std::fs::create_dir_all(&src_dir).unwrap();
 
@@ -3151,8 +3129,9 @@ mod tests {
 
         let result = compute_diagnostic_summary(target.to_str().unwrap());
 
+        // Restore permissions so the TempDir's Drop cleanup can remove the
+        // sibling file.
         let _ = std::fs::set_permissions(&sibling, std::fs::Permissions::from_mode(0o644));
-        let _ = std::fs::remove_dir_all(&dir);
 
         assert!(
             result.get("unreadable_package_files").is_some(),
@@ -3178,11 +3157,8 @@ mod tests {
             return;
         }
 
-        let dir = std::env::temp_dir().join(format!(
-            "beamtalk-mcp-summary-unreadable-target-{}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = temp.path();
 
         let target = dir.join("locked.bt");
         std::fs::write(&target, "Object subclass: Locked\n  class hello => 1\n").unwrap();
@@ -3190,8 +3166,9 @@ mod tests {
 
         let result = compute_diagnostic_summary(target.to_str().unwrap());
 
+        // Restore permissions so the TempDir's Drop cleanup can remove the
+        // target file.
         std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o644)).unwrap();
-        let _ = std::fs::remove_dir_all(&dir);
 
         assert_eq!(result["files_checked"], 0);
         assert!(
@@ -3221,11 +3198,8 @@ mod tests {
             return;
         }
 
-        let dir = std::env::temp_dir().join(format!(
-            "beamtalk-mcp-summary-dir-unreadable-{}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = temp.path();
 
         let readable = dir.join("readable.bt");
         std::fs::write(&readable, "Object subclass: Readable\n  class hello => 1\n").unwrap();
@@ -3236,8 +3210,9 @@ mod tests {
 
         let result = compute_diagnostic_summary(dir.to_str().unwrap());
 
+        // Restore permissions so the TempDir's Drop cleanup can remove the
+        // locked file.
         std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o644)).unwrap();
-        let _ = std::fs::remove_dir_all(&dir);
 
         assert_eq!(
             result["files_checked"], 1,
@@ -3267,11 +3242,8 @@ mod tests {
             return;
         }
 
-        let dir = std::env::temp_dir().join(format!(
-            "beamtalk-mcp-lint-dir-unreadable-{}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = temp.path();
 
         let readable = dir.join("readable.bt");
         std::fs::write(&readable, "Object subclass: Readable\n  class hello => 1\n").unwrap();
@@ -3282,8 +3254,9 @@ mod tests {
 
         let result = run_lint_structured(dir.to_str().unwrap());
 
+        // Restore permissions so the TempDir's Drop cleanup can remove the
+        // locked file.
         std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o644)).unwrap();
-        let _ = std::fs::remove_dir_all(&dir);
 
         let has_locked_error = result
             .errors
@@ -3696,11 +3669,10 @@ mod tests {
     #[test]
     fn compute_diagnostic_summary_clean_file() {
         // A well-formed source file should produce a summary with files_checked=1.
-        let tmp =
-            std::env::temp_dir().join(format!("beamtalk-mcp-summary-{}.bt", std::process::id()));
-        std::fs::write(&tmp, "Object subclass: Clean\n  class hello => 42\n").unwrap();
-        let result = compute_diagnostic_summary(tmp.to_str().unwrap());
-        let _ = std::fs::remove_file(&tmp);
+        let temp = tempfile::TempDir::new().unwrap();
+        let file = temp.path().join("clean.bt");
+        std::fs::write(&file, "Object subclass: Clean\n  class hello => 42\n").unwrap();
+        let result = compute_diagnostic_summary(file.to_str().unwrap());
         assert_eq!(result["files_checked"], 1);
         // Total may include some diagnostics from semantic analysis depending
         // on the class environment, but files_checked must be correct.
