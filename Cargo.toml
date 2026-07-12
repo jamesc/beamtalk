@@ -18,6 +18,10 @@ repository = "https://github.com/jamesc/beamtalk"
 [workspace.dependencies]
 # Workspace crates
 beamtalk-build = { path = "crates/beamtalk-build" }
+# why: beamtalk-mcp's offline lint/diagnostic_summary tools share
+# beamtalk-cli's manifest/build-layout/dependency-class-resolution logic
+# (BT-2823) via this lib target.
+beamtalk-cli = { path = "crates/beamtalk-cli" }
 beamtalk-core = { path = "crates/beamtalk-core" }
 beamtalk-etf = { path = "crates/beamtalk-etf" }
 beamtalk-examples = { path = "crates/beamtalk-examples" }

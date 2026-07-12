@@ -23,6 +23,12 @@ sealed typed Object subclass: OS
   /// ```beamtalk
   /// OS run: "echo hello"   // => "hello"
   /// ```
+  ///
+  /// BT-2829: the underlying FFI spec types the result `binary()` (`String |
+  /// Binary`, BT-2254), but `beamtalk_os:run/1` always builds and returns a
+  /// UTF-8 String — suppress the resulting `String | Binary` vs. declared
+  /// `String` return-type mismatch.
+  @expect type
   class sealed run: cmd :: String -> String => (Erlang beamtalk_os) run: cmd
 
   /// Execute a shell command with an explicit wall-clock timeout in milliseconds.
@@ -34,5 +40,8 @@ sealed typed Object subclass: OS
   /// ```beamtalk
   /// OS run: "sleep 1" timeout: 5000   // => ""
   /// ```
+  ///
+  /// BT-2829: see `run:` above — same `binary()` FFI spec imprecision.
+  @expect type
   class sealed run: cmd :: String timeout: ms :: Integer -> String =>
     (Erlang beamtalk_os) run: cmd timeout: ms

@@ -244,6 +244,12 @@ sealed typed Object subclass: Inspector
   /// ```beamtalk
   /// (Inspector on: (Point x: 3 y: 4)) printStringExpanded: 1
   /// ```
+  ///
+  /// BT-2829: the underlying FFI spec types the result `binary()` (`String |
+  /// Binary`, BT-2254), but `beamtalk_inspector:printString/2` always builds
+  /// and returns a UTF-8 String — suppress the resulting `String | Binary`
+  /// vs. declared `String` return-type mismatch.
+  @expect type
   printStringExpanded: depth :: Integer -> String =>
     (Erlang beamtalk_inspector) printString: self depth: depth
 

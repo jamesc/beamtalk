@@ -207,7 +207,7 @@ These CLI subcommands are build/tooling commands that operate offline (no worksp
 | `check` | -- | `textDocument/publishDiagnostics` | Offline syntax/type check; LSP provides diagnostics on save. **BT-2800 (ADR 0100 Rule 3):** both `beamtalk build`/`check` and the LSP apply the package's `beamtalk.toml` `[diagnostics]` per-category severity-override table through the same shared pipeline (`compute_project_diagnostics` → `apply_diagnostics_table`, `beamtalk-core`'s `compilation::diagnostics_policy` module) — a package that sets `dnu = "error"` fails the CLI build *and* shows the same site as an `Error` in the editor, closing what was previously a surface-parity gap (a `beamtalk-lsp → beamtalk-cli` dependency was avoided by moving the table parser + `apply_diagnostics_table` into `beamtalk-core`, which both crates already depend on). The LSP loads each workspace root's table once at startup (`Backend::load_diagnostics_table`, alongside the ADR 0075 type-cache load) — editing `beamtalk.toml` while the server is running requires a restart to pick up the change. |
 | `fmt` | -- | `textDocument/formatting` | Format source files; LSP provides document formatting |
 | `fmt-check` | -- | -- | `surface-specific: CI formatting check` |
-| `lint` | `lint` | -- | Lint checks; MCP exposes for AI-assisted workflows |
+| `lint` | `lint` | -- | Lint checks; MCP exposes for AI-assisted workflows. **BT-2823:** both resolve dependency (`beamtalk.toml`) class metadata into the same `ClassHierarchy` so `Unresolved class` diagnostics match for classes defined only in a git/path dependency. Deliberate divergence: the CLI's `resolve_dep_class_infos` will fetch a missing/stale git dependency over the network (`ensure_deps_resolved`); the MCP tool stays fully offline and only reads whatever dependency checkout already exists under `_build/deps/<name>/` (as left by a prior `beamtalk build`) — an unfetched dependency's classes are silently skipped rather than triggering a fetch. |
 | `test-script` | -- | -- | `surface-specific: btscript expression tests (CI)` |
 | `test-docs` | -- | -- | `surface-specific: doctest runner (CI)` |
 | `doctor` | -- | -- | `surface-specific: environment health check` |
@@ -232,7 +232,7 @@ These MCP tools provide AI-assistant-specific capabilities that have no direct R
 
 | MCP tool | Notes |
 |----------|-------|
-| `diagnostic_summary` | `surface-specific: AI-facing diagnostic overview for a file/package` |
+| `diagnostic_summary` | `surface-specific: AI-facing diagnostic overview for a file/package`. Shares the same offline, best-effort dependency-class resolution as MCP `lint` (BT-2823) — see that row's note. |
 | `search_examples` | `surface-specific: offline corpus search for code examples` |
 | `search_classes` | `surface-specific: offline class discovery by keyword` |
 | `list_packages` | `surface-specific: list loaded Beamtalk packages` |

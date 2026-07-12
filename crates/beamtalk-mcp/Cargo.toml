@@ -35,6 +35,11 @@ clap.workspace = true
 # Core compiler for lint passes in the lint MCP tool
 beamtalk-core.workspace = true
 
+# why: shares manifest parsing / build-layout / dependency-class resolution
+# with `beamtalk lint` so the offline `lint` and `diagnostic_summary` tools
+# resolve git/path dependency classes the same way (BT-2823)
+beamtalk-cli.workspace = true
+
 # Shared REPL protocol types (request/response)
 beamtalk-repl-protocol.workspace = true
 

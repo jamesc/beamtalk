@@ -1214,28 +1214,17 @@ impl TypeChecker {
         let Some(ref declared) = method.return_type else {
             return;
         };
-        let InferredType::Known {
-            class_name: actual_ty,
-            type_args: actual_args,
-            ..
-        } = body_type
-        else {
-            return; // Dynamic or Union body — can't reliably check
-        };
 
-        // Resolve the declared return type. The `-> Self` case needs the
-        // static receiver class (which the plain annotation resolver does not
-        // thread), so handle it specially via `receiver_type_for_class`.
-        // `-> Self class` returns a class object — existing body-type
-        // comparison cannot meaningfully validate this, so skip (BT-1952).
+        // Resolve the declared return type up front — every `body_type` arm
+        // below (`Known`, `Union` [BT-2829 Part A], `Dynamic` [BT-2829 Part
+        // B]) needs it. The `-> Self` case needs the static receiver class
+        // (which the plain annotation resolver does not thread), so handle it
+        // specially via `receiver_type_for_class`. `-> Self class` returns a
+        // class object — existing body-type comparison cannot meaningfully
+        // validate this, so skip (BT-1952).
         //
         // BT-2025: All other arms — including `Generic` — go through the
         // central `resolve_type_annotation` resolver.
-        //
-        // BT-2022: The resolver now preserves type_args, and the comparison
-        // below checks them when both sides carry generic arguments. This
-        // closes the bug where `-> Result(Integer, Error)` with body
-        // `Result(String, Error)` produced no warning.
         let expected = match declared {
             TypeAnnotation::SelfType { .. } => {
                 super::type_resolver::receiver_type_for_class(class_name, hierarchy)
@@ -1244,6 +1233,46 @@ impl TypeChecker {
             _ => Self::resolve_type_annotation(declared),
         };
 
+        let InferredType::Known {
+            class_name: actual_ty,
+            type_args: actual_args,
+            ..
+        } = body_type
+        else {
+            // BT-2829: `Union` and `Dynamic` bodies used to bail out of return-type
+            // checking entirely here, even against a concrete declared return
+            // type — the exact mechanism that let BT-2824's bug go unnoticed for
+            // so long. Route those through dedicated checks (Parts A and B);
+            // `Never`/`Meta`/`Negation`/`Intersection` bodies still can't be
+            // reliably compared against `expected` here, so they keep bailing
+            // silently as before.
+            match body_type {
+                InferredType::Union { members, .. } => {
+                    self.check_union_body_return_type(
+                        method, body_type, members, &expected, class_name, hierarchy,
+                    );
+                }
+                InferredType::Dynamic(reason) => {
+                    self.check_dynamic_body_return_hint(
+                        method, *reason, &expected, class_name, hierarchy,
+                    );
+                }
+                // `Known` is unreachable here at runtime (the `let`-`else`
+                // above already matched it out) — listed only because the
+                // compiler can't narrow `body_type`'s type in this arm.
+                InferredType::Never
+                | InferredType::Meta { .. }
+                | InferredType::Negation { .. }
+                | InferredType::Intersection { .. }
+                | InferredType::Known { .. } => {}
+            }
+            return;
+        };
+
+        // BT-2022: The resolver now preserves type_args, and the comparison
+        // below checks them when both sides carry generic arguments. This
+        // closes the bug where `-> Result(Integer, Error)` with body
+        // `Result(String, Error)` produced no warning.
         match &expected {
             InferredType::Known {
                 class_name: expected_ty,
@@ -1352,6 +1381,195 @@ impl TypeChecker {
             | InferredType::Negation { .. }
             | InferredType::Intersection { .. } => {}
         }
+    }
+
+    /// Returns whether a `Known` type — either a method body's whole inferred
+    /// type or one member of a `Union` body (BT-2829 Part A) — is compatible
+    /// with an `expected` (resolved declared) return type.
+    ///
+    /// Mirrors the comparison rules `check_return_type`'s `Known` body arm
+    /// applies against `expected`: base-class compatibility via
+    /// [`Self::is_type_compatible`], plus a recursive type-args check
+    /// (BT-2022) when both sides carry generic arguments and the arities
+    /// match. `expected == Never` is always a mismatch for a concrete `Known`
+    /// value (a divergent declaration requires a divergent body). `Meta` /
+    /// `Dynamic` / `Negation` / `Intersection` expected types have no
+    /// reliable `Known`-vs-`expected` comparison, so — like the `Known` body
+    /// arm's own fallthrough for those — they're treated as compatible
+    /// (conservative skip, not a false positive).
+    fn known_type_compatible_with_expected(
+        actual_ty: &EcoString,
+        actual_args: &[InferredType],
+        expected: &InferredType,
+        hierarchy: &ClassHierarchy,
+    ) -> bool {
+        match expected {
+            InferredType::Known {
+                class_name: expected_ty,
+                type_args: expected_args,
+                ..
+            } => {
+                if !Self::is_type_compatible(actual_ty, expected_ty, hierarchy) {
+                    return false;
+                }
+                if expected_args.is_empty()
+                    || actual_args.is_empty()
+                    || expected_args.len() != actual_args.len()
+                {
+                    return true;
+                }
+                expected_args
+                    .iter()
+                    .zip(actual_args.iter())
+                    .all(|(exp_arg, act_arg)| {
+                        Self::type_args_compatible(exp_arg, act_arg, hierarchy)
+                    })
+            }
+            InferredType::Union { members, .. } => members.iter().any(|member| {
+                member
+                    .as_known()
+                    .is_none_or(|name| Self::is_type_compatible(actual_ty, name, hierarchy))
+            }),
+            InferredType::Never => false,
+            InferredType::Meta { .. }
+            | InferredType::Dynamic(_)
+            | InferredType::Negation { .. }
+            | InferredType::Intersection { .. } => true,
+        }
+    }
+
+    /// BT-2829 Part A: validate a `Union` method body against the declared
+    /// return type.
+    ///
+    /// Before this, `check_return_type` bailed out of validation entirely for
+    /// `Union` bodies — so `foo -> String => self bar ifTrue: ["yes"]
+    /// ifFalse: [42]` (body infers `Union(String, Integer)`) compiled with
+    /// zero diagnostics despite `Integer` never satisfying `-> String`.
+    ///
+    /// Every member is now checked with
+    /// [`Self::known_type_compatible_with_expected`] — the same rules the
+    /// `Known` body arm applies — and a single incompatible member raises the
+    /// same `DiagnosticCategory::Type` mismatch diagnostic the `Known` arm
+    /// produces (same severity: this is a real bug, not a new lint class). A
+    /// union whose members are all compatible with `expected` — including
+    /// BT-2047's legitimate branch-union case, e.g. `ifNil:ifNotNil:`
+    /// producing exactly the declared `T | R` — stays silent, same as today.
+    ///
+    /// Conservative like `classify_union_members` (BT-1832): if any member is
+    /// itself not `Known` (nested `Dynamic`/`Union`/`Meta`/`Never`/etc.), skip
+    /// — we can't reason about those precisely enough to warn without risking
+    /// false positives.
+    ///
+    /// Scoped to `typed` classes only (per the issue title and AC), matching
+    /// Part B's gating even though the underlying comparison itself is
+    /// typed-status-agnostic — this keeps both BT-2829 diagnostics equally
+    /// narrow and avoids a noise spike in untyped/dynamic classes.
+    fn check_union_body_return_type(
+        &mut self,
+        method: &crate::ast::MethodDefinition,
+        body_type: &InferredType,
+        members: &[InferredType],
+        expected: &InferredType,
+        class_name: &EcoString,
+        hierarchy: &ClassHierarchy,
+    ) {
+        if !hierarchy.is_typed(class_name) {
+            return;
+        }
+
+        let mut known_members = Vec::with_capacity(members.len());
+        for member in members {
+            let InferredType::Known {
+                class_name: member_ty,
+                type_args: member_args,
+                ..
+            } = member
+            else {
+                return; // Non-Known member — can't reliably check, skip conservatively.
+            };
+            known_members.push((member_ty, member_args));
+        }
+
+        let all_compatible = known_members.iter().all(|(member_ty, member_args)| {
+            Self::known_type_compatible_with_expected(member_ty, member_args, expected, hierarchy)
+        });
+        if all_compatible {
+            return;
+        }
+
+        let selector = method.selector.name();
+        let expected_display = expected
+            .display_for_diagnostic()
+            .unwrap_or_else(|| EcoString::from("Dynamic"));
+        let actual_display = body_type
+            .display_for_diagnostic()
+            .unwrap_or_else(|| EcoString::from("Dynamic"));
+        self.diagnostics.push(
+            Diagnostic::warning(
+                format!(
+                    "Method '{selector}' in {class_name} declares return type {expected_display}, but body returns {actual_display}"
+                ),
+                method.span,
+            )
+            .with_category(DiagnosticCategory::Type),
+        );
+    }
+
+    /// BT-2829 Part B: hint when a `Dynamic` body swallows type information
+    /// the checker could plausibly have recovered.
+    ///
+    /// Fires only when all of the following hold:
+    /// - the method is declared in a `typed` class (untyped/dynamic classes
+    ///   intentionally don't get this rigor),
+    /// - the method has a declared concrete return type (guaranteed by the
+    ///   caller — `check_return_type` already returned early otherwise), and
+    /// - the `Dynamic` reason is `AmbiguousControlFlow` or `UnannotatedReturn`
+    ///   specifically — the two reasons that indicate the checker *could*
+    ///   have inferred something better.
+    ///
+    /// Deliberately excludes `DynamicReceiver`, `UntypedFfi`, `DynamicSpec`,
+    /// and `Unknown` — those are legitimately dynamic (FFI boundaries,
+    /// dynamic receivers, no-spec externals) and not actionable in `typed`
+    /// classes. They stay invisible except via `diagnostic_summary`'s
+    /// type-coverage percentage, same as before this change, keeping this new
+    /// diagnostic narrowly scoped.
+    fn check_dynamic_body_return_hint(
+        &mut self,
+        method: &crate::ast::MethodDefinition,
+        reason: DynamicReason,
+        expected: &InferredType,
+        class_name: &EcoString,
+        hierarchy: &ClassHierarchy,
+    ) {
+        if !matches!(
+            reason,
+            DynamicReason::AmbiguousControlFlow | DynamicReason::UnannotatedReturn
+        ) {
+            return;
+        }
+        if !hierarchy.is_typed(class_name) {
+            return;
+        }
+        let description = reason
+            .description()
+            .expect("AmbiguousControlFlow/UnannotatedReturn always have a description");
+
+        let selector = method.selector.name();
+        let expected_display = expected
+            .display_for_diagnostic()
+            .unwrap_or_else(|| EcoString::from("Dynamic"));
+        self.diagnostics.push(
+            Diagnostic::hint(
+                format!(
+                    "Method '{selector}' in {class_name} declares return type {expected_display}, but its body inferred as Dynamic ({description})"
+                ),
+                method.span,
+            )
+            .with_category(DiagnosticCategory::Type)
+            .with_hint(
+                "Add explicit type annotations or restructure control flow so the checker can infer a concrete return type",
+            ),
+        );
     }
 
     /// Emit an error for any parameter annotated with `Self`.

@@ -5,6 +5,11 @@
 //!
 //! All `_build/dev/*` paths are constructed through [`BuildLayout`] to ensure
 //! consistency across commands (build, test, run, repl, deps).
+//!
+//! BT-2823: This module lives in the `beamtalk_cli` **library** crate (not
+//! the `beamtalk` binary) so `beamtalk-mcp` can depend on it too — see the
+//! same note in `crate::manifest` for why every item here must stay `pub`
+//! rather than `pub(crate)`.
 
 use camino::Utf8PathBuf;
 
