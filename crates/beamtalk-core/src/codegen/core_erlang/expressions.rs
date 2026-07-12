@@ -2209,8 +2209,21 @@ impl CoreErlangGenerator {
         let has_array_arm = arms
             .iter()
             .any(|arm| matches!(arm.pattern, Pattern::Array { .. }));
+        // BT-2855 / ADR 0107 Phase A: a `Pattern::Type` arm needs the same
+        // chain-of-nested-`case`s path as `Pattern::Array` — its runtime
+        // test (a guard-safe BIF, an atom-exclusion guard, or a
+        // `maps:get`-based class-tag check) isn't expressible as a single
+        // native Core Erlang pattern the "all-native" fast path below
+        // builds. This is also what makes a `match:` mixing a primitive
+        // `Type` arm and a `Constructor`/native arm compile correctly into
+        // one `case`: both arm kinds flow through `generate_match_chain`,
+        // which dispatches each arm (in source order) to its own strategy
+        // and recurses for the rest.
+        let has_type_arm = arms
+            .iter()
+            .any(|arm| matches!(arm.pattern, Pattern::Type { .. }));
 
-        let inner_doc = if has_array_arm {
+        let inner_doc = if has_array_arm || has_type_arm {
             self.generate_match_chain(&match_var, arms)?
         } else {
             // All arms use native Core Erlang patterns (literals, variables, tuples, maps).
@@ -2299,6 +2312,17 @@ impl CoreErlangGenerator {
             // Generate current arm body FIRST so that state_version and temp-var counters
             // are not advanced by later arms before we codegen the current one.
             return self.generate_array_match_arm(match_var, arm, elements, rest);
+        }
+
+        // BT-2855 / ADR 0107 Phase A: `Pattern::Type` (`binding :: ClassName`)
+        // dispatches to a per-class runtime test (BIF test, atom-exclusion
+        // guard, or map-tag check) — see `generate_type_pattern`. Like
+        // `Pattern::Array` above, this can't reuse the plain native-arm path
+        // below because at least one class (`Dictionary`, or an exact tagged
+        // `Value`/sealed class) needs a `maps:get` test in case-scrutinee
+        // position, which is not expressible as a single Core Erlang guard.
+        if let Pattern::Type { binding, class, .. } = &arm.pattern {
+            return self.generate_type_pattern(match_var, arm, binding, class, rest);
         }
 
         // Native arm: case _Match of <pattern> when guard -> body <_FT> when 'true' -> rest end
@@ -2437,6 +2461,458 @@ impl CoreErlangGenerator {
             rest_doc,
             " end"
         ])
+    }
+
+    /// Compiles a single `Pattern::Type` match arm (`binding :: ClassName ->
+    /// body`) — ADR 0107 Phase A / BT-2855.
+    ///
+    /// Dispatches to one of four runtime-test shapes based on `class`'s
+    /// name, generalizing two existing codegen strategies (no new runtime
+    /// mechanism is introduced):
+    ///
+    /// - **Guard-safe BIF primitives** (`String` → `is_binary`, `Integer` →
+    ///   `is_integer`, `Float` → `is_float`, `List` → `is_list`): a
+    ///   single-level `case call 'erlang':'is_X'(_Match) of <'true'> -> ...
+    ///   <'false'> -> rest end` ([`Self::wrap_bif_test`]), generalizing
+    ///   [`Self::generate_array_match_arm`]'s outer `is_map` check to an
+    ///   arbitrary guard-safe boolean-returning BIF.
+    /// - **`Symbol`**: `is_atom(X) andalso X =/= nil andalso X =/= true
+    ///   andalso X =/= false` ([`Self::wrap_symbol_test`]), expressed as
+    ///   four nested boolean-case tests rather than `andalso` (every
+    ///   sub-test is total/side-effect-free, so nesting is equivalent and
+    ///   avoids reproducing `andalso`'s try/catch desugaring) — this
+    ///   excludes `nil`/`true`/`false` explicitly so an earlier `s ::
+    ///   Symbol` arm can never shadow a later `nil ->`/`b :: Boolean` arm
+    ///   (all four are plain Erlang atoms with no distinguishing runtime
+    ///   tag).
+    /// - **`Boolean`**: an exact 3-clause literal match on the scrutinee
+    ///   (`'true'`/`'false'`/anything-else-falls-through,
+    ///   [`Self::wrap_boolean_test`]) — not a bare `is_atom` guard, for the
+    ///   same shadowing reason as `Symbol`.
+    /// - **`Dictionary`/exact tagged `Value`/sealed classes**: `maps:get/3`
+    ///   is not guard-safe, so [`Self::wrap_class_tag_test`] reuses the
+    ///   exact nested-`case` shape [`Self::generate_array_match_arm`]
+    ///   already uses for its class-tag check: an outer `is_map` case, and
+    ///   — only in the `'true'` branch — an inner case on
+    ///   `maps:get('$beamtalk_class', _Match, 'undefined')` matching
+    ///   `'undefined'` for `Dictionary` (a bare map has no
+    ///   `'$beamtalk_class'` key) or the class name atom for a tagged class
+    ///   (generalizing [`Self::generate_constructor_pattern`]'s map-key
+    ///   check, hardcoded to `Result` via [`sealed_constructor_fields`], to
+    ///   the pattern's `class` field), falling through to `rest` on any
+    ///   other class tag.
+    /// - **`Block`**: `is_function` — a Beamtalk block compiles to a plain
+    ///   Erlang `fun`, never a map, so it needs its own guard-safe BIF
+    ///   entry rather than falling into the tagged-class path.
+    /// - **`True`/`False`/`Nil`/`UndefinedObject`**: `True`/`False` are
+    ///   real (sealed, leaf) stdlib subclasses of `Boolean`, and
+    ///   `UndefinedObject` (canonical) / `Nil` (legacy alias, BT-2016) are
+    ///   the nil class — all four are resolvable, leaf class names a type
+    ///   pattern can legally name, but all four compile to a bare atom
+    ///   (`'true'`/`'false'`/`'nil'`), never a map, so
+    ///   [`Self::wrap_single_atom_test`] tests the one exact atom directly
+    ///   instead of the tagged-class `is_map` check.
+    /// - **Actor-hierarchy classes**: an actor reference is
+    ///   `{'beamtalk_object', ClassAtom, ModuleAtom, Pid}` — a 4-tuple, not
+    ///   a map — so [`Self::wrap_actor_class_tag_test`] tests
+    ///   `is_tuple`/`tuple_size`/`element(1)`/`element(2)` instead of the
+    ///   map-tag check, reusing the same `is_tuple`/`element(1) ==
+    ///   'beamtalk_object'` idiom `fieldAt:`'s actor-vs-map dispatch already
+    ///   uses (`intrinsics.rs`), extended to also compare `element(2)`
+    ///   (the class name) against the pattern's `class` field.
+    fn generate_type_pattern(
+        &mut self,
+        match_var: &str,
+        arm: &MatchArm,
+        binding: &Identifier,
+        class: &Identifier,
+        rest_arms: &[MatchArm],
+    ) -> Result<Document<'static>> {
+        // Bind `binding` to the whole matched value and generate guard/body
+        // FIRST (before rest_arms) so state_version/temp-var counters are
+        // not advanced by later arms before this arm's own codegen — same
+        // ordering rationale as `generate_array_match_arm`.
+        self.push_scope();
+        let core_binding = Self::to_core_erlang_var(&binding.name);
+        self.bind_var(&binding.name, &core_binding);
+        let body_doc = self.expression_doc(&arm.body)?;
+        self.pop_scope();
+
+        // Rest is generated AFTER the current arm to prevent state leakage.
+        let rest_doc = self.generate_match_chain(match_var, rest_arms)?;
+
+        // Use `case 'true' of <'true'> when GUARD -> body <'true'> when
+        // 'true' -> rest end` (Core Erlang guard position) so guard
+        // evaluation errors silently fail and fall through, matching Erlang
+        // guard semantics — same shape `generate_array_match_arm` uses for
+        // its own optional guard.
+        let success_doc = if let Some(guard) = &arm.guard {
+            let guard_doc = self.generate_guard_expression(guard)?;
+            docvec![
+                "case 'true' of ",
+                "<'true'> when ",
+                guard_doc,
+                " -> ",
+                body_doc,
+                " <'true'> when 'true' -> ",
+                rest_doc.clone(),
+                " end"
+            ]
+        } else {
+            body_doc
+        };
+
+        // `binding` denotes the whole matched value — not a decomposed
+        // field, unlike `Pattern::Array`'s per-element extraction.
+        let bound_success = docvec![
+            "let ",
+            leaf::var(core_binding),
+            " = ",
+            leaf::var(match_var.to_string()),
+            " in ",
+            success_doc
+        ];
+
+        Ok(self.dispatch_type_pattern_strategy(match_var, &class.name, bound_success, &rest_doc))
+    }
+
+    /// Picks (and applies) one of `generate_type_pattern`'s per-class
+    /// runtime-test strategies — factored out purely to keep
+    /// `generate_type_pattern` itself under the line-count lint; see that
+    /// function's doc comment for the full strategy breakdown.
+    fn dispatch_type_pattern_strategy(
+        &mut self,
+        match_var: &str,
+        class_name: &str,
+        bound_success: Document<'static>,
+        rest_doc: &Document<'static>,
+    ) -> Document<'static> {
+        match class_name {
+            "String" => Self::wrap_bif_test(match_var, "is_binary", bound_success, rest_doc),
+            "Integer" => Self::wrap_bif_test(match_var, "is_integer", bound_success, rest_doc),
+            "Float" => Self::wrap_bif_test(match_var, "is_float", bound_success, rest_doc),
+            "List" => Self::wrap_bif_test(match_var, "is_list", bound_success, rest_doc),
+            "Block" => Self::wrap_bif_test(match_var, "is_function", bound_success, rest_doc),
+            "Pid" => Self::wrap_bif_test(match_var, "is_pid", bound_success, rest_doc),
+            "Reference" => Self::wrap_bif_test(match_var, "is_reference", bound_success, rest_doc),
+            "Port" => Self::wrap_bif_test(match_var, "is_port", bound_success, rest_doc),
+            "Tuple" => self.wrap_tuple_test(match_var, bound_success, rest_doc),
+            "Symbol" => Self::wrap_symbol_test(match_var, bound_success, rest_doc),
+            "Boolean" => self.wrap_boolean_test(match_var, bound_success, rest_doc),
+            "True" => self.wrap_single_atom_test(match_var, "true", bound_success, rest_doc),
+            "False" => self.wrap_single_atom_test(match_var, "false", bound_success, rest_doc),
+            "Nil" | "UndefinedObject" => {
+                self.wrap_single_atom_test(match_var, "nil", bound_success, rest_doc)
+            }
+            "Dictionary" => self.wrap_class_tag_test(
+                match_var,
+                Document::Str("'undefined'"),
+                bound_success,
+                rest_doc,
+            ),
+            other => {
+                // BT-2855: an actor reference is a 4-tuple
+                // (`{'beamtalk_object', ClassAtom, ModuleAtom, Pid}`), not a
+                // map — the tagged-class `is_map` check would never match a
+                // live actor instance, silently miscompiling the single
+                // most common kind of leaf class in real Beamtalk programs.
+                let is_actor = self
+                    .class_hierarchy
+                    .as_ref()
+                    .is_some_and(|h| h.is_actor_subclass(other));
+                if is_actor {
+                    self.wrap_actor_class_tag_test(match_var, other, bound_success, rest_doc)
+                } else {
+                    self.wrap_class_tag_test(
+                        match_var,
+                        leaf::atom(other.to_string()),
+                        bound_success,
+                        rest_doc,
+                    )
+                }
+            }
+        }
+    }
+
+    /// `case call 'erlang':'BIF'(_Match) of <'true'> -> success <'false'> ->
+    /// rest end` — the single-level generalization of
+    /// `generate_array_match_arm`'s outer `is_map` check to an arbitrary
+    /// guard-safe boolean-returning BIF (`is_binary`, `is_integer`,
+    /// `is_float`, `is_list`). No wildcard fallback clause is needed: these
+    /// BIFs only ever return `'true'`/`'false'`, exactly like the existing
+    /// `is_map` check's 2-clause case.
+    fn wrap_bif_test(
+        match_var: &str,
+        bif: &'static str,
+        success: Document<'static>,
+        rest: &Document<'static>,
+    ) -> Document<'static> {
+        docvec![
+            "case call 'erlang':'",
+            Document::Str(bif),
+            "'(",
+            leaf::var(match_var.to_string()),
+            ") of ",
+            "<'true'> when 'true' -> ",
+            success,
+            " <'false'> when 'true' -> ",
+            rest.clone(),
+            " end"
+        ]
+    }
+
+    /// `is_atom(X) andalso X =/= nil andalso X =/= true andalso X =/=
+    /// false` (ADR 0107 Phase A `Symbol` guard — see
+    /// [`Self::generate_type_pattern`]'s doc for why this excludes the
+    /// other atom-representation patterns). Expressed as four nested
+    /// 2-clause boolean-case tests rather than `andalso`: every sub-test
+    /// here is total and side-effect-free (an atom guard BIF or `=/=`), so
+    /// nesting evaluates identically without reproducing `andalso`'s
+    /// try/catch desugaring.
+    fn wrap_symbol_test(
+        match_var: &str,
+        success: Document<'static>,
+        rest: &Document<'static>,
+    ) -> Document<'static> {
+        let v = leaf::var(match_var.to_string());
+        let tests: [Document<'static>; 4] = [
+            docvec!["call 'erlang':'is_atom'(", v.clone(), ")"],
+            docvec!["call 'erlang':'=/='(", v.clone(), ", 'nil')"],
+            docvec!["call 'erlang':'=/='(", v.clone(), ", 'true')"],
+            docvec!["call 'erlang':'=/='(", v, ", 'false')"],
+        ];
+        tests.into_iter().rev().fold(success, |acc, test| {
+            docvec![
+                "case ",
+                test,
+                " of ",
+                "<'true'> when 'true' -> ",
+                acc,
+                " <'false'> when 'true' -> ",
+                rest.clone(),
+                " end"
+            ]
+        })
+    }
+
+    /// Exact literal match on `'true'`/`'false'` — not a bare `is_atom`
+    /// guard, so an earlier `b :: Boolean` arm can never shadow a later
+    /// `nil ->`/`s :: Symbol` arm (ADR 0107 Phase A; see
+    /// [`Self::generate_type_pattern`]'s doc). Needs a fresh wildcard
+    /// binder (unlike the pure-boolean tests above) because the scrutinee
+    /// ranges over more than `{'true', 'false'}`.
+    fn wrap_boolean_test(
+        &mut self,
+        match_var: &str,
+        success: Document<'static>,
+        rest: &Document<'static>,
+    ) -> Document<'static> {
+        let no_match = self.fresh_temp_var("NoMatch");
+        docvec![
+            "case ",
+            leaf::var(match_var.to_string()),
+            " of ",
+            "<'true'> when 'true' -> ",
+            success.clone(),
+            " <'false'> when 'true' -> ",
+            success,
+            " <",
+            leaf::var(no_match),
+            "> when 'true' -> ",
+            rest.clone(),
+            " end"
+        ]
+    }
+
+    /// `case is_map(_Match) of <'true'> -> case maps:get('$beamtalk_class',
+    /// _Match, 'undefined') of <expected_tag> -> success <_> -> rest end
+    /// <'false'> -> rest end` — the exact nested-`case` shape
+    /// `generate_array_match_arm` already uses for its class-tag check,
+    /// generalized to an arbitrary `expected_tag` atom: `'undefined'` for
+    /// `Dictionary` (a bare map with no `'$beamtalk_class'` key — see
+    /// [`Self::generate_type_pattern`]'s doc) or the class name atom for an
+    /// exact tagged `Value`/sealed class (generalizing
+    /// [`Self::generate_constructor_pattern`]'s map-key check to the
+    /// pattern's `class` field).
+    fn wrap_class_tag_test(
+        &mut self,
+        match_var: &str,
+        expected_tag: Document<'static>,
+        success: Document<'static>,
+        rest: &Document<'static>,
+    ) -> Document<'static> {
+        let no_match_class = self.fresh_temp_var("NoMatch");
+        docvec![
+            "case call 'erlang':'is_map'(",
+            leaf::var(match_var.to_string()),
+            ") of ",
+            "<'true'> when 'true' -> ",
+            "case call 'maps':'get'('$beamtalk_class', ",
+            leaf::var(match_var.to_string()),
+            ", 'undefined') of ",
+            "<",
+            expected_tag,
+            "> when 'true' -> ",
+            success,
+            " <",
+            leaf::var(no_match_class),
+            "> when 'true' -> ",
+            rest.clone(),
+            " end ",
+            "<'false'> when 'true' -> ",
+            rest.clone(),
+            " end"
+        ]
+    }
+
+    /// Exact literal match on a single atom (`'true'`, `'false'`, or
+    /// `'nil'`) — used for the `True`/`False` `Boolean` subclasses and the
+    /// nil class (`UndefinedObject`, or its legacy alias `Nil`, BT-2016).
+    /// None of these is a map, so [`Self::wrap_class_tag_test`]'s `is_map`
+    /// check would never match; a bare `is_atom` guard would also be wrong
+    /// (see [`Self::generate_type_pattern`]'s doc on why `Symbol`/`Boolean`
+    /// need atom-exclusion rather than a bare `is_atom`) — this tests the
+    /// exact expected atom directly, falling through to `rest` on any
+    /// other value.
+    fn wrap_single_atom_test(
+        &mut self,
+        match_var: &str,
+        atom: &'static str,
+        success: Document<'static>,
+        rest: &Document<'static>,
+    ) -> Document<'static> {
+        let no_match = self.fresh_temp_var("NoMatch");
+        docvec![
+            "case ",
+            leaf::var(match_var.to_string()),
+            " of ",
+            "<'",
+            Document::Str(atom),
+            "'> when 'true' -> ",
+            success,
+            " <",
+            leaf::var(no_match),
+            "> when 'true' -> ",
+            rest.clone(),
+            " end"
+        ]
+    }
+
+    /// Tests whether the scrutinee is an actor reference of exactly
+    /// `class_name` — an actor reference is `{'beamtalk_object', ClassAtom,
+    /// ModuleAtom, Pid}` (a 4-tuple, `beamtalk.hrl`'s `#beamtalk_object{}`
+    /// record), never a map, so [`Self::wrap_class_tag_test`]'s `is_map`
+    /// check would never match a live actor instance. Reuses the same
+    /// `is_tuple`/`tuple_size`/`element(1) == 'beamtalk_object'` idiom
+    /// `fieldAt:`'s actor-vs-map dispatch already uses (`intrinsics.rs`),
+    /// guarding `tuple_size` before calling `element/2` (which raises
+    /// `badarg` on an out-of-range index, unlike the guard-safe BIFs used
+    /// elsewhere) so an arbitrary Erlang tuple a caller happens to pass in
+    /// falls through to `rest` instead of crashing. `element(2)` (the class
+    /// name) is then compared against `class_name` to complete the exact
+    /// match.
+    fn wrap_actor_class_tag_test(
+        &mut self,
+        match_var: &str,
+        class_name: &str,
+        success: Document<'static>,
+        rest: &Document<'static>,
+    ) -> Document<'static> {
+        // `is_tuple`/`tuple_size == 4` are boolean-returning (2-clause,
+        // `'true'`/`'false'` only — same convention as the outer `is_map`
+        // check elsewhere); `element(1)`/`element(2)` return an arbitrary
+        // atom, so each needs its own wildcard fallback var.
+        let no_match_tag = self.fresh_temp_var("NoMatch");
+        let no_match_class = self.fresh_temp_var("NoMatch");
+        let v = leaf::var(match_var.to_string());
+        docvec![
+            "case call 'erlang':'is_tuple'(",
+            v.clone(),
+            ") of ",
+            "<'true'> when 'true' -> ",
+            "case call 'erlang':'=='(call 'erlang':'tuple_size'(",
+            v.clone(),
+            "), 4) of ",
+            "<'true'> when 'true' -> ",
+            "case call 'erlang':'element'(1, ",
+            v.clone(),
+            ") of ",
+            "<'beamtalk_object'> when 'true' -> ",
+            "case call 'erlang':'element'(2, ",
+            v,
+            ") of ",
+            "<",
+            leaf::atom(class_name.to_string()),
+            "> when 'true' -> ",
+            success,
+            " <",
+            leaf::var(no_match_class),
+            "> when 'true' -> ",
+            rest.clone(),
+            " end ",
+            "<",
+            leaf::var(no_match_tag),
+            "> when 'true' -> ",
+            rest.clone(),
+            " end ",
+            "<'false'> when 'true' -> ",
+            rest.clone(),
+            " end ",
+            "<'false'> when 'true' -> ",
+            rest.clone(),
+            " end"
+        ]
+    }
+
+    /// `Tuple` matches any Erlang tuple **except** the reserved 4-tuple
+    /// shapes this compiler uses internally for actor references
+    /// (`{'beamtalk_object', ...}`) and supervisor references
+    /// (`{'beamtalk_supervisor' | 'beamtalk_supervisor_new', ...}`) —
+    /// without this exclusion, a live actor/supervisor reference is *also*
+    /// a plain Erlang tuple structurally, so `x :: Tuple` would incorrectly
+    /// match it too. (`Supervisor`/`DynamicSupervisor` subclasses are
+    /// themselves rejected as a type-pattern `class` by
+    /// `validate_type_pattern_class`, but an *unrelated* `x :: Tuple` arm
+    /// could still see one of these values flow through, so the exclusion
+    /// applies regardless.)
+    fn wrap_tuple_test(
+        &mut self,
+        match_var: &str,
+        success: Document<'static>,
+        rest: &Document<'static>,
+    ) -> Document<'static> {
+        let v = leaf::var(match_var.to_string());
+        let not_reserved = self.fresh_temp_var("NotReserved");
+        docvec![
+            "case call 'erlang':'is_tuple'(",
+            v.clone(),
+            ") of ",
+            "<'true'> when 'true' -> ",
+            "case call 'erlang':'=='(call 'erlang':'tuple_size'(",
+            v.clone(),
+            "), 4) of ",
+            "<'true'> when 'true' -> ",
+            "case call 'erlang':'element'(1, ",
+            v,
+            ") of ",
+            "<'beamtalk_object'> when 'true' -> ",
+            rest.clone(),
+            " <'beamtalk_supervisor'> when 'true' -> ",
+            rest.clone(),
+            " <'beamtalk_supervisor_new'> when 'true' -> ",
+            rest.clone(),
+            " <",
+            leaf::var(not_reserved),
+            "> when 'true' -> ",
+            success.clone(),
+            " end ",
+            "<'false'> when 'true' -> ",
+            success,
+            " end ",
+            "<'false'> when 'true' -> ",
+            rest.clone(),
+            " end"
+        ]
     }
 
     /// Handles a `Pattern::Array` element inside an outer array match arm.
@@ -2670,9 +3146,17 @@ impl CoreErlangGenerator {
             // (ADR 0107 Phase A) — `nil` has one canonical runtime
             // representation, no new mechanism needed.
             Pattern::Nil(_) => Ok(Document::Str("'nil'")),
+            // `Pattern::Type` only has codegen as a top-level match arm
+            // pattern (`generate_type_pattern`, dispatched from
+            // `generate_match_chain`) — its per-class runtime test needs to
+            // wrap the *whole* arm (body, guard, rest-arm fallthrough), which
+            // isn't expressible as a plain native sub-pattern nested inside a
+            // `Tuple`/`List`/`Map`/`Constructor`. Mirrors `Pattern::Array`'s
+            // identical restriction just below.
             Pattern::Type { span, .. } => Err(CodeGenError::UnsupportedFeature {
-                feature: "Type pattern (`binding :: ClassName`) in match: is not yet supported \
-                          (ADR 0107 Phase A foundation only — codegen lands in BT-2855)"
+                feature: "Type pattern (`binding :: ClassName`) nested inside a composite \
+                          pattern (tuple/list/map/constructor) is not supported — only \
+                          top-level match arm patterns are supported (ADR 0107 Phase A)"
                     .to_string(),
                 span: Some(*span),
             }),
@@ -3012,9 +3496,13 @@ impl CoreErlangGenerator {
                     Self::collect_pattern_variables_inner(binding, bind);
                 }
             }
-            // Type pattern bindings are not wired up yet (BT-2855 — bindings,
-            // narrowing, and codegen). `generate_pattern` already rejects
-            // `Pattern::Type` arms before this would matter.
+            // `Pattern::Type`'s `binding` is bound directly by
+            // `generate_type_pattern` (BT-2855) when it's the arm's
+            // top-level pattern — this helper is only reached for *nested*
+            // sub-patterns (inside `Tuple`/`List`/`Map`/`Constructor`), and
+            // `generate_pattern` already rejects a nested `Pattern::Type`
+            // before this would matter (same restriction as
+            // `Pattern::Array`).
             Pattern::Wildcard(_)
             | Pattern::Literal(_, _)
             | Pattern::Nil(_)
@@ -3069,6 +3557,7 @@ fn sealed_constructor_fields(class: &str, selector: &str) -> Option<ConstructorP
 mod tests {
     use crate::ast::{
         Block, BlockParameter, Expression, ExpressionStatement, Identifier, Literal, MapPair,
+        MatchArm, MessageSelector, Pattern,
     };
     use crate::codegen::core_erlang::CoreErlangGenerator;
     use crate::source_analysis::Span;
@@ -3200,6 +3689,300 @@ mod tests {
         assert!(
             output.contains("->"),
             "block should have arrow. Got: {output}"
+        );
+    }
+
+    // ── BT-2855 / ADR 0107 Phase A: `Pattern::Type` codegen ─────────────────
+
+    /// Builds a top-level `binding :: class -> body` match arm.
+    fn type_arm(binding: &str, class: &str, body: Expression) -> MatchArm {
+        MatchArm::new(
+            Pattern::Type {
+                binding: Identifier::new(binding, s()),
+                class: Identifier::new(class, s()),
+                span: s(),
+            },
+            body,
+            s(),
+        )
+    }
+
+    /// Builds a wildcard `_ -> body` fallthrough arm.
+    fn wildcard_arm(body: Expression) -> MatchArm {
+        MatchArm::new(Pattern::Wildcard(s()), body, s())
+    }
+
+    fn ident_expr(name: &str) -> Expression {
+        Expression::Identifier(Identifier::new(name, s()))
+    }
+
+    fn int_expr(n: i64) -> Expression {
+        Expression::Literal(Literal::Integer(n), s())
+    }
+
+    #[test]
+    fn test_type_pattern_string_uses_is_binary() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let value = ident_expr("x");
+        let arms = vec![
+            type_arm("s", "String", ident_expr("s")),
+            wildcard_arm(int_expr(0)),
+        ];
+        let output = generator
+            .generate_match(&value, &arms)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            output.contains("'erlang':'is_binary'"),
+            "String pattern should test is_binary. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_type_pattern_integer_uses_is_integer() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let value = ident_expr("x");
+        let arms = vec![
+            type_arm("n", "Integer", ident_expr("n")),
+            wildcard_arm(int_expr(0)),
+        ];
+        let output = generator
+            .generate_match(&value, &arms)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            output.contains("'erlang':'is_integer'"),
+            "Integer pattern should test is_integer. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_type_pattern_float_uses_is_float() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let value = ident_expr("x");
+        let arms = vec![
+            type_arm("f", "Float", ident_expr("f")),
+            wildcard_arm(int_expr(0)),
+        ];
+        let output = generator
+            .generate_match(&value, &arms)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            output.contains("'erlang':'is_float'"),
+            "Float pattern should test is_float. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_type_pattern_list_uses_is_list() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let value = ident_expr("x");
+        let arms = vec![
+            type_arm("l", "List", ident_expr("l")),
+            wildcard_arm(int_expr(0)),
+        ];
+        let output = generator
+            .generate_match(&value, &arms)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            output.contains("'erlang':'is_list'"),
+            "List pattern should test is_list. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_type_pattern_dictionary_uses_nested_map_tag_check() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let value = ident_expr("x");
+        let arms = vec![
+            type_arm("d", "Dictionary", ident_expr("d")),
+            wildcard_arm(int_expr(0)),
+        ];
+        let output = generator
+            .generate_match(&value, &arms)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            output.contains("'erlang':'is_map'"),
+            "Dictionary pattern should test is_map first. Got: {output}"
+        );
+        assert!(
+            output.contains("'maps':'get'('$beamtalk_class'"),
+            "Dictionary pattern should check '$beamtalk_class' via maps:get. Got: {output}"
+        );
+        assert!(
+            output.contains("'undefined'"),
+            "Dictionary pattern matches the *absence* of '$beamtalk_class' ('undefined'). Got: {output}"
+        );
+        // Must NOT use maps:get/3 inside a guard position (not guard-safe) —
+        // it must appear only as a case scrutinee.
+        assert!(
+            !output.contains("when call 'maps':'get'"),
+            "maps:get must not appear in guard position. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_type_pattern_symbol_excludes_nil_true_false() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let value = ident_expr("x");
+        let arms = vec![
+            type_arm("sym", "Symbol", ident_expr("sym")),
+            wildcard_arm(int_expr(0)),
+        ];
+        let output = generator
+            .generate_match(&value, &arms)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            output.contains("'erlang':'is_atom'"),
+            "Symbol pattern should test is_atom. Got: {output}"
+        );
+        assert!(
+            output.contains("'erlang':'=/='") && output.contains("'nil'"),
+            "Symbol pattern should exclude 'nil'. Got: {output}"
+        );
+        assert!(
+            output.contains("'true'") && output.contains("'false'"),
+            "Symbol pattern should exclude 'true'/'false'. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_type_pattern_boolean_is_exact_literal_match_not_is_atom() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let value = ident_expr("x");
+        let arms = vec![
+            type_arm("b", "Boolean", ident_expr("b")),
+            wildcard_arm(int_expr(0)),
+        ];
+        let output = generator
+            .generate_match(&value, &arms)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            !output.contains("is_atom"),
+            "Boolean pattern must not use a bare is_atom guard. Got: {output}"
+        );
+        assert!(
+            output.contains("<'true'>") && output.contains("<'false'>"),
+            "Boolean pattern should match literal 'true'/'false'. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_type_pattern_tagged_class_uses_beamtalk_class_map_check() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let value = ident_expr("x");
+        let arms = vec![
+            type_arm("shape", "Circle", ident_expr("shape")),
+            wildcard_arm(int_expr(0)),
+        ];
+        let output = generator
+            .generate_match(&value, &arms)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            output.contains("'erlang':'is_map'"),
+            "Tagged-class pattern should test is_map first. Got: {output}"
+        );
+        assert!(
+            output.contains("'maps':'get'('$beamtalk_class'"),
+            "Tagged-class pattern should check '$beamtalk_class'. Got: {output}"
+        );
+        assert!(
+            output.contains("'Circle'"),
+            "Tagged-class pattern should match the class name atom. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_type_pattern_binds_value_to_binding_name() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let value = ident_expr("x");
+        let arms = vec![
+            type_arm("path", "String", ident_expr("path")),
+            wildcard_arm(int_expr(0)),
+        ];
+        let output = generator
+            .generate_match(&value, &arms)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            output.contains("Path = "),
+            "binding should be bound via a `let` to the matched value. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_type_pattern_guard_scopes_over_binding() {
+        let mut generator = CoreErlangGenerator::new("test");
+        let value = ident_expr("x");
+        // path :: String when: [path > 0] -> path
+        let guard = Expression::MessageSend {
+            receiver: Box::new(ident_expr("path")),
+            selector: MessageSelector::Binary(">".into()),
+            arguments: vec![int_expr(0)],
+            is_cast: false,
+            span: s(),
+        };
+        let arms = vec![
+            MatchArm::with_guard(
+                Pattern::Type {
+                    binding: Identifier::new("path", s()),
+                    class: Identifier::new("String", s()),
+                    span: s(),
+                },
+                guard,
+                ident_expr("path"),
+                s(),
+            ),
+            wildcard_arm(int_expr(0)),
+        ];
+        let output = generator
+            .generate_match(&value, &arms)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            output.contains("'erlang':'is_binary'"),
+            "Guarded Type arm should still emit the class test. Got: {output}"
+        );
+        assert!(
+            output.contains("'erlang':'>'"),
+            "Guarded Type arm should emit the guard, referencing the bound name. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_match_mixes_primitive_type_arm_and_native_arm_in_one_case() {
+        // A `match:` with a primitive `Type` arm followed by a plain
+        // `Literal`/wildcard arm must compile into a single interleaved
+        // chain (BT-2855 acceptance: dispatch/interleaving layer, not just
+        // each strategy in isolation).
+        let mut generator = CoreErlangGenerator::new("test");
+        let value = ident_expr("x");
+        let arms = vec![
+            type_arm("s", "String", ident_expr("s")),
+            MatchArm::new(
+                Pattern::Literal(Literal::Integer(42), s()),
+                int_expr(1),
+                s(),
+            ),
+            wildcard_arm(int_expr(0)),
+        ];
+        let output = generator
+            .generate_match(&value, &arms)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            output.contains("'erlang':'is_binary'"),
+            "Should still contain the String arm's test. Got: {output}"
+        );
+        assert!(
+            output.contains("<42>"),
+            "Should still contain the native literal arm. Got: {output}"
         );
     }
 }
