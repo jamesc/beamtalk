@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2822: helper actor whose compiled method forwards to another compiled
+// method (via a self-send) that triggers a raw Erlang badarith. Used by
+// actor_self_send_raw_error_test to verify a raw Erlang error escaping a
+// self-send forwarding hop carries the same selector/class breadcrumb
+// (BT-2705's pattern) as the cross-actor equivalent (see
+// raw_error_actor.bt / raw_error_classification_test.bt).
+
+Actor subclass: SelfSendRawErrorActor
+
+  // Direct call: raises a raw badarith without any self-send forwarding hop.
+  triggerBadArithDirect => #(1, "x") sum
+
+  // Forwarded call: a plain self-send into the method that raises.
+  triggerBadArithForwarded => self triggerBadArithDirect
