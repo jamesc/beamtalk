@@ -4009,6 +4009,13 @@ impl TypeChecker {
             // argument is the false block. If it diverges, execution
             // reaching the next statement proves the guard's test held,
             // so the variable narrows to the *true*-branch type.
+            //
+            // For `isKindOf:` this is `compute_class_narrowing`'s resolved
+            // `true_type` (set above). For plain `isNil` checks, `info` was
+            // never routed through `compute_class_narrowing` — `true_type`
+            // instead comes straight from `detect_narrowing`'s `isNil` rule,
+            // which sets it to `InferredType::known("UndefinedObject")`
+            // (see `narrowing/rules/is_nil.rs`).
             let Some(Expression::Block(false_block)) = arguments.first() else {
                 return;
             };

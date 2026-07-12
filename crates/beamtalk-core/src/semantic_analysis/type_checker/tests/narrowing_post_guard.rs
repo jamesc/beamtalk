@@ -424,6 +424,45 @@ typed Object subclass: Caller
     );
 }
 
+/// BT-2825 review follow-up: the combined `ifTrue: [<diverge>] ifFalse:
+/// [...]` shape (`is_if_true_if_false` in `apply_early_return_narrowing`)
+/// shares its code path with the solo `ifTrue: [<diverge>]` case above, but
+/// had no dedicated `isKindOf:` test — only the solo-`ifTrue:` and
+/// solo-`ifFalse:` shapes were covered. Locks in that `x` still narrows to
+/// the complement after the combined form, matching the docs table row
+/// `x isKindOf: Foo ifTrue: [^...] ifFalse: [...]`.
+#[test]
+fn bt2825_is_kind_of_if_true_if_false_diverge_narrows_to_complement() {
+    let source = r#"
+typed Object subclass: Receiver
+  class process: v :: String => v
+
+typed Object subclass: Caller
+  run: x :: Integer | String =>
+    (x isKindOf: Integer) ifTrue: [self error: "was integer"] ifFalse: [Transcript show: "ok"]
+    Receiver process: x
+"#;
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+
+    let result = crate::semantic_analysis::analyse_with_options_and_classes(
+        &module,
+        &crate::CompilerOptions::default(),
+        vec![],
+    );
+    let type_warnings: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.category == Some(DiagnosticCategory::Type))
+        .collect();
+    assert!(
+        type_warnings.is_empty(),
+        "`x` should narrow to String (the complement of Integer) after the \
+         combined `ifTrue: [<diverge>] ifFalse: [...]` guard, got: {type_warnings:?}"
+    );
+}
+
 /// BT-2825 AC (c): `isKindOf:` used directly as an `ifTrue:`/`ifFalse:`
 /// branch condition (not a guard-and-return) already narrows within the
 /// branch (BT-1573/BT-2741/BT-2744) — this locks that behaviour in as an
