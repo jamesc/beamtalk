@@ -145,6 +145,24 @@ generation and must not keep asserting itself as current forever.
 pre-existing finding's `note` as possibly-stale in place, rather than either
 silently dropping it (could hide a real, still-live problem) or leaving it
 looking freshly-verified (the BT-2802 bug).
+
+**`not_verified_owners` (BT-2828)** widens that same treatment to two more
+ways a `Kept` candidate can end up with nothing to show for it:
+`recheck_owner/5` (and `recheck_owner_for_shape/4`) returns `{skipped, []}`
+when `beamtalk_workspace_meta:get_class_source/1` has no live source for the
+owner, and `{failed, []}` when the `diagnostics/3` round-trip itself errors
+out or the compiler port call fails/times out. Both outcomes fall through
+`checked_owners`'s `{Owner, {ok, _}}` filter exactly like a cap-dropped
+candidate does, but — before this field existed — were *also* absent from
+`not_checked_owners` (strictly `Candidates -- Kept`, computed before any
+individual re-check runs), so an owner in this state was in neither list:
+never replaced (not checked) and never marked stale (not cap-dropped) — the
+identical stranded-finding symptom BT-2802 fixed, reached via source/
+diagnostics unavailability instead of the N-candidate cap. `not_verified_owners`
+is `not_checked_owners` unioned with every `Kept` candidate whose outcome
+status was not `ok`, so `beamtalk_repl_loader` has one single set to feed
+into its cap-dropped staleness-marking path (`mark_unverified_findings_stale/2`)
+covering all three "never actually re-verified" cases.
 """.
 
 -include_lib("kernel/include/logger.hrl").
@@ -162,7 +180,8 @@ looking freshly-verified (the BT-2802 bug).
     relevant_diagnostic_shape/3,
     override_method_signature/4,
     relevant_image_diagnostic/1,
-    field_change_note/3
+    field_change_note/3,
+    not_verified_owners/2
 ]).
 -endif.
 
@@ -217,7 +236,8 @@ looking freshly-verified (the BT-2802 bug).
     not_checked := non_neg_integer(),
     cap_note := binary() | undefined,
     checked_owners := [binary()],
-    not_checked_owners := [binary()]
+    not_checked_owners := [binary()],
+    not_verified_owners := [binary()]
 }.
 
 %% A whole-image finding (`trigger_image/0`) — lighter than `finding()`: no
@@ -500,7 +520,8 @@ empty_result() ->
         not_checked => 0,
         cap_note => undefined,
         checked_owners => [],
-        not_checked_owners => []
+        not_checked_owners => [],
+        not_verified_owners => []
     }.
 
 -spec do_trigger_pending(
@@ -713,6 +734,7 @@ do_trigger(ClassNameBin, SelectorBin, Classification) ->
         atom_to_binary(Owner, utf8)
      || {Owner, {ok, _}} <- Outcomes
     ],
+    NotCheckedOwners = not_checked_owners(OwnerGroups, Kept),
     #{
         findings => Findings,
         checked => length(CheckedOwners),
@@ -720,7 +742,8 @@ do_trigger(ClassNameBin, SelectorBin, Classification) ->
         not_checked => NotChecked,
         cap_note => cap_note(NotChecked),
         checked_owners => CheckedOwners,
-        not_checked_owners => not_checked_owners(OwnerGroups, Kept)
+        not_checked_owners => NotCheckedOwners,
+        not_verified_owners => not_verified_owners(NotCheckedOwners, Outcomes)
     }.
 
 -spec do_trigger_shape(binary(), [shape_field_change()]) -> result().
@@ -741,6 +764,7 @@ do_trigger_shape(ClassNameBin, FieldChanges) ->
         atom_to_binary(Owner, utf8)
      || {Owner, {ok, _}} <- Outcomes
     ],
+    NotCheckedOwners = not_checked_owners(OwnerGroups, Kept),
     #{
         findings => Findings,
         checked => length(CheckedOwners),
@@ -748,7 +772,8 @@ do_trigger_shape(ClassNameBin, FieldChanges) ->
         not_checked => NotChecked,
         cap_note => cap_note(NotChecked),
         checked_owners => CheckedOwners,
-        not_checked_owners => not_checked_owners(OwnerGroups, Kept)
+        not_checked_owners => NotCheckedOwners,
+        not_verified_owners => not_verified_owners(NotCheckedOwners, Outcomes)
     }.
 
 -doc """
@@ -762,6 +787,29 @@ and does not need a set datatype. See `result()`'s `not_checked_owners` doc
 -spec not_checked_owners([{atom(), [map()]}], [{atom(), [map()]}]) -> [binary()].
 not_checked_owners(Candidates, Kept) ->
     [atom_to_binary(Owner, utf8) || {Owner, _} <- Candidates -- Kept].
+
+-doc """
+`NotCheckedOwners` (the cap-dropped candidates) unioned with every `Kept`
+candidate whose `recheck_owner/5`/`recheck_owner_for_shape/4` outcome status
+was not `ok` — i.e. `skipped` (no live source recorded) or `failed` (the
+diagnostics round-trip errored or the compiler port call itself failed).
+Both groups share the same defining property `result()`'s moduledoc
+documents for `not_verified_owners` (BT-2828): a diagnostics round-trip
+never completed for this owner this trigger, so any pre-existing finding for
+it was neither replaced nor known-fixed — `beamtalk_repl_loader` must not
+treat it as freshly verified. `NotCheckedOwners` and `Outcomes`' owners are
+always disjoint (`Outcomes` only ever covers `Kept`, and `NotCheckedOwners`
+is exactly `Candidates -- Kept`), so `lists:usort/1` here is for
+deterministic ordering, not for deduplication across the two sources.
+""".
+-spec not_verified_owners([binary()], [{atom(), {ok | skipped | failed, [finding()]}}]) ->
+    [binary()].
+not_verified_owners(NotCheckedOwners, Outcomes) ->
+    UnverifiedFromOutcomes = [
+        atom_to_binary(Owner, utf8)
+     || {Owner, {Status, _}} <- Outcomes, Status =/= ok
+    ],
+    lists:usort(NotCheckedOwners ++ UnverifiedFromOutcomes).
 
 -doc """
 The selector set whose senders are candidate dependents of a shape change:

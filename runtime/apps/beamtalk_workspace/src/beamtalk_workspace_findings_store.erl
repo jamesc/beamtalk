@@ -44,7 +44,7 @@ now correctly scoped:
   second call's replacement is unconditional, so generation-A findings can
   never survive alongside generation-B ones for that origin.
 
-## Caller-cap staleness marking (ADR 0105, BT-2802)
+## Caller-cap staleness marking (ADR 0105, BT-2802, widened by BT-2828)
 
 `beamtalk_recheck:apply_cap/2` keeps only the alphabetically-first N
 candidates per reload; a candidate the cap drops is never re-checked that
@@ -52,9 +52,13 @@ reload, so `put_owner_origin/3` above is never called for it. Left alone,
 an origin bucket recorded while that owner *was* within the cap would
 silently keep asserting itself as current forever, even after whatever it
 flagged is fixed upstream — the cap is a re-check *capacity* limit, not a
-statement that the dropped candidates are fine. `get_origin/2` exists so
-`beamtalk_repl_loader:maybe_run_recheck/4` can check, for each cap-dropped
-candidate (`beamtalk_recheck:result()`'s `not_checked_owners`), whether this
+statement that the dropped candidates are fine. The same "never actually
+re-verified" gap also reaches a candidate that stayed *inside* the cap but
+whose individual re-check came back `skipped` (no live source recorded) or
+`failed` (a compile/compiler-port error) — BT-2828. `get_origin/2` exists so
+`beamtalk_repl_loader:maybe_run_recheck/4` can check, for each such
+not-verified candidate (`beamtalk_recheck:result()`'s `not_verified_owners`
+— the cap-dropped set unioned with the skipped/failed one), whether this
 changed class already left a finding on it — and if so, overwrite that
 finding's `note` in place (still via `put_owner_origin/3`, same replace
 semantics) to say it was not re-verified this reload, rather than either

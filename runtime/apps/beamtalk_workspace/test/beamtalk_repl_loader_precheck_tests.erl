@@ -256,7 +256,8 @@ precheck_no_op_signature_reports_empty_test_() ->
                             not_checked => 0,
                             cap_note => undefined,
                             checked_owners => [],
-                            not_checked_owners => []
+                            not_checked_owners => [],
+                            not_verified_owners => []
                         },
                         Result
                     )

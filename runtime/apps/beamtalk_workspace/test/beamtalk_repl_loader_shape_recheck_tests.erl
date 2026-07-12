@@ -322,3 +322,143 @@ adding_an_unrelated_field_with_no_stale_dependents_still_announces_test_() ->
                 end)
             ]
         end}}.
+
+%%====================================================================
+%% End-to-end: a skipped (no live source) shape-change candidate gets its
+%% pre-existing finding marked stale (BT-2828) — the shape-path counterpart
+%% of `beamtalk_repl_loader_recheck_tests:skipped_candidate_with_existing_finding_gets_marked_stale_test_`.
+%% `do_trigger_shape/2` and `publish_shape_recheck_outcome/3` share
+%% `not_verified_owners/2` and `mark_unverified_findings_stale/2` with the
+%% instance-selector path, but nothing in this module exercised the
+%% skipped/no-live-source outcome specifically until now.
+%%====================================================================
+
+%% Same shape as `clean_counter_source_gen1/2` above (an unrelated `count`
+%% slot added in generation 2, `name` untouched) but under its own class
+%% name — kept distinct from `LoaderShapeCleanCounter` so this test's
+%% dependent-owner xref/seed fixtures below (which reference
+%% `LoaderShapeSkippedCounter`) can't accidentally pass by matching the
+%% wrong changed class.
+skipped_counter_source_gen1() ->
+    <<
+        "Actor subclass: LoaderShapeSkippedCounter\n"
+        "  state: name :: String = \"\"\n"
+    >>.
+
+skipped_counter_source_gen2() ->
+    <<
+        "Actor subclass: LoaderShapeSkippedCounter\n"
+        "  state: name :: String = \"\"\n"
+        "  state: count :: Integer = 0\n"
+    >>.
+
+%% `spawnWith:` (not a field accessor) so this is a valid dependent
+%% regardless of `Actor` never auto-generating accessors — same reasoning as
+%% `clean_dashboard_spawn_with_xref/0` above. Deliberately no
+%% `beamtalk_workspace_meta:set_class_source/2` call for the dependent: its
+%% source is never recorded, so `recheck_owner_for_shape/4` reaches its
+%% `undefined` source branch and returns `{skipped, []}`.
+skipped_dashboard_spawn_with_xref() ->
+    [
+        #{
+            class_side => false,
+            selector => build,
+            line => 2,
+            sends => [#{selector => 'spawnWith:', line => 2, recv_kind => other}],
+            references => [#{class => 'LoaderShapeSkippedCounter', line => 2}],
+            source_status => indexed,
+            provenance => class_body
+        }
+    ].
+
+skipped_candidate_shape_change_marks_existing_finding_stale_test_() ->
+    {timeout, 30,
+        {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    UniqueId = erlang:unique_integer([positive]),
+                    Path = filename:join(
+                        temp_dir(), io_lib:format("loader_shape_skipped_counter_~p.bt", [UniqueId])
+                    ),
+
+                    %% Generation 1: first-ever install this session — no_op,
+                    %% nothing to diff against yet.
+                    ok = file:write_file(Path, skipped_counter_source_gen1()),
+                    State0 = beamtalk_repl_state:new(undefined, 0),
+                    {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, State0),
+
+                    %% Register the dependent via xref only — no
+                    %% `set_class_source/2`, so it stays a `skipped` outcome
+                    %% once generation 2 triggers its re-check.
+                    ok = beamtalk_xref:register_class(
+                        'LoaderShapeSkippedDashboard', skipped_dashboard_spawn_with_xref()
+                    ),
+
+                    %% Seed a stale finding as if an earlier reload (when the
+                    %% dependent's source WAS still recorded) had already
+                    %% flagged it.
+                    SeedFinding = #{
+                        owner => <<"LoaderShapeSkippedDashboard">>,
+                        changed_class => <<"LoaderShapeSkippedCounter">>,
+                        selector => <<"name">>,
+                        classification => shape_change,
+                        severity => <<"warning">>,
+                        category => <<"Dnu">>,
+                        message => <<"stale generation-A shape finding">>,
+                        note => undefined,
+                        sites => [#{method => build, line => 2}],
+                        start => 0,
+                        'end' => 5
+                    },
+                    _ = beamtalk_workspace_findings_store:put_owner_origin(
+                        <<"LoaderShapeSkippedDashboard">>,
+                        <<"LoaderShapeSkippedCounter">>,
+                        [SeedFinding]
+                    ),
+
+                    %% Generation 2: an unrelated `count` slot is added,
+                    %% triggering a shape_change re-check. The dependent's
+                    %% source is still unrecorded, so its outcome is
+                    %% `skipped`, not `ok` — it must never reach
+                    %% `checked_owners`.
+                    ok = file:write_file(Path, skipped_counter_source_gen2()),
+                    {ok, _, _State2} = beamtalk_repl_loader:handle_load(Path, State1),
+
+                    %% The shape re-check runs asynchronously on
+                    %% `beamtalk_workspace_shape_recheck_worker`'s single-cast
+                    %% queue (`maybe_trigger_shape_recheck_for_class/1`'s
+                    %% doc). Unlike the sibling tests above, this scenario's
+                    %% only candidate is `skipped`, so `CheckedOwners` stays
+                    %% empty and `publish_shape_recheck_outcome/3` never
+                    %% broadcasts a `'ReloadCheckCompleted'` announcement
+                    %% (gated on `CheckedOwners` being non-empty — see that
+                    %% function's doc) even though the unconditional
+                    %% `mark_unverified_findings_stale/2` call still ran. A
+                    %% `sys:get_state/1` round trip to the worker forces it to
+                    %% finish draining its mailbox in FIFO order — our
+                    %% `enqueue/1` cast above is already queued ahead of this
+                    %% synchronous system message — without depending on an
+                    %% announcement this scenario deliberately never sends.
+                    _ = sys:get_state(beamtalk_workspace_shape_recheck_worker),
+
+                    %% The seeded finding's message/severity/classification
+                    %% stay untouched (no diagnostics round-trip actually
+                    %% ran for this owner) but its `note` is overwritten to
+                    %% flag it as not re-checked this reload — exactly like
+                    %% the instance-selector path's skipped case.
+                    [DashboardFinding] = beamtalk_workspace_findings_store:get_origin(
+                        <<"LoaderShapeSkippedDashboard">>, <<"LoaderShapeSkippedCounter">>
+                    ),
+                    ?assertEqual(
+                        <<"stale generation-A shape finding">>,
+                        maps:get(message, DashboardFinding)
+                    ),
+                    Note = maps:get(note, DashboardFinding),
+                    ?assert(is_binary(Note)),
+                    ?assert(
+                        binary:match(Note, <<"not re-checked against the latest reload">>) =/=
+                            nomatch
+                    )
+                end)
+            ]
+        end}}.

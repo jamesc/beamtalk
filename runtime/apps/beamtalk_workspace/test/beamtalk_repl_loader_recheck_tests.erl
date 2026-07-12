@@ -661,3 +661,162 @@ capped_out_stale_note_is_idempotent_across_reloads_test_() ->
                 end)
             ]
         end}}.
+
+%%====================================================================
+%% Skipped-candidate staleness marking (ADR 0105, BT-2828)
+%%
+%% A candidate that stays INSIDE the (default, un-capped) `Kept` set but has
+%% no live source recorded (`recheck_owner/5` returns `{skipped, []}`) never
+%% goes through `checked_owners` (not `{ok, _}`) *and*, before this fix, was
+%% absent from `not_checked_owners` too (that field is strictly the
+%% cap-excluded set, computed before any individual re-check runs) — so its
+%% pre-existing finding was neither replaced nor marked stale. These mirror
+%% `capped_out_candidate_with_existing_finding_gets_marked_stale_test_` and
+%% its siblings above, substituting "no live source" for "cap-dropped" as
+%% the reason the candidate's re-check never actually completed.
+%%====================================================================
+
+%% Registers Dashboard as an xref candidate of `size` WITHOUT ever recording
+%% its live source (`beamtalk_workspace_meta:set_class_source/2` is
+%% deliberately skipped) — the default (un-capped) caller cap keeps it in
+%% `Kept`, so `recheck_owner/5` reaches its `undefined` source branch and
+%% returns `{skipped, []}`.
+install_fixture_no_live_source(ReturnType) ->
+    beamtalk_compiler_server:register_class(
+        'LoaderReCheckCounter', counter_hierarchy(ReturnType)
+    ),
+    ok = beamtalk_xref:register_class('LoaderReCheckDashboard', dashboard_xref()).
+
+skipped_candidate_with_existing_finding_gets_marked_stale_test_() ->
+    {timeout, 30,
+        {setup, fun loader_recheck_setup/0, fun loader_recheck_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    install_fixture_no_live_source('String'),
+                    %% Seed Dashboard's origin bucket as if an earlier reload
+                    %% of Counter had already checked it (when its source WAS
+                    %% recorded) and found it stale.
+                    SeedFinding = #{
+                        owner => <<"LoaderReCheckDashboard">>,
+                        changed_class => <<"LoaderReCheckCounter">>,
+                        selector => <<"size">>,
+                        classification => signature_change,
+                        severity => <<"warning">>,
+                        category => <<"Dnu">>,
+                        message => <<"stale generation-A finding">>,
+                        note => undefined,
+                        sites => [#{method => <<"refresh:">>, line => 2}],
+                        start => 0,
+                        'end' => 5
+                    },
+                    _ = beamtalk_workspace_findings_store:put_owner_origin(
+                        <<"LoaderReCheckDashboard">>, <<"LoaderReCheckCounter">>, [SeedFinding]
+                    ),
+
+                    ok = beamtalk_repl_loader:maybe_trigger_recheck(
+                        <<"LoaderReCheckCounter">>,
+                        <<"size">>,
+                        instance,
+                        {captured, undefined, signature_change}
+                    ),
+
+                    %% Dashboard's diagnostics round-trip never ran (no live
+                    %% source), so its original finding's
+                    %% message/severity/classification stay untouched — but
+                    %% the `note` is overwritten to flag it as not
+                    %% re-checked this reload, exactly as a cap-dropped
+                    %% candidate's is.
+                    [DashboardFinding] = beamtalk_workspace_findings_store:get_origin(
+                        <<"LoaderReCheckDashboard">>, <<"LoaderReCheckCounter">>
+                    ),
+                    ?assertEqual(
+                        <<"stale generation-A finding">>, maps:get(message, DashboardFinding)
+                    ),
+                    ?assertEqual(<<"warning">>, maps:get(severity, DashboardFinding)),
+                    Note = maps:get(note, DashboardFinding),
+                    ?assert(is_binary(Note)),
+                    ?assert(
+                        binary:match(Note, <<"not re-checked against the latest reload">>) =/=
+                            nomatch
+                    )
+                end)
+            ]
+        end}}.
+
+%% A skipped candidate with NO existing finding for this origin (the common
+%% case) is left alone — no spurious entry is created just because its
+%% source was unavailable this reload.
+skipped_candidate_with_no_existing_finding_stays_absent_test_() ->
+    {timeout, 30,
+        {setup, fun loader_recheck_setup/0, fun loader_recheck_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    install_fixture_no_live_source('String'),
+                    ok = beamtalk_repl_loader:maybe_trigger_recheck(
+                        <<"LoaderReCheckCounter">>,
+                        <<"size">>,
+                        instance,
+                        {captured, undefined, signature_change}
+                    ),
+                    ?assertEqual(
+                        [],
+                        beamtalk_workspace_findings_store:get_origin(
+                            <<"LoaderReCheckDashboard">>, <<"LoaderReCheckCounter">>
+                        )
+                    )
+                end)
+            ]
+        end}}.
+
+%% A stale note is not re-wrapped on every consecutive reload where the
+%% candidate's source stays unavailable — mirrors
+%% `capped_out_stale_note_is_idempotent_across_reloads_test_`.
+skipped_stale_note_is_idempotent_across_reloads_test_() ->
+    {timeout, 30,
+        {setup, fun loader_recheck_setup/0, fun loader_recheck_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    install_fixture_no_live_source('String'),
+                    SeedFinding = #{
+                        owner => <<"LoaderReCheckDashboard">>,
+                        changed_class => <<"LoaderReCheckCounter">>,
+                        selector => <<"size">>,
+                        classification => signature_change,
+                        severity => <<"warning">>,
+                        category => <<"Dnu">>,
+                        message => <<"stale generation-A finding">>,
+                        note => undefined,
+                        sites => [#{method => <<"refresh:">>, line => 2}],
+                        start => 0,
+                        'end' => 5
+                    },
+                    _ = beamtalk_workspace_findings_store:put_owner_origin(
+                        <<"LoaderReCheckDashboard">>, <<"LoaderReCheckCounter">>, [SeedFinding]
+                    ),
+
+                    %% Two consecutive reloads of Counter, Dashboard's source
+                    %% unavailable both times.
+                    ok = beamtalk_repl_loader:maybe_trigger_recheck(
+                        <<"LoaderReCheckCounter">>,
+                        <<"size">>,
+                        instance,
+                        {captured, undefined, signature_change}
+                    ),
+                    [FirstMarked] = beamtalk_workspace_findings_store:get_origin(
+                        <<"LoaderReCheckDashboard">>, <<"LoaderReCheckCounter">>
+                    ),
+                    ok = beamtalk_repl_loader:maybe_trigger_recheck(
+                        <<"LoaderReCheckCounter">>,
+                        <<"size">>,
+                        instance,
+                        {captured, 'String', signature_change}
+                    ),
+                    [SecondMarked] = beamtalk_workspace_findings_store:get_origin(
+                        <<"LoaderReCheckDashboard">>, <<"LoaderReCheckCounter">>
+                    ),
+                    ?assertEqual(
+                        maps:get(note, FirstMarked), maps:get(note, SecondMarked)
+                    )
+                end)
+            ]
+        end}}.
