@@ -296,7 +296,7 @@ sealed typed Number subclass: Integer
   /// ```beamtalk
   /// 3 timesRepeat: [Transcript show: "hi"]
   /// ```
-  timesRepeat: block :: Block -> Nil =>
+  timesRepeat: block :: Block(R) -> Nil =>
     self > 0
       ifTrue: [
         block value

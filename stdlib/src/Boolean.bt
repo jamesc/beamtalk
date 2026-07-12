@@ -26,10 +26,10 @@ abstract Value subclass: Boolean
     self subclassResponsibility
 
   /// If true, evaluate `trueBlock`.
-  ifTrue: _trueBlock :: Block => self subclassResponsibility
+  ifTrue: _trueBlock :: Block(R) -> R => self subclassResponsibility
 
   /// If false, evaluate `falseBlock`.
-  ifFalse: _falseBlock :: Block => self subclassResponsibility
+  ifFalse: _falseBlock :: Block(R) -> R => self subclassResponsibility
 
   /// Logical negation.
   not -> Boolean => self subclassResponsibility
@@ -52,7 +52,8 @@ abstract Value subclass: Boolean
   /// true and: [false]      // => false
   /// false and: [true]      // => false
   /// ```
-  and: aBlock :: Block -> Boolean => self ifTrue: aBlock ifFalse: [false]
+  and: aBlock :: Block(Boolean) -> Boolean =>
+    self ifTrue: aBlock ifFalse: [false]
 
   /// Logical OR with lazy evaluation. Evaluates `aBlock` only if receiver is false.
   ///
@@ -61,7 +62,7 @@ abstract Value subclass: Boolean
   /// true or: [false]       // => true
   /// false or: [true]       // => true
   /// ```
-  or: aBlock :: Block -> Boolean => self ifTrue: [true] ifFalse: aBlock
+  or: aBlock :: Block(Boolean) -> Boolean => self ifTrue: [true] ifFalse: aBlock
 
   /// Logical XOR. Returns true if exactly one of receiver and `other` is true.
   ///
