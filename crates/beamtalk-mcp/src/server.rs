@@ -2325,10 +2325,16 @@ struct LintResult {
 /// `category.is_some()`, applies `@expect` directives, and returns the
 /// resulting diagnostics together with the `ClassHierarchy` (used by
 /// `compute_diagnostic_summary` for type inference).
+///
+/// `has_package_dependencies` mirrors `beamtalk lint`'s
+/// `CompilerOptions::has_package_dependencies` (BT-2794/BT-2823): true when
+/// the project's manifest declares `[dependencies]`, regardless of whether
+/// any of them could be resolved on disk.
 fn run_module_analysis(
     module: &beamtalk_core::ast::Module,
     all_class_infos: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
     mut diags: Vec<beamtalk_core::source_analysis::Diagnostic>,
+    has_package_dependencies: bool,
 ) -> (
     Vec<beamtalk_core::source_analysis::Diagnostic>,
     beamtalk_core::semantic_analysis::ClassHierarchy,
@@ -2338,9 +2344,13 @@ fn run_module_analysis(
     diags.extend(beamtalk_core::lint::run_lint_passes(module));
 
     let cross_file_classes = ClassHierarchy::cross_file_class_infos(all_class_infos, module);
+    let options = beamtalk_core::CompilerOptions {
+        has_package_dependencies,
+        ..Default::default()
+    };
     let analysis_result = beamtalk_core::semantic_analysis::analyse_with_options_and_classes(
         module,
-        &beamtalk_core::CompilerOptions::default(),
+        &options,
         cross_file_classes,
     );
     diags.extend(
@@ -2427,6 +2437,11 @@ fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
         }
     }
 
+    // BT-2823: Merge dependency class metadata so cross-file references to
+    // classes defined only in a git/path dependency (declared in
+    // beamtalk.toml) resolve the same way `beamtalk build` does.
+    let has_package_dependencies = merge_dependency_class_infos(path, &mut all_class_infos);
+
     // Pass 2: Analyse each file and collect diagnostics + coverage.
     let mut all_diags = Vec::new();
     let mut coverage = CoverageReport {
@@ -2446,8 +2461,12 @@ fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
             .cloned()
             .collect();
 
-        let (file_diags, class_hierarchy) =
-            run_module_analysis(module, &all_class_infos, initial_diags);
+        let (file_diags, class_hierarchy) = run_module_analysis(
+            module,
+            &all_class_infos,
+            initial_diags,
+            has_package_dependencies,
+        );
 
         all_diags.extend(file_diags);
 
@@ -2580,6 +2599,38 @@ fn resolve_extraction_files(
     )
 }
 
+/// BT-2823: Merge class metadata from `path`'s package dependencies (as
+/// declared in `beamtalk.toml`) into `all_class_infos`, so `Unresolved
+/// class` diagnostics see the same class hierarchy as `beamtalk
+/// build`/`beamtalk lint` for classes defined only in a dependency.
+///
+/// Delegates to [`beamtalk_cli::dependency_classes::resolve_dependency_class_infos`],
+/// which is filesystem-only and best-effort — it never fetches over the
+/// network, so this never turns an offline `lint`/`diagnostic_summary` call
+/// into one with network side effects. Dependencies that have never been
+/// fetched by a prior `beamtalk build` are silently skipped.
+///
+/// Returns whether the project's manifest declares any dependencies, for use
+/// as `CompilerOptions::has_package_dependencies` (BT-2794).
+fn merge_dependency_class_infos(
+    path: &str,
+    all_class_infos: &mut Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+) -> bool {
+    let Some(project_root) =
+        beamtalk_core::project::package::find_package_root(std::path::Path::new(path))
+    else {
+        return false;
+    };
+    let Ok(project_root) = camino::Utf8PathBuf::from_path_buf(project_root) else {
+        return false;
+    };
+
+    let (has_package_dependencies, dep_class_infos) =
+        beamtalk_cli::dependency_classes::resolve_dependency_class_infos(&project_root);
+    all_class_infos.extend(dep_class_infos);
+    has_package_dependencies
+}
+
 /// Run lint passes on `path` (file or directory) and return structured results.
 ///
 /// BT-2052: Uses a two-pass pipeline mirroring CLI `beamtalk lint`:
@@ -2655,6 +2706,11 @@ fn run_lint_structured(path: &str) -> LintResult {
         }
     }
 
+    // BT-2823: Merge dependency class metadata so cross-file references to
+    // classes defined only in a git/path dependency (declared in
+    // beamtalk.toml) resolve the same way `beamtalk build` does.
+    let has_package_dependencies = merge_dependency_class_infos(path, &mut all_class_infos);
+
     // Pass 2: Analyse each target file with cross-file class context.
     for (file, source, module, parse_diags) in parsed_targets {
         // Include parse errors (syntax problems) and warnings so files with
@@ -2674,7 +2730,12 @@ fn run_lint_structured(path: &str) -> LintResult {
         // BT-1587 / BT-2052: run_module_analysis runs lint passes, semantic
         // analysis with cross-file class context (mirroring CLI `beamtalk lint`),
         // and applies @expect directives (BT-1476).
-        let (lint_diags, _) = run_module_analysis(&module, &all_class_infos, initial_diags);
+        let (lint_diags, _) = run_module_analysis(
+            &module,
+            &all_class_infos,
+            initial_diags,
+            has_package_dependencies,
+        );
 
         let file_name = file.to_string_lossy().into_owned();
         for diag in &lint_diags {
@@ -2910,6 +2971,97 @@ mod tests {
         assert!(
             !stale,
             "MCP lint with cross-file classes should not report @expect as stale, got: {result:?}",
+        );
+    }
+
+    /// Write a fixture project declaring a git dependency `http` in
+    /// `beamtalk.toml`, with the dependency's checkout already present under
+    /// `_build/deps/http/src/` (simulating the state left by a prior
+    /// `beamtalk build`, matching BT-2823's repro). The project's own
+    /// `src/app.bt` references the dependency's `HTTPServer` class. Returns
+    /// the project directory and the path to `src/app.bt`.
+    ///
+    /// `label` disambiguates the temp directory between the two callers of
+    /// this helper so parallel test execution doesn't collide.
+    fn write_git_dependency_fixture(label: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!(
+            "beamtalk-mcp-lint-git-dep-{label}-{}",
+            std::process::id()
+        ));
+        let src_dir = dir.join("src");
+        std::fs::create_dir_all(&src_dir).unwrap();
+
+        std::fs::write(
+            dir.join("beamtalk.toml"),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n\
+             [dependencies]\nhttp = { git = \"https://example.com/http.git\", tag = \"v1.0.0\" }\n",
+        )
+        .unwrap();
+
+        // Simulate `beamtalk build` having already fetched the dependency.
+        let dep_src_dir = dir.join("_build").join("deps").join("http").join("src");
+        std::fs::create_dir_all(&dep_src_dir).unwrap();
+        std::fs::write(
+            dep_src_dir.join("http_server.bt"),
+            "Object subclass: HTTPServer\n",
+        )
+        .unwrap();
+
+        // A second project-local class so `has_cross_file_classes` is true
+        // independent of dependency resolution (matching the sentinel
+        // pattern `fixture_sourced_protocol_name_is_not_unresolved` uses in
+        // beamtalk-core). Without this, `check_unresolved_classes` would be
+        // skipped entirely for a single-file project and this test would
+        // pass vacuously regardless of whether the fix is in place.
+        std::fs::write(src_dir.join("other.bt"), "Object subclass: Other\n").unwrap();
+
+        let app_file = src_dir.join("app.bt");
+        std::fs::write(
+            &app_file,
+            "Object subclass: App\n\n  class run =>\n    HTTPServer new\n",
+        )
+        .unwrap();
+
+        (dir, app_file)
+    }
+
+    /// BT-2823: MCP `lint` must resolve classes from a project's git
+    /// dependencies (declared in `beamtalk.toml`) the same way `beamtalk
+    /// build`/`beamtalk lint` do, using whatever dependency checkout is
+    /// already on disk under `_build/deps/<name>/` — without a false-positive
+    /// `Unresolved class` diagnostic.
+    #[test]
+    fn run_lint_structured_resolves_git_dependency_classes() {
+        let (dir, app_file) = write_git_dependency_fixture("lint");
+        let result = run_lint_structured(app_file.to_str().unwrap());
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let unresolved = result
+            .warnings
+            .iter()
+            .chain(result.errors.iter())
+            .any(|d| d.message.contains("Unresolved class"));
+        assert!(
+            !unresolved,
+            "MCP lint should resolve HTTPServer from the git dependency checkout, got: {result:?}",
+        );
+    }
+
+    /// BT-2823: Same as `run_lint_structured_resolves_git_dependency_classes`
+    /// but for the `diagnostic_summary` tool.
+    #[test]
+    fn compute_diagnostic_summary_resolves_git_dependency_classes() {
+        let (dir, app_file) = write_git_dependency_fixture("summary");
+        let result = compute_diagnostic_summary(app_file.to_str().unwrap());
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let unresolved_class_total = result["totals_by_category"]["UnresolvedClass"]["total"]
+            .as_u64()
+            .unwrap_or(0);
+        assert_eq!(
+            unresolved_class_total, 0,
+            "diagnostic_summary should resolve HTTPServer from the git dependency \
+             checkout with zero UnresolvedClass diagnostics, got: {result:?}",
         );
     }
 
