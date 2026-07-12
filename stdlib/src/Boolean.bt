@@ -26,10 +26,25 @@ abstract Value subclass: Boolean
     self subclassResponsibility
 
   /// If true, evaluate `trueBlock`.
-  ifTrue: _trueBlock :: Block => self subclassResponsibility
+  ///
+  /// Deliberately has no declared return type here (unlike the combined
+  /// `ifTrue:ifFalse:` above): on an unnarrowed `Boolean` receiver, the
+  /// type checker can't statically prove whether `True` or `False` handles
+  /// the send, and `False>>ifFalse:`'s sibling override, `False>>ifTrue:`,
+  /// never invokes `trueBlock` — it returns `self` (`False`), not the
+  /// block's result. Declaring `-> R` here would let the checker promise
+  /// `R` for an expression that can actually evaluate to `False` at
+  /// runtime — a soundness hole caught in BT-2834 review. `True`/`False`'s
+  /// own overrides below still declare accurate concrete return types once
+  /// the receiver is narrowed to one of them.
+  ifTrue: _trueBlock :: Block(R) => self subclassResponsibility
 
   /// If false, evaluate `falseBlock`.
-  ifFalse: _falseBlock :: Block => self subclassResponsibility
+  ///
+  /// See `ifTrue:` above — no declared return type for the same soundness
+  /// reason: on an unnarrowed receiver, `True>>ifFalse:` returns `self`
+  /// (`True`) without invoking `falseBlock`.
+  ifFalse: _falseBlock :: Block(R) => self subclassResponsibility
 
   /// Logical negation.
   not -> Boolean => self subclassResponsibility
@@ -52,7 +67,8 @@ abstract Value subclass: Boolean
   /// true and: [false]      // => false
   /// false and: [true]      // => false
   /// ```
-  and: aBlock :: Block -> Boolean => self ifTrue: aBlock ifFalse: [false]
+  and: aBlock :: Block(Boolean) -> Boolean =>
+    self ifTrue: aBlock ifFalse: [false]
 
   /// Logical OR with lazy evaluation. Evaluates `aBlock` only if receiver is false.
   ///
@@ -61,7 +77,7 @@ abstract Value subclass: Boolean
   /// true or: [false]       // => true
   /// false or: [true]       // => true
   /// ```
-  or: aBlock :: Block -> Boolean => self ifTrue: [true] ifFalse: aBlock
+  or: aBlock :: Block(Boolean) -> Boolean => self ifTrue: [true] ifFalse: aBlock
 
   /// Logical XOR. Returns true if exactly one of receiver and `other` is true.
   ///

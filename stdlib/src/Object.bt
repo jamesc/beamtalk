@@ -53,14 +53,28 @@ ProtoObject subclass: Object
 
   /// If the receiver is nil, evaluate `nilBlock`. Otherwise return self.
   ///
+  /// `_nilBlock` is never evaluated on this `Object`-level definition (only
+  /// `UndefinedObject`'s override calls it, with `Block(R) -> R`), so `R` is
+  /// unconstrained here — parameterizing it still documents the zero-arg
+  /// shape without implying this branch produces `R` (BT-2834).
+  ///
   /// ## Examples
   /// ```beamtalk
   /// 42 ifNil: [0]         // => 42
   /// nil ifNil: [0]        // => 0
   /// ```
-  ifNil: _nilBlock :: Block -> Self => self
+  ifNil: _nilBlock :: Block(R) -> Self => self
 
   /// If the receiver is not nil, evaluate `notNilBlock` with self.
+  ///
+  /// Left as a bare `Block` deliberately (BT-2834): `notNilBlock` is invoked
+  /// one-arg with `self` and its result becomes the method's own result, so
+  /// a precise signature needs a `Self`-in-`Block(...)` type-arg form
+  /// (`Block(Self, R) -> R`) with no precedent elsewhere in stdlib. The type
+  /// checker doesn't consult this declared signature for `ifNotNil:` anyway
+  /// — it narrows the block's parameter from the receiver's own type via
+  /// `infer_args_for_if_not_nil` in `inference.rs` (BT-2046), independent of
+  /// this stdlib declaration.
   ///
   /// ## Examples
   /// ```beamtalk

@@ -122,7 +122,7 @@ sealed typed Collection subclass: Tuple
   /// ```beamtalk
   /// result unwrapOrElse: [0]   // => 0 when result is {error, _}
   /// ```
-  unwrapOrElse: block :: Block -> Object =>
+  unwrapOrElse: block :: Block(Object) -> Object =>
     self isOk ifTrue: [self at: 2] ifFalse: [block value]
 
   /// Convert the tuple to its string representation.

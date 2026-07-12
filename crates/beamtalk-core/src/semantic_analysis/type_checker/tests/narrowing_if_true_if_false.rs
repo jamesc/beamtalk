@@ -462,3 +462,51 @@ fn bt2624_singleton_union_narrowing_suppresses_branch_warning() {
     );
     assert!(plus_dnu[0].message.contains("#infinity"));
 }
+
+/// BT-2834: solo `ifTrue:` on an UNNARROWED `Boolean` receiver (no
+/// isNil/isKindOf/comparison pattern for `detect_narrowing` to find) must
+/// NOT infer the block's return type. `False>>ifTrue:` never invokes the
+/// block — it returns `self` (`False`) — so if the abstract
+/// `Boolean>>ifTrue:` declared `-> R`, the checker would unsoundly promise
+/// `Integer` here even though the expression can actually evaluate to
+/// `False` at runtime. Regression test for a soundness hole caught in
+/// BT-2834 review (the abstract declaration must stay return-type-less;
+/// only the combined `ifTrue:ifFalse:`, which unifies both arms, may
+/// declare `-> R`).
+#[test]
+fn bt_2834_solo_if_true_unnarrowed_boolean_receiver_stays_dynamic() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    // cond :: Boolean, no narrowing info available (not from isNil/isKindOf/=)
+    env.set_local("cond", InferredType::known("Boolean"));
+
+    let expr = if_true(var("cond"), block_expr(vec![int_lit(42)]));
+    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+
+    assert!(
+        matches!(ty, InferredType::Dynamic(_)),
+        "cond ifTrue: [42] on an unnarrowed Boolean must not soundly promise \
+         Integer (False>>ifTrue: returns self, not the block's result); got {ty:?}"
+    );
+}
+
+/// BT-2834: same soundness check for solo `ifFalse:` (`True>>ifFalse:`
+/// returns `self`, not the block's result).
+#[test]
+fn bt_2834_solo_if_false_unnarrowed_boolean_receiver_stays_dynamic() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set_local("cond", InferredType::known("Boolean"));
+
+    let expr = if_false(var("cond"), block_expr(vec![str_lit("no")]));
+    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+
+    assert!(
+        matches!(ty, InferredType::Dynamic(_)),
+        "cond ifFalse: [\"no\"] on an unnarrowed Boolean must not soundly \
+         promise String (True>>ifFalse: returns self, not the block's \
+         result); got {ty:?}"
+    );
+}

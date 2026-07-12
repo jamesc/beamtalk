@@ -40,6 +40,14 @@ sealed Object subclass: UndefinedObject
 
   /// Return self (nil) since the receiver is nil.
   ///
+  /// Left as a bare `Block` deliberately (BT-2834), matching `Object`'s
+  /// `ifNotNil:`: the parameter's real shape across the polymorphic
+  /// `ifNotNil:` dispatch is one-arg (`Object`'s override invokes it as
+  /// `notNilBlock value: self`), but it is never evaluated on this
+  /// `UndefinedObject` branch. `Block(R)` would misrepresent it as
+  /// zero-arg, and the type checker doesn't consult this declared
+  /// signature for `ifNotNil:` anyway (see `Object.bt`).
+  ///
   /// ## Examples
   /// ```beamtalk
   /// nil ifNotNil: [:v | v + 1]  // => nil
