@@ -73,24 +73,44 @@ impl CoreErlangGenerator {
     /// `#{selector => Selector, class => Class}` construction — so a raw
     /// Erlang error escaping a self-send forwarding hop gets the same
     /// `ClassName>>selector: ...` location prefix (via `wrap_raw/2` /
-    /// `located/3`) as the cross-actor equivalent. Both `selector_atom` and
-    /// the enclosing class name are known at compile time, so the breadcrumb
-    /// is emitted as literal atoms, not runtime lookups.
+    /// `located/3`) as the cross-actor equivalent.
     ///
-    /// Known gap (BT-2833): `class_name()` is the compile-time *defining*
-    /// class of the method body, not the actor's runtime class. For a
-    /// self-send inside a method a subclass inherits without overriding,
-    /// this yields the superclass name instead of the actual instance's
-    /// class — unlike `sync_send_remote/3`, which resolves the runtime class
-    /// via `lookup_class/1`. Cosmetic only (location-prefix text, not
-    /// classification), tracked in BT-2833.
+    /// BT-2833: `class` is resolved via a *runtime* `beamtalk_actor:lookup_class/1`
+    /// call on `self()`, not a compile-time literal atom. For a self-send inside
+    /// a method a subclass inherits without overriding, the inherited method's
+    /// code lives in the superclass module, so a literal `class_name()` atom
+    /// would yield the superclass instead of the actor's actual runtime class —
+    /// unlike `sync_send_remote/3`, which resolves the runtime class via the
+    /// same `lookup_class/1` ETS reverse-lookup on `beamtalk_instance_registry`.
+    /// Emitting the same runtime lookup here keeps the self-send breadcrumb's
+    /// `class` value in parity with the cross-actor path for inherited methods.
+    /// `selector_atom` is still known at compile time and stays a literal atom.
+    ///
+    /// Known caveat: `lookup_class/1` reads `beamtalk_instance_registry`,
+    /// which the *spawner* populates only after `beamtalk_actor:safe_spawn/2`'s
+    /// `await_initialize/1` confirms `handle_continue(initialize, _)` has
+    /// finished (see `gen_server/spawn.rs`'s `instance_registration_doc`). A
+    /// self-send that raises *during* `initialize` therefore runs before this
+    /// actor's own registry entry exists, so `lookup_class(self())` falls
+    /// back to `'unknown'` for that narrow window — trading a guaranteed-
+    /// correct compile-time atom (for non-inherited classes only) for a
+    /// safe-but-less-specific fallback, in exchange for a correct answer in
+    /// every other case (including all inherited-method self-sends, the
+    /// actual bug this fixes). `lookup_class/1` never crashes either way.
+    ///
+    /// Core Erlang map literals (`~{...}~`) cannot contain `call` expressions
+    /// (see `lifecycle_start_telemetry_doc` in `gen_server/callbacks.rs` for the
+    /// same constraint), so the lookup is hoisted into a `let` binding inside
+    /// the clause body before the map is constructed. This only runs on the
+    /// error path — no overhead on the success path.
     ///
     /// # Generated Code
     ///
     /// ```erlang
     /// <{'error', {Type, Reason, Stacktrace}, _}> when 'true' ->
+    ///     let Class = call 'beamtalk_actor':'lookup_class'(call 'erlang':'self'()) in
     ///     call 'beamtalk_exception_handler':'reraise'(Type, Reason, Stacktrace,
-    ///         ~{'selector' => 'selector:', 'class' => 'ClassName'}~)
+    ///         ~{'selector' => 'selector:', 'class' => Class}~)
     /// <{'error', Error, _}> when 'true' -> call 'beamtalk_error':'raise'(Error)
     /// ```
     fn generate_self_dispatch_error_clause(
@@ -98,11 +118,11 @@ impl CoreErlangGenerator {
         var_prefix: &str,
         selector_atom: &str,
     ) -> Document<'static> {
-        let class_name = self.class_name();
         let type_var = self.fresh_var(&format!("{var_prefix}Type"));
         let reason_var = self.fresh_var(&format!("{var_prefix}Reason"));
         let stack_var = self.fresh_var(&format!("{var_prefix}Stack"));
         let plain_error_var = self.fresh_var(&format!("{var_prefix}Plain"));
+        let class_var = self.fresh_var(&format!("{var_prefix}Class"));
         docvec![
             "<{'error', {",
             leaf::var(type_var.clone()),
@@ -110,7 +130,10 @@ impl CoreErlangGenerator {
             leaf::var(reason_var.clone()),
             ", ",
             leaf::var(stack_var.clone()),
-            "}, _}> when 'true' -> call 'beamtalk_exception_handler':'reraise'(",
+            "}, _}> when 'true' -> let ",
+            leaf::var(class_var.clone()),
+            " = call 'beamtalk_actor':'lookup_class'(call 'erlang':'self'()) in ",
+            "call 'beamtalk_exception_handler':'reraise'(",
             leaf::var(type_var),
             ", ",
             leaf::var(reason_var),
@@ -119,7 +142,7 @@ impl CoreErlangGenerator {
             ", ~{'selector' => ",
             leaf::atom(selector_atom.to_string()),
             ", 'class' => ",
-            leaf::atom(class_name),
+            leaf::var(class_var),
             "}~) ",
             "<{'error', ",
             leaf::var(plain_error_var.clone()),
