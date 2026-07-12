@@ -804,81 +804,6 @@ pub fn compile_source(
     .map(|_diags| ())
 }
 
-/// Apply a package's `[diagnostics]` severity-override table (ADR 0100 Rule 3)
-/// to a list of diagnostics.
-///
-/// For each diagnostic whose category has a table entry: `"off"` drops the
-/// diagnostic; `"lint"` / `"hint"` / `"warn"` / `"error"` rewrite its
-/// `severity` in place, becoming the category's *base* severity for the
-/// package. Diagnostics with no category, or whose category has no table
-/// entry, pass through unchanged — an empty table (no manifest, or no
-/// `[diagnostics]` section) is a complete no-op, preserving today's Rule 1
-/// defaults.
-///
-/// **Severity floor:** a diagnostic that already carries `Severity::Error`
-/// is never touched by the table, even if its category has an entry. Rule 3
-/// is an *escalation* mechanism for the soft, open-world diagnostics the
-/// completeness ladder (Rule 1) produces (`Hint`/`Warning`) — it is not a
-/// blanket switch that can quietly turn a hard structural compile error
-/// (e.g. `ActorNew`, `Inheritance`, `EmptyBody`) into a passing build.
-///
-/// Must run after `@expect` suppression (Rule 3 precedence step 1, applied
-/// inside `compute_project_diagnostics`) and before the `--warnings-as-errors`
-/// promotion pass, which is a *final* pass over whatever this step resolves
-/// to (ADR 0100 Rule 3).
-fn apply_diagnostics_table(
-    diagnostics: Vec<beamtalk_core::source_analysis::Diagnostic>,
-    table: &crate::commands::manifest::DiagnosticsTable,
-) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
-    use crate::commands::manifest::DiagnosticSeverityOverride;
-    use beamtalk_core::source_analysis::Severity;
-
-    if table.is_empty() {
-        return diagnostics;
-    }
-
-    diagnostics
-        .into_iter()
-        .filter_map(|mut diagnostic| {
-            let Some(category) = diagnostic.category else {
-                return Some(diagnostic);
-            };
-            // Severity floor: a diagnostic that already arrived as `Error`
-            // (e.g. `ActorNew` — BT-1524's "Actor subclass must use spawn,
-            // not new" — or `Inheritance` / `EmptyBody` hard-error checks) is
-            // never a Rule 1 completeness-ladder soft diagnostic; it's a
-            // structural compile error unrelated to open-world uncertainty.
-            // ADR 0100 Rule 3 frames the table as opt-in *escalation* of soft
-            // diagnostics, not silent de-escalation of hard ones — a `warn`
-            // or `off` entry for one of these categories must not quietly
-            // turn a guaranteed compile error into a passing build.
-            if diagnostic.severity == Severity::Error {
-                return Some(diagnostic);
-            }
-            match table.get(&category) {
-                None => Some(diagnostic),
-                Some(DiagnosticSeverityOverride::Off) => None,
-                Some(DiagnosticSeverityOverride::Lint) => {
-                    diagnostic.severity = Severity::Lint;
-                    Some(diagnostic)
-                }
-                Some(DiagnosticSeverityOverride::Hint) => {
-                    diagnostic.severity = Severity::Hint;
-                    Some(diagnostic)
-                }
-                Some(DiagnosticSeverityOverride::Warn) => {
-                    diagnostic.severity = Severity::Warning;
-                    Some(diagnostic)
-                }
-                Some(DiagnosticSeverityOverride::Error) => {
-                    diagnostic.severity = Severity::Error;
-                    Some(diagnostic)
-                }
-            }
-        })
-        .collect()
-}
-
 /// Compiles a Beamtalk source file to Core Erlang with primitive bindings.
 ///
 /// BT-295 / ADR 0007 Phase 3: Same as [`compile_source`] but accepts a
@@ -944,19 +869,17 @@ pub(crate) fn compile_source_with_bindings(
         native_type_registry: ctx.native_type_registry.clone(),
         dep_registry: ctx.dep_registry,
         strict_deps: ctx.strict_deps,
+        // ADR 0100 Rule 3 (BT-2793) / BT-2800: `compute_project_diagnostics`
+        // applies this table itself (after `@expect` suppression, before
+        // returning) — the single shared pipeline both the CLI and the LSP
+        // call, so severity can never drift between the two surfaces.
+        diagnostics_overrides: ctx.diagnostics_overrides.clone(),
     };
     diagnostics = beamtalk_core::queries::diagnostic_provider::compute_project_diagnostics(
         &module,
         diagnostics,
         &diag_ctx,
     );
-
-    // ADR 0100 Rule 3 (BT-2793): apply the package's `[diagnostics]` table —
-    // precedence step 2, after `@expect` suppression (step 1, applied inside
-    // `compute_project_diagnostics` above) and ahead of the `has_errors`
-    // promotion pass below. A no-op (empty table) when the package has no
-    // manifest or no `[diagnostics]` section.
-    diagnostics = apply_diagnostics_table(diagnostics, &ctx.diagnostics_overrides);
 
     // Check for errors (and optionally treat warnings/hints as errors).
     // Deprecation-category warnings (BT-1529) and structural validation warnings

@@ -64,6 +64,14 @@ pub struct ProjectDiagnosticContext<'a> {
     pub dep_registry: Option<&'a crate::semantic_analysis::DependencyRegistry>,
     /// Whether to promote transitive dependency usage warnings to errors.
     pub strict_deps: bool,
+    /// Per-category diagnostic severity overrides from `beamtalk.toml`'s
+    /// `[diagnostics]` section (ADR 0100 Rule 3, BT-2800). Empty when the
+    /// package has no manifest or no `[diagnostics]` section — absence
+    /// preserves today's Rule 1 completeness-ladder defaults. Applied here,
+    /// inside the shared pipeline, so the CLI (`beamtalk build`) and the LSP
+    /// can never disagree about the resulting severity — see
+    /// `crate::compilation::diagnostics_policy::apply_diagnostics_table`.
+    pub diagnostics_overrides: crate::compilation::diagnostics_policy::DiagnosticsTable,
 }
 
 /// Unified post-analysis diagnostic pipeline (BT-2009).
@@ -151,6 +159,19 @@ pub fn compute_project_diagnostics(
 
     // BT-782: Apply @expect directives to suppress matching diagnostics.
     apply_expect_directives(module, &mut diagnostics);
+
+    // ADR 0100 Rule 3 (BT-2793 / BT-2800): apply the package's `[diagnostics]`
+    // table last, after `@expect` suppression and ahead of any
+    // `--warnings-as-errors`-style promotion pass a caller runs over this
+    // function's result. A no-op (empty table) when the package has no
+    // manifest or no `[diagnostics]` section. Living here — inside the one
+    // pipeline both the CLI compiler and the LSP call — is what makes
+    // `beamtalk build` and the LSP agree on severity for every diagnostic
+    // category by construction, closing the BT-2800 surface-parity gap.
+    diagnostics = crate::compilation::diagnostics_policy::apply_diagnostics_table(
+        diagnostics,
+        &ctx.diagnostics_overrides,
+    );
 
     diagnostics
 }

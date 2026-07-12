@@ -25,6 +25,10 @@ serde = { workspace = true, optional = true }
 # why: ADR 0088 Phase 0b — cerl AST nodes ETF-encode through `eetf` so the
 # wire bytes match `term_to_binary(cerl:c_module(...))` on the Erlang side.
 eetf = "0.12"
+# why: ADR 0100 Rule 3 (BT-2800) — parse `beamtalk.toml`'s `[diagnostics]`
+# severity-override table here so both `beamtalk-cli` and `beamtalk-lsp` can
+# apply it without `beamtalk-lsp` depending on `beamtalk-cli`.
+toml.workspace = true
 
 [dev-dependencies]
 insta.workspace = true

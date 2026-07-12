@@ -784,6 +784,87 @@ impl Backend {
         }
     }
 
+    /// Loads each workspace root's `beamtalk.toml` `[diagnostics]`
+    /// severity-override table (ADR 0100 Rule 3, BT-2800) and installs it in
+    /// the language service so `beamtalk build` and the LSP agree on
+    /// diagnostic severity.
+    ///
+    /// Before this, the LSP's diagnostics path never consulted the table at
+    /// all — a package with `dnu = "error"` failed `beamtalk build` while the
+    /// editor kept showing the same site as a soft `Hint`. Parsing lives in
+    /// `beamtalk-core` (`beamtalk_core::compilation::diagnostics_policy`),
+    /// not `beamtalk-cli`, specifically so the LSP can read `beamtalk.toml`
+    /// without a `beamtalk-lsp -> beamtalk-cli` dependency (forbidden — see
+    /// `docs/development/architecture-principles.md`).
+    ///
+    /// Lenient by design: a root with no `beamtalk.toml`, or one that fails
+    /// to parse, contributes an empty table for that root (Rule 1 defaults)
+    /// rather than blocking diagnostics entirely — a malformed manifest
+    /// already fails loudly at `beamtalk build` time, and the LSP must keep
+    /// publishing diagnostics for open files regardless. Parse failures are
+    /// logged so the mismatch is discoverable. A multi-root workspace merges
+    /// every root's table into one (later roots win on category collisions);
+    /// like `set_has_package_dependencies`, this is a whole-session
+    /// simplification, not a per-file lookup.
+    ///
+    /// Loaded once at startup (mirrors [`Self::load_type_cache`]) —
+    /// `beamtalk.toml` edits made while the server is running require an LSP
+    /// restart to take effect.
+    async fn load_diagnostics_table(&self, roots: &[PathBuf]) {
+        use beamtalk_core::compilation::diagnostics_policy::parse_diagnostics_table_from_manifest_toml;
+
+        let roots_owned: Vec<PathBuf> = roots.to_vec();
+        let table = tokio::task::spawn_blocking(move || {
+            let mut merged = beamtalk_core::compilation::DiagnosticsTable::new();
+            for root in &roots_owned {
+                let manifest_path = root.join("beamtalk.toml");
+                let Ok(content) = std::fs::read_to_string(&manifest_path) else {
+                    continue;
+                };
+                match parse_diagnostics_table_from_manifest_toml(&content) {
+                    Ok(root_table) => {
+                        for (category, severity) in root_table {
+                            if let Some(previous) = merged.get(&category) {
+                                if *previous != severity {
+                                    tracing::warn!(
+                                        root = %root.display(),
+                                        category = ?category,
+                                        previous = ?previous,
+                                        new = ?severity,
+                                        "[diagnostics] category set differently by multiple \
+                                         workspace roots; this root's value wins for the \
+                                         whole session"
+                                    );
+                                }
+                            }
+                            merged.insert(category, severity);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            path = %manifest_path.display(),
+                            error = %e,
+                            "failed to parse [diagnostics] table in beamtalk.toml; \
+                             using Rule 1 defaults for this root"
+                        );
+                    }
+                }
+            }
+            merged
+        })
+        .await
+        .unwrap_or_default();
+
+        if !table.is_empty() {
+            debug!(
+                "Loaded {} [diagnostics] severity override(s) from beamtalk.toml",
+                table.len()
+            );
+        }
+        let mut svc = self.service.lock().expect("service lock poisoned");
+        svc.set_diagnostics_overrides(table);
+    }
+
     async fn preload_workspace_source_files(&self, config: PreloadConfig) {
         let loaded = tokio::task::spawn_blocking(move || collect_preload_files(config))
             .await
@@ -1381,6 +1462,9 @@ impl LanguageServer for Backend {
             self.preload_workspace_source_files(config.clone()).await;
             // ADR 0075: Load type cache from _build/type_cache/ for typed completions.
             self.load_type_cache(&config.roots).await;
+            // ADR 0100 Rule 3 / BT-2800: load beamtalk.toml's [diagnostics]
+            // severity-override table so the LSP agrees with `beamtalk build`.
+            self.load_diagnostics_table(&config.roots).await;
 
             // BT-2027: Re-publish diagnostics for every open file after preload
             // completes. If a file was opened via `did_open` before preload
@@ -5011,6 +5095,138 @@ mod tests {
             .await
             .expect("should return content");
         assert_eq!(result.content, content);
+    }
+
+    // ---- BT-2800: LSP applies beamtalk.toml [diagnostics] table ----
+
+    #[tokio::test]
+    async fn load_diagnostics_table_promotes_dnu_hint_to_error() {
+        // ADR 0100 Rule 3 surface-parity regression: a package that sets
+        // `dnu = "error"` in beamtalk.toml must see the LSP report the same
+        // Error severity `beamtalk build` would, not the Rule 1 default Hint.
+        use beamtalk_core::source_analysis::DiagnosticCategory;
+
+        let temp = unique_temp_dir("beamtalk_lsp_diagnostics_table");
+        fs::create_dir_all(&temp).expect("create project root");
+        fs::write(
+            temp.join("beamtalk.toml"),
+            "[package]\nname = \"t\"\nversion = \"0.1.0\"\n\n[diagnostics]\ndnu = \"error\"\n",
+        )
+        .expect("write beamtalk.toml");
+
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+        backend
+            .load_diagnostics_table(std::slice::from_ref(&temp))
+            .await;
+
+        let source_path = Utf8PathBuf::from_path_buf(temp.join("dnu.bt")).unwrap();
+        {
+            let mut svc = backend.service.lock().expect("service lock poisoned");
+            svc.update_file(source_path.clone(), "\"hello\" frobnicate".to_string());
+        }
+
+        let diags = {
+            let svc = backend.service.lock().expect("service lock poisoned");
+            svc.diagnostics(&source_path)
+        };
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.category == Some(DiagnosticCategory::Dnu)
+                    && d.severity == Severity::Error),
+            "dnu = \"error\" in beamtalk.toml must promote the LSP's Dnu hint to \
+             Error, matching `beamtalk build`: {diags:?}"
+        );
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[tokio::test]
+    async fn load_diagnostics_table_absent_manifest_is_noop() {
+        // No beamtalk.toml at all (or no [diagnostics] section) must leave
+        // Rule 1 defaults untouched — a Dnu hint stays a Hint.
+        use beamtalk_core::source_analysis::DiagnosticCategory;
+
+        let temp = unique_temp_dir("beamtalk_lsp_diagnostics_table_absent");
+        fs::create_dir_all(&temp).expect("create project root");
+
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+        backend
+            .load_diagnostics_table(std::slice::from_ref(&temp))
+            .await;
+
+        let source_path = Utf8PathBuf::from_path_buf(temp.join("dnu.bt")).unwrap();
+        {
+            let mut svc = backend.service.lock().expect("service lock poisoned");
+            svc.update_file(source_path.clone(), "\"hello\" frobnicate".to_string());
+        }
+
+        let diags = {
+            let svc = backend.service.lock().expect("service lock poisoned");
+            svc.diagnostics(&source_path)
+        };
+        assert!(
+            diags.iter().any(
+                |d| d.category == Some(DiagnosticCategory::Dnu) && d.severity == Severity::Hint
+            ),
+            "absent beamtalk.toml must preserve the Rule 1 default Hint severity: {diags:?}"
+        );
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[tokio::test]
+    async fn load_diagnostics_table_multi_root_collision_later_root_wins() {
+        // BT-2800 review follow-up: when two workspace roots set the same
+        // [diagnostics] category to different severities, the collision is
+        // now logged (see load_diagnostics_table's per-key merge loop), but
+        // the resulting behavior is unchanged — the later root's value wins
+        // for the whole session, matching set_has_package_dependencies.
+        use beamtalk_core::source_analysis::DiagnosticCategory;
+
+        let temp = unique_temp_dir("beamtalk_lsp_diagnostics_table_collision");
+        let root_a = temp.join("a");
+        let root_b = temp.join("b");
+        fs::create_dir_all(&root_a).expect("create root a");
+        fs::create_dir_all(&root_b).expect("create root b");
+        fs::write(
+            root_a.join("beamtalk.toml"),
+            "[package]\nname = \"a\"\nversion = \"0.1.0\"\n\n[diagnostics]\ndnu = \"hint\"\n",
+        )
+        .expect("write root a manifest");
+        fs::write(
+            root_b.join("beamtalk.toml"),
+            "[package]\nname = \"b\"\nversion = \"0.1.0\"\n\n[diagnostics]\ndnu = \"error\"\n",
+        )
+        .expect("write root b manifest");
+
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+        backend
+            .load_diagnostics_table(&[root_a.clone(), root_b.clone()])
+            .await;
+
+        let source_path = Utf8PathBuf::from_path_buf(root_b.join("dnu.bt")).unwrap();
+        {
+            let mut svc = backend.service.lock().expect("service lock poisoned");
+            svc.update_file(source_path.clone(), "\"hello\" frobnicate".to_string());
+        }
+
+        let diags = {
+            let svc = backend.service.lock().expect("service lock poisoned");
+            svc.diagnostics(&source_path)
+        };
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.category == Some(DiagnosticCategory::Dnu)
+                    && d.severity == Severity::Error),
+            "the later root (b, dnu = error) must win the whole-session merge: {diags:?}"
+        );
+
+        let _ = fs::remove_dir_all(&temp);
     }
 
     #[test]
