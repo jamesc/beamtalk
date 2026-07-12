@@ -822,7 +822,24 @@ impl Backend {
                     continue;
                 };
                 match parse_diagnostics_table_from_manifest_toml(&content) {
-                    Ok(root_table) => merged.extend(root_table),
+                    Ok(root_table) => {
+                        for (category, severity) in root_table {
+                            if let Some(previous) = merged.get(&category) {
+                                if *previous != severity {
+                                    tracing::warn!(
+                                        root = %root.display(),
+                                        category = ?category,
+                                        previous = ?previous,
+                                        new = ?severity,
+                                        "[diagnostics] category set differently by multiple \
+                                         workspace roots; this root's value wins for the \
+                                         whole session"
+                                    );
+                                }
+                            }
+                            merged.insert(category, severity);
+                        }
+                    }
                     Err(e) => {
                         tracing::warn!(
                             path = %manifest_path.display(),
@@ -5155,6 +5172,58 @@ mod tests {
                 |d| d.category == Some(DiagnosticCategory::Dnu) && d.severity == Severity::Hint
             ),
             "absent beamtalk.toml must preserve the Rule 1 default Hint severity: {diags:?}"
+        );
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[tokio::test]
+    async fn load_diagnostics_table_multi_root_collision_later_root_wins() {
+        // BT-2800 review follow-up: when two workspace roots set the same
+        // [diagnostics] category to different severities, the collision is
+        // now logged (see load_diagnostics_table's per-key merge loop), but
+        // the resulting behavior is unchanged — the later root's value wins
+        // for the whole session, matching set_has_package_dependencies.
+        use beamtalk_core::source_analysis::DiagnosticCategory;
+
+        let temp = unique_temp_dir("beamtalk_lsp_diagnostics_table_collision");
+        let root_a = temp.join("a");
+        let root_b = temp.join("b");
+        fs::create_dir_all(&root_a).expect("create root a");
+        fs::create_dir_all(&root_b).expect("create root b");
+        fs::write(
+            root_a.join("beamtalk.toml"),
+            "[package]\nname = \"a\"\nversion = \"0.1.0\"\n\n[diagnostics]\ndnu = \"hint\"\n",
+        )
+        .expect("write root a manifest");
+        fs::write(
+            root_b.join("beamtalk.toml"),
+            "[package]\nname = \"b\"\nversion = \"0.1.0\"\n\n[diagnostics]\ndnu = \"error\"\n",
+        )
+        .expect("write root b manifest");
+
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+        backend
+            .load_diagnostics_table(&[root_a.clone(), root_b.clone()])
+            .await;
+
+        let source_path = Utf8PathBuf::from_path_buf(root_b.join("dnu.bt")).unwrap();
+        {
+            let mut svc = backend.service.lock().expect("service lock poisoned");
+            svc.update_file(source_path.clone(), "\"hello\" frobnicate".to_string());
+        }
+
+        let diags = {
+            let svc = backend.service.lock().expect("service lock poisoned");
+            svc.diagnostics(&source_path)
+        };
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.category == Some(DiagnosticCategory::Dnu)
+                    && d.severity == Severity::Error),
+            "the later root (b, dnu = error) must win the whole-session merge: {diags:?}"
         );
 
         let _ = fs::remove_dir_all(&temp);
