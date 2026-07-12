@@ -57,7 +57,7 @@ impl CoreErlangGenerator {
     ///    accepts a raw `#beamtalk_error{}` record — crashes with
     ///    `function_clause` instead of propagating the real error (BT-2816).
     ///    Destructuring the triple and routing it through
-    ///    `beamtalk_exception_handler:'reraise'/3` mirrors the cross-actor call
+    ///    `beamtalk_exception_handler:'reraise'/4` mirrors the cross-actor call
     ///    boundary (`beamtalk_actor:sync_send_remote/3`), which correctly
     ///    classifies raw Erlang errors and preserves already-wrapped
     ///    `#beamtalk_error{}` values.
@@ -68,14 +68,37 @@ impl CoreErlangGenerator {
     ///    must stay, or a self-send that resolves to DNU crashes with
     ///    `case_clause` instead of raising the DNU error.
     ///
+    /// BT-2822: Passes a `selector`/`class` breadcrumb `Context` map to
+    /// `reraise/4` — mirroring `sync_send_remote/3`'s
+    /// `#{selector => Selector, class => Class}` construction — so a raw
+    /// Erlang error escaping a self-send forwarding hop gets the same
+    /// `ClassName>>selector: ...` location prefix (via `wrap_raw/2` /
+    /// `located/3`) as the cross-actor equivalent. Both `selector_atom` and
+    /// the enclosing class name are known at compile time, so the breadcrumb
+    /// is emitted as literal atoms, not runtime lookups.
+    ///
+    /// Known gap (BT-2833): `class_name()` is the compile-time *defining*
+    /// class of the method body, not the actor's runtime class. For a
+    /// self-send inside a method a subclass inherits without overriding,
+    /// this yields the superclass name instead of the actual instance's
+    /// class — unlike `sync_send_remote/3`, which resolves the runtime class
+    /// via `lookup_class/1`. Cosmetic only (location-prefix text, not
+    /// classification), tracked in BT-2833.
+    ///
     /// # Generated Code
     ///
     /// ```erlang
     /// <{'error', {Type, Reason, Stacktrace}, _}> when 'true' ->
-    ///     call 'beamtalk_exception_handler':'reraise'(Type, Reason, Stacktrace)
+    ///     call 'beamtalk_exception_handler':'reraise'(Type, Reason, Stacktrace,
+    ///         ~{'selector' => 'selector:', 'class' => 'ClassName'}~)
     /// <{'error', Error, _}> when 'true' -> call 'beamtalk_error':'raise'(Error)
     /// ```
-    fn generate_self_dispatch_error_clause(&mut self, var_prefix: &str) -> Document<'static> {
+    fn generate_self_dispatch_error_clause(
+        &mut self,
+        var_prefix: &str,
+        selector_atom: &str,
+    ) -> Document<'static> {
+        let class_name = self.class_name();
         let type_var = self.fresh_var(&format!("{var_prefix}Type"));
         let reason_var = self.fresh_var(&format!("{var_prefix}Reason"));
         let stack_var = self.fresh_var(&format!("{var_prefix}Stack"));
@@ -93,7 +116,11 @@ impl CoreErlangGenerator {
             leaf::var(reason_var),
             ", ",
             leaf::var(stack_var),
-            ") ",
+            ", ~{'selector' => ",
+            leaf::atom(selector_atom.to_string()),
+            ", 'class' => ",
+            leaf::atom(class_name),
+            "}~) ",
             "<{'error', ",
             leaf::var(plain_error_var.clone()),
             ", _}> when 'true' -> call 'beamtalk_error':'raise'(",
@@ -1472,7 +1499,7 @@ impl CoreErlangGenerator {
         let module = self.module_name.clone();
 
         let args_doc = self.capture_argument_list_doc(arguments)?;
-        let error_clause = self.generate_self_dispatch_error_clause("SelfError");
+        let error_clause = self.generate_self_dispatch_error_clause("SelfError", &selector_atom);
 
         let doc = docvec![
             "case call ",
@@ -1531,6 +1558,10 @@ impl CoreErlangGenerator {
         } = expr
         {
             let selector_atom = selector.to_erlang_atom();
+            // BT-2822: `selector_atom` is moved into `call_doc` below (some
+            // branches consume it via `leaf::atom`), so clone the value
+            // needed for the error-clause breadcrumb before that happens.
+            let selector_atom_for_error = selector_atom.clone();
             let dispatch_var = self.fresh_temp_var("SD");
             let result_var = self.fresh_var("SDResult");
             let state_var = self.fresh_var("SDState");
@@ -1612,7 +1643,8 @@ impl CoreErlangGenerator {
 
             // Result/error clauses + state extraction
             let new_state = self.next_state_var();
-            let error_clause = self.generate_self_dispatch_error_clause("SDError");
+            let error_clause =
+                self.generate_self_dispatch_error_clause("SDError", &selector_atom_for_error);
             let doc = docvec![
                 call_doc,
                 "<{'reply', ",
@@ -1654,7 +1686,8 @@ impl CoreErlangGenerator {
 
         // Level 1: Direct call to standalone sealed method function
         if self.sealed_method_selectors().contains(&selector_name) {
-            return self.generate_direct_sealed_call(&selector_name, arguments);
+            let selector_atom = selector.to_erlang_atom();
+            return self.generate_direct_sealed_call(&selector_name, &selector_atom, arguments);
         }
 
         // Level 2: Direct dispatch/4 call (skip safe_dispatch try/catch)
@@ -1665,7 +1698,7 @@ impl CoreErlangGenerator {
         let module = self.module_name.clone();
 
         let args_doc = self.capture_argument_list_doc(arguments)?;
-        let error_clause = self.generate_self_dispatch_error_clause("SealedError");
+        let error_clause = self.generate_self_dispatch_error_clause("SealedError", &selector_atom);
 
         let doc = docvec![
             "let ",
@@ -1703,6 +1736,7 @@ impl CoreErlangGenerator {
     fn generate_direct_sealed_call(
         &mut self,
         selector_name: &str,
+        selector_atom: &str,
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
         let result_var = self.fresh_var("SealedResult");
@@ -1712,7 +1746,13 @@ impl CoreErlangGenerator {
 
         let args_doc = self.capture_argument_list_doc(arguments)?;
         let comma = if arguments.is_empty() { "" } else { ", " };
-        let error_clause = self.generate_self_dispatch_error_clause("SealedDirectError");
+        // BT-2822: `selector_atom` (from `MessageSelector::to_erlang_atom`) is
+        // the breadcrumb value — kept independent of `selector_name` (used
+        // below for `sealed_fn_name` mangling) so a future change to either
+        // mangling scheme can't silently desync the breadcrumb from the
+        // dispatch atom used at the other call sites.
+        let error_clause =
+            self.generate_self_dispatch_error_clause("SealedDirectError", selector_atom);
 
         let doc = docvec![
             "let ",
@@ -3046,7 +3086,7 @@ impl CoreErlangGenerator {
 
             // Result/error clauses + state extraction
             let new_state = self.next_state_var();
-            let error_clause = self.generate_self_dispatch_error_clause("SDError");
+            let error_clause = self.generate_self_dispatch_error_clause("SDError", &selector_atom);
             docs.push(docvec![
                 call_doc,
                 "<{'reply', ",

@@ -2842,6 +2842,41 @@ fn test_self_call_error_branch_handles_both_error_shapes() {
     );
 }
 
+#[test]
+fn test_self_call_error_branch_threads_selector_class_breadcrumb() {
+    // BT-2822 (BT-2816 follow-up): the caught-exception clause of a
+    // self-dispatch error branch must call reraise/4 with a
+    // #{selector => ..., class => ...} breadcrumb — mirroring
+    // beamtalk_actor:sync_send_remote/3's cross-actor Context construction —
+    // so a raw Erlang error escaping a forwarded self-send gets the same
+    // `ClassName>>selector: ...` location prefix as the cross-actor case.
+    let src = concat!(
+        "Actor subclass: Srv\n",
+        "  state: value = 0\n\n",
+        "  setup =>\n",
+        "    self.value := 42\n\n",
+        "  doWork =>\n",
+        "    self setup\n",
+        "    self.value\n",
+    );
+    let code = codegen_source(src);
+
+    // reraise/4 (four args: Type, Reason, Stacktrace, Context) is used, not
+    // the context-free reraise/3. The 4th arg is a literal
+    // ~{'selector' => 'setup', 'class' => 'Srv'}~ breadcrumb map — the
+    // selector/class are known at compile time so no variable names are
+    // involved (their exact fresh-var numbering is an implementation detail).
+    let reraise_with_breadcrumb = regex::Regex::new(
+        r"call 'beamtalk_exception_handler':'reraise'\(\w+, \w+, \w+, ~\{'selector' => 'setup', 'class' => 'Srv'\}~\)",
+    )
+    .unwrap();
+    assert!(
+        reraise_with_breadcrumb.is_match(&code),
+        "Self-dispatch error branch must call reraise/4 with a literal \
+         #{{selector => 'setup', class => 'Srv'}} breadcrumb map. Got:\n{code}"
+    );
+}
+
 // --- ADR 0070 Phase 2: Package-qualified class reference codegen tests ---
 
 #[test]
