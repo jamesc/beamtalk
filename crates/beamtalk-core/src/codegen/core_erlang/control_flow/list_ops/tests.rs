@@ -1909,3 +1909,123 @@ fn test_do_separated_by_separator_with_param_falls_through() {
         "do:separatedBy: separator with param: should NOT desugar to lists:foldl. Got:\n{code}"
     );
 }
+
+#[test]
+fn test_select_wrong_arity_block_is_compile_error() {
+    // BT-493: select: requires a 1-arg block. A 0-arg block (`[nil]`) must trigger
+    // validate_block_arity_exact and produce a BlockArityError, covering the `?`
+    // error-propagation branch at filter_ops.rs:27.
+    let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    items select: [nil]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(crate::codegen::core_erlang::CodeGenError::BlockArityError { .. })
+        ),
+        "select: with a 0-arg block must be a compile-time BlockArityError. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_reject_wrong_arity_block_is_compile_error() {
+    // BT-493: reject: requires a 1-arg block. A 0-arg block (`[nil]`) must trigger
+    // validate_block_arity_exact and produce a BlockArityError, covering the `?`
+    // error-propagation branch at filter_ops.rs:50.
+    let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    items reject: [nil]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(crate::codegen::core_erlang::CodeGenError::BlockArityError { .. })
+        ),
+        "reject: with a 0-arg block must be a compile-time BlockArityError. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_select_nested_in_direct_params_loop() {
+    // BT-1329: select: with a local mutation nested inside a direct-params to:do:
+    // loop. The outer loop sets in_direct_params_loop=true, which causes
+    // generate_list_filter_with_mutations to skip the StateAcc repack and emit an
+    // open let-chain instead. Covers filter_ops.rs lines 168-193 (negate=false path).
+    let src = concat!(
+        "Actor subclass: Ctr\n",
+        "  state: x = 0\n\n",
+        "  run: items =>\n",
+        "    count := 0\n",
+        "    seen := 0\n",
+        "    1 to: 3 do: [:i |\n",
+        "      count := count + 1\n",
+        "      items select: [:item | seen := seen + 1. item > 0]\n",
+        "    ]\n",
+        "    count\n",
+    );
+    let code = codegen(src);
+    assert!(
+        code.contains("letrec"),
+        "Outer to:do: should generate a letrec. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'lists':'foldl'"),
+        "select: with local mutation should use lists:foldl. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'lists':'filter'"),
+        "Mutation-threaded select: must NOT use lists:filter. Got:\n{code}"
+    );
+    // Direct-params outer loop rebuilds StateAcc exactly once at exit (ExitSA).
+    assert!(
+        code.contains("ExitSA"),
+        "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_reject_nested_in_direct_params_loop() {
+    // BT-1329: reject: with a local mutation nested inside a direct-params to:do:
+    // loop. The outer loop sets in_direct_params_loop=true, which causes
+    // generate_list_filter_with_mutations to skip the StateAcc repack (negate=true path).
+    // The negate=true flag additionally emits `call 'erlang':'not'` in the fold body.
+    // Covers filter_ops.rs lines 168-193 (negate=true path).
+    let src = concat!(
+        "Actor subclass: Ctr\n",
+        "  state: x = 0\n\n",
+        "  run: items =>\n",
+        "    count := 0\n",
+        "    seen := 0\n",
+        "    1 to: 3 do: [:i |\n",
+        "      count := count + 1\n",
+        "      items reject: [:item | seen := seen + 1. item > 0]\n",
+        "    ]\n",
+        "    count\n",
+    );
+    let code = codegen(src);
+    assert!(
+        code.contains("letrec"),
+        "Outer to:do: should generate a letrec. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'lists':'foldl'"),
+        "reject: with local mutation should use lists:foldl. Got:\n{code}"
+    );
+    // negate=true: the fold body wraps the predicate with erlang:not.
+    assert!(
+        code.contains("call 'erlang':'not'"),
+        "reject: (negate=true) in direct-params loop must emit erlang:not. Got:\n{code}"
+    );
+    // Direct-params outer loop rebuilds StateAcc exactly once at exit (ExitSA).
+    assert!(
+        code.contains("ExitSA"),
+        "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
+    );
+}
