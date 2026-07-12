@@ -147,7 +147,7 @@ sealed typed Collection subclass: Tuple
   /// ```beamtalk
   /// result do: [:x | Transcript show: x]
   /// ```
-  do: block :: Block -> Nil => @primitive
+  do: block :: Block(Object, Object) -> Nil => @primitive
 
   /// Return a random element from the tuple.
   ///

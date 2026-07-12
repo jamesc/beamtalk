@@ -310,7 +310,7 @@ sealed typed Number subclass: Integer
   /// ```beamtalk
   /// 1 to: 3 do: [:i | Transcript show: i]
   /// ```
-  to: end :: Integer do: block :: Block -> Nil =>
+  to: end :: Integer do: block :: Block(Integer, Object) -> Nil =>
     self <= end
       ifTrue: [
         block value: self
@@ -324,7 +324,7 @@ sealed typed Number subclass: Integer
   /// ```beamtalk
   /// 1 to: 10 by: 3 do: [:i | Transcript show: i]
   /// ```
-  to: end :: Integer by: step :: Integer do: block :: Block -> Nil =>
+  to: end :: Integer by: step :: Integer do: block :: Block(Integer, Object) -> Nil =>
     cond := (step > 0 and: [self <= end]) or: [step < 0 and: [self >= end]]
     cond
       ifTrue: [

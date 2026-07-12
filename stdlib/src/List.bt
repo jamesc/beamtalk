@@ -306,7 +306,7 @@ sealed typed Collection(E) subclass: List(E)
   /// ```beamtalk
   /// #(1, 2, 3, 4) groupBy: [:x | x isEven]
   /// ```
-  groupBy: block :: Block -> Dictionary => @primitive
+  groupBy: block :: Block(E, Object) -> Dictionary => @primitive
 
   /// Partition elements into a Dictionary with "matching" and "nonMatching" keys.
   ///

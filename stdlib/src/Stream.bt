@@ -37,7 +37,7 @@ sealed typed Object subclass: Stream(E) native: beamtalk_stream
   /// ```beamtalk
   /// (Stream from: 1 by: [:n | n * 2]) take: 4  // => #(1, 2, 4, 8)
   /// ```
-  class sealed from: start :: Integer by: stepFun :: Block -> Stream(Integer) =>
+  class sealed from: start :: Integer by: stepFun :: Block(Integer, Integer) -> Stream(Integer) =>
     self delegate
 
   /// Create a Stream from a collection (list).
@@ -54,7 +54,7 @@ sealed typed Object subclass: Stream(E) native: beamtalk_stream
   /// ```beamtalk
   /// ((Stream on: #(1, 2, 3, 4)) select: [:n | n > 2]) asList  // => #(3, 4)
   /// ```
-  select: predicate :: Block -> Stream(E) => self delegate
+  select: predicate :: Block(E, Boolean) -> Stream(E) => self delegate
 
   /// Transform each element (lazy).
   ///
@@ -62,7 +62,7 @@ sealed typed Object subclass: Stream(E) native: beamtalk_stream
   /// ```beamtalk
   /// ((Stream on: #(1, 2, 3)) collect: [:n | n * 10]) asList  // => #(10, 20, 30)
   /// ```
-  collect: transform :: Block -> Stream => self delegate
+  collect: transform :: Block(E, Object) -> Stream => self delegate
 
   /// Inverse filter — exclude elements matching predicate (lazy).
   ///
@@ -70,7 +70,7 @@ sealed typed Object subclass: Stream(E) native: beamtalk_stream
   /// ```beamtalk
   /// ((Stream on: #(1, 2, 3, 4)) reject: [:n | n > 2]) asList  // => #(1, 2)
   /// ```
-  reject: predicate :: Block -> Stream(E) => self delegate
+  reject: predicate :: Block(E, Boolean) -> Stream(E) => self delegate
 
   /// Skip first N elements (lazy).
   ///
@@ -94,7 +94,7 @@ sealed typed Object subclass: Stream(E) native: beamtalk_stream
   /// ```beamtalk
   /// (Stream on: #(1, 2, 3)) do: [:n | Transcript show: n]
   /// ```
-  do: block :: Block -> Nil => self delegate
+  do: block :: Block(E, Object) -> Nil => self delegate
 
   /// Fold/reduce with initial value (terminal).
   ///
@@ -102,7 +102,7 @@ sealed typed Object subclass: Stream(E) native: beamtalk_stream
   /// ```beamtalk
   /// (Stream on: #(1, 2, 3)) inject: 0 into: [:sum :n | sum + n]  // => 6
   /// ```
-  inject: initial :: Object into: block :: Block -> Object => self delegate
+  inject: initial :: A into: block :: Block(A, E, A) -> A => self delegate
 
   /// Return first element matching predicate, or nil (terminal).
   ///
@@ -110,7 +110,7 @@ sealed typed Object subclass: Stream(E) native: beamtalk_stream
   /// ```beamtalk
   /// (Stream on: #(1, 2, 3, 4)) detect: [:n | n > 2]  // => 3
   /// ```
-  detect: predicate :: Block -> E | Nil => self delegate
+  detect: predicate :: Block(E, Boolean) -> E | Nil => self delegate
 
   /// Materialize entire stream to a List (terminal).
   ///
@@ -126,7 +126,7 @@ sealed typed Object subclass: Stream(E) native: beamtalk_stream
   /// ```beamtalk
   /// (Stream on: #(1, 2, 3)) anySatisfy: [:n | n > 2]  // => true
   /// ```
-  anySatisfy: predicate :: Block -> Boolean => self delegate
+  anySatisfy: predicate :: Block(E, Boolean) -> Boolean => self delegate
 
   /// Return true if all elements satisfy predicate (terminal).
   ///
@@ -134,7 +134,7 @@ sealed typed Object subclass: Stream(E) native: beamtalk_stream
   /// ```beamtalk
   /// (Stream on: #(1, 2, 3)) allSatisfy: [:n | n > 0]  // => true
   /// ```
-  allSatisfy: predicate :: Block -> Boolean => self delegate
+  allSatisfy: predicate :: Block(E, Boolean) -> Boolean => self delegate
 
   /// Return a developer-readable string showing pipeline structure.
   ///

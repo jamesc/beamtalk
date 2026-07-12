@@ -80,7 +80,7 @@ sealed typed Object subclass: Block
   /// ```beamtalk
   /// [1 / 0] on: Error do: [:e | e message]
   /// ```
-  on: exClass :: Object do: handler :: Block => @intrinsic onDo
+  on: exClass :: Object do: handler :: Block(Object, Object) => @intrinsic onDo
 
   /// Evaluate the block, then always evaluate `cleanupBlock` (even on exception).
   ///
