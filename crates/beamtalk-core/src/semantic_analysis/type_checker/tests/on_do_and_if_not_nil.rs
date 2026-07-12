@@ -446,3 +446,31 @@ typed Object subclass: Repro
             .collect::<Vec<_>>()
     );
 }
+
+/// BT-2826 review follow-up: parameterizing `on:do:`'s handler as
+/// `Block(Object, Object)` must not reject the common zero-arg handler
+/// idiom (`on: Error do: [0]`, ignoring the exception) in a `typed` class —
+/// block-param arity checking is flexible (a handler may ignore params it
+/// doesn't need), so this should type-check with no diagnostics.
+#[test]
+fn bt2826_on_do_zero_arg_handler_in_typed_context_no_diagnostics() {
+    let source = "
+typed Object subclass: Repro
+  safeDiv -> Integer =>
+    [1 / 0] on: Error do: [0]
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    assert!(
+        checker.diagnostics().is_empty(),
+        "zero-arg on:do: handler should type-check cleanly in a typed class; got: {:?}",
+        checker.diagnostics()
+    );
+}
