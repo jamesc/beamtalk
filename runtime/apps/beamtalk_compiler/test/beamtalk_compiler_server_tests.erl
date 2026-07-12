@@ -208,6 +208,42 @@ unknown_info() ->
     ?assert(is_pid(whereis(beamtalk_compiler_server))).
 
 %%% ---------------------------------------------------------------
+%%% BT-2832: inject_diagnostics_failure/1 (test-only fault injection)
+%%%
+%%% Direct, isolated coverage of the mechanism itself — one-shot consumption
+%%% and self-clearing — independent of `beamtalk_repl_loader_recheck_tests`'s
+%%% higher-level integration tests (which exercise it as a means to reach
+%%% `beamtalk_recheck`'s otherwise-unreachable `failed` outcome).
+%%% ---------------------------------------------------------------
+
+diagnostics_fault_injection_test_() ->
+    {setup, fun start_compiler/0, fun stop_compiler/1, [
+        {"armed fault fails the next diagnostics call", fun fault_fails_next_call/0},
+        {"fault self-clears after being consumed", fun fault_self_clears/0},
+        {"unarmed diagnostics call reaches the real port", fun no_fault_reaches_port/0}
+    ]}.
+
+fault_fails_next_call() ->
+    ok = beamtalk_compiler_server:inject_diagnostics_failure(<<"BT-2832 test fault">>),
+    Result = beamtalk_compiler_server:diagnostics(<<"1 + 2">>),
+    ?assertMatch({error, [#{message := <<"BT-2832 test fault">>}]}, Result).
+
+fault_self_clears() ->
+    ok = beamtalk_compiler_server:inject_diagnostics_failure(<<"BT-2832 test fault">>),
+    FaultedResult = beamtalk_compiler_server:diagnostics(<<"1 + 2">>),
+    ?assertMatch({error, _}, FaultedResult),
+    %% The fault was consumed by the call above — this one must reach the
+    %% real port and succeed normally, proving the flag is one-shot, not
+    %% "stuck on" for the rest of the process's life.
+    RecoveredResult = beamtalk_compiler_server:diagnostics(<<"1 + 2">>),
+    ?assertMatch({ok, _}, RecoveredResult).
+
+no_fault_reaches_port() ->
+    %% No fault armed — an ordinary diagnostics call is unaffected.
+    Result = beamtalk_compiler_server:diagnostics(<<"1 + 2">>),
+    ?assertMatch({ok, _}, Result).
+
+%%% ---------------------------------------------------------------
 %%% Helpers
 %%% ---------------------------------------------------------------
 

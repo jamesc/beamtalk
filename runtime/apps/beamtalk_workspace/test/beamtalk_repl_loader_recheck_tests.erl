@@ -820,3 +820,183 @@ skipped_stale_note_is_idempotent_across_reloads_test_() ->
                 end)
             ]
         end}}.
+
+%%====================================================================
+%% Failed-candidate staleness marking (ADR 0105, BT-2828 / BT-2832)
+%%
+%% A candidate that stays INSIDE the (default, un-capped) `Kept` set, HAS a
+%% live source recorded, but whose diagnostics round-trip itself errors out
+%% (`recheck_owner/5` returns `{failed, []}`) is the third way a `Kept`
+%% candidate can end up unverified — same stranded-finding symptom the
+%% skipped-candidate tests above cover, just reached via a genuine
+%% compiler-port failure instead of missing source. Unlike the `skipped`
+%% case, this is NOT triggerable via source content alone: the compiler
+%% port's `handle_diagnostics` always replies `status => ok`, even for source
+%% with parse/type errors (those come back as ordinary diagnostics, never a
+%% port-level `{error, _}`) — see `crates/beamtalk-compiler-port/src/main.rs`.
+%% With no mocking library in this codebase and no existing fault-injection
+%% precedent, these tests use `beamtalk_compiler_server:inject_diagnostics_failure/1`
+%% (BT-2832, TEST-only) to deterministically force the *next* `diagnostics/3`
+%% call to return `{error, _}` without touching the real compiler port.
+%%
+%% One instance-path test is sufficient coverage for both re-check triggers:
+%% `trigger/4` (instance-selector path, exercised here via
+%% `maybe_trigger_recheck/4`) and `trigger_shape/2` (shape-change path,
+%% `publish_shape_recheck_outcome/3`) both fold their `Kept`-but-not-`ok`
+%% outcomes into the exact same `beamtalk_recheck:not_verified_owners/2`
+%% union before ever reaching `beamtalk_repl_loader`, and both then call the
+%% identical `mark_unverified_findings_stale/2` on that merged set — the
+%% shape path has no `failed`-specific branch to miss. Duplicating this test
+%% for the shape path would re-exercise the same `beamtalk_repl_loader` code
+%% through a different (already-covered) trigger, not new behaviour.
+%%====================================================================
+
+failed_candidate_with_existing_finding_gets_marked_stale_test_() ->
+    {timeout, 30,
+        {setup, fun loader_recheck_setup/0, fun loader_recheck_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    %% Live source IS recorded here (unlike
+                    %% `install_fixture_no_live_source/1`) — `recheck_owner/5`
+                    %% must reach its diagnostics call for the injected fault
+                    %% to be what fails it, not the "no live source" branch.
+                    install_fixture('String'),
+                    SeedFinding = #{
+                        owner => <<"LoaderReCheckDashboard">>,
+                        changed_class => <<"LoaderReCheckCounter">>,
+                        selector => <<"size">>,
+                        classification => signature_change,
+                        severity => <<"warning">>,
+                        category => <<"Dnu">>,
+                        message => <<"stale generation-A finding">>,
+                        note => undefined,
+                        sites => [#{method => <<"refresh:">>, line => 2}],
+                        start => 0,
+                        'end' => 5
+                    },
+                    _ = beamtalk_workspace_findings_store:put_owner_origin(
+                        <<"LoaderReCheckDashboard">>, <<"LoaderReCheckCounter">>, [SeedFinding]
+                    ),
+
+                    ok = beamtalk_compiler_server:inject_diagnostics_failure(
+                        <<"BT-2832: injected compiler-port failure (test)">>
+                    ),
+                    ok = beamtalk_repl_loader:maybe_trigger_recheck(
+                        <<"LoaderReCheckCounter">>,
+                        <<"size">>,
+                        instance,
+                        {captured, undefined, signature_change}
+                    ),
+
+                    %% Dashboard's diagnostics round-trip errored out
+                    %% (`{failed, []}`), so its original finding's
+                    %% message/severity/classification stay untouched — but
+                    %% the `note` is overwritten to flag it as not
+                    %% re-checked this reload, exactly as a cap-dropped or
+                    %% skipped candidate's is.
+                    [DashboardFinding] = beamtalk_workspace_findings_store:get_origin(
+                        <<"LoaderReCheckDashboard">>, <<"LoaderReCheckCounter">>
+                    ),
+                    ?assertEqual(
+                        <<"stale generation-A finding">>, maps:get(message, DashboardFinding)
+                    ),
+                    ?assertEqual(<<"warning">>, maps:get(severity, DashboardFinding)),
+                    Note = maps:get(note, DashboardFinding),
+                    ?assert(is_binary(Note)),
+                    ?assert(
+                        binary:match(Note, <<"not re-checked against the latest reload">>) =/=
+                            nomatch
+                    )
+                end)
+            ]
+        end}}.
+
+%% A failed candidate with NO existing finding for this origin (the common
+%% case) is left alone — no spurious entry is created just because its
+%% diagnostics round-trip errored out this reload. Mirrors
+%% `skipped_candidate_with_no_existing_finding_stays_absent_test_`.
+failed_candidate_with_no_existing_finding_stays_absent_test_() ->
+    {timeout, 30,
+        {setup, fun loader_recheck_setup/0, fun loader_recheck_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    install_fixture('String'),
+                    ok = beamtalk_compiler_server:inject_diagnostics_failure(
+                        <<"BT-2832: injected compiler-port failure (test)">>
+                    ),
+                    ok = beamtalk_repl_loader:maybe_trigger_recheck(
+                        <<"LoaderReCheckCounter">>,
+                        <<"size">>,
+                        instance,
+                        {captured, undefined, signature_change}
+                    ),
+                    ?assertEqual(
+                        [],
+                        beamtalk_workspace_findings_store:get_origin(
+                            <<"LoaderReCheckDashboard">>, <<"LoaderReCheckCounter">>
+                        )
+                    )
+                end)
+            ]
+        end}}.
+
+%% A stale note is not re-wrapped on every consecutive reload where the
+%% candidate's diagnostics round-trip keeps failing — mirrors
+%% `skipped_stale_note_is_idempotent_across_reloads_test_`. Each reload
+%% re-arms the fault (it is one-shot, consumed by the previous reload's own
+%% diagnostics call) so both reloads independently hit the `failed` branch.
+failed_stale_note_is_idempotent_across_reloads_test_() ->
+    {timeout, 30,
+        {setup, fun loader_recheck_setup/0, fun loader_recheck_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    install_fixture('String'),
+                    SeedFinding = #{
+                        owner => <<"LoaderReCheckDashboard">>,
+                        changed_class => <<"LoaderReCheckCounter">>,
+                        selector => <<"size">>,
+                        classification => signature_change,
+                        severity => <<"warning">>,
+                        category => <<"Dnu">>,
+                        message => <<"stale generation-A finding">>,
+                        note => undefined,
+                        sites => [#{method => <<"refresh:">>, line => 2}],
+                        start => 0,
+                        'end' => 5
+                    },
+                    _ = beamtalk_workspace_findings_store:put_owner_origin(
+                        <<"LoaderReCheckDashboard">>, <<"LoaderReCheckCounter">>, [SeedFinding]
+                    ),
+
+                    %% Two consecutive reloads of Counter, Dashboard's
+                    %% diagnostics round-trip failing both times.
+                    ok = beamtalk_compiler_server:inject_diagnostics_failure(
+                        <<"BT-2832: injected compiler-port failure (test, reload A)">>
+                    ),
+                    ok = beamtalk_repl_loader:maybe_trigger_recheck(
+                        <<"LoaderReCheckCounter">>,
+                        <<"size">>,
+                        instance,
+                        {captured, undefined, signature_change}
+                    ),
+                    [FirstMarked] = beamtalk_workspace_findings_store:get_origin(
+                        <<"LoaderReCheckDashboard">>, <<"LoaderReCheckCounter">>
+                    ),
+                    ok = beamtalk_compiler_server:inject_diagnostics_failure(
+                        <<"BT-2832: injected compiler-port failure (test, reload B)">>
+                    ),
+                    ok = beamtalk_repl_loader:maybe_trigger_recheck(
+                        <<"LoaderReCheckCounter">>,
+                        <<"size">>,
+                        instance,
+                        {captured, 'String', signature_change}
+                    ),
+                    [SecondMarked] = beamtalk_workspace_findings_store:get_origin(
+                        <<"LoaderReCheckDashboard">>, <<"LoaderReCheckCounter">>
+                    ),
+                    ?assertEqual(
+                        maps:get(note, FirstMarked), maps:get(note, SecondMarked)
+                    )
+                end)
+            ]
+        end}}.

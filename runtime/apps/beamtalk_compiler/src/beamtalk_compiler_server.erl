@@ -54,7 +54,8 @@ to avoid temp files on disk (BT-48).
     handle_compile_response/1,
     handle_diagnostics_response/1,
     handle_version_response/1,
-    clear_classes/0
+    clear_classes/0,
+    inject_diagnostics_failure/1
 ]).
 -endif.
 
@@ -63,7 +64,13 @@ to avoid temp files on disk (BT-48).
     %% ADR 0050 Phase 3: Accumulated class metadata cache.
     %% Maps class name atom → __beamtalk_meta/0 map.
     %% Populated via register_class/2 casts and crash recovery on init.
-    classes = #{} :: #{atom() => map()}
+    classes = #{} :: #{atom() => map()},
+    %% BT-2832 (test-only): when set (via inject_diagnostics_failure/1, only
+    %% exported in TEST builds), the *next* diagnostics/3 call fails with this
+    %% reason instead of reaching the real compiler port, then self-clears.
+    %% Always `undefined` in production — nothing outside TEST builds can set
+    %% it. See inject_diagnostics_failure/1's doc for why this exists.
+    diagnostics_fault = undefined :: undefined | binary()
 }).
 
 %%% Public API
@@ -205,6 +212,28 @@ clean class cache. Synchronous so the next compile sees an empty cache.
 -spec clear_classes() -> ok.
 clear_classes() ->
     gen_server:call(?MODULE, clear_classes, 5000).
+
+-doc """
+Force the *next* `diagnostics/3' call to fail with `{error, [#{message =>
+Reason}]}' instead of reaching the real compiler port (BT-2832, test use
+only).
+
+`beamtalk_recheck:recheck_owner/5' (and `recheck_owner_for_shape/4')'s
+`{failed, []}' outcome fires only on a genuine port-level failure — the
+compiler port's `handle_diagnostics' always replies `status => ok', even for
+source with parse/type errors (those come back as ordinary diagnostics in the
+list, never a port-level `{error, _}'). That makes `failed' unreachable via
+source content alone, and this codebase has no mocking library — so this is
+a deterministic, self-clearing substitute: it flips a flag `handle_call/3'
+checks on the *next* `{diagnostics, ...}' request only (any `Mode'/`Options'),
+after which the flag resets to `undefined' and every following call reaches
+the real port again. Never touches the port itself, so unrelated requests
+(`compile_expression', `compile', ...) — and any diagnostics call after the
+one consumed — are unaffected.
+""".
+-spec inject_diagnostics_failure(binary()) -> ok.
+inject_diagnostics_failure(Reason) ->
+    gen_server:call(?MODULE, {inject_diagnostics_failure, Reason}, 5000).
 -endif.
 
 -doc """
@@ -569,6 +598,16 @@ handle_call({resolve_completion_type, Expression}, _From, State) ->
         State#state.port, Expression, State#state.classes
     ),
     {reply, Result, State};
+handle_call(
+    {diagnostics, _Source, _Mode, _Options}, _From, #state{diagnostics_fault = Fault} = State
+) when
+    Fault =/= undefined
+->
+    %% BT-2832 (test-only fault injection, see inject_diagnostics_failure/1):
+    %% consumed by exactly this one request — the real port is never touched,
+    %% and the flag clears itself so every following diagnostics call (this
+    %% one included, on retry) reaches the real port again.
+    {reply, {error, [#{message => Fault}]}, State#state{diagnostics_fault = undefined}};
 handle_call({diagnostics, Source, Mode, Options}, _From, State) ->
     %% ADR 0105 Phase 1 (BT-2778): only thread the ambient class cache when
     %% explicitly requested (see diagnostics/3's moduledoc) — the default
@@ -631,6 +670,8 @@ handle_call(version, _From, State) ->
     {reply, Result, State};
 handle_call(clear_classes, _From, State) ->
     {reply, ok, State#state{classes = #{}}};
+handle_call({inject_diagnostics_failure, Reason}, _From, State) ->
+    {reply, ok, State#state{diagnostics_fault = Reason}};
 handle_call(get_classes, _From, State) ->
     {reply, State#state.classes, State};
 handle_call(_Request, _From, State) ->
