@@ -91,6 +91,11 @@ fn bt2847_nested_union_incompatible_member_warns() {
         checker.diagnostics()
     );
     assert!(warnings[0].message.contains("Array(String)"));
+    assert!(
+        warnings[0].message.contains("Array(String | Nil)"),
+        "Warning should render the nested union in the actual type: {}",
+        warnings[0].message
+    );
 }
 
 /// AC: no regression — a nested `Union` type-arg whose every member is
