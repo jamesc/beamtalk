@@ -3,6 +3,20 @@
 ## Status
 Accepted (2026-07-12)
 
+## Implementation Tracking
+
+**Epic:** [BT-2853](https://linear.app/beamtalk/issue/BT-2853)
+**Issues:**
+
+| Phase | Issue | Title | Size | Blocked by |
+|---|---|---|---|---|
+| 1 | [BT-2854](https://linear.app/beamtalk/issue/BT-2854) | Foundation: `Pattern::Nil` + `Pattern::Type` AST/parser/leaf-gate | M | – |
+| 2 | [BT-2855](https://linear.app/beamtalk/issue/BT-2855) | `Pattern::Type`: bindings, narrowing, and codegen | L | BT-2854 |
+| 3 | [BT-2856](https://linear.app/beamtalk/issue/BT-2856) | Exhaustiveness + hot-reload re-check integration | M | BT-2855 |
+| 4 | [BT-2857](https://linear.app/beamtalk/issue/BT-2857) | Docs, LSP, and E2E validation | M | BT-2855, BT-2856 |
+
+**Status:** Planned
+
 ## Context
 
 ### Problem statement
