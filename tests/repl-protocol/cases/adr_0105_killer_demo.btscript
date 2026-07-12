@@ -41,31 +41,31 @@
 Actor subclass: KillerDemoCounter
   state: count = 0
   increment => self.count := self.count + 1
-// => _
+// => KillerDemoCounter
 
 KillerDemoCounter >> getCount -> Integer => self.count
-// => _
+// => KillerDemoCounter>>getCount
 
 KillerDemoCounter >> cleanup => self.count := 0
-// => _
+// => KillerDemoCounter>>cleanup
 
 // The stale caller: assumes `getCount` still answers an Integer (`+ 1`) —
 // the ADR's `Dashboard>>refresh`.
 Object subclass: KillerDemoDashboard
   refresh: c :: KillerDemoCounter -> Integer => (c getCount) + 1
-// => _
+// => KillerDemoDashboard
 
 // The genuinely-unaffected caller: only stringifies the result, so it
 // re-checks clean whatever `getCount` returns — the ADR's `StatsView>>render`.
 Object subclass: KillerDemoStatsView
   render: c :: KillerDemoCounter -> String => (c getCount) printString
-// => _
+// => KillerDemoStatsView
 
 // The removal target: calls a selector that will be deleted from the class —
 // the ADR's `AdminPanel>>onClick` / `Counter>>reset` example.
 Object subclass: KillerDemoAdminPanel
   onClick: c :: KillerDemoCounter -> Object => c cleanup
-// => _
+// => KillerDemoAdminPanel
 
 // ===========================================================================
 // LOAD + SPAWN + USE — the live image before any edit.
@@ -98,7 +98,7 @@ killerDemoFindings := [((Workspace recheckImage) at: #findings) select: [:f | (f
 // ===========================================================================
 
 KillerDemoCounter >> getCount -> String => self.count printString
-// => _
+// => KillerDemoCounter>>getCount
 
 // Existing actor picks up the new method immediately — no restart, no rebuild.
 // count is still 1 (untouched by this edit); now stringified.
@@ -135,7 +135,7 @@ counter getCount
 // ===========================================================================
 
 KillerDemoCounter >> getCount -> Symbol => #done
-// => _
+// => KillerDemoCounter>>getCount
 
 // Still exactly one Dashboard finding — generation B replaced generation A,
 // it did not stack a second contradictory finding on top of it.
@@ -156,7 +156,7 @@ KillerDemoCounter >> getCount -> Symbol => #done
 // ===========================================================================
 
 KillerDemoCounter >> getCount -> Integer => self.count
-// => _
+// => KillerDemoCounter>>getCount
 
 (killerDemoFindings value) size
 // => 0
@@ -172,10 +172,10 @@ KillerDemoCounter >> getCount -> Integer => self.count
 Actor subclass: KillerDemoCounter
   state: count = 0
   increment => self.count := self.count + 1
-// => _
+// => KillerDemoCounter
 
 KillerDemoCounter >> getCount -> Integer => self.count
-// => _
+// => KillerDemoCounter>>getCount
 
 // AdminPanel is now the sole stale caller — Dashboard/StatsView are clean
 // again (both survived the `getCount` round-trip back to `Integer`).
