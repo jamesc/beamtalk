@@ -796,15 +796,42 @@ impl TypeChecker {
     /// shapes like `Result(Array(Integer), Error)` vs `Result(Array(String),
     /// Error)` are detected as mismatches at the inner level.
     ///
-    /// Returns true (compatible) for any non-`Known` shape (Dynamic, Union,
-    /// Never) — those are handled by the broader checker and we don't want to
-    /// double-warn here. Generic type-param placeholders (T, E, K, V) are
-    /// treated as compatible since they're symbolic.
+    /// BT-2847: a nested `Union` on the `actual` (body-inferred) side is no
+    /// longer an automatic pass — every member must be compatible with
+    /// `expected`, recursing through this same function (mirroring the
+    /// `classify_union_members`-style check used at the top level, BT-1832).
+    /// So a declared `List(String)` against a body inferring `List(String |
+    /// Nil)` now warns, since `Nil` isn't assignable to `String`. Like
+    /// `classify_union_members`, the whole union is skipped (permissive) if
+    /// any member is itself non-`Known` (nested `Dynamic`/`Union`/`Never`/
+    /// etc.) — we can't reason about those precisely enough to warn without
+    /// risking a false positive.
+    ///
+    /// Nested `Dynamic`/`Never` on either side (outside of a `Union`) still
+    /// short-circuit to `true` — that stays permissive per the BT-2847 spec
+    /// decision: `Dynamic` is the checker's universal escape hatch and
+    /// Beamtalk generics are erased at runtime, so there's no runtime-safety
+    /// payoff to warning on nested `Dynamic` the way there is for a concrete
+    /// incompatible `Union` member like `Nil`. Generic type-param
+    /// placeholders (T, E, K, V) are treated as compatible since they're
+    /// symbolic.
     fn type_args_compatible(
         expected: &InferredType,
         actual: &InferredType,
         hierarchy: &ClassHierarchy,
     ) -> bool {
+        if let InferredType::Union { members, .. } = actual {
+            // Conservative skip (classify_union_members-style): a non-Known
+            // member (nested Dynamic/Union/Never/etc.) means we can't reason
+            // about the union precisely, so stay permissive for the whole
+            // thing rather than risk a false positive.
+            if members.iter().any(|m| m.as_known().is_none()) {
+                return true;
+            }
+            return members
+                .iter()
+                .all(|member| Self::type_args_compatible(expected, member, hierarchy));
+        }
         let (
             InferredType::Known {
                 class_name: exp_name,
@@ -818,7 +845,7 @@ impl TypeChecker {
             },
         ) = (expected, actual)
         else {
-            return true; // Dynamic / Union / Never on either side — skip
+            return true; // Dynamic / Never on either side — skip
         };
         if super::is_generic_type_param(exp_name) || super::is_generic_type_param(act_name) {
             return true;
