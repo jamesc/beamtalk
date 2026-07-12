@@ -292,15 +292,22 @@ fn check_pattern_type_classes(
         Pattern::Type { class, .. } => {
             validate_type_pattern_class(class, hierarchy, has_cross_file_classes, diagnostics);
         }
-        Pattern::Tuple { elements, .. } | Pattern::List { elements, .. } => {
+        Pattern::Tuple { elements, .. } => {
             for elem in elements {
                 check_pattern_type_classes(elem, hierarchy, has_cross_file_classes, diagnostics);
             }
-            if let Pattern::List {
-                tail: Some(tail), ..
-            } = pattern
-            {
-                check_pattern_type_classes(tail, hierarchy, has_cross_file_classes, diagnostics);
+        }
+        Pattern::List { elements, tail, .. } => {
+            for elem in elements {
+                check_pattern_type_classes(elem, hierarchy, has_cross_file_classes, diagnostics);
+            }
+            if let Some(tail_pat) = tail {
+                check_pattern_type_classes(
+                    tail_pat,
+                    hierarchy,
+                    has_cross_file_classes,
+                    diagnostics,
+                );
             }
         }
         Pattern::Array { elements, rest, .. } => {

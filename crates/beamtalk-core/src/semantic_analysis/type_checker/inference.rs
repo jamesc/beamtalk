@@ -878,6 +878,17 @@ impl TypeChecker {
                                     InferredType::known(WellKnownClass::UndefinedObject.as_str()),
                                 );
                             } else {
+                                // Deliberately overwrites whatever
+                                // `bind_pattern_vars` (above) just set for
+                                // this key: today that's always `Dynamic` for
+                                // a pattern-bound variable, so the residual
+                                // here is strictly more precise. If a future
+                                // phase (`Pattern::Type` narrowing, BT-2855)
+                                // makes `bind_pattern_vars` assign a real
+                                // narrowed type to a pattern variable that
+                                // happens to share the scrutinee's key, this
+                                // line will silently win over it — revisit
+                                // this ordering when that lands.
                                 arm_env.set(key.clone(), residual_scrutinee_ty.clone());
                             }
                         }
