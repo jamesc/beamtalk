@@ -1732,12 +1732,19 @@ fn spawn_build_worker_for_specs(beam_files: &[Utf8PathBuf]) -> Result<std::proce
     // (`spawn_build_worker_node`), so a relative `beam_file` path (e.g. from
     // a CLI arg given as a relative path) would resolve against the wrong
     // directory if passed to `-pa` as-is.
+    let mut seen_dirs: std::collections::HashSet<std::path::PathBuf> =
+        ebin_dirs.iter().cloned().collect();
     for beam_file in beam_files {
-        let absolute = std::fs::canonicalize(beam_file.as_std_path())
-            .unwrap_or_else(|_| beam_file.as_std_path().to_path_buf());
+        let absolute = match std::fs::canonicalize(beam_file.as_std_path()) {
+            Ok(abs) => abs,
+            Err(e) => {
+                warn!("Failed to canonicalize '{beam_file}': {e}. Using path as-is.");
+                beam_file.as_std_path().to_path_buf()
+            }
+        };
         if let Some(parent) = absolute.parent() {
             let parent = parent.to_path_buf();
-            if !ebin_dirs.contains(&parent) {
+            if seen_dirs.insert(parent.clone()) {
                 ebin_dirs.push(parent);
             }
         }

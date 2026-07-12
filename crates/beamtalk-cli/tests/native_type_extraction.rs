@@ -21,6 +21,11 @@ fn native_sibling_type_reference_resolves_after_build() {
 
     std::fs::create_dir_all(project.path().join("native")).unwrap();
 
+    // Writing `.erl` source (not a precompiled `.beam`) relies on `beamtalk
+    // build` compiling it itself: with no `[native.dependencies]` in
+    // beamtalk.toml, native/*.erl files are compiled directly via
+    // `compile:file/2` in the build worker (ADR 0072 Path A, no rebar3).
+
     // One native module exports a type tagged `'$beamtalk_class'` so the spec
     // reader recognises it as the Beamtalk class `NativeThingResponse`.
     std::fs::write(
@@ -70,7 +75,10 @@ fn native_sibling_type_reference_resolves_after_build() {
 
     let mut combined = String::new();
     for entry in entries.flatten() {
-        combined.push_str(&std::fs::read_to_string(entry.path()).unwrap());
+        let path = entry.path();
+        if path.is_file() {
+            combined.push_str(&std::fs::read_to_string(path).unwrap());
+        }
     }
 
     assert!(
