@@ -274,7 +274,7 @@ ProtoObject subclass: Object
   /// ```beamtalk
   /// 42 show: "value: "
   /// ```
-  show: aValue -> Self =>
+  show: aValue :: Printable -> Self =>
     TranscriptStream current ifNotNil: [:t | t show: aValue]
     self
 
@@ -286,7 +286,7 @@ ProtoObject subclass: Object
   /// ```beamtalk
   /// 42 showCr: "hello world"
   /// ```
-  showCr: aValue -> Self =>
+  showCr: aValue :: Printable -> Self =>
     TranscriptStream current ifNotNil: [:t | t show: aValue; cr]
     self
 
@@ -310,7 +310,8 @@ ProtoObject subclass: Object
   /// Integer isKindOf: Object    // => true (grounded — Object is reachable via the metaclass tower)
   /// Integer isKindOf: Class     // => true (Integer class inherits from Class)
   /// ```
-  isKindOf: aClass -> Boolean => self class includesBehaviour: aClass
+  isKindOf: aClass :: Behaviour -> Boolean =>
+    self class includesBehaviour: aClass
 
   /// Raise an error with the given message.
   ///

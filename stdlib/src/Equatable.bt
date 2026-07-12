@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+/// Equatable — Protocol for objects that support value equality via `=:=`.
+///
+/// Any class that implements `=:=` automatically conforms to Equatable via
+/// structural protocol conformance (ADR 0068). Implemented by `Integer`,
+/// `Float`, `Character`, `Symbol`, `String`, `DateTime`, `Pid`, `Port`,
+/// and `Reference`.
+///
+/// ## Examples
+/// ```beamtalk
+/// 1 conformsTo: #Equatable         // => true
+/// (Dictionary new) conformsTo: #Equatable   // => false (Dictionary has no =:=)
+/// ```
+Protocol define: Equatable
+  =:= other :: Self -> Boolean
