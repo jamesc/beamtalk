@@ -127,14 +127,21 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
         false
     };
 
-    // BT-2134: Load the FFI type registry from `_build/type_cache/` so lint
-    // sees Erlang FFI return types the same way build does. The cache is
-    // populated by `beamtalk build`; if it's missing, lint falls back to no
-    // registry (matching the previous behaviour for projects that have never
-    // been built).
+    // BT-2134 / BT-2851: Populate the FFI type registry via the same
+    // `extract_type_specs` that `beamtalk build` calls, instead of only
+    // reading whatever `_build/type_cache/` happens to hold. Reading a cache
+    // written by a *previous* build let lint's view of FFI types drift from
+    // build's live view — on a project that had never been built, lint's
+    // cache read silently returned `None` (skipping FFI arg-type checks
+    // build performs), and any `@expect type` written to suppress a real
+    // build-time FFI diagnostic was then flagged as stale by lint. Calling
+    // the shared extractor directly makes `beamtalk lint` and `beamtalk
+    // build`/`test` agree on the FFI type registry by construction: a fresh
+    // cache still short-circuits to zero `.beam` reads, and a cold/stale one
+    // extracts once and writes the same cache a subsequent build would.
     let native_type_registry = package_root.as_deref().and_then(|root| {
-        let cache_dir = root.join("_build").join("type_cache");
-        crate::beam_compiler::load_type_cache_registry(&cache_dir).map(std::sync::Arc::new)
+        let layout = crate::commands::build_layout::BuildLayout::new(root);
+        super::build::extract_type_specs(&layout, true, false).map(std::sync::Arc::new)
     });
 
     // Pass 2: Analyse each file with cross-file class context.
@@ -1059,6 +1066,64 @@ mod tests {
         assert!(
             untyped_ffi.is_empty(),
             "with registry, lint must not warn untyped FFI; got: {untyped_ffi:?}"
+        );
+    }
+
+    /// BT-2851: `run_lint` now populates its native-type registry via
+    /// `super::build::extract_type_specs` — the exact function `beamtalk
+    /// build` calls — instead of only reading `_build/type_cache/`. On a
+    /// project that has never been built (no cache directory at all), the
+    /// old cache-only read silently returned `None`, so lint skipped FFI
+    /// arg-type checks that build performs; an `@expect type` written for
+    /// the resulting build-time diagnostic was then reported as stale by
+    /// lint. Calling the shared extractor makes lint see the same registry
+    /// build would, with no prior build required — this test drives that
+    /// extractor exactly as `run_lint` does and confirms `@expect type` on
+    /// a genuine FFI arg-type mismatch is not stale.
+    #[test]
+    fn lint_extracts_type_specs_live_on_cold_cache_bt_2851() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = camino::Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let layout = crate::commands::build_layout::BuildLayout::new(&root);
+
+        // No `_build/` directory exists yet — the cold-cache case.
+        assert!(!layout.type_cache_dir().exists());
+
+        let Some(registry) = crate::commands::build::extract_type_specs(&layout, true, false)
+        else {
+            // OTP `.beam` discovery is environment-dependent (e.g. a sandbox
+            // with no OTP install on disk); skip rather than false-fail.
+            eprintln!(
+                "skipping lint_extracts_type_specs_live_on_cold_cache_bt_2851: \
+                 no OTP .beam files discovered in this environment"
+            );
+            return;
+        };
+        assert!(
+            registry.lookup("lists", "reverse", 1).is_some(),
+            "live extraction with no prior build must still find lists:reverse/1"
+        );
+        // The extractor writes the same cache a `beamtalk build` would, so a
+        // subsequent lint or build run reads it back instead of re-extracting.
+        assert!(layout.type_cache_dir().exists());
+
+        let source = "Object subclass: LintFfiColdCacheTest\n\n  @expect type\n  class badCall => Erlang lists reverse: 42\n";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diags = collect_diagnostics(
+            &module,
+            parse_diags,
+            vec![],
+            Some(std::sync::Arc::new(registry)),
+            beamtalk_core::semantic_analysis::KnowledgeScope::default(),
+            &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
+            false,
+        );
+        let stale = diags.iter().any(|d| d.message.contains("stale @expect"));
+        assert!(
+            !stale,
+            "@expect type suppressing a genuine cold-cache FFI arg-type \
+             mismatch must not be reported as stale by lint, got: {diags:?}"
         );
     }
 

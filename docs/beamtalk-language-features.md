@@ -4745,6 +4745,15 @@ Declaration-level `@expect` supports the same categories and stale-directive rul
 
 `@expect` works inside method bodies, inside block bodies (e.g., `ifTrue: [...]`, `collect: [...]`, `whileTrue: [...]`), on declarations in class definitions, and at module scope (BT-2010).
 
+**Where `@expect` is evaluated (BT-2851):** `@expect` directives are matched and applied by a single function, `apply_expect_directives`, called at the end of both diagnostic pipelines:
+
+- `beamtalk lint` — after parsing, lint passes, and semantic analysis (`collect_diagnostics` in the CLI's `lint` command).
+- `beamtalk build` / `beamtalk test` / the LSP — after semantic analysis and all post-analysis passes (`compute_project_diagnostics`, the unified pipeline from BT-2009).
+
+"Stale" means: for a given `@expect` directive, *this specific diagnostic run* produced no diagnostic of a matching category whose span falls inside the annotated expression or declaration. Both pipelines share the same semantic-analysis entry points and the same matching logic, so a diagnostic that either surface can produce is treated identically by both — an `@expect` is not stale on one surface and legitimate on the other for the same diagnostic.
+
+This includes Erlang FFI argument-type diagnostics (`@expect type` on a call like `Erlang lists reverse: 42`): both `beamtalk lint` and `beamtalk build`/`beamtalk test` type-check FFI calls against the same native-type registry, populated by the same extractor (`extract_type_specs`) from OTP/dependency `.beam` files. Earlier, lint read that registry only from an on-disk cache (`_build/type_cache/`) written by a *previous* `beamtalk build`; on a project that had never been built, the cache read returned nothing, lint silently skipped the FFI argument-type check, and any `@expect type` added to suppress the corresponding build-time diagnostic was then reported "stale @expect" by lint. Lint now calls the same live extractor build does — which still reads the on-disk cache as a fast path when it is fresh — so both surfaces populate the registry identically regardless of build order.
+
 ### Pragma Annotations (`@primitive` and `@intrinsic`)
 
 The standard library uses pragma annotations to declare methods whose implementations are provided by the compiler or runtime rather than written in Beamtalk code.
