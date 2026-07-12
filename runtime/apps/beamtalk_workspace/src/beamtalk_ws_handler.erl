@@ -672,19 +672,34 @@ handle_run_entry_async(Msg, _SessionPid, State) ->
 
 %% Validate the `run-entry` op fields, returning the argv as a `List(String)`
 %% (a list of UTF-8 binaries) on success. `class`/`selector` must be non-empty
-%% binaries; `args` must be a (possibly empty) list of strings.
+%% binaries, `selector` must be a valid run-entry shape (see
+%% is_valid_run_entry_selector/1), and `args` must be a (possibly empty) list
+%% of strings.
 -spec validate_run_entry(term(), term(), term()) ->
     {ok, [binary()]} | {error, beamtalk_error:error()}.
 validate_run_entry(ClassBin, SelectorBin, RawArgs) when
     is_binary(ClassBin), ClassBin =/= <<>>, is_binary(SelectorBin), SelectorBin =/= <<>>
 ->
-    case run_entry_args(RawArgs, []) of
-        {ok, Argv} ->
-            {ok, Argv};
-        error ->
+    case is_valid_run_entry_selector(SelectorBin) of
+        true ->
+            case run_entry_args(RawArgs, []) of
+                {ok, Argv} ->
+                    {ok, Argv};
+                error ->
+                    Err = beamtalk_error:new(invalid_argument, 'Program'),
+                    Err1 = beamtalk_error:with_message(
+                        Err, <<"run-entry `args` must be a list of strings">>
+                    ),
+                    {error, Err1}
+            end;
+        false ->
             Err = beamtalk_error:new(invalid_argument, 'Program'),
             Err1 = beamtalk_error:with_message(
-                Err, <<"run-entry `args` must be a list of strings">>
+                Err,
+                <<
+                    "Invalid run-entry selector: only a unary selector (e.g. `run`) "
+                    "or a single arity-1 keyword selector (e.g. `main:`) is accepted"
+                >>
             ),
             {error, Err1}
     end;
@@ -694,6 +709,25 @@ validate_run_entry(_ClassBin, _SelectorBin, _RawArgs) ->
         Err, <<"run-entry requires non-empty `class` and `selector` strings">>
     ),
     {error, Err1}.
+
+-doc """
+BT-2699: True when `SelectorBin` has a valid run-entry shape — a unary
+selector (no `:`) or a single arity-1 keyword selector (exactly one `:`,
+trailing, e.g. `main:`). Mirrors the CLI's `validate_class_and_selector`
+(`crates/beamtalk-cli/src/commands/run.rs`) so a direct WebSocket client (or
+future MCP/LSP consumer) gets the same "only a unary or single arity-1
+keyword entry is accepted" rejection, rather than `do_dispatch/5` calling
+`class_send/3` with a mismatched selector/arity and surfacing a bare
+`badarg`/`undef` or a confusing DNU. Multi-keyword selectors (`move:to:`) and
+selectors with an interior colon (`at:put`) are rejected.
+""".
+-spec is_valid_run_entry_selector(binary()) -> boolean().
+is_valid_run_entry_selector(SelectorBin) ->
+    case binary:matches(SelectorBin, <<":">>) of
+        [] -> true;
+        [{Pos, _Len}] -> Pos =:= byte_size(SelectorBin) - 1;
+        _ -> false
+    end.
 
 -spec run_entry_args(term(), [binary()]) -> {ok, [binary()]} | error.
 run_entry_args([], Acc) -> {ok, lists:reverse(Acc)};

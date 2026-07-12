@@ -344,6 +344,67 @@ eval_when_already_pending_returns_busy_test() ->
     {Frames, _State} = beamtalk_ws_handler:websocket_handle({text, Json}, State),
     ?assertMatch([{text, _} | _], Frames).
 
+%%% ===========================================================================
+%%% websocket_handle/2 — run-entry op (BT-2699 selector shape validation)
+%%% ===========================================================================
+
+run_entry_multi_keyword_selector_rejected_test() ->
+    %% BT-2699: a direct WebSocket client sending a multi-keyword selector
+    %% must get a clear rejection, not a bare badarg/DNU from class_send/3.
+    Json = op_json(<<"run-entry">>, #{
+        <<"class">> => <<"Greeter">>,
+        <<"selector">> => <<"run:with:">>,
+        <<"args">> => []
+    }),
+    {Frames, State} = beamtalk_ws_handler:websocket_handle({text, Json}, authed_state()),
+    ?assertEqual(undefined, State#ws_state.pending_eval),
+    Decoded = first_text(Frames),
+    ?assert(maps:is_key(<<"error">>, Decoded)),
+    ?assertNotEqual(
+        nomatch, binary:match(maps:get(<<"error">>, Decoded), <<"arity-1 keyword">>)
+    ).
+
+run_entry_interior_colon_selector_rejected_test() ->
+    %% A single colon that isn't trailing (`at:put`) is not a valid keyword
+    %% selector shape either.
+    Json = op_json(<<"run-entry">>, #{
+        <<"class">> => <<"Greeter">>,
+        <<"selector">> => <<"at:put">>,
+        <<"args">> => []
+    }),
+    {Frames, State} = beamtalk_ws_handler:websocket_handle({text, Json}, authed_state()),
+    ?assertEqual(undefined, State#ws_state.pending_eval),
+    Decoded = first_text(Frames),
+    ?assertNotEqual(
+        nomatch, binary:match(maps:get(<<"error">>, Decoded), <<"arity-1 keyword">>)
+    ).
+
+run_entry_unary_selector_accepted_test() ->
+    Json = op_json(<<"run-entry">>, #{
+        <<"class">> => <<"Greeter">>,
+        <<"selector">> => <<"run">>,
+        <<"args">> => []
+    }),
+    {ok, State1} = beamtalk_ws_handler:websocket_handle({text, Json}, authed_state()),
+    ?assertNotEqual(undefined, State1#ws_state.pending_eval),
+    receive
+        {'$gen_cast', {dispatch_async, <<"Greeter">>, <<"run">>, [], _}} -> ok
+    after 0 -> ?assert(false)
+    end.
+
+run_entry_single_keyword_selector_accepted_test() ->
+    Json = op_json(<<"run-entry">>, #{
+        <<"class">> => <<"Greeter">>,
+        <<"selector">> => <<"main:">>,
+        <<"args">> => [<<"a">>, <<"b">>]
+    }),
+    {ok, State1} = beamtalk_ws_handler:websocket_handle({text, Json}, authed_state()),
+    ?assertNotEqual(undefined, State1#ws_state.pending_eval),
+    receive
+        {'$gen_cast', {dispatch_async, <<"Greeter">>, <<"main:">>, [<<"a">>, <<"b">>], _}} -> ok
+    after 0 -> ?assert(false)
+    end.
+
 stdin_without_pending_input_errors_test() ->
     Json = op_json(<<"stdin">>, #{<<"value">> => <<"hello\n">>}),
     {Frames, _State} = beamtalk_ws_handler:websocket_handle({text, Json}, authed_state()),
