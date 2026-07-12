@@ -503,6 +503,47 @@ fn test_ffi_argument_dynamic_param_no_warning() {
 }
 
 #[test]
+fn test_ffi_argument_string_list_union_param_no_warning() {
+    // BT-2817: Erlang os putenv: "MY_VAR" value: "my_value"
+    // `os:putenv/2` params are Erlang `string()`-typed, which the FFI spec
+    // reader maps to `String | List` (not `List` only) — a Beamtalk String
+    // argument must type-check without a warning.
+    //
+    // Registers the module via `parse_specs_line` with the exact wire format
+    // `beamtalk_spec_reader.erl` emits (`type => <<"String | List">>`), so
+    // this exercises the real `map_type_name` string-parsing path rather than
+    // constructing `InferredType` directly — the parsing step is itself part
+    // of the contract being regression-tested (BT-2817 code review).
+    let mut reg = NativeTypeRegistry::new();
+    let line = "beamtalk-specs-module:os:[#{arity => 2,name => <<\"putenv\">>,\
+        params => [#{name => <<\"varname\">>,type => <<\"String | List\">>},\
+        #{name => <<\"value\">>,type => <<\"String | List\">>}],\
+        return_type => <<\"True\">>}]";
+    let result = parse_specs_line(line, &mut reg);
+    assert_eq!(result, Some("os".to_string()));
+
+    let module = make_module(vec![msg_send(
+        erlang_module_recv("os"),
+        keyword_selector(&["putenv:", "value:"]),
+        vec![str_lit("MY_VAR"), str_lit("my_value")],
+    )]);
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.set_native_type_registry(reg);
+    checker.check_module(&module, &hierarchy);
+
+    let type_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("expects"))
+        .collect();
+    assert!(
+        type_warnings.is_empty(),
+        "String argument should type-check against a String | List union param. Got: {type_warnings:?}"
+    );
+}
+
+#[test]
 fn test_ffi_dynamic_module_name_falls_back() {
     // Erlang (someVar) reverse: xs → Dynamic (no static module name)
     // This is a keyword send on Erlang class, which goes through normal DNU-suppressed path
