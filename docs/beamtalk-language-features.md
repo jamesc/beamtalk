@@ -1740,6 +1740,7 @@ render: coll :: Printable | Nil -> String =>
 | `x isNil ifTrue: [^...]` | `x` is non-nil after the statement | Rest of method |
 | `x isNil ifTrue: [self error: "..."]` | `x` is non-nil after the statement | Rest of method |
 | `x isNil ifFalse: [...]` | `x` is non-nil in false block | False block |
+| `x isNil ifFalse: [^...]` | `x` is nil after the statement | Rest of method |
 | `x isNil ifTrue: [^...] ifFalse: [...]` | `x` is non-nil in false block | False block |
 | `x ifNotNil: [:v \| ...]` | `v` is non-nil in block | Block only |
 | `x ifNil: [...] ifNotNil: [:v \| ...]` | `v` is non-nil in notNil block | NotNil block |

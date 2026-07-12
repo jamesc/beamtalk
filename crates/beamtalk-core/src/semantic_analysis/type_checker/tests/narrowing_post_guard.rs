@@ -544,3 +544,40 @@ typed Object subclass: Caller
             .collect::<Vec<_>>()
     );
 }
+
+/// BT-2825 review follow-up: `apply_early_return_narrowing`'s new
+/// `is_if_false` arm is gated on `info.is_nil_check || info.class_test.is_some()`,
+/// so it also fires for plain `isNil` guards, not just `isKindOf:` — `x isNil
+/// ifFalse: [^...]` is the mirror of the already-covered `isNil ifTrue:
+/// [^...]` case, and narrows `x` to `Nil` (only the nil case falls through)
+/// for the rest of the method. Locks in this implicit-but-correct behavior.
+#[test]
+fn bt2825_is_nil_if_false_diverge_narrows_to_nil() {
+    let source = r"
+typed Object subclass: Receiver
+  class process: v :: Nil => v
+
+typed Object subclass: Caller
+  run: x :: Integer | Nil =>
+    x isNil ifFalse: [^nil]
+    Receiver process: x
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+
+    let result = crate::semantic_analysis::analyse_with_options_and_classes(
+        &module,
+        &crate::CompilerOptions::default(),
+        vec![],
+    );
+    let type_warnings: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.category == Some(DiagnosticCategory::Type))
+        .collect();
+    assert!(
+        type_warnings.is_empty(),
+        "`x` should narrow to Nil after `x isNil ifFalse: [^nil]`, got: {type_warnings:?}"
+    );
+}
