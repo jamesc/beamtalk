@@ -814,6 +814,171 @@ fn test_erlang_module_proxy_equality_uses_normal_dispatch() {
     );
 }
 
+// ---- BT-2846: Union arm for check_ffi_argument_types ----
+
+/// Helper: a `FunctionSignature` for a single-param FFI function `mod:fun/1`
+/// whose declared parameter type is `param_type`.
+fn single_param_sig(param_type: InferredType) -> FunctionSignature {
+    FunctionSignature {
+        name: "fun".to_string(),
+        arity: 1,
+        params: vec![ParamType {
+            keyword: Some(ecow::EcoString::from("arg")),
+            type_: param_type,
+        }],
+        return_type: InferredType::Dynamic(DynamicReason::DynamicSpec),
+        provenance: TypeProvenance::Extracted,
+        line: None,
+    }
+}
+
+#[test]
+fn ffi_union_arg_incompatible_member_warns() {
+    // `String | Integer` passed to a param declared `String` — the `Integer`
+    // member is incompatible, so a diagnostic must fire.
+    let sig = single_param_sig(InferredType::known("String"));
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.check_ffi_argument_types(
+        "mymod",
+        "fun",
+        &sig,
+        &[InferredType::simple_union(&["String", "Integer"])],
+        span(),
+        &hierarchy,
+    );
+    assert_eq!(
+        checker.diagnostics().len(),
+        1,
+        "Union with an incompatible member should emit a diagnostic. Got: {:?}",
+        checker.diagnostics()
+    );
+    assert!(checker.diagnostics()[0].message.contains("expects String"));
+}
+
+#[test]
+fn ffi_union_arg_all_members_compatible_no_warning() {
+    // `String | String` (degenerate but valid) — every member matches the
+    // declared `String` param, so no diagnostic should fire.
+    let sig = single_param_sig(InferredType::known("String"));
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.check_ffi_argument_types(
+        "mymod",
+        "fun",
+        &sig,
+        &[InferredType::simple_union(&["String", "String"])],
+        span(),
+        &hierarchy,
+    );
+    assert!(
+        checker.diagnostics().is_empty(),
+        "All union members compatible with declared param — no diagnostic expected, got: {:?}",
+        checker.diagnostics()
+    );
+}
+
+#[test]
+fn ffi_union_arg_object_param_accepts_any_member() {
+    // A param declared `Object` accepts any union of concrete classes —
+    // mirrors the existing Known/Known Object shortcut.
+    let sig = single_param_sig(InferredType::known("Object"));
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.check_ffi_argument_types(
+        "mymod",
+        "fun",
+        &sig,
+        &[InferredType::simple_union(&["String", "Integer"])],
+        span(),
+        &hierarchy,
+    );
+    assert!(
+        checker.diagnostics().is_empty(),
+        "Object param should accept any union member. Got: {:?}",
+        checker.diagnostics()
+    );
+}
+
+#[test]
+fn ffi_union_arg_singleton_symbol_members_compatible_with_symbol_param() {
+    // BT-2846 regression: an FFI param declared `Symbol` (e.g. Erlang spec
+    // `atom()`) must accept a call-site union of singleton symbols like
+    // `#emergency | #alert | ...` (typed:: annotations on Beamtalk-side
+    // wrapper methods, e.g. BeamtalkInterface>>logLevel:). Singletons are
+    // subtypes of Symbol (mirrors `is_type_compatible`'s `#foo` handling),
+    // so this must NOT warn.
+    let sig = single_param_sig(InferredType::known("Symbol"));
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.check_ffi_argument_types(
+        "mymod",
+        "fun",
+        &sig,
+        &[InferredType::simple_union(&[
+            "#emergency",
+            "#alert",
+            "#critical",
+            "#error",
+            "#warning",
+            "#notice",
+            "#info",
+            "#debug",
+        ])],
+        span(),
+        &hierarchy,
+    );
+    assert!(
+        checker.diagnostics().is_empty(),
+        "Singleton symbol union members should be compatible with a Symbol param. Got: {:?}",
+        checker.diagnostics()
+    );
+}
+
+#[test]
+fn ffi_dynamic_arg_unchanged_no_warning() {
+    // A `Dynamic` argument continues to short-circuit — same as before this
+    // ticket's Union arm was added.
+    let sig = single_param_sig(InferredType::known("String"));
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.check_ffi_argument_types(
+        "mymod",
+        "fun",
+        &sig,
+        &[InferredType::Dynamic(DynamicReason::Unknown)],
+        span(),
+        &hierarchy,
+    );
+    assert!(
+        checker.diagnostics().is_empty(),
+        "Dynamic argument should still be skipped. Got: {:?}",
+        checker.diagnostics()
+    );
+}
+
+#[test]
+fn ffi_known_known_call_unchanged_no_regression() {
+    // A plain `Known`/`Known` compatible call stays silent (no regression
+    // from restructuring the Dynamic/Known/Union match).
+    let sig = single_param_sig(InferredType::known("String"));
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.check_ffi_argument_types(
+        "mymod",
+        "fun",
+        &sig,
+        &[InferredType::known("String")],
+        span(),
+        &hierarchy,
+    );
+    assert!(
+        checker.diagnostics().is_empty(),
+        "Known/Known compatible call should stay silent. Got: {:?}",
+        checker.diagnostics()
+    );
+}
+
 #[test]
 fn test_erlang_lists_still_infers_ffi() {
     // Sanity check: `Erlang lists reverse: xs` should still go through FFI inference.
