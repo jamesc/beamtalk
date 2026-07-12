@@ -1923,7 +1923,10 @@ fn test_select_wrong_arity_block_is_compile_error() {
         crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
     );
     assert!(
-        matches!(result, Err(crate::codegen::core_erlang::CodeGenError::BlockArityError { .. })),
+        matches!(
+            result,
+            Err(crate::codegen::core_erlang::CodeGenError::BlockArityError { .. })
+        ),
         "select: with a 0-arg block must be a compile-time BlockArityError. Got: {result:?}"
     );
 }
@@ -1941,7 +1944,10 @@ fn test_reject_wrong_arity_block_is_compile_error() {
         crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
     );
     assert!(
-        matches!(result, Err(crate::codegen::core_erlang::CodeGenError::BlockArityError { .. })),
+        matches!(
+            result,
+            Err(crate::codegen::core_erlang::CodeGenError::BlockArityError { .. })
+        ),
         "reject: with a 0-arg block must be a compile-time BlockArityError. Got: {result:?}"
     );
 }
