@@ -957,6 +957,67 @@ fn check_keyword_for_kind(
     }
 }
 
+// ── BT-2830: Value subclass slot with*: selector collisions ────────────────
+
+/// BT-2830: Error when two `Value subclass:` slots collide on the auto-generated
+/// `with*:` setter selector.
+///
+/// `AutoSlotMethods::with_star_selector` (mirrored by
+/// [`crate::synthetic_selectors::with_star_selector`]) only uppercases the
+/// *first* letter of a field name to build the setter selector, e.g. `x` →
+/// `withX:`. Two slots that differ only by the case of their first letter —
+/// `field: x` and `field: X` on the same class — both produce `withX:`. Getter
+/// selectors stay case-sensitive and don't collide, but the setter collision
+/// would silently duplicate a map key in the generated dispatch/doc/signature
+/// maps (last-write-wins or a `core_lint` failure). This validator catches the
+/// collision at compile time with a clear diagnostic instead.
+pub(crate) fn check_value_slot_case_collision(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for class in &module.classes {
+        if hierarchy.resolve_class_kind(class.name.name.as_str()) != ClassKind::Value {
+            continue;
+        }
+        let mut seen_by_selector: std::collections::HashMap<String, &str> =
+            std::collections::HashMap::new();
+        for slot in &class.state {
+            let slot_name = slot.name.name.as_str();
+            let with_sel = crate::synthetic_selectors::with_star_selector(slot_name);
+            if let Some(&first_name) = seen_by_selector.get(&with_sel) {
+                let reason = if first_name == slot_name {
+                    format!("`{slot_name}` is declared more than once")
+                } else {
+                    "`with*:` selectors only differ by the case of the slot's first letter"
+                        .to_string()
+                };
+                diagnostics.push(
+                    Diagnostic::error(
+                        format!(
+                            "Slots `{first_name}` and `{slot_name}` on Value subclass \
+                             `{}` both produce the setter selector `{with_sel}` — {reason}",
+                            class.name.name
+                        ),
+                        slot.name.span,
+                    )
+                    .with_hint(if first_name == slot_name {
+                        format!("Remove the duplicate `field: {slot_name}` declaration")
+                    } else {
+                        format!(
+                            "Rename `{slot_name}` (or `{first_name}`) so their auto-generated \
+                             `with*:` setter selectors no longer collide"
+                        )
+                    })
+                    .with_category(DiagnosticCategory::Type),
+                );
+            } else {
+                seen_by_selector.insert(with_sel, slot_name);
+            }
+        }
+    }
+}
+
 // ── BT-1793: Actor field mutation inside block closures ─────────────────────
 
 /// BT-1793: Error when an Actor method contains `self.field := expr` inside a
@@ -2055,6 +2116,94 @@ Actor subclass: HomActor
         assert!(
             diagnostics.is_empty(),
             "Expected no errors for self-send HOM, got: {diagnostics:?}"
+        );
+    }
+
+    // ── BT-2830: Value subclass slot with*: selector collision tests ────────
+
+    /// Two slots differing only by the case of their first letter (`x`/`X`) both
+    /// produce the `withX:` setter selector — this must be a compile error.
+    #[test]
+    fn value_subclass_case_insensitive_setter_collision_is_error() {
+        let src = "Value subclass: Weird\n  field: x = 0\n  field: X = 0";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_value_slot_case_collision(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 error for colliding withX: selector, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Error);
+        assert!(
+            diagnostics[0].message.contains("withX:"),
+            "Expected message to mention the colliding selector `withX:`, got: {}",
+            diagnostics[0].message
+        );
+    }
+
+    /// Exact duplicate slot names (same name declared twice) also collide on
+    /// the setter selector, but get a "declared more than once" message rather
+    /// than the case-collision wording (which would be misleading since the
+    /// names don't differ in case at all).
+    #[test]
+    fn value_subclass_exact_duplicate_slot_name_is_error() {
+        let src = "Value subclass: Dup\n  field: x = 0\n  field: x = 1";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_value_slot_case_collision(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 error for duplicate slot name, got: {diagnostics:?}"
+        );
+        assert!(
+            diagnostics[0].message.contains("declared more than once"),
+            "Expected 'declared more than once' in message, got: {}",
+            diagnostics[0].message
+        );
+    }
+
+    /// Slots with distinct first letters (`x`/`y`) never collide.
+    #[test]
+    fn value_subclass_distinct_slots_no_collision() {
+        let src = "Value subclass: Point\n  field: x = 0\n  field: y = 0";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_value_slot_case_collision(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no diagnostics for non-colliding slots, got: {diagnostics:?}"
+        );
+    }
+
+    /// Actor subclasses (`state:`) are exempt — the collision check only
+    /// applies to Value subclass auto-generated accessors.
+    #[test]
+    fn actor_subclass_case_insensitive_slots_no_collision_check() {
+        let src = "Actor subclass: Weird\n  state: x = 0\n  state: X = 0";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_value_slot_case_collision(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no diagnostics for Actor subclass (auto slot methods are Value-only), got: {diagnostics:?}"
         );
     }
 }

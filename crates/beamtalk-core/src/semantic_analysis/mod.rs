@@ -732,6 +732,14 @@ fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult {
         &mut result.diagnostics,
     );
 
+    // BT-2830: Error on Value subclass slots that collide on the auto-generated
+    // `with*:` setter selector (case-insensitive first-letter collision).
+    validators::check_value_slot_case_collision(
+        module,
+        &result.class_hierarchy,
+        &mut result.diagnostics,
+    );
+
     // BT-1299: Error on non-exhaustive match: for sealed types (e.g. Result missing error: arm)
     validators::check_match_exhaustiveness(module, &mut result.diagnostics);
 
