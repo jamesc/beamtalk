@@ -418,6 +418,15 @@ p2 y                     // => 2
 p3 := (Point new withX: 5) withY: 7   // x=5, y=7
 ```
 
+The `with<SlotName>:` selector is built by uppercasing only the *first* letter of the slot name. Two slots whose names differ only by the case of their first letter (e.g. `x` and `X`) would generate the same setter selector — this is a compile error:
+
+```beamtalk
+// Compile error — rejected before the code runs:
+// Value subclass: Weird
+//   field: x = 0
+//   field: X = 0   ← error: both `x` and `X` produce the setter `withX:`
+```
+
 #### Immutability enforcement
 
 Direct slot mutation is illegal in value types:
