@@ -148,3 +148,25 @@ TestCase subclass: Tier2StoredBlockMatrixTest
     // total the outer write would read stale state and land on the wrong
     // answer.
     self assert: self.a getTotal equals: 5
+
+  // BT-2821: regression test pinning the documented-wrong behavior from
+  // testArgumentPositionFieldStored above, this time with a NONZERO
+  // starting total, where the coincidence breaks. `addTickResult:`
+  // discards the block's own NewState (see fixture comment) and instead
+  // computes `self.total(pre-call) + Result`, where `Result` is itself
+  // `self.total(pre-call) + x` (the block's own computed value, discarded
+  // as state but still returned as a result). So each call actually
+  // computes `(2 * pre-call total) + x`, not the naively-expected
+  // `total + x`. Starting from 0: call 1 gives 0 + 5 = 5 (matches the
+  // "coincidentally correct" case above). Call 2 starts from total=5, so
+  // it computes (2 * 5) + 5 = 15, not the naively-expected 5 + 5 = 10 —
+  // pinning the actual (known-wrong) doubling behavior at runtime. If
+  // `close_tier2_value_subexpr_doc` is ever fixed to thread NewState
+  // through, this assertion will start failing and must be updated
+  // alongside the fixture's addTickResult: comment.
+  testArgumentPositionFieldStoredNonzeroStartingTotal =>
+    self.a setupOnTick
+    self.a addTickResult: 5
+    self assert: self.a getTotal equals: 5
+    self.a addTickResult: 5
+    self assert: self.a getTotal equals: 15
