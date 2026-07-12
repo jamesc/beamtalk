@@ -294,6 +294,136 @@ fn bt2829_untyped_class_dynamic_ambiguous_control_flow_no_diagnostic() {
     );
 }
 
+// ── BT-2840: Union arm generic type-arg comparison ───────────────────────
+//
+// `known_type_compatible_with_expected`'s (and `check_return_type`'s own
+// directly-declared-`Union`) `Union` arm used to only check base-class
+// compatibility of a body's `Known` type against each union member,
+// ignoring generic type arguments — so a body `Result(Integer, Error)` was
+// wrongly treated as compatible with a declared `Result(String, Error) |
+// Nil` merely because the `Result` base class matched. Both call sites now
+// delegate to `known_type_compatible_with_union_member`, which also compares
+// type args via `type_args_compatible` (mirroring the non-`Union` `Known`
+// arm).
+
+/// Declared `-> Result(String, Error) | Nil`, as built by `resolve_type_annotation`.
+fn result_string_error_or_nil() -> TypeAnnotation {
+    TypeAnnotation::Union {
+        types: vec![
+            TypeAnnotation::Generic {
+                base: ident("Result"),
+                parameters: vec![
+                    TypeAnnotation::Simple(ident("String")),
+                    TypeAnnotation::Simple(ident("Error")),
+                ],
+                span: span(),
+            },
+            TypeAnnotation::Simple(ident("Nil")),
+        ],
+        span: span(),
+    }
+}
+
+/// AC: a `Known` body (not itself a union) with mismatched type args against
+/// a generic union member — `Result(Integer, Error)` body vs declared
+/// `Result(String, Error) | Nil` — now produces the type-mismatch diagnostic.
+/// This is `check_return_type`'s own `Union`-arm dispatch (declared type is
+/// directly a `Union`, body is `Known`), the exact repro from the issue.
+#[test]
+fn bt2840_known_body_mismatched_type_args_against_union_member_warns() {
+    let hierarchy = typed_class_hierarchy("Probe");
+    let method = method_with_return_type(result_string_error_or_nil());
+    let body_type = InferredType::known_with_args(
+        "Result",
+        vec![InferredType::known("Integer"), InferredType::known("Error")],
+    );
+
+    let mut checker = TypeChecker::new();
+    checker.check_return_type(&method, &body_type, &eco_string("Probe"), &hierarchy);
+
+    let warnings = type_mismatch_diagnostics(&checker);
+    assert_eq!(
+        warnings.len(),
+        1,
+        "Result(Integer, Error) body should warn against declared Result(String, Error) | Nil: {:?}",
+        checker.diagnostics()
+    );
+}
+
+/// AC: same mismatched-type-args scenario, but reached via Part A's
+/// union-body path — `check_union_body_return_type` calls
+/// `known_type_compatible_with_expected`, whose `Union` arm must also catch
+/// the type-arg mismatch on `Result(Integer, Error)` (one member of a
+/// `Union` body) against the declared `Result(String, Error) | Nil`.
+#[test]
+fn bt2840_union_body_member_mismatched_type_args_against_union_member_warns() {
+    let hierarchy = typed_class_hierarchy("Probe");
+    let method = method_with_return_type(result_string_error_or_nil());
+    let body_type = InferredType::Union {
+        members: vec![
+            InferredType::known_with_args(
+                "Result",
+                vec![InferredType::known("Integer"), InferredType::known("Error")],
+            ),
+            InferredType::known("Nil"),
+        ],
+        provenance: TypeProvenance::Inferred(span()),
+    };
+
+    let mut checker = TypeChecker::new();
+    checker.check_return_type(&method, &body_type, &eco_string("Probe"), &hierarchy);
+
+    let warnings = type_mismatch_diagnostics(&checker);
+    assert_eq!(
+        warnings.len(),
+        1,
+        "Union(Result(Integer, Error), Nil) body should warn against declared Result(String, Error) | Nil: {:?}",
+        checker.diagnostics()
+    );
+}
+
+/// AC: existing conservative-pass case stays silent — the body's type args
+/// match the union member's exactly (`Result(String, Error)` vs declared
+/// `Result(String, Error) | Nil`), so no new false positive.
+#[test]
+fn bt2840_known_body_matching_type_args_against_union_member_no_diagnostic() {
+    let hierarchy = typed_class_hierarchy("Probe");
+    let method = method_with_return_type(result_string_error_or_nil());
+    let body_type = InferredType::known_with_args(
+        "Result",
+        vec![InferredType::known("String"), InferredType::known("Error")],
+    );
+
+    let mut checker = TypeChecker::new();
+    checker.check_return_type(&method, &body_type, &eco_string("Probe"), &hierarchy);
+
+    assert!(
+        type_mismatch_diagnostics(&checker).is_empty(),
+        "Result(String, Error) body should match declared Result(String, Error) | Nil with no diagnostic: {:?}",
+        checker.diagnostics()
+    );
+}
+
+/// AC: existing conservative-pass case stays silent — the body is an
+/// unparameterized `Result` (no type args), so the arity mismatch against
+/// the declared union member's `Result(String, Error)` is not enough
+/// information to warn (bare `Result` may stand for any `Result(_, _)`).
+#[test]
+fn bt2840_known_body_unparameterized_against_union_member_no_diagnostic() {
+    let hierarchy = typed_class_hierarchy("Probe");
+    let method = method_with_return_type(result_string_error_or_nil());
+    let body_type = InferredType::known("Result");
+
+    let mut checker = TypeChecker::new();
+    checker.check_return_type(&method, &body_type, &eco_string("Probe"), &hierarchy);
+
+    assert!(
+        type_mismatch_diagnostics(&checker).is_empty(),
+        "unparameterized Result body should stay conservative against declared Result(String, Error) | Nil: {:?}",
+        checker.diagnostics()
+    );
+}
+
 // ── Declaration-level `@expect type` suppression, end to end ────────────
 
 /// Regression test mirroring the real `BeamtalkInterface.bt` shape that
