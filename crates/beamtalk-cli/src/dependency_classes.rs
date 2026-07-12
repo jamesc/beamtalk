@@ -60,8 +60,18 @@ use tracing::warn;
 #[must_use]
 pub fn resolve_dependency_class_infos(project_root: &Utf8Path) -> (bool, Vec<ClassInfo>) {
     let manifest_path = project_root.join("beamtalk.toml");
-    if !manifest_path.exists() {
-        return (false, Vec::new());
+    match manifest_path.try_exists() {
+        Ok(true) => {}
+        Ok(false) => return (false, Vec::new()),
+        Err(e) => {
+            warn!(
+                error = %e,
+                path = %manifest_path,
+                "Failed to check for beamtalk.toml for offline dependency class resolution; \
+                 assuming no manifest"
+            );
+            return (false, Vec::new());
+        }
     }
 
     let parsed = match manifest::parse_manifest_full(&manifest_path) {
