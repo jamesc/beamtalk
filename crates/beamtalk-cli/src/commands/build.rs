@@ -715,7 +715,12 @@ fn execute_build_passes(
     // native compilation so freshly compiled native modules are included.
     // Results are cached in _build/type_cache/ — incremental builds read zero
     // .beam files when the cache is fresh.
-    let native_type_registry = extract_type_specs(env, options).map(std::sync::Arc::new);
+    let native_type_registry = extract_type_specs(
+        &env.layout,
+        env.pkg_manifest().is_some(),
+        options.stdlib_mode,
+    )
+    .map(std::sync::Arc::new);
 
     let file_module_pairs = compute_file_module_pairs(env)?;
 
@@ -905,28 +910,40 @@ fn post_process_package_artifacts(
 /// succeeds without type information. The LSP will still provide untyped
 /// completions in that case.
 ///
-/// Runs in package mode (when `beamtalk.toml` exists) and in `--stdlib-mode`
-/// (used by `dialyzer-specs` and the build-stdlib pipeline, which compile a
-/// directory of stdlib `.bt` files without a manifest). Single-file builds
-/// without either signal return `None`.
-fn extract_type_specs(
-    env: &BuildEnvironment,
-    options: &beamtalk_core::CompilerOptions,
+/// Runs in package mode (`has_manifest`) and in `--stdlib-mode` (used by
+/// `dialyzer-specs` and the build-stdlib pipeline, which compile a directory
+/// of stdlib `.bt` files without a manifest). Single-file builds without
+/// either signal return `None`.
+///
+/// BT-2851: This is the single source of truth for populating a
+/// [`NativeTypeRegistry`] from OTP/dependency `.beam` files. `beamtalk build`
+/// (via [`execute_build_passes`]) and `beamtalk lint` (via
+/// [`super::lint::run_lint`]) both call this function directly — rather than
+/// lint reading a possibly-absent/stale on-disk cache written by a *previous*
+/// build — so the two surfaces can never see different FFI type diagnostics
+/// for the same code. The tiered cache in `cache_dir` still makes repeat
+/// calls (from either surface) cheap: a fresh cache short-circuits to zero
+/// `.beam` reads; a cold/stale one pays the extraction cost once and writes
+/// the cache for the next caller, whichever surface that is.
+pub(crate) fn extract_type_specs(
+    layout: &BuildLayout,
+    has_manifest: bool,
+    stdlib_mode: bool,
 ) -> Option<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry> {
     use crate::beam_compiler;
     use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
 
     // No manifest: only continue when compiling the stdlib (which has its own
     // FFI surface in runtime/stdlib/workspace ebins). Otherwise nothing to do.
-    if env.pkg_manifest().is_none() {
-        return if options.stdlib_mode {
+    if !has_manifest {
+        return if stdlib_mode {
             super::build_stdlib::extract_stdlib_type_specs()
         } else {
             None
         };
     }
 
-    let cache_dir = env.layout.type_cache_dir();
+    let cache_dir = layout.type_cache_dir();
 
     // Discover OTP .beam files and the OTP version (for the shared cache key).
     let otp = match beam_compiler::discover_otp_beam_files() {
@@ -946,12 +963,12 @@ fn extract_type_specs(
     });
 
     // Discover dependency .beam files (path deps, native ebin, rebar3 hex deps).
-    let mut dep_ebin_dirs: Vec<_> = super::deps::collect_dep_ebin_paths(&env.layout);
-    let native_ebin = env.layout.native_ebin_dir();
+    let mut dep_ebin_dirs: Vec<_> = super::deps::collect_dep_ebin_paths(layout);
+    let native_ebin = layout.native_ebin_dir();
     if native_ebin.exists() {
         dep_ebin_dirs.push(native_ebin);
     }
-    dep_ebin_dirs.extend(collect_rebar3_ebin_paths(&env.layout));
+    dep_ebin_dirs.extend(collect_rebar3_ebin_paths(layout));
     dep_ebin_dirs.sort();
     dep_ebin_dirs.dedup();
 
