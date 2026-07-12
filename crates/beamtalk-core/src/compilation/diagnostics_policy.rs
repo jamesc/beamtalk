@@ -43,16 +43,16 @@ pub enum DiagnosticSeverityOverride {
 
 impl DiagnosticSeverityOverride {
     /// Parses one of the four accepted `[diagnostics]` value strings.
-    fn parse(s: &str) -> Result<Self, DiagnosticsTableError> {
+    /// Returns `None` on an unrecognised string — the caller attaches the
+    /// offending `key` context via [`DiagnosticsTableError::InvalidSeverityForKey`].
+    fn parse(s: &str) -> Option<Self> {
         match s {
-            "off" => Ok(Self::Off),
-            "lint" => Ok(Self::Lint),
-            "hint" => Ok(Self::Hint),
-            "warn" => Ok(Self::Warn),
-            "error" => Ok(Self::Error),
-            other => Err(DiagnosticsTableError::InvalidSeverity {
-                severity: other.to_string(),
-            }),
+            "off" => Some(Self::Off),
+            "lint" => Some(Self::Lint),
+            "hint" => Some(Self::Hint),
+            "warn" => Some(Self::Warn),
+            "error" => Some(Self::Error),
+            _ => None,
         }
     }
 }
@@ -100,16 +100,6 @@ pub enum DiagnosticsTableError {
     InvalidSeverityForKey {
         /// The key whose value is invalid.
         key: String,
-        /// The offending severity string.
-        severity: String,
-    },
-    /// Internal-only: raised by [`DiagnosticSeverityOverride::parse`] before
-    /// the caller (`parse_diagnostics_table`) attaches the `key` context via
-    /// [`Self::InvalidSeverityForKey`]. Never observed outside this module.
-    #[error(
-        "invalid diagnostic severity '{severity}' — expected one of \"off\", \"lint\", \"hint\", \"warn\", \"error\""
-    )]
-    InvalidSeverity {
         /// The offending severity string.
         severity: String,
     },
@@ -222,7 +212,7 @@ pub fn parse_diagnostics_table(
                 found: value_type_name(value),
             })?;
 
-        let severity = DiagnosticSeverityOverride::parse(severity_str).map_err(|_| {
+        let severity = DiagnosticSeverityOverride::parse(severity_str).ok_or_else(|| {
             DiagnosticsTableError::InvalidSeverityForKey {
                 key: key.clone(),
                 severity: severity_str.to_string(),
@@ -372,7 +362,7 @@ sendability = "hint"
 "#;
         let value: toml::Value = toml::from_str(toml_str).unwrap();
         let table = parse_diagnostics_table(Some(&value)).unwrap();
-        assert_eq!(table.len(), 17);
+        assert_eq!(table.len(), DIAGNOSTIC_CATEGORY_KEYS.len());
         assert_eq!(
             table[&DiagnosticCategory::Dnu],
             DiagnosticSeverityOverride::Hint
