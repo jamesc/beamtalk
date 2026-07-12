@@ -1316,11 +1316,19 @@ impl TypeChecker {
                 }
             }
             InferredType::Union { members, .. } => {
-                // Body type must be compatible with at least one union member
+                // Body type must be compatible with at least one union member.
+                // BT-2840: delegates to `known_type_compatible_with_union_member`,
+                // which also compares generic type args — otherwise a body like
+                // `Result(Integer, Error)` is wrongly treated as compatible with
+                // a declared `Result(String, Error) | Nil` just because the
+                // `Result` base class matches.
                 let compatible = members.iter().any(|member| {
-                    member
-                        .as_known()
-                        .is_none_or(|name| Self::is_type_compatible(actual_ty, name, hierarchy))
+                    Self::known_type_compatible_with_union_member(
+                        actual_ty,
+                        actual_args,
+                        member,
+                        hierarchy,
+                    )
                 });
                 if !compatible {
                     let selector = method.selector.name();
@@ -1425,10 +1433,19 @@ impl TypeChecker {
                         Self::type_args_compatible(exp_arg, act_arg, hierarchy)
                     })
             }
+            // BT-2840: delegate to `known_type_compatible_with_union_member`,
+            // which also compares generic type args instead of stopping at
+            // base-class compatibility — otherwise a union body member like
+            // `Result(Integer, Error)` is wrongly treated as compatible with
+            // a declared `Result(String, Error) | Nil` just because the
+            // `Result` base class matches.
             InferredType::Union { members, .. } => members.iter().any(|member| {
-                member
-                    .as_known()
-                    .is_none_or(|name| Self::is_type_compatible(actual_ty, name, hierarchy))
+                Self::known_type_compatible_with_union_member(
+                    actual_ty,
+                    actual_args,
+                    member,
+                    hierarchy,
+                )
             }),
             InferredType::Never => false,
             InferredType::Meta { .. }
@@ -1436,6 +1453,55 @@ impl TypeChecker {
             | InferredType::Negation { .. }
             | InferredType::Intersection { .. } => true,
         }
+    }
+
+    /// BT-2840: compare a body's `Known` type against one member of a
+    /// `Union` expected/declared return type.
+    ///
+    /// Shared by both `Union`-arm sites in this file — `check_return_type`'s
+    /// own dispatch (declared type is directly a `Union`) and
+    /// [`Self::known_type_compatible_with_expected`] (declared type is a
+    /// `Union` reached via `check_union_body_return_type`'s per-member
+    /// check) — so the fix for BT-2840's false negative lives in one place.
+    ///
+    /// Mirrors the `Known`-vs-`Known` comparison in
+    /// [`Self::known_type_compatible_with_expected`]: base-class
+    /// compatibility via [`Self::is_type_compatible`], plus a recursive
+    /// type-args check via [`Self::type_args_compatible`] when both the
+    /// actual type and the member carry generic arguments of matching
+    /// arity. Previously this only checked the base class (via
+    /// `member.as_known()`), so a body like `Result(Integer, Error)` was
+    /// wrongly treated as compatible with a declared `Result(String,
+    /// Error) | Nil` merely because the `Result` base class matched.
+    ///
+    /// Stays conservative (returns `true`) for any non-`Known` member
+    /// (`Dynamic`/`Union`/`Meta`/`Never`) — those can't be reasoned about
+    /// precisely enough to warn without risking a false positive, matching
+    /// the previous `member.as_known().is_none_or(...)` behavior.
+    fn known_type_compatible_with_union_member(
+        actual_ty: &EcoString,
+        actual_args: &[InferredType],
+        member: &InferredType,
+        hierarchy: &ClassHierarchy,
+    ) -> bool {
+        let InferredType::Known {
+            class_name: member_ty,
+            type_args: member_args,
+            ..
+        } = member
+        else {
+            return true;
+        };
+        Self::is_type_compatible(actual_ty, member_ty, hierarchy)
+            && (member_args.is_empty()
+                || actual_args.is_empty()
+                || member_args.len() != actual_args.len()
+                || member_args
+                    .iter()
+                    .zip(actual_args.iter())
+                    .all(|(exp_arg, act_arg)| {
+                        Self::type_args_compatible(exp_arg, act_arg, hierarchy)
+                    }))
     }
 
     /// BT-2829 Part A: validate a `Union` method body against the declared
