@@ -1078,7 +1078,13 @@ mod tests {
         // Real cache entry — 16-hex hash matches `TypeCache::cache_path`.
         std::fs::write(
             cache_dir.join("gen_tcp_0123456789abcdef.json").as_std_path(),
-            r#"{"beam_mtime_secs":0,"beam_mtime_nanos":0,"specs_line":"beamtalk-specs-module:gen_tcp:[#{arity => 2,line => 1,name => <<\"connect\">>,params => [#{name => <<\"sockaddr\">>,type => <<\"Symbol\">>},#{name => <<\"port\">>,type => <<\"Integer\">>}],return_type => <<\"Result(Dynamic | Tuple, Symbol)\">>}]"}"#,
+            serde_json::json!({
+                "beam_mtime_secs": 0,
+                "beam_mtime_nanos": 0,
+                "mapping_stamp": crate::beam_compiler::current_spec_mapping_stamp(),
+                "specs_line": r#"beamtalk-specs-module:gen_tcp:[#{arity => 2,line => 1,name => <<"connect">>,params => [#{name => <<"sockaddr">>,type => <<"Symbol">>},#{name => <<"port">>,type => <<"Integer">>}],return_type => <<"Result(Dynamic | Tuple, Symbol)">>}]"#,
+            })
+            .to_string(),
         )
         .unwrap();
         // Foreign files that must be ignored: wrong extension, missing hash,
@@ -1138,7 +1144,13 @@ mod tests {
         let stale_path = cache_dir.join("gen_tcp_aaaaaaaaaaaaaaaa.json");
         std::fs::write(
             stale_path.as_std_path(),
-            r#"{"beam_mtime_secs":0,"beam_mtime_nanos":0,"specs_line":"beamtalk-specs-module:gen_tcp:[#{arity => 2,line => 1,name => <<\"connect\">>,params => [#{name => <<\"sockaddr\">>,type => <<\"Symbol\">>},#{name => <<\"port\">>,type => <<\"Integer\">>}],return_type => <<\"Symbol\">>}]"}"#,
+            serde_json::json!({
+                "beam_mtime_secs": 0,
+                "beam_mtime_nanos": 0,
+                "mapping_stamp": crate::beam_compiler::current_spec_mapping_stamp(),
+                "specs_line": r#"beamtalk-specs-module:gen_tcp:[#{arity => 2,line => 1,name => <<"connect">>,params => [#{name => <<"sockaddr">>,type => <<"Symbol">>},#{name => <<"port">>,type => <<"Integer">>}],return_type => <<"Symbol">>}]"#,
+            })
+            .to_string(),
         )
         .unwrap();
         // Force the stale entry's mtime backwards so the latest-mtime test
@@ -1156,7 +1168,13 @@ mod tests {
             cache_dir
                 .join("gen_tcp_bbbbbbbbbbbbbbbb.json")
                 .as_std_path(),
-            r#"{"beam_mtime_secs":1,"beam_mtime_nanos":0,"specs_line":"beamtalk-specs-module:gen_tcp:[#{arity => 2,line => 1,name => <<\"connect\">>,params => [#{name => <<\"sockaddr\">>,type => <<\"Symbol\">>},#{name => <<\"port\">>,type => <<\"Integer\">>}],return_type => <<\"Result(Dynamic | Tuple, Symbol)\">>}]"}"#,
+            serde_json::json!({
+                "beam_mtime_secs": 1,
+                "beam_mtime_nanos": 0,
+                "mapping_stamp": crate::beam_compiler::current_spec_mapping_stamp(),
+                "specs_line": r#"beamtalk-specs-module:gen_tcp:[#{arity => 2,line => 1,name => <<"connect">>,params => [#{name => <<"sockaddr">>,type => <<"Symbol">>},#{name => <<"port">>,type => <<"Integer">>}],return_type => <<"Result(Dynamic | Tuple, Symbol)">>}]"#,
+            })
+            .to_string(),
         )
         .unwrap();
 
@@ -1205,6 +1223,7 @@ mod tests {
             "beam_mtime_secs": stale_secs,
             "beam_mtime_nanos": 0,
             "beam_path": beam_path.to_str().unwrap(),
+            "mapping_stamp": crate::beam_compiler::current_spec_mapping_stamp(),
             "specs_line": r#"beamtalk-specs-module:gen_tcp:[#{arity => 2,line => 1,name => <<"connect">>,params => [#{name => <<"sockaddr">>,type => <<"Symbol">>},#{name => <<"port">>,type => <<"Integer">>}],return_type => <<"Symbol">>}]"#,
         })
         .to_string();
@@ -1240,6 +1259,7 @@ mod tests {
             "beam_mtime_secs": 1,
             "beam_mtime_nanos": 0,
             "beam_path": missing_beam.to_str().unwrap(),
+            "mapping_stamp": crate::beam_compiler::current_spec_mapping_stamp(),
             "specs_line": r#"beamtalk-specs-module:gen_tcp:[#{arity => 1,line => 1,name => <<"close">>,params => [#{name => <<"sock">>,type => <<"Object">>}],return_type => <<"Symbol">>}]"#,
         })
         .to_string();
@@ -1261,6 +1281,11 @@ mod tests {
     /// `beam_path`. Those must continue to load — pessimistically treated as
     /// fresh — so a `lint` immediately after upgrading does not blank out
     /// every FFI signature until the user re-runs `build`.
+    ///
+    /// This entry does carry a current `mapping_stamp` (BT-2852) so the test
+    /// isolates the `beam_path` leniency behaviour; see
+    /// `load_type_cache_registry_skips_entry_when_mapping_stamp_missing` for
+    /// the case where the stamp itself is absent.
     #[test]
     fn load_type_cache_registry_loads_legacy_entry_without_beam_path() {
         use crate::beam_compiler::load_type_cache_registry;
@@ -1272,7 +1297,13 @@ mod tests {
         // No `beam_path` field at all — what BT-2134 wrote.
         std::fs::write(
             cache_dir.join("gen_tcp_0123456789abcdef.json").as_std_path(),
-            r#"{"beam_mtime_secs":0,"beam_mtime_nanos":0,"specs_line":"beamtalk-specs-module:gen_tcp:[#{arity => 2,line => 1,name => <<\"connect\">>,params => [#{name => <<\"sockaddr\">>,type => <<\"Symbol\">>},#{name => <<\"port\">>,type => <<\"Integer\">>}],return_type => <<\"Result(Dynamic | Tuple, Symbol)\">>}]"}"#,
+            serde_json::json!({
+                "beam_mtime_secs": 0,
+                "beam_mtime_nanos": 0,
+                "mapping_stamp": crate::beam_compiler::current_spec_mapping_stamp(),
+                "specs_line": r#"beamtalk-specs-module:gen_tcp:[#{arity => 2,line => 1,name => <<"connect">>,params => [#{name => <<"sockaddr">>,type => <<"Symbol">>},#{name => <<"port">>,type => <<"Integer">>}],return_type => <<"Result(Dynamic | Tuple, Symbol)">>}]"#,
+            })
+            .to_string(),
         )
         .unwrap();
 
@@ -1280,6 +1311,63 @@ mod tests {
         assert!(
             registry.lookup("gen_tcp", "connect", 2).is_some(),
             "legacy entry without beam_path must be tolerated as fresh"
+        );
+    }
+
+    /// BT-2852: An entry written by a `beamtalk` build *before* this feature
+    /// shipped has no `mapping_stamp` field at all (the default, empty
+    /// string). It must be treated as a graceful cache miss — not a crash —
+    /// even though its `.beam` mtime and (absent) `beam_path` would otherwise
+    /// be accepted as fresh.
+    #[test]
+    fn load_type_cache_registry_skips_entry_when_mapping_stamp_missing() {
+        use crate::beam_compiler::load_type_cache_registry;
+
+        let temp = tempfile::TempDir::new().unwrap();
+        let cache_dir = camino::Utf8PathBuf::from_path_buf(temp.path().join("type_cache")).unwrap();
+        std::fs::create_dir_all(cache_dir.as_std_path()).unwrap();
+
+        // Pre-BT-2852 shape: no `mapping_stamp` field at all.
+        std::fs::write(
+            cache_dir.join("gen_tcp_0123456789abcdef.json").as_std_path(),
+            r#"{"beam_mtime_secs":0,"beam_mtime_nanos":0,"specs_line":"beamtalk-specs-module:gen_tcp:[#{arity => 2,line => 1,name => <<\"connect\">>,params => [#{name => <<\"sockaddr\">>,type => <<\"Symbol\">>},#{name => <<\"port\">>,type => <<\"Integer\">>}],return_type => <<\"Result(Dynamic | Tuple, Symbol)\">>}]"}"#,
+        )
+        .unwrap();
+
+        assert!(
+            load_type_cache_registry(&cache_dir).is_none(),
+            "an entry with no mapping_stamp field must be a graceful miss, not a crash"
+        );
+    }
+
+    /// BT-2852: An entry stamped by a *different* compiler build (a stale
+    /// `mapping_stamp`) must be skipped even though its `.beam` mtime still
+    /// matches — this is the regression scenario the issue describes: a warm
+    /// cache surviving a change to `beamtalk_spec_reader.erl`'s type-mapping
+    /// logic must not keep serving the old mapping forever.
+    #[test]
+    fn load_type_cache_registry_skips_entry_when_mapping_stamp_differs() {
+        use crate::beam_compiler::load_type_cache_registry;
+
+        let temp = tempfile::TempDir::new().unwrap();
+        let cache_dir = camino::Utf8PathBuf::from_path_buf(temp.path().join("type_cache")).unwrap();
+        std::fs::create_dir_all(cache_dir.as_std_path()).unwrap();
+
+        std::fs::write(
+            cache_dir.join("gen_tcp_0123456789abcdef.json").as_std_path(),
+            serde_json::json!({
+                "beam_mtime_secs": 0,
+                "beam_mtime_nanos": 0,
+                "mapping_stamp": "stale-mapping-stamp-from-an-older-compiler-build",
+                "specs_line": r#"beamtalk-specs-module:gen_tcp:[#{arity => 2,line => 1,name => <<"connect">>,params => [#{name => <<"sockaddr">>,type => <<"Symbol">>},#{name => <<"port">>,type => <<"Integer">>}],return_type => <<"Result(Dynamic | Tuple, Symbol)">>}]"#,
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        assert!(
+            load_type_cache_registry(&cache_dir).is_none(),
+            "an entry stamped by a different compiler build must be a cache miss"
         );
     }
 
@@ -1302,6 +1390,7 @@ mod tests {
             "beam_mtime_secs": dur.as_secs(),
             "beam_mtime_nanos": dur.subsec_nanos(),
             "beam_path": beam_path.to_str().unwrap(),
+            "mapping_stamp": crate::beam_compiler::current_spec_mapping_stamp(),
             "specs_line": r#"beamtalk-specs-module:gen_tcp:[#{arity => 2,line => 1,name => <<"connect">>,params => [#{name => <<"sockaddr">>,type => <<"Symbol">>},#{name => <<"port">>,type => <<"Integer">>}],return_type => <<"Result(Dynamic | Tuple, Symbol)">>}]"#,
         })
         .to_string();
@@ -1337,12 +1426,24 @@ mod tests {
             cache_dir
                 .join("gen_tcp_socket_1111111111111111.json")
                 .as_std_path(),
-            r#"{"beam_mtime_secs":0,"beam_mtime_nanos":0,"specs_line":"beamtalk-specs-module:gen_tcp_socket:[#{arity => 1,line => 1,name => <<\"close\">>,params => [#{name => <<\"sock\">>,type => <<\"Object\">>}],return_type => <<\"Symbol\">>}]"}"#,
+            serde_json::json!({
+                "beam_mtime_secs": 0,
+                "beam_mtime_nanos": 0,
+                "mapping_stamp": crate::beam_compiler::current_spec_mapping_stamp(),
+                "specs_line": r#"beamtalk-specs-module:gen_tcp_socket:[#{arity => 1,line => 1,name => <<"close">>,params => [#{name => <<"sock">>,type => <<"Object">>}],return_type => <<"Symbol">>}]"#,
+            })
+            .to_string(),
         )
         .unwrap();
         std::fs::write(
             cache_dir.join("gen_tcp_2222222222222222.json").as_std_path(),
-            r#"{"beam_mtime_secs":0,"beam_mtime_nanos":0,"specs_line":"beamtalk-specs-module:gen_tcp:[#{arity => 1,line => 1,name => <<\"close\">>,params => [#{name => <<\"sock\">>,type => <<\"Object\">>}],return_type => <<\"Symbol\">>}]"}"#,
+            serde_json::json!({
+                "beam_mtime_secs": 0,
+                "beam_mtime_nanos": 0,
+                "mapping_stamp": crate::beam_compiler::current_spec_mapping_stamp(),
+                "specs_line": r#"beamtalk-specs-module:gen_tcp:[#{arity => 1,line => 1,name => <<"close">>,params => [#{name => <<"sock">>,type => <<"Object">>}],return_type => <<"Symbol">>}]"#,
+            })
+            .to_string(),
         )
         .unwrap();
 

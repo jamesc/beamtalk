@@ -99,7 +99,7 @@ The summary is suppressed when `--no-warnings` is passed.
 
 `beamtalk lint` prints the same summary at end of run. In `--format json` mode, a `summary` JSON object is emitted as the last line with `totals_by_severity`, `totals_by_category`, `files_checked`, and `total` fields for CI diffing.
 
-`beamtalk lint` also loads FFI type signatures from the build cache (`_build/type_cache/`) so that lint and build agree on Erlang FFI return types. Cache entries are validated against live `.beam` file mtimes — if the underlying module has been recompiled since the cache was written, the stale entry is skipped and lint falls back to untyped-FFI inference. If the project has never been built, lint proceeds without a cache (matching its pre-cache behaviour).
+`beamtalk lint` also loads FFI type signatures from the build cache (`_build/type_cache/`) so that lint and build agree on Erlang FFI return types. Cache entries are validated against live `.beam` file mtimes and against the producing compiler's Erlang→Beamtalk type-mapping stamp (BT-2852) — if the underlying module has been recompiled since the cache was written, or the entry was written by a `beamtalk` build with different type-mapping logic, the stale entry is skipped and lint falls back to untyped-FFI inference. If the project has never been built, lint proceeds without a cache (matching its pre-cache behaviour).
 
 ### Build Artifact Layout (`BuildLayout`)
 
