@@ -64,5 +64,10 @@ beamtalk-examples.workspace = true
 # why: SHA-256 hashing for search telemetry query_hash field
 sha2.workspace = true
 
+[dev-dependencies]
+# why: RAII temp-dir cleanup for test fixtures (auto-removes on panic, unlike
+# manual std::env::temp_dir() + remove_dir_all)
+tempfile = "3.14"
+
 [lints]
 workspace = true
