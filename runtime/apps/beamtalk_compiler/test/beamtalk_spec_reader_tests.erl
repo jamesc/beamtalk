@@ -271,7 +271,58 @@ map_type_byte_test() ->
     ?assertEqual(<<"Integer">>, beamtalk_spec_reader:map_type({type, 0, byte, []})).
 
 map_type_string_test() ->
-    ?assertEqual(<<"List">>, beamtalk_spec_reader:map_type({type, 0, string, []})).
+    %% BT-2817: `string()` widens to `String | List` so binary-backed
+    %% Beamtalk Strings type-check against classic charlist-typed params.
+    ?assertEqual(<<"String | List">>, beamtalk_spec_reader:map_type({type, 0, string, []})).
+
+map_type_nonempty_string_test() ->
+    %% BT-2817: `nonempty_string()` (e.g. `os:env_var_name()`) gets the same
+    %% widened mapping as `string()`.
+    ?assertEqual(
+        <<"String | List">>, beamtalk_spec_reader:map_type({type, 0, nonempty_string, []})
+    ).
+
+map_type_list_of_char_test() ->
+    %% BT-2817: `[char()]` is the expanded form of `string()` (a charlist is
+    %% literally a list of char codes) — it must get the same `String | List`
+    %% mapping as `string()`, not fall through to the generic element-carrying
+    %% `List(Integer)` clause.
+    ?assertEqual(
+        <<"String | List">>,
+        beamtalk_spec_reader:map_type({type, 0, list, [{type, 0, char, []}]})
+    ).
+
+map_type_nonempty_list_of_char_test() ->
+    %% BT-2817: `nonempty_list(char())` gets the same treatment.
+    ?assertEqual(
+        <<"String | List">>,
+        beamtalk_spec_reader:map_type({type, 0, nonempty_list, [{type, 0, char, []}]})
+    ).
+
+map_type_list_of_integer_still_carries_element_type_test() ->
+    %% Regression guard: only `list(char())` specifically is treated as a
+    %% charlist. A plain `[integer()]` (not `char()`) must still carry its
+    %% element type as `List(Integer)`, unaffected by the char-list special case.
+    ?assertEqual(
+        <<"List(Integer)">>,
+        beamtalk_spec_reader:map_type({type, 0, list, [{type, 0, integer, []}]})
+    ).
+
+map_type_union_dedups_flattened_members_test() ->
+    %% BT-2817: `atom() | string() | binary()` (this is literally `io:format/0`'s
+    %% definition) must not duplicate `String` — `string()` and `binary()` both
+    %% expand to compound unions that share the `String` member. Members must be
+    %% deduped after flattening, not deduped as whole branch strings.
+    ?assertEqual(
+        <<"Symbol | String | List | Binary">>,
+        beamtalk_spec_reader:map_type(
+            {type, 0, union, [
+                {type, 0, atom, []},
+                {type, 0, string, []},
+                {type, 0, binary, []}
+            ]}
+        )
+    ).
 
 map_type_range_test() ->
     ?assertEqual(
@@ -614,6 +665,52 @@ verify_file_read_file_result_test() ->
     RetType = maps:get(return_type, Spec),
     %% Should start with "Result(" — the ok type is String | Binary from binary()
     ?assertMatch(<<"Result(String | Binary,", _/binary>>, RetType).
+
+%% BT-2817: os:putenv/2 params — `VarName :: env_var_name()` resolves to
+%% `nonempty_string()` and `Value :: env_var_value()` resolves to `string()`
+%% (both local user_types in os.erl). Both must map to `String | List`, not
+%% `List` only — `os:putenv/2` accepts binaries fine at runtime on modern OTP.
+verify_os_putenv_params_test() ->
+    BeamFile = code:which(os),
+    ?assertNotEqual(non_existing, BeamFile),
+    {ok, Specs} = beamtalk_spec_reader:read_specs(BeamFile),
+    PutenvSpecs = [
+        S
+     || S <- Specs,
+        maps:get(name, S) =:= <<"putenv">>,
+        maps:get(arity, S) =:= 2
+    ],
+    ?assert(length(PutenvSpecs) > 0),
+    [Spec | _] = PutenvSpecs,
+    Params = maps:get(params, Spec),
+    ?assertEqual(2, length(Params)),
+    lists:foreach(
+        fun(P) ->
+            ?assertEqual(<<"String | List">>, maps:get(type, P))
+        end,
+        Params
+    ).
+
+%% BT-2817: `io_lib:format/2`'s `Format` param resolves (via the remote type
+%% `io:format()`) to the literal union `atom() | string() | binary()`.
+%% `string()` and `binary()` both expand to compound unions sharing the
+%% `String` member, so this is a real-world reproduction of the
+%% flattened-member dedup bug: without the fix this would resolve to
+%% `Symbol | String | List | String | Binary` (duplicated `String`).
+verify_io_lib_format_param_dedups_test() ->
+    BeamFile = code:which(io_lib),
+    ?assertNotEqual(non_existing, BeamFile),
+    {ok, Specs} = beamtalk_spec_reader:read_specs(BeamFile),
+    FormatSpecs = [
+        S
+     || S <- Specs,
+        maps:get(name, S) =:= <<"format">>,
+        maps:get(arity, S) =:= 2
+    ],
+    ?assert(length(FormatSpecs) > 0),
+    [Spec | _] = FormatSpecs,
+    [FormatParam, _DataParam] = maps:get(params, Spec),
+    ?assertEqual(<<"Symbol | String | List | Binary">>, maps:get(type, FormatParam)).
 
 %% timer:send_after/2 → Result return type
 verify_timer_send_after_result_test() ->
@@ -1365,8 +1462,9 @@ resolve_remote_type_disk_log_test() ->
             %% Should be Result(Nil, Symbol | Tuple...) instead of Result(Nil, Dynamic).
             %% BT-2254: the error tuples now carry their positional element types
             %% (`{error, Reason}` shapes), so the Tuple branches are parametric.
+            %% BT-2817: the `string()`-typed element now widens to `String | List`.
             ?assertEqual(
-                <<"Result(Nil, Symbol | Tuple(Symbol, Dynamic) | Tuple(Symbol, List, Dynamic))">>,
+                <<"Result(Nil, Symbol | Tuple(Symbol, Dynamic) | Tuple(Symbol, String | List, Dynamic))">>,
                 RetType
             )
     end.

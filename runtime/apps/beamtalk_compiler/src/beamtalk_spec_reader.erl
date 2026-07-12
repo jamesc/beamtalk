@@ -446,14 +446,8 @@ extract_clause(_) ->
 %% - Duplicate types are removed
 %% - Empty list: returns `<<"Dynamic">>'
 -spec merge_return_types([binary()]) -> binary().
-merge_return_types([]) ->
-    <<"Dynamic">>;
 merge_return_types(Types) ->
-    Unique = dedup_types(Types),
-    case Unique of
-        [Single] -> Single;
-        Multiple -> iolist_to_binary(lists:join(<<" | ">>, Multiple))
-    end.
+    join_types(Types).
 
 %% Remove duplicate types while preserving order.
 -spec dedup_types([binary()]) -> [binary()].
@@ -467,6 +461,48 @@ dedup_types([T | Rest], Acc, Seen) ->
         true -> dedup_types(Rest, Acc, Seen);
         false -> dedup_types(Rest, [T | Acc], Seen#{T => true})
     end.
+
+%% BT-2817: Join a list of mapped type strings into a single type string,
+%% flattening and deduping at the individual-member level rather than the
+%% branch-string level. A branch may itself already map to a top-level union
+%% (e.g. `string()` -> `"String | List"`, `binary()` -> `"String | Binary"`),
+%% so a union like `atom() | string() | binary()` (e.g. `io:format/0`) would
+%% otherwise dedup only whole branch strings and emit a duplicated member:
+%% `"Symbol | String | List | String | Binary"`. Flattening each branch's top-
+%% level members before deduping collapses the shared `String` member,
+%% producing `"Symbol | String | List | Binary"` instead.
+-spec join_types([binary()]) -> binary().
+join_types(Types) ->
+    case flatten_union_members(Types) of
+        [] -> <<"Dynamic">>;
+        [Single] -> Single;
+        Multiple -> iolist_to_binary(lists:join(<<" | ">>, Multiple))
+    end.
+
+%% Split each mapped type string into its top-level union members (paren-
+%% depth aware, so a compound type parameterized by a union — e.g.
+%% `List(String | Binary)` — is kept intact as a single member, not split),
+%% then dedup the flattened members while preserving first-seen order.
+-spec flatten_union_members([binary()]) -> [binary()].
+flatten_union_members(Types) ->
+    dedup_types(lists:flatmap(fun split_top_level_union/1, Types)).
+
+%% Split a single type string on top-level ` | ` separators (depth 0 only).
+-spec split_top_level_union(binary()) -> [binary()].
+split_top_level_union(Type) ->
+    Parts = split_top_level_union(binary_to_list(Type), 0, [], []),
+    [iolist_to_binary(lists:reverse(P)) || P <- lists:reverse(Parts)].
+
+split_top_level_union([], _Depth, Current, Acc) ->
+    [Current | Acc];
+split_top_level_union([$( | Rest], Depth, Current, Acc) ->
+    split_top_level_union(Rest, Depth + 1, [$( | Current], Acc);
+split_top_level_union([$) | Rest], Depth, Current, Acc) ->
+    split_top_level_union(Rest, Depth - 1, [$) | Current], Acc);
+split_top_level_union([$\s, $|, $\s | Rest], 0, Current, Acc) ->
+    split_top_level_union(Rest, 0, [], [Current | Acc]);
+split_top_level_union([C | Rest], Depth, Current, Acc) ->
+    split_top_level_union(Rest, Depth, [C | Current], Acc).
 
 %% Extract parameter names from spec type arguments.
 %% Spec variable names (e.g., `From :: integer()`) provide meaningful names.
@@ -835,6 +871,16 @@ map_type({type, _, 'fun', _}) ->
 %% List types
 map_type({type, _, list, []}) ->
     <<"List">>;
+%% BT-2817: `[char()]` / `nonempty_list(char())` are the expanded forms of
+%% `string()` / `nonempty_string()` (a charlist is a list of char codes) —
+%% some specs use the expanded list-of-char() shape directly instead of the
+%% `string()` alias. Map them identically to `string()` (`String | List`)
+%% rather than falling through to the generic element-carrying clause below,
+%% which would otherwise produce the misleading `List(Integer)`.
+map_type({type, _, list, [{type, _, char, []}]}) ->
+    <<"String | List">>;
+map_type({type, _, nonempty_list, [{type, _, char, []}]}) ->
+    <<"String | List">>;
 map_type({type, _, list, [ElemType]}) ->
     %% ADR 0075 amendment (BT-2254): carry the element type so iterating an
     %% FFI-typed list binds block params to the element type instead of Dynamic.
@@ -902,8 +948,16 @@ map_type({type, _, char, []}) ->
     <<"Integer">>;
 map_type({type, _, byte, []}) ->
     <<"Integer">>;
+%% BT-2817: classic Erlang `string()` / `nonempty_string()` (charlist) specs
+%% are common on stdlib functions (e.g. `os:putenv/2`, whose `env_var_name()`
+%% type resolves to `nonempty_string()`) that accept binaries/iodata fine at
+%% runtime on modern OTP. Map to `String | List` (mirroring the `binary()` ->
+%% `String | Binary` treatment above) instead of `List` only, so a
+%% Beamtalk binary-backed String argument type-checks against these params.
 map_type({type, _, string, []}) ->
-    <<"List">>;
+    <<"String | List">>;
+map_type({type, _, nonempty_string, []}) ->
+    <<"String | List">>;
 %% Union types — recognize ok/error patterns as Result(T, E)
 map_type({type, Line, union, Branches}) ->
     map_union(Branches, Line);
@@ -1010,11 +1064,7 @@ map_union_result(Branches) ->
             %% re-check would always be `not_singleton_union`. Map each branch via
             %% map_type: a lone atom keeps its `Symbol` mapping; mixed unions map
             %% each member.
-            Mapped = dedup_types([map_type(B) || B <- Branches]),
-            case Mapped of
-                [Single] -> Single;
-                Multiple -> iolist_to_binary(lists:join(<<" | ">>, Multiple))
-            end;
+            join_types([map_type(B) || B <- Branches]);
         _ ->
             %% At least one ok or error branch — emit Result(T, E)
             OkType = resolve_ok_type(OkTypes),
@@ -1024,9 +1074,7 @@ map_union_result(Branches) ->
                 [] ->
                     ResultType;
                 _ ->
-                    OtherMapped = dedup_types([map_type(B) || B <- OtherBranches]),
-                    AllTypes = dedup_types([ResultType | OtherMapped]),
-                    iolist_to_binary(lists:join(<<" | ">>, AllTypes))
+                    join_types([ResultType | [map_type(B) || B <- OtherBranches]])
             end
     end.
 
@@ -1123,17 +1171,13 @@ resolve_ok_type([Type]) ->
     map_type(Type);
 resolve_ok_type(Types) ->
     %% Multiple ok branches — union their inner types
-    Mapped = dedup_types([
+    join_types([
         case T of
             nil -> <<"Nil">>;
             _ -> map_type(T)
         end
      || T <- Types
-    ]),
-    case Mapped of
-        [Single] -> Single;
-        Multiple -> iolist_to_binary(lists:join(<<" | ">>, Multiple))
-    end.
+    ]).
 
 %% Determine the error type from classified error branches.
 -spec resolve_err_type([tuple() | nil]) -> binary().
@@ -1144,17 +1188,13 @@ resolve_err_type([nil]) ->
 resolve_err_type([Type]) ->
     map_type(Type);
 resolve_err_type(Types) ->
-    Mapped = dedup_types([
+    join_types([
         case T of
             nil -> <<"Nil">>;
             _ -> map_type(T)
         end
      || T <- Types
-    ]),
-    case Mapped of
-        [Single] -> Single;
-        Multiple -> iolist_to_binary(lists:join(<<" | ">>, Multiple))
-    end.
+    ]).
 
 %% Format Result(T, E) type string.
 -spec format_result_type(binary(), binary()) -> binary().
