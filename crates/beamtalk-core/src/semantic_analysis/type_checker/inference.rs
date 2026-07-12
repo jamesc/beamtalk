@@ -2483,18 +2483,70 @@ impl TypeChecker {
     ///
     /// `detect` only sees the AST, so it records the tested class name in
     /// `class_test` and leaves `true_type` provisional. Here we resolve the
-    /// variable's current type and route the **true** branch through the
-    /// hierarchy-aware `intersect(current, C)` for *both* idioms, and the
-    /// **false** branch through `difference(current, C)` for `isKindOf:`
-    /// *only* — see `ClassTestKind` for why `class =:=`'s false branch must
-    /// stay unnarrowed.
+    /// variable's current type and delegate to the diagnostic-free
+    /// [`Self::compute_class_narrowing`] (BT-2825 factored this out so
+    /// [`Self::apply_early_return_narrowing`] can reuse the same math without
+    /// re-emitting the "comparison can never be true" hint below for a guard
+    /// that was already fully type-checked), then reports that hint using
+    /// the resolved true branch.
+    pub(super) fn refine_class_narrowing(
+        &mut self,
+        info: NarrowingInfo,
+        env: &TypeEnv,
+        hierarchy: &ClassHierarchy,
+        test_span: Span,
+    ) -> NarrowingInfo {
+        let Some(ClassTestInfo { class_name, .. }) = info.class_test.clone() else {
+            return info;
+        };
+        let current_ty = Self::resolve_narrowing_variable_type(&info.variable, env, hierarchy);
+        let refined_info = Self::compute_class_narrowing(
+            info,
+            &current_ty,
+            hierarchy,
+            self.protocol_registry.as_ref(),
+        );
+        self.check_impossible_class_comparison(
+            &current_ty,
+            &class_name,
+            &refined_info.true_type,
+            test_span,
+        );
+        refined_info
+    }
+
+    /// Pure narrowing math for a `class = C` / `isKindOf: C` test — no
+    /// diagnostics (BT-2825). Shared by [`Self::refine_class_narrowing`] (the
+    /// primary `ifTrue:`/`ifFalse:` dispatch site, which additionally emits
+    /// the "comparison can never be true" hint) and
+    /// [`Self::apply_early_return_narrowing`] (the guard-and-early-return
+    /// post-guard case, which must *not* re-emit that hint since the guard
+    /// expression was already fully type-checked by the time post-guard
+    /// narrowing runs).
     ///
-    /// The true branch is a deliberate refinement over the previous
-    /// unconditional `true_type = C` — a subclass test now narrows precisely
-    /// (`x :: Number; x isKindOf: Integer` true branch is `Integer`, not
-    /// `Number`), and a test against a hierarchy-unrelated class types the
-    /// (unreachable) true branch `Never`, reported via
-    /// `check_impossible_class_comparison`.
+    /// Routes the **true** branch through the hierarchy-and-protocol-aware
+    /// `intersect(current, C)` for *both* idioms, and the **false** branch
+    /// through `difference(current, C)` for `isKindOf:` *only* — see
+    /// `ClassTestKind` for why `class =:=`'s false branch must stay
+    /// unnarrowed.
+    ///
+    /// The true branch narrows precisely (`x :: Number; x isKindOf: Integer`
+    /// true branch is `Integer`, not `Number`), and a test against a
+    /// hierarchy-unrelated class types the (unreachable) true branch `Never`
+    /// (reported by the caller via `check_impossible_class_comparison`).
+    ///
+    /// **Protocol collapse (BT-2825):** when `current` is a protocol (or a
+    /// union containing one) and `C` is an unrelated concrete class,
+    /// `intersect` conservatively returns the irreducible `current & C`
+    /// (ADR 0102 §1/§3) — sound for a *declared* `P1 & P2` annotation, but
+    /// `isKindOf: C` is a positive **runtime** proof that the value literally
+    /// is a `C` (or subclass), which is strictly stronger. The true branch
+    /// collapses that `Intersection` down to the bare `C` so downstream
+    /// assignability (`is_assignable_to`, which has no notion of `&`) and DNU
+    /// checks see a plain nominal type instead of a compound one they don't
+    /// otherwise understand — this is what lets a `Printable`-declared local
+    /// satisfy a `List`-typed assignment after `(x isKindOf: List) ifTrue:
+    /// [...]` / `ifFalse: [^...]` without an `@expect type` escape hatch.
     ///
     /// The `isKindOf:` false branch closes the group-2 gap ADR 0102 §1
     /// deliberately left open (nominal-class difference needed its own
@@ -2502,27 +2554,30 @@ impl TypeChecker {
     /// to `Number \ Integer` (previously untouched — `false_type` stayed
     /// `None`, and `ifFalse:`/the else-arm of `ifTrue:ifFalse:` fell back to
     /// no narrowing). `class =:=`'s false branch stays `None`, exactly as
-    /// before this issue.
-    pub(super) fn refine_class_narrowing(
-        &mut self,
+    /// before BT-2744.
+    fn compute_class_narrowing(
         mut info: NarrowingInfo,
-        env: &TypeEnv,
+        current_ty: &InferredType,
         hierarchy: &ClassHierarchy,
-        test_span: Span,
+        protocol_registry: Option<&crate::semantic_analysis::protocol_registry::ProtocolRegistry>,
     ) -> NarrowingInfo {
         let Some(ClassTestInfo { class_name, kind }) = info.class_test.clone() else {
             return info;
         };
-        let current_ty = Self::resolve_narrowing_variable_type(&info.variable, env, hierarchy);
         let pattern = InferredType::known(class_name.clone());
         let provenance = super::TypeProvenance::Inferred(Span::default());
-        // No protocol registry: a `class = C` / `isKindOf: C` pattern is always
-        // a nominal class, never a protocol intersection (matches the other
-        // narrowing call sites).
-        let refined =
-            InferredType::intersect(&current_ty, &pattern, provenance, Some(hierarchy), None);
-        self.check_impossible_class_comparison(&current_ty, &class_name, &refined, test_span);
-        info.true_type = refined;
+        let refined = InferredType::intersect(
+            current_ty,
+            &pattern,
+            provenance,
+            Some(hierarchy),
+            protocol_registry,
+        );
+        info.true_type = if matches!(refined, InferredType::Intersection { .. }) {
+            pattern.clone()
+        } else {
+            refined
+        };
         // BT-2744: only `isKindOf:`'s false branch can be narrowed via
         // nominal-class `difference` — `Negation{base, excluded}` always
         // excludes `excluded`'s *entire* subtree, which matches `isKindOf:`'s
@@ -2533,7 +2588,7 @@ impl TypeChecker {
         // `ClassTestKind`.
         if kind == ClassTestKind::KindOf {
             info.false_type = Some(InferredType::difference(
-                &current_ty,
+                current_ty,
                 &pattern,
                 provenance,
                 Some(hierarchy),
@@ -3980,71 +4035,138 @@ impl TypeChecker {
 
     /// Apply early-return narrowing to the environment after a statement.
     ///
-    /// Detects `x isNil ifTrue: [<diverge>]` — if the true-block cannot fall
-    /// through (either a non-local return `^` or a diverging call such as
-    /// `self error: "..."` whose inferred type is `Never`), the variable must
-    /// be non-nil in subsequent statements.  Covers both local variables and
-    /// synthetic `self.field` keys via
+    /// Detects `x isNil ifTrue: [<diverge>]` and, since BT-2825, `x isKindOf:
+    /// C ifTrue: [<diverge>]` / `ifFalse: [<diverge>]` / `ifTrue: [<diverge>]
+    /// ifFalse: [...]` — if the branch whose test is *not* the one we fall
+    /// through cannot fall through (either a non-local return `^` or a
+    /// diverging call such as `self error: "..."` whose inferred type is
+    /// `Never`), the variable is narrowed for subsequent statements. Covers
+    /// both local variables and synthetic `self.field` keys via
     /// [`Self::resolve_narrowing_variable_type`] (BT-2049).
     fn apply_early_return_narrowing(
-        &self,
+        &mut self,
         expr: &Expression,
         env: &mut TypeEnv,
         hierarchy: &ClassHierarchy,
     ) {
-        // Match: `<receiver> ifTrue: [diverging block]` or
-        //         `<receiver> ifTrue: [diverging] ifFalse: [...]` — if the
-        // true branch diverges, any execution reaching the next statement
-        // came through the false branch and the variable is non-nil.
-        if let Expression::MessageSend {
+        // Match: `<receiver> ifTrue: [diverging]`, `<receiver> ifFalse:
+        // [diverging]` (BT-2825), or `<receiver> ifTrue: [diverging]
+        // ifFalse: [...]` — whichever block diverges, any execution reaching
+        // the next statement came through the *other* path, narrowing the
+        // variable accordingly.
+        let Expression::MessageSend {
             receiver,
             selector: MessageSelector::Keyword(parts),
             arguments,
             ..
         } = expr
-        {
-            let is_if_true = parts.len() == 1 && parts[0].keyword == "ifTrue:";
-            let is_if_true_if_false =
-                parts.len() == 2 && parts[0].keyword == "ifTrue:" && parts[1].keyword == "ifFalse:";
-            if !(is_if_true || is_if_true_if_false) {
+        else {
+            return;
+        };
+        let is_if_true = parts.len() == 1 && parts[0].keyword == "ifTrue:";
+        let is_if_false = parts.len() == 1 && parts[0].keyword == "ifFalse:";
+        let is_if_true_if_false =
+            parts.len() == 2 && parts[0].keyword == "ifTrue:" && parts[1].keyword == "ifFalse:";
+        if !(is_if_true || is_if_false || is_if_true_if_false) {
+            return;
+        }
+        let Some(mut info) = Self::detect_narrowing(receiver) else {
+            return;
+        };
+        if !info.is_nil_check && info.class_test.is_none() {
+            return;
+        }
+        if info.class_test.is_some() {
+            // BT-2825: resolve `true_type`/`false_type` the same way the
+            // primary `ifTrue:`/`ifFalse:` dispatch does
+            // (`refine_class_narrowing`), but through the diagnostic-free
+            // `compute_class_narrowing` — `expr` (this exact guard) was
+            // already fully type-checked by `infer_stmts` above, so the
+            // "comparison can never be true" hint already fired once.
+            let current_ty = Self::resolve_narrowing_variable_type(&info.variable, env, hierarchy);
+            info = Self::compute_class_narrowing(
+                info,
+                &current_ty,
+                hierarchy,
+                self.protocol_registry.as_ref(),
+            );
+        }
+
+        if is_if_true || is_if_true_if_false {
+            // In both shapes, the true block is argument 0.
+            let Some(Expression::Block(true_block)) = arguments.first() else {
+                return;
+            };
+            if !self.block_diverges(true_block) {
                 return;
             }
-            if let Some(info) = Self::detect_narrowing(receiver) {
-                if !info.is_nil_check {
-                    return;
-                }
-                // In both shapes, the true block is argument 0.
-                let Some(Expression::Block(true_block)) = arguments.first() else {
-                    return;
-                };
-                if !self.block_diverges(true_block) {
-                    return;
-                }
-                // For `ifTrue:ifFalse:`, execution may reach the next
-                // statement through the `ifFalse:` block. If that block
-                // reassigns the tested variable (e.g. `[self.user := nil]`
-                // or `[x := nil]`), the post-statement narrowing would be
-                // unsound — skip it.
-                if is_if_true_if_false {
-                    if let Some(Expression::Block(false_block)) = arguments.get(1) {
-                        if block_may_reassign(false_block, &info.variable) {
-                            return;
-                        }
+            // For `ifTrue:ifFalse:`, execution may reach the next
+            // statement through the `ifFalse:` block. If that block
+            // reassigns the tested variable (e.g. `[self.user := nil]`
+            // or `[x := nil]`), the post-statement narrowing would be
+            // unsound — skip it.
+            if is_if_true_if_false {
+                if let Some(Expression::Block(false_block)) = arguments.get(1) {
+                    if block_may_reassign(false_block, &info.variable) {
+                        return;
                     }
                 }
-                // BT-2050: after this statement, the variable is non-nil.
-                // Use method-remainder scope: the refinement outlives the
-                // guard send and applies to the rest of the enclosing method
-                // body (unlike the block-scoped narrowings pushed inside
-                // `infer_block_with_narrowing`).
-                let current_ty =
-                    Self::resolve_narrowing_variable_type(&info.variable, env, hierarchy);
-                let non_nil = Self::non_nil_type(&current_ty);
-                env.push_refinement(RefinementLayer::method_remainder(
-                    info.variable.clone(),
-                    non_nil,
-                ));
             }
+            let Some(narrowed) = Self::early_return_false_branch_type(&info, env, hierarchy) else {
+                return;
+            };
+            // BT-2050: after this statement, the variable is narrowed.
+            // Use method-remainder scope: the refinement outlives the
+            // guard send and applies to the rest of the enclosing method
+            // body (unlike the block-scoped narrowings pushed inside
+            // `infer_block_with_narrowing`).
+            env.push_refinement(RefinementLayer::method_remainder(
+                info.variable.clone(),
+                narrowed,
+            ));
+        } else if is_if_false {
+            // BT-2825: `<receiver> ifFalse: [diverging]` — the sole
+            // argument is the false block. If it diverges, execution
+            // reaching the next statement proves the guard's test held,
+            // so the variable narrows to the *true*-branch type.
+            //
+            // For `isKindOf:` this is `compute_class_narrowing`'s resolved
+            // `true_type` (set above). For plain `isNil` checks, `info` was
+            // never routed through `compute_class_narrowing` — `true_type`
+            // instead comes straight from `detect_narrowing`'s `isNil` rule,
+            // which sets it to `InferredType::known("UndefinedObject")`
+            // (see `narrowing/rules/is_nil.rs`).
+            let Some(Expression::Block(false_block)) = arguments.first() else {
+                return;
+            };
+            if !self.block_diverges(false_block) {
+                return;
+            }
+            env.push_refinement(RefinementLayer::method_remainder(
+                info.variable.clone(),
+                info.true_type.clone(),
+            ));
+        }
+    }
+
+    /// The type the tested variable takes in the "complementary" (false)
+    /// branch of a narrowing, mirroring `infer_args_with_narrowing`'s
+    /// `ifFalse:` arm (BT-2825): an explicit `false_type` (class test /
+    /// Result / singleton) if set, else non-nil for `isNil` checks, else
+    /// `None` (no useful narrowing — e.g. `class =:=`'s false branch, which
+    /// deliberately stays unnarrowed per `ClassTestKind`).
+    fn early_return_false_branch_type(
+        info: &NarrowingInfo,
+        env: &TypeEnv,
+        hierarchy: &ClassHierarchy,
+    ) -> Option<InferredType> {
+        if let Some(ref false_ty) = info.false_type {
+            Some(false_ty.clone())
+        } else if info.is_nil_check {
+            let current_ty = Self::resolve_narrowing_variable_type(&info.variable, env, hierarchy);
+            Some(Self::non_nil_type(&current_ty))
+        } else {
+            None
         }
     }
 
