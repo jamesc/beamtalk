@@ -1022,9 +1022,30 @@ struct TypeCacheEntry {
     /// until the next build rewrites them with a path.
     #[serde(default)]
     beam_path: String,
+    /// The producing compiler's Erlang→Beamtalk type-mapping stamp — a
+    /// content hash of `beamtalk_spec_reader.erl` baked in at compile time
+    /// via `BEAMTALK_SPEC_MAPPING_STAMP` (BT-2852). Compared against
+    /// [`current_spec_mapping_stamp`] on read; a mismatch (including the
+    /// empty default for entries written before BT-2852) is a cache miss, so
+    /// a compiler upgrade that changes how Erlang types map to Beamtalk types
+    /// invalidates stale FFI signatures instead of waiting for an unrelated
+    /// `.beam` mtime or OTP-version change that may never happen.
+    #[serde(default)]
+    mapping_stamp: String,
     /// The raw `beamtalk-specs-module:...` protocol line (without newline).
     /// Empty string if the module had no specs or an error occurred.
     specs_line: String,
+}
+
+/// The current compiler's Erlang→Beamtalk type-mapping stamp (BT-2852) — see
+/// [`TypeCacheEntry::mapping_stamp`]. Baked in at compile time by
+/// `beamtalk-cli/build.rs` via `beamtalk_build::emit_spec_mapping_stamp`, so
+/// comparing it is a cheap `&str` comparison, not a per-build filesystem hash.
+///
+/// `pub(crate)` so `commands::lint`'s tests can stamp fixture cache entries
+/// with the running compiler's value.
+pub(crate) fn current_spec_mapping_stamp() -> &'static str {
+    env!("BEAMTALK_SPEC_MAPPING_STAMP")
 }
 
 /// Manages the type-spec cache for incremental spec extraction.
@@ -1165,6 +1186,11 @@ impl TypeCache {
     }
 
     /// Reads a fresh cache entry from `base`, or `None` if missing/stale.
+    ///
+    /// Freshness requires both the `.beam` mtime to match *and* the entry's
+    /// mapping stamp to match the running compiler's (BT-2852) — an entry
+    /// written before BT-2852 carries the empty default stamp, which never
+    /// matches a real hash, so it is a miss rather than a crash.
     fn read_fresh(
         base: &Utf8Path,
         module_name: &str,
@@ -1175,7 +1201,10 @@ impl TypeCache {
         let path = Self::entry_path(base, module_name, beam_path);
         let content = std::fs::read_to_string(path.as_std_path()).ok()?;
         let entry: TypeCacheEntry = serde_json::from_str(&content).ok()?;
-        if entry.beam_mtime_secs == beam_mtime_secs && entry.beam_mtime_nanos == beam_mtime_nanos {
+        if entry.beam_mtime_secs == beam_mtime_secs
+            && entry.beam_mtime_nanos == beam_mtime_nanos
+            && entry.mapping_stamp == current_spec_mapping_stamp()
+        {
             Some(entry.specs_line)
         } else {
             None
@@ -1226,6 +1255,7 @@ impl TypeCache {
             beam_mtime_secs,
             beam_mtime_nanos,
             beam_path: canonical_beam_path,
+            mapping_stamp: current_spec_mapping_stamp().to_string(),
             specs_line: specs_line.to_string(),
         };
         let path = Self::entry_path(base, module_name, beam_path);
@@ -1560,13 +1590,24 @@ fn sanitize_module_name(name: &str) -> &str {
 }
 
 /// Returns `true` if the cache entry still describes the live `.beam` file —
-/// i.e. the file at `beam_path` exists and its mtime matches what was cached.
+/// i.e. the file at `beam_path` exists and its mtime matches what was cached
+/// — *and* the entry's type-mapping stamp matches the running compiler's
+/// (BT-2852).
+///
+/// The mapping-stamp check is evaluated first: an entry written before
+/// BT-2852 carries the empty default stamp, which never matches a real hash,
+/// so every pre-BT-2852 entry is a miss (cache rebuild), never a crash —
+/// including legacy entries with an empty `beam_path` that the check below
+/// would otherwise pessimistically accept.
 ///
 /// Legacy entries written before BT-2139 carry an empty `beam_path`; we have
-/// no way to validate them, so they are pessimistically accepted as fresh.
-/// The next `beamtalk build` rewrites them with a path, which then enables
-/// validation on subsequent lint runs.
+/// no way to validate them, so — once the mapping stamp matches — they are
+/// pessimistically accepted as fresh. The next `beamtalk build` rewrites them
+/// with a path, which then enables validation on subsequent lint runs.
 fn is_cache_entry_fresh(entry: &TypeCacheEntry) -> bool {
+    if entry.mapping_stamp != current_spec_mapping_stamp() {
+        return false;
+    }
     if entry.beam_path.is_empty() {
         return true;
     }
@@ -2925,6 +2966,43 @@ end
         assert_eq!(
             cache.lookup("lists", beam_path, 200, 0),
             Some("line2".to_string())
+        );
+    }
+
+    /// BT-2852: A cache entry written by a *different* compiler build — same
+    /// module, same `.beam` mtime, same path, but a different
+    /// `mapping_stamp` — must be treated as a miss. This is the exact warm-cache
+    /// scenario the issue describes: a `beamtalk_spec_reader.erl` mapping-logic
+    /// change (e.g. BT-2817 widening `string()` to `String | List`) must
+    /// invalidate previously-cached specs even though nothing about the
+    /// `.beam` file itself changed.
+    #[test]
+    fn type_cache_invalidates_on_mapping_stamp_change() {
+        let temp = TempDir::new().unwrap();
+        let cache_dir = Utf8PathBuf::from_path_buf(temp.path().join("type_cache")).unwrap();
+        let cache = TypeCache::new(cache_dir.clone());
+        let beam_path = Utf8Path::new("/usr/lib/erlang/lib/stdlib/ebin/lists.beam");
+
+        cache.store("lists", beam_path, 100, 0, "specs_line_v1");
+        assert_eq!(
+            cache.lookup("lists", beam_path, 100, 0),
+            Some("specs_line_v1".to_string()),
+            "freshly stored entry should be a hit"
+        );
+
+        // Simulate an older-build entry: rewrite the on-disk JSON with a
+        // different `mapping_stamp`, keeping module/mtime/path identical —
+        // i.e. everything the *old* cache key compared stays the same.
+        let entry_path = TypeCache::entry_path(&cache_dir, "lists", beam_path);
+        let content = std::fs::read_to_string(entry_path.as_std_path()).unwrap();
+        let mut entry: serde_json::Value = serde_json::from_str(&content).unwrap();
+        entry["mapping_stamp"] =
+            serde_json::Value::String("an-older-compiler-builds-stamp".to_string());
+        std::fs::write(entry_path.as_std_path(), entry.to_string()).unwrap();
+
+        assert!(
+            cache.lookup("lists", beam_path, 100, 0).is_none(),
+            "a stale mapping_stamp must invalidate an otherwise-fresh (matching mtime) entry"
         );
     }
 

@@ -5,6 +5,9 @@
 //!
 //! Provides `emit_beamtalk_version` which reads the workspace `VERSION` file
 //! and git state, then exposes the `BEAMTALK_VERSION` compile-time env var.
+//! Also provides `emit_spec_mapping_stamp`, which hashes
+//! `beamtalk_spec_reader.erl` and exposes the result as
+//! `BEAMTALK_SPEC_MAPPING_STAMP` (BT-2852).
 //!
 //! # Usage
 //!
@@ -99,4 +102,80 @@ fn git_short_sha() -> Option<String> {
         .ok()
         .filter(|o| o.status.success())
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+}
+
+/// Hash `runtime/apps/beamtalk_compiler/src/beamtalk_spec_reader.erl` and
+/// expose the result as the `BEAMTALK_SPEC_MAPPING_STAMP` compile-time env var
+/// (BT-2852).
+///
+/// The FFI type-spec cache (`_build/type_cache/`, and the shared
+/// OTP-version-keyed tier) keys cached specs by module name, `.beam` mtime,
+/// and OTP version only — none of which change just because the *compiler's*
+/// Erlang→Beamtalk type-mapping logic (`beamtalk_spec_reader.erl`'s
+/// `map_type/1` and friends) changed. Baking a content hash of that file into
+/// the binary at compile time gives cache entries a stamp to compare against:
+/// a build whose mapping logic differs produces a different stamp, so stale
+/// entries are detected as a miss rather than silently reused forever.
+///
+/// Deriving the stamp from a hash (rather than a hand-maintained constant)
+/// means there is nothing to remember to bump — any change to the reader's
+/// source, including comment-only edits, rotates the stamp automatically.
+/// The hash itself runs once per `cargo build` (via `rerun-if-changed`), not
+/// per `beamtalk` invocation, so comparing it at runtime is a cheap string
+/// comparison against a `&'static str` baked in via `env!()`.
+///
+/// # Panics
+///
+/// Panics if `beamtalk_spec_reader.erl` cannot be read — this file is
+/// committed source, so its absence indicates a broken checkout.
+pub fn emit_spec_mapping_stamp(workspace_root: &Path) {
+    let reader_path = workspace_root
+        .join("runtime")
+        .join("apps")
+        .join("beamtalk_compiler")
+        .join("src")
+        .join("beamtalk_spec_reader.erl");
+    println!("cargo:rerun-if-changed={}", reader_path.display());
+
+    let content = fs::read(&reader_path)
+        .unwrap_or_else(|e| panic!("Failed to read {}: {e}", reader_path.display()));
+
+    let hash = fnv1a_64(&content);
+    println!("cargo:rustc-env=BEAMTALK_SPEC_MAPPING_STAMP={hash:016x}");
+}
+
+/// FNV-1a 64-bit hash. Not cryptographic — used only as a cheap, deterministic
+/// content fingerprint so the type-mapping stamp doesn't depend on the
+/// standard library's hasher (which offers no cross-version stability
+/// guarantee) or an external hashing crate.
+fn fnv1a_64(data: &[u8]) -> u64 {
+    const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+    const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+    let mut hash = FNV_OFFSET_BASIS;
+    for &byte in data {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    hash
+}
+
+#[cfg(test)]
+mod fnv_tests {
+    use super::fnv1a_64;
+
+    #[test]
+    fn deterministic_for_same_input() {
+        assert_eq!(fnv1a_64(b"hello world"), fnv1a_64(b"hello world"));
+    }
+
+    #[test]
+    fn differs_for_different_input() {
+        assert_ne!(fnv1a_64(b"hello world"), fnv1a_64(b"hello worlds"));
+    }
+
+    #[test]
+    fn matches_known_fnv1a_64_vector() {
+        // Standard FNV-1a 64-bit test vector for the empty string.
+        assert_eq!(fnv1a_64(b""), 0xcbf2_9ce4_8422_2325);
+    }
 }
