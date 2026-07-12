@@ -1718,6 +1718,13 @@ process: x :: Object =>
 validate: x :: Object =>
   x isNil ifTrue: [^nil]
   x doSomething    // x is non-nil for the remainder
+
+// isKindOf: guard-and-return also narrows the rest of the method (BT-2825)
+render: coll :: Printable | Nil -> String =>
+  coll isNil ifTrue: [^""]
+  (coll isKindOf: List) ifFalse: [^""]
+  items :: List := coll   // no `@expect type` needed — coll is List here
+  items inject: "" into: [:acc :item | acc ++ item asString]
 ```
 
 **Supported narrowing patterns:**
@@ -1727,6 +1734,9 @@ validate: x :: Object =>
 | `x class =:= Foo ifTrue: [...]` | `x` is `Foo` in true block | True block only |
 | `x isKindOf: Foo ifTrue: [...]` | `x` is `Foo` in true block | True block only |
 | `x isKindOf: Foo ifFalse: [...]` | `x` is `T \ Foo` in false block | False block only |
+| `x isKindOf: Foo ifFalse: [^...]` | `x` is `Foo` after the statement | Rest of method |
+| `x isKindOf: Foo ifTrue: [^...]` | `x` is `T \ Foo` after the statement | Rest of method |
+| `x isKindOf: Foo ifTrue: [^...] ifFalse: [...]` | `x` is `T \ Foo` after the statement | Rest of method |
 | `x isNil ifTrue: [^...]` | `x` is non-nil after the statement | Rest of method |
 | `x isNil ifTrue: [self error: "..."]` | `x` is non-nil after the statement | Rest of method |
 | `x isNil ifFalse: [...]` | `x` is non-nil in false block | False block |
@@ -1735,6 +1745,8 @@ validate: x :: Object =>
 | `x ifNil: [...] ifNotNil: [:v \| ...]` | `v` is non-nil in notNil block | NotNil block |
 
 The diverging-guard pattern (`isNil ifTrue: [self error: "..."]`) recognises any block whose body infers as `Never` — including calls to `error:`, `notImplemented`, or any `-> Never` method — not just non-local returns (`^`). Narrowing also works on `self.field` reads: inside `self.field isNil ifFalse: [...]`, the field narrows to non-nil within the block.
+
+**`isKindOf:` guard-and-return (BT-2825):** the same diverging-guard treatment `isNil` gets also applies to `isKindOf:` — `(x isKindOf: Foo) ifFalse: [^default]` proves `x` is `Foo` for the rest of the method, and `(x isKindOf: Foo) ifTrue: [^default]` proves `x` is `T \ Foo`. This also closes a related gap: when `x`'s declared type is a Protocol (e.g. `Printable`) and `Foo` is a concrete class, the narrowed type collapses to the bare `Foo` — a runtime `isKindOf: Foo` check is a stronger proof than the protocol annotation, so the narrowed value is assignable to a `Foo`-typed local without an `@expect type` escape hatch.
 
 ### Conditional Return Type Inference
 
