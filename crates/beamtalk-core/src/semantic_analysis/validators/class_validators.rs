@@ -980,11 +980,22 @@ pub(crate) fn check_value_slot_case_collision(
         if hierarchy.resolve_class_kind(class.name.name.as_str()) != ClassKind::Value {
             continue;
         }
+        // Mirror compute_auto_slot_methods's filter (value_type_codegen.rs):
+        // a slot whose `with*:` selector is already user-defined never gets an
+        // auto-generated setter, so it can't collide at codegen time either.
+        let user_instance_selectors: std::collections::HashSet<String> = class
+            .methods
+            .iter()
+            .map(|m| m.selector.name().to_string())
+            .collect();
         let mut seen_by_selector: std::collections::HashMap<String, &str> =
             std::collections::HashMap::new();
         for slot in &class.state {
             let slot_name = slot.name.name.as_str();
             let with_sel = crate::synthetic_selectors::with_star_selector(slot_name);
+            if user_instance_selectors.contains(&with_sel) {
+                continue;
+            }
             if let Some(&first_name) = seen_by_selector.get(&with_sel) {
                 let reason = if first_name == slot_name {
                     format!("`{slot_name}` is declared more than once")
@@ -2186,6 +2197,27 @@ Actor subclass: HomActor
         assert!(
             diagnostics.is_empty(),
             "Expected no diagnostics for non-colliding slots, got: {diagnostics:?}"
+        );
+    }
+
+    /// A user-defined `withX:` method suppresses the auto-generated setter for
+    /// *both* colliding slots (mirrors `compute_auto_slot_methods`'s filter in
+    /// `value_type_codegen.rs`), so codegen never emits a duplicate map key —
+    /// the validator must not flag this as a collision either.
+    #[test]
+    fn value_subclass_user_defined_setter_suppresses_collision() {
+        let src = "Value subclass: Weird\n  field: x = 0\n  field: X = 0\n  withX: v => v";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.unwrap();
+        let mut diagnostics = Vec::new();
+        check_value_slot_case_collision(&module, &hierarchy, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no diagnostics when a user-defined withX: suppresses both \
+             auto-generated setters, got: {diagnostics:?}"
         );
     }
 
