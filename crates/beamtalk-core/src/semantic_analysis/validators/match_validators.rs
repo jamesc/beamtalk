@@ -384,6 +384,17 @@ fn validate_type_pattern_class(
         return;
     }
 
+    // `Nil` is a legacy alias for the nil class (`UndefinedObject`, BT-2016)
+    // recognised in annotation position (`structural_validators`'s
+    // `BUILTIN_CLASS_NAMES`), but — unlike `UndefinedObject` itself — it has
+    // no entry in `ClassHierarchy` to resolve against, so it would
+    // otherwise trip the unresolved-class check below despite being a
+    // codegen-supported (BT-2855, `generate_type_pattern`'s exact-atom-match
+    // branch), always-valid type-pattern class name.
+    if class_name == "Nil" {
+        return;
+    }
+
     if !hierarchy.has_class(class_name) {
         // Unknown class — reuse the existing unresolved-class diagnostic
         // (ADR 0100) verbatim, gated the same way as
@@ -400,6 +411,33 @@ fn validate_type_pattern_class(
                     .with_category(DiagnosticCategory::UnresolvedClass),
             );
         }
+        return;
+    }
+
+    // `Supervisor`/`DynamicSupervisor` subclasses reference a supervisor
+    // process, tagged `{'beamtalk_supervisor' | 'beamtalk_supervisor_new',
+    // ClassName, Module, Pid}` at runtime (`beamtalk_supervisor.erl`) — a
+    // third shape distinct from both the tagged-map (`Value`/`Object`) and
+    // actor-tuple (`'beamtalk_object'`) strategies `generate_type_pattern`
+    // already handles. Rather than risk silently-wrong codegen for a shape
+    // this session hasn't fully characterised (e.g. the transient
+    // `'beamtalk_supervisor_new'` tag during `class initialize:`), reject
+    // explicitly — the same "fail loudly, not silently wrong" choice
+    // already made for `Character` above and non-leaf classes below.
+    if hierarchy.is_supervisor_subclass(class_name)
+        || hierarchy.is_dynamic_supervisor_subclass(class_name)
+    {
+        diagnostics.push(
+            Diagnostic::error(
+                format!(
+                    "`{class_name}` is a Supervisor/DynamicSupervisor subclass; type patterns \
+                     are not yet supported for supervisor references"
+                ),
+                class.span,
+            )
+            .with_hint("Use `isKindOf:` guard clauses instead.".to_string())
+            .with_category(DiagnosticCategory::Type),
+        );
         return;
     }
 

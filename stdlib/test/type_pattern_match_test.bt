@@ -1,0 +1,240 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2855 / ADR 0107 Phase A: runtime tests for `nil` and `binding ::
+// ClassName` patterns in `match:` — bindings, narrowing, and codegen for
+// every Phase A primitive (String, Integer, Float, List, Dictionary,
+// Boolean, Symbol) plus an exact tagged `Value` class, a `when:` guard
+// scoped over the type-pattern binding, and a `match:` mixing pattern
+// kinds in one dispatch.
+//
+// Fixtures: stdlib/test/fixtures/value_point.bt (ValuePoint — a leaf
+// `Value subclass:` with no subclasses, used for the tagged-class arm)
+//           stdlib/test/fixtures/type_pattern_actor_fixture.bt
+//           (TypePatternActorFixture — a leaf `Actor subclass:` with no
+//           subclasses anywhere in the test corpus, used for the
+//           actor-reference arm; an actor reference is a 4-tuple at
+//           runtime, not a map, so it needs its own codegen strategy
+//           distinct from `ValuePoint`'s map-tag check)
+
+TestCase subclass: TypePatternMatchTest
+
+  testNilPattern =>
+    self
+      assert: (nil match: [
+        nil -> 0;
+        s :: String -> s size;
+        _ -> -1
+      ])
+      equals: 0
+
+  testStringPattern =>
+    self
+      assert: ("hi" match: [
+        nil -> 0;
+        s :: String -> s size;
+        _ -> -1
+      ])
+      equals: 2
+
+  testFallthroughToWildcard =>
+    self
+      assert: (42 match: [
+        nil -> 0;
+        s :: String -> s size;
+        _ -> -1
+      ])
+      equals: -1
+
+  testIntegerPattern =>
+    self
+      assert: (7 match: [
+        n :: Integer -> n + 1;
+        _ -> -1
+      ])
+      equals: 8
+
+  testFloatPattern =>
+    self
+      assert: (1.5 match: [
+        f :: Float -> f + 0.5;
+        _ -> -1
+      ])
+      equals: 2.0
+
+  testListPattern =>
+    self
+      assert: (#(1, 2, 3) match: [
+        l :: List -> l size;
+        _ -> -1
+      ])
+      equals: 3
+
+  testDictionaryPattern =>
+    self
+      assert: (#{#a => 1} match: [
+        d :: Dictionary -> d size;
+        _ -> -1
+      ])
+      equals: 1
+
+  testBooleanPatternTrue =>
+    self
+      assert: (true match: [
+        b :: Boolean -> b;
+        _ -> #other
+      ])
+      equals: true
+
+  testBooleanPatternFalse =>
+    self
+      assert: (false match: [
+        b :: Boolean -> b;
+        _ -> #other
+      ])
+      equals: false
+
+  // `Symbol`/`nil`/`Boolean` are all plain Erlang atoms with no
+  // distinguishing runtime tag — an earlier `s :: Symbol` arm must not
+  // shadow a later `nil ->` or `b :: Boolean` arm (ADR 0107 Phase A).
+  testSymbolPatternDoesNotMatchNil =>
+    self
+      assert: (nil match: [
+        s :: Symbol -> #matched;
+        nil -> #isNil;
+        _ -> #other
+      ])
+      equals: #isNil
+
+  testSymbolPatternDoesNotMatchBoolean =>
+    self
+      assert: (true match: [
+        s :: Symbol -> #matched;
+        b :: Boolean -> #isBoolean;
+        _ -> #other
+      ])
+      equals: #isBoolean
+
+  testSymbolPatternMatchesPlainSymbol =>
+    self
+      assert: (#ok match: [
+        s :: Symbol -> s;
+        _ -> #other
+      ])
+      equals: #ok
+
+  // Exact tagged `Value`/sealed classes use the map-tag (`$beamtalk_class`)
+  // check, generalized from the constructor pattern's hardcoded `Result`.
+  testTaggedValueClassPattern =>
+    p := ValuePoint new: #{#x => 3, #y => 4}
+    self
+      assert: (p match: [
+        pt :: ValuePoint -> pt distanceSquared;
+        _ -> -1
+      ])
+      equals: 25
+
+  // The binding's scope includes the arm's `when:` guard, not just its
+  // body (ADR 0107 Phase A) — the guard below references `n`, which only
+  // exists because the `Type` pattern's binding is already in scope by the
+  // time the guard is evaluated.
+  testGuardScopedOverTypeBinding =>
+    self
+      assert: (10 match: [
+        n :: Integer when: [n > 5] -> "big";
+        n :: Integer -> "small";
+        _ -> "other"
+      ])
+      equals: "big"
+    self
+      assert: (2 match: [
+        n :: Integer when: [n > 5] -> "big";
+        n :: Integer -> "small";
+        _ -> "other"
+      ])
+      equals: "small"
+
+  // A `match:` mixing a primitive `Type` arm and a tagged-class `Type` arm
+  // must dispatch correctly for both, plus fall through to a wildcard.
+  testMixedPrimitiveAndTaggedClassArmsInOneMatch =>
+    p := ValuePoint new: #{#x => 1, #y => 1}
+    self
+      assert: ("hi" match: [
+        s :: String -> #string;
+        pt :: ValuePoint -> #point;
+        _ -> #other
+      ])
+      equals: #string
+    self
+      assert: (p match: [
+        s :: String -> #string;
+        pt :: ValuePoint -> #point;
+        _ -> #other
+      ])
+      equals: #point
+    self
+      assert: (42 match: [
+        s :: String -> #string;
+        pt :: ValuePoint -> #point;
+        _ -> #other
+      ])
+      equals: #other
+
+  // A Beamtalk block compiles to a plain Erlang `fun`, never a map.
+  testBlockPattern =>
+    self
+      assert: ([:x | x + 1] match: [
+        blk :: Block -> (blk value: 41);
+        _ -> -1
+      ])
+      equals: 42
+
+  // `True`/`False` are real sealed `Boolean` subclasses, and
+  // `Nil`/`UndefinedObject` are the nil class (canonical + legacy alias,
+  // BT-2016) — all four compile to a bare atom, never a map.
+  testTrueFalseNilUndefinedObjectPatterns =>
+    self
+      assert: (true match: [
+        t :: True -> #wasTrue;
+        f :: False -> #wasFalse;
+        _ -> #other
+      ])
+      equals: #wasTrue
+    self
+      assert: (false match: [
+        t :: True -> #wasTrue;
+        f :: False -> #wasFalse;
+        _ -> #other
+      ])
+      equals: #wasFalse
+    self
+      assert: (nil match: [
+        n :: Nil -> #wasNil;
+        _ -> #other
+      ])
+      equals: #wasNil
+    self
+      assert: (nil match: [
+        u :: UndefinedObject -> #wasNil;
+        _ -> #other
+      ])
+      equals: #wasNil
+
+  // BT-2855 regression: an actor reference is `{'beamtalk_object',
+  // ClassAtom, ModuleAtom, Pid}` at runtime — a 4-tuple, not a map. Naively
+  // reusing the tagged-class `is_map` check for Actor subclasses would
+  // silently never match a live actor instance.
+  testActorClassPattern =>
+    a := TypePatternActorFixture spawn
+    self
+      assert: (a match: [
+        actor :: TypePatternActorFixture -> #wasActor;
+        _ -> #other
+      ])
+      equals: #wasActor
+    self
+      assert: (42 match: [
+        actor :: TypePatternActorFixture -> #wasActor;
+        _ -> #other
+      ])
+      equals: #other
