@@ -600,3 +600,39 @@ typed Object subclass: Repro
         "expected an inferred type to be recorded for the `ifNil:` send"
     );
 }
+
+/// A literal-`nil` receiver (`Known("UndefinedObject")`, not a `Union`) is
+/// out of scope for `if_nil_solo_union_ret_ty` — the guard bails since the
+/// receiver isn't a `Union`, and the send falls back to the pre-existing
+/// generic dispatch path (`infer_args_with_block_context`). That path infers
+/// `Known("String")` correctly here: since the receiver is `Known` (not a
+/// `Union`), it resolves `UndefinedObject>>ifNil:`'s `Block(R) -> R` param
+/// signature and substitutes `R` from the block's actual argument type — the
+/// BT-2824 fix (which targets the `T | Nil` union case) doesn't touch or
+/// regress this already-correct path.
+#[test]
+fn bt2824_literal_nil_receiver_if_nil_falls_back_to_generic_dispatch() {
+    let source = r#"
+typed Object subclass: Repro
+  go =>
+    nil ifNil: ["a"]
+"#;
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    let send_ty = find_send_inferred_ty(&module, checker.type_map(), "ifNil:")
+        .expect("no ifNil: send found in type_map");
+    assert!(
+        matches!(send_ty, InferredType::Known { class_name, .. } if class_name.as_str() == "String"),
+        "literal-nil receiver `ifNil:` falls back to the generic dispatch path, \
+         which correctly substitutes the method-local `R` generic from the \
+         block's type — expected Known(\"String\"), got: {send_ty:?}",
+    );
+}

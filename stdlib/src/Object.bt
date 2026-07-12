@@ -71,6 +71,15 @@ ProtoObject subclass: Object
 
   /// If nil, evaluate `nilBlock`; otherwise evaluate `notNilBlock` with self.
   ///
+  /// Bare `Block` params here (unlike `UndefinedObject`'s `Block(R) -> R`
+  /// override, BT-2824) are intentional, not an oversight: the type checker
+  /// never consults this declared signature for these two selectors — it
+  /// reads the block arguments' actual inferred return types directly
+  /// (`if_nil_branch_union_ret_ty` in `inference.rs`, BT-2047) since a bare
+  /// `-> R` here can't express "whatever the block returns" without a
+  /// `Self`-in-`Block(...)` type-arg form with no precedent elsewhere in
+  /// stdlib.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// 42 ifNil: [0] ifNotNil: [:v | v + 1]    // => 43
@@ -80,6 +89,8 @@ ProtoObject subclass: Object
     notNilBlock value: self
 
   /// If not nil, evaluate `notNilBlock` with self; otherwise evaluate `nilBlock`.
+  ///
+  /// See `ifNil:ifNotNil:` above — the bare `Block` params are intentional.
   ///
   /// ## Examples
   /// ```beamtalk

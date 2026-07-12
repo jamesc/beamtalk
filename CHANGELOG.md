@@ -27,6 +27,7 @@
 - **`isKindOf:` false-branch narrowing (ADR 0102)** — the false branch of an `isKindOf:` test now narrows via difference: `x :: Number; x isKindOf: Integer ifFalse: [...]` narrows `x` to `Number \ Integer` inside the false block, enabling more precise DNU warnings and eliminating false positives after class-membership guards. `class =:=` false branches intentionally stay unnarrowed (subclasses remain live possibilities) (BT-2744).
 - Fix false "type mismatch" warning when passing a structurally conforming class to a protocol-typed parameter — the nominal class-hierarchy walk now recognises protocols registered as synthetic classes (BT-2784).
 - Fix field mutations (`self.<field> :=`) inside blocks that are stored, returned, or passed to user-defined methods producing broken code (cryptic `erlc` errors or runtime `badarity` crashes) — now caught at compile time with a clear diagnostic and suggested fix (BT-2792).
+- Fix solo `ifNil:` / `ifNotNil:` on a `T | Nil` receiver inferring `Dynamic` instead of `T | R` / `R | Nil`, silently — matches what the two-arm `ifNil:ifNotNil:` / `ifNotNil:ifNil:` combinators already did (BT-2047). `Object>>ifNil:` now declares an explicit `-> Self` return type, which also tightens inference for non-union receivers: `knownNonNilValue ifNil: [block]` (dead-code block, receiver never nil) now infers as the receiver's own type instead of `Dynamic` — a correctness improvement, but code relying on `Dynamic` there to suppress a downstream type check may see a new warning (BT-2824).
 
 ### Standard Library
 
