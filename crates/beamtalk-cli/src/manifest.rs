@@ -453,10 +453,10 @@ fn parse_native_dependencies(native: Option<&NativeSection>) -> Result<NativeDep
 // `docs/development/architecture-principles.md`). Re-exported here so
 // existing `crate::commands::manifest::{DiagnosticsTable,
 // DiagnosticSeverityOverride}` references throughout this crate keep working
-// unchanged. `DiagnosticSeverityOverride` is only referenced from test code
-// in this crate today, so its re-export is `#[cfg(test)]`-gated to avoid an
-// unused-import warning in non-test builds.
-#[cfg(test)]
+// unchanged. `DiagnosticSeverityOverride` is referenced from test code in
+// both this lib crate and the `beamtalk` bin crate's own `#[cfg(test)]`
+// modules (e.g. `beam_compiler.rs`); the bin crate depends on this lib built
+// *without* `cfg(test)`, so the re-export must be unconditional.
 pub use beamtalk_core::compilation::DiagnosticSeverityOverride;
 pub use beamtalk_core::compilation::DiagnosticsTable;
 
