@@ -856,6 +856,73 @@ fn partition_diagnostics(
     (errors, warnings)
 }
 
+/// Process-wide cache for the package's `beamtalk.toml` `[diagnostics]`
+/// severity-override table (ADR 0100 Rule 3, BT-2839).
+///
+/// The compiler port is a long-lived process spawned once per BEAM node
+/// session (interactive REPL, `beamtalk run`, or a connected/LiveView
+/// session attached to either) with its working directory set to the
+/// project root — every node-startup path pins its own cwd there (e.g.
+/// `crates/beamtalk-cli/src/commands/repl/process.rs`,
+/// `crates/beamtalk-cli/src/commands/run.rs`) — and this port process
+/// inherits it at spawn time, unaffected by any later `file:set_cwd/1` on
+/// the Erlang side. Reading and parsing `beamtalk.toml`
+/// on every `compile_expression`/`compile`/`diagnostics` request would repeat
+/// disk I/O on a hot path (`diagnostics` in particular fires on a ~150ms
+/// idle-debounce as the user types); caching once per process — mirroring the
+/// LSP's "load once at startup" (`Backend::load_diagnostics_table`, BT-2800)
+/// — avoids that while keeping the same lenient, no-manifest-is-a-no-op
+/// semantics.
+static DIAGNOSTICS_OVERRIDES: std::sync::OnceLock<beamtalk_core::compilation::DiagnosticsTable> =
+    std::sync::OnceLock::new();
+
+/// Returns the process-wide `[diagnostics]` table, loading it from the
+/// current working directory's `beamtalk.toml` on first use.
+fn diagnostics_overrides() -> &'static beamtalk_core::compilation::DiagnosticsTable {
+    DIAGNOSTICS_OVERRIDES.get_or_init(|| {
+        let cwd = std::env::current_dir().unwrap_or_default();
+        load_diagnostics_overrides_from(&cwd)
+    })
+}
+
+/// Load the `[diagnostics]` severity-override table from `<root>/beamtalk.toml`
+/// (ADR 0100 Rule 3).
+///
+/// Lenient by design, mirroring the LSP's `load_diagnostics_table`: a root
+/// with no `beamtalk.toml`, or one that fails to parse, yields an empty table
+/// (Rule 1 defaults) rather than blocking diagnostics — a malformed manifest
+/// already fails loudly at `beamtalk build` time, and the REPL must keep
+/// evaluating regardless. Parse failures are logged so the mismatch is
+/// discoverable. Pure function of `root` (no global state) so it is directly
+/// unit-testable without touching the process's real working directory.
+fn load_diagnostics_overrides_from(
+    root: &std::path::Path,
+) -> beamtalk_core::compilation::DiagnosticsTable {
+    let manifest_path = root.join("beamtalk.toml");
+    let Ok(content) = std::fs::read_to_string(&manifest_path) else {
+        return beamtalk_core::compilation::DiagnosticsTable::new();
+    };
+    match beamtalk_core::compilation::parse_diagnostics_table_from_manifest_toml(&content) {
+        Ok(table) => {
+            if !table.is_empty() {
+                tracing::debug!(
+                    count = table.len(),
+                    "Loaded [diagnostics] severity override(s) from beamtalk.toml"
+                );
+            }
+            table
+        }
+        Err(e) => {
+            tracing::warn!(
+                path = %manifest_path.display(),
+                error = %e,
+                "failed to parse [diagnostics] table in beamtalk.toml; using Rule 1 defaults"
+            );
+            beamtalk_core::compilation::DiagnosticsTable::new()
+        }
+    }
+}
+
 /// Parse a Beamtalk expression source and run full diagnostics with primitive validation.
 ///
 /// Returns `Ok((module, warnings))` on success, or `Err(response_term)` containing a
@@ -875,6 +942,7 @@ fn parse_and_check_expression(
             parse_diagnostics,
             &known_var_refs,
             pre_class_hierarchy,
+            diagnostics_overrides(),
         );
 
     let options = beamtalk_core::CompilerOptions::default();
@@ -1266,6 +1334,7 @@ fn handle_compile(request: &Map) -> Term {
             parse_diagnostics,
             &[],
             pre_class_hierarchy.clone(),
+            diagnostics_overrides(),
         );
 
     // Run @primitive validation
@@ -1568,6 +1637,7 @@ fn handle_compile_method(request: &Map) -> Term {
             merged_parse_diags,
             &[],
             pre_class_hierarchy.clone(),
+            diagnostics_overrides(),
         );
     let options = beamtalk_core::CompilerOptions {
         stdlib_mode,
@@ -1683,6 +1753,7 @@ fn handle_diagnostics(request: &Map) -> Term {
             parse_diagnostics,
             &[],
             pre_class_hierarchy,
+            diagnostics_overrides(),
         )
     };
 
@@ -2575,6 +2646,64 @@ mod tests {
         assert!(
             diagnostics.elements.is_empty(),
             "expected no diagnostics for a plain valid expression: {response:?}"
+        );
+    }
+
+    /// BT-2839 (ADR 0100 Rule 3 surface-parity gap): a project root with a
+    /// `dnu = "error"` `[diagnostics]` table parses into a table that
+    /// escalates `Dnu`, mirroring what `beamtalk build` and the LSP
+    /// (BT-2800) already do for the same `beamtalk.toml`.
+    #[test]
+    fn load_diagnostics_overrides_from_parses_project_manifest() {
+        use beamtalk_core::compilation::DiagnosticSeverityOverride;
+        use beamtalk_core::source_analysis::DiagnosticCategory;
+
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        std::fs::write(
+            dir.path().join("beamtalk.toml"),
+            "[package]\nname = \"demo\"\nversion = \"0.1.0\"\n\n[diagnostics]\ndnu = \"error\"\n",
+        )
+        .expect("failed to write beamtalk.toml");
+
+        let table = load_diagnostics_overrides_from(dir.path());
+        assert_eq!(
+            table.get(&DiagnosticCategory::Dnu),
+            Some(&DiagnosticSeverityOverride::Error),
+            "expected dnu = \"error\" to parse into the table, got: {table:?}"
+        );
+    }
+
+    /// Lenient by design: a root with no `beamtalk.toml` at all — the common
+    /// case for an ad-hoc `beamtalk repl` session outside a project — must
+    /// not block diagnostics. An empty table is a complete no-op (Rule 1
+    /// defaults), matching the LSP's `load_diagnostics_table_absent_manifest_is_noop`.
+    #[test]
+    fn load_diagnostics_overrides_from_missing_manifest_is_empty() {
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+
+        let table = load_diagnostics_overrides_from(dir.path());
+        assert!(
+            table.is_empty(),
+            "expected an empty table with no beamtalk.toml, got: {table:?}"
+        );
+    }
+
+    /// A `beamtalk.toml` with an invalid `[diagnostics]` table (unknown
+    /// severity string) must not panic or block diagnostics — it logs and
+    /// falls back to an empty table, same as a missing manifest.
+    #[test]
+    fn load_diagnostics_overrides_from_malformed_table_is_empty() {
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        std::fs::write(
+            dir.path().join("beamtalk.toml"),
+            "[diagnostics]\ndnu = \"not-a-real-severity\"\n",
+        )
+        .expect("failed to write beamtalk.toml");
+
+        let table = load_diagnostics_overrides_from(dir.path());
+        assert!(
+            table.is_empty(),
+            "expected an empty table for a malformed [diagnostics] entry, got: {table:?}"
         );
     }
 

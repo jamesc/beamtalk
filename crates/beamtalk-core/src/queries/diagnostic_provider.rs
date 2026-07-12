@@ -261,12 +261,24 @@ pub fn compute_diagnostics_with_native_types(
 ///
 /// `pre_loaded_classes` are injected into the `ClassHierarchy` before `TypeChecking`,
 /// making REPL-session user classes visible to the `TypeChecker`.
+///
+/// This is the REPL's diagnostics entry point (called from
+/// `beamtalk-compiler-port`'s `compile_expression`/`compile`/`diagnostics`
+/// request handlers). `diagnostics_overrides` is the package's `beamtalk.toml`
+/// `[diagnostics]` severity-override table (ADR 0100 Rule 3); applying it
+/// here — after `@expect` suppression, mirroring the order
+/// [`compute_project_diagnostics`] uses — closes the BT-2839 surface-parity
+/// gap: a package that sets `dnu = "error"` now fails `beamtalk build`, shows
+/// an `Error` in the LSP (BT-2800), *and* shows an `Error` at the REPL,
+/// instead of a REPL-only soft `Hint`. Pass an empty table (the `Default`)
+/// for callers with no manifest context, which is a complete no-op.
 #[must_use]
 pub fn compute_diagnostics_with_known_vars_and_classes(
     module: &crate::ast::Module,
     parse_diagnostics: Vec<Diagnostic>,
     known_vars: &[&str],
     pre_loaded_classes: Vec<crate::semantic_analysis::class_hierarchy::ClassInfo>,
+    diagnostics_overrides: &crate::compilation::diagnostics_policy::DiagnosticsTable,
 ) -> Vec<Diagnostic> {
     let mut all_diagnostics = parse_diagnostics;
     let analysis_result = crate::semantic_analysis::analyse_with_known_vars_and_classes(
@@ -276,7 +288,10 @@ pub fn compute_diagnostics_with_known_vars_and_classes(
     );
     all_diagnostics.extend(analysis_result.diagnostics);
     apply_expect_directives(module, &mut all_diagnostics);
-    all_diagnostics
+    crate::compilation::diagnostics_policy::apply_diagnostics_table(
+        all_diagnostics,
+        diagnostics_overrides,
+    )
 }
 
 /// Applies `@expect` directives to suppress matching diagnostics.
@@ -710,6 +725,55 @@ mod tests {
         assert!(
             !has_undefined,
             "Should not report any undefined variables, got: {diagnostics:?}"
+        );
+    }
+
+    /// BT-2839 (ADR 0100 Rule 3 surface-parity gap): the REPL's diagnostics
+    /// entry point must apply the `[diagnostics]` table exactly like
+    /// `beamtalk build` (BT-2793) and the LSP (BT-2800) — a `dnu = "error"`
+    /// override promotes the default `Hint` on an unresolved selector to
+    /// `Error`, and an empty table (no manifest) is a complete no-op.
+    #[test]
+    fn compute_diagnostics_with_known_vars_and_classes_applies_severity_overrides() {
+        use crate::compilation::diagnostics_policy::{
+            DiagnosticSeverityOverride, DiagnosticsTable,
+        };
+        use crate::source_analysis::{DiagnosticCategory, Severity};
+
+        let source = "\"hello\" frobnicate";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+
+        // Baseline: empty table (no manifest) is a no-op — Rule 1 default is Hint.
+        let baseline = compute_diagnostics_with_known_vars_and_classes(
+            &module,
+            parse_diags.clone(),
+            &[],
+            vec![],
+            &DiagnosticsTable::new(),
+        );
+        assert!(
+            baseline.iter().any(
+                |d| d.category == Some(DiagnosticCategory::Dnu) && d.severity == Severity::Hint
+            ),
+            "expected a Dnu Hint with no overrides: {baseline:?}"
+        );
+
+        let mut table = DiagnosticsTable::new();
+        table.insert(DiagnosticCategory::Dnu, DiagnosticSeverityOverride::Error);
+        let overridden = compute_diagnostics_with_known_vars_and_classes(
+            &module,
+            parse_diags,
+            &[],
+            vec![],
+            &table,
+        );
+        assert!(
+            overridden
+                .iter()
+                .any(|d| d.category == Some(DiagnosticCategory::Dnu)
+                    && d.severity == Severity::Error),
+            "dnu = \"error\" override must promote the Dnu diagnostic to Error: {overridden:?}"
         );
     }
 

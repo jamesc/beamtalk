@@ -14,7 +14,9 @@ dependencies get no unresolved-selector hints in project-complete builds
 (the Rule 1 third downgrade, implemented as the BT-2794 guard). BT-2800
 closed a surface-parity gap BT-2793 left behind: the LSP now applies the
 Rule 3 `[diagnostics]` table too, not just `beamtalk build` (see the
-Escalation implementation note below).
+Escalation implementation note below). BT-2839 closed the same gap for a
+third surface, the REPL — `beamtalk build`, the LSP, and the REPL now all
+agree on Rule 3 severity.
 
 ## Context
 
@@ -353,9 +355,10 @@ escalation (Rule 3). What we reject: Gleam's closed-world fatality as a default.
   diagnostic, with `Dnu` clearly separated, makes it trivial to render hints
   distinctly from errors and to offer "create method" / "did you mean" actions.
   The Rule 3 `[diagnostics]` table (below) is honoured identically by
-  `beamtalk build` and the LSP (BT-2800) — a category escalated to `Error`
-  shows as an editor error, not a quiet hint, so the build and the IDE never
-  disagree about a diagnostic's severity.
+  `beamtalk build`, the LSP (BT-2800), and the REPL (BT-2839) — a category
+  escalated to `Error` shows as an editor error and a REPL error, not a
+  quiet hint, so the build, the IDE, and the REPL never disagree about a
+  diagnostic's severity.
 
 ### Discoverability
 
@@ -499,8 +502,9 @@ This ADR is policy; the code changes ride the BT-2251 workstreams.
   parse-error guard, pre-WS3 dependency guard).
 - **Escalation** (`crates/beamtalk-core/src/compilation/diagnostics_policy.rs`):
   **done (BT-2793, moved to `beamtalk-core` and wired into the LSP by
-  BT-2800).** The `beamtalk.toml` `[diagnostics]` per-category table (Rule 3)
-  is implemented; `--warnings-as-errors` itself is unchanged (still promotes
+  BT-2800, extended to the REPL by BT-2839).** The `beamtalk.toml`
+  `[diagnostics]` per-category table (Rule 3) is implemented;
+  `--warnings-as-errors` itself is unchanged (still promotes
   `Warning`/`Hint` to `Error`, excluding the gradual-migration categories
   unless the table explicitly overrides one of them). BT-2793 first landed
   the table and its application (`apply_diagnostics_table`) in
@@ -515,6 +519,21 @@ This ADR is policy; the code changes ride the BT-2251 workstreams.
   two surfaces cannot drift again by construction. The LSP
   (`crates/beamtalk-lsp/src/server.rs`, `Backend::load_diagnostics_table`)
   loads and parses each workspace root's `beamtalk.toml` once at startup.
+  BT-2839 found a **third** surface with the same pre-existing gap: the
+  REPL's diagnostics entry point
+  (`compute_diagnostics_with_known_vars_and_classes`, called from
+  `crates/beamtalk-compiler-port/src/main.rs`'s
+  `compile_expression`/`compile`/`diagnostics` request handlers) is a
+  separate function from `compute_project_diagnostics` that never called
+  `apply_diagnostics_table`. Unlike the LSP, the compiler-port has no
+  persistent per-connection service object to cache a loaded table on — it
+  is a stateless-per-request OTP port process — so BT-2839 instead caches
+  the table process-wide (`OnceLock`), loaded on first use from
+  `beamtalk.toml` in the port process's working directory, which is the
+  project root for the whole REPL session (the parent BEAM node pins its
+  cwd there at spawn, and the port inherits it). This mirrors the LSP's
+  load-once-at-startup semantics without requiring any new
+  Erlang↔Rust wire-protocol field.
 - **No runtime/codegen changes.**
 - **Coordination with ADR 0101 (`native:` for stateless Objects):** the
   receiver-knowledge scan must count `self delegate` `native:` methods as
@@ -548,7 +567,9 @@ transitions warrant care:
   WS5 is this policy), BT-2250, BT-2228; BT-2793 (Rule 1 + Rule 3,
   implemented), BT-2794 (Rule 2, blocked on BT-2795/BT-2796); BT-2800 (Rule 3
   LSP surface-parity fix — the `[diagnostics]` table moved to `beamtalk-core`
-  and is now applied by the LSP, not just `beamtalk build`)
+  and is now applied by the LSP, not just `beamtalk build`); BT-2839 (Rule 3
+  REPL surface-parity fix — the same table, found missing on a third surface
+  during BT-2800's review, is now applied by the REPL's compiler-port too)
 - Related ADRs: ADR 0024 (static-first, live-augmented tooling), ADR 0066 (open
   class extension methods), ADR 0077 (type coverage visibility / `@expect`),
   ADR 0070 (package namespaces & dependencies — cross-package interface)

@@ -108,7 +108,7 @@ Keys are kebab-case diagnostic categories (`dnu`, `type`, `unused`, `empty-body`
 
 **Severity floor:** the table can only affect diagnostics the checker considers *soft* (`Hint`/`Warning`/`Lint`). A diagnostic that is already a hard structural error — e.g. `actor-new` (`Actor subclass` must use `spawn`, not `new`), `inheritance` (subclassing a sealed class), `empty-body` — is never touched by a table entry. Rule 3 is an escalation mechanism for the open-world completeness-ladder diagnostics (Rule 1); it cannot be used to silence a category that's a hard compile error by construction.
 
-**Cross-surface parity:** `beamtalk build`/`check` and the LSP apply this table identically (BT-2800) — a package that sets `dnu = "error"` fails the CLI build *and* shows the same site as an `Error` in the editor, never a soft hint. The LSP loads `beamtalk.toml` once per workspace root at startup; edits to the `[diagnostics]` section while the server is running require an editor/LSP restart to take effect.
+**Cross-surface parity:** `beamtalk build`/`check`, the LSP (BT-2800), and the REPL (BT-2839) all apply this table identically — a package that sets `dnu = "error"` fails the CLI build, shows the same site as an `Error` in the editor, *and* shows an `Error` at the REPL, never a soft hint. The LSP loads `beamtalk.toml` once per workspace root at startup; the REPL's compiler-port process loads it once per session from its working directory (the project root the REPL was started in). Edits to the `[diagnostics]` section while the server/session is running require an editor/LSP restart or a fresh REPL session to take effect.
 
 See [ADR 0100](ADR/0100-open-world-diagnostic-policy.md) for the full policy rationale.
 
