@@ -583,14 +583,19 @@ to work.
   `generate_array_match_arm`'s (line 2350) nested-`case`-wrapping-a-guard-BIF-test
   shape (the `is_map` check at line 2411 is its concrete instance) generalized
   to a class-name → BIF table (`is_binary`,
-  `is_integer`, `is_float`, `is_list`, ...) — with two classes needing a
-  compound rather than single-BIF guard: `Dictionary` is a bare Erlang map
-  with **no** `'$beamtalk_class'` key (`value_type_codegen.rs:630`), while
-  every tagged `Value`/sealed-class instance is *also* a map, but *with* one
-  — so `x :: Dictionary` must compile to `is_map(X) andalso maps:get(
-  '$beamtalk_class', X, undefined) =:= undefined`, not a bare `is_map`, to
-  avoid false-positiving on every `Value` instance; and `Symbol`'s guard
-  excludes `nil`/`true`/`false` as described above. Exact tagged
+  `is_integer`, `is_float`, `is_list`, ...) — with two classes needing more
+  than a single-BIF guard: `Dictionary` is a bare Erlang map with **no**
+  `'$beamtalk_class'` key (`value_type_codegen.rs:630`), while every tagged
+  `Value`/sealed-class instance is *also* a map, but *with* one — so `x ::
+  Dictionary` cannot be a single `when` guard (`maps:get/3` is not a
+  guard-safe BIF; only `is_map/1`, `map_get/2`, and `is_map_key/2` are). It
+  emits the same nested-`case` shape the array arm already uses (line
+  2411-2418): an outer `case call 'erlang':'is_map'(X)`, and — only in the
+  `'true'` branch — an inner `case call 'maps':'get'('$beamtalk_class', X,
+  'undefined')` matching `'undefined'` for the Dictionary arm (`maps:get` in
+  *case-scrutinee* position, never inside a guard) and falling through to the
+  next arm on any other class tag; and `Symbol`'s guard excludes
+  `nil`/`true`/`false` as described above. Exact tagged
   `Value`/sealed classes reuse `generate_constructor_pattern`'s
   `'$beamtalk_class'` map-key check (~line 2761), generalized from
   hardcoded `Result` to the pattern's `class` field. Non-leaf classes in
