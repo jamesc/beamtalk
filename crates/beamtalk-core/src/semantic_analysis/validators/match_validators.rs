@@ -7,7 +7,7 @@
 //!
 //! Validates pattern match exhaustiveness for sealed types (BT-1299).
 
-use crate::ast::{Expression, Module, Pattern};
+use crate::ast::{Expression, Identifier, Module, Pattern};
 use crate::ast_walker::walk_module;
 use crate::semantic_analysis::ClassHierarchy;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
@@ -199,8 +199,38 @@ fn visit_assignment_in_match_arm(expr: &Expression, diagnostics: &mut Vec<Diagno
 
 // ── BT-2854 / ADR 0107 Phase A: `Pattern::Type` class validation ───────────
 
+/// Stdlib primitives ADR 0107 Phase A explicitly names as supported
+/// `Pattern::Type` classes (Decision §Phase A scope), each with its own
+/// dedicated BIF-test codegen strategy once BT-2855 lands.
+///
+/// These are exempted from the general hierarchy-based leaf check below:
+/// several of them are *nominally* non-leaf in `ClassHierarchy` for reasons
+/// that have nothing to do with runtime dispatch ambiguity — `Boolean` has
+/// stdlib subclasses `True`/`False` (`stdlib/src/True.bt`,
+/// `stdlib/src/False.bt`) purely to hang `ifTrue:`/`ifFalse:` double-dispatch
+/// methods off of, not because a plain `true`/`false` atom carries any
+/// distinguishing runtime tag — Phase A's `x :: Boolean` still means exactly
+/// "is this value `'true'` or `'false'`", tested as one BIF-style guard, not
+/// a class-tag test that could plausibly need Phase B's subclass dispatch.
+/// This list is the authority for which primitives get that treatment; it is
+/// intentionally not derived from the hierarchy (unlike the general leaf
+/// check), because "is a Phase A primitive" and "is a hierarchy leaf" are
+/// different questions that happen to coincide for ordinary user classes.
+const PHASE_A_PRIMITIVE_CLASSES: &[&str] = &[
+    "String",
+    "Integer",
+    "Float",
+    "List",
+    "Dictionary",
+    "Boolean",
+    "Symbol",
+];
+
 /// BT-2854 / ADR 0107 Phase A: validate the class name in every
-/// `Pattern::Type` (`binding :: ClassName`) arm of a `match:` expression.
+/// `Pattern::Type` (`binding :: ClassName`) arm of a `match:` expression,
+/// including type patterns nested inside container patterns (`Tuple`,
+/// `Array`, `List`, `Map`, `Constructor` keywords) — a `Pattern::Type` can
+/// appear anywhere a sub-pattern can, not just as an arm's top-level pattern.
 ///
 /// This is purely a semantic-analysis-stage check — `Pattern::Type` has no
 /// codegen yet (that lands with bindings/narrowing in BT-2855), so there is
@@ -209,7 +239,9 @@ fn visit_assignment_in_match_arm(expr: &Expression, diagnostics: &mut Vec<Diagno
 /// - **`Character`** is never accepted, known or not: it shares `Integer`'s
 ///   runtime representation with no distinct tag (ADR 0107 §Phase A scope),
 ///   so `x :: Character` could never be distinguished from `x :: Integer` at
-///   runtime.
+///   runtime. (Unlike `Boolean`, above, `Character` genuinely cannot be
+///   disambiguated from `Integer` by any runtime test — it compiles to a
+///   plain Erlang integer, not merely a nominal hierarchy child.)
 /// - **Unknown class name** reuses the existing unresolved-class diagnostic
 ///   verbatim (ADR 0100) — same `Warning` severity, same
 ///   [`DiagnosticCategory::UnresolvedClass`] category, and the same
@@ -220,7 +252,8 @@ fn visit_assignment_in_match_arm(expr: &Expression, diagnostics: &mut Vec<Diagno
 /// - **Non-leaf class** (has one or more subclasses) is a compile `Error` —
 ///   Phase A only supports concrete/leaf classes; matching on a class with
 ///   subclasses needs either compile-time subclass enumeration or a wrapped
-///   runtime dispatch call, deferred to ADR 0107 Phase B.
+///   runtime dispatch call, deferred to ADR 0107 Phase B. Classes in
+///   [`PHASE_A_PRIMITIVE_CLASSES`] are exempt from this check (see its doc).
 pub(crate) fn check_type_pattern_classes(
     module: &Module,
     hierarchy: &ClassHierarchy,
@@ -243,79 +276,142 @@ fn visit_type_pattern_classes(
     };
 
     for arm in arms {
-        let Pattern::Type { class, .. } = &arm.pattern else {
-            continue;
-        };
-        let class_name = class.name.as_str();
+        check_pattern_type_classes(&arm.pattern, hierarchy, has_cross_file_classes, diagnostics);
+    }
+}
 
-        // `Character` shares `Integer`'s runtime representation (no distinct
-        // tag) — never valid in a type pattern, regardless of whether it
-        // resolves in the hierarchy.
-        if class_name == "Character" {
-            diagnostics.push(
-                Diagnostic::error(
-                    "`Character` is not supported in a type pattern — it shares `Integer`'s \
-                     runtime representation with no distinct tag, so `x :: Character` can never \
-                     be distinguished from `x :: Integer` at runtime"
-                        .to_string(),
-                    class.span,
-                )
-                .with_hint("Use `x :: Integer` instead.".to_string())
-                .with_category(DiagnosticCategory::Type),
-            );
-            continue;
+/// Recursively finds every `Pattern::Type` in `pattern` (including ones
+/// nested inside container sub-patterns) and validates its class name.
+fn check_pattern_type_classes(
+    pattern: &Pattern,
+    hierarchy: &ClassHierarchy,
+    has_cross_file_classes: bool,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    match pattern {
+        Pattern::Type { class, .. } => {
+            validate_type_pattern_class(class, hierarchy, has_cross_file_classes, diagnostics);
         }
-
-        if !hierarchy.has_class(class_name) {
-            // Unknown class — reuse the existing unresolved-class diagnostic
-            // (ADR 0100) verbatim, gated the same way as
-            // `check_unresolved_classes`: open-world assumption when
-            // cross-file metadata isn't loaded.
-            if has_cross_file_classes {
-                diagnostics.push(
-                    Diagnostic::warning(format!("Unresolved class `{class_name}`"), class.span)
-                        .with_hint(
-                            "This class is not defined in the current compilation unit or \
-                             standard library. Suppress with @expect unresolved_class if it \
-                             exists at runtime.",
-                        )
-                        .with_category(DiagnosticCategory::UnresolvedClass),
+        Pattern::Tuple { elements, .. } | Pattern::List { elements, .. } => {
+            for elem in elements {
+                check_pattern_type_classes(elem, hierarchy, has_cross_file_classes, diagnostics);
+            }
+            if let Pattern::List {
+                tail: Some(tail), ..
+            } = pattern
+            {
+                check_pattern_type_classes(tail, hierarchy, has_cross_file_classes, diagnostics);
+            }
+        }
+        Pattern::Array { elements, rest, .. } => {
+            for elem in elements {
+                check_pattern_type_classes(elem, hierarchy, has_cross_file_classes, diagnostics);
+            }
+            if let Some(rest_pat) = rest {
+                check_pattern_type_classes(
+                    rest_pat,
+                    hierarchy,
+                    has_cross_file_classes,
+                    diagnostics,
                 );
             }
-            continue;
         }
+        Pattern::Map { pairs, .. } => {
+            for pair in pairs {
+                check_pattern_type_classes(
+                    &pair.value,
+                    hierarchy,
+                    has_cross_file_classes,
+                    diagnostics,
+                );
+            }
+        }
+        Pattern::Binary { segments, .. } => {
+            for segment in segments {
+                check_pattern_type_classes(
+                    &segment.value,
+                    hierarchy,
+                    has_cross_file_classes,
+                    diagnostics,
+                );
+            }
+        }
+        Pattern::Constructor { keywords, .. } => {
+            for (_, binding) in keywords {
+                check_pattern_type_classes(binding, hierarchy, has_cross_file_classes, diagnostics);
+            }
+        }
+        Pattern::Wildcard(_) | Pattern::Literal(_, _) | Pattern::Variable(_) | Pattern::Nil(_) => {}
+    }
+}
 
-        // Non-leaf class — Phase A only supports concrete/leaf classes.
-        //
-        // `Character` is filtered out of the subclass count: it is a nominal
-        // (type-level) `Integer subclass:` in the stdlib, but shares
-        // `Integer`'s runtime representation exactly (no distinct tag,
-        // rejected on its own above) — so its existence doesn't make
-        // `Integer` itself ambiguous the way a real polymorphic subclass
-        // would. This is a targeted stdlib carve-out, not a general
-        // "ignore some subclasses" policy: every other subclass still counts.
-        let real_subclasses = hierarchy
-            .direct_subclasses(class_name)
-            .into_iter()
-            .filter(|s| s.as_str() != "Character")
-            .count();
-        if real_subclasses > 0 {
+fn validate_type_pattern_class(
+    class: &Identifier,
+    hierarchy: &ClassHierarchy,
+    has_cross_file_classes: bool,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let class_name = class.name.as_str();
+
+    // `Character` shares `Integer`'s runtime representation (no distinct
+    // tag) — never valid in a type pattern, regardless of whether it
+    // resolves in the hierarchy.
+    if class_name == "Character" {
+        diagnostics.push(
+            Diagnostic::error(
+                "`Character` is not supported in a type pattern — it shares `Integer`'s \
+                 runtime representation with no distinct tag, so `x :: Character` can never \
+                 be distinguished from `x :: Integer` at runtime"
+                    .to_string(),
+                class.span,
+            )
+            .with_hint("Use `x :: Integer` instead.".to_string())
+            .with_category(DiagnosticCategory::Type),
+        );
+        return;
+    }
+
+    // Phase A's explicitly-named primitives are always valid — see
+    // `PHASE_A_PRIMITIVE_CLASSES`'s doc for why they skip the leaf check.
+    if PHASE_A_PRIMITIVE_CLASSES.contains(&class_name) {
+        return;
+    }
+
+    if !hierarchy.has_class(class_name) {
+        // Unknown class — reuse the existing unresolved-class diagnostic
+        // (ADR 0100) verbatim, gated the same way as
+        // `check_unresolved_classes`: open-world assumption when
+        // cross-file metadata isn't loaded.
+        if has_cross_file_classes {
             diagnostics.push(
-                Diagnostic::error(
-                    format!(
-                        "`{class_name}` has subclasses; type patterns are not yet supported \
-                         for non-leaf classes — see ADR 0107 Phase B"
-                    ),
-                    class.span,
-                )
-                .with_hint(
-                    "Match on the concrete subclasses instead, or use `isKindOf:` guard \
-                     clauses."
-                        .to_string(),
-                )
-                .with_category(DiagnosticCategory::Type),
+                Diagnostic::warning(format!("Unresolved class `{class_name}`"), class.span)
+                    .with_hint(
+                        "This class is not defined in the current compilation unit or \
+                         standard library. Suppress with @expect unresolved_class if it \
+                         exists at runtime.",
+                    )
+                    .with_category(DiagnosticCategory::UnresolvedClass),
             );
         }
+        return;
+    }
+
+    // Non-leaf class — Phase A only supports concrete/leaf classes.
+    if !hierarchy.direct_subclasses(class_name).is_empty() {
+        diagnostics.push(
+            Diagnostic::error(
+                format!(
+                    "`{class_name}` has subclasses; type patterns are not yet supported \
+                     for non-leaf classes — see ADR 0107 Phase B"
+                ),
+                class.span,
+            )
+            .with_hint(
+                "Match on the concrete subclasses instead, or use `isKindOf:` guard clauses."
+                    .to_string(),
+            )
+            .with_category(DiagnosticCategory::Type),
+        );
     }
 }
 
@@ -588,6 +684,27 @@ mod tests {
         );
     }
 
+    /// Regression test: referencing a `Pattern::Type` binding in its own arm
+    /// body must not raise a spurious "Undefined variable" error. The
+    /// binding is registered in `pattern_bindings.rs` even though narrowing
+    /// its type to `class` is deferred to BT-2855.
+    #[test]
+    fn type_pattern_binding_is_not_undefined_variable() {
+        let src = "Object subclass: Foo\n  test: x =>\n    x match: [path :: String -> path; _ -> \"\"]\n";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "parse diags: {parse_diags:?}");
+        let result = crate::semantic_analysis::analyse(&module);
+        assert!(
+            !result
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("Undefined variable")),
+            "Expected no undefined-variable error for a Pattern::Type binding, got: {:?}",
+            result.diagnostics
+        );
+    }
+
     // ── BT-2854 / ADR 0107 Phase A: `Pattern::Type` class validation ────────
 
     fn hierarchy_for(src: &str) -> (crate::ast::Module, ClassHierarchy) {
@@ -610,17 +727,35 @@ mod tests {
         );
     }
 
-    /// `Integer` is a known Phase A leaf class even though `Character` is a
-    /// nominal `Integer subclass:` in the stdlib — `Character` must not count
-    /// against `Integer`'s leaf status.
+    /// `Integer` is a known Phase A primitive even though `Character` is a
+    /// nominal `Integer subclass:` in the stdlib — `PHASE_A_PRIMITIVE_CLASSES`
+    /// exempts it from the general hierarchy-based leaf check.
     #[test]
-    fn type_pattern_integer_not_flagged_non_leaf_by_character() {
+    fn type_pattern_integer_not_flagged_non_leaf() {
         let (module, hierarchy) = hierarchy_for("x match: [n :: Integer -> n; _ -> 0]");
         let mut diagnostics = Vec::new();
         check_type_pattern_classes(&module, &hierarchy, true, &mut diagnostics);
         assert!(
             diagnostics.is_empty(),
-            "Expected no diagnostics for Integer (Character doesn't count), got: {diagnostics:?}"
+            "Expected no diagnostics for Integer, got: {diagnostics:?}"
+        );
+    }
+
+    /// `Boolean` is an explicitly-named Phase A primitive (ADR 0107 Decision
+    /// §Phase A scope) even though it has nominal stdlib subclasses `True`/
+    /// `False` (`stdlib/src/True.bt`, `stdlib/src/False.bt`) — those exist to
+    /// hang `ifTrue:`/`ifFalse:` double-dispatch methods off of, not because
+    /// `true`/`false` atoms carry a distinguishing runtime tag. Regression
+    /// test for the bug where a naive hierarchy-only leaf check would wrongly
+    /// reject `x :: Boolean` as non-leaf.
+    #[test]
+    fn type_pattern_boolean_not_flagged_non_leaf() {
+        let (module, hierarchy) = hierarchy_for("x match: [b :: Boolean -> b; _ -> 0]");
+        let mut diagnostics = Vec::new();
+        check_type_pattern_classes(&module, &hierarchy, true, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no diagnostics for Boolean, got: {diagnostics:?}"
         );
     }
 
@@ -717,5 +852,42 @@ mod tests {
             diagnostics.is_empty(),
             "Expected no diagnostics when no Pattern::Type is present, got: {diagnostics:?}"
         );
+    }
+
+    /// A `Pattern::Type` nested inside a tuple sub-pattern is still
+    /// validated — the check must recurse into container patterns, not just
+    /// inspect the arm's top-level pattern.
+    #[test]
+    fn type_pattern_nested_in_tuple_is_validated() {
+        let (module, hierarchy) = hierarchy_for("x match: [{c :: Character, y} -> y; _ -> 0]");
+        let mut diagnostics = Vec::new();
+        check_type_pattern_classes(&module, &hierarchy, true, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected the nested Character type pattern to be flagged, got: {diagnostics:?}"
+        );
+        assert!(diagnostics[0].message.contains("Character"));
+    }
+
+    /// A `Pattern::Type` nested inside an array sub-pattern is still
+    /// validated (same recursion path as the tuple case above; `Array`
+    /// elements also route through the general `parse_pattern`, unlike
+    /// `Constructor` keyword bindings and `Map` values, which don't yet
+    /// accept a `::` type pattern at the grammar level).
+    #[test]
+    fn type_pattern_nested_in_array_is_validated() {
+        let (module, hierarchy) = hierarchy_for(
+            "Object subclass: Shape\nShape subclass: Circle\n\
+             x match: [#[s :: Shape, y] -> y; _ -> 0]",
+        );
+        let mut diagnostics = Vec::new();
+        check_type_pattern_classes(&module, &hierarchy, true, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected the nested non-leaf Shape type pattern to be flagged, got: {diagnostics:?}"
+        );
+        assert!(diagnostics[0].message.contains("Shape"));
     }
 }

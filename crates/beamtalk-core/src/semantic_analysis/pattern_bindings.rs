@@ -70,6 +70,41 @@ pub fn extract_match_arm_bindings(
     (bindings, diagnostics)
 }
 
+/// Records a single identifier binding, emitting a duplicate-variable
+/// diagnostic if it collides with an earlier binding in the same pattern
+/// (unless `allow_duplicates` is set — see `extract_match_arm_bindings`).
+/// Shared by `Pattern::Variable` and `Pattern::Type`'s `binding`.
+fn record_binding(
+    id: &Identifier,
+    bindings: &mut Vec<Identifier>,
+    seen: &mut std::collections::HashMap<EcoString, Span>,
+    diagnostics: &mut Vec<crate::source_analysis::Diagnostic>,
+    allow_duplicates: bool,
+) {
+    use std::collections::hash_map::Entry;
+
+    match seen.entry(id.name.clone()) {
+        Entry::Occupied(entry) => {
+            if !allow_duplicates {
+                // Duplicate variable - emit diagnostic
+                let first_span = *entry.get();
+                diagnostics.push(crate::source_analysis::Diagnostic::error(
+                    format!(
+                        "Variable '{}' is bound multiple times in pattern (first bound at byte offset {})",
+                        id.name,
+                        first_span.start()
+                    ),
+                    id.span,
+                ).with_hint(format!("Rename one of the `{}` bindings — each variable can only appear once in a pattern", id.name)));
+            }
+        }
+        Entry::Vacant(entry) => {
+            entry.insert(id.span);
+        }
+    }
+    bindings.push(id.clone());
+}
+
 /// Internal implementation of pattern binding extraction.
 ///
 /// `allow_duplicates` suppresses the duplicate-variable diagnostic. It is set
@@ -85,29 +120,18 @@ fn extract_pattern_bindings_impl(
     match pattern {
         // Variable patterns bind the identifier
         Pattern::Variable(id) => {
-            // Use Entry API to avoid double lookup
-            use std::collections::hash_map::Entry;
+            record_binding(id, bindings, seen, diagnostics, allow_duplicates);
+        }
 
-            match seen.entry(id.name.clone()) {
-                Entry::Occupied(entry) => {
-                    if !allow_duplicates {
-                        // Duplicate variable - emit diagnostic
-                        let first_span = *entry.get();
-                        diagnostics.push(crate::source_analysis::Diagnostic::error(
-                            format!(
-                                "Variable '{}' is bound multiple times in pattern (first bound at byte offset {})",
-                                id.name,
-                                first_span.start()
-                            ),
-                            id.span,
-                        ).with_hint(format!("Rename one of the `{}` bindings — each variable can only appear once in a pattern", id.name)));
-                    }
-                }
-                Entry::Vacant(entry) => {
-                    entry.insert(id.span);
-                }
-            }
-            bindings.push(id.clone());
+        // Type patterns bind `binding` (ADR 0107 Phase A) — registering it
+        // here is what makes the name resolvable in the arm body/guard;
+        // narrowing its *type* to `class` is BT-2855's job (bindings/scope,
+        // narrowing, and codegen for `Pattern::Type` land together there).
+        // Without this, `path :: String -> path` would raise a spurious
+        // "Undefined variable: path" error even though the pattern is
+        // otherwise valid Phase A syntax.
+        Pattern::Type { binding, .. } => {
+            record_binding(binding, bindings, seen, diagnostics, allow_duplicates);
         }
 
         // Tuple patterns: recursively extract; duplicates are not allowed (native Core Erlang patterns)
@@ -197,10 +221,8 @@ fn extract_pattern_bindings_impl(
         }
 
         // Wildcards and literals don't bind variables. `nil` likewise binds
-        // nothing (ADR 0107 Phase A). `Pattern::Type`'s `binding` is not
-        // wired into scope/name-resolution yet — that lands with narrowing
-        // and codegen in BT-2855.
-        Pattern::Wildcard(_) | Pattern::Literal(_, _) | Pattern::Nil(_) | Pattern::Type { .. } => {}
+        // nothing (ADR 0107 Phase A).
+        Pattern::Wildcard(_) | Pattern::Literal(_, _) | Pattern::Nil(_) => {}
     }
 }
 

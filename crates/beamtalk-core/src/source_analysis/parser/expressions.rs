@@ -1387,6 +1387,7 @@ impl Parser {
     /// - `identifier :: ClassName` — type pattern (ADR 0107 Phase A)
     /// - integer, float, string, symbol, character — literal
     /// - `{p1, p2, ...}` — tuple
+    #[allow(clippy::too_many_lines)] // one arm per pattern kind
     fn parse_pattern(&mut self) -> Pattern {
         // Guard against stack overflow from deeply nested tuple patterns
         let span = self.current_token().span();
