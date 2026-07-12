@@ -36,7 +36,7 @@ sealed Object subclass: UndefinedObject
   /// ```beamtalk
   /// nil ifNil: ["nothing"]      // => "nothing"
   /// ```
-  ifNil: nilBlock :: Block => nilBlock value
+  ifNil: nilBlock :: Block(R) -> R => nilBlock value
 
   /// Return self (nil) since the receiver is nil.
   ///
@@ -52,7 +52,8 @@ sealed Object subclass: UndefinedObject
   /// ```beamtalk
   /// nil ifNil: [0] ifNotNil: [:v | v + 1]   // => 0
   /// ```
-  ifNil: nilBlock :: Block ifNotNil: _notNilBlock :: Block => nilBlock value
+  ifNil: nilBlock :: Block(R) ifNotNil: _notNilBlock :: Block(R) -> R =>
+    nilBlock value
 
   /// Evaluate `nilBlock` since the receiver is nil.
   ///
@@ -60,7 +61,8 @@ sealed Object subclass: UndefinedObject
   /// ```beamtalk
   /// nil ifNotNil: [:v | v + 1] ifNil: [0]   // => 0
   /// ```
-  ifNotNil: _notNilBlock :: Block ifNil: nilBlock :: Block => nilBlock value
+  ifNotNil: _notNilBlock :: Block(R) ifNil: nilBlock :: Block(R) -> R =>
+    nilBlock value
 
   /// Return self. nil is immutable and unique.
   ///
