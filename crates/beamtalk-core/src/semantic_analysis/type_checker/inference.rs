@@ -716,7 +716,14 @@ impl TypeChecker {
                 let is_class_side_send = Self::is_class_side_receiver(cascade_target, env);
                 for msg in messages {
                     let selector_name = msg.selector.name();
-                    self.infer_args_with_block_context(
+                    // BT-2845: capture the inferred argument types so every
+                    // cascaded message (not just the first) can be run
+                    // through `check_argument_types` below — previously this
+                    // return value was discarded, so a mistyped argument to a
+                    // second-or-later cascade message went entirely
+                    // unchecked, unlike the same send written as its own
+                    // statement.
+                    let arg_types = self.infer_args_with_block_context(
                         &msg.arguments,
                         &dispatch_ty,
                         &selector_name,
@@ -727,6 +734,16 @@ impl TypeChecker {
                     );
                     if is_class_ref {
                         if let Expression::ClassReference { name, .. } = unwrapped_target {
+                            self.check_argument_types(
+                                &name.name,
+                                &selector_name,
+                                &arg_types,
+                                msg.span,
+                                hierarchy,
+                                true,
+                                Some(&msg.arguments),
+                                Some(env),
+                            );
                             self.check_class_side_send(
                                 &name.name,
                                 &selector_name,
@@ -738,6 +755,16 @@ impl TypeChecker {
                     } else if let InferredType::Known { ref class_name, .. } = dispatch_ty {
                         if env.in_class_method && Self::is_self_receiver(unwrapped_target) {
                             if !in_abstract_method {
+                                self.check_argument_types(
+                                    class_name,
+                                    &selector_name,
+                                    &arg_types,
+                                    msg.span,
+                                    hierarchy,
+                                    true,
+                                    Some(&msg.arguments),
+                                    Some(env),
+                                );
                                 self.check_class_side_send(
                                     class_name,
                                     &selector_name,
@@ -747,6 +774,25 @@ impl TypeChecker {
                                 );
                             }
                         } else {
+                            // Skip argument type check for binary messages —
+                            // `check_binary_operand_types` (run on the first
+                            // cascade send via `infer_message_send_with_receiver_ty`)
+                            // already provides more specific warnings for
+                            // arithmetic/comparison/concat; mirrors the
+                            // non-cascade skip at the bottom of
+                            // `infer_message_send_with_receiver_ty`.
+                            if !matches!(msg.selector, MessageSelector::Binary(_)) {
+                                self.check_argument_types(
+                                    class_name,
+                                    &selector_name,
+                                    &arg_types,
+                                    msg.span,
+                                    hierarchy,
+                                    false,
+                                    Some(&msg.arguments),
+                                    Some(env),
+                                );
+                            }
                             self.check_instance_selector(
                                 class_name,
                                 &selector_name,
@@ -755,7 +801,14 @@ impl TypeChecker {
                             );
                         }
                     } else if let InferredType::Union { ref members, .. } = dispatch_ty {
-                        // Union cascades: validate selector on all members
+                        // Union cascades: validate selector on all members.
+                        // Argument-type checking against a union *receiver* is
+                        // out of scope here — `infer_message_send_with_receiver_ty`
+                        // doesn't perform it for the first cascade message
+                        // either (see `infer_union_message_send`), so this
+                        // preserves parity rather than introducing new
+                        // behaviour beyond BT-2845's scope (unchecked
+                        // arguments on continuation messages).
                         self.infer_union_message_send(members, &selector_name, msg.span, hierarchy);
                     }
                 }
