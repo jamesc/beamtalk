@@ -44,7 +44,7 @@ impl TypeChecker {
     /// whole union when any member is `Dynamic`/`Union`/`Meta`/`Never`.
     ///
     /// [`inferred_type_to_string`]: Self::inferred_type_to_string
-    fn classify_union_members<F>(
+    pub(super) fn classify_union_members<F>(
         members: &[InferredType],
         pred: F,
     ) -> Option<(usize, usize, Vec<EcoString>)>

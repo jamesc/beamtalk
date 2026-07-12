@@ -1462,6 +1462,7 @@ impl TypeChecker {
                     arguments,
                     &arg_types,
                     span,
+                    hierarchy,
                 );
             }
 
@@ -1762,6 +1763,7 @@ impl TypeChecker {
     /// the registry's declared parameter names (ADR 0075 — footgun prevention).
     ///
     /// **References:** ADR 0075 — Type Checker Integration, Keyword mismatch warning
+    #[allow(clippy::too_many_arguments)] // BT-2846: hierarchy needed for Union-arm compatibility checks
     fn infer_ffi_call(
         &mut self,
         receiver_type_args: &[InferredType],
@@ -1770,6 +1772,7 @@ impl TypeChecker {
         arguments: &[Expression],
         arg_types: &[InferredType],
         span: Span,
+        hierarchy: &ClassHierarchy,
     ) -> InferredType {
         // Extract the module name from the receiver's type args.
         // ErlangModule<lists> → module_name = "lists"
@@ -1802,7 +1805,14 @@ impl TypeChecker {
         self.check_ffi_keyword_mismatch(module_name, &function_name, arity, selector, &sig, span);
 
         // Check argument types positionally against declared params
-        self.check_ffi_argument_types(module_name, &function_name, &sig, arg_types, span);
+        self.check_ffi_argument_types(
+            module_name,
+            &function_name,
+            &sig,
+            arg_types,
+            span,
+            hierarchy,
+        );
 
         // BT-2023(C): Propagate call-site type_args into the FFI return type.
         // Erlang specs with polymorphic types (e.g., `[T] -> [T]` for lists:reverse/1)
@@ -1837,13 +1847,14 @@ impl TypeChecker {
     /// Checks argument types against declared parameter types in an FFI signature.
     ///
     /// Types are matched positionally (ADR 0075 — FFI calls are positional).
-    fn check_ffi_argument_types(
+    pub(super) fn check_ffi_argument_types(
         &mut self,
         module_name: &str,
         function_name: &str,
         sig: &super::native_type_registry::FunctionSignature,
         arg_types: &[InferredType],
         span: Span,
+        hierarchy: &ClassHierarchy,
     ) {
         for (i, (param, arg_ty)) in sig.params.iter().zip(arg_types.iter()).enumerate() {
             // Skip Dynamic args — we don't know the type
@@ -1855,39 +1866,88 @@ impl TypeChecker {
                 continue;
             }
 
-            if let (
-                InferredType::Known {
-                    class_name: expected,
-                    ..
-                },
+            let InferredType::Known {
+                class_name: expected,
+                ..
+            } = &param.type_
+            else {
+                continue;
+            };
+
+            let param_pos = i + 1;
+            let fallback_label = format!("parameter {param_pos}");
+            let param_label = param.keyword.as_deref().unwrap_or(&fallback_label);
+            // BT-2066: Render `UndefinedObject` as `Nil` in user-facing messages.
+            let expected_display = InferredType::class_name_for_diagnostic(expected.as_str());
+
+            // Object is the root of the BT class hierarchy — any class is a
+            // subtype. This arises when Erlang specs use beamtalk_object()
+            // (which maps to Object) and the call site passes a concrete class.
+            let expected_is_object =
+                WellKnownClass::from_str(expected) == Some(WellKnownClass::Object);
+
+            match arg_ty {
                 InferredType::Known {
                     class_name: actual, ..
-                },
-            ) = (&param.type_, arg_ty)
-            {
-                if expected == actual {
-                    continue;
+                } => {
+                    if actual == expected || expected_is_object {
+                        continue;
+                    }
+                    let actual_display = InferredType::class_name_for_diagnostic(actual.as_str());
+                    self.diagnostics.push(Diagnostic::warning(
+                        format!(
+                            "{module_name}:{function_name}/{arity} {param_label} expects {expected_display}, got {actual_display}",
+                            arity = sig.arity,
+                        ),
+                        span,
+                    ).with_hint("Use `@expect type` to suppress if the call is intentional")
+                    .with_category(DiagnosticCategory::Type));
                 }
-                // Object is the root of the BT class hierarchy — any class is
-                // a subtype. This arises when Erlang specs use beamtalk_object()
-                // (which maps to Object) and the call site passes a concrete class.
-                if WellKnownClass::from_str(expected) == Some(WellKnownClass::Object) {
-                    continue;
-                }
-                let param_pos = i + 1;
-                let fallback_label = format!("parameter {param_pos}");
-                let param_label = param.keyword.as_deref().unwrap_or(&fallback_label);
-                // BT-2066: Render `UndefinedObject` as `Nil` in user-facing messages.
-                let expected_display = InferredType::class_name_for_diagnostic(expected.as_str());
-                let actual_display = InferredType::class_name_for_diagnostic(actual.as_str());
-                self.diagnostics.push(Diagnostic::warning(
-                    format!(
-                        "{module_name}:{function_name}/{arity} {param_label} expects {expected_display}, got {actual_display}",
+                InferredType::Union { members, .. } => {
+                    // BT-2846: mirrors check_argument_types's Union handling
+                    // (BT-1832) — every member of the argument's union is
+                    // checked against the declared FFI parameter type.
+                    if expected_is_object {
+                        continue;
+                    }
+                    let Some((compat, total, incompatible)) =
+                        Self::classify_union_members(members, |m| {
+                            Self::is_type_compatible(m, expected, hierarchy)
+                        })
+                    else {
+                        continue; // Contains Dynamic/Union/Meta/Never member — skip conservatively
+                    };
+                    if compat == total {
+                        continue; // All members compatible → pass
+                    }
+                    let union_display = arg_ty
+                        .display_for_diagnostic()
+                        .unwrap_or_else(|| EcoString::from("Dynamic"));
+                    let base_message = format!(
+                        "{module_name}:{function_name}/{arity} {param_label} expects {expected_display}, got {union_display}",
                         arity = sig.arity,
-                    ),
-                    span,
-                ).with_hint("Use `@expect type` to suppress if the call is intentional")
-                .with_category(DiagnosticCategory::Type));
+                    );
+                    let diag = if compat == 0 {
+                        Diagnostic::warning(base_message, span).with_hint(format!(
+                            "No member of {union_display} is compatible with {expected_display}"
+                        ))
+                    } else {
+                        let list = incompatible
+                            .iter()
+                            .map(|m| InferredType::class_name_for_diagnostic(m.as_str()))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        Diagnostic::hint(base_message, span).with_hint(format!(
+                            "Some members of the union are not compatible with {expected_display}: {list}"
+                        ))
+                    };
+                    self.diagnostics
+                        .push(diag.with_category(DiagnosticCategory::Type));
+                }
+                _ => {
+                    // Meta/Negation/Intersection/Never argument shapes are not
+                    // handled by this check — same conservative skip as before.
+                }
             }
         }
     }
