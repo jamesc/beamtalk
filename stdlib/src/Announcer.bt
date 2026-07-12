@@ -47,6 +47,11 @@ typed Object subclass: Announcer
   /// ```
   class new -> Announcer => (Erlang beamtalk_announcements) newAnnouncer
 
+  // Left as bare `Block` (not `Block(Object, Object)`): the event's actual
+  // runtime type is whatever `aClass` names (and its subclasses), not a
+  // fixed static bound. Parameterizing to `Object` would reject legitimate
+  // member sends like `e newPrice` at compile time (BT-2826).
+
   /// Subscribe: deliver announcements of `aClass` (or any subclass, via MRO
   /// matching) to the calling process by evaluating `aBlock` with the event.
   ///
@@ -77,6 +82,8 @@ typed Object subclass: Announcer
       class: aClass
       selector: sel
       receiver: receiver
+
+  // Left as bare `Block` — same reasoning as `when:do:` above (BT-2826).
 
   /// Subscribe once: deliver exactly one announcement of `aClass`, then
   /// auto-unsubscribe. Consumed atomically under concurrent announcers.

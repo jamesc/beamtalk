@@ -331,7 +331,8 @@ Object subclass: Actor
   ///   Logger info: "worker exited" metadata: #{"reason" => reason displayString}
   /// ]
   /// ```
-  sealed onExit: block :: Block -> Symbol => @intrinsic "actorOnExit"
+  sealed onExit: block :: Block(Object, Object) -> Symbol =>
+    @intrinsic "actorOnExit"
 
   /// Gracefully stop this actor (gen_server:stop).
   ///

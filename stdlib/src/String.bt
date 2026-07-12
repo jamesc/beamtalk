@@ -445,7 +445,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "abc" do: [:c | Transcript show: c]
   /// ```
-  do: block :: Block -> Nil => @primitive "each:"
+  do: block :: Block(String, Object) -> Nil => @primitive "each:"
 
   /// Collect results of evaluating `block` on each grapheme cluster.
   ///
@@ -455,7 +455,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "abc" collect: [:c | c uppercase]  // => "ABC"
   /// ```
-  collect: block :: Block -> String => @primitive
+  collect: block :: Block(String, String) -> String => @primitive
 
   /// Select grapheme clusters for which `block` returns true.
   ///
@@ -466,7 +466,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "a1b2" select: [:c | c isAlpha]    // => "ab"
   /// ```
-  select: block :: Block -> String => @primitive
+  select: block :: Block(String, Boolean) -> String => @primitive
 
   /// Reject grapheme clusters for which `block` returns true.
   ///
@@ -476,7 +476,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "a1b2" reject: [:c | c isAlpha]    // => "12"
   /// ```
-  reject: block :: Block -> String => @primitive
+  reject: block :: Block(String, Boolean) -> String => @primitive
 
   /// Return a lazy Stream over the characters (grapheme clusters).
   ///
