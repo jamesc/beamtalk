@@ -2798,7 +2798,9 @@ fn test_self_call_error_branch_handles_both_error_shapes() {
     //
     // 1. A caught exception: safe_dispatch/3's try/catch packs it as the
     //    3-tuple {'error', {Type, Reason, Stacktrace}, State} — must be
-    //    destructured and routed through beamtalk_exception_handler:reraise/3
+    //    destructured and routed through beamtalk_exception_handler:reraise/4
+    //    (with a selector/class breadcrumb — see BT-2822's
+    //    test_self_call_error_branch_threads_selector_class_breadcrumb below)
     //    (passing the whole triple straight to beamtalk_error:raise/1 crashes
     //    with function_clause, since raise/1 only accepts a raw
     //    #beamtalk_error{} record — the original BT-2816 bug).
@@ -2821,11 +2823,12 @@ fn test_self_call_error_branch_handles_both_error_shapes() {
     );
     let code = codegen_source(src);
 
-    // Clause 1: destructured triple routed through reraise/3.
+    // Clause 1: destructured triple routed through reraise/4 (with a
+    // selector/class breadcrumb, since BT-2822).
     assert!(
         code.contains("call 'beamtalk_exception_handler':'reraise'("),
         "Self-dispatch error branch must destructure the caught-exception \
-         triple via beamtalk_exception_handler:reraise/3. Got:\n{code}"
+         triple via beamtalk_exception_handler:reraise/4. Got:\n{code}"
     );
     // Clause 2: fallback for a plain #beamtalk_error{} returned (not caught).
     assert!(
