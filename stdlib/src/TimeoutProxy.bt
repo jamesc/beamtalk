@@ -47,8 +47,16 @@ typed Actor subclass: TimeoutProxy
     self.timeoutMs := ms
 
   /// Forward all unknown messages to the target with the configured timeout.
+  ///
+  /// BT-2829: moved from a statement-level `@expect type` (on the
+  /// `perform:withArguments:timeout:` send below) to declaration-level so it
+  /// also covers the new whole-method "declared -> Object, but body inferred
+  /// as Dynamic (unannotated return)" hint — `doesNotUnderstand:args:`
+  /// forwarding through `perform:withArguments:timeout:` is inherently
+  /// type-erased (the whole point of DNU forwarding), so neither diagnostic
+  /// is actionable here.
+  @expect type
   doesNotUnderstand: selector :: Symbol args: arguments :: Array -> Object =>
-    @expect type
     self.target
       perform: selector
       withArguments: arguments

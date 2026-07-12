@@ -158,6 +158,13 @@ sealed typed Class subclass: Metaclass
   /// ```beamtalk
   /// Integer class packageName   // => "stdlib"
   /// ```
+  ///
+  /// BT-2829: the underlying FFI spec types the non-nil result `binary()`
+  /// (`String | Binary`, BT-2254), but `beamtalk_package:packageNameFor/1`
+  /// always builds and returns a UTF-8 String (or `nil`) — suppress the
+  /// resulting `String | Binary | Nil` vs. declared `String | Nil`
+  /// return-type mismatch.
+  @expect type
   sealed packageName -> String | Nil =>
     (Erlang beamtalk_package) packageNameFor: self thisClass name
 

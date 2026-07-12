@@ -63,6 +63,12 @@ sealed typed Object subclass: BeamtalkInterface
   /// Beamtalk help: Counter
   /// Beamtalk help: #Counter
   /// ```
+  ///
+  /// BT-2829: the underlying FFI spec types the result `binary()` (`String |
+  /// Binary`, BT-2254), but `beamtalk_interface:help/1` always builds and
+  /// returns a UTF-8 String — suppress the resulting `String | Binary` vs.
+  /// declared `String` return-type mismatch.
+  @expect type
   sealed help: aClass :: Object -> String =>
     (Erlang beamtalk_interface) help: aClass
 
@@ -72,6 +78,9 @@ sealed typed Object subclass: BeamtalkInterface
   /// ```beamtalk
   /// Beamtalk help: Counter selector: #increment
   /// ```
+  ///
+  /// BT-2829: see `help:` above — same `binary()` FFI spec imprecision.
+  @expect type
   sealed help: aClass :: Class selector: aSelector :: Symbol -> String =>
     (Erlang beamtalk_interface) help: aClass selector: aSelector
 
@@ -82,6 +91,9 @@ sealed typed Object subclass: BeamtalkInterface
   /// Beamtalk erlangHelp: "lists"
   /// Beamtalk erlangHelp: "maps"
   /// ```
+  ///
+  /// BT-2829: see `help:` above — same `binary()` FFI spec imprecision.
+  @expect type
   sealed erlangHelp: moduleName :: String -> String =>
     (Erlang beamtalk_interface) erlangHelp: moduleName
 
@@ -92,6 +104,9 @@ sealed typed Object subclass: BeamtalkInterface
   /// Beamtalk erlangHelp: "lists" selector: #reverse
   /// Beamtalk erlangHelp: "maps" selector: #get
   /// ```
+  ///
+  /// BT-2829: see `help:` above — same `binary()` FFI spec imprecision.
+  @expect type
   sealed erlangHelp: moduleName :: String selector: functionName :: Symbol -> String =>
     (Erlang beamtalk_interface) erlangHelp: moduleName selector: functionName
 
@@ -101,6 +116,9 @@ sealed typed Object subclass: BeamtalkInterface
   /// ```beamtalk
   /// Beamtalk version
   /// ```
+  ///
+  /// BT-2829: see `help:` above — same `binary()` FFI spec imprecision.
+  @expect type
   version -> String => (Erlang beamtalk_interface) version
 
   // --- Logging configuration (delegates to beamtalk_logging_config) ---
@@ -201,4 +219,7 @@ sealed typed Object subclass: BeamtalkInterface
   /// ```beamtalk
   /// Beamtalk loggerInfo
   /// ```
+  ///
+  /// BT-2829: see `help:` above — same `binary()` FFI spec imprecision.
+  @expect type
   loggerInfo -> String => (Erlang beamtalk_logging_config) loggerInfo
