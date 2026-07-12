@@ -283,6 +283,114 @@ fn test_state_default_value_match_no_warn() {
     );
 }
 
+// --- BT-2848: Union-typed state defaults ---
+
+#[test]
+fn test_state_default_union_incompatible_member_warns() {
+    // helper -> String | Integer => 42.  state: value :: String = self helper.
+    // The default's inferred type is Union(String, Integer); Integer is not
+    // assignable to the declared String, so a diagnostic should fire.
+    let helper_method = MethodDefinition::with_return_type(
+        MessageSelector::Unary("helper".into()),
+        vec![],
+        vec![bare(int_lit(42))],
+        TypeAnnotation::union(
+            vec![
+                TypeAnnotation::simple("String", span()),
+                TypeAnnotation::simple("Integer", span()),
+            ],
+            span(),
+        ),
+        span(),
+    );
+    let state = vec![StateDeclaration::with_type_and_default(
+        ident("value"),
+        TypeAnnotation::simple("String", span()),
+        msg_send(var("self"), MessageSelector::Unary("helper".into()), vec![]),
+        span(),
+    )];
+    let class = counter_class_with_typed_state(vec![helper_method], state);
+    let module = make_module_with_classes(vec![], vec![class]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("Type mismatch") && d.message.contains("value"))
+        .collect();
+    assert_eq!(
+        warnings.len(),
+        1,
+        "Expected 1 type mismatch for union default with incompatible member, got: {:?}",
+        checker.diagnostics()
+    );
+}
+
+#[test]
+fn test_state_default_union_all_compatible_no_warn() {
+    // helper -> Integer | Number => 42.  state: value :: Number = self helper.
+    // Both union members (Integer, Number) are assignable to the declared
+    // Number, so no diagnostic should fire.
+    let helper_method = MethodDefinition::with_return_type(
+        MessageSelector::Unary("helper".into()),
+        vec![],
+        vec![bare(int_lit(42))],
+        TypeAnnotation::union(
+            vec![
+                TypeAnnotation::simple("Integer", span()),
+                TypeAnnotation::simple("Number", span()),
+            ],
+            span(),
+        ),
+        span(),
+    );
+    let state = vec![StateDeclaration::with_type_and_default(
+        ident("value"),
+        TypeAnnotation::simple("Number", span()),
+        msg_send(var("self"), MessageSelector::Unary("helper".into()), vec![]),
+        span(),
+    )];
+    let class = counter_class_with_typed_state(vec![helper_method], state);
+    let module = make_module_with_classes(vec![], vec![class]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    assert!(
+        checker.diagnostics().is_empty(),
+        "Union default with all-compatible members should not warn, got: {:?}",
+        checker.diagnostics()
+    );
+}
+
+#[test]
+fn test_state_default_dynamic_no_warn() {
+    // state: count: Integer = unknownVar → unknownVar is unbound, so the
+    // default's inferred type is Dynamic. Dynamic defaults must remain
+    // unchecked (BT-2848 AC (c)) — same behaviour as before the Union arm
+    // was added.
+    let state = vec![StateDeclaration::with_type_and_default(
+        ident("count"),
+        TypeAnnotation::simple("Integer", span()),
+        var("unknownVar"),
+        span(),
+    )];
+    let class = counter_class_with_typed_state(vec![], state);
+    let module = make_module_with_classes(vec![], vec![class]);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let type_mismatches: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("Type mismatch"))
+        .collect();
+    assert!(
+        type_mismatches.is_empty(),
+        "Dynamic default value should not produce a type mismatch warning, got: {type_mismatches:?}"
+    );
+}
+
 #[test]
 fn test_dynamic_expression_no_warn() {
     // Assigning a dynamic expression (unknown variable) to a typed field → no assignment warning

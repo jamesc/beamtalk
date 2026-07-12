@@ -2229,31 +2229,86 @@ impl TypeChecker {
             let mut env = TypeEnv::new();
             env.set_local("self", InferredType::known(class.name.name.clone()));
             let inferred = self.infer_expr(default_value, hierarchy, &mut env, false);
-            let InferredType::Known {
-                class_name: value_type,
-                ..
-            } = &inferred
-            else {
-                continue; // Dynamic defaults are fine
-            };
-            if !Self::is_assignable_to(value_type, &declared_type, hierarchy) {
-                // BT-2066: Render `UndefinedObject` as `Nil` in user-facing messages.
-                let declared_display =
-                    InferredType::class_name_for_diagnostic(declared_type.as_str());
-                let value_display = InferredType::class_name_for_diagnostic(value_type.as_str());
-                self.diagnostics.push(
-                    Diagnostic::warning(
-                        format!(
-                            "Type mismatch: state `{}` declared as {declared_display}, default is {value_display}",
-                            decl.name.name
-                        ),
-                        decl.span,
-                    )
-                    .with_category(DiagnosticCategory::Type)
-                    .with_hint(format!(
-                        "Default value type {value_display} is not compatible with {declared_display}"
-                    )),
-                );
+            match &inferred {
+                InferredType::Known {
+                    class_name: value_type,
+                    ..
+                } => {
+                    if !Self::is_assignable_to(value_type, &declared_type, hierarchy) {
+                        // BT-2066: Render `UndefinedObject` as `Nil` in user-facing messages.
+                        let declared_display =
+                            InferredType::class_name_for_diagnostic(declared_type.as_str());
+                        let value_display =
+                            InferredType::class_name_for_diagnostic(value_type.as_str());
+                        self.diagnostics.push(
+                            Diagnostic::warning(
+                                format!(
+                                    "Type mismatch: state `{}` declared as {declared_display}, default is {value_display}",
+                                    decl.name.name
+                                ),
+                                decl.span,
+                            )
+                            .with_category(DiagnosticCategory::Type)
+                            .with_hint(format!(
+                                "Default value type {value_display} is not compatible with {declared_display}"
+                            )),
+                        );
+                    }
+                }
+                InferredType::Union { members, .. } => {
+                    // BT-2848: Check all union members against the declared field
+                    // type, mirroring `check_field_assignment`'s handling
+                    // (BT-1832).
+                    let Some((compat, total, incompatible)) =
+                        Self::classify_union_members(members, |m| {
+                            Self::is_assignable_to(m, &declared_type, hierarchy)
+                        })
+                    else {
+                        continue; // Contains Dynamic — skip
+                    };
+                    if compat == total {
+                        continue; // All members compatible
+                    }
+                    let union_display = inferred
+                        .display_for_diagnostic()
+                        .unwrap_or_else(|| EcoString::from("Dynamic"));
+                    // BT-2066: Render `UndefinedObject` as `Nil` in user-facing messages.
+                    let declared_display =
+                        InferredType::class_name_for_diagnostic(declared_type.as_str());
+                    let diag = if compat == 0 {
+                        Diagnostic::warning(
+                            format!(
+                                "Type mismatch: state `{}` declared as {declared_display}, default is {union_display}",
+                                decl.name.name
+                            ),
+                            decl.span,
+                        )
+                        .with_hint(format!(
+                            "No member of {union_display} is compatible with {declared_display}"
+                        ))
+                    } else {
+                        let list = incompatible
+                            .iter()
+                            .map(|m| InferredType::class_name_for_diagnostic(m.as_str()))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        Diagnostic::hint(
+                            format!(
+                                "Type mismatch: state `{}` declared as {declared_display}, default is {union_display}",
+                                decl.name.name
+                            ),
+                            decl.span,
+                        )
+                        .with_hint(format!(
+                            "Some members of the union are not compatible with {declared_display}: {list}"
+                        ))
+                    };
+                    self.diagnostics
+                        .push(diag.with_category(DiagnosticCategory::Type));
+                }
+                // Dynamic / Never / Meta / Negation / Intersection defaults —
+                // skip conservatively, matching `check_field_assignment`.
+                _ => {}
             }
         }
     }
