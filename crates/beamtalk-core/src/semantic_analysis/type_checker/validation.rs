@@ -1257,6 +1257,9 @@ impl TypeChecker {
                         method, *reason, &expected, class_name, hierarchy,
                     );
                 }
+                // `Known` is unreachable here at runtime (the `let`-`else`
+                // above already matched it out) — listed only because the
+                // compiler can't narrow `body_type`'s type in this arm.
                 InferredType::Never
                 | InferredType::Meta { .. }
                 | InferredType::Negation { .. }

@@ -350,6 +350,6 @@ fn bt2829_consecutive_declaration_level_expect_all_suppress_cleanly() {
         diags
             .iter()
             .all(|d| !d.message.contains("declares return type")),
-        "the Part A Union mismatch hint on `second`/`third` must be suppressed: {diags:#?}"
+        "the Part A Union mismatch warning on `second`/`third` must be suppressed: {diags:#?}"
     );
 }
