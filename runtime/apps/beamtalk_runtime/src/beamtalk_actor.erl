@@ -187,6 +187,12 @@ handle_getValue([], State) ->
 %% Internal dispatch
 -export([dispatch/4, make_self/1]).
 
+%% BT-2833: exported so generated self-dispatch error breadcrumbs
+%% (dispatch_codegen.rs's generate_self_dispatch_error_clause) can resolve
+%% the actor's actual runtime class at the error-wrap boundary, matching
+%% sync_send_remote/3's cross-actor Context construction.
+-export([lookup_class/1]).
+
 %% BT-2524: per-object change publish hook, called from compiled actor
 %% gen_server callbacks after a method commits new state.
 %% BT-2717: strip_local_temps/1 cleans codegen-internal `__local__` threading
