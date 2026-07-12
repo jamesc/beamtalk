@@ -1595,7 +1595,7 @@ fn beam_mtime(path: &Utf8Path) -> (u64, u32) {
 /// raw protocol line for successful modules, or an empty string for modules that
 /// had errors (`no_debug_info`, etc.).
 fn extract_specs_via_build_worker(beam_files: &[Utf8PathBuf]) -> Result<Vec<(String, String)>> {
-    let mut child = spawn_build_worker_for_specs()?;
+    let mut child = spawn_build_worker_for_specs(beam_files)?;
 
     let result = extract_specs_from_child(&mut child, beam_files);
 
@@ -1679,7 +1679,13 @@ fn spawn_build_worker_node(pa_args: &[String]) -> Result<std::process::Child> {
 }
 
 /// Spawns a `beamtalk_build_worker` BEAM node for spec extraction.
-fn spawn_build_worker_for_specs() -> Result<std::process::Child> {
+///
+/// `beam_files` are the `.beam` files about to be read for specs; their parent
+/// directories are added to the `-pa` list alongside the runtime's own ebin
+/// dirs so that sibling modules (e.g. a package's own `native/` ebin dir, per
+/// ADR 0075 "package-bundled native code") can be resolved by `code:which/1`
+/// when a `-spec` references one of their remote types (BT-2861).
+fn spawn_build_worker_for_specs(beam_files: &[Utf8PathBuf]) -> Result<std::process::Child> {
     use beamtalk_cli::repl_startup;
 
     let (runtime_dir, layout) = repl_startup::find_runtime_dir_with_layout().map_err(|_| {
@@ -1710,12 +1716,33 @@ fn spawn_build_worker_for_specs() -> Result<std::process::Child> {
     // Add all runtime ebin directories to the code path so the spec reader
     // can resolve remote types (e.g., `beamtalk_result:t()` needs the
     // beamtalk_stdlib ebin on the path for `code:which/1` to find it).
-    let ebin_dirs = [
-        &paths.compiler_ebin,
-        &paths.runtime_ebin,
-        &paths.stdlib_erlang_ebin,
-        &paths.workspace_ebin,
+    let mut ebin_dirs: Vec<std::path::PathBuf> = vec![
+        paths.compiler_ebin.clone(),
+        paths.runtime_ebin.clone(),
+        paths.stdlib_erlang_ebin.clone(),
+        paths.workspace_ebin.clone(),
     ];
+
+    // Also add the ebin directories the beam files themselves live in (BT-2861).
+    // A package's own native/ ebin dir isn't one of the runtime dirs above, so
+    // without this a module's `-spec` referencing a sibling native module's
+    // type (e.g. `beamtalk_http_response:t()`) can't be resolved by
+    // `code:which/1`, and falls back to `Dynamic`. Canonicalize first: the
+    // worker node runs with its cwd set to the system temp dir
+    // (`spawn_build_worker_node`), so a relative `beam_file` path (e.g. from
+    // a CLI arg given as a relative path) would resolve against the wrong
+    // directory if passed to `-pa` as-is.
+    for beam_file in beam_files {
+        let absolute = std::fs::canonicalize(beam_file.as_std_path())
+            .unwrap_or_else(|_| beam_file.as_std_path().to_path_buf());
+        if let Some(parent) = absolute.parent() {
+            let parent = parent.to_path_buf();
+            if !ebin_dirs.contains(&parent) {
+                ebin_dirs.push(parent);
+            }
+        }
+    }
+
     let mut pa_args = Vec::new();
     for ebin in &ebin_dirs {
         if ebin.exists() {
