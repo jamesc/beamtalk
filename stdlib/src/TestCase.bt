@@ -137,7 +137,7 @@ Value subclass: TestCase
   /// self assert: (1 + 1) equals: 2   // passes
   /// self assert: (1 + 1) equals: 3   // fails
   /// ```
-  assert: actual :: Equatable equals: expected :: Equatable -> Nil =>
+  assert: actual :: Object equals: expected :: Object -> Nil =>
     (actual =:= expected) ifFalse: [
       self fail: "Expected {expected}, got {actual}"
     ]
