@@ -67,6 +67,36 @@ pub enum Pattern {
     /// Variable binding pattern - binds to a name.
     Variable(Identifier),
 
+    /// Nil pattern - matches exactly the value that `isNil` returns true for.
+    ///
+    /// Example: `nil -> defaultValue`
+    ///
+    /// `nil` is a reserved identifier, not a `Literal` variant; this is a
+    /// dedicated pattern kind (ADR 0107 Phase A) that reuses the existing
+    /// atom-literal codegen path (`Document::Str("'nil'")`) — no new runtime
+    /// mechanism.
+    Nil(Span),
+
+    /// Type pattern - matches if the scrutinee's runtime class is exactly
+    /// `class`, binding the value (narrowed to `class` for the arm body) to
+    /// `binding`.
+    ///
+    /// Example: `path :: String -> self expandHome: path`
+    ///
+    /// Reuses the `::` token already established by ADR 0053 for
+    /// parameter/state type annotations, in a new grammatical position
+    /// (ADR 0107 Phase A). Phase A restricts `class` to concrete leaf
+    /// classes (no subclasses) — a class with subclasses is a compile
+    /// error, not silently-wrong behaviour; see ADR 0107 Phase B.
+    Type {
+        /// The name bound to the matched value inside the arm.
+        binding: Identifier,
+        /// The class the scrutinee's runtime class must equal.
+        class: Identifier,
+        /// Source location.
+        span: Span,
+    },
+
     /// Tuple pattern - matches tuple structure.
     ///
     /// Example: `{#ok, value}`
@@ -154,12 +184,14 @@ impl Pattern {
             Self::Variable(id) => id.span,
             Self::Wildcard(span)
             | Self::Literal(_, span)
+            | Self::Nil(span)
             | Self::Tuple { span, .. }
             | Self::Array { span, .. }
             | Self::List { span, .. }
             | Self::Binary { span, .. }
             | Self::Map { span, .. }
-            | Self::Constructor { span, .. } => *span,
+            | Self::Constructor { span, .. }
+            | Self::Type { span, .. } => *span,
         }
     }
 }

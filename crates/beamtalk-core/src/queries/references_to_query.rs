@@ -331,7 +331,11 @@ fn collect_all_pattern_refs(pattern: &Pattern, source: &str, hits: &mut Vec<(Str
                 }
             }
         }
-        Pattern::Wildcard(..) | Pattern::Literal(..) | Pattern::Variable(..) => {}
+        Pattern::Type { class, .. } => {
+            hits.push((class.name.to_string(), class.span.line_number(source)));
+        }
+        Pattern::Wildcard(..) | Pattern::Literal(..) | Pattern::Variable(..) | Pattern::Nil(..) => {
+        }
     }
 }
 
@@ -532,7 +536,13 @@ fn collect_pattern_reference_lines(
                 }
             }
         }
-        Pattern::Wildcard(..) | Pattern::Literal(..) | Pattern::Variable(..) => {}
+        Pattern::Type { class, .. } => {
+            if class.name.as_str() == class_name {
+                lines.push(class.span.line_number(source));
+            }
+        }
+        Pattern::Wildcard(..) | Pattern::Literal(..) | Pattern::Variable(..) | Pattern::Nil(..) => {
+        }
     }
 }
 

@@ -21,7 +21,6 @@ use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::{EcoString, eco_format};
 
-#[cfg(test)]
 use super::narrowing::extract::extract_variable_name;
 use super::narrowing::extract::unwrap_parens;
 use super::narrowing::refinement::RefinementLayer;
@@ -851,15 +850,57 @@ impl TypeChecker {
                 } else {
                     self.check_singleton_match_exhaustiveness(&scrutinee_ty, arms, *span);
                 }
+
+                // BT-2854 / ADR 0107 Phase A: a `nil` arm narrows the
+                // scrutinee to `UndefinedObject` inside its own body (mirrors
+                // `x isNil ifTrue:`), and — when unguarded — removes `Nil`
+                // from what subsequent arms see (mirrors `x isNil ifFalse:`'s
+                // `non_nil_type`), reusing the exact narrowing algebra
+                // already established by `is_nil.rs`. A guarded `nil when:
+                // [...] ->` arm does not guarantee coverage, so it does not
+                // narrow the residual for later arms (same rule
+                // `singleton_match_residual` uses for guarded arms). Only
+                // applies when the scrutinee has a stable narrowable key
+                // (`extract_variable_name`) — an arbitrary expression
+                // scrutinee has nothing to narrow.
+                let scrutinee_key = extract_variable_name(unwrap_parens(value));
+                let mut residual_scrutinee_ty = scrutinee_ty.clone();
+
                 let arm_types: Vec<InferredType> = arms
                     .iter()
                     .map(|arm| {
                         let mut arm_env = env.child();
                         Self::bind_pattern_vars(&arm.pattern, &mut arm_env);
+                        if let Some(key) = &scrutinee_key {
+                            if matches!(arm.pattern, Pattern::Nil(_)) {
+                                arm_env.set(
+                                    key.clone(),
+                                    InferredType::known(WellKnownClass::UndefinedObject.as_str()),
+                                );
+                            } else {
+                                // Deliberately overwrites whatever
+                                // `bind_pattern_vars` (above) just set for
+                                // this key: today that's always `Dynamic` for
+                                // a pattern-bound variable, so the residual
+                                // here is strictly more precise. If a future
+                                // phase (`Pattern::Type` narrowing, BT-2855)
+                                // makes `bind_pattern_vars` assign a real
+                                // narrowed type to a pattern variable that
+                                // happens to share the scrutinee's key, this
+                                // line will silently win over it — revisit
+                                // this ordering when that lands.
+                                arm_env.set(key.clone(), residual_scrutinee_ty.clone());
+                            }
+                        }
                         if let Some(guard) = &arm.guard {
                             self.infer_expr(guard, hierarchy, &mut arm_env, in_abstract_method);
                         }
-                        self.infer_expr(&arm.body, hierarchy, &mut arm_env, in_abstract_method)
+                        let body_ty =
+                            self.infer_expr(&arm.body, hierarchy, &mut arm_env, in_abstract_method);
+                        if arm.guard.is_none() && matches!(arm.pattern, Pattern::Nil(_)) {
+                            residual_scrutinee_ty = Self::non_nil_type(&residual_scrutinee_ty);
+                        }
+                        body_ty
                     })
                     .collect();
                 if arm_types.is_empty() {
@@ -6231,6 +6272,107 @@ mod tests {
         };
         let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
         assert_eq!(ty, InferredType::Dynamic(DynamicReason::Unknown));
+    }
+
+    // ---- BT-2854 / ADR 0107 Phase A: `Pattern::Nil` narrowing ----
+
+    /// A `nil` arm's body sees the scrutinee narrowed to `UndefinedObject`,
+    /// mirroring `x isNil ifTrue:` (reuses the same true-branch type as
+    /// `is_nil.rs`).
+    #[test]
+    fn infer_expr_match_nil_arm_narrows_scrutinee_to_undefined_object() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        env.set_local("x", InferredType::simple_union(&["String", "Nil"]));
+
+        // x match: [nil -> x; _ -> 0]
+        let expr = Expression::Match {
+            value: Box::new(var("x")),
+            arms: vec![
+                MatchArm::new(Pattern::Nil(span()), var("x"), span()),
+                MatchArm::new(Pattern::Wildcard(span()), int_lit(0), span()),
+            ],
+            exhaustive: false,
+            span: span(),
+        };
+        let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+        // Arm types: [UndefinedObject (nil arm's `x`), Integer (wildcard arm)]
+        assert_eq!(
+            ty,
+            InferredType::union_of(&[
+                InferredType::known(WellKnownClass::UndefinedObject.as_str()),
+                InferredType::known("Integer"),
+            ])
+        );
+    }
+
+    /// An unguarded `nil` arm removes `Nil` from what subsequent arms see,
+    /// mirroring `x isNil ifFalse:`'s `non_nil_type` narrowing.
+    #[test]
+    fn infer_expr_match_unguarded_nil_arm_narrows_subsequent_arms() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        env.set_local("x", InferredType::simple_union(&["String", "Nil"]));
+
+        // x match: [nil -> 0; y -> x]  -- second arm's body reads `x`, which
+        // should be narrowed to non-nil (`String`) after the unguarded nil arm.
+        let expr = Expression::Match {
+            value: Box::new(var("x")),
+            arms: vec![
+                MatchArm::new(Pattern::Nil(span()), int_lit(0), span()),
+                MatchArm::new(
+                    Pattern::Variable(Identifier::new("y", span())),
+                    var("x"),
+                    span(),
+                ),
+            ],
+            exhaustive: false,
+            span: span(),
+        };
+        let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+        // Arm types: [Integer (nil arm), String (narrowed `x` in 2nd arm)]
+        assert_eq!(
+            ty,
+            InferredType::union_of(&[
+                InferredType::known("Integer"),
+                InferredType::known("String")
+            ])
+        );
+    }
+
+    /// A *guarded* `nil when: [...] ->` arm does not guarantee coverage, so
+    /// it must not narrow away `Nil` for subsequent arms.
+    #[test]
+    fn infer_expr_match_guarded_nil_arm_does_not_narrow_subsequent_arms() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        env.set_local("x", InferredType::simple_union(&["String", "Nil"]));
+
+        let expr = Expression::Match {
+            value: Box::new(var("x")),
+            arms: vec![
+                MatchArm::with_guard(Pattern::Nil(span()), var("x"), int_lit(0), span()),
+                MatchArm::new(
+                    Pattern::Variable(Identifier::new("y", span())),
+                    var("x"),
+                    span(),
+                ),
+            ],
+            exhaustive: false,
+            span: span(),
+        };
+        let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+        // Second arm still sees `x` as `String | Nil` (unchanged residual).
+        assert_eq!(
+            ty,
+            InferredType::union_of(&[
+                InferredType::known("Integer"),
+                InferredType::simple_union(&["String", "Nil"]),
+            ])
+        );
     }
 
     // ---- build_substitution_map ----

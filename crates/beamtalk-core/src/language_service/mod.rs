@@ -1323,7 +1323,22 @@ impl SimpleLanguageService {
             Pattern::Binary { segments, .. } => segments
                 .iter()
                 .find_map(|seg| Self::find_identifier_in_pattern(&seg.value, offset_val)),
-            Pattern::Wildcard(_) | Pattern::Literal(_, _) | Pattern::Variable(_) => None,
+            Pattern::Type { class, .. } => {
+                if offset_val >= class.span.start() && offset_val < class.span.end() {
+                    Some((class.clone(), class.span))
+                } else {
+                    // The binding (e.g. `path` in `path :: String`) is a
+                    // local variable, not a class reference — this function
+                    // only navigates class identifiers. Go-to-definition on
+                    // the binding itself is deferred to BT-2855, which is
+                    // when it becomes a fully navigable scope entry.
+                    None
+                }
+            }
+            Pattern::Wildcard(_)
+            | Pattern::Literal(_, _)
+            | Pattern::Variable(_)
+            | Pattern::Nil(_) => None,
         }
     }
 

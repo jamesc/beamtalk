@@ -769,6 +769,17 @@ fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult {
             &mut result.diagnostics,
         );
     }
+    // BT-2854 / ADR 0107 Phase A: validate `Pattern::Type` class names in
+    // `match:` arms (unknown class, non-leaf class, `Character` exclusion).
+    // The unknown-class branch is internally gated on `has_cross_file_classes`,
+    // same open-world policy as `check_unresolved_classes` above; the
+    // leaf-class and `Character` checks run unconditionally.
+    validators::check_type_pattern_classes(
+        module,
+        &result.class_hierarchy,
+        has_cross_file_classes,
+        &mut result.diagnostics,
+    );
     // BT-1759: Warn when a workspace binding shadows a class name.
     // This check works against the full class hierarchy (including locally
     // defined classes), so it does not require cross-file metadata.

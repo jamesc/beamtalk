@@ -625,6 +625,25 @@ fn find_hover_in_pattern(pattern: &Pattern, offset: u32, type_map: &TypeMap) -> 
                 .iter()
                 .find_map(|(_, p)| find_hover_in_pattern(p, offset, type_map))
         }
+        Pattern::Type { binding, class, .. } => {
+            if offset >= class.span.start() && offset < class.span.end() {
+                return Some(HoverInfo::new(
+                    format!("Type pattern: `{}`", class.name),
+                    class.span,
+                ));
+            }
+            if offset >= binding.span.start() && offset < binding.span.end() {
+                return Some(HoverInfo::new(
+                    format!(
+                        "Pattern variable: `{}` — Type: {}",
+                        binding.name, class.name
+                    ),
+                    binding.span,
+                ));
+            }
+            None
+        }
+        Pattern::Nil(span) => Some(HoverInfo::new("Nil pattern".to_string(), *span)),
         Pattern::Wildcard(_) | Pattern::Literal(_, _) => None,
     }
 }

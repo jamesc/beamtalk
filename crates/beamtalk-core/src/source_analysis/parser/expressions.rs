@@ -1382,9 +1382,12 @@ impl Parser {
     ///
     /// Supported patterns:
     /// - `_` — wildcard
+    /// - `nil` — nil pattern (ADR 0107 Phase A)
     /// - identifier — variable binding
+    /// - `identifier :: ClassName` — type pattern (ADR 0107 Phase A)
     /// - integer, float, string, symbol, character — literal
     /// - `{p1, p2, ...}` — tuple
+    #[allow(clippy::too_many_lines)] // one arm per pattern kind
     fn parse_pattern(&mut self) -> Pattern {
         // Guard against stack overflow from deeply nested tuple patterns
         let span = self.current_token().span();
@@ -1408,12 +1411,44 @@ impl Parser {
                 self.parse_constructor_pattern()
             }
 
-            // Variable binding
+            // Nil pattern: `nil` (ADR 0107 Phase A) — a reserved identifier,
+            // recognized before the generic variable-binding case below.
+            TokenKind::Identifier(name) if name.as_str() == "nil" => {
+                let span = self.advance().span();
+                Pattern::Nil(span)
+            }
+
+            // Variable binding, or a type pattern if followed by `:: ClassName`
+            // (ADR 0107 Phase A: `binding :: ClassName`, reusing the `::`
+            // tokenization from ADR 0053's parameter-annotation parsing).
             TokenKind::Identifier(name) => {
                 let name = name.clone();
                 let token = self.advance();
                 let span = token.span();
-                Pattern::Variable(Identifier::new(name, span))
+                let binding = Identifier::new(name, span);
+
+                if matches!(self.current_kind(), TokenKind::DoubleColon) {
+                    self.advance(); // consume '::'
+                    if let TokenKind::Identifier(class_name) = self.current_kind() {
+                        let class_name = class_name.clone();
+                        let class_span = self.advance().span();
+                        let full_span = span.merge(class_span);
+                        Pattern::Type {
+                            binding,
+                            class: Identifier::new(class_name, class_span),
+                            span: full_span,
+                        }
+                    } else {
+                        let bad_span = self.current_token().span();
+                        self.diagnostics.push(Diagnostic::error(
+                            "Expected a class name after '::' in a type pattern",
+                            bad_span,
+                        ));
+                        Pattern::Wildcard(span.merge(bad_span))
+                    }
+                } else {
+                    Pattern::Variable(binding)
+                }
             }
 
             // Literal patterns: integer, float, string, character
@@ -2909,5 +2944,59 @@ mod tests {
             "expected a diagnostic instead of a panic, got: {:?}",
             parser.diagnostics
         );
+    }
+
+    // ── BT-2854 / ADR 0107 Phase A: `Pattern::Nil` and `Pattern::Type` ──────
+
+    #[test]
+    fn parse_nil_pattern() {
+        let (module, diags) = parse_source("x match: [nil -> 0; _ -> 1]");
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        let Expression::Match { arms, .. } = &module.expressions[0].expression else {
+            panic!("expected Expression::Match");
+        };
+        assert!(
+            matches!(arms[0].pattern, Pattern::Nil(_)),
+            "expected Pattern::Nil, got: {:?}",
+            arms[0].pattern
+        );
+    }
+
+    #[test]
+    fn parse_type_pattern() {
+        let (module, diags) = parse_source("x match: [path :: String -> path; _ -> 1]");
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        let Expression::Match { arms, .. } = &module.expressions[0].expression else {
+            panic!("expected Expression::Match");
+        };
+        match &arms[0].pattern {
+            Pattern::Type { binding, class, .. } => {
+                assert_eq!(binding.name, "path");
+                assert_eq!(class.name, "String");
+            }
+            other => panic!("expected Pattern::Type, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_type_pattern_missing_class_name_recovers() {
+        let (_module, diags) = parse_source("x match: [path :: -> path; _ -> 1]");
+        assert!(
+            diags.iter().any(|d| d.message.contains("class name")),
+            "expected a diagnostic about the missing class name, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn parse_nil_variable_and_type_patterns_together() {
+        // Combining all three pattern kinds in one match: (ADR 0107 example shape).
+        let (module, diags) = parse_source("x match: [nil -> 0; path :: String -> 1; other -> 2]");
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        let Expression::Match { arms, .. } = &module.expressions[0].expression else {
+            panic!("expected Expression::Match");
+        };
+        assert!(matches!(arms[0].pattern, Pattern::Nil(_)));
+        assert!(matches!(arms[1].pattern, Pattern::Type { .. }));
+        assert!(matches!(arms[2].pattern, Pattern::Variable(_)));
     }
 }

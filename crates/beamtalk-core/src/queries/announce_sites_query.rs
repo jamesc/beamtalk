@@ -311,7 +311,11 @@ fn collect_pattern_announce_sites(pattern: &Pattern, source: &str, hits: &mut Ve
                 collect_pattern_announce_sites(inner, source, hits);
             }
         }
-        Pattern::Wildcard(..) | Pattern::Literal(..) | Pattern::Variable(..) => {}
+        Pattern::Wildcard(..)
+        | Pattern::Literal(..)
+        | Pattern::Variable(..)
+        | Pattern::Nil(..)
+        | Pattern::Type { .. } => {}
     }
 }
 
