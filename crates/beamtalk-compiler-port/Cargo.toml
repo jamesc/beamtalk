@@ -36,6 +36,8 @@ tracing-subscriber = { workspace = true }
 [dev-dependencies]
 # why: property-based testing for compiler port robustness (ADR 0011 Phase 4)
 proptest = { workspace = true }
+# why: isolated beamtalk.toml fixtures for load_diagnostics_overrides_from tests (BT-2839)
+tempfile = "3.14"
 
 [build-dependencies]
 beamtalk-build.workspace = true
