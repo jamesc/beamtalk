@@ -62,7 +62,7 @@ sealed typed Object subclass: Stream(E) native: beamtalk_stream
   /// ```beamtalk
   /// ((Stream on: #(1, 2, 3)) collect: [:n | n * 10]) asList  // => #(10, 20, 30)
   /// ```
-  collect: transform :: Block(E, Object) -> Stream => self delegate
+  collect: transform :: Block(E, R) -> Stream(R) => self delegate
 
   /// Inverse filter — exclude elements matching predicate (lazy).
   ///
