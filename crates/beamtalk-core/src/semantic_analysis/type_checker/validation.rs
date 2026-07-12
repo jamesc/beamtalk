@@ -2306,8 +2306,12 @@ impl TypeChecker {
                     self.diagnostics
                         .push(diag.with_category(DiagnosticCategory::Type));
                 }
-                // Dynamic / Never / Meta / Negation / Intersection defaults —
-                // skip conservatively, matching `check_field_assignment`.
+                // Dynamic / Never / Negation / Intersection defaults — skip
+                // conservatively, matching `check_field_assignment`. `Meta`
+                // (`C class` as a default value) is left unchecked here too;
+                // `check_field_assignment`'s explicit `Meta` handling (ADR
+                // 0083, metatype-vs-`Class` assignability) is out of scope
+                // for this ticket (BT-2848), which only adds the `Union` arm.
                 _ => {}
             }
         }
