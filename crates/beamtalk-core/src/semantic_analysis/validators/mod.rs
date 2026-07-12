@@ -38,7 +38,9 @@ pub(crate) use lint_validators::{
     check_redundant_assignment, check_redundant_local_type_annotation,
     check_redundant_super_initialize,
 };
-pub(crate) use match_validators::{check_match_exhaustiveness, warn_assignment_in_match_arms};
+pub(crate) use match_validators::{
+    check_match_exhaustiveness, check_type_pattern_classes, warn_assignment_in_match_arms,
+};
 pub(crate) use native_validators::{
     check_native_delegate_reserved_word, check_native_delegate_return_type,
     check_native_state_fields,

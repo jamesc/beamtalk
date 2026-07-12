@@ -229,7 +229,11 @@ fn collect_pattern_send_lines(
                 collect_pattern_send_lines(inner, selector_name, source, lines);
             }
         }
-        Pattern::Wildcard(..) | Pattern::Literal(..) | Pattern::Variable(..) => {}
+        Pattern::Wildcard(..)
+        | Pattern::Literal(..)
+        | Pattern::Variable(..)
+        | Pattern::Nil(..)
+        | Pattern::Type { .. } => {}
     }
 }
 

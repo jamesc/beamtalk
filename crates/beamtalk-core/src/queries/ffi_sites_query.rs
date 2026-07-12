@@ -427,7 +427,11 @@ fn collect_pattern_ffi_sites(
                 collect_pattern_ffi_sites(inner, target, source, lines);
             }
         }
-        Pattern::Wildcard(..) | Pattern::Literal(..) | Pattern::Variable(..) => {}
+        Pattern::Wildcard(..)
+        | Pattern::Literal(..)
+        | Pattern::Variable(..)
+        | Pattern::Nil(..)
+        | Pattern::Type { .. } => {}
     }
 }
 

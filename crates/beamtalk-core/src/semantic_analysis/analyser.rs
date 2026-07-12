@@ -366,7 +366,14 @@ impl Analyser {
                     self.define_pattern_variables_in_scope(binding);
                 }
             }
-            Pattern::Binary { .. } | Pattern::Wildcard(_) | Pattern::Literal(_, _) => {}
+            // `nil` binds nothing (ADR 0107 Phase A). `Pattern::Type`'s
+            // `binding` is not wired into scope tracking yet — that lands
+            // with narrowing and codegen in BT-2855.
+            Pattern::Binary { .. }
+            | Pattern::Wildcard(_)
+            | Pattern::Literal(_, _)
+            | Pattern::Nil(_)
+            | Pattern::Type { .. } => {}
         }
     }
 

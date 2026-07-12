@@ -339,7 +339,11 @@ fn collect_pattern_access_lines(
                 collect_pattern_access_lines(inner, field_name, kind, source, lines);
             }
         }
-        Pattern::Wildcard(..) | Pattern::Literal(..) | Pattern::Variable(..) => {}
+        Pattern::Wildcard(..)
+        | Pattern::Literal(..)
+        | Pattern::Variable(..)
+        | Pattern::Nil(..)
+        | Pattern::Type { .. } => {}
     }
 }
 

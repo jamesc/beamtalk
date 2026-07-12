@@ -1535,7 +1535,15 @@ fn unparse_pattern(pattern: &Pattern) -> Document<'static> {
     match pattern {
         Pattern::Wildcard(_) => Document::Str("_"),
         Pattern::Literal(lit, _) => unparse_literal(lit),
+        Pattern::Nil(_) => Document::Str("nil"),
         Pattern::Variable(id) => unparse_identifier(id),
+        Pattern::Type { binding, class, .. } => {
+            docvec![
+                unparse_identifier(binding),
+                " :: ",
+                leaf::ident(&class.name)
+            ]
+        }
         Pattern::Tuple { elements, .. } => {
             let elem_docs: Vec<Document<'static>> = elements.iter().map(unparse_pattern).collect();
             let joined = join_docs(elem_docs, ", ");
@@ -2683,6 +2691,31 @@ mod tests {
         assert!(
             output.contains("_ -> \"other\"\n"),
             "last arm should not have semicolon: {output}"
+        );
+    }
+
+    #[test]
+    fn match_nil_pattern_round_trips() {
+        // ADR 0107 Phase A: `nil` pattern round-trips through parse + unparse.
+        let source = "Actor subclass: A\n  m => x match: [nil -> \"none\"; _ -> \"other\"]";
+        let module = parse_source(source);
+        let output = unparse_module(&module);
+        assert!(
+            output.contains("nil -> \"none\""),
+            "nil pattern should round-trip: {output}"
+        );
+    }
+
+    #[test]
+    fn match_type_pattern_round_trips() {
+        // ADR 0107 Phase A: `binding :: ClassName` type pattern round-trips
+        // through parse + unparse.
+        let source = "Actor subclass: A\n  m => x match: [path :: String -> path; _ -> \"other\"]";
+        let module = parse_source(source);
+        let output = unparse_module(&module);
+        assert!(
+            output.contains("path :: String -> path"),
+            "type pattern should round-trip: {output}"
         );
     }
 

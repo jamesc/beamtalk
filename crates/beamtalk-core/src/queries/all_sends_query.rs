@@ -456,7 +456,11 @@ fn collect_pattern_sends(pattern: &Pattern, source: &str, hits: &mut Vec<SendHit
                 collect_pattern_sends(inner, source, hits);
             }
         }
-        Pattern::Wildcard(..) | Pattern::Literal(..) | Pattern::Variable(..) => {}
+        Pattern::Wildcard(..)
+        | Pattern::Literal(..)
+        | Pattern::Variable(..)
+        | Pattern::Nil(..)
+        | Pattern::Type { .. } => {}
     }
 }
 

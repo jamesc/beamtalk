@@ -416,7 +416,11 @@ fn collect_pattern_bindings(
 
         // Leaf patterns have no ordering constraints or size expressions.
         // Delegate to the canonical semantic analysis extractor.
-        Pattern::Variable(_) | Pattern::Wildcard(..) | Pattern::Literal(..) => {
+        Pattern::Variable(_)
+        | Pattern::Wildcard(..)
+        | Pattern::Literal(..)
+        | Pattern::Nil(..)
+        | Pattern::Type { .. } => {
             let (identifiers, _) = crate::semantic_analysis::extract_pattern_bindings(pattern);
             for id in identifiers {
                 let name = id.name.to_string();

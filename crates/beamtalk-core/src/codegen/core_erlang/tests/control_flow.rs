@@ -903,6 +903,44 @@ fn test_match_array_pattern_duplicate_variable_emits_equality_check() {
     );
 }
 
+// BT-2854 / ADR 0107 Phase A: `Pattern::Nil` and `Pattern::Type` codegen
+
+#[test]
+fn test_match_nil_pattern_compiles_to_atom_literal() {
+    // ADR 0107 Phase A: `nil` pattern reuses the existing atom-literal
+    // codegen path verbatim — no new runtime mechanism.
+    let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      nil -> 0;\n      _ -> 1\n    ]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code =
+        generate_module(&module, CodegenOptions::new("foo")).expect("codegen should succeed");
+
+    eprintln!("Generated code for nil pattern match:\n{code}");
+
+    assert!(
+        code.contains("<'nil'>"),
+        "nil pattern should compile to the atom-literal case pattern 'nil'. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_match_type_pattern_codegen_not_yet_supported() {
+    // ADR 0107 Phase A (BT-2854 foundation only): `Pattern::Type` parses and
+    // passes semantic analysis (for a known leaf class), but codegen doesn't
+    // exist yet — that lands in BT-2855. Must fail loudly, not silently emit
+    // wrong code.
+    let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      s :: String -> s;\n      _ -> \"none\"\n    ]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let err = generate_module(&module, CodegenOptions::new("foo"))
+        .expect_err("Pattern::Type codegen should not be implemented yet (BT-2855)");
+    let message = err.to_string();
+    assert!(
+        message.contains("Type pattern"),
+        "error should mention the Type pattern is unsupported. Got: {message}"
+    );
+}
+
 // BT-2359: value-type outer-local threading for count:/detect: predicates and
 // threading constructs used as a (parenthesized) assignment RHS.
 

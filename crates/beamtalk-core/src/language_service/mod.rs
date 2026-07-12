@@ -1323,7 +1323,17 @@ impl SimpleLanguageService {
             Pattern::Binary { segments, .. } => segments
                 .iter()
                 .find_map(|seg| Self::find_identifier_in_pattern(&seg.value, offset_val)),
-            Pattern::Wildcard(_) | Pattern::Literal(_, _) | Pattern::Variable(_) => None,
+            Pattern::Type { class, .. } => {
+                if offset_val >= class.span.start() && offset_val < class.span.end() {
+                    Some((class.clone(), class.span))
+                } else {
+                    None
+                }
+            }
+            Pattern::Wildcard(_)
+            | Pattern::Literal(_, _)
+            | Pattern::Variable(_)
+            | Pattern::Nil(_) => None,
         }
     }
 

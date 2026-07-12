@@ -196,8 +196,11 @@ fn extract_pattern_bindings_impl(
             }
         }
 
-        // Wildcards and literals don't bind variables
-        Pattern::Wildcard(_) | Pattern::Literal(_, _) => {}
+        // Wildcards and literals don't bind variables. `nil` likewise binds
+        // nothing (ADR 0107 Phase A). `Pattern::Type`'s `binding` is not
+        // wired into scope/name-resolution yet — that lands with narrowing
+        // and codegen in BT-2855.
+        Pattern::Wildcard(_) | Pattern::Literal(_, _) | Pattern::Nil(_) | Pattern::Type { .. } => {}
     }
 }
 

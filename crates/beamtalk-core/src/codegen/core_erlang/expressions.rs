@@ -2666,6 +2666,16 @@ impl CoreErlangGenerator {
     pub(super) fn generate_pattern(&mut self, pattern: &Pattern) -> Result<Document<'static>> {
         match pattern {
             Pattern::Wildcard(_) => Ok(Document::Str("_")),
+            // Reuses the existing atom-literal codegen path verbatim
+            // (ADR 0107 Phase A) — `nil` has one canonical runtime
+            // representation, no new mechanism needed.
+            Pattern::Nil(_) => Ok(Document::Str("'nil'")),
+            Pattern::Type { span, .. } => Err(CodeGenError::UnsupportedFeature {
+                feature: "Type pattern (`binding :: ClassName`) in match: is not yet supported \
+                          (ADR 0107 Phase A foundation only — codegen lands in BT-2855)"
+                    .to_string(),
+                span: Some(*span),
+            }),
             Pattern::Variable(id) => {
                 let var_name = Self::to_core_erlang_var(&id.name);
                 Ok(leaf::var(var_name))
@@ -3002,7 +3012,13 @@ impl CoreErlangGenerator {
                     Self::collect_pattern_variables_inner(binding, bind);
                 }
             }
-            Pattern::Wildcard(_) | Pattern::Literal(_, _) => {}
+            // Type pattern bindings are not wired up yet (BT-2855 — bindings,
+            // narrowing, and codegen). `generate_pattern` already rejects
+            // `Pattern::Type` arms before this would matter.
+            Pattern::Wildcard(_)
+            | Pattern::Literal(_, _)
+            | Pattern::Nil(_)
+            | Pattern::Type { .. } => {}
         }
     }
 }
