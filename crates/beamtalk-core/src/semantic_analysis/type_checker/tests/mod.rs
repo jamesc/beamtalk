@@ -13,6 +13,7 @@ mod arg_return_checking;
 mod asserted_match_exhaustiveness;
 mod basic_inference;
 mod bt2826_block_param_types;
+mod bt2829_return_type_union_dynamic;
 mod cast_and_sync_send;
 mod destructure_and_extension;
 mod dynamic_and_blocks;
