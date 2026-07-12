@@ -1508,10 +1508,7 @@ impl TypeChecker {
                 ),
                 method.span,
             )
-            .with_category(DiagnosticCategory::Type)
-            .with_hint(format!(
-                "Declared -> {expected_display}, inferred body type is {actual_display}"
-            )),
+            .with_category(DiagnosticCategory::Type),
         );
     }
 
@@ -1550,9 +1547,9 @@ impl TypeChecker {
         if !hierarchy.is_typed(class_name) {
             return;
         }
-        let Some(description) = reason.description() else {
-            return;
-        };
+        let description = reason
+            .description()
+            .expect("AmbiguousControlFlow/UnannotatedReturn always have a description");
 
         let selector = method.selector.name();
         let expected_display = expected

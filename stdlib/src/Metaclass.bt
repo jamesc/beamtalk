@@ -147,6 +147,8 @@ sealed typed Class subclass: Metaclass
   sealed classIncludesSelector: selector -> Boolean =>
     @primitive "metaclassIncludesSelector"
 
+  // --- Package reflection (ADR 0070 Phase 5) ---
+
   /// Return the name of the package that owns the described class.
   ///
   /// Extracts the package name from the class registry or .app metadata.
