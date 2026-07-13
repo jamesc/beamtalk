@@ -2862,12 +2862,13 @@ direction matchExhaustive: [
 ]
 ```
 
-If the scrutinee's type is **not** a closed union of `#symbol` singletons (`Dynamic`, a bare/open `Symbol`, or a mixed union), `matchExhaustive:` cannot verify the assertion and fails loudly rather than staying silent:
+If the scrutinee's type is **not** a closed union of `#symbol` singletons (`Dynamic`, a bare/open `Symbol`, or a mixed union), nor a closed `Known | Nil` union (or small closed union of concrete leaf classes) covered by `nil`/`Type` patterns (ADR 0107), `matchExhaustive:` cannot verify the assertion and fails loudly rather than staying silent:
 
 ```beamtalk
 x matchExhaustive: [#ok -> 1; _ -> 0]
 // ⛔ Error: cannot verify `matchExhaustive:` is exhaustive — scrutinee type
-//    `Dynamic` is not a closed union of symbol singletons
+//    `Dynamic` is not a closed union of symbol singletons, `nil`, or
+//    concrete leaf classes
 ```
 
 Plain `match:`'s advisory warning behaviour is unchanged by `matchExhaustive:` — the two checks are independent, and only the keyword you write selects between them.

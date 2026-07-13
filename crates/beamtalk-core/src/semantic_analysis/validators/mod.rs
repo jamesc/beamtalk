@@ -39,7 +39,8 @@ pub(crate) use lint_validators::{
     check_redundant_super_initialize,
 };
 pub(crate) use match_validators::{
-    check_match_exhaustiveness, check_type_pattern_classes, warn_assignment_in_match_arms,
+    check_match_exhaustiveness, check_type_pattern_classes, is_concrete_leaf_class,
+    warn_assignment_in_match_arms,
 };
 pub(crate) use native_validators::{
     check_native_delegate_reserved_word, check_native_delegate_return_type,

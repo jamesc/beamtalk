@@ -301,6 +301,65 @@ relevant_image_diagnostic_drops_unrelated_category_test() ->
     ).
 
 %%====================================================================
+%% Pure helper — relevant_diagnostic_leaf_change/2 (ADR 0107 Phase A, BT-2856)
+%%====================================================================
+
+%% A `Type`-category diagnostic naming the class is kept — regardless of
+%% severity (the one deliberate exception to every other relevance filter
+%% in this module dropping `error` outright; see `trigger_leaf_change/1`'s
+%% doc for why).
+relevant_diagnostic_leaf_change_keeps_error_severity_test() ->
+    ?assert(
+        beamtalk_recheck:relevant_diagnostic_leaf_change(
+            #{
+                category => <<"Type">>,
+                severity => <<"error">>,
+                message => <<"`Shape` has subclasses; type patterns are not yet supported">>
+            },
+            <<"Shape">>
+        )
+    ).
+
+relevant_diagnostic_leaf_change_keeps_warning_severity_test() ->
+    ?assert(
+        beamtalk_recheck:relevant_diagnostic_leaf_change(
+            #{
+                category => <<"Type">>,
+                severity => <<"warning">>,
+                message => <<"non-exhaustive match: `Shape` residual">>
+            },
+            <<"Shape">>
+        )
+    ).
+
+relevant_diagnostic_leaf_change_drops_unrelated_category_test() ->
+    ?assertNot(
+        beamtalk_recheck:relevant_diagnostic_leaf_change(
+            #{
+                category => <<"Dnu">>,
+                severity => <<"hint">>,
+                message => <<"`Shape` does not understand `foo`">>
+            },
+            <<"Shape">>
+        )
+    ).
+
+%% A `Type`-category diagnostic that does NOT mention the changed class at
+%% all is unrelated noise (e.g. a pre-existing, unrelated type mismatch
+%% elsewhere in the same file) — dropped even though the category matches.
+relevant_diagnostic_leaf_change_drops_unrelated_class_name_test() ->
+    ?assertNot(
+        beamtalk_recheck:relevant_diagnostic_leaf_change(
+            #{
+                category => <<"Type">>,
+                severity => <<"error">>,
+                message => <<"`OtherClass` has subclasses">>
+            },
+            <<"Shape">>
+        )
+    ).
+
+%%====================================================================
 %% Integration fixture: real compiler port + xref + workspace_meta
 %%====================================================================
 
