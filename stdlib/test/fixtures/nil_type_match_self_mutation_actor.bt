@@ -1,0 +1,35 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2880: Actor fixture reproducing the bug report's repro — a match:
+// arm whose body is a multi-statement `[...] value` block that mutates
+// `self.<state>` must thread actor state correctly and return the block's
+// real last-statement value, not an internal state-threading Tuple. Mixes
+// a native `nil ->` arm (the mutating one) with a `Pattern::Type` arm
+// (`x :: Integer -> x`), matching the repro and exercising the
+// chain-of-nested-cases codegen path (generate_match_chain).
+//
+// Unlike the bug report's own repro, `count` has a default value here
+// rather than being a bare `state: count :: Integer` (no default) — a
+// non-`typed` Actor with a no-default typed field plus an explicit
+// `initialize` hits an unrelated, pre-existing gap where `handle_continue`
+// never dispatches to `initialize` at all (also silently bypassing the
+// uninitialized-state safety check), unrelated to this match: bug.
+
+Actor subclass: NilTypeMatchSelfMutationRegistry
+  state: count :: Integer = 0
+
+  initialize =>
+    self.count := 0
+    nil
+
+  bumpMatch -> Integer =>
+    nil match: [
+      nil -> [
+        self.count := self.count + 1
+        self.count
+      ] value;
+      x :: Integer -> x
+    ]
+
+  currentCount => self.count

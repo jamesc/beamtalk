@@ -2223,8 +2223,20 @@ impl CoreErlangGenerator {
             .iter()
             .any(|arm| matches!(arm.pattern, Pattern::Type { .. }));
 
+        // BT-2880: decide once, for the whole `match:`, whether any arm needs
+        // actor state threading (e.g. an arm body that is a state-mutating
+        // `[...] value` block). When it does, every arm below is compiled to a
+        // uniform `{Value, State}` shape via `generate_match_arm_body`, so the
+        // whole `match:` expression threads state exactly like `ifTrue:`/
+        // `ifFalse:` mutations — see `match_needs_mutation_threading`.
+        let base_state = if self.match_needs_mutation_threading(arms) {
+            Some(self.current_state_var())
+        } else {
+            None
+        };
+
         let inner_doc = if has_array_arm || has_type_arm {
-            self.generate_match_chain(&match_var, arms)?
+            self.generate_match_chain(&match_var, arms, base_state.as_deref())?
         } else {
             // All arms use native Core Erlang patterns (literals, variables, tuples, maps).
             let mut parts: Vec<Document<'static>> = Vec::new();
@@ -2249,7 +2261,7 @@ impl CoreErlangGenerator {
                     parts.push(Document::Str(" when 'true'"));
                 }
                 parts.push(Document::Str(" -> "));
-                let body_doc = self.expression_doc(&arm.body)?;
+                let body_doc = self.generate_match_arm_body(&arm.body, base_state.as_deref())?;
                 parts.push(body_doc);
                 self.pop_scope();
             }
@@ -2264,6 +2276,61 @@ impl CoreErlangGenerator {
             value_doc,
             " in ",
             inner_doc
+        ])
+    }
+
+    /// BT-2880: Compiles a `match:` arm body.
+    ///
+    /// When `base_state` is `None` (no arm in this `match:` needs actor state
+    /// threading — the common case), this is exactly `expression_doc`,
+    /// byte-for-byte unchanged from before BT-2880.
+    ///
+    /// When `base_state` is `Some` (`match_needs_mutation_threading` found at
+    /// least one arm that does), every arm must yield a `{Value, State}` tuple
+    /// so the whole `match:` expression has one consistent shape that the
+    /// caller (`generate_match`) can return as-is, letting the existing
+    /// `ifTrue:`/`ifFalse:`-style tuple-unwrap machinery
+    /// (`control_flow_has_mutations`'s `Expression::Match` branch) consume it:
+    /// - An arm body that is itself a state-mutating `[...] value` block
+    ///   (`is_tier2_value_call` with a block-literal receiver) is inlined via
+    ///   `generate_conditional_branch_inline` — the same mechanism `ifTrue:`/
+    ///   `ifFalse:` branches use — so `self.<field> :=` assignments inside it
+    ///   thread state correctly instead of leaking their raw internal tuple
+    ///   as the match's value (BT-2880).
+    /// - Any other arm body — including other `is_tier2_value_call` shapes,
+    ///   which `expression_doc` already unwraps/discards state for (see
+    ///   `close_tier2_value_subexpr_doc`) — is wrapped unchanged as
+    ///   `{<value>, <base_state>}`.
+    fn generate_match_arm_body(
+        &mut self,
+        body: &Expression,
+        base_state: Option<&str>,
+    ) -> Result<Document<'static>> {
+        let Some(base_state) = base_state else {
+            return self.expression_doc(body);
+        };
+        if self.is_tier2_value_call(body) {
+            if let Expression::MessageSend { receiver, .. } = body {
+                if let Expression::Block(block) = receiver.as_ref() {
+                    let (branch_doc, _) = self.with_branch_context(|this| {
+                        this.generate_conditional_branch_inline(block)
+                    })?;
+                    return Ok(docvec![
+                        "let StateAcc = ",
+                        leaf::var(base_state.to_string()),
+                        " in ",
+                        branch_doc
+                    ]);
+                }
+            }
+        }
+        let body_doc = self.expression_doc(body)?;
+        Ok(docvec![
+            "{",
+            body_doc,
+            ", ",
+            leaf::var(base_state.to_string()),
+            "}"
         ])
     }
 
@@ -2296,6 +2363,7 @@ impl CoreErlangGenerator {
         &mut self,
         match_var: &str,
         arms: &[MatchArm],
+        base_state: Option<&str>,
     ) -> Result<Document<'static>> {
         if arms.is_empty() {
             return Ok(docvec![
@@ -2311,7 +2379,7 @@ impl CoreErlangGenerator {
         if let Pattern::Array { elements, .. } = &arm.pattern {
             // Generate current arm body FIRST so that state_version and temp-var counters
             // are not advanced by later arms before we codegen the current one.
-            return self.generate_array_match_arm(match_var, arm, elements, rest);
+            return self.generate_array_match_arm(match_var, arm, elements, rest, base_state);
         }
 
         // BT-2855 / ADR 0107 Phase A: `Pattern::Type` (`binding :: ClassName`)
@@ -2322,7 +2390,7 @@ impl CoreErlangGenerator {
         // `Value`/sealed class) needs a `maps:get` test in case-scrutinee
         // position, which is not expressible as a single Core Erlang guard.
         if let Pattern::Type { binding, class, .. } = &arm.pattern {
-            return self.generate_type_pattern(match_var, arm, binding, class, rest);
+            return self.generate_type_pattern(match_var, arm, binding, class, rest, base_state);
         }
 
         // Native arm: case _Match of <pattern> when guard -> body <_FT> when 'true' -> rest end
@@ -2340,11 +2408,11 @@ impl CoreErlangGenerator {
         } else {
             Document::Str(" when 'true'")
         };
-        let body_doc = self.expression_doc(&arm.body)?;
+        let body_doc = self.generate_match_arm_body(&arm.body, base_state)?;
         self.pop_scope();
 
         // Rest is generated AFTER the current arm to prevent state leakage.
-        let rest_doc = self.generate_match_chain(match_var, rest)?;
+        let rest_doc = self.generate_match_chain(match_var, rest, base_state)?;
 
         Ok(docvec![
             "case ",
@@ -2377,6 +2445,7 @@ impl CoreErlangGenerator {
         arm: &MatchArm,
         elements: &[Pattern],
         rest_arms: &[MatchArm],
+        base_state: Option<&str>,
     ) -> Result<Document<'static>> {
         let n = elements.len();
 
@@ -2392,11 +2461,11 @@ impl CoreErlangGenerator {
         } else {
             None
         };
-        let body_doc = self.expression_doc(&arm.body)?;
+        let body_doc = self.generate_match_arm_body(&arm.body, base_state)?;
         self.pop_scope();
 
         // Generate rest AFTER the current arm body to prevent state leakage.
-        let rest_doc = self.generate_match_chain(match_var, rest_arms)?;
+        let rest_doc = self.generate_match_chain(match_var, rest_arms, base_state)?;
 
         // Build body section: element extractions + optional guard check.
         // Use `case 'true' of <'true'> when GUARD ->` (Core Erlang guard position) so that
@@ -2527,6 +2596,7 @@ impl CoreErlangGenerator {
         binding: &Identifier,
         class: &Identifier,
         rest_arms: &[MatchArm],
+        base_state: Option<&str>,
     ) -> Result<Document<'static>> {
         // Bind `binding` to the whole matched value and generate guard/body
         // FIRST (before rest_arms) so state_version/temp-var counters are
@@ -2535,11 +2605,11 @@ impl CoreErlangGenerator {
         self.push_scope();
         let core_binding = Self::to_core_erlang_var(&binding.name);
         self.bind_var(&binding.name, &core_binding);
-        let body_doc = self.expression_doc(&arm.body)?;
+        let body_doc = self.generate_match_arm_body(&arm.body, base_state)?;
         self.pop_scope();
 
         // Rest is generated AFTER the current arm to prevent state leakage.
-        let rest_doc = self.generate_match_chain(match_var, rest_arms)?;
+        let rest_doc = self.generate_match_chain(match_var, rest_arms, base_state)?;
 
         // Use `case 'true' of <'true'> when GUARD -> body <'true'> when
         // 'true' -> rest end` (Core Erlang guard position) so guard

@@ -1212,6 +1212,49 @@ fn test_match_type_pattern_nested_in_tuple_pattern_is_codegen_error() {
     );
 }
 
+#[test]
+fn test_match_arm_self_mutating_value_block_threads_actor_state() {
+    // BT-2880: a `match:` arm body that is a multi-statement `[...] value`
+    // block mutating `self.<state>` must thread actor state correctly and
+    // unwrap to the block's real value — not leak the internal `{Value,
+    // NewState}` state-threading tuple as the match's result. Mixes a
+    // native `nil ->` arm (mutating) with a `Pattern::Type` arm (`x ::
+    // Integer -> x`, non-mutating) so this exercises `generate_match_chain`,
+    // the exact path the original bug report's repro takes.
+    let src = "Actor subclass: Registry\n  state: count :: Integer\n\n  initialize -> Nil =>\n    self.count := 0\n    nil\n\n  bumpMatch -> Integer =>\n    nil match: [\n      nil -> [\n        self.count := self.count + 1\n        self.count\n      ] value;\n      x :: Integer -> x\n    ]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code =
+        generate_module(&module, CodegenOptions::new("registry")).expect("codegen should succeed");
+
+    eprintln!("Generated code for match: arm self-mutating value block:\n{code}");
+
+    assert!(
+        code.contains("'maps':'put'('count'"),
+        "Self-mutating match: arm must thread state via maps:put. Got:\n{code}"
+    );
+    // The bug produced a raw {Value, NewState} tuple as the whole match:'s
+    // result instead of unwrapping it — the generated `handle_call` clause
+    // for `bumpMatch` must return `{'reply', <ResultVar>, <StateVar>}` (two
+    // bare variables), not a doubly-nested tuple wrapping the match's own
+    // {Value, NewState} tuple as the reply value.
+    let bump_match_clause = code
+        .split("<'bumpMatch'>")
+        .nth(1)
+        .expect("handle_call must have a bumpMatch clause")
+        .split("<OtherSelector>")
+        .next()
+        .expect("bumpMatch clause must be followed by the OtherSelector fallback");
+    assert!(
+        bump_match_clause.contains("{'reply', ") && !bump_match_clause.contains("{'reply', {"),
+        "bumpMatch's state-threading tuple must be unwrapped into plain \
+         Result/State vars before the gen_server reply, not leaked as the \
+         reply value itself. Got clause:\n{bump_match_clause}"
+    );
+
+    crate::test_helpers::assert_compiles_through_erlc("registry", &code);
+}
+
 // BT-2359: value-type outer-local threading for count:/detect: predicates and
 // threading constructs used as a (parenthesized) assignment RHS.
 

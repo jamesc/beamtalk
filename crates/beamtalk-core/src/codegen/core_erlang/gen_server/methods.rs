@@ -3728,6 +3728,21 @@ impl CoreErlangGenerator {
         false
     }
 
+    /// BT-2880: `true` when a `match:` needs actor state threading — i.e. it
+    /// runs in Actor context and at least one arm's body is a Tier 2 value-call
+    /// (most commonly a state-mutating `[...] value` block). `generate_match`
+    /// checks this once per `match:` and, when true, compiles every arm's body
+    /// to a uniform `{Value, State}` shape so the whole expression can be
+    /// unwrapped by the same machinery as `ifTrue:`/`ifFalse:` mutations
+    /// (`control_flow_has_mutations`'s `Expression::Match` branch above).
+    pub(in crate::codegen::core_erlang) fn match_needs_mutation_threading(
+        &self,
+        arms: &[crate::ast::MatchArm],
+    ) -> bool {
+        self.context == super::super::CodeGenContext::Actor
+            && arms.iter().any(|arm| self.is_tier2_value_call(&arm.body))
+    }
+
     /// BT-1213/BT-2815: Returns captured mutation variable names for a Tier 2
     /// value-call statement (`expr` already classified/proven
     /// `BodyExprKind::Tier2ValueCall` by `is_tier2_value_call`) whose receiver
@@ -3975,6 +3990,19 @@ impl CoreErlangGenerator {
         // classified as control flow with mutations (and thus unpacked + threaded)
         // rather than falling through to a plain pure local assignment.
         let expr = Self::peel_parens(expr);
+
+        // BT-2880: `match:` is a dedicated `Expression::Match` node, not a
+        // `MessageSend`, so it's otherwise invisible to this classifier — a
+        // `match:` arm body that is a state-mutating `[...] value` block would
+        // fall through to `BodyExprKind::Pure` and leak its raw `{Result,
+        // NewState}` tuple as the match's value. `generate_match` threads state
+        // through every arm (see `match_needs_mutation_threading`) whenever any
+        // arm needs it, so route it through the same tuple-unwrap machinery as
+        // `ifTrue:`/`ifFalse:`.
+        if let Expression::Match { arms, .. } = expr {
+            return self.match_needs_mutation_threading(arms);
+        }
+
         let Expression::MessageSend {
             receiver,
             arguments,
