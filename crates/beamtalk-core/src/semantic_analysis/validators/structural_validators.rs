@@ -461,7 +461,7 @@ fn extract_erlang_module(expr: &Expression) -> Option<&str> {
 /// Keyword selectors like `seq:to:` become the first keyword part (`seq`).
 /// Unary selectors use the name directly. Binary selectors don't map to
 /// Erlang functions (they're Beamtalk operators).
-fn erlang_function_name(selector: &MessageSelector) -> Option<String> {
+pub(crate) fn erlang_function_name(selector: &MessageSelector) -> Option<String> {
     match selector {
         MessageSelector::Unary(name) => Some(name.to_string()),
         MessageSelector::Keyword(parts) => parts
@@ -476,7 +476,7 @@ fn erlang_function_name(selector: &MessageSelector) -> Option<String> {
 /// For direct Erlang FFI calls, the arity is the number of Beamtalk arguments
 /// for keyword messages (e.g. `seq: 1 to: 10` has arity 2), and 0 for unary
 /// messages (they lower to zero-argument Erlang function calls).
-fn erlang_arity(selector: &MessageSelector, argument_count: usize) -> usize {
+pub(crate) fn erlang_arity(selector: &MessageSelector, argument_count: usize) -> usize {
     match selector {
         MessageSelector::Unary(_) => 0,
         _ => argument_count,

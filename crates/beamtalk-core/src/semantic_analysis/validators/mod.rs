@@ -52,7 +52,7 @@ pub(crate) use sendability_validators::{
 };
 pub(crate) use structural_validators::{
     check_ffi_arity, check_unresolved_classes, check_unresolved_ffi_modules,
-    check_workspace_shadows,
+    check_workspace_shadows, erlang_arity, erlang_function_name,
 };
 pub(crate) use supervision_validators::{
     check_children_supervision_policy, check_supervision_policy_override,
