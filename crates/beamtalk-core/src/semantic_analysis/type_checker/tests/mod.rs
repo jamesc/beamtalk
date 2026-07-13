@@ -10,6 +10,7 @@ mod common;
 
 mod adr_0104_integration;
 mod arg_return_checking;
+mod argument_check_matrix;
 mod asserted_match_exhaustiveness;
 mod basic_inference;
 mod bt2826_block_param_types;
