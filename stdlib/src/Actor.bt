@@ -67,7 +67,7 @@ Object subclass: Actor
   /// ```beamtalk
   /// c := (Counter spawnWith: #{#count => 10} as: #counter) unwrap
   /// ```
-  class sealed spawnWith: initArgs as: name :: Symbol -> Result(Self, Error) =>
+  class sealed spawnWith: initArgs :: Object as: name :: Symbol -> Result(Self, Error) =>
     (Erlang beamtalk_actor)
       doSpawnWith: self
       args: initArgs

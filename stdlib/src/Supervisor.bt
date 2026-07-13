@@ -128,7 +128,7 @@ abstract Object subclass: Supervisor
   /// on `not_found` — terminating an already-gone child returns `Result ok: nil`.
   /// Genuine failures surface as
   /// `Result error: #beamtalk_error{kind = terminate_failed}`.
-  terminate: aClass -> Result(Nil, Error) =>
+  terminate: aClass :: Class -> Result(Nil, Error) =>
     (Erlang beamtalk_supervisor) terminateChild: self class: aClass
 
   /// Return the count of currently-running children.
