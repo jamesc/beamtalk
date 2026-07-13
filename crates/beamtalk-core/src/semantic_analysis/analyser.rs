@@ -366,14 +366,25 @@ impl Analyser {
                     self.define_pattern_variables_in_scope(binding);
                 }
             }
-            // `nil` binds nothing (ADR 0107 Phase A). `Pattern::Type`'s
-            // `binding` is not wired into scope tracking yet — that lands
-            // with narrowing and codegen in BT-2855.
+            // BT-2855: defensive parity with `Pattern::Constructor` above —
+            // the parser currently never produces a `Pattern::Type` here
+            // (`identifier :: Type := expr` is rejected as "Type annotations
+            // on destructuring assignments are not yet supported"), so this
+            // arm is unreachable today. Handling it the same way `Variable`
+            // is handled keeps this function correct-by-construction if that
+            // parser restriction is ever lifted, rather than silently
+            // leaving `binding` unbound in scope.
+            Pattern::Type { binding, .. } => {
+                if self.scope.lookup_immut(&binding.name).is_none() {
+                    self.scope
+                        .define(&binding.name, binding.span, BindingKind::Local);
+                }
+            }
+            // `nil` binds nothing (ADR 0107 Phase A).
             Pattern::Binary { .. }
             | Pattern::Wildcard(_)
             | Pattern::Literal(_, _)
-            | Pattern::Nil(_)
-            | Pattern::Type { .. } => {}
+            | Pattern::Nil(_) => {}
         }
     }
 

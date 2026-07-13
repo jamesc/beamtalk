@@ -871,34 +871,78 @@ impl TypeChecker {
                     .map(|arm| {
                         let mut arm_env = env.child();
                         Self::bind_pattern_vars(&arm.pattern, &mut arm_env);
+
+                        // BT-2855 / ADR 0107 Phase A: a `binding :: ClassName`
+                        // arm narrows `binding` to `ClassName`, computed the
+                        // same way `isKindOf:`'s true branch does
+                        // (`intersect_with_class`, shared with
+                        // `compute_class_narrowing`) — from the scrutinee's
+                        // *current* residual type, not the original
+                        // `scrutinee_ty`, so a `Type` arm after an unguarded
+                        // `nil ->`/`Type` arm sees the narrower residual.
+                        // Overwrites the `Dynamic` `bind_pattern_vars` (above)
+                        // just set for `binding`.
+                        let type_pattern_narrowed =
+                            if let Pattern::Type { binding, class, .. } = &arm.pattern {
+                                let narrowed = Self::intersect_with_class(
+                                    &residual_scrutinee_ty,
+                                    &class.name,
+                                    hierarchy,
+                                    self.protocol_registry.as_ref(),
+                                );
+                                arm_env.set_local(binding.name.clone(), narrowed.clone());
+                                Some(narrowed)
+                            } else {
+                                None
+                            };
+
                         if let Some(key) = &scrutinee_key {
                             if matches!(arm.pattern, Pattern::Nil(_)) {
                                 arm_env.set(
                                     key.clone(),
                                     InferredType::known(WellKnownClass::UndefinedObject.as_str()),
                                 );
+                            } else if let Some(narrowed) = &type_pattern_narrowed {
+                                // The scrutinee variable (if it has a stable
+                                // name) denotes the same value as `binding` —
+                                // give it the identical narrowed type inside
+                                // this arm, so `raw match: [path :: String ->
+                                // raw ...]` sees `raw` narrowed too, not just
+                                // `path`.
+                                arm_env.set(key.clone(), narrowed.clone());
                             } else {
                                 // Deliberately overwrites whatever
                                 // `bind_pattern_vars` (above) just set for
                                 // this key: today that's always `Dynamic` for
                                 // a pattern-bound variable, so the residual
-                                // here is strictly more precise. If a future
-                                // phase (`Pattern::Type` narrowing, BT-2855)
-                                // makes `bind_pattern_vars` assign a real
-                                // narrowed type to a pattern variable that
-                                // happens to share the scrutinee's key, this
-                                // line will silently win over it — revisit
-                                // this ordering when that lands.
+                                // here is strictly more precise.
                                 arm_env.set(key.clone(), residual_scrutinee_ty.clone());
                             }
                         }
+                        // Guard sees `binding`/scrutinee already narrowed
+                        // above (ADR 0107: "scope includes the arm's `when:`
+                        // guard, not just its body").
                         if let Some(guard) = &arm.guard {
                             self.infer_expr(guard, hierarchy, &mut arm_env, in_abstract_method);
                         }
                         let body_ty =
                             self.infer_expr(&arm.body, hierarchy, &mut arm_env, in_abstract_method);
-                        if arm.guard.is_none() && matches!(arm.pattern, Pattern::Nil(_)) {
-                            residual_scrutinee_ty = Self::non_nil_type(&residual_scrutinee_ty);
+                        if arm.guard.is_none() {
+                            if matches!(arm.pattern, Pattern::Nil(_)) {
+                                residual_scrutinee_ty = Self::non_nil_type(&residual_scrutinee_ty);
+                            } else if let Pattern::Type { class, .. } = &arm.pattern {
+                                // Unguarded `Type` arm guarantees coverage of
+                                // `ClassName` — subsequent arms see the
+                                // scrutinee narrowed by `\ ClassName` (ADR
+                                // 0102 §5 nominal-class difference), mirroring
+                                // `isKindOf:`'s false-branch narrowing.
+                                residual_scrutinee_ty = InferredType::difference(
+                                    &residual_scrutinee_ty,
+                                    &InferredType::known(class.name.clone()),
+                                    super::TypeProvenance::Inferred(Span::default()),
+                                    Some(hierarchy),
+                                );
+                            }
                         }
                         body_ty
                     })
@@ -2719,19 +2763,8 @@ impl TypeChecker {
             return info;
         };
         let pattern = InferredType::known(class_name.clone());
-        let provenance = super::TypeProvenance::Inferred(Span::default());
-        let refined = InferredType::intersect(
-            current_ty,
-            &pattern,
-            provenance,
-            Some(hierarchy),
-            protocol_registry,
-        );
-        info.true_type = if matches!(refined, InferredType::Intersection { .. }) {
-            pattern.clone()
-        } else {
-            refined
-        };
+        info.true_type =
+            Self::intersect_with_class(current_ty, &class_name, hierarchy, protocol_registry);
         // BT-2744: only `isKindOf:`'s false branch can be narrowed via
         // nominal-class `difference` — `Negation{base, excluded}` always
         // excludes `excluded`'s *entire* subtree, which matches `isKindOf:`'s
@@ -2744,11 +2777,41 @@ impl TypeChecker {
             info.false_type = Some(InferredType::difference(
                 current_ty,
                 &pattern,
-                provenance,
+                super::TypeProvenance::Inferred(Span::default()),
                 Some(hierarchy),
             ));
         }
         info
+    }
+
+    /// `intersect(current, Known(class_name))`, collapsing a compound
+    /// `Intersection` result down to the bare nominal `class_name` (BT-2825)
+    /// — shared by `isKindOf:`/`class =` guard narrowing (above) and
+    /// `Pattern::Type` match-arm binding narrowing (BT-2855, ADR 0107), both
+    /// of which need the same "this value literally is `class_name`"
+    /// true-branch collapse so downstream `is_assignable_to`/DNU checks see
+    /// a plain nominal type rather than an `Intersection` they don't
+    /// otherwise understand.
+    fn intersect_with_class(
+        current_ty: &InferredType,
+        class_name: &EcoString,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: Option<&crate::semantic_analysis::protocol_registry::ProtocolRegistry>,
+    ) -> InferredType {
+        let pattern = InferredType::known(class_name.clone());
+        let provenance = super::TypeProvenance::Inferred(Span::default());
+        let refined = InferredType::intersect(
+            current_ty,
+            &pattern,
+            provenance,
+            Some(hierarchy),
+            protocol_registry,
+        );
+        if matches!(refined, InferredType::Intersection { .. }) {
+            pattern
+        } else {
+            refined
+        }
     }
 
     /// ADR 0102 §2 group 2 / BT-2741: emits the "comparison can never be
@@ -6371,6 +6434,143 @@ mod tests {
             InferredType::union_of(&[
                 InferredType::known("Integer"),
                 InferredType::simple_union(&["String", "Nil"]),
+            ])
+        );
+    }
+
+    // ---- BT-2855 / ADR 0107 Phase A: `Pattern::Type` narrowing ----
+
+    /// A `binding :: ClassName` arm's body sees `binding` statically
+    /// narrowed to `ClassName`, mirroring `isKindOf:`'s true-branch
+    /// narrowing (`intersect_with_class`).
+    #[test]
+    fn infer_expr_match_type_arm_narrows_binding_to_class() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        env.set_local("x", InferredType::simple_union(&["String", "Integer"]));
+
+        // x match: [s :: String -> s; n :: Integer -> n]
+        let expr = Expression::Match {
+            value: Box::new(var("x")),
+            arms: vec![
+                MatchArm::new(
+                    Pattern::Type {
+                        binding: Identifier::new("s", span()),
+                        class: Identifier::new("String", span()),
+                        span: span(),
+                    },
+                    var("s"),
+                    span(),
+                ),
+                MatchArm::new(
+                    Pattern::Type {
+                        binding: Identifier::new("n", span()),
+                        class: Identifier::new("Integer", span()),
+                        span: span(),
+                    },
+                    var("n"),
+                    span(),
+                ),
+            ],
+            exhaustive: false,
+            span: span(),
+        };
+        let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+        // Each arm's body is the narrowed binding, not the original union.
+        assert_eq!(
+            ty,
+            InferredType::union_of(&[
+                InferredType::known("String"),
+                InferredType::known("Integer"),
+            ])
+        );
+    }
+
+    /// An unguarded `Type` arm removes `ClassName` from what subsequent arms
+    /// see, mirroring `isKindOf:`'s false-branch `\` (difference) narrowing
+    /// — and the *scrutinee's own name* (not just the pattern's binding)
+    /// sees the same narrowed type, since they denote the same value.
+    #[test]
+    fn infer_expr_match_unguarded_type_arm_narrows_subsequent_arms() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        env.set_local("x", InferredType::simple_union(&["String", "Integer"]));
+
+        // x match: [s :: String -> 0; y -> x]  -- second arm's body reads
+        // `x` (the scrutinee, not `s`), which should be narrowed to
+        // `Integer` after the unguarded String arm.
+        let expr = Expression::Match {
+            value: Box::new(var("x")),
+            arms: vec![
+                MatchArm::new(
+                    Pattern::Type {
+                        binding: Identifier::new("s", span()),
+                        class: Identifier::new("String", span()),
+                        span: span(),
+                    },
+                    int_lit(0),
+                    span(),
+                ),
+                MatchArm::new(
+                    Pattern::Variable(Identifier::new("y", span())),
+                    var("x"),
+                    span(),
+                ),
+            ],
+            exhaustive: false,
+            span: span(),
+        };
+        let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+        assert_eq!(
+            ty,
+            InferredType::union_of(&[
+                InferredType::known("Integer"),
+                InferredType::known("Integer"),
+            ])
+        );
+    }
+
+    /// A *guarded* `binding :: ClassName when: [...] ->` arm does not
+    /// guarantee coverage, so it must not narrow away `ClassName` for
+    /// subsequent arms (same rule the guarded `nil` case above uses).
+    #[test]
+    fn infer_expr_match_guarded_type_arm_does_not_narrow_subsequent_arms() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        env.set_local("x", InferredType::simple_union(&["String", "Integer"]));
+
+        let expr = Expression::Match {
+            value: Box::new(var("x")),
+            arms: vec![
+                MatchArm::with_guard(
+                    Pattern::Type {
+                        binding: Identifier::new("s", span()),
+                        class: Identifier::new("String", span()),
+                        span: span(),
+                    },
+                    var("s"),
+                    int_lit(0),
+                    span(),
+                ),
+                MatchArm::new(
+                    Pattern::Variable(Identifier::new("y", span())),
+                    var("x"),
+                    span(),
+                ),
+            ],
+            exhaustive: false,
+            span: span(),
+        };
+        let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+        // Second arm still sees `x` as `String | Integer` (unchanged residual).
+        assert_eq!(
+            ty,
+            InferredType::union_of(&[
+                InferredType::known("Integer"),
+                InferredType::simple_union(&["String", "Integer"]),
             ])
         );
     }

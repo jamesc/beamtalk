@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2855: TypePatternActorFixture — a leaf `Actor subclass:` with no
+// subclasses anywhere in the test corpus, used to verify `x ::
+// TypePatternActorFixture` type-pattern codegen against a real actor
+// reference (a 4-tuple at runtime, not a map).
+
+Actor subclass: TypePatternActorFixture
+  state: value = 0
+
+  getValue => self.value

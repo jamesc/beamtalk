@@ -923,21 +923,292 @@ fn test_match_nil_pattern_compiles_to_atom_literal() {
     );
 }
 
+// BT-2855 / ADR 0107 Phase A: `Pattern::Type` codegen (`generate_type_pattern`)
+
 #[test]
-fn test_match_type_pattern_codegen_not_yet_supported() {
-    // ADR 0107 Phase A (BT-2854 foundation only): `Pattern::Type` parses and
-    // passes semantic analysis (for a known leaf class), but codegen doesn't
-    // exist yet — that lands in BT-2855. Must fail loudly, not silently emit
-    // wrong code.
+fn test_match_type_pattern_string_compiles_to_is_binary_test() {
+    // `s :: String` compiles to a guard-safe `is_binary` case test — the
+    // single-level generalization of `generate_array_match_arm`'s `is_map`
+    // check to an arbitrary primitive BIF.
     let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      s :: String -> s;\n      _ -> \"none\"\n    ]\n";
     let tokens = crate::source_analysis::lex_with_eof(src);
     let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code =
+        generate_module(&module, CodegenOptions::new("foo")).expect("codegen should succeed");
+
+    eprintln!("Generated code for String type pattern match:\n{code}");
+
+    assert!(
+        code.contains("'erlang':'is_binary'"),
+        "String type pattern should test is_binary. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_match_type_pattern_tagged_class_compiles_to_map_tag_check() {
+    // An exact tagged `Value`/sealed class reuses the `'$beamtalk_class'`
+    // map-key check `generate_constructor_pattern` already uses for
+    // `Result`, generalized to the pattern's `class` field. `generate_module`
+    // compiles a single class per call, so the pattern's target class (`Bar`)
+    // and the method under test live on the same class.
+    let src = "Value subclass: Bar\n  field: n = 0\n\n  test: x =>\n    x match: [\n      b :: Bar -> b;\n      _ -> \"none\"\n    ]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code =
+        generate_module(&module, CodegenOptions::new("bar")).expect("codegen should succeed");
+
+    eprintln!("Generated code for tagged-class type pattern match:\n{code}");
+
+    assert!(
+        code.contains("'erlang':'is_map'"),
+        "Tagged-class type pattern should test is_map first. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'maps':'get'('$beamtalk_class'"),
+        "Tagged-class type pattern should check '$beamtalk_class'. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'Bar'"),
+        "Tagged-class type pattern should match the class name atom. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_match_type_pattern_mixed_with_nil_and_native_arms_compiles() {
+    // A `match:` mixing `nil`, a primitive `Type` arm, and a wildcard must
+    // still compile into one dispatch chain (verifies the
+    // dispatch/interleaving layer, not just each strategy in isolation).
+    let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      nil -> 0;\n      n :: Integer -> n;\n      _ -> -1\n    ]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code =
+        generate_module(&module, CodegenOptions::new("foo")).expect("codegen should succeed");
+
+    eprintln!("Generated code for mixed nil/type/wildcard match:\n{code}");
+
+    assert!(
+        code.contains("<'nil'>"),
+        "Should still contain the nil arm. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'erlang':'is_integer'"),
+        "Should still contain the Integer arm's test. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_match_type_pattern_block_compiles_to_is_function_test() {
+    // A Beamtalk block compiles to a plain Erlang `fun`, never a map — it
+    // needs its own guard-safe BIF entry rather than falling into the
+    // tagged-class `is_map` path (which would never match a `fun`).
+    let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      blk :: Block -> blk;\n      _ -> \"none\"\n    ]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code =
+        generate_module(&module, CodegenOptions::new("foo")).expect("codegen should succeed");
+
+    eprintln!("Generated code for Block type pattern match:\n{code}");
+
+    assert!(
+        code.contains("'erlang':'is_function'"),
+        "Block type pattern should test is_function. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_match_type_pattern_true_false_nil_use_exact_atom_match() {
+    // `True`/`False` (real sealed `Boolean` subclasses) and
+    // `Nil`/`UndefinedObject` (the nil class and its legacy alias) all
+    // compile to a bare atom, never a map — each needs an exact
+    // single-atom test rather than the tagged-class `is_map` check (which
+    // would never match a plain atom).
+    let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      t :: True -> 1;\n      f :: False -> 2;\n      n :: Nil -> 3;\n      u :: UndefinedObject -> 4;\n      _ -> 0\n    ]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code =
+        generate_module(&module, CodegenOptions::new("foo")).expect("codegen should succeed");
+
+    eprintln!("Generated code for True/False/Nil/UndefinedObject type patterns:\n{code}");
+
+    assert!(
+        !code.contains("is_map"),
+        "None of True/False/Nil/UndefinedObject should use the tagged-class is_map check. Got:\n{code}"
+    );
+    assert!(
+        code.matches("<'true'>").count() >= 1,
+        "Should contain an exact 'true' match for the True arm. Got:\n{code}"
+    );
+    assert!(
+        code.matches("<'false'>").count() >= 1,
+        "Should contain an exact 'false' match for the False arm. Got:\n{code}"
+    );
+    assert!(
+        code.matches("<'nil'>").count() >= 2,
+        "Should contain an exact 'nil' match for both the Nil and UndefinedObject arms. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_match_type_pattern_actor_class_uses_tuple_tag_check_and_compiles() {
+    // BT-2855: an actor reference is `{'beamtalk_object', ClassAtom,
+    // ModuleAtom, Pid}` — a 4-tuple, not a map. Naively generalizing the
+    // tagged-class `is_map` check to Actor subclasses would silently never
+    // match a live actor instance. Verifies both the generated shape and
+    // that it actually compiles through erlc (not just pretty-prints).
+    let src = "Actor subclass: Counter\n  state: count = 0\n\n  test: x =>\n    x match: [\n      c :: Counter -> c;\n      _ -> \"none\"\n    ]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code =
+        generate_module(&module, CodegenOptions::new("counter")).expect("codegen should succeed");
+
+    eprintln!("Generated code for actor type pattern match:\n{code}");
+
+    assert!(
+        code.contains("'erlang':'is_tuple'"),
+        "Actor-class type pattern should test is_tuple. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'beamtalk_object'"),
+        "Actor-class type pattern should check the 'beamtalk_object' tag. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'Counter'"),
+        "Actor-class type pattern should match the class name atom. Got:\n{code}"
+    );
+
+    crate::test_helpers::assert_compiles_through_erlc("counter", &code);
+}
+
+#[test]
+fn test_match_type_pattern_pid_reference_port_use_guard_safe_bifs() {
+    // `Pid`/`Reference`/`Port` are raw BEAM terms (never maps) — each needs
+    // its own guard-safe BIF entry rather than the tagged-class `is_map`
+    // check (which would never match a bare pid/ref/port).
+    let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      p :: Pid -> 1;\n      r :: Reference -> 2;\n      pt :: Port -> 3;\n      _ -> 0\n    ]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code =
+        generate_module(&module, CodegenOptions::new("foo")).expect("codegen should succeed");
+
+    eprintln!("Generated code for Pid/Reference/Port type patterns:\n{code}");
+
+    assert!(
+        code.contains("'erlang':'is_pid'"),
+        "Pid type pattern should test is_pid. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'erlang':'is_reference'"),
+        "Reference type pattern should test is_reference. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'erlang':'is_port'"),
+        "Port type pattern should test is_port. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_match_type_pattern_tuple_excludes_actor_reference_shape() {
+    // BT-2855: an actor reference is *also* a plain Erlang tuple
+    // structurally (`{'beamtalk_object', ClassAtom, ModuleAtom, Pid}`), so
+    // `x :: Tuple` must explicitly exclude the reserved actor/supervisor
+    // tags or it would incorrectly match a live actor reference too.
+    let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      t :: Tuple -> 1;\n      _ -> 0\n    ]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code =
+        generate_module(&module, CodegenOptions::new("foo")).expect("codegen should succeed");
+
+    eprintln!("Generated code for Tuple type pattern:\n{code}");
+
+    assert!(
+        code.contains("'erlang':'is_tuple'"),
+        "Tuple type pattern should test is_tuple. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'beamtalk_object'"),
+        "Tuple type pattern should exclude the actor-reference tag. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'beamtalk_supervisor'"),
+        "Tuple type pattern should exclude the supervisor-reference tag. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_match_type_pattern_supervisor_subclass_is_compile_error() {
+    // Supervisor references use a third runtime shape
+    // (`{'beamtalk_supervisor' | 'beamtalk_supervisor_new', ...}`) distinct
+    // from both the tagged-map and actor-tuple strategies — rejected
+    // explicitly (fail loudly) rather than risk silently-wrong codegen.
+    let src = "Supervisor subclass: WebApp\n\nObject subclass: Foo\n  test: x =>\n    x match: [\n      s :: WebApp -> s;\n      _ -> \"none\"\n    ]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, diags) = crate::source_analysis::parse(tokens);
+    assert!(diags.is_empty(), "Parse failed: {diags:?}");
+
+    let (hierarchy_result, _) =
+        crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module);
+    let hierarchy = hierarchy_result.expect("hierarchy build should succeed");
+    let mut diagnostics = Vec::new();
+    crate::semantic_analysis::validators::check_type_pattern_classes(
+        &module,
+        &hierarchy,
+        false,
+        &mut diagnostics,
+    );
+
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("WebApp") && d.message.contains("Supervisor")),
+        "Expected a Supervisor-subclass type-pattern error, got: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn test_match_type_pattern_dictionary_and_tagged_class_arms_interleave_in_one_case() {
+    // `Dictionary` and an exact tagged class both use an `is_map`-based
+    // strategy; a `match:` mixing the two must still compile into one
+    // dispatch chain, not collide on temp-var names or short-circuit past
+    // the second arm.
+    let src = "Value subclass: Bar\n  field: n = 0\n\n  test: x =>\n    x match: [\n      d :: Dictionary -> d;\n      b :: Bar -> b;\n      _ -> \"none\"\n    ]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code =
+        generate_module(&module, CodegenOptions::new("bar")).expect("codegen should succeed");
+
+    eprintln!("Generated code for Dictionary + tagged-class match:\n{code}");
+
+    assert!(
+        code.matches("'erlang':'is_map'").count() >= 2,
+        "Should contain at least two independent is_map checks (Dictionary arm + Bar arm; \
+         other class-boilerplate `is_map` checks may also appear). Got:\n{code}"
+    );
+    assert!(
+        code.contains("'undefined'"),
+        "Should still contain the Dictionary arm's 'undefined' tag check. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'Bar'"),
+        "Should still contain the Bar arm's class-tag check. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_match_type_pattern_nested_in_tuple_pattern_is_codegen_error() {
+    // A `Pattern::Type` nested inside a composite pattern (here a `Tuple`)
+    // has no codegen path — `generate_type_pattern` only handles a
+    // top-level arm pattern, since its per-class runtime test needs to wrap
+    // the whole arm. Verifies this is a clean, reported codegen error, not
+    // a panic or silently-wrong output.
+    let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      {s :: String, n} -> n;\n      _ -> 0\n    ]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
     let err = generate_module(&module, CodegenOptions::new("foo"))
-        .expect_err("Pattern::Type codegen should not be implemented yet (BT-2855)");
+        .expect_err("nested Pattern::Type should be a codegen error, not silently accepted");
     let message = err.to_string();
     assert!(
-        message.contains("Type pattern"),
-        "error should mention the Type pattern is unsupported. Got: {message}"
+        message.contains("Type pattern") && message.contains("nested"),
+        "error should describe the nested Type pattern restriction. Got: {message}"
     );
 }
 
