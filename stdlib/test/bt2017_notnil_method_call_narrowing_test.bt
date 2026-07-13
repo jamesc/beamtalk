@@ -18,7 +18,7 @@ TestCase subclass: Bt2017NotNilMethodCallNarrowingTest
   // checking union-aware (matching the pre-existing keyword-send behavior),
   // which now correctly flags this as statically unproven — even though it's
   // runtime-safe due to `and:`'s short-circuit evaluation. Expected/suppressed
-  // pending dedicated `and:`-narrowing support.
+  // pending dedicated `and:`-narrowing support — tracked as BT-2872.
   testParamPassthroughNotNil =>
     x :: Integer | Nil := 3
     local := x
