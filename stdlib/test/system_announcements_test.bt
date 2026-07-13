@@ -11,17 +11,17 @@ TestCase subclass: SystemAnnouncementsTest
 
   // --- The system event classes exist and are Announcements ---
   testEventClassesAreAnnouncements =>
-    self assert: (ActorSpawned new isKindOf: Announcement) equals: true
-    self assert: (ActorStopped new isKindOf: Announcement) equals: true
-    self assert: (ClassLoaded new isKindOf: Announcement) equals: true
-    self assert: (ClassRemoved new isKindOf: Announcement) equals: true
-    self assert: (BindingChanged new isKindOf: Announcement) equals: true
-    self assert: (SupervisionChildAdded new isKindOf: Announcement) equals: true
-    self assert: (SupervisionChildCrashed new isKindOf: Announcement) equals: true
+    self assert: (ActorSpawned new isKindOf: Announcement)
+    self assert: (ActorStopped new isKindOf: Announcement)
+    self assert: (ClassLoaded new isKindOf: Announcement)
+    self assert: (ClassRemoved new isKindOf: Announcement)
+    self assert: (BindingChanged new isKindOf: Announcement)
+    self assert: (SupervisionChildAdded new isKindOf: Announcement)
+    self assert: (SupervisionChildCrashed new isKindOf: Announcement)
     // ADR 0095 §5 / BT-2489: per-object change event.
-    self assert: (ObjectStateChanged new isKindOf: Announcement) equals: true
+    self assert: (ObjectStateChanged new isKindOf: Announcement)
     // BT-2530: workspace flush completion event.
-    self assert: (FlushCompleted new isKindOf: Announcement) equals: true
+    self assert: (FlushCompleted new isKindOf: Announcement)
 
   // --- BindingChanged carries name / value / sessionId (BT-2530) ---
   testBindingChangedFields =>
