@@ -1,0 +1,20 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2842: base class for a hierarchy-walk regression. A subclass instance
+// invoking `triggerBadArithForwarded` never overrides either method here, so
+// the call is resolved entirely through `beamtalk_dispatch:super/5`'s
+// hierarchy walk (see inherited_self_send_error_child.bt) rather than the
+// class's own local dispatch/4 case statement.
+//
+// See also: stdlib/test/fixtures/self_send_raw_error_actor.bt, which covers
+// the same badarith trigger for the *local* (non-hierarchy-walk) dispatch
+// path.
+
+Actor subclass: InheritedSelfSendErrorBase
+
+  // Direct call: raises a raw badarith without any self-send forwarding hop.
+  triggerBadArithDirect => #(1, "x") sum
+
+  // Forwarded call: a plain self-send into the method that raises.
+  triggerBadArithForwarded => self triggerBadArithDirect

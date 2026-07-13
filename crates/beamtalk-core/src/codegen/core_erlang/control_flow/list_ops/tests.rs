@@ -2029,3 +2029,129 @@ fn test_reject_nested_in_direct_params_loop() {
         "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
     );
 }
+
+#[test]
+fn test_do_nested_in_direct_params_loop() {
+    // BT-1329: do: with a local mutation nested inside a direct-params to:do: loop.
+    // The outer loop sets in_direct_params_loop=true, which causes
+    // generate_list_do_with_mutations to hit the tuple-acc + in_direct_params_loop
+    // branch (basic_ops.rs lines 94-112): StateAcc repack is skipped, an open
+    // let-chain is emitted, and last_open_scope_result is set to "_" so the outer
+    // loop can chain the next expression directly.
+    let src = concat!(
+        "Actor subclass: Ctr\n",
+        "  state: x = 0\n\n",
+        "  run: items =>\n",
+        "    count := 0\n",
+        "    seen := 0\n",
+        "    1 to: 3 do: [:i |\n",
+        "      count := count + 1\n",
+        "      items do: [:item | seen := seen + 1]\n",
+        "    ]\n",
+        "    count\n",
+    );
+    let code = codegen(src);
+    assert!(
+        code.contains("letrec"),
+        "Outer to:do: should generate a letrec. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'lists':'foldl'"),
+        "do: with local mutation should use lists:foldl. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'lists':'foreach'"),
+        "Mutation-threaded do: must NOT use lists:foreach. Got:\n{code}"
+    );
+    // Direct-params outer loop rebuilds StateAcc exactly once at exit (ExitSA).
+    assert!(
+        code.contains("ExitSA"),
+        "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_collect_nested_in_direct_params_loop() {
+    // BT-1329: collect: with a local mutation nested inside a direct-params to:do:
+    // loop. The outer loop sets in_direct_params_loop=true, which causes
+    // generate_list_collect_with_mutations to hit the tuple-acc + in_direct_params_loop
+    // branch (basic_ops.rs lines 302-360): StateAcc repack is skipped and the result
+    // list is stored in direct_params_list_op_result for the outer loop to consume.
+    let src = concat!(
+        "Actor subclass: Ctr\n",
+        "  state: x = 0\n\n",
+        "  run: items =>\n",
+        "    count := 0\n",
+        "    seen := 0\n",
+        "    1 to: 3 do: [:i |\n",
+        "      count := count + 1\n",
+        "      items collect: [:item | seen := seen + 1. item * 2]\n",
+        "    ]\n",
+        "    count\n",
+    );
+    let code = codegen(src);
+    assert!(
+        code.contains("letrec"),
+        "Outer to:do: should generate a letrec. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'lists':'foldl'"),
+        "collect: with local mutation should use lists:foldl. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'lists':'map'"),
+        "Mutation-threaded collect: must NOT use lists:map. Got:\n{code}"
+    );
+    // collect: reverses the accumulated list after foldl.
+    assert!(
+        code.contains("'lists':'reverse'"),
+        "collect: should reverse the accumulated result list. Got:\n{code}"
+    );
+    // Direct-params outer loop rebuilds StateAcc exactly once at exit (ExitSA).
+    assert!(
+        code.contains("ExitSA"),
+        "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_do_wrong_arity_block_is_compile_error() {
+    // BT-493: do: requires a 1-arg block. A 0-arg block (`[nil]`) must trigger
+    // validate_block_arity_exact and produce a BlockArityError, covering the `?`
+    // error-propagation branch at basic_ops.rs:31.
+    let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    items do: [nil]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(crate::codegen::core_erlang::CodeGenError::BlockArityError { .. })
+        ),
+        "do: with a 0-arg block must be a compile-time BlockArityError. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_collect_wrong_arity_block_is_compile_error() {
+    // BT-493: collect: requires a 1-arg block. A 0-arg block (`[nil]`) must trigger
+    // validate_block_arity_exact and produce a BlockArityError, covering the `?`
+    // error-propagation branch at basic_ops.rs:219.
+    let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    items collect: [nil]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(crate::codegen::core_erlang::CodeGenError::BlockArityError { .. })
+        ),
+        "collect: with a 0-arg block must be a compile-time BlockArityError. Got: {result:?}"
+    );
+}

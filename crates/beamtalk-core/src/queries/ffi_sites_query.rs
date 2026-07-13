@@ -57,6 +57,7 @@
 
 use super::selector_span;
 use crate::ast::{Expression, MessageSelector, Pattern, StringSegment};
+use crate::semantic_analysis::validators::{erlang_arity, erlang_function_name};
 use crate::source_analysis::{Span, lex_with_eof, parse};
 
 /// Number of newlines in the synthetic class header that wraps the input.
@@ -175,34 +176,6 @@ fn extract_erlang_module(expr: &Expression) -> Option<&str> {
         }
     }
     None
-}
-
-/// Derive the Erlang function name from a Beamtalk selector.
-///
-/// Keyword selectors like `seq:to:` use the first keyword part (`seq`). Unary
-/// selectors use the name directly. Binary selectors do not map to Erlang
-/// function calls (they are Beamtalk operators), so they yield `None`. Mirrors
-/// `structural_validators::erlang_function_name` and the codegen lowering.
-fn erlang_function_name(selector: &MessageSelector) -> Option<String> {
-    match selector {
-        MessageSelector::Unary(name) => Some(name.to_string()),
-        MessageSelector::Keyword(parts) => parts
-            .first()
-            .map(|kp| kp.keyword.trim_end_matches(':').to_string()),
-        MessageSelector::Binary(_) => None,
-    }
-}
-
-/// Compute the Erlang arity for a message send.
-///
-/// Unary FFI sends lower to zero-argument Erlang calls; keyword/binary sends use
-/// the Beamtalk argument count (`seq: 1 to: 10` → arity 2). Mirrors
-/// `structural_validators::erlang_arity`.
-fn erlang_arity(selector: &MessageSelector, argument_count: usize) -> usize {
-    match selector {
-        MessageSelector::Unary(_) => 0,
-        _ => argument_count,
-    }
 }
 
 /// Determine the line number to report for a matching FFI call site. Uses the

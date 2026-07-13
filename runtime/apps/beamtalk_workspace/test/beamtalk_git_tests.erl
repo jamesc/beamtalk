@@ -641,7 +641,19 @@ git_revert_file_discards_change_test() ->
 canonical(Path) when is_binary(Path) ->
     list_to_binary(canonical(binary_to_list(Path)));
 canonical(Path) ->
-    string:trim(os:cmd("cd " ++ shell_quote(Path) ++ " && pwd -P")).
+    case os:type() of
+        {win32, _} ->
+            %% No macOS-style /tmp -> /private/tmp symlink indirection to
+            %% resolve on Windows, and `pwd` isn't on PATH under `cmd /c`
+            %% (Git for Windows' usr/bin is reachable only via Git Bash).
+            %% nativename/1 still normalizes drive-letter case and mixed
+            %% separators, since `Path` (git's raw, un-normalized stdout
+            %% for `Resolved`) never goes through filename:join the way
+            %% `Top` does in make_temp_dir/0.
+            filename:nativename(Path);
+        _ ->
+            string:trim(os:cmd("cd " ++ shell_quote(Path) ++ " && pwd -P"))
+    end.
 
 %% Create a throwaway git repo with a committed file inside a *subdirectory*
 %% project, modify that file, run Fun(Toplevel, ProjectDir, RepoRelFile), then
@@ -706,13 +718,14 @@ with_repo_root_project(Fun) ->
 
 %% Create a unique empty temp dir (not a git repo).
 make_temp_dir() ->
-    Base = filename:basedir(user_cache, "beamtalk_git_test"),
-    ok = filelib:ensure_dir(filename:join(Base, "x")),
+    %% os:getpid/0 returns a string; ~p renders strings as quoted literals
+    %% (embedding literal `"` characters), which is a legal POSIX filename
+    %% byte but a forbidden Windows filename character -- use ~s instead.
     Unique = lists:flatten(
-        io_lib:format("repo_~p_~p", [erlang:unique_integer([positive]), os:getpid()])
+        io_lib:format("repo_~p_~s", [erlang:unique_integer([positive]), os:getpid()])
     ),
-    Dir = filename:join(Base, Unique),
-    ok = file:make_dir(Dir),
+    Dir = filename:join(binary_to_list(beamtalk_file:'tempDirectory'()), Unique),
+    ok = filelib:ensure_dir(filename:join(Dir, "x")),
     Dir.
 
 %% Create a unique temp dir and `git init` it with a deterministic identity.
@@ -736,11 +749,25 @@ git_in(Dir, Args) ->
     _ = os:cmd(Cmd),
     ok.
 
+%% os:cmd/1 never runs a POSIX shell on Windows (it shells out via `cmd /c`,
+%% which does not strip single quotes), so quoting must be platform-aware.
 shell_quote(S) ->
-    "'" ++ lists:flatten(string:replace(S, "'", "'\\''", all)) ++ "'".
+    case os:type() of
+        {win32, _} ->
+            "\"" ++ lists:flatten(string:replace(S, "\"", "\\\"", all)) ++ "\"";
+        _ ->
+            "'" ++ lists:flatten(string:replace(S, "'", "'\\''", all)) ++ "'"
+    end.
 
+%% `rm`/`pwd`/etc. from Git for Windows' usr/bin are not on PATH under
+%% `cmd /c` on Windows runners (only reachable via Git Bash), so `rm -rf`
+%% silently no-ops there; use the cmd.exe builtin instead.
 rm_rf(Dir) ->
-    _ = os:cmd("rm -rf " ++ shell_quote(Dir)),
+    _ =
+        case os:type() of
+            {win32, _} -> os:cmd("rmdir /s /q " ++ shell_quote(Dir) ++ " 2>nul");
+            _ -> os:cmd("rm -rf " ++ shell_quote(Dir))
+        end,
     ok.
 
 %% Join records with a trailing NUL after each, matching `-z` output.
