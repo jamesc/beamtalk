@@ -773,13 +773,15 @@ impl TypeChecker {
                                 );
                             }
                         } else {
-                            // Skip argument type check for binary messages —
-                            // `check_binary_operand_types` (run on the first
-                            // cascade send via `infer_message_send_with_receiver_ty`)
-                            // already provides more specific warnings for
-                            // arithmetic/comparison/concat; mirrors the
-                            // non-cascade skip at the bottom of
-                            // `infer_message_send_with_receiver_ty`.
+                            // Skip argument type check for binary messages in
+                            // cascade continuations. `check_binary_operand_types`
+                            // is never called here (it only runs for the first
+                            // cascade send via `infer_message_send_with_receiver_ty`),
+                            // so unlike the non-cascade path this unconditionally
+                            // drops argument checking for binary sends — including
+                            // Union arguments, which BT-2843 made the non-cascade
+                            // path check via the `binary_operand_check_ran` fallback.
+                            // Pre-existing gap, tracked as BT-2871.
                             if !matches!(msg.selector, MessageSelector::Binary(_)) {
                                 self.check_argument_types(
                                     class_name,
