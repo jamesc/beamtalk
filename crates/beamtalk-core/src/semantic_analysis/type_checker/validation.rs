@@ -1761,6 +1761,15 @@ impl TypeChecker {
     /// When both receiver and argument types are known, checks that the argument type
     /// is compatible with the operator. Only emits warnings (not errors) to allow
     /// for dynamic dispatch.
+    /// Returns `true` when this function has specific arithmetic/comparison/
+    /// concat logic for the `(operator, receiver_ty)` shape — regardless of
+    /// whether the argument turned out to be compatible (i.e. `true` even
+    /// when no diagnostic was emitted). `false` means this operator/receiver
+    /// combination has no bespoke check here (e.g. `String>>,`, `Integer>>**`,
+    /// or any other binary selector outside +-*/ / </>/<=/>= / `++` on
+    /// String) — the caller must fall back to the generic
+    /// `check_argument_types` (BT-2843) rather than treat "resolved on the
+    /// receiver" as "checked".
     pub(super) fn check_binary_operand_types(
         &mut self,
         receiver_ty: &EcoString,
@@ -1769,14 +1778,26 @@ impl TypeChecker {
         span: Span,
         hierarchy: &ClassHierarchy,
         arg_origin: Option<&(EcoString, Option<Span>)>,
-    ) {
+    ) -> bool {
         let is_numeric = |ty: &str| hierarchy.is_numeric_type(ty);
         let is_arithmetic = matches!(operator, "+" | "-" | "*" | "/");
         let is_comparison = matches!(operator, "<" | ">" | "<=" | ">=");
+        let is_concat = operator == "++"
+            && WellKnownClass::from_str(receiver_ty) == Some(WellKnownClass::String);
         let is_generic = super::is_generic_type_param(arg_ty);
         // BT-2066: Render `UndefinedObject` as `Nil` in user-facing messages.
         let arg_display = InferredType::class_name_for_diagnostic(arg_ty.as_str());
         let receiver_display = InferredType::class_name_for_diagnostic(receiver_ty.as_str());
+
+        // BT-2843: whether this call has bespoke logic for `operator` on
+        // `receiver_ty` — computed from the same guards each branch below
+        // uses, so it stays in lockstep with what's actually checked. If a
+        // new operator/receiver shape gets a branch below, its guard must be
+        // added here too, or the caller will wrongly treat it as `handled`
+        // and skip the generic `check_argument_types` fallback.
+        let handled = (is_arithmetic && is_numeric(receiver_ty))
+            || is_concat
+            || (is_comparison && is_numeric(receiver_ty));
 
         // Arithmetic operators on numeric types require numeric arguments
         if is_arithmetic && is_numeric(receiver_ty) && !is_numeric(arg_ty) {
@@ -1803,12 +1824,11 @@ impl TypeChecker {
                 diag = diag.with_note(desc.clone(), *origin_span);
             }
             self.diagnostics.push(diag);
-            return;
+            return handled;
         }
 
         // String concatenation with ++ expects a String argument
-        if operator == "++"
-            && WellKnownClass::from_str(receiver_ty) == Some(WellKnownClass::String)
+        if is_concat
             && WellKnownClass::from_str(arg_ty) != Some(WellKnownClass::String)
             && arg_ty.as_str() != "Symbol"
             && !arg_ty.starts_with('#')
@@ -1835,7 +1855,7 @@ impl TypeChecker {
                 diag = diag.with_note(desc.clone(), *origin_span);
             }
             self.diagnostics.push(diag);
-            return;
+            return handled;
         }
 
         // Comparison operators on numeric types require numeric arguments
@@ -1863,6 +1883,7 @@ impl TypeChecker {
             }
             self.diagnostics.push(diag);
         }
+        handled
     }
 
     /// Check a field assignment `self.field := value` against the declared state type.
