@@ -51,6 +51,21 @@ superclasses_losing_leaf_status_ignores_classes_without_a_superclass_key_test() 
         beamtalk_repl_loader:superclasses_losing_leaf_status([#{name => "NoSuperclassHere"}])
     ).
 
+%% This function runs in the class-install hot path with no surrounding
+%% `try/catch` at any of its four call sites (`load_class_module/3`,
+%% `load_compiled_module/6`, `reload_compile_and_load/4`,
+%% `new_class_install/7`) — a malformed `superclass` value (here, an atom
+%% `unicode:characters_to_binary/1` cannot coerce) must degrade to `[]`
+%% rather than crash the class load itself (ADR 0105: advisory, never
+%% blocking). Regression pin for exactly this defensive wrapping.
+superclasses_losing_leaf_status_never_crashes_the_caller_test() ->
+    ?assertEqual(
+        [],
+        beamtalk_repl_loader:superclasses_losing_leaf_status([
+            #{name => "Malformed", superclass => not_a_string_or_binary}
+        ])
+    ).
+
 superclasses_losing_leaf_status_dedupes_test_() ->
     {timeout, 30,
         {setup, fun leaf_loader_setup/0, fun leaf_loader_teardown/1, fun(_) ->

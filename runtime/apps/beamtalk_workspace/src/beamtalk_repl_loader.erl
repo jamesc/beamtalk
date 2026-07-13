@@ -2397,14 +2397,39 @@ non-empty on every later reload and this never re-fires for it.
 `load_class_module/3` path this same function is called from) —
 `unicode:characters_to_binary/1` (not `list_to_binary/1`, which badargs on
 an already-binary input) normalises either shape.
+
+**Never raises: any internal failure degrades to `[]` (advisory, never
+blocking — ADR 0105's own rule).** This is called on every single
+new-class-defining load, immediately before `code:load_binary/3`
+(`activate_module/4`'s doc) — unlike every other call site in this
+mechanism (`recheck_owner_for_leaf_change/3`, `was_leaf_class/1`'s own
+`binary_to_existing_atom/2` guard), a failure here sits directly in the
+class-install hot path with no surrounding `try/catch` at any of its
+call sites, so this function must be defensive on its own, the same way
+`prime_shape_capture/1` wraps each class's store-priming individually
+rather than trusting its own caller to catch anything.
 """.
 -spec superclasses_losing_leaf_status([map()]) -> [binary()].
 superclasses_losing_leaf_status(Classes) ->
-    SuperclassNames = lists:usort([
-        unicode:characters_to_binary(Super)
-     || #{superclass := Super} <- Classes, Super =/= undefined
-    ]),
-    lists:filter(fun was_leaf_class/1, SuperclassNames).
+    try
+        SuperclassNames = lists:usort([
+            unicode:characters_to_binary(Super)
+         || #{superclass := Super} <- Classes, Super =/= undefined
+        ]),
+        lists:filter(fun was_leaf_class/1, SuperclassNames)
+    catch
+        Class:Reason:Stack ->
+            ?LOG_WARNING(
+                "Leaf-change detection failed (install proceeding)",
+                #{
+                    error_class => Class,
+                    reason => Reason,
+                    stack => Stack,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            []
+    end.
 
 -doc """
 Was `SuperclassBin` a leaf class (zero direct subclasses) at the moment
