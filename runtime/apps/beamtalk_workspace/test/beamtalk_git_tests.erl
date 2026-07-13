@@ -646,7 +646,11 @@ canonical(Path) ->
             %% No macOS-style /tmp -> /private/tmp symlink indirection to
             %% resolve on Windows, and `pwd` isn't on PATH under `cmd /c`
             %% (Git for Windows' usr/bin is reachable only via Git Bash).
-            Path;
+            %% nativename/1 still normalizes drive-letter case and mixed
+            %% separators, since `Path` (git's raw, un-normalized stdout
+            %% for `Resolved`) never goes through filename:join the way
+            %% `Top` does in make_temp_dir/0.
+            filename:nativename(Path);
         _ ->
             string:trim(os:cmd("cd " ++ shell_quote(Path) ++ " && pwd -P"))
     end.
@@ -758,7 +762,7 @@ shell_quote(S) ->
 rm_rf(Dir) ->
     _ =
         case os:type() of
-            {win32, _} -> os:cmd("rmdir /s /q " ++ shell_quote(Dir));
+            {win32, _} -> os:cmd("rmdir /s /q " ++ shell_quote(Dir) ++ " 2>nul");
             _ -> os:cmd("rm -rf " ++ shell_quote(Dir))
         end,
     ok.
