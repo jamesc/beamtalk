@@ -718,8 +718,11 @@ with_repo_root_project(Fun) ->
 
 %% Create a unique empty temp dir (not a git repo).
 make_temp_dir() ->
+    %% os:getpid/0 returns a string; ~p renders strings as quoted literals
+    %% (embedding literal `"` characters), which is a legal POSIX filename
+    %% byte but a forbidden Windows filename character -- use ~s instead.
     Unique = lists:flatten(
-        io_lib:format("repo_~p_~p", [erlang:unique_integer([positive]), os:getpid()])
+        io_lib:format("repo_~p_~s", [erlang:unique_integer([positive]), os:getpid()])
     ),
     Dir = filename:join(binary_to_list(beamtalk_file:'tempDirectory'()), Unique),
     ok = filelib:ensure_dir(filename:join(Dir, "x")),
