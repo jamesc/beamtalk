@@ -21,6 +21,7 @@ mod bt2847_nested_union_type_args;
 mod bt2850_cascade_spawn_with_keys;
 mod bt2871_cascade_binary_arg_check;
 mod bt2872_and_not_nil_narrowing;
+mod bt2879_cascade_meta_branch;
 mod cast_and_sync_send;
 mod destructure_and_extension;
 mod dynamic_and_blocks;

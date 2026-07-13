@@ -713,7 +713,12 @@ impl TypeChecker {
                 // downstream selector validation.
                 let unwrapped_target = unwrap_parens(cascade_target);
                 let is_class_ref = matches!(unwrapped_target, Expression::ClassReference { .. });
-                let is_class_side_send = Self::is_class_side_receiver(cascade_target, env);
+                // ADR 0083 / BT-2879: a Meta-typed cascade target (`someVar ::
+                // SomeClass class`) is also class-side for block-param
+                // propagation purposes, mirroring `infer_generic_send_args`'s
+                // `is_class_side` computation (~line 1241).
+                let is_class_side_send = Self::is_class_side_receiver(cascade_target, env)
+                    || matches!(dispatch_ty, InferredType::Meta { .. });
                 for msg in messages {
                     let selector_name = msg.selector.name();
                     // BT-2845: capture the inferred argument types so every
@@ -758,6 +763,50 @@ impl TypeChecker {
                             );
                             self.check_class_side_send(
                                 &name.name,
+                                &selector_name,
+                                msg.span,
+                                hierarchy,
+                                &[], // cascade return type is receiver, not send result
+                            );
+                        }
+                    } else if let InferredType::Meta {
+                        class_name: ref meta_class,
+                        ..
+                    } = dispatch_ty
+                    {
+                        // ADR 0083 / BT-2879: cascade continuation messages on
+                        // a Meta-typed receiver (`someVar :: SomeClass class`)
+                        // dispatch class-side exactly like a syntactic class
+                        // reference, mirroring `infer_message_send_with_receiver_ty`'s
+                        // `Meta` branch (~line 1541). This branch was entirely
+                        // missing — BT-2850 fixed the ClassReference and
+                        // self-in-class-method branches the cascade loop
+                        // already handled, but the Meta branch never existed
+                        // here, so these sends silently skipped
+                        // `check_argument_types` and `check_spawn_with_map_keys`.
+                        let is_equality = matches!(
+                            msg.selector,
+                            MessageSelector::Binary(ref op) if is_equality_comparison_op(op)
+                        );
+                        if !is_equality && selector_name != "class" {
+                            self.check_argument_types(
+                                meta_class,
+                                &selector_name,
+                                &arg_types,
+                                msg.span,
+                                hierarchy,
+                                true,
+                                Some(&msg.arguments),
+                                Some(env),
+                            );
+                            self.check_spawn_with_map_keys(
+                                meta_class,
+                                &selector_name,
+                                &msg.arguments,
+                                hierarchy,
+                            );
+                            self.check_class_side_send(
+                                meta_class,
                                 &selector_name,
                                 msg.span,
                                 hierarchy,
