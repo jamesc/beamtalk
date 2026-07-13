@@ -132,6 +132,9 @@ Value subclass: TestCase
 
   /// Assert that `actual` equals `expected`, failing the test if they differ.
   ///
+  /// Uses strict equality (`=:=`) — `1 equals: 1.0` fails since Beamtalk's
+  /// strict comparison does not coerce across numeric types.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// self assert: (1 + 1) equals: 2   // passes
