@@ -9,9 +9,20 @@
 TestCase subclass: Bt2017NotNilMethodCallNarrowingTest
 
   // (a) local from parameter passthrough — always worked
+  //
+  // BT-2843: `local notNil and: [...]` only narrows `local` where it's the
+  // receiver of a further send (`local > 0`); it does NOT narrow `local`
+  // inside the doubly-nested block argument `[5 >= local]`, where `local` is
+  // the *argument* of `>=` rather than the receiver — there's no `and:`-aware
+  // narrowing of block-argument positions. BT-2843 made binary-send argument
+  // checking union-aware (matching the pre-existing keyword-send behavior),
+  // which now correctly flags this as statically unproven — even though it's
+  // runtime-safe due to `and:`'s short-circuit evaluation. Expected/suppressed
+  // pending dedicated `and:`-narrowing support.
   testParamPassthroughNotNil =>
     x :: Integer | Nil := 3
     local := x
+    @expect type
     result := (local notNil and: [
       local > 0 and: [5 >= local]
     ]) ifTrue: [true] ifFalse: [false]
@@ -20,6 +31,7 @@ TestCase subclass: Bt2017NotNilMethodCallNarrowingTest
   // (b) local from literal nil — always worked
   testLiteralNilNotNil =>
     local :: Integer | Nil := nil
+    @expect type
     result := (local notNil and: [
       local > 0 and: [5 >= local]
     ]) ifTrue: [true] ifFalse: [false]
@@ -29,6 +41,7 @@ TestCase subclass: Bt2017NotNilMethodCallNarrowingTest
   testMethodCallNotNil =>
     cfg := Bt2017NarrowCfg v: 3
     local := cfg v
+    @expect type
     result := (local notNil and: [
       local > 0 and: [5 >= local]
     ]) ifTrue: [true] ifFalse: [false]
@@ -38,6 +51,7 @@ TestCase subclass: Bt2017NotNilMethodCallNarrowingTest
   testMethodCallNotNilWithNil =>
     cfg := Bt2017NarrowCfg new
     local := cfg v
+    @expect type
     result := (local notNil and: [
       local > 0 and: [5 >= local]
     ]) ifTrue: [true] ifFalse: [false]
@@ -47,6 +61,7 @@ TestCase subclass: Bt2017NotNilMethodCallNarrowingTest
   testMethodCallNotNilOutOfRange =>
     cfg := Bt2017NarrowCfg v: 10
     local := cfg v
+    @expect type
     result := (local notNil and: [
       local > 0 and: [5 >= local]
     ]) ifTrue: [true] ifFalse: [false]
