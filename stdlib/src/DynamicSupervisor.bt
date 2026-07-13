@@ -95,7 +95,7 @@ abstract Object subclass: DynamicSupervisor(C)
   /// when failure should propagate as an exception, or `ifOk:ifError:` /
   /// `andThen:` for recoverable starts. Failures surface as
   /// `Result error: #beamtalk_error{kind = child_start_failed}`.
-  startChild: args -> Result(C, Error) =>
+  startChild: args :: Object -> Result(C, Error) =>
     (Erlang beamtalk_supervisor) startChild: self with: args
 
   /// Terminate the given child process.

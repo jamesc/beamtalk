@@ -132,6 +132,8 @@ const REGISTRY: &[(&str, PrimitiveLowerFn)] = &[
 const RUNTIME_DISPATCHED_PRIMITIVES: &[(&str, &str)] = &[
     ("ProtoObject", "=="),
     ("ProtoObject", "/="),
+    ("ProtoObject", "=:="),
+    ("ProtoObject", "=/="),
     ("ProtoObject", "class"),
     ("ProtoObject", "perform:withArguments:"),
     ("ProtoObject", "perform:withArguments:timeout:"),
