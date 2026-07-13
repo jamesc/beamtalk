@@ -41,16 +41,28 @@ Reloads simply queue and drain in order; nothing here needs to know about
 backpressure or cancellation because there is no unbounded fan-out left to
 bound.
 
+**BT-2856 / ADR 0107 Phase A** reuses this same queue for the leaf-change
+re-check (`beamtalk_repl_loader:maybe_trigger_leaf_change_recheck/1`,
+enqueued via `enqueue_leaf_change/1`) instead of a second dedicated worker:
+`trigger_leaf_change/1` is at least as expensive a compiler-port sweep as a
+shape re-check (a whole-image recompile, per its own doc), so it needs the
+exact same "at most one in flight" guarantee, and the event that triggers
+it (a class gaining its first subclass) is rarer still than an ordinary
+shape-changing reload — sharing one mailbox/queue is strictly simpler than
+running two independent single-worker queues for two ADR 0105 mechanisms
+with the identical contention concern.
+
 ## Crash isolation
 
-`beamtalk_repl_loader:maybe_trigger_shape_recheck_for_class/1` is already
-documented as self-swallowing end-to-end (store read, `trigger_shape/2`,
+`beamtalk_repl_loader:maybe_trigger_shape_recheck_for_class/1` and
+`maybe_trigger_leaf_change_recheck_for_class/1` are both already documented
+as self-swallowing end-to-end (store read/compute, the `trigger_*/*` call,
 and publish are each wrapped in their own `try/catch`), so this worker
-should never see an exception escape that call. `handle_cast/2` wraps the
-call in `try/catch` anyway, defensively: an uncaught crash here would take
+should never see an exception escape either call. `handle_cast/2` wraps
+both in `try/catch` anyway, defensively: an uncaught crash here would take
 down this `gen_server` (permanent restart under `beamtalk_workspace_sup`,
 matching every sibling ADR 0105 store), and because a crashed process's
-mailbox is discarded on restart, any *other* reloads' shape rechecks still
+mailbox is discarded on restart, any *other* reloads' rechecks still
 queued behind the crashing one would be silently dropped rather than
 retried — a plain `try/catch` costs nothing here and avoids ever exercising
 that path.
@@ -66,7 +78,7 @@ class-body reload path in run mode for this to guard).
 
 -include_lib("kernel/include/logger.hrl").
 
--export([start_link/0, enqueue/1]).
+-export([start_link/0, enqueue/1, enqueue_leaf_change/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -91,6 +103,17 @@ strictly one at a time through this worker's mailbox.
 enqueue(Classes) ->
     gen_server:cast(?MODULE, {recheck, Classes}).
 
+-doc """
+BT-2856 / ADR 0107 Phase A: queue a leaf-change re-check for
+`NewlyNonLeafSuperclasses` (the same list
+`beamtalk_repl_loader:superclasses_losing_leaf_status/1` produces) and
+return immediately — see the moduledoc's "reuses this same queue" note for
+why this shares `enqueue/1`'s worker rather than getting its own.
+""".
+-spec enqueue_leaf_change([binary()]) -> ok.
+enqueue_leaf_change(NewlyNonLeafSuperclasses) ->
+    gen_server:cast(?MODULE, {leaf_change, NewlyNonLeafSuperclasses}).
+
 %%====================================================================
 %% gen_server callbacks
 %%====================================================================
@@ -99,6 +122,25 @@ init([]) ->
     logger:set_process_metadata(#{domain => [beamtalk, runtime]}),
     {ok, undefined}.
 
+handle_cast({leaf_change, Superclasses}, State) ->
+    try
+        beamtalk_repl_loader:maybe_trigger_leaf_change_recheck(Superclasses)
+    catch
+        %% Defensive only — see the moduledoc's "Crash isolation" section.
+        %% maybe_trigger_leaf_change_recheck/1 is already self-swallowing, so
+        %% this should be unreachable in practice.
+        Class:Reason:Stack ->
+            ?LOG_WARNING(
+                "Leaf-change re-check worker: unexpected crash swallowed (queue continues)",
+                #{
+                    error_class => Class,
+                    reason => Reason,
+                    stack => Stack,
+                    domain => [beamtalk, runtime]
+                }
+            )
+    end,
+    {noreply, State};
 handle_cast({recheck, Classes}, State) ->
     try
         beamtalk_repl_loader:maybe_trigger_shape_recheck(Classes)
