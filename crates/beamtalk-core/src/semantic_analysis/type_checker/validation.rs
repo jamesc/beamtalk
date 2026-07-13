@@ -1782,7 +1782,8 @@ impl TypeChecker {
         let is_numeric = |ty: &str| hierarchy.is_numeric_type(ty);
         let is_arithmetic = matches!(operator, "+" | "-" | "*" | "/");
         let is_comparison = matches!(operator, "<" | ">" | "<=" | ">=");
-        let is_concat = operator == "++" && WellKnownClass::from_str(receiver_ty) == Some(WellKnownClass::String);
+        let is_concat = operator == "++"
+            && WellKnownClass::from_str(receiver_ty) == Some(WellKnownClass::String);
         let is_generic = super::is_generic_type_param(arg_ty);
         // BT-2066: Render `UndefinedObject` as `Nil` in user-facing messages.
         let arg_display = InferredType::class_name_for_diagnostic(arg_ty.as_str());
@@ -1791,8 +1792,9 @@ impl TypeChecker {
         // BT-2843: whether this call has bespoke logic for `operator` on
         // `receiver_ty` — computed from the same guards each branch below
         // uses, so it stays in lockstep with what's actually checked.
-        let handled =
-            (is_arithmetic && is_numeric(receiver_ty)) || is_concat || (is_comparison && is_numeric(receiver_ty));
+        let handled = (is_arithmetic && is_numeric(receiver_ty))
+            || is_concat
+            || (is_comparison && is_numeric(receiver_ty));
 
         // Arithmetic operators on numeric types require numeric arguments
         if is_arithmetic && is_numeric(receiver_ty) && !is_numeric(arg_ty) {
