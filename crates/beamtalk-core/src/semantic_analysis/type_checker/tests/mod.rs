@@ -18,6 +18,7 @@ mod bt2835_stream_collect_return_type;
 mod bt2843_binary_arg_union_check;
 mod bt2847_nested_union_type_args;
 mod bt2871_cascade_binary_arg_check;
+mod bt2872_and_not_nil_narrowing;
 mod cast_and_sync_send;
 mod destructure_and_extension;
 mod dynamic_and_blocks;
