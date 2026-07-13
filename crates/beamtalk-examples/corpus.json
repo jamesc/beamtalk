@@ -30528,6 +30528,27 @@
       "explanation": "TaskWorker - actor in a subdirectory of a nested fixture directory. Used by load_nested_directory.bt to regression-test that actors loaded from subdirectories generate the correct BEAM module name so that spawn/0 resolves correctly (bt@...@workers@task_worker, not bt@...@task_worker)."
     },
     {
+      "id": "tests-repl-protocol-fixtures-nil-type-exhaustiveness-error",
+      "title": "NilTypeExhaustivenessErrorFixture",
+      "category": "repl-protocol-fixtures",
+      "tags": [
+        "NilTypeExhaustivenessErrorFixture",
+        "Object",
+        "describe:",
+        "exception",
+        "extends",
+        "inherit",
+        "inheritance",
+        "nil_type_exhaustiveness_error",
+        "object",
+        "raise",
+        "subclassing",
+        "throw"
+      ],
+      "source": "// Fixture that triggers a compile error: `matchExhaustive:` on a closed\n// `String | Nil` union missing the `nil` arm (ADR 0107 Phase A, BT-2856).\n// Used by tests/repl-protocol/cases/nil-and-type-patterns.btscript via\n// `// @load-error`.\n\nObject subclass: NilTypeExhaustivenessErrorFixture\n\n  describe: raw :: String | Nil => raw matchExhaustive: [s :: String -> s size]",
+      "explanation": "Fixture that triggers a compile error: `matchExhaustive:` on a closed `String | Nil` union missing the `nil` arm (ADR 0107 Phase A, BT-2856). Used by tests/repl-protocol/cases/nil-and-type-patterns.btscript via `// @load-error`."
+    },
+    {
       "id": "tests-repl-protocol-fixtures-object-repr-foo",
       "title": "Foo",
       "category": "repl-protocol-fixtures",
