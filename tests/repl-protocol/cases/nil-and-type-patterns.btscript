@@ -48,7 +48,7 @@ coll := nil
 
 coll match: [
   nil -> "none";
-  items :: List -> items size printString;
+  items :: List -> items size;
   _ -> "other"
 ]
 // => none
@@ -58,7 +58,7 @@ populatedColl := #(1, 2, 3)
 
 populatedColl match: [
   nil -> "none";
-  items :: List -> items size printString;
+  items :: List -> items size;
   _ -> "other"
 ]
 // => 3
@@ -84,3 +84,10 @@ populatedColl match: [
 // narrowed type must be submitted together.
 raw :: String | Nil := "hello". raw match: [s :: String -> s size]
 // => WARNING: non-exhaustive match: `Nil` is not handled
+
+// The `// => WARNING:` assertion above only checks the diagnostic text, not
+// the return value — verify separately that the narrowed `s :: String` arm
+// still dispatches to the correct value (not e.g. a silently-wrong `nil`)
+// when the same shape is fully covered.
+raw2 :: String | Nil := "hello". raw2 match: [s :: String -> s size; _ -> -1]
+// => 5
