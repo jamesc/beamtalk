@@ -643,14 +643,15 @@ canonical(Path) when is_binary(Path) ->
 canonical(Path) ->
     case os:type() of
         {win32, _} ->
-            %% No macOS-style /tmp -> /private/tmp symlink indirection to
-            %% resolve on Windows, and `pwd` isn't on PATH under `cmd /c`
-            %% (Git for Windows' usr/bin is reachable only via Git Bash).
-            %% nativename/1 still normalizes drive-letter case and mixed
-            %% separators, since `Path` (git's raw, un-normalized stdout
-            %% for `Resolved`) never goes through filename:join the way
-            %% `Top` does in make_temp_dir/0.
-            filename:nativename(Path);
+            %% `Path` may carry a short (8.3) name segment inherited from a
+            %% GHA Windows runner's %TEMP% (e.g. `RUNNER~1` for the
+            %% `runneradmin` account), while `git rev-parse --show-toplevel`
+            %% always resolves such segments to their long-name form.
+            %% nativename/1 alone can't undo that, so route every path
+            %% through the same `--show-toplevel` resolution the code under
+            %% test uses -- every call site here passes a repo (sub)dir, so
+            %% this is a no-op re-resolution rather than a different path.
+            string:trim(os:cmd("git -C " ++ shell_quote(Path) ++ " rev-parse --show-toplevel"));
         _ ->
             string:trim(os:cmd("cd " ++ shell_quote(Path) ++ " && pwd -P"))
     end.
