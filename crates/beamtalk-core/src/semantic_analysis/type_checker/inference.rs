@@ -2984,22 +2984,6 @@ impl TypeChecker {
         )))
     }
 
-    /// Returns `true` when `ty` is a non-empty union where every member is a
-    /// concrete `Known` type with no type args and a name that does NOT start
-    /// with `#` — i.e. a closed union of ordinary leaf classes (e.g.
-    /// `Integer | String`), as opposed to a closed singleton union (e.g.
-    /// `#north | #south`).  Used by [`check_asserted_match_exhaustiveness`]
-    /// to distinguish "scrutinee is a closed union but not of singletons"
-    /// from "scrutinee is not a closed union at all".
-    fn is_closed_non_singleton_leaf_union(ty: &InferredType) -> bool {
-        matches!(ty, InferredType::Union { members, .. }
-        if !members.is_empty() && members.iter().all(|m| matches!(
-            m,
-            InferredType::Known { class_name, type_args, .. }
-                if type_args.is_empty() && !class_name.starts_with('#')
-        )))
-    }
-
     /// BT-2745 / ADR 0102 §4: advisory `match:` exhaustiveness for
     /// singleton-union scrutinees.
     ///
@@ -3092,43 +3076,23 @@ impl TypeChecker {
     ) {
         if !Self::is_closed_singleton_union(scrutinee_ty) {
             let ty_display = scrutinee_ty.display_for_diagnostic().unwrap_or_default();
-            if Self::is_closed_non_singleton_leaf_union(scrutinee_ty) {
-                self.diagnostics.push(
-                    Diagnostic::error(
-                        format!(
-                            "cannot verify `matchExhaustive:` is exhaustive — scrutinee type \
-                             `{ty_display}` is a closed union of leaf classes, but \
-                             `matchExhaustive:` only supports closed unions of `#symbol` \
-                             singletons"
-                        ),
-                        match_span,
-                    )
-                    .with_hint(
-                        "Use `match:` (advisory) instead, or reannotate the scrutinee as a \
-                         closed union of `#symbol` singletons (e.g. `x :: #north | #south`)."
-                            .to_string(),
-                    )
-                    .with_category(DiagnosticCategory::Type),
-                );
-            } else {
-                self.diagnostics.push(
-                    Diagnostic::error(
-                        format!(
-                            "cannot verify `matchExhaustive:` is exhaustive — scrutinee type \
-                             `{ty_display}` is not a closed union of symbol singletons"
-                        ),
-                        match_span,
-                    )
-                    .with_hint(
-                        "matchExhaustive: only proves exhaustiveness over a closed union of \
-                         `#symbol` singletons (e.g. `x :: #north | #south`). Annotate the \
-                         scrutinee with such a type, or use `match:` if exhaustiveness cannot \
-                         be guaranteed statically."
-                            .to_string(),
-                    )
-                    .with_category(DiagnosticCategory::Type),
-                );
-            }
+            self.diagnostics.push(
+                Diagnostic::error(
+                    format!(
+                        "cannot verify `matchExhaustive:` is exhaustive — scrutinee type \
+                         `{ty_display}` is not a closed union of symbol singletons"
+                    ),
+                    match_span,
+                )
+                .with_hint(
+                    "matchExhaustive: only proves exhaustiveness over a closed union of \
+                     `#symbol` singletons (e.g. `x :: #north | #south`). Annotate the \
+                     scrutinee with such a type, or use `match:` if exhaustiveness cannot \
+                     be guaranteed statically."
+                        .to_string(),
+                )
+                .with_category(DiagnosticCategory::Type),
+            );
             return;
         }
 

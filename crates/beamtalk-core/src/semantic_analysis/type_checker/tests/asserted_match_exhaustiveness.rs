@@ -238,8 +238,8 @@ fn union_with_non_singleton_member_errors_loudly() {
 }
 
 /// A union of ordinary classes (no singletons) cannot be proven exhaustive
-/// by this checker — `Error`, naming the actual inferred type and explaining
-/// that the union is closed but not of symbol singletons.
+/// by this checker — `Error`, naming the actual inferred type so the user
+/// knows why.
 #[test]
 fn union_of_ordinary_classes_errors_loudly() {
     let diags = asserted_diagnostics(
@@ -248,16 +248,7 @@ fn union_of_ordinary_classes_errors_loudly() {
     );
     assert_eq!(diags.len(), 1, "expected one error, got: {diags:?}");
     assert_eq!(diags[0].severity, Severity::Error);
-    assert!(
-        diags[0].message.contains("Integer"),
-        "message should name the scrutinee type: {}",
-        diags[0].message
-    );
-    assert!(
-        diags[0].message.contains("closed union of leaf classes"),
-        "message should explain it IS a closed union (but not of singletons): {}",
-        diags[0].message
-    );
+    assert!(diags[0].message.contains("Integer"));
 }
 
 // ── Regression: advisory `match:` path is completely unchanged ──────────
