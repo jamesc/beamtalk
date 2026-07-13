@@ -1255,6 +1255,131 @@ fn test_match_arm_self_mutating_value_block_threads_actor_state() {
     crate::test_helpers::assert_compiles_through_erlc("registry", &code);
 }
 
+#[test]
+fn test_match_arm_self_field_held_block_value_call_compiles_without_double_wrapping() {
+    // BT-2880 / BT-2814: a match: arm body that invokes a *dynamically held*
+    // Tier 2 block via `self.<field> value` (not a `[...] value` block
+    // literal) is a different receiver shape than the one this fix inlines.
+    // `is_tier2_value_call` still classifies it as needing threading (so
+    // `match_needs_mutation_threading` returns true for the whole match:),
+    // but `generate_match_arm_body`'s literal-block branch doesn't match a
+    // `self.field` receiver, so it falls to `expression_doc`, which already
+    // unwraps+discards that call's own NewState via
+    // `close_tier2_value_subexpr_doc` (the same BT-2814 sub-expression-
+    // position limitation `test_bt2814_field_stored_tier2_value_call_in_argument_position_unpacks_result`
+    // pins elsewhere — the held block's mutation is not threaded forward,
+    // by design, both before and after this fix). This test only pins that
+    // the combination compiles cleanly through erlc and does not
+    // double-wrap the already-unwrapped value in an extra tuple layer.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n  state: onTick = nil\n\n  setup => self.onTick := [:x | self.total := self.total + x]\n\n  run: n =>\n    n match: [\n      x :: Integer -> self.onTick value: x;\n      _ -> 0\n    ]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code =
+        generate_module(&module, CodegenOptions::new("ctr")).expect("codegen should succeed");
+
+    eprintln!("Generated code for match: arm self.field-held block value call:\n{code}");
+
+    // The arm's own value: call must be unwrapped exactly once (BT-2814's
+    // close_tier2_value_subexpr_doc), not left as a raw tuple nor wrapped a
+    // second time by generate_match_arm_body's plain-arm fallback.
+    assert!(
+        code.contains("'erlang':'element'(1, "),
+        "self.onTick value: x must still go through the BT-2814 single-unwrap \
+         path inside the match: arm. Got:\n{code}"
+    );
+
+    crate::test_helpers::assert_compiles_through_erlc("ctr", &code);
+}
+
+#[test]
+fn test_match_arm_nested_if_true_mutation_without_value_wrapper_threads_actor_state() {
+    // BT-2880 (generalization): the same bug also reproduces when an arm
+    // body is itself a nested control-flow-with-mutations construct — here
+    // `flag ifTrue: [self.count := ...]` — directly, with no `[...] value`
+    // wrapper around it. `ifTrue:`/`ifFalse:` already compile such a body to
+    // a correctly state-threaded `{Value, NewState}` tuple on their own; the
+    // bug was that `match:` didn't know to route that tuple through the
+    // gen_server reply's unwrap machinery, since `Expression::Match` was
+    // invisible to `control_flow_has_mutations`.
+    let src = "Actor subclass: Registry\n  state: count :: Integer\n\n  initialize -> Nil =>\n    self.count := 0\n    nil\n\n  bumpMatch: flag -> Integer =>\n    nil match: [\n      nil -> flag ifTrue: [self.count := self.count + 1] ifFalse: [self.count := self.count - 1];\n      x :: Integer -> x\n    ]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code =
+        generate_module(&module, CodegenOptions::new("registry")).expect("codegen should succeed");
+
+    eprintln!("Generated code for match: arm nested ifTrue:/ifFalse: mutation:\n{code}");
+
+    assert!(
+        code.contains("'maps':'put'('count'"),
+        "Nested ifTrue:/ifFalse: mutation inside a match: arm must thread state via maps:put. Got:\n{code}"
+    );
+    let bump_match_clause = code
+        .split("<'bumpMatch:'>")
+        .nth(1)
+        .expect("handle_call must have a bumpMatch: clause")
+        .split("<OtherSelector>")
+        .next()
+        .expect("bumpMatch: clause must be followed by the OtherSelector fallback");
+    // The bug leaked the match:'s raw {Value, NewState} tuple as the reply
+    // itself (`{'reply', {_Val, _State}, State}`, a tuple nested inside the
+    // reply). The fix unwraps it via `erlang:element/2` first, so the reply
+    // wraps two bare variables. (Ignore the unrelated `bad_arity` fallback
+    // clause, which legitimately contains a literal `{'reply', {'error', ...`.)
+    assert!(
+        bump_match_clause.contains("'erlang':'element'(2, "),
+        "bumpMatch:'s match: result must be unpacked via erlang:element/2 \
+         before the gen_server reply. Got clause:\n{bump_match_clause}"
+    );
+    let reply_re =
+        regex::Regex::new(r"\{'reply', (_?[A-Za-z][A-Za-z0-9_]*), (_?[A-Za-z][A-Za-z0-9_]*)\}")
+            .unwrap();
+    assert!(
+        reply_re.is_match(bump_match_clause),
+        "bumpMatch:'s state-threading tuple must be unwrapped into plain \
+         Result/State vars before the gen_server reply, not leaked as the \
+         reply value itself (e.g. `{{'reply', {{Val, State}}, State}}`). Got clause:\n{bump_match_clause}"
+    );
+
+    crate::test_helpers::assert_compiles_through_erlc("registry", &code);
+}
+
+#[test]
+fn test_match_arm_self_mutating_value_block_threads_actor_state_all_native_fast_path() {
+    // BT-2880: same bug, but with every arm using a native Core Erlang
+    // pattern (`nil` and `_`, no `Pattern::Type`/`Pattern::Array`) — this
+    // routes through `generate_match`'s flat all-native fast path (the
+    // single `case` built directly in `generate_match`) rather than the
+    // recursive `generate_match_chain`, which the other BT-2880 regression
+    // tests exercise via their `x :: Integer` arm. Both arm-body compile
+    // call sites needed the same fix.
+    let src = "Actor subclass: Registry\n  state: count :: Integer\n\n  initialize -> Nil =>\n    self.count := 0\n    nil\n\n  bumpMatch -> Integer =>\n    nil match: [\n      nil -> [\n        self.count := self.count + 1\n        self.count\n      ] value;\n      _ -> -1\n    ]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code =
+        generate_module(&module, CodegenOptions::new("registry")).expect("codegen should succeed");
+
+    eprintln!("Generated code for match: arm self-mutating value block (fast path):\n{code}");
+
+    assert!(
+        code.contains("'maps':'put'('count'"),
+        "Self-mutating match: arm must thread state via maps:put. Got:\n{code}"
+    );
+    let bump_match_clause = code
+        .split("<'bumpMatch'>")
+        .nth(1)
+        .expect("handle_call must have a bumpMatch clause")
+        .split("<OtherSelector>")
+        .next()
+        .expect("bumpMatch clause must be followed by the OtherSelector fallback");
+    assert!(
+        bump_match_clause.contains("'erlang':'element'(2, "),
+        "bumpMatch's match: result must be unpacked via erlang:element/2 \
+         before the gen_server reply. Got clause:\n{bump_match_clause}"
+    );
+
+    crate::test_helpers::assert_compiles_through_erlc("registry", &code);
+}
+
 // BT-2359: value-type outer-local threading for count:/detect: predicates and
 // threading constructs used as a (parenthesized) assignment RHS.
 

@@ -4,7 +4,9 @@
 // BT-2880: match: arm with self-mutating multi-statement block returns
 // internal state tuple instead of value. Verifies bumpMatch returns the
 // mutated Integer (not an internal state-threading Tuple), and that the
-// mutation is actually visible in subsequent state reads.
+// mutation is actually visible in subsequent state reads. Also covers the
+// generalized shape — a match: arm whose body is itself a nested
+// ifTrue:/ifFalse: mutation with no `[...] value` wrapper.
 
 TestCase subclass: NilTypeMatchSelfMutationActorTest
 
@@ -21,3 +23,17 @@ TestCase subclass: NilTypeMatchSelfMutationActorTest
     result := a bumpMatch
     self assert: result equals: 3
     self assert: a currentCount equals: 3
+
+  testBumpMatchIfTrueReturnsIntegerNotTuple =>
+    a := NilTypeMatchSelfMutationRegistry spawn
+    result := a bumpMatchIfTrue: true
+    self assert: result equals: 1
+    self assert: a currentCount equals: 1
+
+  testBumpMatchIfTrueThreadsStateAcrossCalls =>
+    a := NilTypeMatchSelfMutationRegistry spawn
+    a bumpMatchIfTrue: true
+    a bumpMatchIfTrue: true
+    result := a bumpMatchIfTrue: false
+    self assert: result equals: 1
+    self assert: a currentCount equals: 1

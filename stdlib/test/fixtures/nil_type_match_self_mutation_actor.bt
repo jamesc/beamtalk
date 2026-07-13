@@ -15,6 +15,10 @@
 // `initialize` hits an unrelated, pre-existing gap where `handle_continue`
 // never dispatches to `initialize` at all (also silently bypassing the
 // uninitialized-state safety check), unrelated to this match: bug.
+//
+// `bumpMatchIfTrue:` covers the same bug in a second shape: an arm body
+// that is itself a nested `ifTrue:`/`ifFalse:` mutation, with no `[...]
+// value` wrapper at all.
 
 Actor subclass: NilTypeMatchSelfMutationRegistry
   state: count :: Integer = 0
@@ -29,6 +33,14 @@ Actor subclass: NilTypeMatchSelfMutationRegistry
         self.count := self.count + 1
         self.count
       ] value;
+      x :: Integer -> x
+    ]
+
+  bumpMatchIfTrue: flag -> Integer =>
+    nil match: [
+      nil -> flag ifTrue: [
+        self.count := self.count + 1
+      ] ifFalse: [self.count := self.count - 1];
       x :: Integer -> x
     ]
 

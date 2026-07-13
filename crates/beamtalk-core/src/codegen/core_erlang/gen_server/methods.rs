@@ -3729,18 +3729,25 @@ impl CoreErlangGenerator {
     }
 
     /// BT-2880: `true` when a `match:` needs actor state threading — i.e. it
-    /// runs in Actor context and at least one arm's body is a Tier 2 value-call
-    /// (most commonly a state-mutating `[...] value` block). `generate_match`
-    /// checks this once per `match:` and, when true, compiles every arm's body
-    /// to a uniform `{Value, State}` shape so the whole expression can be
-    /// unwrapped by the same machinery as `ifTrue:`/`ifFalse:` mutations
-    /// (`control_flow_has_mutations`'s `Expression::Match` branch above).
+    /// runs in Actor context and at least one arm's body either is a Tier 2
+    /// value-call (most commonly a state-mutating `[...] value` block) or is
+    /// itself a nested control-flow-with-mutations construct (`ifTrue:`/
+    /// `ifFalse:`/a nested `match:`/etc. with no `[...] value` wrapper, e.g.
+    /// `nil -> flag ifTrue: [self.x := 1]`). `generate_match` checks this once
+    /// per `match:` and, when true, compiles every arm's body to a uniform
+    /// `{Value, State}` shape so the whole expression can be unwrapped by the
+    /// same machinery as `ifTrue:`/`ifFalse:` mutations
+    /// (`control_flow_has_mutations`'s `Expression::Match` branch above — this
+    /// function is mutually recursive with it, which is what lets a nested
+    /// `match:` arm body be detected too).
     pub(in crate::codegen::core_erlang) fn match_needs_mutation_threading(
         &self,
         arms: &[crate::ast::MatchArm],
     ) -> bool {
         self.context == super::super::CodeGenContext::Actor
-            && arms.iter().any(|arm| self.is_tier2_value_call(&arm.body))
+            && arms.iter().any(|arm| {
+                self.is_tier2_value_call(&arm.body) || self.control_flow_has_mutations(&arm.body)
+            })
     }
 
     /// BT-1213/BT-2815: Returns captured mutation variable names for a Tier 2

@@ -2297,6 +2297,15 @@ impl CoreErlangGenerator {
     ///   `ifFalse:` branches use — so `self.<field> :=` assignments inside it
     ///   thread state correctly instead of leaking their raw internal tuple
     ///   as the match's value (BT-2880).
+    /// - An arm body that is itself a nested control-flow-with-mutations
+    ///   construct — `ifTrue:`/`ifFalse:`/a nested `match:`/etc., e.g. `nil ->
+    ///   flag ifTrue: [self.x := 1]` with no `[...] value` wrapper — already
+    ///   compiles to `{Value, State}` rooted at the same `base_state` (both
+    ///   derive from the `self.current_state_var()` snapshot taken before
+    ///   this `match:` began, and every intermediate arm's own state-version
+    ///   bookkeeping is saved/restored via `with_branch_context`, so it never
+    ///   leaks into that snapshot). Passed through via `expression_doc`
+    ///   unchanged — no extra wrapping needed.
     /// - Any other arm body — including other `is_tier2_value_call` shapes,
     ///   which `expression_doc` already unwraps/discards state for (see
     ///   `close_tier2_value_subexpr_doc`) — is wrapped unchanged as
@@ -2323,6 +2332,9 @@ impl CoreErlangGenerator {
                     ]);
                 }
             }
+        }
+        if self.control_flow_has_mutations(body) {
+            return self.expression_doc(body);
         }
         let body_doc = self.expression_doc(body)?;
         Ok(docvec![
