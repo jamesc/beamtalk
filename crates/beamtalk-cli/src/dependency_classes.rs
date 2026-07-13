@@ -203,7 +203,7 @@ fn collect_dep_class_infos(dep_root: &Utf8Path, dep_name: &str, class_infos: &mu
     let cached = cache
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
-        .get(dep_root)
+        .get(search_dir)
         .filter(|(cached_fingerprint, _)| *cached_fingerprint == fingerprint)
         .map(|(_, cached_infos)| cached_infos.clone());
     if let Some(cached_infos) = cached {
@@ -240,7 +240,7 @@ fn collect_dep_class_infos(dep_root: &Utf8Path, dep_name: &str, class_infos: &mu
         cache
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .insert(dep_root.to_path_buf(), (fingerprint, resolved));
+            .insert(search_dir.to_path_buf(), (fingerprint, resolved));
     }
 }
 
