@@ -641,7 +641,15 @@ git_revert_file_discards_change_test() ->
 canonical(Path) when is_binary(Path) ->
     list_to_binary(canonical(binary_to_list(Path)));
 canonical(Path) ->
-    string:trim(os:cmd("cd " ++ shell_quote(Path) ++ " && pwd -P")).
+    case os:type() of
+        {win32, _} ->
+            %% No macOS-style /tmp -> /private/tmp symlink indirection to
+            %% resolve on Windows, and `pwd` isn't on PATH under `cmd /c`
+            %% (Git for Windows' usr/bin is reachable only via Git Bash).
+            Path;
+        _ ->
+            string:trim(os:cmd("cd " ++ shell_quote(Path) ++ " && pwd -P"))
+    end.
 
 %% Create a throwaway git repo with a committed file inside a *subdirectory*
 %% project, modify that file, run Fun(Toplevel, ProjectDir, RepoRelFile), then
@@ -739,13 +747,20 @@ git_in(Dir, Args) ->
 shell_quote(S) ->
     case os:type() of
         {win32, _} ->
-            "\"" ++ S ++ "\"";
+            "\"" ++ lists:flatten(string:replace(S, "\"", "\\\"", all)) ++ "\"";
         _ ->
             "'" ++ lists:flatten(string:replace(S, "'", "'\\''", all)) ++ "'"
     end.
 
+%% `rm`/`pwd`/etc. from Git for Windows' usr/bin are not on PATH under
+%% `cmd /c` on Windows runners (only reachable via Git Bash), so `rm -rf`
+%% silently no-ops there; use the cmd.exe builtin instead.
 rm_rf(Dir) ->
-    _ = os:cmd("rm -rf " ++ shell_quote(Dir)),
+    _ =
+        case os:type() of
+            {win32, _} -> os:cmd("rmdir /s /q " ++ shell_quote(Dir));
+            _ -> os:cmd("rm -rf " ++ shell_quote(Dir))
+        end,
     ok.
 
 %% Join records with a trailing NUL after each, matching `-z` output.
