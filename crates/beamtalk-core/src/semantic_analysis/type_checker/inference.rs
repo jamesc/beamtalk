@@ -773,27 +773,30 @@ impl TypeChecker {
                                 );
                             }
                         } else {
-                            // Skip argument type check for binary messages in
-                            // cascade continuations. `check_binary_operand_types`
-                            // is never called here (it only runs for the first
-                            // cascade send via `infer_message_send_with_receiver_ty`),
-                            // so unlike the non-cascade path this unconditionally
-                            // drops argument checking for binary sends — including
-                            // Union arguments, which BT-2843 made the non-cascade
-                            // path check via the `binary_operand_check_ran` fallback.
-                            // Pre-existing gap, tracked as BT-2871.
-                            if !matches!(msg.selector, MessageSelector::Binary(_)) {
-                                self.check_argument_types(
-                                    class_name,
-                                    &selector_name,
-                                    &arg_types,
-                                    msg.span,
-                                    hierarchy,
-                                    false,
-                                    Some(&msg.arguments),
-                                    Some(env),
-                                );
-                            }
+                            // BT-2871: unlike the non-cascade path in
+                            // `infer_message_send_with_receiver_ty`,
+                            // `check_binary_operand_types` never runs for
+                            // cascade continuation messages (it's only called
+                            // for the first message of a send/cascade), so
+                            // there is no more-specific-wording path to defer
+                            // to here. Always fall back to the generic
+                            // `check_argument_types` for binary continuation
+                            // messages too — this is the "simpler" option
+                            // from BT-2871's AC: `check_binary_operand_types`'s
+                            // only value-add over `check_argument_types` is
+                            // more specific wording for arithmetic/comparison/
+                            // concat, not broader coverage, so skipping it
+                            // here only loses phrasing, not correctness.
+                            self.check_argument_types(
+                                class_name,
+                                &selector_name,
+                                &arg_types,
+                                msg.span,
+                                hierarchy,
+                                false,
+                                Some(&msg.arguments),
+                                Some(env),
+                            );
                             self.check_instance_selector(
                                 class_name,
                                 &selector_name,
