@@ -14,14 +14,14 @@
 /// All methods are compiler intrinsics dispatched at the call site.
 abstract nil subclass: ProtoObject
 
-  /// Test value equality (Erlang `==`).
+  /// Test value equality (Erlang `==`, non-strict — `1 == 1.0` is true).
   ///
   /// ## Examples
   /// ```beamtalk
   /// 42 == 42           // => true
   /// "abc" == "abc"     // => true
   /// ```
-  == other -> Boolean => @intrinsic "=="
+  == other :: ProtoObject -> Boolean => @intrinsic "=="
 
   /// Test value inequality (negation of `==`).
   ///
@@ -30,7 +30,33 @@ abstract nil subclass: ProtoObject
   /// 1 /= 2             // => true
   /// 42 /= 42           // => false
   /// ```
-  /= other -> Boolean => @intrinsic "/="
+  /= other :: ProtoObject -> Boolean => @intrinsic "/="
+
+  /// Test strict value equality (Erlang `=:=` — `1 =:= 1.0` is false, unlike `==`).
+  ///
+  /// Every object supports this at runtime (it lowers directly to Erlang's
+  /// `=:=` operator regardless of receiver type, ADR 0002) — declared here,
+  /// once, so it is visible in method listings/completions/`respondsTo:` for
+  /// every class, not just the handful (`Integer`, `String`, ...) that
+  /// separately redeclare it with a narrower, class-typed `other` for
+  /// documentation purposes.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 1 =:= 1             // => true
+  /// 1 =:= 1.0           // => false (strict — different types)
+  /// (Dictionary new) =:= #{}   // => true
+  /// ```
+  =:= other :: ProtoObject -> Boolean => @intrinsic "=:="
+
+  /// Test strict value inequality (negation of `=:=`).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 1 =/= 1.0           // => true (strict — different types)
+  /// 1 =/= 1             // => false
+  /// ```
+  =/= other :: ProtoObject -> Boolean => @intrinsic "=/="
 
   /// Return the class of the receiver.
   ///
