@@ -2787,7 +2787,44 @@ temp match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
   Result error: _ -> 0
 ]
 // => 42
+
+// Nil pattern — matches nil exactly (BT-2854, ADR 0107)
+value :: String | Nil := nil
+value match: [
+  nil -> "was nil";
+  s :: String -> s;
+  _ -> "other"
+]
+// => "was nil"
+
+// Type patterns — bind and test runtime class (BT-2855, ADR 0107)
+x :: Integer | String | Nil := "hello"
+x match: [
+  nil -> "nil";
+  s :: String -> s size;
+  n :: Integer -> n + 1;
+  _ -> "other"
+]
+// => 5
+
+// Guard scoped over the type-pattern binding
+42 match: [
+  n :: Integer when: [n > 100] -> "big";
+  n :: Integer -> "small";
+  _ -> "other"
+]
+// => "small"
+
+// Mixing type patterns with literal and wildcard patterns
+"hi" match: [
+  nil -> 0;
+  s :: String -> s size;
+  _ -> -1
+]
+// => 2
 ```
+
+**Type patterns** test the runtime class of the scrutinee and bind the value to the named variable, narrowed to that class. Subsequent arms see the scrutinee type narrowed by difference (e.g. after a `s :: String` arm, the remaining arms see the type minus `String`). Supported classes: `String`, `Integer`, `Float`, `List`, `Dictionary`, `Boolean`, `True`, `False`, `Symbol`, `Nil`, `UndefinedObject`, `Block`, `Pid`, `Reference`, `Port`, user-defined `Value` subclasses, and `Actor` subclasses. `Supervisor`/`DynamicSupervisor` subclasses are not yet supported in type patterns (compile-time rejection). A `Symbol` type pattern excludes `nil` and booleans — `nil match: [s :: Symbol -> ...]` does **not** match.
 
 **Supported pattern types:**
 
@@ -2806,6 +2843,8 @@ temp match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
 | Array rest | `#[a, ...rest]` | Destructure first elements, bind remaining to a sub-array (destructuring assignment only) |
 | Dict/Map | `#{#k => v}` | Match a Dictionary containing key `#k`, bind value to `v`; partial match (other keys ignored) |
 | Constructor | `Result ok: v` | Match sealed type by constructor (Phase 1: Result only) |
+| Nil | `nil` | Matches `nil` exactly; narrows subsequent arms to exclude `Nil` (BT-2854, ADR 0107) |
+| Type | `x :: String` | Bind `x` and test runtime class; `x` is narrowed to the named class in the arm body and guard (BT-2855, ADR 0107) |
 
 **Exhaustiveness checking (BT-1299):** `match:` on a sealed type with constructor patterns must cover all known variants or include a wildcard `_` arm, or the compiler emits an error:
 
