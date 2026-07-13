@@ -17,6 +17,7 @@ mod bt2829_return_type_union_dynamic;
 mod bt2835_stream_collect_return_type;
 mod bt2843_binary_arg_union_check;
 mod bt2847_nested_union_type_args;
+mod bt2862_self_delegate_return_type;
 mod cast_and_sync_send;
 mod destructure_and_extension;
 mod dynamic_and_blocks;

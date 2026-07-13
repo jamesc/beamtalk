@@ -125,6 +125,12 @@ impl TypeChecker {
                 );
                 let body_type =
                     self.infer_stmts(&method.body, hierarchy, &mut method_env, is_abstract);
+                let body_type = self.resolve_self_delegate_return_type(
+                    method,
+                    body_type,
+                    &class.name.name,
+                    hierarchy,
+                );
                 self.check_return_type(method, &body_type, &class.name.name, hierarchy);
                 self.check_override_param_compatibility(method, &class.name.name, hierarchy);
                 self.check_no_self_in_params(method, &class.name.name);
@@ -166,6 +172,12 @@ impl TypeChecker {
                 );
                 let body_type =
                     self.infer_stmts(&method.body, hierarchy, &mut method_env, is_abstract);
+                let body_type = self.resolve_self_delegate_return_type(
+                    method,
+                    body_type,
+                    &class.name.name,
+                    hierarchy,
+                );
                 self.check_return_type(method, &body_type, &class.name.name, hierarchy);
                 self.check_no_self_in_params(method, &class.name.name);
                 if is_typed {
@@ -228,6 +240,12 @@ impl TypeChecker {
                 hierarchy,
                 &mut method_env,
                 is_abstract,
+            );
+            let body_type = self.resolve_self_delegate_return_type(
+                &standalone.method,
+                body_type,
+                class_name,
+                hierarchy,
             );
             self.check_return_type(&standalone.method, &body_type, class_name, hierarchy);
             self.check_no_self_in_params(&standalone.method, class_name);
@@ -310,6 +328,61 @@ impl TypeChecker {
     pub(super) fn resolve_type_annotation(ann: &TypeAnnotation) -> InferredType {
         let subst = super::type_resolver::SubstitutionMap::new();
         super::type_resolver::resolve_type_annotation(ann, &subst, None)
+    }
+
+    /// BT-2862: When a method body is exactly `self delegate` (the ADR 0056 /
+    /// ADR 0101 native-facade marker pattern) and the enclosing method
+    /// declares an explicit return-type annotation, trust that annotation for
+    /// the expression's inferred type instead of the `Dynamic` that `delegate`'s
+    /// own (deliberately untyped) `sealed delegate => @intrinsic "actorDelegate"`
+    /// signature would otherwise produce.
+    ///
+    /// `delegate` dispatches into a single generic `handle_call/3` callback
+    /// shared by every selector on the native-backed class, so its own
+    /// signature can never carry a per-selector return type. The author
+    /// already declares the real type once, on the enclosing method
+    /// (`port -> Integer => self delegate`) — this mirrors the gradual-typing
+    /// "trust the annotation" model used everywhere else (ADR 0025) rather
+    /// than requiring hand-written per-selector Erlang specs.
+    ///
+    /// Returns `body_type` unchanged when the method isn't a `self delegate`
+    /// body, or when it has no return-type annotation (still `Dynamic` — no
+    /// regression). Otherwise resolves the annotation and overwrites the
+    /// `self delegate` expression's `type_map` entry so LSP hover and
+    /// `beamtalk type-coverage` see the trusted type too.
+    pub(super) fn resolve_self_delegate_return_type(
+        &mut self,
+        method: &crate::ast::MethodDefinition,
+        body_type: InferredType,
+        class_name: &EcoString,
+        hierarchy: &ClassHierarchy,
+    ) -> InferredType {
+        if !method.is_self_delegate() {
+            return body_type;
+        }
+        let Some(ref declared) = method.return_type else {
+            return body_type;
+        };
+        let resolved = match declared {
+            TypeAnnotation::SelfType { .. } => {
+                super::type_resolver::receiver_type_for_class(class_name, hierarchy)
+            }
+            // `Self class` / `X class` return a class object — no concrete
+            // instance type to trust here, so leave the Dynamic body alone
+            // (mirrors `check_return_type`'s handling of the same shapes).
+            TypeAnnotation::SelfClass { .. } | TypeAnnotation::ClassOf { .. } => {
+                return body_type;
+            }
+            _ => Self::resolve_type_annotation(declared),
+        };
+        // The method body is exactly one statement (`self delegate`) per
+        // `is_self_delegate`'s definition — record the trusted type against
+        // that expression's own span, not just the method's cached return type.
+        if let Some(stmt) = method.body.first() {
+            self.type_map
+                .insert(stmt.expression.span(), resolved.clone());
+        }
+        resolved
     }
 
     /// Resolves type-position keywords to their class names.
