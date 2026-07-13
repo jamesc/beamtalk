@@ -706,13 +706,11 @@ with_repo_root_project(Fun) ->
 
 %% Create a unique empty temp dir (not a git repo).
 make_temp_dir() ->
-    Base = filename:basedir(user_cache, "beamtalk_git_test"),
-    ok = filelib:ensure_dir(filename:join(Base, "x")),
     Unique = lists:flatten(
         io_lib:format("repo_~p_~p", [erlang:unique_integer([positive]), os:getpid()])
     ),
-    Dir = filename:join(Base, Unique),
-    ok = file:make_dir(Dir),
+    Dir = filename:join(binary_to_list(beamtalk_file:'tempDirectory'()), Unique),
+    ok = filelib:ensure_dir(filename:join(Dir, "x")),
     Dir.
 
 %% Create a unique temp dir and `git init` it with a deterministic identity.
@@ -736,8 +734,15 @@ git_in(Dir, Args) ->
     _ = os:cmd(Cmd),
     ok.
 
+%% os:cmd/1 never runs a POSIX shell on Windows (it shells out via `cmd /c`,
+%% which does not strip single quotes), so quoting must be platform-aware.
 shell_quote(S) ->
-    "'" ++ lists:flatten(string:replace(S, "'", "'\\''", all)) ++ "'".
+    case os:type() of
+        {win32, _} ->
+            "\"" ++ S ++ "\"";
+        _ ->
+            "'" ++ lists:flatten(string:replace(S, "'", "'\\''", all)) ++ "'"
+    end.
 
 rm_rf(Dir) ->
     _ = os:cmd("rm -rf " ++ shell_quote(Dir)),
