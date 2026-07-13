@@ -10,7 +10,7 @@
 //! rebind to recover a concrete param type. With `Block(String, String)` on
 //! `String>>collect:` and `Block(Object, Object)` on `Actor>>onExit:`, the
 //! block parameter should now resolve to a concrete (non-Dynamic) type with
-//! no `@expect` workaround needed.
+//! no `@expect` workaround needed (BT-2826).
 
 use super::common::*;
 
@@ -64,7 +64,7 @@ typed Object subclass: Repro
 /// `worker onExit: [:reason | ...]` — the block param `reason` should be
 /// inferred as `Object` (the best available bound for an OTP exit reason),
 /// so no "unannotated parameter" Dynamic warning fires and no `@expect type`
-/// workaround is needed.
+/// workaround is needed (BT-2826).
 #[test]
 fn bt2826_actor_on_exit_infers_object_block_param() {
     let source = r"

@@ -28,12 +28,12 @@
 //! dependency, because [`beamtalk_core::project::package`] only walks the
 //! package's own `src/`/`test/` directories.
 //!
-//! **Known limitation:** only *direct* dependencies (the project's own
-//! `[dependencies]` table) are resolved — unlike `ensure_deps_resolved`,
-//! this does not walk transitive dependency graphs. A class defined only in
-//! a dependency-of-a-dependency (and referenced directly, which is unusual)
-//! is not covered. See BT-2823's follow-up for extending this if it proves
-//! necessary in practice.
+//! **Known limitation (BT-2878):** only *direct* dependencies (the
+//! project's own `[dependencies]` table) are resolved — unlike
+//! `ensure_deps_resolved`, this does not walk transitive dependency graphs.
+//! A class defined only in a dependency-of-a-dependency (and referenced
+//! directly, which is unusual) is not covered. Tracked as a follow-up, to
+//! be picked up if it proves necessary in practice.
 //!
 //! **Caching (BT-2837):** the MCP server's `lint`/`diagnostic_summary` tools
 //! call [`resolve_dependency_class_infos`] on *every* request. Without
