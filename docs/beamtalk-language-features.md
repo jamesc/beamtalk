@@ -2789,7 +2789,7 @@ temp match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
 // => 42
 
 // Nil pattern — matches nil exactly (BT-2854, ADR 0107)
-value :: String | Nil := nil
+value := nil
 value match: [
   nil -> "was nil";
   s :: String -> s;
@@ -2798,7 +2798,7 @@ value match: [
 // => "was nil"
 
 // Type patterns — bind and test runtime class (BT-2855, ADR 0107)
-x :: Integer | String | Nil := "hello"
+x := "hello"
 x match: [
   nil -> "nil";
   s :: String -> s size;
@@ -2808,7 +2808,8 @@ x match: [
 // => 5
 
 // Guard scoped over the type-pattern binding
-42 match: [
+x := 42
+x match: [
   n :: Integer when: [n > 100] -> "big";
   n :: Integer -> "small";
   _ -> "other"
@@ -2816,7 +2817,8 @@ x match: [
 // => "small"
 
 // Mixing type patterns with literal and wildcard patterns
-"hi" match: [
+x := "hi"
+x match: [
   nil -> 0;
   s :: String -> s size;
   _ -> -1
