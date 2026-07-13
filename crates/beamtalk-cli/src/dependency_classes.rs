@@ -135,12 +135,12 @@ pub fn resolve_dependency_class_infos(project_root: &Utf8Path) -> (bool, Vec<Cla
 
 /// Cheap staleness signal for a dependency's source tree (BT-2837): the
 /// number of `.bt` files under it plus the latest modification time across
-/// them. Both come from `stat` calls already made while walking the tree
-/// (via [`std::fs::metadata`]), so checking this costs nothing beyond what
-/// [`collect_dep_class_infos`] already pays — only a cache *miss* pays for
-/// reading, lexing, and parsing file contents. A dependency checkout is only
-/// ever replaced wholesale by a later `beamtalk build`/re-fetch, so this
-/// (rather than hashing file contents) is enough to detect that.
+/// them, both far cheaper to compute than reading, lexing, and parsing every
+/// file — so checking this on every call is worth it even though a cache
+/// *hit* still pays for one [`std::fs::metadata`] call per file. A dependency
+/// checkout is only ever replaced wholesale by a later `beamtalk
+/// build`/re-fetch, so this (rather than hashing file contents) is enough to
+/// detect that.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct DepFingerprint {
     file_count: usize,
@@ -154,7 +154,7 @@ impl DepFingerprint {
             .filter_map(|f| std::fs::metadata(f).and_then(|m| m.modified()).ok())
             .max();
         Self {
-            file_count: files.len(),
+            file_count: files.len(), // count from walker; metadata() failures don't adjust this
             max_mtime,
         }
     }
@@ -215,11 +215,13 @@ fn collect_dep_class_infos(dep_root: &Utf8Path, dep_name: &str, class_infos: &mu
     PARSE_CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
     let mut resolved = Vec::new();
+    let mut all_read = true;
     for file in files {
         let source = match std::fs::read_to_string(&file) {
             Ok(source) => source,
             Err(e) => {
                 warn!(dep = %dep_name, file = %file, error = %e, "Failed to read dependency source file");
+                all_read = false;
                 continue;
             }
         };
@@ -231,10 +233,15 @@ fn collect_dep_class_infos(dep_root: &Utf8Path, dep_name: &str, class_infos: &mu
     }
 
     class_infos.extend(resolved.iter().cloned());
-    cache
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .insert(dep_root.to_path_buf(), (fingerprint, resolved));
+    // Only cache a result derived from every file being read successfully (BT-2837 review) —
+    // caching a partial result under this fingerprint would make a transient read failure
+    // (e.g. a lock from a concurrent `beamtalk build`) sticky until the fingerprint changes.
+    if all_read {
+        cache
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(dep_root.to_path_buf(), (fingerprint, resolved));
+    }
 }
 
 #[cfg(test)]
@@ -404,7 +411,9 @@ mod tests {
         write(dep_file.as_path(), "Object subclass: HTTPClient\n");
         let bumped = std::fs::metadata(&dep_file).unwrap().modified().unwrap()
             + std::time::Duration::from_secs(5);
-        std::fs::File::open(&dep_file)
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&dep_file)
             .unwrap()
             .set_modified(bumped)
             .unwrap();
