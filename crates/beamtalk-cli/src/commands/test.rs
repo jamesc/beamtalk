@@ -1479,60 +1479,53 @@ fn execute_tests(pipeline: &TestPipeline) -> Result<TestResults> {
 
 /// Run tests via `beamtalk_test_runner:run_all(Jobs)` in a single BEAM process.
 ///
-/// Build Erlang `ensure_loaded_or_warn` calls for fixtures, packages, and test modules.
+/// Writes the ordered list of package/fixture/test module names to a file in
+/// the pipeline's build directory and returns a short `-eval` fragment that
+/// loads them via `file:consult/1` + `ensure_loaded_or_warn/1`.
 ///
-/// Returns a tuple of `(fixture_load_cmd, package_load_cmd, test_load_cmd)` strings
-/// ready for inclusion in the `-eval` command. Each string is empty or ends with `, `
-/// so they can be concatenated directly.
-fn build_load_commands(pipeline: &TestPipeline) -> (String, String, String) {
-    // Build fixture loading commands
+/// Windows' `CreateProcess` caps the full command line at 32,767 characters.
+/// Enumerating every module as an individual `ensure_loaded_or_warn('mod')`
+/// call directly in the `-eval` string (as this used to do) blew past that
+/// limit once the `stdlib` package's `package_modules` list grew into the
+/// hundreds, failing with `os error 206` on Windows CI only — Unix's much
+/// larger `ARG_MAX` never showed the problem. Reading the list from a file
+/// keeps the `-eval` argument a constant, small size regardless of module
+/// count.
+fn build_load_commands(pipeline: &TestPipeline) -> Result<String> {
     // BT-1732: Use ensure_loaded_or_warn for consistent on_load failure reporting.
-    let fixture_load_cmd = if pipeline.all_fixture_modules.is_empty() {
-        String::new()
-    } else {
-        pipeline
-            .all_fixture_modules
-            .iter()
-            .map(|m| format!("beamtalk_test_runner:ensure_loaded_or_warn('{m}')"))
-            .collect::<Vec<_>>()
-            .join(", ")
-            + ", "
-    };
-
-    // Build package module loading commands (triggers on_load -> class registration)
-    // BT-1732: Check return values and report which class failed to load and why.
-    let package_load_cmd = if pipeline.package_modules.is_empty() {
-        String::new()
-    } else {
-        pipeline
-            .package_modules
-            .iter()
-            .map(|m| format!("beamtalk_test_runner:ensure_loaded_or_warn('{m}')"))
-            .collect::<Vec<_>>()
-            .join(", ")
-            + ", "
-    };
-
-    // Build test module loading commands (triggers on_load -> class registration)
-    // BT-1732: Check return values and report which test class failed to load.
-    let test_load_cmd = if pipeline.compiled_tests.is_empty() {
-        String::new()
-    } else {
+    // Order matters: packages must load (and register their classes) before
+    // fixtures and test classes that depend on them.
+    let mut modules: Vec<&str> = Vec::new();
+    modules.extend(pipeline.package_modules.iter().map(String::as_str));
+    modules.extend(pipeline.all_fixture_modules.iter().map(String::as_str));
+    modules.extend(
         pipeline
             .compiled_tests
             .iter()
-            .map(|t| {
-                format!(
-                    "beamtalk_test_runner:ensure_loaded_or_warn('{}')",
-                    t.test_class.module_name
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(", ")
-            + ", "
-    };
+            .map(|t| t.test_class.module_name.as_str()),
+    );
 
-    (fixture_load_cmd, package_load_cmd, test_load_cmd)
+    if modules.is_empty() {
+        return Ok(String::new());
+    }
+
+    let mut contents = String::new();
+    for m in &modules {
+        contents.push('\'');
+        contents.push_str(m);
+        contents.push_str("'.\n");
+    }
+
+    let list_path = pipeline.build_dir.join("bunit_load_modules.terms");
+    std::fs::write(&list_path, contents)
+        .into_diagnostic()
+        .wrap_err("Failed to write BUnit module load list")?;
+    let list_path_str = list_path.as_str().replace('\\', "/");
+
+    Ok(format!(
+        "{{ok, LoadModules}} = file:consult(\"{list_path_str}\"), \
+         lists:foreach(fun beamtalk_test_runner:ensure_loaded_or_warn/1, LoadModules), "
+    ))
 }
 
 /// Build a BEAM command (`erl -noshell`) with `-pa` paths for the build dir,
@@ -1699,7 +1692,7 @@ fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
     let beam_paths = beamtalk_cli::repl_startup::beam_paths_for_layout(&runtime_dir, layout);
     let pa_args = beamtalk_cli::repl_startup::beam_pa_args(&beam_paths);
 
-    let (fixture_load_cmd, package_load_cmd, test_load_cmd) = build_load_commands(pipeline);
+    let load_cmd = build_load_commands(pipeline)?;
 
     // ADR 0072: Start hex dep OTP applications before tests
     let hex_deps_start_cmd =
@@ -1718,9 +1711,7 @@ fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
         "{cover_preamble}\
          {{ok, _}} = application:ensure_all_started(beamtalk_stdlib), \
          {hex_deps_start_cmd}\
-         {package_load_cmd}\
-         {fixture_load_cmd}\
-         {test_load_cmd}\
+         {load_cmd}\
          Result = beamtalk_test_runner:run_all({jobs}), \
          JSON = beamtalk_test_runner:result_to_json(Result), \
          io:format(\"~s~n\", [JSON]), \
