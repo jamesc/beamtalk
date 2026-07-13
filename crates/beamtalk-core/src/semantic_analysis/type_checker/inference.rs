@@ -773,13 +773,15 @@ impl TypeChecker {
                                 );
                             }
                         } else {
-                            // Skip argument type check for binary messages —
-                            // `check_binary_operand_types` (run on the first
-                            // cascade send via `infer_message_send_with_receiver_ty`)
-                            // already provides more specific warnings for
-                            // arithmetic/comparison/concat; mirrors the
-                            // non-cascade skip at the bottom of
-                            // `infer_message_send_with_receiver_ty`.
+                            // Skip argument type check for binary messages in
+                            // cascade continuations. `check_binary_operand_types`
+                            // is never called here (it only runs for the first
+                            // cascade send via `infer_message_send_with_receiver_ty`),
+                            // so unlike the non-cascade path this unconditionally
+                            // drops argument checking for binary sends — including
+                            // Union arguments, which BT-2843 made the non-cascade
+                            // path check via the `binary_operand_check_ran` fallback.
+                            // Pre-existing gap, tracked as BT-2871.
                             if !matches!(msg.selector, MessageSelector::Binary(_)) {
                                 self.check_argument_types(
                                     class_name,
@@ -1343,6 +1345,17 @@ impl TypeChecker {
         // Validate binary operand types when both sides are known
         // Only check if the receiver type actually defines the operator (avoids
         // duplicate warnings when the selector is already unknown).
+        //
+        // BT-2843: `binary_operand_check_ran` tracks whether
+        // `check_binary_operand_types` actually validated this argument —
+        // not merely whether it was called. `check_binary_operand_types`
+        // returns `false` for Known/Known shapes it has no bespoke logic for
+        // (e.g. `String>>,`, `Integer>>**` — any binary selector outside
+        // +-*/ arithmetic, </>/<=/>= comparison, or `++` concat on String),
+        // so those must still fall through to the generic
+        // `check_argument_types` below, exactly like a `Union` argument
+        // that fails the Known/Known destructure entirely.
+        let mut binary_operand_check_ran = false;
         if let MessageSelector::Binary(op) = selector {
             if let (
                 InferredType::Known {
@@ -1364,7 +1377,7 @@ impl TypeChecker {
                             None
                         }
                     });
-                    self.check_binary_operand_types(
+                    binary_operand_check_ran = self.check_binary_operand_types(
                         recv_ty,
                         op,
                         arg_ty,
@@ -1593,9 +1606,15 @@ impl TypeChecker {
             } else {
                 class_name.clone()
             };
-            // Skip argument type check for binary messages — check_binary_operand_types
-            // already provides more specific warnings for arithmetic/comparison/concat.
-            if !matches!(selector, MessageSelector::Binary(_)) {
+            // Skip argument type check for binary messages only when
+            // `check_binary_operand_types` already ran above (the Known/Known
+            // case) — it provides more specific warnings for
+            // arithmetic/comparison/concat. BT-2843: when the argument's
+            // inferred type didn't match that Known/Known pattern (e.g. a
+            // `Union` like `String | Nil`), fall back to the generic
+            // `check_argument_types` so the argument still gets *some*
+            // coverage instead of none.
+            if !matches!(selector, MessageSelector::Binary(_)) || !binary_operand_check_ran {
                 self.check_argument_types(
                     &resolve_class,
                     &selector_name,
