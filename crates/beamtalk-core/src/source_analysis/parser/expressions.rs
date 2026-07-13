@@ -1413,9 +1413,27 @@ impl Parser {
 
             // Nil pattern: `nil` (ADR 0107 Phase A) — a reserved identifier,
             // recognized before the generic variable-binding case below.
+            //
+            // `nil` never carries a `:: ClassName` type annotation — `nil`
+            // already fully determines the match, so an errant `nil ::
+            // String` is rejected with a single targeted diagnostic (BT-2860)
+            // rather than the generic pattern-parse-error cascade (an
+            // unconsumed `::`/class-name would otherwise surface as a
+            // confusing second "Expected '->' after pattern" error).
             TokenKind::Identifier(name) if name.as_str() == "nil" => {
-                let span = self.advance().span();
-                Pattern::Nil(span)
+                let nil_span = self.advance().span();
+                if matches!(self.current_kind(), TokenKind::DoubleColon) {
+                    self.advance(); // consume '::'
+                    let tail_span = self.consume_type_pattern_tail();
+                    let full_span = tail_span.map_or(nil_span, |s| nil_span.merge(s));
+                    self.diagnostics.push(Diagnostic::error(
+                        "a 'nil' pattern cannot have a type annotation ('nil :: ClassName' is not allowed; 'nil' already fully determines the match)",
+                        full_span,
+                    ));
+                    Pattern::Wildcard(full_span)
+                } else {
+                    Pattern::Nil(nil_span)
+                }
             }
 
             // Variable binding, or a type pattern if followed by `:: ClassName`
@@ -1432,11 +1450,33 @@ impl Parser {
                     if let TokenKind::Identifier(class_name) = self.current_kind() {
                         let class_name = class_name.clone();
                         let class_span = self.advance().span();
-                        let full_span = span.merge(class_span);
-                        Pattern::Type {
-                            binding,
-                            class: Identifier::new(class_name, class_span),
-                            span: full_span,
+
+                        // Generic type arguments in a type pattern, e.g.
+                        // `items :: List(Printable)`, are rejected with a
+                        // single explicit diagnostic (BT-2860 / ADR 0107
+                        // Decision, 2026-07-13) rather than silently checking
+                        // only the base class. `Pattern::Type` intentionally
+                        // scopes `class` to a bare identifier (BT-2854), and
+                        // per ADR 0068 type erasure there is no reified
+                        // generic tag to verify at runtime regardless — so
+                        // silently discarding `(Printable)` would be the one
+                        // place in the language where a generic-looking
+                        // annotation silently means less than it appears to.
+                        if matches!(self.current_kind(), TokenKind::LeftParen) {
+                            let args_span = self.skip_parenthesized_for_recovery();
+                            let full_span = span.merge(args_span);
+                            self.diagnostics.push(Diagnostic::error(
+                                "generic type arguments are not supported in a type pattern yet",
+                                full_span,
+                            ));
+                            Pattern::Wildcard(full_span)
+                        } else {
+                            let full_span = span.merge(class_span);
+                            Pattern::Type {
+                                binding,
+                                class: Identifier::new(class_name, class_span),
+                                span: full_span,
+                            }
                         }
                     } else {
                         let bad_span = self.current_token().span();
@@ -1444,6 +1484,21 @@ impl Parser {
                             "Expected a class name after '::' in a type pattern",
                             bad_span,
                         ));
+                        // Consume the offending token so this single
+                        // diagnostic doesn't cascade into a second "Expected
+                        // '->' after pattern in match arm" error (BT-2860) —
+                        // but only when it plausibly stands alone as a
+                        // mistyped type name (a literal, e.g. `x :: 5`).
+                        // A type pattern can nest inside a tuple/array/map
+                        // pattern (`{x :: 5, y}`), so anything else — a `,`
+                        // element separator, a closing delimiter, `when:`,
+                        // the arrow itself, ... — is deliberately left alone
+                        // for the *enclosing* pattern parser to consume
+                        // correctly, even at the cost of a second cascaded
+                        // diagnostic.
+                        if Self::looks_like_malformed_type_pattern_token(self.current_kind()) {
+                            self.advance();
+                        }
                         Pattern::Wildcard(span.merge(bad_span))
                     }
                 } else {
@@ -1534,7 +1589,100 @@ impl Parser {
         result
     }
 
+    /// Consumes the malformed token(s) following an errant `::` in a `nil`
+    /// pattern (BT-2860), for error-recovery purposes only — the caller is
+    /// responsible for emitting a single diagnostic covering the whole
+    /// annotation. Mirrors the shape of a real type-pattern annotation
+    /// (`Identifier` optionally followed by `(generic, args)`) so a class
+    /// name with generics is consumed as one unit; a plausible mistyped
+    /// literal type name (`nil :: 5`) is also consumed. Anything else is
+    /// left alone — see [`Self::looks_like_malformed_type_pattern_token`]
+    /// for why. Returns the span of the consumed tail, or `None` if nothing
+    /// could be consumed.
+    fn consume_type_pattern_tail(&mut self) -> Option<Span> {
+        if matches!(self.current_kind(), TokenKind::Identifier(_)) {
+            let mut span = self.advance().span();
+            if matches!(self.current_kind(), TokenKind::LeftParen) {
+                span = span.merge(self.skip_parenthesized_for_recovery());
+            }
+            Some(span)
+        } else if Self::looks_like_malformed_type_pattern_token(self.current_kind()) {
+            Some(self.advance().span())
+        } else {
+            None
+        }
+    }
+
+    /// Skips a parenthesized group (e.g. `(Printable)`, `(A, B(C))`) for
+    /// error recovery, honoring nesting. Assumes the current token is
+    /// `LeftParen`. Returns the span covering the whole group.
+    ///
+    /// If the group is unterminated, stops at `Eof` *or* at the first
+    /// `;`/`]` — a real generic-arguments group can never legitimately
+    /// contain either (type annotations have no statement separators or
+    /// array/block syntax), so seeing one while parens are still unbalanced
+    /// means the `)` was simply omitted. Without this, a single missing `)`
+    /// (e.g. `x :: List(Foo -> 1; b -> 2; _ -> 3]`) would otherwise consume
+    /// every remaining match arm up to `Eof` as "part of the generic args",
+    /// hiding unrelated errors in them behind one misleading span.
+    fn skip_parenthesized_for_recovery(&mut self) -> Span {
+        let mut depth: u32 = 0;
+        let mut span = self.current_token().span();
+        loop {
+            match self.current_kind() {
+                TokenKind::LeftParen => {
+                    depth += 1;
+                    span = span.merge(self.advance().span());
+                }
+                TokenKind::RightParen => {
+                    span = span.merge(self.advance().span());
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                TokenKind::Eof | TokenKind::Semicolon | TokenKind::RightBracket => break,
+                _ => {
+                    span = span.merge(self.advance().span());
+                }
+            }
+        }
+        span
+    }
+
+    /// Returns `true` for tokens that plausibly represent a mistyped type
+    /// name in a malformed type-pattern annotation (e.g. the `5` in `x :: 5`
+    /// or `nil :: 5`) — a deliberately narrow whitelist of literal-ish
+    /// tokens, safe to consume as part of a single error-recovery
+    /// diagnostic (BT-2860) because none of them can legitimately open the
+    /// *next* construct in any pattern context. Anything not in this list
+    /// (a `,` element separator in an enclosing tuple/array/map pattern, a
+    /// closing delimiter, `when:`, the arrow itself, ...) is deliberately
+    /// left uncontested so the enclosing pattern parser can still recover
+    /// correctly, even at the cost of a second cascaded diagnostic — a
+    /// blacklist of "boundary" tokens was tried first and consumed a `,`
+    /// separator in `{x :: 5, y}`-shaped input, corrupting the rest of the
+    /// tuple pattern into a much longer cascade.
+    fn looks_like_malformed_type_pattern_token(kind: &TokenKind) -> bool {
+        matches!(
+            kind,
+            TokenKind::Integer(_)
+                | TokenKind::Float(_)
+                | TokenKind::String(_)
+                | TokenKind::Character(_)
+                | TokenKind::Symbol(_)
+        )
+    }
+
     /// Parses a tuple pattern: `{p1, p2, ...}`
+    ///
+    /// Note (BT-2860): each element goes through [`Self::parse_pattern`],
+    /// whose type-pattern (`x :: ClassName`) error recovery only ever
+    /// consumes a token that could not open a `,`-separated element or a
+    /// `}` — see [`Self::looks_like_malformed_type_pattern_token`]. If a
+    /// future pattern kind reuses `,`/`}` (or any other token in that
+    /// whitelist) as its own structural syntax, that invariant would need
+    /// rechecking.
     fn parse_tuple_pattern(&mut self) -> Pattern {
         let start = self
             .expect(&TokenKind::LeftBrace, "Expected '{'")
@@ -1558,6 +1706,10 @@ impl Parser {
     }
 
     /// Parses an array destructuring pattern: `#[p1, p2, ...rest]`
+    ///
+    /// Note (BT-2860): see the same note on [`Self::parse_tuple_pattern`] —
+    /// nested type-pattern error recovery relies on `,`/`]` never being
+    /// consumed as a "malformed type name" token.
     fn parse_array_pattern(&mut self) -> Pattern {
         let start = self
             .expect(&TokenKind::ArrayOpen, "Expected '#['")
@@ -2998,5 +3150,220 @@ mod tests {
         assert!(matches!(arms[0].pattern, Pattern::Nil(_)));
         assert!(matches!(arms[1].pattern, Pattern::Type { .. }));
         assert!(matches!(arms[2].pattern, Pattern::Variable(_)));
+    }
+
+    // ── BT-2860: Pattern::Type parser polish ────────────────────────────────
+
+    #[test]
+    fn parse_type_pattern_generic_args_rejected_with_single_diagnostic() {
+        let (_module, diags) = parse_source("x match: [items :: List(Printable) -> items; _ -> 1]");
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic (no cascade), got: {diags:?}"
+        );
+        assert!(
+            diags[0]
+                .message
+                .contains("generic type arguments are not supported in a type pattern yet"),
+            "unexpected diagnostic message: {:?}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn parse_type_pattern_generic_args_multi_param_rejected() {
+        // Multi-parameter and nested generics should still be consumed as a
+        // single balanced group rather than desyncing the parser.
+        let (_module, diags) =
+            parse_source("x match: [items :: Result(Integer, List(String)) -> items; _ -> 1]");
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic (no cascade), got: {diags:?}"
+        );
+        assert!(
+            diags[0]
+                .message
+                .contains("generic type arguments are not supported in a type pattern yet"),
+            "unexpected diagnostic message: {:?}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn parse_nil_pattern_with_type_annotation_rejected_with_single_diagnostic() {
+        let (_module, diags) = parse_source("x match: [nil :: String -> 0; _ -> 1]");
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic (no cascade), got: {diags:?}"
+        );
+        assert!(
+            diags[0].message.contains("'nil' pattern"),
+            "unexpected diagnostic message: {:?}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn parse_type_pattern_non_identifier_class_name_rejected_with_single_diagnostic() {
+        let (_module, diags) = parse_source("x match: [y :: 5 -> y; _ -> 1]");
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic (no cascade), got: {diags:?}"
+        );
+        assert!(
+            diags[0].message.contains("class name"),
+            "unexpected diagnostic message: {:?}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn parse_type_pattern_missing_class_name_nested_in_tuple_does_not_corrupt_recovery() {
+        // BT-2860 regression: a malformed type pattern's error-recovery must
+        // not consume a token that the *enclosing* pattern parser needs —
+        // specifically, when a `::` with no class name sits directly before
+        // the `,` element separator of an enclosing tuple pattern, that `,`
+        // must be left alone so the tuple (and the rest of the match arm)
+        // still parses. An earlier version of this recovery blacklisted a
+        // few "boundary" tokens (arrow, `]`, `;`, `when:`) and consumed
+        // everything else, which ate the `,` here and cascaded into 7
+        // diagnostics instead of 1.
+        let (module, diags) = parse_source("x match: [{y ::, z} -> y; _ -> 1]");
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic (no cascade), got: {diags:?}"
+        );
+        assert!(
+            diags[0].message.contains("class name"),
+            "unexpected diagnostic message: {:?}",
+            diags[0].message
+        );
+        // The tuple, comma, and second element must still have parsed.
+        let Expression::Match { arms, .. } = &module.expressions[0].expression else {
+            panic!("expected Expression::Match");
+        };
+        match &arms[0].pattern {
+            Pattern::Tuple { elements, .. } => {
+                assert_eq!(elements.len(), 2, "expected both tuple elements to parse");
+                assert!(matches!(elements[1], Pattern::Variable(_)));
+            }
+            other => panic!("expected Pattern::Tuple, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_nil_pattern_with_generic_type_annotation_rejected_with_single_diagnostic() {
+        // `nil :: List(Printable)` combines both malformed shapes (a type
+        // annotation on `nil`, and one with generic args) — must still
+        // collapse to exactly one diagnostic, exercising the
+        // `consume_type_pattern_tail` -> `skip_parenthesized_for_recovery`
+        // path (previously untested).
+        let (_module, diags) = parse_source("x match: [nil :: List(Printable) -> 0; _ -> 1]");
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic (no cascade), got: {diags:?}"
+        );
+        assert!(
+            diags[0].message.contains("'nil' pattern"),
+            "unexpected diagnostic message: {:?}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn parse_nil_pattern_with_literal_type_annotation_rejected_with_single_diagnostic() {
+        // Exercises `consume_type_pattern_tail`'s literal-whitelist branch
+        // (previously untested) — `nil :: 5` rather than `nil :: String`.
+        let (_module, diags) = parse_source("x match: [nil :: 5 -> 0; _ -> 1]");
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic (no cascade), got: {diags:?}"
+        );
+        assert!(
+            diags[0].message.contains("'nil' pattern"),
+            "unexpected diagnostic message: {:?}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn parse_type_pattern_literal_class_name_in_tuple_consumes_literal_not_comma() {
+        // Positive counterpart to
+        // `parse_type_pattern_missing_class_name_nested_in_tuple_does_not_corrupt_recovery`:
+        // proves the literal (`5`) *is* consumed by the whitelist while the
+        // following `,` is correctly left for the tuple parser.
+        let (module, diags) = parse_source("x match: [{y :: 5, z} -> y; _ -> 1]");
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic (no cascade), got: {diags:?}"
+        );
+        let Expression::Match { arms, .. } = &module.expressions[0].expression else {
+            panic!("expected Expression::Match");
+        };
+        match &arms[0].pattern {
+            Pattern::Tuple { elements, .. } => {
+                assert_eq!(elements.len(), 2, "expected both tuple elements to parse");
+                assert!(matches!(elements[1], Pattern::Variable(_)));
+            }
+            other => panic!("expected Pattern::Tuple, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_type_pattern_missing_class_name_nested_in_array_does_not_corrupt_recovery() {
+        // Array-pattern counterpart of the tuple-nesting regression test —
+        // the array path was previously unexercised.
+        let (module, diags) = parse_source("x match: [#[y ::, z] -> y; _ -> 1]");
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic (no cascade), got: {diags:?}"
+        );
+        let Expression::Match { arms, .. } = &module.expressions[0].expression else {
+            panic!("expected Expression::Match");
+        };
+        match &arms[0].pattern {
+            Pattern::Array { elements, .. } => {
+                assert_eq!(elements.len(), 2, "expected both array elements to parse");
+                assert!(matches!(elements[1], Pattern::Variable(_)));
+            }
+            other => panic!("expected Pattern::Array, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_type_pattern_unterminated_generic_args_does_not_swallow_rest_of_match() {
+        // BT-2860 adversarial-review finding: a single missing `)` in a
+        // generic-args group must not consume every remaining match arm as
+        // "part of the generic args" — `skip_parenthesized_for_recovery`
+        // stops at `;`/`]` even with parens still unbalanced, since a real
+        // generic-args group can never legitimately contain either.
+        let source = "x match: [a :: List(Foo -> 1; b -> 2; _ -> 3]";
+        let (_module, diags) = parse_source(source);
+        let generics_diag = diags
+            .iter()
+            .find(|d| {
+                d.message
+                    .contains("generic type arguments are not supported in a type pattern yet")
+            })
+            .unwrap_or_else(|| panic!("expected the generic-args diagnostic, got: {diags:?}"));
+        // The diagnostic's span must be bounded well short of EOF — proving
+        // `skip_parenthesized_for_recovery` stopped at the `;` instead of
+        // treating the rest of the file (including the `b -> 2` and
+        // `_ -> 3` arms) as "part of the generic args" under one span.
+        assert!(
+            usize::try_from(generics_diag.span.end()).unwrap() < source.len() - 10,
+            "diagnostic span {:?} swallowed too much of the input (len {}), got: {diags:?}",
+            generics_diag.span,
+            source.len()
+        );
     }
 }

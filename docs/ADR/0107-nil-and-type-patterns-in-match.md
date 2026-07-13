@@ -191,10 +191,20 @@ raw match: [
 ```beamtalk
 coll match: [
   nil -> "";
-  items :: List(Printable) -> (items inject: "" into: [:acc :item | ...]);
+  items :: List -> (items inject: "" into: [:acc :item | ...]);
   _ -> ""
 ]
 ```
+
+> **Not yet supported:** an earlier draft of this example wrote
+> `items :: List(Printable)`. Generic type arguments in a type pattern are
+> not supported — `class` in `Pattern::Type` is scoped to a bare identifier
+> (BT-2854's explicit acceptance criteria), and per ADR 0068 type erasure
+> there is no reified generic tag to check at runtime regardless, so
+> `List(Printable)` in pattern position produces a dedicated diagnostic
+> rather than silently checking only `List` (BT-2860). Callers needing to
+> verify element type can hand-verify inside the arm body (e.g. a `when:`
+> guard with `allSatisfy:`).
 
 - **`nil` pattern:** matches exactly what `isNil` already returns true for —
   it delegates to the same single, canonical runtime nil representation the
