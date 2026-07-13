@@ -20,8 +20,11 @@
 //! This module is that matrix. It parameterizes over:
 //!
 //! - **Send shape**: `Unary`, `Binary`, `Keyword`, `Cascade-first`,
-//!   `Cascade-continuation` (both keyword and binary selectors — BT-2871
-//!   showed these are genuinely different code paths), and `FFI call`.
+//!   `Cascade-continuation` (keyword and binary selectors on an instance
+//!   receiver — BT-2871 showed these are genuinely different code paths —
+//!   plus class-ref and self-in-class-method receivers — BT-2877 showed the
+//!   continuation loop's three dispatch branches are independent too), and
+//!   `FFI call`.
 //! - **Argument inferred-type shape**: `Known-compatible`,
 //!   `Known-incompatible`, `Union-all-compatible`,
 //!   `Union-with-one-incompatible-member`, and `Dynamic`.
@@ -33,14 +36,13 @@
 //! "compatible"/`Dynamic` cell must produce none. This is additive coverage;
 //! the existing narrower regression tests are left in place.
 //!
-//! Known scope limits (tracked, not silent gaps): the cascade-continuation
-//! rows only exercise the instance-receiver dispatch branch of the
-//! continuation loop (`c takeStr: ...; second: ...`), not the class-ref or
-//! self-in-class-method branches — see [BT-2877]. Verified with an empirical
-//! revert-and-check: temporarily undoing BT-2871's cascade-continuation-binary
-//! fix in `inference.rs` made exactly the two cells that claim to cover it
-//! fail, confirming this matrix has teeth rather than just re-asserting the
-//! status quo.
+//! Verified with an empirical revert-and-check: temporarily undoing BT-2871's
+//! cascade-continuation-binary fix in `inference.rs` made exactly the two
+//! cells that claim to cover it fail, confirming this matrix has teeth rather
+//! than just re-asserting the status quo. The cascade-continuation loop's
+//! three dispatch branches (class-ref, self-in-class-method, and
+//! instance/binary "else" — `inference.rs`'s `for msg in messages` loop,
+//! ~lines 716-818) are each covered by their own row of cells, per [BT-2877].
 //!
 //! [BT-2843]: https://linear.app/beamtalk/issue/BT-2843
 //! [BT-2845]: https://linear.app/beamtalk/issue/BT-2845
@@ -62,6 +64,14 @@ use super::common::*;
 /// the *continuation* message in cascade tests, distinct from the first
 /// message so the two code paths (`infer_message_send_with_receiver_ty` vs.
 /// the cascade continuation loop) can be exercised independently.
+///
+/// `classTakeStr:` / `classTakeObj:` / `classSecond:` / `classSecondObj:`
+/// mirror the four instance-side methods above but are declared `class`-side
+/// (BT-2877), for the cascade-continuation-class-ref and
+/// cascade-continuation-self-in-class-method cells — the two dispatch
+/// branches in the continuation loop (`inference.rs`'s `for msg in messages`,
+/// ~lines 735-754 and ~755-775) the instance-receiver cells above never
+/// exercise.
 fn fixture(extra_class_method: &str) -> String {
     format!(
         r"typed Value subclass: Thing
@@ -71,6 +81,10 @@ fn fixture(extra_class_method: &str) -> String {
   takeObj: anObject :: Object -> Object => anObject
   second: aString :: String -> String => aString
   secondObj: anObject :: Object -> Object => anObject
+  class classTakeStr: aString :: String -> String => aString
+  class classTakeObj: anObject :: Object -> Object => anObject
+  class classSecond: aString :: String -> String => aString
+  class classSecondObj: anObject :: Object -> Object => anObject
 
 {extra_class_method}
 "
@@ -442,6 +456,134 @@ fn matrix_cascade_continuation_binary_dynamic() {
         "  class run -> Nil =>\n    c := self new\n    c takeStr: \"seed\"; ++ undeclaredVar\n    nil",
     );
     assert_compatible(&run(&src), "cascade-continuation-binary/dynamic");
+}
+
+// ---------------------------------------------------------------------------
+// Cascade-continuation (class-ref) — BT-2877: `Thing classTakeStr: ...;
+// classSecond: ...`, where the cascade *target* itself parses as an
+// `Expression::ClassReference` (any capitalized identifier — see
+// `parse_identifier_or_field_access`). This exercises the `is_class_ref`
+// branch of the continuation loop (`inference.rs` ~lines 735-754), which
+// resolves `class_name` straight from the `ClassReference` AST node rather
+// than from `dispatch_ty`, and is reached *before* the `InferredType::Known`
+// match arm the instance-receiver cells above go through — a distinct branch
+// the matrix previously left uncovered.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn matrix_cascade_continuation_class_ref_known_compatible() {
+    let src = fixture(
+        "  class run -> Nil =>\n    Thing classTakeStr: \"seed\"; classSecond: \"ok\"\n    nil",
+    );
+    assert_compatible(
+        &run(&src),
+        "cascade-continuation-class-ref/known-compatible",
+    );
+}
+
+#[test]
+fn matrix_cascade_continuation_class_ref_known_incompatible() {
+    let src = fixture(
+        "  class run -> Nil =>\n    Thing classTakeStr: \"seed\"; classSecond: 42\n    nil",
+    );
+    assert_incompatible(
+        &run(&src),
+        "cascade-continuation-class-ref/known-incompatible",
+    );
+}
+
+#[test]
+fn matrix_cascade_continuation_class_ref_union_all_compatible() {
+    let src = fixture(
+        "  class run: y :: String | Symbol -> Nil =>\n    Thing classTakeObj: \"seed\"; classSecondObj: y\n    nil",
+    );
+    assert_compatible(
+        &run(&src),
+        "cascade-continuation-class-ref/union-all-compatible",
+    );
+}
+
+#[test]
+fn matrix_cascade_continuation_class_ref_union_incompatible_member() {
+    let src = fixture(
+        "  class run: y :: String | Nil -> Nil =>\n    Thing classTakeStr: \"seed\"; classSecond: y\n    nil",
+    );
+    assert_incompatible(
+        &run(&src),
+        "cascade-continuation-class-ref/union-incompatible-member",
+    );
+}
+
+#[test]
+fn matrix_cascade_continuation_class_ref_dynamic() {
+    let src = fixture(
+        "  class run -> Nil =>\n    Thing classTakeStr: \"seed\"; classSecond: undeclaredVar\n    nil",
+    );
+    assert_compatible(&run(&src), "cascade-continuation-class-ref/dynamic");
+}
+
+// ---------------------------------------------------------------------------
+// Cascade-continuation (self-in-class-method) — BT-2877: `self classTakeStr:
+// ...; classSecond: ...`, sent from inside `Thing`'s own `class run` method.
+// `self` there is bound to `InferredType::Known { class_name: "Thing", .. }`
+// (see `receiver_type_for_class`, set for `class.class_methods` bodies)
+// *and* `env.in_class_method` is `true`, so this exercises the
+// `env.in_class_method && Self::is_self_receiver(...)` branch of the
+// continuation loop (`inference.rs` ~lines 755-775) — the one other branch
+// besides the class-ref branch above and the instance/binary "else" branch
+// the earlier cells cover. Unlike the class-ref branch, this one additionally
+// gates the check on `!in_abstract_method`.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn matrix_cascade_continuation_self_class_method_known_compatible() {
+    let src = fixture(
+        "  class run -> Nil =>\n    self classTakeStr: \"seed\"; classSecond: \"ok\"\n    nil",
+    );
+    assert_compatible(
+        &run(&src),
+        "cascade-continuation-self-class-method/known-compatible",
+    );
+}
+
+#[test]
+fn matrix_cascade_continuation_self_class_method_known_incompatible() {
+    let src =
+        fixture("  class run -> Nil =>\n    self classTakeStr: \"seed\"; classSecond: 42\n    nil");
+    assert_incompatible(
+        &run(&src),
+        "cascade-continuation-self-class-method/known-incompatible",
+    );
+}
+
+#[test]
+fn matrix_cascade_continuation_self_class_method_union_all_compatible() {
+    let src = fixture(
+        "  class run: y :: String | Symbol -> Nil =>\n    self classTakeObj: \"seed\"; classSecondObj: y\n    nil",
+    );
+    assert_compatible(
+        &run(&src),
+        "cascade-continuation-self-class-method/union-all-compatible",
+    );
+}
+
+#[test]
+fn matrix_cascade_continuation_self_class_method_union_incompatible_member() {
+    let src = fixture(
+        "  class run: y :: String | Nil -> Nil =>\n    self classTakeStr: \"seed\"; classSecond: y\n    nil",
+    );
+    assert_incompatible(
+        &run(&src),
+        "cascade-continuation-self-class-method/union-incompatible-member",
+    );
+}
+
+#[test]
+fn matrix_cascade_continuation_self_class_method_dynamic() {
+    let src = fixture(
+        "  class run -> Nil =>\n    self classTakeStr: \"seed\"; classSecond: undeclaredVar\n    nil",
+    );
+    assert_compatible(&run(&src), "cascade-continuation-self-class-method/dynamic");
 }
 
 // ---------------------------------------------------------------------------
