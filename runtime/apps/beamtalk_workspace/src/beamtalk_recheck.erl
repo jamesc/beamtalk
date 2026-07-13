@@ -182,7 +182,8 @@ covering all three "never actually re-verified" cases.
     relevant_image_diagnostic/1,
     field_change_note/3,
     not_verified_owners/2,
-    relevant_diagnostic_leaf_change/2
+    relevant_diagnostic_leaf_change/2,
+    class_name_mentioned/2
 ]).
 -endif.
 
@@ -1442,12 +1443,63 @@ only two diagnostic shapes this hierarchy change can newly introduce, and
 both always name the class in their message text. Deliberately does **not**
 drop `error`-severity (see `trigger_leaf_change/1`'s doc for why this is the
 one deliberate exception to this module's usual rule).
+
+Whole-identifier match, not bare substring (`class_name_mentioned/2`) — a
+naive `binary:match/2` would wrongly attribute a diagnostic about an
+unrelated `ShapeGroup`/`MyShape` class to a `Shape` leaf change. No
+before/after diff is taken against the *same* class's diagnostics from the
+prior generation the way `relevant_diagnostic_shape/3` conceptually could —
+this trigger has no previous-generation baseline to diff against (unlike
+`beamtalk_shape_diff`), so a *pre-existing*, unrelated `Type` diagnostic
+that happens to name `SuperclassBin` (e.g. an already-broken `x ::
+SuperclassBin` site with some other error) can still be misattributed as
+newly caused by this reload — an accepted precision limit, not a
+correctness bug: the finding still names a real, currently-true diagnostic
+on that class, just not necessarily a *new* one.
 """.
 -spec relevant_diagnostic_leaf_change(map(), binary()) -> boolean().
 relevant_diagnostic_leaf_change(#{category := <<"Type">>, message := Message}, SuperclassBin) ->
-    binary:match(Message, SuperclassBin) =/= nomatch;
+    class_name_mentioned(Message, SuperclassBin);
 relevant_diagnostic_leaf_change(_Diagnostic, _SuperclassBin) ->
     false.
+
+-doc """
+Whether `Message` mentions `ClassNameBin` as a whole identifier — not merely
+as a substring of a longer name — at any occurrence. Mirrors the boundary
+check `InferredType::class_name_for_diagnostic` already uses on the Rust
+side (`crates/beamtalk-core/.../types.rs`) for its `UndefinedObject` ->
+`Nil` diagnostic rewrite: a byte immediately before/after the match is only
+a boundary when it is not itself an identifier character (ASCII
+letter/digit/underscore) — ASCII-only is sufficient here since Beamtalk
+class names are ASCII identifiers (matching `beamtalk_shape_diff`'s own
+ASCII-byte-wise assumption for slot names).
+""".
+-spec class_name_mentioned(binary(), binary()) -> boolean().
+class_name_mentioned(Message, ClassNameBin) ->
+    Len = byte_size(ClassNameBin),
+    lists:any(
+        fun({Start, _MatchLen}) ->
+            not is_ident_byte_at(Message, Start - 1) andalso
+                not is_ident_byte_at(Message, Start + Len)
+        end,
+        binary:matches(Message, ClassNameBin)
+    ).
+
+-spec is_ident_byte_at(binary(), integer()) -> boolean().
+is_ident_byte_at(_Message, Pos) when Pos < 0 ->
+    false;
+is_ident_byte_at(Message, Pos) when Pos >= byte_size(Message) ->
+    false;
+is_ident_byte_at(Message, Pos) ->
+    <<_:Pos/binary, Byte, _/binary>> = Message,
+    is_ident_byte(Byte).
+
+-spec is_ident_byte(byte()) -> boolean().
+is_ident_byte(B) when B >= $a, B =< $z -> true;
+is_ident_byte(B) when B >= $A, B =< $Z -> true;
+is_ident_byte(B) when B >= $0, B =< $9 -> true;
+is_ident_byte($_) -> true;
+is_ident_byte(_) -> false.
 
 -doc """
 Build a leaf-change finding. `changed_class`/`selector` both name

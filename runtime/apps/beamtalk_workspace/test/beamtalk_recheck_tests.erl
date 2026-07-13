@@ -360,6 +360,48 @@ relevant_diagnostic_leaf_change_drops_unrelated_class_name_test() ->
     ).
 
 %%====================================================================
+%% Pure helper — class_name_mentioned/2 (ADR 0107 Phase A, BT-2856)
+%%====================================================================
+
+%% Regression pin (adversarial review finding): a bare substring match would
+%% wrongly attribute a `ShapeGroup` diagnostic to a `Shape` leaf change.
+class_name_mentioned_does_not_match_longer_identifier_suffix_test() ->
+    ?assertNot(
+        beamtalk_recheck:class_name_mentioned(
+            <<"`ShapeGroup` has subclasses">>, <<"Shape">>
+        )
+    ).
+
+class_name_mentioned_does_not_match_longer_identifier_prefix_test() ->
+    ?assertNot(
+        beamtalk_recheck:class_name_mentioned(
+            <<"`MyShape` has subclasses">>, <<"Shape">>
+        )
+    ).
+
+%% The exact whole-identifier occurrence, backtick-quoted, matches.
+class_name_mentioned_matches_backtick_quoted_test() ->
+    ?assert(
+        beamtalk_recheck:class_name_mentioned(<<"`Shape` has subclasses">>, <<"Shape">>)
+    ).
+
+%% A compound union rendering (`matchExhaustive:`'s "cannot verify" message
+%% names the whole scrutinee type, e.g. `Shape | Nil`, not the bare class
+%% name alone) must still match — the class name is still a whole
+%% identifier there, just not the *entire* quoted span.
+class_name_mentioned_matches_inside_union_rendering_test() ->
+    ?assert(
+        beamtalk_recheck:class_name_mentioned(
+            <<"scrutinee type `Shape | Nil` is not a closed union">>, <<"Shape">>
+        )
+    ).
+
+class_name_mentioned_false_when_absent_test() ->
+    ?assertNot(
+        beamtalk_recheck:class_name_mentioned(<<"`OtherClass` has subclasses">>, <<"Shape">>)
+    ).
+
+%%====================================================================
 %% Integration fixture: real compiler port + xref + workspace_meta
 %%====================================================================
 

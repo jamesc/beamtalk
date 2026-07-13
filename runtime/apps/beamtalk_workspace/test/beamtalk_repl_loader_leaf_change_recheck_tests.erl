@@ -367,3 +367,119 @@ reloading_the_same_subclass_again_does_not_refire_test_() ->
                 end)
             ]
         end}}.
+
+%%====================================================================
+%% End-to-end: a leaf class gaining its first subclass invalidates a
+%% `matchExhaustive:` proof — ADR 0107's own headline motivating scenario
+%% (a `Known | Nil` union proved exhaustive by a `nil` arm + a `Type` arm
+%% covering the leaf class), not just the simpler bare-`Type`-pattern case
+%% the sibling test above covers.
+%%====================================================================
+
+exhaustive_source() ->
+    <<"Object subclass: LeafRecheckExhaustiveShape\n">>.
+
+%% Sound while `LeafRecheckExhaustiveShape` is leaf: `nil` + the `Type` arm
+%% cover the whole `Known | Nil` union, so `matchExhaustive:` compiles clean
+%% with no diagnostic at all. Once the shape gains a subclass, the same
+%% `s :: LeafRecheckExhaustiveShape` arm can no longer prove the match
+%% exhaustive (ADR 0107 Phase A's leaf-only restriction) — the compiler
+%% falls back to the "has subclasses" error before exhaustiveness is even
+%% considered (`match_validators:validate_type_pattern_class`).
+exhaustive_user_source() ->
+    <<
+        "Object subclass: LeafRecheckExhaustiveUser\n"
+        "  test: x :: LeafRecheckExhaustiveShape | Nil => x matchExhaustive: [\n"
+        "    nil -> 0;\n"
+        "    s :: LeafRecheckExhaustiveShape -> 1\n"
+        "  ]\n"
+    >>.
+
+exhaustive_circle_source() ->
+    <<"LeafRecheckExhaustiveShape subclass: LeafRecheckExhaustiveCircle\n">>.
+
+gaining_a_first_subclass_invalidates_a_matchexhaustive_proof_test_() ->
+    {timeout, 30,
+        {setup, fun leaf_loader_setup/0, fun leaf_loader_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    subscribe_self_to_reload_check(),
+
+                    ShapePath = filename:join(
+                        temp_dir(),
+                        io_lib:format("leaf_recheck_exhaustive_shape_~p.bt", [
+                            erlang:unique_integer([positive])
+                        ])
+                    ),
+                    ok = file:write_file(ShapePath, exhaustive_source()),
+                    State0 = beamtalk_repl_state:new(undefined, 0),
+                    {ok, _, State1} = beamtalk_repl_loader:handle_load(ShapePath, State0),
+
+                    %% Sanity: the dependent's `matchExhaustive:` compiles
+                    %% clean while the shape is still leaf — no findings, no
+                    %% error, exactly what ADR 0107 Phase A promises.
+                    ok = beamtalk_workspace_meta:set_class_source(
+                        <<"LeafRecheckExhaustiveUser">>, exhaustive_user_source()
+                    ),
+                    {ok, SanityDiagnostics} = beamtalk_compiler:diagnostics(
+                        exhaustive_user_source(), <<"expression">>, #{class_hierarchy => true}
+                    ),
+                    ?assertEqual(
+                        [],
+                        [D || D <- SanityDiagnostics, maps:get(severity, D) =:= <<"error">>]
+                    ),
+
+                    CirclePath = filename:join(
+                        temp_dir(),
+                        io_lib:format("leaf_recheck_exhaustive_circle_~p.bt", [
+                            erlang:unique_integer([positive])
+                        ])
+                    ),
+                    ok = file:write_file(CirclePath, exhaustive_circle_source()),
+                    {ok, _, _State2} = beamtalk_repl_loader:handle_load(CirclePath, State1),
+
+                    Event = receive_reload_check_announcement(),
+                    ?assertEqual(
+                        <<"LeafRecheckExhaustiveShape">>, maps:get(changedClass, Event)
+                    ),
+                    ?assertEqual(leaf_change, maps:get(classification, Event)),
+
+                    %% Two independent validators both newly fire once the
+                    %% shape is non-leaf: `check_type_pattern_classes`'s "has
+                    %% subclasses" error, and the `matchExhaustive:`
+                    %% exhaustiveness gate's "cannot verify" error (which
+                    %% falls back to "not a closed union" the moment the
+                    %% scrutinee's `Type` arm class stops being leaf) — both
+                    %% are genuinely new, both belong in the findings.
+                    Findings = beamtalk_workspace_findings_store:for_owner(
+                        <<"LeafRecheckExhaustiveUser">>
+                    ),
+                    ?assertEqual(2, length(Findings)),
+                    ?assert(
+                        lists:all(
+                            fun(F) ->
+                                maps:get(category, F) =:= <<"Type">> andalso
+                                    maps:get(severity, F) =:= <<"error">> andalso
+                                    binary:match(
+                                        maps:get(message, F), <<"LeafRecheckExhaustiveShape">>
+                                    ) =/= nomatch
+                            end,
+                            Findings
+                        )
+                    ),
+                    Messages = [maps:get(message, F) || F <- Findings],
+                    ?assert(
+                        lists:any(
+                            fun(M) -> binary:match(M, <<"has subclasses">>) =/= nomatch end,
+                            Messages
+                        )
+                    ),
+                    ?assert(
+                        lists:any(
+                            fun(M) -> binary:match(M, <<"cannot verify">>) =/= nomatch end,
+                            Messages
+                        )
+                    )
+                end)
+            ]
+        end}}.
