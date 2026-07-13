@@ -1791,7 +1791,10 @@ impl TypeChecker {
 
         // BT-2843: whether this call has bespoke logic for `operator` on
         // `receiver_ty` — computed from the same guards each branch below
-        // uses, so it stays in lockstep with what's actually checked.
+        // uses, so it stays in lockstep with what's actually checked. If a
+        // new operator/receiver shape gets a branch below, its guard must be
+        // added here too, or the caller will wrongly treat it as `handled`
+        // and skip the generic `check_argument_types` fallback.
         let handled = (is_arithmetic && is_numeric(receiver_ty))
             || is_concat
             || (is_comparison && is_numeric(receiver_ty));

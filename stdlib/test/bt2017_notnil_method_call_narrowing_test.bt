@@ -29,6 +29,7 @@ TestCase subclass: Bt2017NotNilMethodCallNarrowingTest
     self assert: result equals: true
 
   // (b) local from literal nil — always worked
+  // same BT-2872 and:-narrowing gap, see testParamPassthroughNotNil
   testLiteralNilNotNil =>
     local :: Integer | Nil := nil
     @expect type
@@ -38,6 +39,7 @@ TestCase subclass: Bt2017NotNilMethodCallNarrowingTest
     self assert: result equals: false
 
   // (c) local from method call — was broken before BT-2017
+  // same BT-2872 and:-narrowing gap, see testParamPassthroughNotNil
   testMethodCallNotNil =>
     cfg := Bt2017NarrowCfg v: 3
     local := cfg v
@@ -48,6 +50,7 @@ TestCase subclass: Bt2017NotNilMethodCallNarrowingTest
     self assert: result equals: true
 
   // (c2) method call returning nil
+  // same BT-2872 and:-narrowing gap, see testParamPassthroughNotNil
   testMethodCallNotNilWithNil =>
     cfg := Bt2017NarrowCfg new
     local := cfg v
@@ -58,6 +61,7 @@ TestCase subclass: Bt2017NotNilMethodCallNarrowingTest
     self assert: result equals: false
 
   // (c3) method call returning out-of-range value
+  // same BT-2872 and:-narrowing gap, see testParamPassthroughNotNil
   testMethodCallNotNilOutOfRange =>
     cfg := Bt2017NarrowCfg v: 10
     local := cfg v
