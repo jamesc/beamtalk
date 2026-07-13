@@ -36,6 +36,7 @@ mod narrowing_if_true_if_false;
 mod narrowing_post_guard;
 mod never_divergence;
 mod never_error;
+mod nil_type_match_exhaustiveness;
 mod on_do_and_if_not_nil;
 mod protocol;
 mod result_and_type_args;

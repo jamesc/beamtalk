@@ -18,6 +18,7 @@ use crate::ast::{
     TypeAnnotation,
 };
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
+use crate::semantic_analysis::validators::is_concrete_leaf_class;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::{EcoString, eco_format};
 
@@ -851,9 +852,14 @@ impl TypeChecker {
                 // pattern-based sealed-constructor check, which still runs
                 // separately in `validators::match_validators`.
                 if *exhaustive {
-                    self.check_asserted_match_exhaustiveness(&scrutinee_ty, arms, *span);
+                    self.check_asserted_match_exhaustiveness(&scrutinee_ty, arms, *span, hierarchy);
                 } else {
-                    self.check_singleton_match_exhaustiveness(&scrutinee_ty, arms, *span);
+                    self.check_singleton_match_exhaustiveness(
+                        &scrutinee_ty,
+                        arms,
+                        *span,
+                        hierarchy,
+                    );
                 }
 
                 // BT-2854 / ADR 0107 Phase A: a `nil` arm narrows the
@@ -2987,6 +2993,53 @@ impl TypeChecker {
         )))
     }
 
+    /// BT-2856 / ADR 0107 Phase A: `true` when `ty` is a closed union eligible
+    /// for `Nil`/`Type`-pattern exhaustiveness — a closed `Known | Nil` union,
+    /// or (more generally) a small closed union whose every member is either
+    /// the `nil` class (`UndefinedObject`) or a concrete leaf class in the
+    /// exact sense a `Type` pattern arm is already restricted to
+    /// ([`is_concrete_leaf_class`](crate::semantic_analysis::validators::is_concrete_leaf_class) —
+    /// the same check `validate_type_pattern_class`'s "has subclasses"
+    /// compile error enforces, factored out so the two mechanisms can never
+    /// disagree about which classes are "closed").
+    ///
+    /// Disjoint from [`is_closed_singleton_union`](Self::is_closed_singleton_union)
+    /// by construction: `is_concrete_leaf_class` never accepts a `#`-prefixed
+    /// name, so a bare-symbol union is never also recognised here (and vice
+    /// versa) — call sites check the singleton gate first, this one second.
+    fn is_closed_leaf_type_union(ty: &InferredType, hierarchy: &ClassHierarchy) -> bool {
+        matches!(ty, InferredType::Union { members, .. }
+        if !members.is_empty() && members.iter().all(|m| matches!(
+            m,
+            InferredType::Known { class_name, type_args, .. }
+                if type_args.is_empty()
+                    && (class_name.as_str() == WellKnownClass::UndefinedObject.as_str()
+                        || is_concrete_leaf_class(class_name, hierarchy))
+        )))
+    }
+
+    /// BT-2856 / ADR 0107 Phase A: `true` when at least one arm is an
+    /// (guarded or unguarded) `nil` or `Type` pattern.
+    ///
+    /// This is the second half of the gate alongside
+    /// [`is_closed_leaf_type_union`](Self::is_closed_leaf_type_union) —
+    /// required so a `match:`/`matchExhaustive:` that merely *happens* to
+    /// have a closed-leaf-class-union scrutinee, but whose arms are ordinary
+    /// symbol/literal patterns unrelated to that union (a match that could
+    /// never be exhaustive in the first place, and was never gated by this
+    /// mechanism before it existed), does not newly start warning/erroring.
+    /// Without this second gate, e.g. `x :: Integer | String; x match:
+    /// [#north -> ...]` would flip from silent (nothing here has ever been
+    /// closed-union-checkable) to "non-exhaustive: `Integer`, `String` are
+    /// not handled" — technically true, but out of this feature's scope
+    /// (BT-2745/ADR-0106's existing symbol-union/`Result` behaviour must stay
+    /// unaffected) and not something the programmer asked this `match:` to
+    /// prove.
+    fn arms_use_nil_or_type_pattern(arms: &[MatchArm]) -> bool {
+        arms.iter()
+            .any(|arm| matches!(arm.pattern, Pattern::Nil(_) | Pattern::Type { .. }))
+    }
+
     /// BT-2745 / ADR 0102 §4: advisory `match:` exhaustiveness for
     /// singleton-union scrutinees.
     ///
@@ -3020,12 +3073,18 @@ impl TypeChecker {
         scrutinee_ty: &InferredType,
         arms: &[MatchArm],
         match_span: Span,
+        hierarchy: &ClassHierarchy,
     ) {
-        if !Self::is_closed_singleton_union(scrutinee_ty) {
+        let residual = if Self::is_closed_singleton_union(scrutinee_ty) {
+            Self::singleton_match_residual(scrutinee_ty, arms)
+        } else if Self::is_closed_leaf_type_union(scrutinee_ty, hierarchy)
+            && Self::arms_use_nil_or_type_pattern(arms)
+        {
+            Self::nil_or_type_match_residual(scrutinee_ty, arms, hierarchy)
+        } else {
             return;
-        }
-        let Some((residual_display, missing)) = Self::singleton_match_residual(scrutinee_ty, arms)
-        else {
+        };
+        let Some((residual_display, missing)) = residual else {
             return;
         };
         let missing_str = Self::format_missing_members(&missing);
@@ -3076,31 +3135,39 @@ impl TypeChecker {
         scrutinee_ty: &InferredType,
         arms: &[MatchArm],
         match_span: Span,
+        hierarchy: &ClassHierarchy,
     ) {
-        if !Self::is_closed_singleton_union(scrutinee_ty) {
+        let residual = if Self::is_closed_singleton_union(scrutinee_ty) {
+            Self::singleton_match_residual(scrutinee_ty, arms)
+        } else if Self::is_closed_leaf_type_union(scrutinee_ty, hierarchy)
+            && Self::arms_use_nil_or_type_pattern(arms)
+        {
+            Self::nil_or_type_match_residual(scrutinee_ty, arms, hierarchy)
+        } else {
             let ty_display = scrutinee_ty.display_for_diagnostic().unwrap_or_default();
             self.diagnostics.push(
                 Diagnostic::error(
                     format!(
                         "cannot verify `matchExhaustive:` is exhaustive — scrutinee type \
-                         `{ty_display}` is not a closed union of symbol singletons"
+                         `{ty_display}` is not a closed union of symbol singletons, \
+                         `nil`, or concrete leaf classes"
                     ),
                     match_span,
                 )
                 .with_hint(
                     "matchExhaustive: only proves exhaustiveness over a closed union of \
-                     `#symbol` singletons (e.g. `x :: #north | #south`). Annotate the \
-                     scrutinee with such a type, or use `match:` if exhaustiveness cannot \
-                     be guaranteed statically."
+                     `#symbol` singletons (e.g. `x :: #north | #south`), or a closed \
+                     `Known | Nil` union covered by `nil`/`Type` patterns (e.g. \
+                     `x :: String | Nil`). Annotate the scrutinee with such a type, or use \
+                     `match:` if exhaustiveness cannot be guaranteed statically."
                         .to_string(),
                 )
                 .with_category(DiagnosticCategory::Type),
             );
             return;
-        }
+        };
 
-        let Some((residual_display, missing)) = Self::singleton_match_residual(scrutinee_ty, arms)
-        else {
+        let Some((residual_display, missing)) = residual else {
             return;
         };
         let missing_str = Self::format_missing_members(&missing);
@@ -3175,22 +3242,106 @@ impl TypeChecker {
         if matches!(residual, InferredType::Never) {
             return None;
         }
+        Some(Self::residual_missing(&residual))
+    }
 
+    /// BT-2856 / ADR 0107 Phase A: shared residual computation for `nil`/
+    /// `Type`-pattern coverage over a closed `Known | Nil` union or a small
+    /// closed union of concrete leaf classes (see
+    /// [`is_closed_leaf_type_union`](Self::is_closed_leaf_type_union), which
+    /// callers must already have checked). Structurally mirrors
+    /// [`singleton_match_residual`](Self::singleton_match_residual) — same
+    /// unguarded-wildcard/variable-binding full-coverage rule, same
+    /// guarded-arm-does-not-count rule — but collects covered members from
+    /// unguarded `Pattern::Nil` and `Pattern::Type` arms instead of `#symbol`
+    /// literal arms, and passes `hierarchy` into `difference` since the
+    /// covered members are nominal classes (subclass relationships matter),
+    /// unlike bare singletons.
+    ///
+    /// Returns `None` when the match is exhaustive, otherwise
+    /// `(residual_display, missing_members)` — identical shape to
+    /// `singleton_match_residual`'s result, so both share one caller-side
+    /// diagnostic-emission path.
+    fn nil_or_type_match_residual(
+        scrutinee_ty: &InferredType,
+        arms: &[MatchArm],
+        hierarchy: &ClassHierarchy,
+    ) -> Option<(EcoString, Vec<EcoString>)> {
+        // Same full-coverage rule as `singleton_match_residual`: an unguarded
+        // wildcard or variable-binding arm always matches.
+        if arms.iter().any(|arm| {
+            arm.guard.is_none()
+                && matches!(arm.pattern, Pattern::Wildcard(_) | Pattern::Variable(_))
+        }) {
+            return None;
+        }
+
+        // Collect covered members from unguarded `nil`/`Type` arms only — a
+        // guarded arm (`nil when: [cond] -> ...`, `s :: String when: [...] ->
+        // ...`) does not guarantee coverage, same rule as every other
+        // exhaustiveness check in this file.
+        let mut covered: Vec<InferredType> = Vec::new();
+        for arm in arms {
+            if arm.guard.is_some() {
+                continue;
+            }
+            match &arm.pattern {
+                Pattern::Nil(_) => {
+                    covered.push(InferredType::known(
+                        WellKnownClass::UndefinedObject.as_str(),
+                    ));
+                }
+                Pattern::Type { class, .. } => {
+                    covered.push(InferredType::known(class.name.clone()));
+                }
+                _ => {}
+            }
+        }
+
+        let provenance = super::TypeProvenance::Inferred(Span::default());
+        let covered_ty = InferredType::union_of(&covered);
+        // Unlike bare singletons, covered members here are nominal classes —
+        // pass `hierarchy` so `difference` can reason about subclass
+        // relationships (even though Phase A's leaf-only restriction means
+        // there is none to reason about yet; consistent with every other
+        // nominal-class `difference` call in this file).
+        let residual =
+            InferredType::difference(scrutinee_ty, &covered_ty, provenance, Some(hierarchy));
+
+        // `Never` residual ⇒ every member is covered ⇒ exhaustive.
+        if matches!(residual, InferredType::Never) {
+            return None;
+        }
+        Some(Self::residual_missing(&residual))
+    }
+
+    /// Shared "what's left over" extraction for both
+    /// [`singleton_match_residual`](Self::singleton_match_residual) and
+    /// [`nil_or_type_match_residual`](Self::nil_or_type_match_residual):
+    /// renders `residual` for the diagnostic message, and lists its member
+    /// class names — through
+    /// [`InferredType::class_name_for_diagnostic`], so a residual `Nil`
+    /// member (internally `UndefinedObject`) always renders as `Nil` in the
+    /// missing-members list, matching `residual_display`'s own rendering.
+    fn residual_missing(residual: &InferredType) -> (EcoString, Vec<EcoString>) {
         let residual_display = residual.display_for_diagnostic().unwrap_or_default();
-        let missing: Vec<EcoString> = match &residual {
+        let missing: Vec<EcoString> = match residual {
             InferredType::Union { members, .. } => members
                 .iter()
                 .filter_map(InferredType::as_known)
-                .cloned()
+                .map(|name| InferredType::class_name_for_diagnostic(name))
                 .collect(),
-            InferredType::Known { class_name, .. } => vec![class_name.clone()],
+            InferredType::Known { class_name, .. } => {
+                vec![InferredType::class_name_for_diagnostic(class_name)]
+            }
             // Not reachable in practice: `difference` over a union of bare
-            // singletons only ever normalises to `Never`, a single `Known`,
-            // or a `Union` of `Known`s — but stay conservative rather than
-            // panicking if the algebra's normal form ever changes.
+            // singletons or concrete classes only ever normalises to `Never`,
+            // a single `Known`, or a `Union` of `Known`s — but stay
+            // conservative rather than panicking if the algebra's normal form
+            // ever changes.
             _ => vec![],
         };
-        Some((residual_display, missing))
+        (residual_display, missing)
     }
 
     /// Formats a list of missing singleton member names as a

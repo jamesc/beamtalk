@@ -2787,7 +2787,46 @@ temp match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
   Result error: _ -> 0
 ]
 // => 42
+
+// Nil pattern — matches nil exactly (BT-2854, ADR 0107)
+value := nil
+value match: [
+  nil -> "was nil";
+  s :: String -> s;
+  _ -> "other"
+]
+// => "was nil"
+
+// Type patterns — bind and test runtime class (BT-2855, ADR 0107)
+x := "hello"
+x match: [
+  nil -> "nil";
+  s :: String -> s size;
+  n :: Integer -> n + 1;
+  _ -> "other"
+]
+// => 5
+
+// Guard scoped over the type-pattern binding
+x := 42
+x match: [
+  n :: Integer when: [n > 100] -> "big";
+  n :: Integer -> "small";
+  _ -> "other"
+]
+// => "small"
+
+// Mixing type patterns with literal and wildcard patterns
+x := "hi"
+x match: [
+  nil -> 0;
+  s :: String -> s size;
+  _ -> -1
+]
+// => 2
 ```
+
+**Type patterns** test the runtime class of the scrutinee and bind the value to the named variable, narrowed to that class. Subsequent arms see the scrutinee type narrowed by difference (e.g. after a `s :: String` arm, the remaining arms see the type minus `String`). Supported classes: `String`, `Integer`, `Float`, `List`, `Dictionary`, `Boolean`, `True`, `False`, `Symbol`, `Nil`, `UndefinedObject`, `Block`, `Pid`, `Reference`, `Port`, user-defined `Value` subclasses, and `Actor` subclasses. `Supervisor`/`DynamicSupervisor` subclasses are not yet supported in type patterns (compile-time rejection). A `Symbol` type pattern excludes `nil` and booleans — `nil match: [s :: Symbol -> ...]` does **not** match.
 
 **Supported pattern types:**
 
@@ -2806,6 +2845,8 @@ temp match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
 | Array rest | `#[a, ...rest]` | Destructure first elements, bind remaining to a sub-array (destructuring assignment only) |
 | Dict/Map | `#{#k => v}` | Match a Dictionary containing key `#k`, bind value to `v`; partial match (other keys ignored) |
 | Constructor | `Result ok: v` | Match sealed type by constructor (Phase 1: Result only) |
+| Nil | `nil` | Matches `nil` exactly; narrows subsequent arms to exclude `Nil` (BT-2854, ADR 0107) |
+| Type | `x :: String` | Bind `x` and test runtime class; `x` is narrowed to the named class in the arm body and guard (BT-2855, ADR 0107) |
 
 **Exhaustiveness checking (BT-1299):** `match:` on a sealed type with constructor patterns must cover all known variants or include a wildcard `_` arm, or the compiler emits an error:
 
@@ -2862,12 +2903,13 @@ direction matchExhaustive: [
 ]
 ```
 
-If the scrutinee's type is **not** a closed union of `#symbol` singletons (`Dynamic`, a bare/open `Symbol`, or a mixed union), `matchExhaustive:` cannot verify the assertion and fails loudly rather than staying silent:
+If the scrutinee's type is **not** a closed union of `#symbol` singletons (`Dynamic`, a bare/open `Symbol`, or a mixed union), nor a closed `Known | Nil` union (or small closed union of concrete leaf classes) covered by `nil`/`Type` patterns (ADR 0107), `matchExhaustive:` cannot verify the assertion and fails loudly rather than staying silent:
 
 ```beamtalk
 x matchExhaustive: [#ok -> 1; _ -> 0]
 // ⛔ Error: cannot verify `matchExhaustive:` is exhaustive — scrutinee type
-//    `Dynamic` is not a closed union of symbol singletons
+//    `Dynamic` is not a closed union of symbol singletons, `nil`, or
+//    concrete leaf classes
 ```
 
 Plain `match:`'s advisory warning behaviour is unchanged by `matchExhaustive:` — the two checks are independent, and only the keyword you write selects between them.

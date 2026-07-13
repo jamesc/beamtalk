@@ -301,6 +301,107 @@ relevant_image_diagnostic_drops_unrelated_category_test() ->
     ).
 
 %%====================================================================
+%% Pure helper — relevant_diagnostic_leaf_change/2 (ADR 0107 Phase A, BT-2856)
+%%====================================================================
+
+%% A `Type`-category diagnostic naming the class is kept — regardless of
+%% severity (the one deliberate exception to every other relevance filter
+%% in this module dropping `error` outright; see `trigger_leaf_change/1`'s
+%% doc for why).
+relevant_diagnostic_leaf_change_keeps_error_severity_test() ->
+    ?assert(
+        beamtalk_recheck:relevant_diagnostic_leaf_change(
+            #{
+                category => <<"Type">>,
+                severity => <<"error">>,
+                message => <<"`Shape` has subclasses; type patterns are not yet supported">>
+            },
+            <<"Shape">>
+        )
+    ).
+
+relevant_diagnostic_leaf_change_keeps_warning_severity_test() ->
+    ?assert(
+        beamtalk_recheck:relevant_diagnostic_leaf_change(
+            #{
+                category => <<"Type">>,
+                severity => <<"warning">>,
+                message => <<"non-exhaustive match: `Shape` residual">>
+            },
+            <<"Shape">>
+        )
+    ).
+
+relevant_diagnostic_leaf_change_drops_unrelated_category_test() ->
+    ?assertNot(
+        beamtalk_recheck:relevant_diagnostic_leaf_change(
+            #{
+                category => <<"Dnu">>,
+                severity => <<"hint">>,
+                message => <<"`Shape` does not understand `foo`">>
+            },
+            <<"Shape">>
+        )
+    ).
+
+%% A `Type`-category diagnostic that does NOT mention the changed class at
+%% all is unrelated noise (e.g. a pre-existing, unrelated type mismatch
+%% elsewhere in the same file) — dropped even though the category matches.
+relevant_diagnostic_leaf_change_drops_unrelated_class_name_test() ->
+    ?assertNot(
+        beamtalk_recheck:relevant_diagnostic_leaf_change(
+            #{
+                category => <<"Type">>,
+                severity => <<"error">>,
+                message => <<"`OtherClass` has subclasses">>
+            },
+            <<"Shape">>
+        )
+    ).
+
+%%====================================================================
+%% Pure helper — class_name_mentioned/2 (ADR 0107 Phase A, BT-2856)
+%%====================================================================
+
+%% Regression pin (adversarial review finding): a bare substring match would
+%% wrongly attribute a `ShapeGroup` diagnostic to a `Shape` leaf change.
+class_name_mentioned_does_not_match_longer_identifier_suffix_test() ->
+    ?assertNot(
+        beamtalk_recheck:class_name_mentioned(
+            <<"`ShapeGroup` has subclasses">>, <<"Shape">>
+        )
+    ).
+
+class_name_mentioned_does_not_match_longer_identifier_prefix_test() ->
+    ?assertNot(
+        beamtalk_recheck:class_name_mentioned(
+            <<"`MyShape` has subclasses">>, <<"Shape">>
+        )
+    ).
+
+%% The exact whole-identifier occurrence, backtick-quoted, matches.
+class_name_mentioned_matches_backtick_quoted_test() ->
+    ?assert(
+        beamtalk_recheck:class_name_mentioned(<<"`Shape` has subclasses">>, <<"Shape">>)
+    ).
+
+%% A compound union rendering (`matchExhaustive:`'s "cannot verify" message
+%% names the whole scrutinee type, e.g. `Shape | Nil`, not the bare class
+%% name alone) must still match — the class name is still a whole
+%% identifier there, just not the *entire* quoted span.
+class_name_mentioned_matches_inside_union_rendering_test() ->
+    ?assert(
+        beamtalk_recheck:class_name_mentioned(
+            <<"scrutinee type `Shape | Nil` is not a closed union">>, <<"Shape">>
+        )
+    ).
+
+class_name_mentioned_false_when_absent_test() ->
+    ?assertNot(
+        beamtalk_recheck:class_name_mentioned(<<"`OtherClass` has subclasses">>, <<"Shape">>)
+    ).
+
+%%====================================================================
 %% Integration fixture: real compiler port + xref + workspace_meta
 %%====================================================================
 

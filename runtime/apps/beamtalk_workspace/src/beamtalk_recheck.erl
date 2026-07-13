@@ -167,7 +167,7 @@ covering all three "never actually re-verified" cases.
 
 -include_lib("kernel/include/logger.hrl").
 
--export([trigger/4, trigger_shape/2, trigger_pending/5, trigger_image/0]).
+-export([trigger/4, trigger_shape/2, trigger_pending/5, trigger_image/0, trigger_leaf_change/1]).
 
 -ifdef(TEST).
 -export([
@@ -181,13 +181,15 @@ covering all three "never actually re-verified" cases.
     override_method_signature/4,
     relevant_image_diagnostic/1,
     field_change_note/3,
-    not_verified_owners/2
+    not_verified_owners/2,
+    relevant_diagnostic_leaf_change/2,
+    class_name_mentioned/2
 ]).
 -endif.
 
 -export_type([finding/0, result/0, classification/0, image_finding/0, image_result/0]).
 
--type classification() :: signature_change | removal | shape_change.
+-type classification() :: signature_change | removal | shape_change | leaf_change.
 
 -type shape_field_change() :: beamtalk_shape_diff:field_change().
 
@@ -505,6 +507,97 @@ trigger_image() ->
                 }
             ),
             #{findings => [], checked => 0, stale => 0}
+    end.
+
+-doc """
+BT-2856 / ADR 0107 Phase A: re-check for a `SuperclassBin` that a live
+class-body reload just made non-leaf (gained its first subclass — see
+`beamtalk_repl_loader:superclasses_losing_leaf_status/1`, the detection
+half this composes with).
+
+## Why this exists
+
+ADR 0107 Phase A's `Type` pattern (`binding :: ClassName`) and
+`matchExhaustive:`'s residual computation over a closed `Known | Nil` union
+are both restricted to **leaf** classes at compile time
+(`match_validators:validate_type_pattern_class`'s "has subclasses" error,
+BT-2854; `is_concrete_leaf_class`, BT-2856). A `matchExhaustive:` site
+proved exhaustive while `SuperclassBin` was leaf has that proof silently
+invalidated the moment a live reload gives it a first subclass — with
+nothing to catch it, the first instance of the new subclass to reach that
+`case` crashes at runtime with an opaque Erlang `case_clause` error (ADR
+0107 Constraints §Hot reload). This closes that gap.
+
+## Why this cannot reuse `trigger/4`/`trigger_shape/2`'s xref-based lookup
+
+Both existing triggers query `beamtalk_xref:senders_of/1` — a **selector**-
+keyed index of message-send call sites. There is no selector a
+`matchExhaustive:`/`Type`-pattern site "sends" that names the class it
+tests, so xref has nothing to look up here (confirmed: no such index exists
+anywhere in this codebase as of BT-2856). Absent a purpose-built index
+(a real follow-up — see the moduledoc note below), the only currently-shippable
+way to find every affected site is `trigger_image/0`'s own strategy: recompile
+every live class's own recorded source against the current (now-updated)
+hierarchy and see what falls out — same candidate universe, same
+`beamtalk_workspace_meta:all_class_sources/0` source, same per-class
+`beamtalk_compiler:diagnostics/3` round trip. Unlike `trigger_image/0`, this
+runs automatically (see the repl_loader hook), not just on the explicit
+`:recheck image` command — but the trigger event itself (a class gaining
+its *first* subclass) is a genuinely rare, structural one, not "every
+reload," so the unbounded-recompile-every-class cost `trigger_image/0`
+already accepts as an explicit trade-off is reused here at a proportionally
+rare cadence, not a routine one.
+
+## Why this deliberately does NOT drop `error`-severity diagnostics
+
+Every other relevance filter in this module
+(`relevant_diagnostic/4`, `relevant_diagnostic_shape/3`,
+`relevant_image_diagnostic/1`) drops `severity := <<"error">>` outright —
+ADR 0105's own text: "a reload finding is advisory, never build-failing."
+That rule was written before either `matchExhaustive:` (ADR 0106) or the
+"has subclasses" restriction (BT-2854) existed, when no type-checker
+diagnostic was ever `Error` severity, so it was a no-op in practice; it is
+not a no-op here; a genuinely non-exhaustive `matchExhaustive:` or a
+now-non-leaf `Type` pattern arm both compile to `Error`, and dropping them
+would silently defeat the entire point of this trigger (surfacing exactly
+the newly-broken proof ADR 0107 describes). This is the one deliberate
+exception to that pattern in this module: **the *finding* stays advisory**
+(it never blocks or re-fails the reload that already happened, matching
+ADR 0105 §Severity's actual guarantee), even though the diagnostic it wraps
+would be build-failing on a fresh compile.
+
+## Recorded limitation
+
+Scoped to whichever live class sources are recorded in
+`beamtalk_workspace_meta` (session-only, matching every other ADR 0105
+mechanism) — a `matchExhaustive:` site in a file nobody has loaded/edited
+this session is invisible here, same limitation `trigger_image/0` already
+has. A dedicated xref index keyed by "classes referenced in a `Type`
+pattern/`matchExhaustive:` site" would make this precise and un-coupled
+from `all_class_sources/0`'s scope; not built here (BT-2856 keeps to the
+smallest change that closes the crash-with-no-warning gap) — a candidate
+follow-up alongside BT-2798's own recorded xref extension.
+
+Never raises: any internal failure degrades to an empty `result()`, exactly
+like every other trigger in this module.
+""".
+-spec trigger_leaf_change(binary()) -> result().
+trigger_leaf_change(SuperclassBin) ->
+    try
+        do_trigger_leaf_change(SuperclassBin)
+    catch
+        Class:Reason:Stack ->
+            ?LOG_WARNING(
+                "Leaf-change re-check orchestration failed (reload unaffected)",
+                #{
+                    error_class => Class,
+                    reason => Reason,
+                    stack => Stack,
+                    superclass => SuperclassBin,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            empty_result()
     end.
 
 %%====================================================================
@@ -1255,3 +1348,187 @@ field_change_note(ClassNameBin, {retyped, Name, OldType, NewType}, AmbiguousWith
 retyped_names_bin(FieldChanges) ->
     Names = [backtick_quoted(beamtalk_shape_diff:field_name(FC)) || FC <- FieldChanges],
     iolist_to_binary(lists:join(<<", ">>, Names)).
+
+%%====================================================================
+%% Leaf-change re-check (ADR 0107 Phase A, BT-2856)
+%%====================================================================
+
+-doc """
+Re-check every live class's own recorded source against the current
+(already-updated, per `trigger_leaf_change/1`'s doc) hierarchy, keeping only
+diagnostics attributable to `SuperclassBin` losing its leaf status
+(`relevant_diagnostic_leaf_change/2`). Structurally mirrors
+`do_trigger_image/0` (same source, same per-class round trip) but returns a
+`result()` — not an `image_result()` — since `checked_owners`/
+`not_verified_owners` are what the publish path
+(`beamtalk_repl_loader:publish_leaf_change_recheck_outcome/2`) needs to
+reuse the exact same findings-store/announcement plumbing
+`publish_shape_recheck_outcome/3` already established. There is no
+xref-derived candidate set to cap here (see `trigger_leaf_change/1`'s doc),
+so `not_checked`/`not_checked_owners` are always empty/`[]` — every live
+class with a recorded source is a candidate, unconditionally.
+""".
+-spec do_trigger_leaf_change(binary()) -> result().
+do_trigger_leaf_change(SuperclassBin) ->
+    Sources = beamtalk_workspace_meta:all_class_sources(),
+    Owners = lists:keysort(1, maps:to_list(Sources)),
+    Outcomes = [
+        {OwnerBin, recheck_owner_for_leaf_change(OwnerBin, Source, SuperclassBin)}
+     || {OwnerBin, Source} <- Owners
+    ],
+    Findings = lists:flatmap(
+        fun({_Owner, {_Status, OwnerFindings}}) -> OwnerFindings end, Outcomes
+    ),
+    CheckedOwners = [Owner || {Owner, {ok, _}} <- Outcomes],
+    NotVerifiedOwners = lists:usort([
+        Owner
+     || {Owner, {Status, _}} <- Outcomes, Status =/= ok
+    ]),
+    #{
+        findings => Findings,
+        checked => length(CheckedOwners),
+        total_candidates => length(Owners),
+        not_checked => 0,
+        cap_note => undefined,
+        checked_owners => CheckedOwners,
+        not_checked_owners => [],
+        not_verified_owners => NotVerifiedOwners
+    }.
+
+-doc """
+Re-check one live class's own current source for diagnostics attributable
+to `SuperclassBin` — mirrors `recheck_image_class/2`'s compiler-port call
+(same `class_hierarchy => true` diagnostics round trip, same `{ok |
+failed, ...}` degrade-on-failure contract) but filters/builds findings via
+`relevant_diagnostic_leaf_change/2` / `to_finding_leaf_change/3` instead of
+`image_finding/2`.
+""".
+-spec recheck_owner_for_leaf_change(binary(), string(), binary()) -> {ok | failed, [finding()]}.
+recheck_owner_for_leaf_change(OwnerBin, Source, SuperclassBin) ->
+    SourceBin = unicode:characters_to_binary(Source),
+    try beamtalk_compiler:diagnostics(SourceBin, <<"expression">>, #{class_hierarchy => true}) of
+        {ok, Diagnostics} ->
+            Findings = [
+                to_finding_leaf_change(OwnerBin, SuperclassBin, D)
+             || D <- Diagnostics, relevant_diagnostic_leaf_change(D, SuperclassBin)
+            ],
+            {ok, Findings};
+        {error, Reason} ->
+            ?LOG_WARNING(
+                "Leaf-change re-check compile failed for class (no findings reported)",
+                #{owner => OwnerBin, reason => Reason, domain => [beamtalk, runtime]}
+            ),
+            {failed, []}
+    catch
+        Class:Reason:Stack ->
+            ?LOG_WARNING(
+                "Leaf-change re-check compiler-port call failed for class (no findings reported)",
+                #{
+                    owner => OwnerBin,
+                    error_class => Class,
+                    reason => Reason,
+                    stack => Stack,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            {failed, []}
+    end.
+
+-doc """
+Is `Diagnostic` attributable to `SuperclassBin` losing its leaf status? A
+`Type`-category diagnostic naming `SuperclassBin` — the "has subclasses"
+compile error (BT-2854) and a non-exhaustive/"cannot verify"
+`matchExhaustive:` (BT-2856, both share `DiagnosticCategory::Type`) are the
+only two diagnostic shapes this hierarchy change can newly introduce, and
+both always name the class in their message text. Deliberately does **not**
+drop `error`-severity (see `trigger_leaf_change/1`'s doc for why this is the
+one deliberate exception to this module's usual rule).
+
+Whole-identifier match, not bare substring (`class_name_mentioned/2`) — a
+naive `binary:match/2` would wrongly attribute a diagnostic about an
+unrelated `ShapeGroup`/`MyShape` class to a `Shape` leaf change. No
+before/after diff is taken against the *same* class's diagnostics from the
+prior generation the way `relevant_diagnostic_shape/3` conceptually could —
+this trigger has no previous-generation baseline to diff against (unlike
+`beamtalk_shape_diff`), so a *pre-existing*, unrelated `Type` diagnostic
+that happens to name `SuperclassBin` (e.g. an already-broken `x ::
+SuperclassBin` site with some other error) can still be misattributed as
+newly caused by this reload — an accepted precision limit, not a
+correctness bug: the finding still names a real, currently-true diagnostic
+on that class, just not necessarily a *new* one.
+""".
+-spec relevant_diagnostic_leaf_change(map(), binary()) -> boolean().
+relevant_diagnostic_leaf_change(#{category := <<"Type">>, message := Message}, SuperclassBin) ->
+    class_name_mentioned(Message, SuperclassBin);
+relevant_diagnostic_leaf_change(_Diagnostic, _SuperclassBin) ->
+    false.
+
+-doc """
+Whether `Message` mentions `ClassNameBin` as a whole identifier — not merely
+as a substring of a longer name — at any occurrence. Mirrors the boundary
+check `InferredType::class_name_for_diagnostic` already uses on the Rust
+side (`crates/beamtalk-core/.../types.rs`) for its `UndefinedObject` ->
+`Nil` diagnostic rewrite: a byte immediately before/after the match is only
+a boundary when it is not itself an identifier character (ASCII
+letter/digit/underscore) — ASCII-only is sufficient here since Beamtalk
+class names are ASCII identifiers (matching `beamtalk_shape_diff`'s own
+ASCII-byte-wise assumption for slot names).
+""".
+-spec class_name_mentioned(binary(), binary()) -> boolean().
+class_name_mentioned(Message, ClassNameBin) ->
+    Len = byte_size(ClassNameBin),
+    lists:any(
+        fun({Start, _MatchLen}) ->
+            not is_ident_byte_at(Message, Start - 1) andalso
+                not is_ident_byte_at(Message, Start + Len)
+        end,
+        binary:matches(Message, ClassNameBin)
+    ).
+
+-spec is_ident_byte_at(binary(), integer()) -> boolean().
+is_ident_byte_at(_Message, Pos) when Pos < 0 ->
+    false;
+is_ident_byte_at(Message, Pos) when Pos >= byte_size(Message) ->
+    false;
+is_ident_byte_at(Message, Pos) ->
+    <<_:Pos/binary, Byte, _/binary>> = Message,
+    is_ident_byte(Byte).
+
+-spec is_ident_byte(byte()) -> boolean().
+is_ident_byte(B) when B >= $a, B =< $z -> true;
+is_ident_byte(B) when B >= $A, B =< $Z -> true;
+is_ident_byte(B) when B >= $0, B =< $9 -> true;
+is_ident_byte($_) -> true;
+is_ident_byte(_) -> false.
+
+-doc """
+Build a leaf-change finding. `changed_class`/`selector` both name
+`SuperclassBin` — there is no single call-site selector this is "about"
+(the same shape-change precedent `finding()`'s own doc already
+establishes for `shape_change`'s `selector` field), and `sites` is always
+`[]` — there is no xref call-site to translate against (see
+`trigger_leaf_change/1`'s doc for why no xref index exists for this
+classification).
+""".
+-spec to_finding_leaf_change(binary(), binary(), map()) -> finding().
+to_finding_leaf_change(
+    OwnerBin,
+    SuperclassBin,
+    #{message := Message, severity := Severity, start := Start, 'end' := End} =
+        Diagnostic
+) ->
+    #{
+        owner => OwnerBin,
+        changed_class => SuperclassBin,
+        selector => SuperclassBin,
+        classification => leaf_change,
+        severity => Severity,
+        category => maps:get(category, Diagnostic, undefined),
+        message => Message,
+        note =>
+            <<SuperclassBin/binary,
+                " gained a new subclass live, invalidating a leaf-only Type-pattern/matchExhaustive: proof (ADR 0107)">>,
+        sites => [],
+        start => Start,
+        'end' => End
+    }.
