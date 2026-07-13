@@ -128,3 +128,74 @@ typed Object subclass: Runner
         "a compatible argument on a Meta-receiver cascade continuation must not warn: {diags:?}"
     );
 }
+
+/// AC (block-param propagation): a Meta-typed cascade target's continuation
+/// message block arguments must resolve against the class's *class-side*
+/// method signatures, not instance methods — mirroring
+/// `block_params_typed_for_class_method_in_cascade_bt2158`'s class-reference
+/// case (`dynamic_and_blocks.rs`). This is only correct because
+/// `is_class_side_send` (used by `infer_args_with_block_context` for every
+/// message in the cascade loop) now also treats a `Meta`-typed dispatch
+/// target as class-side, matching `infer_generic_send_args`'s ADR 0083
+/// handling (~line 1241).
+///
+/// Asserts against the type map directly rather than diagnostics: when the
+/// block param falls back to Dynamic, it does so as `Dynamic(DynamicReceiver)`
+/// (BT-2042), which is deliberately excluded from the "Dynamic in typed
+/// class" warning — so a diagnostics-only assertion here would pass whether
+/// or not the params were actually typed, giving false confidence.
+#[test]
+fn bt2879_cascade_meta_receiver_continuation_block_params_typed() {
+    let source = "
+typed Object subclass: HTTPRouteBuilder
+  get: path :: String -> HTTPRouteBuilder => self
+
+typed Object subclass: HTTPRouter
+  class build: aBlock :: Block(HTTPRouteBuilder, Object) -> Integer => 42
+  class buildMore: aBlock :: Block(HTTPRouteBuilder, Object) -> Integer => 43
+
+typed Object subclass: App
+  go: cls :: HTTPRouter class -> Object =>
+    cls
+      build: [:r | r get: \"/\"];
+      buildMore: [:r2 | r2 get: \"/more\"]
+";
+    let module = parse_source(source);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    // Every `Block(...)` entry recorded in the type map should have its first
+    // param type resolved to `HTTPRouteBuilder`, not left as `Dynamic`.
+    let block_first_params: Vec<Option<ecow::EcoString>> = checker
+        .type_map()
+        .iter()
+        .filter_map(|(_, ty)| {
+            if let InferredType::Known {
+                class_name,
+                type_args,
+                ..
+            } = ty
+            {
+                if class_name.as_str() == "Block" {
+                    return Some(type_args.first().and_then(InferredType::as_known).cloned());
+                }
+            }
+            None
+        })
+        .collect();
+    assert_eq!(
+        block_first_params.len(),
+        2,
+        "expected one Block(...) type-map entry per cascade continuation message; got {block_first_params:?}"
+    );
+    for param_ty in &block_first_params {
+        assert_eq!(
+            param_ty.as_deref(),
+            Some("HTTPRouteBuilder"),
+            "Meta-receiver cascade continuation block param should resolve to \
+             `HTTPRouteBuilder` from the class-side method signature, not Dynamic; \
+             got {block_first_params:?}"
+        );
+    }
+}
