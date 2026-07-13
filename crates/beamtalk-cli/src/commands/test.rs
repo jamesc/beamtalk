@@ -17,6 +17,7 @@
 use crate::beam_compiler::{
     BeamCompiler, ClassHierarchyContext, CompileContext, compile_source_with_bindings,
 };
+use beamtalk_core::codegen::core_erlang::escape_atom_chars;
 use beamtalk_core::file_walker::FileWalker;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
@@ -1491,33 +1492,38 @@ fn execute_tests(pipeline: &TestPipeline) -> Result<TestResults> {
 /// larger `ARG_MAX` never showed the problem. Reading the list from a file
 /// keeps the `-eval` argument a constant, small size regardless of module
 /// count.
-fn build_load_commands(pipeline: &TestPipeline) -> Result<String> {
+fn build_load_command(pipeline: &TestPipeline) -> Result<String> {
     // BT-1732: Use ensure_loaded_or_warn for consistent on_load failure reporting.
     // Order matters: packages must load (and register their classes) before
     // fixtures and test classes that depend on them.
-    let mut modules: Vec<&str> = Vec::new();
-    modules.extend(pipeline.package_modules.iter().map(String::as_str));
-    modules.extend(pipeline.all_fixture_modules.iter().map(String::as_str));
-    modules.extend(
-        pipeline
-            .compiled_tests
-            .iter()
-            .map(|t| t.test_class.module_name.as_str()),
-    );
+    let modules = pipeline
+        .package_modules
+        .iter()
+        .map(String::as_str)
+        .chain(pipeline.all_fixture_modules.iter().map(String::as_str))
+        .chain(
+            pipeline
+                .compiled_tests
+                .iter()
+                .map(|t| t.test_class.module_name.as_str()),
+        );
 
-    if modules.is_empty() {
-        return Ok(String::new());
-    }
-
+    // escape_atom_chars mirrors the Core Erlang codegen path (leaf::atom):
+    // module names can contain characters (e.g. `'`, `\`) that would
+    // otherwise break the quoted-atom terms below and fail `file:consult/1`.
     let mut contents = String::new();
-    for m in &modules {
+    for m in modules {
         contents.push('\'');
-        contents.push_str(m);
+        contents.push_str(&escape_atom_chars(m));
         contents.push_str("'.\n");
     }
 
+    if contents.is_empty() {
+        return Ok(String::new());
+    }
+
     let list_path = pipeline.build_dir.join("bunit_load_modules.terms");
-    std::fs::write(&list_path, contents)
+    fs::write(&list_path, contents)
         .into_diagnostic()
         .wrap_err("Failed to write BUnit module load list")?;
     let list_path_str = list_path.as_str().replace('\\', "/");
@@ -1692,7 +1698,7 @@ fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
     let beam_paths = beamtalk_cli::repl_startup::beam_paths_for_layout(&runtime_dir, layout);
     let pa_args = beamtalk_cli::repl_startup::beam_pa_args(&beam_paths);
 
-    let load_cmd = build_load_commands(pipeline)?;
+    let load_cmd = build_load_command(pipeline)?;
 
     // ADR 0072: Start hex dep OTP applications before tests
     let hex_deps_start_cmd =
