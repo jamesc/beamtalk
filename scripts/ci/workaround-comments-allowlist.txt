@@ -6,6 +6,7 @@ crates/beamtalk-core/src/codegen/core_erlang/intrinsics.rs	1793420816
 crates/beamtalk-core/src/codegen/core_erlang/intrinsics.rs	2346773361
 crates/beamtalk-core/src/codegen/core_erlang/intrinsics.rs	2986145653
 crates/beamtalk-core/src/semantic_analysis/type_checker/tests/dynamic_iterable.rs	1945273604
+crates/beamtalk-core/src/semantic_analysis/type_checker/validation.rs	3460558164
 crates/beamtalk-core/src/source_analysis/parser/tests/class_tests.rs	3846721765
 crates/beamtalk-core/src/source_analysis/parser/tests/expression_tests.rs	1027809464
 fuzz/corpus/parse_arbitrary/011_class_reflection.bt	2213515280
