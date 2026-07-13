@@ -744,6 +744,18 @@ impl TypeChecker {
                                 Some(&msg.arguments),
                                 Some(env),
                             );
+                            // BT-2850: ADR 0104 Phase 2 (BT-2750) `C spawnWith:
+                            // #{...}` literal-map key check, mirroring the
+                            // ClassReference branch of
+                            // `infer_message_send_with_receiver_ty` — otherwise
+                            // a cascade's non-first `spawnWith:` message skips
+                            // typo-suggestion checking entirely.
+                            self.check_spawn_with_map_keys(
+                                &name.name,
+                                &selector_name,
+                                &msg.arguments,
+                                hierarchy,
+                            );
                             self.check_class_side_send(
                                 &name.name,
                                 &selector_name,
@@ -764,6 +776,18 @@ impl TypeChecker {
                                     true,
                                     Some(&msg.arguments),
                                     Some(env),
+                                );
+                                // BT-2850: ADR 0104 Phase 2 (BT-2750)
+                                // `spawnWith: #{...}` literal-map key check,
+                                // mirroring the Meta-typed-receiver branch of
+                                // `infer_message_send_with_receiver_ty` (this
+                                // branch is the cascade's equivalent — `self`
+                                // dispatch inside a class method).
+                                self.check_spawn_with_map_keys(
+                                    class_name,
+                                    &selector_name,
+                                    &msg.arguments,
+                                    hierarchy,
                                 );
                                 self.check_class_side_send(
                                     class_name,
