@@ -78,7 +78,7 @@ tokio = { version = "1", features = ["full"] }
 stacker = "0.1"
 
 # WebSocket (ADR 0020 — REPL protocol transport)
-tungstenite = "0.29"
+tungstenite = "0.30"
 tokio-tungstenite = "0.29"
 
 # Windows process management (native replacement for sysinfo, BT-1039)
