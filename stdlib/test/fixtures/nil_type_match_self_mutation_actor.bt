@@ -25,10 +25,10 @@
 // one arm fires per call, each must start from the same pre-match state —
 // this pins that compiling arm 2 doesn't see any state leaked from
 // compiling arm 1 (they're alternatives, not a sequence). Uses Integer
-// literal patterns (1/2), not bare `true`/`false` — those parse as
-// `Pattern::Variable` (an unconditional catch-all binding matching
-// anything, always taking the first arm), not a boolean literal test; only
-// `nil` is a reserved pattern keyword (ADR 0107).
+// literal patterns (1/2), not bare `true`/`false` — those are rejected at
+// compile time with a diagnostic (BT-2883) rather than parsing as a
+// boolean-literal test; use `x :: True`/`x :: False`/`x :: Boolean`
+// instead (ADR 0107 Phase A).
 
 Actor subclass: NilTypeMatchSelfMutationRegistry
   state: count :: Integer = 0
