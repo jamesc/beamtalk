@@ -2713,6 +2713,14 @@ impl CoreErlangGenerator {
                 // map — the tagged-class `is_map` check would never match a
                 // live actor instance, silently miscompiling the single
                 // most common kind of leaf class in real Beamtalk programs.
+                //
+                // BT-2882: `is_actor_subclass`/`is_supervisor_subclass`/
+                // `is_dynamic_supervisor_subclass` are verified to resolve
+                // correctly even when `other`'s Actor/Supervisor ancestor is
+                // declared in a different file (or several files away) —
+                // see their doc comments in `hierarchy_queries.rs` and the
+                // `..._resolves_through_cross_file_stub_chain` codegen tests
+                // in `tests/control_flow.rs`.
                 let is_actor = self
                     .class_hierarchy
                     .as_ref()

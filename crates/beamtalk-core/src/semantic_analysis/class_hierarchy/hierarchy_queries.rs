@@ -136,6 +136,23 @@ impl ClassHierarchy {
     }
 
     /// Returns true if the named class is Actor or a subclass of Actor.
+    ///
+    /// BT-2882: codegen (`dispatch_type_pattern_strategy`) trusts this to
+    /// decide the actor-tuple tag-test strategy for `x :: SomeClass`, and
+    /// relies on it staying consistent with the runtime's own
+    /// `beamtalk_supervisor:is_supervisor/1`-style classification of a
+    /// *live* value. That consistency holds even when `Actor` is several
+    /// hops up the chain and every intermediate ancestor is declared in a
+    /// different file: `superclass_chain` walks through the stub `ClassInfo`
+    /// entries `add_external_superclasses` inserts for cross-file parents
+    /// exactly the same way it walks real ones, and package-wide
+    /// compilation always backfills the *whole* project's class → superclass
+    /// edges (not just the current file's direct references) before
+    /// codegen runs — see `crates/beamtalk-cli/src/commands/build.rs`'s
+    /// Pass 1 (`build_class_module_index`). The chain only fails to resolve
+    /// (see `has_cross_file_parent`) when an ancestor is missing entirely —
+    /// a distinct, pre-existing failure mode this function does not guard
+    /// against.
     #[must_use]
     pub fn is_actor_subclass(&self, class_name: &str) -> bool {
         if class_name == "Actor" {
@@ -147,6 +164,9 @@ impl ClassHierarchy {
     }
 
     /// Returns true if the named class is Supervisor or a subclass of Supervisor (BT-1218).
+    ///
+    /// BT-2882: same cross-file-stub-chain invariant as
+    /// [`Self::is_actor_subclass`] — see its doc comment.
     #[must_use]
     pub fn is_supervisor_subclass(&self, class_name: &str) -> bool {
         if class_name == "Supervisor" {
@@ -169,6 +189,9 @@ impl ClassHierarchy {
     }
 
     /// Returns true if the named class is `DynamicSupervisor` or a subclass (BT-1218).
+    ///
+    /// BT-2882: same cross-file-stub-chain invariant as
+    /// [`Self::is_actor_subclass`] — see its doc comment.
     #[must_use]
     pub fn is_dynamic_supervisor_subclass(&self, class_name: &str) -> bool {
         if class_name == "DynamicSupervisor" {
