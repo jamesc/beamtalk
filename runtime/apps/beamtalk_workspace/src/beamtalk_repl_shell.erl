@@ -264,7 +264,7 @@ init(SessionId) when is_binary(SessionId) ->
     %% — default to empty origin metadata (→ `kind => unknown`).
     init({SessionId, #{}});
 init({SessionId, Meta}) when is_map(Meta) ->
-    logger:set_process_metadata(#{domain => [beamtalk, runtime]}),
+    beamtalk_logging_config:set_domain(runtime),
     %% Create session-specific REPL state
     %% We use undefined for listen_socket and port since session doesn't own TCP connection
     %%

@@ -147,7 +147,7 @@ clear() ->
 %%====================================================================
 
 init([]) ->
-    logger:set_process_metadata(#{domain => [beamtalk, runtime]}),
+    beamtalk_logging_config:set_domain(runtime),
     {ok, #state{}}.
 
 handle_call({capture, ClassName, Selector, Side, NewSignature}, _From, State = #state{sigs = Sigs}) ->
