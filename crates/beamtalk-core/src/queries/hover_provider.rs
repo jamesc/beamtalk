@@ -86,7 +86,8 @@ pub fn compute_hover(
     // body (BT-1005).
     let enriched_hierarchy;
     let (hierarchy, type_map) = {
-        let (enriched, type_map) = enrich_hierarchy_with_inferred_returns(module, hierarchy);
+        let (enriched, type_map) =
+            enrich_hierarchy_with_inferred_returns(module, hierarchy, native_types);
         let h = match enriched {
             Some(h) => {
                 enriched_hierarchy = h;
@@ -2467,6 +2468,55 @@ mod tests {
         assert!(
             doc.contains("auto-extracted"),
             "FFI hover should show provenance. Got: {doc}"
+        );
+    }
+
+    /// BT-2867: hovering an expression *downstream* of a well-specced FFI
+    /// call (not the FFI call site itself) must show the propagated
+    /// concrete type, not `Dynamic`. Before the fix, `compute_hover`'s
+    /// `enrich_hierarchy_with_inferred_returns` call never received the
+    /// caller's `native_types` registry, so only the FFI call site itself
+    /// (handled by a separate, special-cased lookup) resolved correctly —
+    /// everything built from its result stayed `Dynamic(UntypedFfi)`.
+    #[test]
+    fn ffi_hover_on_downstream_expression_shows_propagated_type() {
+        use crate::semantic_analysis::type_checker::TypeProvenance;
+        use crate::semantic_analysis::type_checker::native_type_registry::{
+            FunctionSignature, NativeTypeRegistry, ParamType,
+        };
+
+        let source = "Object subclass: Nav\n  run =>\n    \
+            y := Erlang lists reverse: #(1, 2, 3)\n    y";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let mut registry = NativeTypeRegistry::new();
+        registry.register_module(
+            "lists",
+            vec![FunctionSignature {
+                name: "reverse".to_string(),
+                arity: 1,
+                params: vec![ParamType {
+                    keyword: Some(ecow::EcoString::from("list")),
+                    type_: InferredType::known("List"),
+                }],
+                return_type: InferredType::known("List"),
+                provenance: TypeProvenance::Extracted,
+                line: None,
+            }],
+        );
+
+        // Hover over the second (downstream) use of `y`, not the assignment.
+        let y_use_offset = source.rfind('y').unwrap();
+        let pos = pos_at(source, y_use_offset);
+        let hover = compute_hover(&module, source, pos, &hierarchy, Some(&registry));
+        let hover = hover.expect("should get hover for downstream identifier");
+        assert!(
+            hover.contents.contains("List"),
+            "Downstream expression should show the type propagated from the \
+             FFI call, not Dynamic. Got: {}",
+            hover.contents
         );
     }
 

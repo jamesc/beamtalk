@@ -2502,7 +2502,7 @@ fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
         all_diags.extend(file_diags);
 
         // Type coverage.
-        let type_map = infer_types(module, &class_hierarchy);
+        let type_map = infer_types(module, &class_hierarchy, native_type_registry.as_deref());
         let file_report = CoverageReport::from_module(module, &type_map, file_str, false);
         coverage.merge(file_report);
     }

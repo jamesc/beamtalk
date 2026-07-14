@@ -268,9 +268,23 @@ impl CoverageReport {
 ///
 /// This is the main entry point for LSP providers that need type information
 /// at specific positions (hover, completions).
+///
+/// BT-2867: `native_type_registry` (ADR 0075), when `Some`, lets `(Erlang m)
+/// f:` calls resolve to their typed return instead of `Dynamic(UntypedFfi)`,
+/// and lets everything downstream of such a call (e.g. `x := (Erlang m) f:.
+/// x bar`) see `x`'s real type too — not just the FFI call site itself.
+/// `None` preserves the previous behaviour for callers with no registry
+/// available (e.g. a bare parse with no build/package context).
 #[must_use]
-pub fn infer_types(module: &Module, hierarchy: &ClassHierarchy) -> TypeMap {
+pub fn infer_types(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    native_type_registry: Option<&NativeTypeRegistry>,
+) -> TypeMap {
     let mut checker = TypeChecker::new();
+    if let Some(registry) = native_type_registry {
+        checker.set_native_type_registry(registry.clone());
+    }
     checker.check_module(module, hierarchy);
     checker.take_type_map()
 }
@@ -294,12 +308,17 @@ pub type MethodReturnKey = (EcoString, EcoString, bool);
 /// BT-2022: The map now stores [`InferredType`] instead of bare `EcoString` so
 /// that generic type arguments (e.g., `List(String)`) are preserved through
 /// the inference cache and available to callers for full type comparison.
+/// BT-2867: see [`infer_types`]'s doc comment for `native_type_registry`.
 #[must_use]
 pub fn infer_method_return_types(
     module: &Module,
     hierarchy: &ClassHierarchy,
+    native_type_registry: Option<&NativeTypeRegistry>,
 ) -> HashMap<MethodReturnKey, InferredType> {
     let mut checker = TypeChecker::new();
+    if let Some(registry) = native_type_registry {
+        checker.set_native_type_registry(registry.clone());
+    }
     checker.check_module(module, hierarchy);
     checker.take_method_return_types()
 }
@@ -311,12 +330,17 @@ pub fn infer_method_return_types(
 /// [`TypeMap`] (for hover/completion position types) and method return types
 /// (for hierarchy enrichment). Using this avoids the double-pass previously
 /// required by calling [`infer_method_return_types`] followed by [`infer_types`].
+/// BT-2867: see [`infer_types`]'s doc comment for `native_type_registry`.
 #[must_use]
 pub fn infer_types_and_returns(
     module: &Module,
     hierarchy: &ClassHierarchy,
+    native_type_registry: Option<&NativeTypeRegistry>,
 ) -> (TypeMap, HashMap<MethodReturnKey, InferredType>) {
     let mut checker = TypeChecker::new();
+    if let Some(registry) = native_type_registry {
+        checker.set_native_type_registry(registry.clone());
+    }
     checker.check_module(module, hierarchy);
     (checker.take_type_map(), checker.take_method_return_types())
 }

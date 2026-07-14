@@ -414,7 +414,7 @@ pub fn resolve_receiver_class_context(
     hierarchy: &ClassHierarchy,
 ) -> Option<ReceiverClassContext> {
     let class_context = find_class_context(module, offset);
-    let type_map = infer_types(module, hierarchy);
+    let type_map = infer_types(module, hierarchy, None);
     match &selector_lookup.receiver_hint {
         ReceiverHint::ClassReference(name) => Some(ReceiverClassContext {
             class_name: name.clone(),

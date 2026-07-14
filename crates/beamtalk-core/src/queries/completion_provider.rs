@@ -164,7 +164,8 @@ pub fn compute_completions(
     // no longer needed for correct chain completion filtering (BT-1005).
     let enriched_hierarchy;
     let (hierarchy, type_map) = {
-        let (enriched, type_map) = enrich_hierarchy_with_inferred_returns(module, hierarchy);
+        let (enriched, type_map) =
+            enrich_hierarchy_with_inferred_returns(module, hierarchy, native_types);
         let h = match enriched {
             Some(h) => {
                 enriched_hierarchy = h;
@@ -1185,7 +1186,7 @@ pub fn resolve_expression_type(source: &str, hierarchy: &ClassHierarchy) -> Opti
     let (module, _diagnostics) = crate::source_analysis::parse(tokens);
     let last_expr = module.expressions.last()?;
     let span = last_expr.expression.span();
-    let type_map = crate::semantic_analysis::infer_types(&module, hierarchy);
+    let type_map = crate::semantic_analysis::infer_types(&module, hierarchy, None);
     match type_map.get(span) {
         Some(InferredType::Known { class_name, .. }) => Some(class_name.to_string()),
         _ => None,

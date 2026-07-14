@@ -272,7 +272,7 @@ fn bt2022_method_return_type_cache_preserves_type_args() {
     let (module, _diags) = crate::source_analysis::parse(tokens);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
-    let result = infer_method_return_types(&module, &hierarchy);
+    let result = infer_method_return_types(&module, &hierarchy, None);
 
     // The cache should contain the inferred return type for `items`
     let key = ("Holder".into(), "items".into(), false);
