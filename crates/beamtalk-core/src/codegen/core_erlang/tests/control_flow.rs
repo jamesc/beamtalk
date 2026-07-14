@@ -1341,11 +1341,21 @@ fn test_match_arm_cascade_tier2_value_call_compiles_without_double_wrapping() {
     // this fix inlines and the self.field-held one the sibling test above
     // pins. `generate_match_arm_body`'s literal-block branch only matches an
     // `Expression::MessageSend` with an `Expression::Block` receiver, so a
-    // `Cascade` body falls through to `expression_doc`, which (per BT-2808)
-    // already threads state correctly across BOTH cascaded sends and
-    // extracts element(1) as its own value. Only the wrapping matters here:
-    // this pins that the plain-arm `{value, base_state}` fallback does not
-    // double-wrap that already-unwrapped value.
+    // `Cascade` body falls through to `expression_doc`. Two separate layers
+    // are at work here, and this test only pins the outer one:
+    // - BT-2808's own cascade codegen correctly threads state BETWEEN the
+    //   two cascaded `value:` sends (each sees the prior send's mutation),
+    //   which is why `maps:put('total'...)` appears in the generated code
+    //   at all.
+    // - But per the BT-2814 sub-expression-position limitation,
+    //   `close_tier2_value_subexpr_doc` then discards that cascade's FINAL
+    //   NewState and returns only its logical value — so as a match: arm
+    //   body, `self.total`'s mutation across the whole cascade does not
+    //   persist to the actor's real state; `generate_match_arm_body`'s
+    //   plain-arm fallback wraps that already-unwrapped value against the
+    //   *pre-match* `base_state`, unchanged. This is the same discard that
+    //   already applied to `self.field value:` in sub-expression position
+    //   everywhere else, not a regression.
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: item -> Integer =>\n    blk := [:x | self.total := self.total + x]\n    nil match: [\n      nil -> (blk value: item; value: item);\n      x :: Integer -> x\n    ]\n";
     let tokens = crate::source_analysis::lex_with_eof(src);
     let (module, _diags) = crate::source_analysis::parse(tokens);
@@ -1356,7 +1366,9 @@ fn test_match_arm_cascade_tier2_value_call_compiles_without_double_wrapping() {
 
     assert!(
         code.contains("'maps':'put'('total'"),
-        "the cascade's block mutation must still thread state via maps:put. Got:\n{code}"
+        "the cascade's own internal codegen must still generate the \
+         maps:put mutation (even though the match: arm wrapper below \
+         discards it, per the BT-2814 limitation documented above). Got:\n{code}"
     );
 
     crate::test_helpers::assert_compiles_through_erlc("ctr", &code);
