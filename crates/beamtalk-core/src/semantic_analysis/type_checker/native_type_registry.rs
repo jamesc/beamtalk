@@ -32,6 +32,7 @@ use super::types::DynamicReason;
 use super::types::{InferredType, TypeProvenance};
 use ecow::EcoString;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Type signature for a single Erlang function.
 ///
@@ -117,10 +118,18 @@ pub struct ParamType {
 ///
 /// Keyed by module name → list of function type signatures. Provides
 /// lookup by (module, function, arity) for the type checker and LSP.
+///
+/// BT-2867: `modules` is `Arc`-wrapped so `Clone` is a cheap refcount bump.
+/// `infer_types`/`infer_types_and_returns`/`infer_method_return_types` and
+/// every LSP query provider that owns only a borrowed
+/// `Option<&NativeTypeRegistry>` clone the registry to hand `TypeChecker` an
+/// owned copy (`impl Into<Arc<NativeTypeRegistry>>`) — on the hover/
+/// completion/signature-help hot path, that used to deep-copy the whole
+/// `module → signatures` map on every call.
 #[derive(Debug, Clone, Default)]
 pub struct NativeTypeRegistry {
     /// Module name → list of function type signatures.
-    modules: HashMap<String, Vec<FunctionSignature>>,
+    modules: Arc<HashMap<String, Vec<FunctionSignature>>>,
 }
 
 impl NativeTypeRegistry {
@@ -128,7 +137,7 @@ impl NativeTypeRegistry {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            modules: HashMap::new(),
+            modules: Arc::new(HashMap::new()),
         }
     }
 
@@ -136,7 +145,7 @@ impl NativeTypeRegistry {
     ///
     /// Replaces any existing signatures for this module.
     pub fn register_module(&mut self, module_name: &str, functions: Vec<FunctionSignature>) {
-        self.modules.insert(module_name.to_string(), functions);
+        Arc::make_mut(&mut self.modules).insert(module_name.to_string(), functions);
     }
 
     /// Merges all modules from `other` into `self`, keeping `self`'s entry on
@@ -147,8 +156,11 @@ impl NativeTypeRegistry {
     /// same-named dependency module (mirroring the OTP-first de-duplication in
     /// `beamtalk build`'s spec extraction).
     pub fn merge(&mut self, other: NativeTypeRegistry) {
-        for (module, functions) in other.modules {
-            self.modules.entry(module).or_insert(functions);
+        let other_modules =
+            Arc::try_unwrap(other.modules).unwrap_or_else(|shared| (*shared).clone());
+        let self_modules = Arc::make_mut(&mut self.modules);
+        for (module, functions) in other_modules {
+            self_modules.entry(module).or_insert(functions);
         }
     }
 
