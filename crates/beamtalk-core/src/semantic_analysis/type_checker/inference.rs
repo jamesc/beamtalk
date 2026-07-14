@@ -429,6 +429,16 @@ impl TypeChecker {
         if WellKnownClass::from_str(type_name) == Some(WellKnownClass::Never) {
             return InferredType::Never;
         }
+        // BT-2865: mirrors `type_resolver::resolve_type_annotation`'s `Never`
+        // and `Dynamic` special-casing — without it, a state field declared
+        // `:: Dynamic` (or nested, e.g. `Result(Dynamic, Error)`) resolves to
+        // a `Known{class_name: "Dynamic"}` pseudo-class rather than the real
+        // `InferredType::Dynamic` variant, silently defeating every check
+        // written against that variant (dead-code analysis, `Dynamic`-loses
+        // merge rules, etc.).
+        if WellKnownClass::from_str(type_name) == Some(WellKnownClass::Dynamic) {
+            return InferredType::Dynamic(DynamicReason::ExplicitDynamic);
+        }
         // Split on `|` respecting parenthesis nesting, so
         // `Result(String | Integer, Error)` is not split at the inner `|`.
         if type_name.contains('|') {
@@ -1277,13 +1287,17 @@ impl TypeChecker {
         // BT-1914: Warn when an expression in a typed class infers as Dynamic.
         // Only warn for root-cause Dynamic reasons (not DynamicReceiver, which is
         // propagated from a receiver that already produced its own warning).
-        // Unknown is also skipped — no actionable message.
+        // Unknown is also skipped — no actionable message. BT-2865:
+        // ExplicitDynamic is skipped too — the author already wrote `Dynamic`
+        // in a type annotation, so "add a type annotation" would be
+        // nonsensical advice for something that already has one.
         if let InferredType::Dynamic(reason) = ty {
             if !matches!(
                 reason,
                 DynamicReason::DynamicReceiver
                     | DynamicReason::DynamicSpec
                     | DynamicReason::Unknown
+                    | DynamicReason::ExplicitDynamic
             ) {
                 if let Some(ref class_name) = self.typed_class_context {
                     if let Some(description) = reason.description() {
@@ -5282,29 +5296,72 @@ impl TypeChecker {
     }
 
     /// Merge a new binding for a method-local type parameter, preferring Known
-    /// types over Dynamic.
+    /// types over Dynamic (BT-2039) — except an *explicitly declared*
+    /// `Dynamic` binding (BT-2865), which is authoritative and always wins.
     ///
     /// BT-2039: When the same type parameter appears in multiple argument
     /// positions (e.g. `Block(R) Block(R) -> R` in `ifTrue:ifFalse:`), a
     /// last-wins `insert` could collapse a Known return type to
     /// `Dynamic(UntypedFfi)` whenever one branch was an untyped FFI call.
-    /// Preserve the Known binding instead so the method's declared return type
-    /// survives the join.
-    fn merge_method_local_binding(
+    /// Preserve the Known binding instead so the method's declared return
+    /// type survives the join. This applies broadly — every `DynamicReason`
+    /// other than `ExplicitDynamic` means "we don't have enough information
+    /// to give a concrete type", so Known wins regardless of *which*
+    /// uninformative reason it is or which side arrived first (an earlier,
+    /// narrower version of this rule only protected one arrival order and
+    /// only two reasons, which under-protected the common case: most
+    /// `Dynamic` bindings observed in real code are `UnannotatedParam`,
+    /// `Unknown`, etc., not specifically `UntypedFfi`/`DynamicSpec`).
+    ///
+    /// BT-2865: `DynamicReason::ExplicitDynamic` means the *opposite* — the
+    /// author wrote `Dynamic` in a type annotation (e.g. `T` in `Result(
+    /// Dynamic, Error)`), so `okBlock :: Block(T, R)`'s inferred return is
+    /// genuinely, deliberately `Dynamic`. That must survive being unified
+    /// with a Known binding from a sibling argument position (e.g.
+    /// `ifError:`'s block returning a concrete `nil`) — R can't soundly
+    /// collapse to "definitely Nil" when one branch can produce anything.
+    /// Whichever side is `ExplicitDynamic` always wins, in either order.
+    ///
+    /// Two Known/Union bindings (no Dynamic on either side) unify via
+    /// `union_of` rather than last-wins, so neither is silently discarded.
+    ///
+    /// `pub(super)` so `type_checker::tests` can unit-test the merge rules
+    /// directly (BT-2865) rather than only indirectly through diagnostics.
+    pub(super) fn merge_method_local_binding(
         method_subst: &mut HashMap<EcoString, InferredType>,
         key: EcoString,
         new_ty: InferredType,
     ) {
-        match method_subst.get(&key) {
-            Some(InferredType::Known { .. } | InferredType::Union { .. })
-                if matches!(new_ty, InferredType::Dynamic(_)) =>
-            {
-                // Keep the existing Known/Union — Dynamic loses.
-            }
-            _ => {
-                method_subst.insert(key, new_ty);
-            }
+        let Some(existing) = method_subst.get(&key).cloned() else {
+            method_subst.insert(key, new_ty);
+            return;
+        };
+        let is_explicit_dynamic =
+            |ty: &InferredType| matches!(ty, InferredType::Dynamic(DynamicReason::ExplicitDynamic));
+        if is_explicit_dynamic(&existing) {
+            return; // Authoritative — keep it regardless of new_ty.
         }
+        if is_explicit_dynamic(&new_ty) {
+            method_subst.insert(key, new_ty);
+            return;
+        }
+        if matches!(
+            existing,
+            InferredType::Known { .. } | InferredType::Union { .. }
+        ) && matches!(new_ty, InferredType::Dynamic(_))
+        {
+            return; // Keep the existing Known/Union — Dynamic loses.
+        }
+        if matches!(existing, InferredType::Dynamic(_))
+            && matches!(
+                new_ty,
+                InferredType::Known { .. } | InferredType::Union { .. }
+            )
+        {
+            method_subst.insert(key, new_ty);
+            return;
+        }
+        method_subst.insert(key, InferredType::union_of(&[existing, new_ty]));
     }
 
     /// Infer the type of a literal value.

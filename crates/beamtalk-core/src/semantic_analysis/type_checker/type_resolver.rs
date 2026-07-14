@@ -114,6 +114,21 @@ pub(in crate::semantic_analysis) fn resolve_type_annotation(
             if WellKnownClass::from_str(name) == Some(WellKnownClass::Never) {
                 return InferredType::Never;
             }
+            // BT-2865: `Dynamic` must resolve to the real `InferredType::
+            // Dynamic` variant, not a `Known{class_name: "Dynamic"}` pseudo-
+            // class — otherwise every check written against the `Dynamic`
+            // variant (dead-code analysis like `isKindOf:`'s "can never be
+            // true" hint, `merge_method_local_binding`'s "Known survives
+            // Dynamic" rule, etc.) silently fails to recognise it, since
+            // `matches!(ty, InferredType::Dynamic(_))` never matches a
+            // disguised `Known`. This matters most as a *nested* type arg
+            // (e.g. `Result(Dynamic, Error)`) — a bare, unparameterized
+            // `Result` never hits this path at all (no type args to resolve),
+            // which is why the bug was invisible until a param was partially
+            // parameterized.
+            if WellKnownClass::from_str(name) == Some(WellKnownClass::Dynamic) {
+                return InferredType::Dynamic(DynamicReason::ExplicitDynamic);
+            }
             // Method-local / class-level type-parameter substitution wins over
             // keyword resolution, because `T`, `E`, `R` would otherwise flow
             // through as ordinary class names.
