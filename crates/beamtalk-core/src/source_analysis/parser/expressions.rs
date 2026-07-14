@@ -3416,7 +3416,10 @@ mod tests {
         let Expression::Match { arms, .. } = &module.expressions[0].expression else {
             panic!("expected Expression::Match");
         };
-        let Pattern::Constructor { keywords: ok_kw, .. } = &arms[0].pattern else {
+        let Pattern::Constructor {
+            keywords: ok_kw, ..
+        } = &arms[0].pattern
+        else {
             panic!("expected Pattern::Constructor, got: {:?}", arms[0].pattern);
         };
         assert!(
