@@ -347,10 +347,20 @@ impl TypeChecker {
     /// than requiring hand-written per-selector Erlang specs.
     ///
     /// Returns `body_type` unchanged when the method isn't a `self delegate`
-    /// body, or when it has no return-type annotation (still `Dynamic` — no
-    /// regression). Otherwise resolves the annotation and overwrites the
-    /// `self delegate` expression's `type_map` entry so LSP hover and
-    /// `beamtalk type-coverage` see the trusted type too.
+    /// body, or when it has no return-type annotation (still whatever it
+    /// inferred before — `Dynamic` for an Actor-backed class, `Never` for an
+    /// Object-backed class via the `Object>>delegate -> Never` sentinel — no
+    /// regression either way). Otherwise resolves the annotation and
+    /// overwrites the `self delegate` expression's `type_map` entry so LSP
+    /// hover and `beamtalk type-coverage` see the trusted type too.
+    ///
+    /// Limitation: non-`Self`/`Self class`/`X class` annotations resolve via
+    /// the thin [`Self::resolve_type_annotation`] wrapper, which supplies an
+    /// empty substitution map and no protocol registry — an ADR 0102
+    /// intersection (`A & B`) or difference (`A \ B`) return-type annotation
+    /// on a `self delegate` body won't resolve precisely (that limitation
+    /// lives in the wrapper, not here). This is a narrow case with no known
+    /// `self delegate` use today.
     pub(super) fn resolve_self_delegate_return_type(
         &mut self,
         method: &crate::ast::MethodDefinition,
