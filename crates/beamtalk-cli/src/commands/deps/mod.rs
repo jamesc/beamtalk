@@ -156,6 +156,14 @@ struct DiscoveredDep {
 /// Returns all deps (direct + transitive) without compilation or ebin checks.
 /// Used by both `deps_are_fresh` and `collect_fresh_deps` to handle the full
 /// transitive graph rather than just direct deps.
+///
+/// Note (BT-2836): `dependency_classes.rs`'s offline MCP
+/// `lint`/`diagnostic_summary` dependency-class resolution needs the same
+/// transitive-walk reachability but cannot call this function directly — it
+/// lives in the library crate (`lib.rs`) while this module is compiled only
+/// into the `beamtalk-cli` binary (`mod commands;` in `main.rs`). It
+/// reimplements an equivalent walk instead; keep the two in sync if this
+/// algorithm changes.
 fn discover_all_dep_roots(
     project_root: &Utf8Path,
     manifest: &manifest::ParsedManifest,
