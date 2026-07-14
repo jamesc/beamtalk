@@ -510,10 +510,27 @@ trigger_image() ->
     end.
 
 -doc """
-BT-2856 / ADR 0107 Phase A: re-check for a `SuperclassBin` that a live
-class-body reload just made non-leaf (gained its first subclass — see
+BT-2856 / ADR 0107 Phase A: re-check for every superclass in
+`SuperclassBins` that a live class-body reload just made non-leaf (gained
+its first subclass — see
 `beamtalk_repl_loader:superclasses_losing_leaf_status/1`, the detection
 half this composes with).
+
+**BT-2873:** `SuperclassBins` is the *whole* list a single reload event
+produced (`superclasses_losing_leaf_status/1` can return more than one name
+when one reload installs several classes at once, each subclassing a
+different previously-leaf superclass) — this runs **one** whole-image sweep
+covering all of them, not one independent sweep per superclass. Each live
+class's source is compiled exactly once; a diagnostic naming any superclass
+in the batch is attributed to that specific superclass
+(`recheck_owner_for_leaf_change/3`), so the `result()`'s `findings` list can
+mix `changed_class` values when the batch has more than one entry. This
+matters because `trigger_leaf_change/1` is already "at least as expensive as
+`trigger_image/0`" per this module's own doc — paying for N independent
+whole-image sweeps when N superclasses lose leaf status in the same reload
+would multiply that cost for no benefit, since every sweep would recompile
+the exact same candidate set against the exact same (already fully updated)
+hierarchy.
 
 ## Why this exists
 
@@ -581,10 +598,10 @@ follow-up alongside BT-2798's own recorded xref extension.
 Never raises: any internal failure degrades to an empty `result()`, exactly
 like every other trigger in this module.
 """.
--spec trigger_leaf_change(binary()) -> result().
-trigger_leaf_change(SuperclassBin) ->
+-spec trigger_leaf_change([binary()]) -> result().
+trigger_leaf_change(SuperclassBins) ->
     try
-        do_trigger_leaf_change(SuperclassBin)
+        do_trigger_leaf_change(SuperclassBins)
     catch
         Class:Reason:Stack ->
             ?LOG_WARNING(
@@ -593,7 +610,7 @@ trigger_leaf_change(SuperclassBin) ->
                     error_class => Class,
                     reason => Reason,
                     stack => Stack,
-                    superclass => SuperclassBin,
+                    superclasses => SuperclassBins,
                     domain => [beamtalk, runtime]
                 }
             ),
@@ -1356,24 +1373,27 @@ retyped_names_bin(FieldChanges) ->
 -doc """
 Re-check every live class's own recorded source against the current
 (already-updated, per `trigger_leaf_change/1`'s doc) hierarchy, keeping only
-diagnostics attributable to `SuperclassBin` losing its leaf status
-(`relevant_diagnostic_leaf_change/2`). Structurally mirrors
-`do_trigger_image/0` (same source, same per-class round trip) but returns a
-`result()` — not an `image_result()` — since `checked_owners`/
+diagnostics attributable to one of `SuperclassBins` losing its leaf status
+(`relevant_diagnostic_leaf_change/2`, applied per superclass in the batch —
+see `recheck_owner_for_leaf_change/3`). Structurally mirrors
+`do_trigger_image/0` (same source, same per-class round trip, run **once**
+regardless of how many superclasses are in `SuperclassBins` — BT-2873) but
+returns a `result()` — not an `image_result()` — since `checked_owners`/
 `not_verified_owners` are what the publish path
-(`beamtalk_repl_loader:publish_leaf_change_recheck_outcome/2`) needs to
+(`beamtalk_repl_loader:publish_leaf_change_recheck_outcome/2`, called once
+per superclass in the batch against this one shared `result()`) needs to
 reuse the exact same findings-store/announcement plumbing
 `publish_shape_recheck_outcome/3` already established. There is no
 xref-derived candidate set to cap here (see `trigger_leaf_change/1`'s doc),
 so `not_checked`/`not_checked_owners` are always empty/`[]` — every live
 class with a recorded source is a candidate, unconditionally.
 """.
--spec do_trigger_leaf_change(binary()) -> result().
-do_trigger_leaf_change(SuperclassBin) ->
+-spec do_trigger_leaf_change([binary()]) -> result().
+do_trigger_leaf_change(SuperclassBins) ->
     Sources = beamtalk_workspace_meta:all_class_sources(),
     Owners = lists:keysort(1, maps:to_list(Sources)),
     Outcomes = [
-        {OwnerBin, recheck_owner_for_leaf_change(OwnerBin, Source, SuperclassBin)}
+        {OwnerBin, recheck_owner_for_leaf_change(OwnerBin, Source, SuperclassBins)}
      || {OwnerBin, Source} <- Owners
     ],
     Findings = lists:flatmap(
@@ -1397,21 +1417,28 @@ do_trigger_leaf_change(SuperclassBin) ->
 
 -doc """
 Re-check one live class's own current source for diagnostics attributable
-to `SuperclassBin` — mirrors `recheck_image_class/2`'s compiler-port call
-(same `class_hierarchy => true` diagnostics round trip, same `{ok |
-failed, ...}` degrade-on-failure contract) but filters/builds findings via
-`relevant_diagnostic_leaf_change/2` / `to_finding_leaf_change/3` instead of
-`image_finding/2`.
+to any superclass in `SuperclassBins` — mirrors `recheck_image_class/2`'s
+compiler-port call (same `class_hierarchy => true` diagnostics round trip,
+same `{ok | failed, ...}` degrade-on-failure contract) but filters/builds
+findings via `relevant_diagnostic_leaf_change/2` / `to_finding_leaf_change/3`
+instead of `image_finding/2`.
+
+**BT-2873:** one `diagnostics/3` round trip covers every superclass in the
+batch — a diagnostic that happens to name more than one batch member (not
+observed in practice; every shipped diagnostic message names exactly one
+class) contributes one finding per matching superclass, rather than picking
+just the first match, since each is an independently real, independently
+attributable finding.
 """.
--spec recheck_owner_for_leaf_change(binary(), string(), binary()) -> {ok | failed, [finding()]}.
-recheck_owner_for_leaf_change(OwnerBin, Source, SuperclassBin) ->
+-spec recheck_owner_for_leaf_change(binary(), string(), [binary()]) -> {ok | failed, [finding()]}.
+recheck_owner_for_leaf_change(OwnerBin, Source, SuperclassBins) ->
     SourceBin = unicode:characters_to_binary(Source),
     try beamtalk_compiler:diagnostics(SourceBin, <<"expression">>, #{class_hierarchy => true}) of
         {ok, Diagnostics} ->
-            Findings = [
-                to_finding_leaf_change(OwnerBin, SuperclassBin, D)
-             || D <- Diagnostics, relevant_diagnostic_leaf_change(D, SuperclassBin)
-            ],
+            Findings = lists:flatmap(
+                fun(D) -> findings_for_leaf_change_diagnostic(OwnerBin, SuperclassBins, D) end,
+                Diagnostics
+            ),
             {ok, Findings};
         {error, Reason} ->
             ?LOG_WARNING(
@@ -1433,6 +1460,14 @@ recheck_owner_for_leaf_change(OwnerBin, Source, SuperclassBin) ->
             ),
             {failed, []}
     end.
+
+-spec findings_for_leaf_change_diagnostic(binary(), [binary()], map()) -> [finding()].
+findings_for_leaf_change_diagnostic(OwnerBin, SuperclassBins, Diagnostic) ->
+    [
+        to_finding_leaf_change(OwnerBin, SuperclassBin, Diagnostic)
+     || SuperclassBin <- SuperclassBins,
+        relevant_diagnostic_leaf_change(Diagnostic, SuperclassBin)
+    ].
 
 -doc """
 Is `Diagnostic` attributable to `SuperclassBin` losing its leaf status? A
