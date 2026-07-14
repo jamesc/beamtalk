@@ -29,8 +29,20 @@ TestCase subclass: NonTypedTypedNoDefaultTest
       NonTypedUninitializedStateActor spawn
     ] raise: #instantiation_error
 
+  testUninitializedErrorContainsClassName =>
+    result := [
+      NonTypedUninitializedStateActor spawn
+    ] on: Exception do: [:e | e message]
+    self assert: (result includesSubstring: "NonTypedUninitializedStateActor")
+
   testUninitializedErrorHintContainsFieldName =>
     result := [
       NonTypedUninitializedStateActor spawn
     ] on: Exception do: [:e | e hint]
     self assert: (result includesSubstring: "count")
+
+  testUninitializedErrorHintContainsTypeName =>
+    result := [
+      NonTypedUninitializedStateActor spawn
+    ] on: Exception do: [:e | e hint]
+    self assert: (result includesSubstring: "Integer")
