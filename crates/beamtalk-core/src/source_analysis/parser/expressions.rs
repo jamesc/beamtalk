@@ -1387,6 +1387,10 @@ impl Parser {
     /// - `identifier :: ClassName` — type pattern (ADR 0107 Phase A)
     /// - integer, float, string, symbol, character — literal
     /// - `{p1, p2, ...}` — tuple
+    ///
+    /// Bare `true`/`false` are rejected with a diagnostic (BT-2883) rather
+    /// than parsed as a variable binding — use `x :: True`/`x :: False`/
+    /// `x :: Boolean` instead.
     #[allow(clippy::too_many_lines)] // one arm per pattern kind
     fn parse_pattern(&mut self) -> Pattern {
         // Guard against stack overflow from deeply nested tuple patterns
@@ -1423,9 +1427,9 @@ impl Parser {
             TokenKind::Identifier(name) if name.as_str() == "nil" => {
                 let nil_span = self.advance().span();
                 if matches!(self.current_kind(), TokenKind::DoubleColon) {
-                    self.advance(); // consume '::'
+                    let double_colon_span = self.advance().span(); // consume '::'
                     let tail_span = self.consume_type_pattern_tail();
-                    let full_span = tail_span.map_or(nil_span, |s| nil_span.merge(s));
+                    let full_span = nil_span.merge(tail_span.unwrap_or(double_colon_span));
                     self.diagnostics.push(Diagnostic::error(
                         "a 'nil' pattern cannot have a type annotation ('nil :: ClassName' is not allowed; 'nil' already fully determines the match)",
                         full_span,
@@ -1434,6 +1438,45 @@ impl Parser {
                 } else {
                     Pattern::Nil(nil_span)
                 }
+            }
+
+            // Bare `true`/`false` pattern (BT-2883): unlike `nil`, `true` and
+            // `false` are *not* reserved pattern keywords — falling through
+            // to the generic "Variable binding" branch below would silently
+            // parse them as `Pattern::Variable(Identifier{name: "true"})` /
+            // `Pattern::Variable(Identifier{name: "false"})`, an
+            // unconditional catch-all binding that matches any value, not a
+            // boolean-literal test. Since arms are tried in source order, a
+            // `true ->` arm listed first would always win regardless of the
+            // scrutinee — a silent-wrong-behavior footgun with no
+            // diagnostic. Rejected here with a single targeted diagnostic
+            // (mirroring `nil`'s `nil :: ClassName` diagnostic above)
+            // pointing at the existing, already-working idiom for boolean
+            // literal/type tests: `x :: True` / `x :: False` (exact literal)
+            // or `x :: Boolean` (either), both `Pattern::Type`
+            // (ADR 0107 Phase A, `generate_type_pattern`'s
+            // `wrap_single_atom_test` / `wrap_boolean_test`).
+            //
+            // A trailing `:: ClassName` (e.g. a plausible `true :: Boolean`
+            // typo before discovering the `b :: Boolean` idiom) is consumed
+            // here too, exactly like the `nil` branch above — otherwise the
+            // unconsumed `::`/class-name would surface as a second, spurious
+            // "Expected '->' after pattern" diagnostic.
+            TokenKind::Identifier(name) if name.as_str() == "true" || name.as_str() == "false" => {
+                let name = name.clone();
+                let mut bad_span = self.advance().span();
+                if matches!(self.current_kind(), TokenKind::DoubleColon) {
+                    let double_colon_span = self.advance().span(); // consume '::'
+                    let tail_span = self.consume_type_pattern_tail();
+                    bad_span = bad_span.merge(tail_span.unwrap_or(double_colon_span));
+                }
+                self.diagnostics.push(Diagnostic::error(
+                    format!(
+                        "bare '{name}' in a match: pattern always matches — it binds any value to a variable named '{name}', it does not test for the boolean literal '{name}' (use 'x :: True' / 'x :: False' for an exact literal test, or 'x :: Boolean' to match either)"
+                    ),
+                    bad_span,
+                ));
+                Pattern::Wildcard(bad_span)
             }
 
             // Variable binding, or a type pattern if followed by `:: ClassName`
@@ -1590,9 +1633,10 @@ impl Parser {
     }
 
     /// Consumes the malformed token(s) following an errant `::` in a `nil`
-    /// pattern (BT-2860), for error-recovery purposes only — the caller is
-    /// responsible for emitting a single diagnostic covering the whole
-    /// annotation. Mirrors the shape of a real type-pattern annotation
+    /// pattern (BT-2860) or a bare `true`/`false` pattern (BT-2883), for
+    /// error-recovery purposes only — the caller is responsible for
+    /// emitting a single diagnostic covering the whole annotation. Mirrors
+    /// the shape of a real type-pattern annotation
     /// (`Identifier` optionally followed by `(generic, args)`) so a class
     /// name with generics is consumed as one unit; a plausible mistyped
     /// literal type name (`nil :: 5`) is also consumed. Anything else is
@@ -3190,6 +3234,131 @@ mod tests {
         assert!(matches!(arms[2].pattern, Pattern::Variable(_)));
     }
 
+    // ── BT-2883: bare `true`/`false` pattern rejection ──────────────────────
+
+    #[test]
+    fn parse_bare_true_pattern_rejected_with_single_diagnostic() {
+        let (_module, diags) = parse_source("x match: [true -> 0; _ -> 1]");
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic (no cascade), got: {diags:?}"
+        );
+        assert!(
+            diags[0].message.contains("bare 'true'") && diags[0].message.contains("x :: True"),
+            "unexpected diagnostic message: {:?}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn parse_bare_false_pattern_rejected_with_single_diagnostic() {
+        let (_module, diags) = parse_source("x match: [false -> 0; _ -> 1]");
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic (no cascade), got: {diags:?}"
+        );
+        assert!(
+            diags[0].message.contains("bare 'false'") && diags[0].message.contains("x :: False"),
+            "unexpected diagnostic message: {:?}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn parse_bare_true_false_pattern_does_not_bind_as_variable() {
+        let (module, diags) = parse_source("x match: [true -> 0; false -> 1]");
+        assert_eq!(diags.len(), 2, "expected one diagnostic per arm: {diags:?}");
+        let Expression::Match { arms, .. } = &module.expressions[0].expression else {
+            panic!("expected Expression::Match");
+        };
+        assert!(
+            matches!(arms[0].pattern, Pattern::Wildcard(_)),
+            "expected bare 'true' to recover as Pattern::Wildcard, not Pattern::Variable, got: {:?}",
+            arms[0].pattern
+        );
+        assert!(
+            matches!(arms[1].pattern, Pattern::Wildcard(_)),
+            "expected bare 'false' to recover as Pattern::Wildcard, not Pattern::Variable, got: {:?}",
+            arms[1].pattern
+        );
+    }
+
+    #[test]
+    fn parse_true_false_type_pattern_still_works() {
+        // `x :: True` / `x :: False` (ADR 0107 Phase A `Pattern::Type`) is
+        // the correct, already-working idiom this diagnostic points users
+        // at — confirm it's unaffected by the bare-identifier rejection.
+        let (module, diags) = parse_source("x match: [b :: True -> 0; b :: False -> 1; _ -> 2]");
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        let Expression::Match { arms, .. } = &module.expressions[0].expression else {
+            panic!("expected Expression::Match");
+        };
+        match &arms[0].pattern {
+            Pattern::Type { class, .. } => assert_eq!(class.name, "True"),
+            other => panic!("expected Pattern::Type, got: {other:?}"),
+        }
+        match &arms[1].pattern {
+            Pattern::Type { class, .. } => assert_eq!(class.name, "False"),
+            other => panic!("expected Pattern::Type, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_bare_true_pattern_nested_in_tuple_rejected() {
+        // parse_pattern recurses into tuple/array/map elements, so the
+        // bare true/false rejection must apply there too, not just at the
+        // top level of a match arm.
+        let (_module, diags) = parse_source("x match: [{true, y} -> y; _ -> 1]");
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic (no cascade), got: {diags:?}"
+        );
+        assert!(
+            diags[0].message.contains("bare 'true'"),
+            "unexpected diagnostic message: {:?}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn parse_bare_true_with_type_annotation_rejected_with_single_diagnostic() {
+        // A plausible typo before discovering the `b :: Boolean` idiom —
+        // the trailing `:: ClassName` must be consumed along with `true`,
+        // not left dangling to cascade into a second "Expected '->'" error
+        // (mirroring the `nil :: ClassName` case above).
+        let (_module, diags) = parse_source("x match: [true :: Boolean -> 1; _ -> 0]");
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic (no cascade), got: {diags:?}"
+        );
+        assert!(
+            diags[0].message.contains("bare 'true'"),
+            "unexpected diagnostic message: {:?}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn parse_bare_false_with_type_annotation_rejected_with_single_diagnostic() {
+        // Symmetric coverage of `parse_bare_true_with_type_annotation_rejected_with_single_diagnostic`
+        // for the `false` arm of the branch.
+        let (_module, diags) = parse_source("x match: [false :: Boolean -> 1; _ -> 0]");
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic (no cascade), got: {diags:?}"
+        );
+        assert!(
+            diags[0].message.contains("bare 'false'"),
+            "unexpected diagnostic message: {:?}",
+            diags[0].message
+        );
+    }
+
     // ── BT-2860: Pattern::Type parser polish ────────────────────────────────
 
     #[test]
@@ -3241,6 +3410,43 @@ mod tests {
             diags[0].message.contains("'nil' pattern"),
             "unexpected diagnostic message: {:?}",
             diags[0].message
+        );
+    }
+
+    #[test]
+    fn parse_nil_pattern_double_colon_with_no_consumable_tail_span_covers_double_colon() {
+        // When nothing follows `::` that `consume_type_pattern_tail` can
+        // consume (e.g. the arrow comes right after), the diagnostic span
+        // must still cover the `::` token itself, not just `nil`.
+        let src = "x match: [nil :: -> 0; _ -> 1]";
+        let (_module, diags) = parse_source(src);
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic (no cascade), got: {diags:?}"
+        );
+        let double_colon_end = u32::try_from(src.find("::").unwrap()).unwrap() + 2;
+        assert!(
+            diags[0].span.end() >= double_colon_end,
+            "expected diagnostic span to cover '::' (end >= {double_colon_end}), got span {:?}",
+            diags[0].span
+        );
+    }
+
+    #[test]
+    fn parse_bare_true_double_colon_with_no_consumable_tail_span_covers_double_colon() {
+        let src = "x match: [true :: -> 0; _ -> 1]";
+        let (_module, diags) = parse_source(src);
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic (no cascade), got: {diags:?}"
+        );
+        let double_colon_end = u32::try_from(src.find("::").unwrap()).unwrap() + 2;
+        assert!(
+            diags[0].span.end() >= double_colon_end,
+            "expected diagnostic span to cover '::' (end >= {double_colon_end}), got span {:?}",
+            diags[0].span
         );
     }
 
