@@ -3359,6 +3359,84 @@ mod tests {
         );
     }
 
+    // ── BT-2884: constructor pattern keyword bindings — nil/true/false ──────
+
+    #[test]
+    fn parse_constructor_binding_nil_is_nil_pattern() {
+        let (module, diags) = parse_source("x match: [Result ok: nil -> 0; _ -> 1]");
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        let Expression::Match { arms, .. } = &module.expressions[0].expression else {
+            panic!("expected Expression::Match");
+        };
+        let Pattern::Constructor { keywords, .. } = &arms[0].pattern else {
+            panic!("expected Pattern::Constructor, got: {:?}", arms[0].pattern);
+        };
+        assert!(
+            matches!(keywords[0].1, Pattern::Nil(_)),
+            "expected 'nil' binding to parse as Pattern::Nil, not Pattern::Variable, got: {:?}",
+            keywords[0].1
+        );
+    }
+
+    #[test]
+    fn parse_constructor_binding_bare_true_rejected_with_single_diagnostic() {
+        let (_module, diags) = parse_source("x match: [Result ok: true -> 0; _ -> 1]");
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic (no cascade), got: {diags:?}"
+        );
+        assert!(
+            diags[0].message.contains("bare 'true'") && diags[0].message.contains("when:"),
+            "unexpected diagnostic message: {:?}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn parse_constructor_binding_bare_false_rejected_with_single_diagnostic() {
+        let (_module, diags) = parse_source("x match: [Result ok: false -> 0; _ -> 1]");
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic (no cascade), got: {diags:?}"
+        );
+        assert!(
+            diags[0].message.contains("bare 'false'") && diags[0].message.contains("when:"),
+            "unexpected diagnostic message: {:?}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn parse_constructor_binding_bare_true_false_recovers_as_wildcard() {
+        let (module, diags) =
+            parse_source("x match: [Result ok: true -> 0; Result error: false -> 1; _ -> 2]");
+        assert_eq!(diags.len(), 2, "expected one diagnostic per arm: {diags:?}");
+        let Expression::Match { arms, .. } = &module.expressions[0].expression else {
+            panic!("expected Expression::Match");
+        };
+        let Pattern::Constructor { keywords: ok_kw, .. } = &arms[0].pattern else {
+            panic!("expected Pattern::Constructor, got: {:?}", arms[0].pattern);
+        };
+        assert!(
+            matches!(ok_kw[0].1, Pattern::Wildcard(_)),
+            "expected bare 'true' binding to recover as Pattern::Wildcard, got: {:?}",
+            ok_kw[0].1
+        );
+        let Pattern::Constructor {
+            keywords: error_kw, ..
+        } = &arms[1].pattern
+        else {
+            panic!("expected Pattern::Constructor, got: {:?}", arms[1].pattern);
+        };
+        assert!(
+            matches!(error_kw[0].1, Pattern::Wildcard(_)),
+            "expected bare 'false' binding to recover as Pattern::Wildcard, got: {:?}",
+            error_kw[0].1
+        );
+    }
+
     // ── BT-2860: Pattern::Type parser polish ────────────────────────────────
 
     #[test]
