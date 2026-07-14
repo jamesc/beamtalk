@@ -630,6 +630,44 @@ typed Object subclass: TypeTest5
     );
 }
 
+/// BT-2868: when the block always exits via a non-local return (`^`), it
+/// contributes `Never` to the union — which `union_of` skips — so the send
+/// infers plain `Boolean` (the surviving self-branch alone), not a
+/// `Boolean | Never` union or `Dynamic`. Mirrors the equivalent
+/// always-returns coverage `if_nil_branch_union_ret_ty` already has for the
+/// two-armed `ifNil:ifNotNil:` case.
+#[test]
+fn bt2868_solo_if_true_block_always_returns_yields_plain_boolean() {
+    let source = r"
+typed Object subclass: Repro
+  go: flag :: Boolean -> Boolean =>
+    flag ifTrue: [^flag]
+    flag
+";
+    let module = parse_source(source);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    let send_ty = find_send_inferred_ty(&module, checker.type_map(), "ifTrue:")
+        .expect("no ifTrue: send found in type_map");
+    assert_eq!(
+        send_ty.as_known().map(EcoString::as_str),
+        Some("Boolean"),
+        "flag ifTrue: [^flag] should infer plain Boolean (Never is skipped \
+         by union_of), not {send_ty:?}"
+    );
+    assert!(
+        checker
+            .diagnostics()
+            .iter()
+            .all(|d| d.severity != crate::source_analysis::Severity::Warning),
+        "expected no warnings, got: {:?}",
+        checker.diagnostics()
+    );
+}
+
 /// BT-2868: a solo `ifTrue:`/`ifFalse:` on a `Boolean`-containing UNION
 /// receiver (e.g. `Boolean | Nil`) also widens to `Boolean | R` instead of
 /// poisoning the whole union to `Dynamic` — audits the structurally
