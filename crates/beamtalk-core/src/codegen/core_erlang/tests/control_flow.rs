@@ -1464,6 +1464,19 @@ fn test_match_two_adjacent_nested_if_true_mutation_arms_thread_from_the_same_bas
         "run:'s match: result must be unpacked via erlang:element/2 before \
          the gen_server reply, regardless of which arm fired. Got clause:\n{run_clause}"
     );
+    // Also assert the reply *shape* directly (mirroring the sibling
+    // single-mutating-arm test) — element(2, ...) alone wouldn't catch a
+    // double-nested `{'reply', {Val, State}, State}` if some other part of
+    // the wrap regressed while still happening to contain that substring.
+    let reply_re =
+        regex::Regex::new(r"\{'reply', (_?[A-Za-z][A-Za-z0-9_]*), (_?[A-Za-z][A-Za-z0-9_]*)\}")
+            .unwrap();
+    assert!(
+        reply_re.is_match(run_clause),
+        "run:'s state-threading tuple must be unwrapped into plain \
+         Result/State vars before the gen_server reply, not leaked as the \
+         reply value itself. Got clause:\n{run_clause}"
+    );
 
     crate::test_helpers::assert_compiles_through_erlc("two_if_true_arms", &code);
 }
