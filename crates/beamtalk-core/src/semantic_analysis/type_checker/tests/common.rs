@@ -487,3 +487,95 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
 
     hierarchy.add_from_beam_meta(vec![result_info]);
 }
+
+/// Assert the module's `type_map` contains a Union whose members' class names
+/// match `expected` (order-insensitive). Returns the matching type on success.
+pub(super) fn find_union_in_type_map<'a>(
+    type_map: &'a crate::semantic_analysis::type_checker::TypeMap,
+    expected: &[&str],
+) -> Option<&'a InferredType> {
+    type_map.iter().find_map(|(_, ty)| {
+        if let InferredType::Union { members, .. } = ty {
+            let names: std::collections::BTreeSet<String> = members
+                .iter()
+                .filter_map(|m| m.as_known().map(std::string::ToString::to_string))
+                .collect();
+            let want: std::collections::BTreeSet<String> =
+                expected.iter().map(|s| (*s).to_string()).collect();
+            if names == want {
+                return Some(ty);
+            }
+        }
+        None
+    })
+}
+
+/// Walk the module AST to find the first `MessageSend` whose selector name
+/// matches `selector_name`, then look up its inferred type in `type_map`.
+/// Checking diagnostics alone isn't enough because `check_return_type` bails
+/// on `Union` / `Dynamic` inferred bodies.
+///
+/// Built on top of the shared [`crate::ast::visitor::Visitor`] trait so that
+/// variant coverage is exhaustive (`ArrayLiteral`, `ListLiteral`, `Match`,
+/// etc. are all searched). Unlike the default opaque-block visitor, this
+/// walker overrides `visit_block` to descend: callers need to find sends
+/// anywhere in the AST, including inside nested block bodies.
+pub(super) fn find_send_inferred_ty<'a>(
+    module: &'a crate::ast::Module,
+    type_map: &'a crate::semantic_analysis::type_checker::TypeMap,
+    selector_name: &'a str,
+) -> Option<&'a InferredType> {
+    use crate::ast::visitor::{Visitor, walk_block, walk_expr};
+    use crate::ast::{Expression, MessageSelector};
+
+    struct Finder<'a> {
+        type_map: &'a crate::semantic_analysis::type_checker::TypeMap,
+        selector_name: &'a str,
+        found: Option<&'a InferredType>,
+    }
+    impl<'a> Visitor<'a> for Finder<'a> {
+        fn visit_expr(&mut self, e: &'a Expression) {
+            if self.found.is_some() {
+                return;
+            }
+            if let Expression::MessageSend { selector, span, .. } = e {
+                let this_sel = match selector {
+                    MessageSelector::Unary(s) | MessageSelector::Binary(s) => s.to_string(),
+                    MessageSelector::Keyword(parts) => {
+                        parts.iter().map(|p| p.keyword.as_str()).collect::<String>()
+                    }
+                };
+                if this_sel == self.selector_name {
+                    // Match: capture the outermost send's type. Intentionally
+                    // do NOT descend into receiver/arguments — tests want the
+                    // outermost send, not a matching send buried inside its
+                    // arguments.
+                    self.found = self.type_map.get(*span);
+                    return;
+                }
+            }
+            walk_expr(self, e);
+        }
+        fn visit_block(&mut self, block: &'a crate::ast::Block) {
+            // Opt-in descent: tests want to see into nested blocks.
+            walk_block(self, block);
+        }
+    }
+
+    let mut finder = Finder {
+        type_map,
+        selector_name,
+        found: None,
+    };
+    for class in &module.classes {
+        for method in &class.methods {
+            for stmt in &method.body {
+                finder.visit_expr(&stmt.expression);
+                if finder.found.is_some() {
+                    return finder.found;
+                }
+            }
+        }
+    }
+    finder.found
+}
