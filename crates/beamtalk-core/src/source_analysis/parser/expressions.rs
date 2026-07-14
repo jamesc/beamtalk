@@ -3255,6 +3255,24 @@ mod tests {
         }
     }
 
+    #[test]
+    fn parse_bare_true_pattern_nested_in_tuple_rejected() {
+        // parse_pattern recurses into tuple/array/map elements, so the
+        // bare true/false rejection must apply there too, not just at the
+        // top level of a match arm.
+        let (_module, diags) = parse_source("x match: [{true, y} -> y; _ -> 1]");
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic (no cascade), got: {diags:?}"
+        );
+        assert!(
+            diags[0].message.contains("bare 'true'"),
+            "unexpected diagnostic message: {:?}",
+            diags[0].message
+        );
+    }
+
     // ── BT-2860: Pattern::Type parser polish ────────────────────────────────
 
     #[test]
