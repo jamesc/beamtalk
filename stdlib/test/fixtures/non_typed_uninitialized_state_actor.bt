@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// NonTypedUninitializedStateActor — regression fixture for BT-2881
+//
+// A plain (non-`typed`) `Actor subclass:` with a typed, no-default state
+// field that `initialize` forgets to set. Should raise
+// `UninitializedStateError` at startup, same as the `typed` counterpart in
+// `uninitialized_state_actor.bt` — the BT-1949/BT-1951 safety check must
+// not be gated on the `typed` keyword.
+
+Actor subclass: NonTypedUninitializedStateActor
+  state: count :: Integer
+  state: other = 0
+
+  initialize -> Nil =>
+    // Deliberately does NOT set self.count
+    self.other := 1
+    nil
+
+  getCount -> Integer => self.count
