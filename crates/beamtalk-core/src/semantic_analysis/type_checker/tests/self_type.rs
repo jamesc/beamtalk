@@ -695,7 +695,7 @@ fn infer_method_return_types_collects_instance_methods() {
     );
     let module = make_module_with_classes(vec![], vec![class]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let result = infer_method_return_types(&module, &hierarchy);
+    let result = infer_method_return_types(&module, &hierarchy, None);
     assert_eq!(
         result.get(&("Greeter".into(), "greeting".into(), false)),
         Some(&InferredType::known("String")),
@@ -710,7 +710,7 @@ fn infer_method_return_types_collects_class_methods() {
     class.class_methods = vec![method_unannotated("zero", vec![int_lit(0)])];
     let module = make_module_with_classes(vec![], vec![class]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let result = infer_method_return_types(&module, &hierarchy);
+    let result = infer_method_return_types(&module, &hierarchy, None);
     assert_eq!(
         result.get(&("Counter".into(), "zero".into(), true)),
         Some(&InferredType::known("Integer")),
@@ -731,7 +731,7 @@ fn infer_method_return_types_collects_standalone_methods() {
         span: span(),
     }];
     let hierarchy = ClassHierarchy::with_builtins();
-    let result = infer_method_return_types(&module, &hierarchy);
+    let result = infer_method_return_types(&module, &hierarchy, None);
     assert_eq!(
         result.get(&("Widget".into(), "label".into(), false)),
         Some(&InferredType::known("String")),
@@ -748,7 +748,7 @@ fn infer_method_return_types_excludes_annotated_methods() {
     );
     let module = make_module_with_classes(vec![], vec![class]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let result = infer_method_return_types(&module, &hierarchy);
+    let result = infer_method_return_types(&module, &hierarchy, None);
     assert!(
         !result.contains_key(&("Foo".into(), "value".into(), false)),
         "annotated method must not be overridden by inference"
@@ -764,7 +764,7 @@ fn infer_method_return_types_excludes_primitive_methods() {
     );
     let module = make_module_with_classes(vec![], vec![class]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let result = infer_method_return_types(&module, &hierarchy);
+    let result = infer_method_return_types(&module, &hierarchy, None);
     assert!(
         !result.contains_key(&("Bar".into(), "add".into(), false)),
         "@primitive method must not appear in inferred return types"
@@ -780,7 +780,7 @@ fn infer_method_return_types_excludes_dynamic_results() {
     );
     let module = make_module_with_classes(vec![], vec![class]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let result = infer_method_return_types(&module, &hierarchy);
+    let result = infer_method_return_types(&module, &hierarchy, None);
     assert!(
         !result.contains_key(&("Baz".into(), "compute".into(), false)),
         "Dynamic result must not appear in inferred return types"
@@ -820,7 +820,7 @@ fn infer_types_and_returns_produces_both_outputs() {
     let module = make_module_with_classes(vec![], vec![class]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
-    let (type_map, returns) = infer_types_and_returns(&module, &hierarchy);
+    let (type_map, returns) = infer_types_and_returns(&module, &hierarchy, None);
 
     // method_return_types should contain the inferred return type
     assert_eq!(

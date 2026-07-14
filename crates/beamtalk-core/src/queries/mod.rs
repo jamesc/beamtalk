@@ -79,11 +79,18 @@ pub(crate) fn selector_span(selector: &MessageSelector) -> Option<Span> {
 ///
 /// Used by [`completion_provider`] and [`hover_provider`] so both share identical
 /// enrichment logic (BT-1014).
+///
+/// BT-2867: `native_type_registry`, when `Some`, lets expressions *downstream*
+/// of a typed FFI call (e.g. `x := (Erlang m) f:. x bar`) see `x`'s real type
+/// in the returned [`TypeMap`] too — not just the FFI call site itself, which
+/// callers already special-case separately via their own `native_types`
+/// parameter.
 pub(crate) fn enrich_hierarchy_with_inferred_returns(
     module: &Module,
     hierarchy: &ClassHierarchy,
+    native_type_registry: Option<&crate::semantic_analysis::type_checker::NativeTypeRegistry>,
 ) -> (Option<ClassHierarchy>, TypeMap) {
-    let (type_map, inferred) = infer_types_and_returns(module, hierarchy);
+    let (type_map, inferred) = infer_types_and_returns(module, hierarchy, native_type_registry);
     let enriched = if inferred.is_empty() {
         None
     } else {

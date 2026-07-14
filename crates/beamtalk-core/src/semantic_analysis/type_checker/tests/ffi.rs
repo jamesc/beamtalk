@@ -1020,6 +1020,39 @@ fn ffi_known_known_call_unchanged_no_regression() {
     );
 }
 
+/// BT-2867: the free `infer_types` function (used by `type-coverage` and the
+/// LSP query providers) must accept and thread a `NativeTypeRegistry` — not
+/// just `TypeChecker` when driven directly, which every other test in this
+/// file exercises. Before the fix, `infer_types` unconditionally built a
+/// registry-less `TypeChecker`, so a well-specced FFI call's return type
+/// resolved correctly at the call site (via `beamtalk build`/`lint`'s
+/// separate registry-threaded path) but everything built from it — like
+/// `y size` here — stayed `Dynamic(UntypedFfi)` under `infer_types`.
+#[test]
+fn infer_types_free_fn_threads_registry_to_downstream_expression() {
+    let src = "typed Object subclass: Nav\n  \
+        run =>\n    \
+          y := (Erlang lists) reverse: #(1, 2, 3)\n    \
+          y size";
+    let module = parse_source(src);
+    let hierarchy = ClassHierarchy::with_builtins();
+
+    let downstream_span = module.classes[0].methods[0]
+        .body
+        .last()
+        .unwrap()
+        .expression
+        .span();
+
+    let type_map = infer_types(&module, &hierarchy, Some(&lists_registry()));
+    let downstream_type = type_map.get(downstream_span);
+    assert!(
+        !matches!(downstream_type, None | Some(InferredType::Dynamic(_))),
+        "expression downstream of a specced FFI call should infer a \
+         concrete type via the free `infer_types` function, got {downstream_type:?}"
+    );
+}
+
 #[test]
 fn test_erlang_lists_still_infers_ffi() {
     // Sanity check: `Erlang lists reverse: xs` should still go through FFI inference.

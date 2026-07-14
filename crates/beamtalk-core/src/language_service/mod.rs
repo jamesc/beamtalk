@@ -1745,6 +1745,7 @@ impl LanguageService for SimpleLanguageService {
         let inferred = crate::semantic_analysis::type_checker::infer_method_return_types(
             &file_data.module,
             self.project_index.hierarchy(),
+            self.native_types.as_deref(),
         );
 
         if inferred.is_empty() {

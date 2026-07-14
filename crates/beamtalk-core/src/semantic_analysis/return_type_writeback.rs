@@ -78,7 +78,7 @@ fn writeback_annotation(ty: &InferredType, span: Span) -> Option<TypeAnnotation>
 /// * `module` - Mutable AST module to update in place.
 /// * `hierarchy` - Class hierarchy used for type inference.
 pub fn apply_return_type_writeback(module: &mut Module, hierarchy: &ClassHierarchy) {
-    let inferred = infer_method_return_types(module, hierarchy);
+    let inferred = infer_method_return_types(module, hierarchy, None);
 
     for class in &mut module.classes {
         for method in &mut class.methods {

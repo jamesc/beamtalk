@@ -51,7 +51,7 @@ pub fn compute_signature_help(
     native_types: Option<&NativeTypeRegistry>,
 ) -> Option<SignatureHelp> {
     let offset = position.to_byte_offset(source)?.get();
-    let type_map = infer_types(module, hierarchy);
+    let type_map = infer_types(module, hierarchy, native_types);
 
     // Search top-level expressions
     for stmt in &module.expressions {

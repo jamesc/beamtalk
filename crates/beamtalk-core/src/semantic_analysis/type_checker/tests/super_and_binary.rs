@@ -94,7 +94,7 @@ fn test_super_infers_parent_class_type() {
 
     let module = make_module_with_classes(vec![], vec![parent, child]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let type_map = infer_types(&module, &hierarchy);
+    let type_map = infer_types(&module, &hierarchy, None);
 
     // super should be inferred as Parent (not Dynamic)
     let ty = type_map.get(super_span);

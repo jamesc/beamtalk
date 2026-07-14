@@ -731,7 +731,7 @@ Object subclass: Counter
     let (module, _diags) = crate::source_analysis::parse(tokens);
 
     let hierarchy = ClassHierarchy::with_builtins();
-    let type_map = infer_types(&module, &hierarchy);
+    let type_map = infer_types(&module, &hierarchy, None);
 
     let report = CoverageReport::from_module(&module, &type_map, "test.bt", false);
 
@@ -758,7 +758,7 @@ Object subclass: Greeter
     let (module, _diags) = crate::source_analysis::parse(tokens);
 
     let hierarchy = ClassHierarchy::with_builtins();
-    let type_map = infer_types(&module, &hierarchy);
+    let type_map = infer_types(&module, &hierarchy, None);
 
     let report = CoverageReport::from_module(&module, &type_map, "greeter.bt", true);
 
@@ -777,7 +777,7 @@ Object subclass: Greeter
 fn coverage_report_empty_module() {
     let module = make_module(vec![]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let type_map = infer_types(&module, &hierarchy);
+    let type_map = infer_types(&module, &hierarchy, None);
 
     let report = CoverageReport::from_module(&module, &type_map, "empty.bt", false);
 

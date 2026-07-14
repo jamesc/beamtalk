@@ -1338,7 +1338,7 @@ mod tests {
         assert!(hard_errs.is_empty(), "Parse failed: {hard_errs:?}");
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.expect("hierarchy build failed");
-        let type_map = crate::semantic_analysis::infer_types(&module, &hierarchy);
+        let type_map = crate::semantic_analysis::infer_types(&module, &hierarchy, None);
         let mut diagnostics = Vec::new();
         check_redundant_local_type_annotation(&module, &type_map, &mut diagnostics);
         diagnostics
