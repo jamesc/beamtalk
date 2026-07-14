@@ -2520,6 +2520,14 @@ impl CoreErlangGenerator {
     ///   'beamtalk_object'` idiom `fieldAt:`'s actor-vs-map dispatch already
     ///   uses (`intrinsics.rs`), extended to also compare `element(2)`
     ///   (the class name) against the pattern's `class` field.
+    /// - **`Supervisor`/`DynamicSupervisor`-hierarchy classes** (BT-2870): a
+    ///   live supervisor reference is a third runtime shape, also a 4-tuple
+    ///   but tagged `'beamtalk_supervisor'` (or transiently
+    ///   `'beamtalk_supervisor_new'` — never observable outside `class
+    ///   initialize:`, see `beamtalk_class_dispatch:class_send_dispatch/3`)
+    ///   rather than `'beamtalk_object'` — [`Self::wrap_supervisor_class_tag_test`]
+    ///   accepts either tag at `element(1)` before comparing `element(2)`
+    ///   against the pattern's `class` field.
     fn generate_type_pattern(
         &mut self,
         match_var: &str,
@@ -2620,8 +2628,18 @@ impl CoreErlangGenerator {
                     .class_hierarchy
                     .as_ref()
                     .is_some_and(|h| h.is_actor_subclass(other));
+                // BT-2870: a Supervisor/DynamicSupervisor subclass reference
+                // is a *different* 4-tuple, tagged `'beamtalk_supervisor'`
+                // (or transiently `'beamtalk_supervisor_new'`) rather than
+                // `'beamtalk_object'` — same reasoning as the actor case
+                // above, just a different reserved tag.
+                let is_supervisor = self.class_hierarchy.as_ref().is_some_and(|h| {
+                    h.is_supervisor_subclass(other) || h.is_dynamic_supervisor_subclass(other)
+                });
                 if is_actor {
                     self.wrap_actor_class_tag_test(match_var, other, bound_success, rest_doc)
+                } else if is_supervisor {
+                    self.wrap_supervisor_class_tag_test(match_var, other, bound_success, rest_doc)
                 } else {
                     self.wrap_class_tag_test(
                         match_var,
@@ -2864,17 +2882,90 @@ impl CoreErlangGenerator {
         ]
     }
 
+    /// Tests whether the scrutinee is a supervisor reference (a
+    /// `Supervisor`/`DynamicSupervisor` subclass instance) of exactly
+    /// `class_name` (BT-2870). A live supervisor reference is
+    /// `{'beamtalk_supervisor', ClassAtom, ModuleAtom, Pid}` — or,
+    /// transiently during `class supervise`'s fresh-start branch,
+    /// `{'beamtalk_supervisor_new', ClassAtom, ModuleAtom, Pid}` (rewritten
+    /// to the `'beamtalk_supervisor'` tag by
+    /// `beamtalk_class_dispatch:class_send_dispatch/3` before the caller
+    /// ever observes it — see `beamtalk_supervisor.erl`'s `startLink/1`
+    /// doc). Neither shape is a map, so [`Self::wrap_class_tag_test`]'s
+    /// `is_map` check would never match; this reuses the same
+    /// `is_tuple`/`tuple_size`/`element(1)`/`element(2)` idiom
+    /// [`Self::wrap_actor_class_tag_test`] uses, but accepts *either*
+    /// reserved tag at `element(1)` before comparing `element(2)` (the
+    /// class name) against `class_name`.
+    fn wrap_supervisor_class_tag_test(
+        &mut self,
+        match_var: &str,
+        class_name: &str,
+        success: Document<'static>,
+        rest: &Document<'static>,
+    ) -> Document<'static> {
+        let no_match_tag = self.fresh_temp_var("NoMatch");
+        let no_match_class = self.fresh_temp_var("NoMatch");
+        let v = leaf::var(match_var.to_string());
+
+        // Shared by both accepted tags below — cloned rather than rebuilt
+        // so the `element(2)` class-name check is generated exactly once.
+        let class_check = docvec![
+            "case call 'erlang':'element'(2, ",
+            v.clone(),
+            ") of ",
+            "<",
+            leaf::atom(class_name.to_string()),
+            "> when 'true' -> ",
+            success,
+            " <",
+            leaf::var(no_match_class),
+            "> when 'true' -> ",
+            rest.clone(),
+            " end"
+        ];
+
+        docvec![
+            "case call 'erlang':'is_tuple'(",
+            v.clone(),
+            ") of ",
+            "<'true'> when 'true' -> ",
+            "case call 'erlang':'=='(call 'erlang':'tuple_size'(",
+            v.clone(),
+            "), 4) of ",
+            "<'true'> when 'true' -> ",
+            "case call 'erlang':'element'(1, ",
+            v,
+            ") of ",
+            "<'beamtalk_supervisor'> when 'true' -> ",
+            class_check.clone(),
+            " <'beamtalk_supervisor_new'> when 'true' -> ",
+            class_check,
+            " <",
+            leaf::var(no_match_tag),
+            "> when 'true' -> ",
+            rest.clone(),
+            " end ",
+            "<'false'> when 'true' -> ",
+            rest.clone(),
+            " end ",
+            "<'false'> when 'true' -> ",
+            rest.clone(),
+            " end"
+        ]
+    }
+
     /// `Tuple` matches any Erlang tuple **except** the reserved 4-tuple
     /// shapes this compiler uses internally for actor references
     /// (`{'beamtalk_object', ...}`) and supervisor references
     /// (`{'beamtalk_supervisor' | 'beamtalk_supervisor_new', ...}`) —
     /// without this exclusion, a live actor/supervisor reference is *also*
     /// a plain Erlang tuple structurally, so `x :: Tuple` would incorrectly
-    /// match it too. (`Supervisor`/`DynamicSupervisor` subclasses are
-    /// themselves rejected as a type-pattern `class` by
-    /// `validate_type_pattern_class`, but an *unrelated* `x :: Tuple` arm
-    /// could still see one of these values flow through, so the exclusion
-    /// applies regardless.)
+    /// match it too. (BT-2870: `Supervisor`/`DynamicSupervisor` subclasses
+    /// are themselves valid type-pattern `class` names now, handled by
+    /// [`Self::wrap_supervisor_class_tag_test`] above — this exclusion
+    /// still applies to an *unrelated* `x :: Tuple` arm that could see one
+    /// of these values flow through.)
     fn wrap_tuple_test(
         &mut self,
         match_var: &str,

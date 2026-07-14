@@ -414,32 +414,16 @@ fn validate_type_pattern_class(
         return;
     }
 
-    // `Supervisor`/`DynamicSupervisor` subclasses reference a supervisor
-    // process, tagged `{'beamtalk_supervisor' | 'beamtalk_supervisor_new',
-    // ClassName, Module, Pid}` at runtime (`beamtalk_supervisor.erl`) — a
-    // third shape distinct from both the tagged-map (`Value`/`Object`) and
-    // actor-tuple (`'beamtalk_object'`) strategies `generate_type_pattern`
-    // already handles. Rather than risk silently-wrong codegen for a shape
-    // this session hasn't fully characterised (e.g. the transient
-    // `'beamtalk_supervisor_new'` tag during `class initialize:`), reject
-    // explicitly — the same "fail loudly, not silently wrong" choice
-    // already made for `Character` above and non-leaf classes below.
-    if hierarchy.is_supervisor_subclass(class_name)
-        || hierarchy.is_dynamic_supervisor_subclass(class_name)
-    {
-        diagnostics.push(
-            Diagnostic::error(
-                format!(
-                    "`{class_name}` is a Supervisor/DynamicSupervisor subclass; type patterns \
-                     are not yet supported for supervisor references"
-                ),
-                class.span,
-            )
-            .with_hint("Use `isKindOf:` guard clauses instead.".to_string())
-            .with_category(DiagnosticCategory::Type),
-        );
-        return;
-    }
+    // BT-2870: `Supervisor`/`DynamicSupervisor` subclasses reference a
+    // supervisor process, tagged `{'beamtalk_supervisor' |
+    // 'beamtalk_supervisor_new', ClassName, Module, Pid}` at runtime
+    // (`beamtalk_supervisor.erl`) — a third shape distinct from both the
+    // tagged-map (`Value`/`Object`) and actor-tuple (`'beamtalk_object'`)
+    // strategies. `generate_type_pattern`'s `wrap_supervisor_class_tag_test`
+    // now handles this shape directly (accepting either reserved tag), so
+    // — unlike the earlier BT-2855 rejection this replaced — these classes
+    // fall through to the ordinary leaf-class check below rather than being
+    // rejected outright.
 
     // Non-leaf class — Phase A only supports concrete/leaf classes.
     if !hierarchy.direct_subclasses(class_name).is_empty() {
@@ -866,6 +850,37 @@ mod tests {
         assert!(
             diagnostics.is_empty(),
             "Expected no diagnostics for a leaf user class, got: {diagnostics:?}"
+        );
+    }
+
+    /// BT-2870: a leaf `Supervisor subclass:` is now a valid type-pattern
+    /// class — replaces the earlier BT-2855 rejection now that
+    /// `generate_type_pattern` has real codegen support
+    /// (`wrap_supervisor_class_tag_test`).
+    #[test]
+    fn type_pattern_supervisor_subclass_no_diagnostics() {
+        let (module, hierarchy) = hierarchy_for(
+            "Supervisor subclass: WebApp\n  class children => #()\nx match: [s :: WebApp -> s; _ -> 0]",
+        );
+        let mut diagnostics = Vec::new();
+        check_type_pattern_classes(&module, &hierarchy, true, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no diagnostics for a leaf Supervisor subclass, got: {diagnostics:?}"
+        );
+    }
+
+    /// BT-2870: same as above, for `DynamicSupervisor(C)` subclasses.
+    #[test]
+    fn type_pattern_dynamic_supervisor_subclass_no_diagnostics() {
+        let (module, hierarchy) = hierarchy_for(
+            "Object subclass: Widget\nDynamicSupervisor(Widget) subclass: Pool\n  class childClass => Widget\nx match: [p :: Pool -> p; _ -> 0]",
+        );
+        let mut diagnostics = Vec::new();
+        check_type_pattern_classes(&module, &hierarchy, true, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no diagnostics for a leaf DynamicSupervisor subclass, got: {diagnostics:?}"
         );
     }
 
