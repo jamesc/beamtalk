@@ -5,6 +5,8 @@
 ///
 /// Provides shared boolean protocol. Cannot be instantiated directly.
 /// In the stdlib, True and False are the concrete boolean subclasses.
+/// Sealed: user code cannot add further subclasses, so True and False
+/// are guaranteed to be the only concrete classes under Boolean (BT-2886).
 ///
 /// ## Examples
 /// ```beamtalk
@@ -13,7 +15,7 @@
 /// true and: [false]       // => false
 /// false or: [true]        // => true
 /// ```
-abstract Value subclass: Boolean
+abstract sealed Value subclass: Boolean
 
   // === Abstract protocol (subclasses must implement) ===
 

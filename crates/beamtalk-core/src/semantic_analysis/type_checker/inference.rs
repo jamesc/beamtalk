@@ -4080,6 +4080,20 @@ impl TypeChecker {
     /// type, `class_name` isn't `Boolean`, or the stdlib contract this
     /// function relies on no longer matches, so the caller falls back to the
     /// generic Dynamic classification for those cases.
+    ///
+    /// Soundness also depends on a second, closed-world assumption that this
+    /// function does *not* verify structurally: that `True` and `False` are
+    /// the *only* concrete classes that can appear at runtime under a
+    /// `Boolean`-typed receiver. That's what makes the "self branch returns
+    /// `Boolean`" reasoning above valid — if a third subclass existed and
+    /// overrode `ifTrue:`/`ifFalse:` to return something outside `True |
+    /// False | R`, the inferred union here would be unsound for it. This is
+    /// enforced by `Boolean` being declared `sealed` in `stdlib/src/Boolean.bt`
+    /// (BT-2886), which closes it to exactly its two existing `sealed`
+    /// subclasses, `True` and `False`. Unlike the `ifNil:`/`ifNotNil:`
+    /// self-branch check above, there's no `hierarchy.find_method(...)` guard
+    /// for this half of the assumption — it relies on the parser/semantic
+    /// analysis rejecting any attempt to subclass a `sealed` class.
     fn if_true_false_solo_boolean_ret_ty(
         selector_name: &str,
         class_name: &str,
