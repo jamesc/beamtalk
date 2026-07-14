@@ -2912,8 +2912,8 @@ impl CoreErlangGenerator {
         let no_match_class = self.fresh_temp_var("NoMatch");
         let v = leaf::var(match_var.to_string());
 
-        // Shared by both accepted tags below — cloned rather than rebuilt
-        // so the `element(2)` class-name check is generated exactly once.
+        // Built once in source; cloned into both accepted tag arms below so
+        // the element(2) class-name check isn't copy-pasted in Rust source.
         let class_check = docvec![
             "case call 'erlang':'element'(2, ",
             v.clone(),

@@ -383,6 +383,10 @@ mod tests {
 
         let (_, infos1) = resolve_dependency_class_infos(root);
         let calls_after_first = PARSE_CALLS.load(std::sync::atomic::Ordering::Relaxed);
+        assert!(
+            calls_after_first > 0,
+            "first call should have parsed the dependency file, got 0 parse calls"
+        );
         let (_, infos2) = resolve_dependency_class_infos(root);
         let calls_after_second = PARSE_CALLS.load(std::sync::atomic::Ordering::Relaxed);
 
@@ -413,6 +417,10 @@ mod tests {
         let (_, infos1) = resolve_dependency_class_infos(root);
         assert!(infos1.iter().any(|c| c.name == "HTTPServer"));
         let calls_after_first = PARSE_CALLS.load(std::sync::atomic::Ordering::Relaxed);
+        assert!(
+            calls_after_first > 0,
+            "first call should have parsed the dependency file, got 0 parse calls"
+        );
 
         // Simulate a rebuild replacing the checkout's contents. Bump the
         // mtime forward explicitly (rather than relying on real wall-clock
