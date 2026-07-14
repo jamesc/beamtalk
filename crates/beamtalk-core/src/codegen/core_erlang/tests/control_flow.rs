@@ -1292,6 +1292,35 @@ fn test_match_arm_self_field_held_block_value_call_compiles_without_double_wrapp
 }
 
 #[test]
+fn test_match_arm_cascade_tier2_value_call_compiles_without_double_wrapping() {
+    // BT-2880 review follow-up: a match: arm body that is a `Cascade`
+    // (`blk value: a; value: b`, BT-2808) on a Tier 2 local var is a third
+    // `is_tier2_value_call` receiver shape besides the block-literal one
+    // this fix inlines and the self.field-held one the sibling test above
+    // pins. `generate_match_arm_body`'s literal-block branch only matches an
+    // `Expression::MessageSend` with an `Expression::Block` receiver, so a
+    // `Cascade` body falls through to `expression_doc`, which (per BT-2808)
+    // already threads state correctly across BOTH cascaded sends and
+    // extracts element(1) as its own value. Only the wrapping matters here:
+    // this pins that the plain-arm `{value, base_state}` fallback does not
+    // double-wrap that already-unwrapped value.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: item -> Integer =>\n    blk := [:x | self.total := self.total + x]\n    nil match: [\n      nil -> (blk value: item; value: item);\n      x :: Integer -> x\n    ]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code =
+        generate_module(&module, CodegenOptions::new("ctr")).expect("codegen should succeed");
+
+    eprintln!("Generated code for match: arm cascade tier2 value: call:\n{code}");
+
+    assert!(
+        code.contains("'maps':'put'('total'"),
+        "the cascade's block mutation must still thread state via maps:put. Got:\n{code}"
+    );
+
+    crate::test_helpers::assert_compiles_through_erlc("ctr", &code);
+}
+
+#[test]
 fn test_match_arm_nested_if_true_mutation_without_value_wrapper_threads_actor_state() {
     // BT-2880 (generalization): the same bug also reproduces when an arm
     // body is itself a nested control-flow-with-mutations construct — here

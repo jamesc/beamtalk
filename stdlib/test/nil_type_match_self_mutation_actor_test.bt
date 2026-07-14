@@ -31,6 +31,10 @@ TestCase subclass: NilTypeMatchSelfMutationActorTest
     self assert: a currentCount equals: 1
 
   testBumpMatchIfTrueThreadsStateAcrossCalls =>
+    // count: 0 -> 1 -> 2 -> 1 (the last call passes false, taking the
+    // ifFalse: branch, self.count := self.count - 1 = 1). The assignment's
+    // value is what's returned, so `result` is that decremented count, not
+    // the pre-decrement value.
     a := NilTypeMatchSelfMutationRegistry spawn
     a bumpMatchIfTrue: true
     a bumpMatchIfTrue: true

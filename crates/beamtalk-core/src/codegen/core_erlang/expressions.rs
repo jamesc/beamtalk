@@ -2306,9 +2306,13 @@ impl CoreErlangGenerator {
     ///   bookkeeping is saved/restored via `with_branch_context`, so it never
     ///   leaks into that snapshot). Passed through via `expression_doc`
     ///   unchanged — no extra wrapping needed.
-    /// - Any other arm body — including other `is_tier2_value_call` shapes,
-    ///   which `expression_doc` already unwraps/discards state for (see
-    ///   `close_tier2_value_subexpr_doc`) — is wrapped unchanged as
+    /// - Any other arm body — including the remaining `is_tier2_value_call`
+    ///   shapes this function doesn't special-case (`self.<field> value`, a
+    ///   named `tier2_local_vars`/`tier2_block_params` identifier receiver,
+    ///   or a `Cascade` of safe `value:` sends, e.g. `blk value: a; value:
+    ///   b`), for which `expression_doc` already unwraps/discards that
+    ///   call's own state via `close_tier2_value_subexpr_doc` (the BT-2814
+    ///   sub-expression-position limitation) — is wrapped unchanged as
     ///   `{<value>, <base_state>}`.
     fn generate_match_arm_body(
         &mut self,
