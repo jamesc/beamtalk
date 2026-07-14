@@ -1256,6 +1256,48 @@ fn test_match_arm_self_mutating_value_block_threads_actor_state() {
 }
 
 #[test]
+fn test_match_two_adjacent_mutating_arms_each_thread_from_the_same_base_state() {
+    // BT-2880 review follow-up: two DIFFERENT arms in the same match: each
+    // mutate a different field via a `[...] value` block. Since only one arm
+    // fires at runtime, each arm's `with_branch_context` call must reset to
+    // the SAME pre-match base_state — arm 2's compilation must not see any
+    // state_version advancement leaked from arm 1's compilation (they are
+    // alternatives, not a sequence). Both arms use `Pattern::Literal`
+    // (Integer), a genuine native case-literal match (unlike bare `true`/
+    // `false`, which the parser treats as `Pattern::Variable` — an
+    // unconditional catch-all binding, not a boolean literal test; only
+    // `nil` is a reserved pattern keyword per ADR 0107), so this also
+    // re-confirms the all-native fast path handles more than one mutating
+    // arm.
+    let src = "Actor subclass: TwoMutatingArms\n  state: a :: Integer = 0\n  state: b :: Integer = 0\n\n  run: choice -> Integer =>\n    choice match: [\n      1 -> [self.a := self.a + 1. self.a] value;\n      2 -> [self.b := self.b + 1. self.b] value\n    ]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code = generate_module(&module, CodegenOptions::new("two_mutating_arms"))
+        .expect("codegen should succeed");
+
+    eprintln!("Generated code for match: with two adjacent mutating arms:\n{code}");
+
+    assert!(
+        code.contains("'maps':'put'('a'") && code.contains("'maps':'put'('b'"),
+        "both arms must thread their own field's mutation via maps:put. Got:\n{code}"
+    );
+    let run_clause = code
+        .split("<'run:'>")
+        .nth(1)
+        .expect("handle_call must have a run: clause")
+        .split("<OtherSelector>")
+        .next()
+        .expect("run: clause must be followed by the OtherSelector fallback");
+    assert!(
+        run_clause.contains("'erlang':'element'(2, "),
+        "run:'s match: result must be unpacked via erlang:element/2 before \
+         the gen_server reply, regardless of which arm fired. Got clause:\n{run_clause}"
+    );
+
+    crate::test_helpers::assert_compiles_through_erlc("two_mutating_arms", &code);
+}
+
+#[test]
 fn test_match_arm_self_field_held_block_value_call_compiles_without_double_wrapping() {
     // BT-2880 / BT-2814: a match: arm body that invokes a *dynamically held*
     // Tier 2 block via `self.<field> value` (not a `[...] value` block

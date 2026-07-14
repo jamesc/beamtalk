@@ -19,12 +19,24 @@
 // `bumpMatchIfTrue:` covers the same bug in a second shape: an arm body
 // that is itself a nested `ifTrue:`/`ifFalse:` mutation, with no `[...]
 // value` wrapper at all.
+//
+// `bumpEitherOf:` covers a third shape (review follow-up): TWO different
+// arms each mutate a DIFFERENT field via a `[...] value` block. Since only
+// one arm fires per call, each must start from the same pre-match state —
+// this pins that compiling arm 2 doesn't see any state leaked from
+// compiling arm 1 (they're alternatives, not a sequence). Uses Integer
+// literal patterns (1/2), not bare `true`/`false` — those parse as
+// `Pattern::Variable` (an unconditional catch-all binding matching
+// anything, always taking the first arm), not a boolean literal test; only
+// `nil` is a reserved pattern keyword (ADR 0107).
 
 Actor subclass: NilTypeMatchSelfMutationRegistry
   state: count :: Integer = 0
+  state: otherCount :: Integer = 0
 
   initialize =>
     self.count := 0
+    self.otherCount := 0
     nil
 
   bumpMatch -> Integer =>
@@ -44,4 +56,18 @@ Actor subclass: NilTypeMatchSelfMutationRegistry
       x :: Integer -> x
     ]
 
+  bumpEitherOf: choice -> Integer =>
+    choice match: [
+      1 -> [
+        self.count := self.count + 1
+        self.count
+      ] value;
+      2 -> [
+        self.otherCount := self.otherCount + 1
+        self.otherCount
+      ] value
+    ]
+
   currentCount => self.count
+
+  currentOtherCount => self.otherCount

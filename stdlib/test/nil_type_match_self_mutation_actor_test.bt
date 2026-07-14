@@ -6,7 +6,8 @@
 // mutated Integer (not an internal state-threading Tuple), and that the
 // mutation is actually visible in subsequent state reads. Also covers the
 // generalized shape — a match: arm whose body is itself a nested
-// ifTrue:/ifFalse: mutation with no `[...] value` wrapper.
+// ifTrue:/ifFalse: mutation with no `[...] value` wrapper — and a match:
+// with two adjacent arms that each mutate a different field.
 
 TestCase subclass: NilTypeMatchSelfMutationActorTest
 
@@ -41,3 +42,17 @@ TestCase subclass: NilTypeMatchSelfMutationActorTest
     result := a bumpMatchIfTrue: false
     self assert: result equals: 1
     self assert: a currentCount equals: 1
+
+  testBumpEitherOfMutatesOnlyTheMatchingArmsField =>
+    // Each arm must start from the same pre-match state: bumping the `2`
+    // arm after two `1` bumps must not see (or leak into) the count the
+    // `1` arm mutated, and vice versa.
+    a := NilTypeMatchSelfMutationRegistry spawn
+    r1 := a bumpEitherOf: 1
+    r2 := a bumpEitherOf: 1
+    r3 := a bumpEitherOf: 2
+    self assert: r1 equals: 1
+    self assert: r2 equals: 2
+    self assert: r3 equals: 1
+    self assert: a currentCount equals: 2
+    self assert: a currentOtherCount equals: 1
