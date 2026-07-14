@@ -2083,9 +2083,21 @@ impl Parser {
             // guard semantics (a bare guard variable *does* require the
             // exact atom `true` — no other value passes — but `=:=` says so
             // without relying on that knowledge).
+            //
+            // A trailing `:: ClassName` (e.g. `true :: Boolean`) is consumed
+            // here too (BT-2885 follow-up, per Claude review on #2998) —
+            // otherwise the unconsumed `::`/class-name would surface as a
+            // second, spurious "Expected '->' after pattern" diagnostic,
+            // exactly the cascade the generic-identifier arm below was fixed
+            // to avoid.
             TokenKind::Identifier(name) if name.as_str() == "true" || name.as_str() == "false" => {
                 let name = name.clone();
-                let bad_span = self.advance().span();
+                let mut bad_span = self.advance().span();
+                if matches!(self.current_kind(), TokenKind::DoubleColon) {
+                    let double_colon_span = self.advance().span(); // consume '::'
+                    let tail_span = self.consume_type_pattern_tail();
+                    bad_span = bad_span.merge(tail_span.unwrap_or(double_colon_span));
+                }
                 let guard_example = if name == "true" {
                     "v =:= true"
                 } else {
@@ -3476,7 +3488,7 @@ mod tests {
 
     #[test]
     fn parse_constructor_binding_type_annotation_rejected_with_single_diagnostic() {
-        let (_module, diags) =
+        let (module, diags) =
             parse_source("r match: [Result ok: x :: Integer -> x; Result error: _ -> 0]");
         assert_eq!(
             diags.len(),
@@ -3490,13 +3502,6 @@ mod tests {
             "unexpected diagnostic message: {:?}",
             diags[0].message
         );
-    }
-
-    #[test]
-    fn parse_constructor_binding_type_annotation_recovers_as_wildcard() {
-        let (module, diags) =
-            parse_source("r match: [Result ok: x :: Integer -> x; Result error: _ -> 0]");
-        assert_eq!(diags.len(), 1, "expected one diagnostic: {diags:?}");
         let Expression::Match { arms, .. } = &module.expressions[0].expression else {
             panic!("expected Expression::Match");
         };
@@ -3510,6 +3515,25 @@ mod tests {
             matches!(ok_kw[0].1, Pattern::Wildcard(_)),
             "expected 'x :: Integer' binding to recover as Pattern::Wildcard, got: {:?}",
             ok_kw[0].1
+        );
+    }
+
+    #[test]
+    fn parse_constructor_binding_bare_true_type_annotation_rejected_with_single_diagnostic() {
+        // BT-2885 follow-up (Claude review on #2998): the `true`/`false` arm
+        // has the same "trailing `:: ClassName` cascades" bug as the plain
+        // identifier arm above — `true :: Boolean` must consume the tail
+        // rather than leaving it to cascade into a second diagnostic.
+        let (_module, diags) = parse_source("x match: [Result ok: true :: Boolean -> 0; _ -> 1]");
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic (no cascade), got: {diags:?}"
+        );
+        assert!(
+            diags[0].message.contains("bare 'true'"),
+            "unexpected diagnostic message: {:?}",
+            diags[0].message
         );
     }
 
