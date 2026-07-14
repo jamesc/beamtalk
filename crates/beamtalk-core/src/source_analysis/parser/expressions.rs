@@ -1999,12 +1999,50 @@ impl Parser {
 
     /// Parses the binding position of a constructor pattern argument.
     ///
-    /// Accepts: wildcard `_`, variable identifier, or a literal (integer, float, string, symbol,
-    /// or negative number like `-1`).
+    /// Accepts: wildcard `_`, variable identifier, `nil` (the `Pattern::Nil`
+    /// literal — BT-2884), or a literal (integer, float, string, symbol, or
+    /// negative number like `-1`). Bare `true`/`false` are rejected with a
+    /// diagnostic (BT-2884) rather than parsed as a variable binding — see
+    /// the dedicated match arm below for why.
     fn parse_constructor_binding(&mut self) -> Pattern {
         match self.current_kind() {
             TokenKind::Identifier(name) if name.as_str() == "_" => {
                 Pattern::Wildcard(self.advance().span())
+            }
+            // `nil` binding (BT-2884): mirrors `parse_pattern`'s top-level
+            // `nil` handling — `nil` is a reserved identifier, not a plain
+            // variable name, so `Result ok: nil` must test the wrapped value
+            // *is* nil (`Pattern::Nil`), not bind a variable named `nil`
+            // that matches unconditionally. Unlike top-level `nil`, no `::
+            // ClassName` tail is accepted here — type patterns aren't
+            // supported nested inside a constructor pattern at all (see
+            // `generate_pattern`'s `Pattern::Type` codegen restriction), so
+            // there's nothing to consume-and-reject.
+            TokenKind::Identifier(name) if name.as_str() == "nil" => {
+                Pattern::Nil(self.advance().span())
+            }
+            // Bare `true`/`false` binding (BT-2884, sibling to BT-2883's
+            // top-level fix): falling through to the generic variable-binding
+            // arm below would silently parse `Result ok: true` as
+            // `Pattern::Variable(Identifier{name: "true"})` — an
+            // unconditional catch-all that matches *any* wrapped value, not
+            // a boolean-literal test. Unlike the top-level fix, the
+            // diagnostic here can't point at `x :: True`/`x :: False`
+            // (`Pattern::Type` has no codegen when nested inside a
+            // constructor pattern — see `generate_pattern`), so it points at
+            // the guard-clause idiom instead, which is already supported
+            // (`Result ok: v when: [v]`).
+            TokenKind::Identifier(name) if name.as_str() == "true" || name.as_str() == "false" => {
+                let name = name.clone();
+                let bad_span = self.advance().span();
+                let guard_example = if name == "true" { "v" } else { "v not" };
+                self.diagnostics.push(Diagnostic::error(
+                    format!(
+                        "bare '{name}' in a constructor pattern binding always matches — it binds any value to a variable named '{name}', it does not test for the boolean literal '{name}' (bind a variable and test it in a guard clause instead, e.g. 'Result ok: v when: [{guard_example}]')"
+                    ),
+                    bad_span,
+                ));
+                Pattern::Wildcard(bad_span)
             }
             TokenKind::Identifier(_) => {
                 let token = self.advance();
