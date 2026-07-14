@@ -1213,6 +1213,94 @@ fn test_match_type_pattern_dynamic_supervisor_subclass_uses_tuple_tag_check_and_
 }
 
 #[test]
+fn test_match_type_pattern_actor_subclass_resolves_through_cross_file_stub_chain() {
+    // BT-2882: `LeafActor`'s superclass `MidActor` is *not* declared
+    // anywhere in this compilation unit — only `LeafActor subclass:`
+    // itself is parsed here. `MidActor` and its own superclass `BaseActor`
+    // are supplied purely as `add_external_superclasses` stubs (simulating
+    // both ancestors living in separate files), exactly the multi-hop
+    // shape `class_superclass_index` produces from a whole-project Pass 1.
+    // `is_actor_subclass` must still walk stub -> stub -> builtin `Actor`
+    // and dispatch to the actor tuple-tag strategy, not silently fall back
+    // to the tagged-map strategy that would never match a live actor.
+    let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      c :: LeafActor -> c;\n      _ -> \"none\"\n    ]\n\nMidActor subclass: LeafActor\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+
+    let mut superclass_index = std::collections::HashMap::new();
+    superclass_index.insert("MidActor".to_string(), "BaseActor".to_string());
+    superclass_index.insert("BaseActor".to_string(), "Actor".to_string());
+
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("leaf_actor").with_class_superclass_index(superclass_index),
+    )
+    .expect("codegen should succeed");
+
+    eprintln!("Generated code for cross-file actor type pattern match:\n{code}");
+
+    assert!(
+        code.contains("'erlang':'is_tuple'"),
+        "Actor-class type pattern should test is_tuple even through a cross-file stub chain. \
+         Got:\n{code}"
+    );
+    assert!(
+        code.contains("'beamtalk_object'"),
+        "Actor-class type pattern should check the 'beamtalk_object' tag even through a \
+         cross-file stub chain. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'LeafActor'"),
+        "Actor-class type pattern should match the class name atom. Got:\n{code}"
+    );
+
+    crate::test_helpers::assert_compiles_through_erlc("leaf_actor", &code);
+}
+
+#[test]
+fn test_match_type_pattern_supervisor_subclass_resolves_through_cross_file_stub_chain() {
+    // BT-2882: same concern as the actor test above, for the Supervisor
+    // strategy. `LeafSupervisor`'s superclass `MidSupervisor` and *its*
+    // superclass `BaseSupervisor` are both supplied only as cross-file
+    // stubs — neither is declared in this compilation unit. If
+    // `is_supervisor_subclass` failed to walk through two stub hops, this
+    // would silently fall back to the tagged-map strategy, which never
+    // matches a live supervisor reference (a 4-tuple).
+    let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      s :: LeafSupervisor -> s;\n      _ -> \"none\"\n    ]\n\nMidSupervisor subclass: LeafSupervisor\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+
+    let mut superclass_index = std::collections::HashMap::new();
+    superclass_index.insert("MidSupervisor".to_string(), "BaseSupervisor".to_string());
+    superclass_index.insert("BaseSupervisor".to_string(), "Supervisor".to_string());
+
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("leaf_supervisor").with_class_superclass_index(superclass_index),
+    )
+    .expect("codegen should succeed");
+
+    eprintln!("Generated code for cross-file supervisor type pattern match:\n{code}");
+
+    assert!(
+        code.contains("'erlang':'is_tuple'"),
+        "Supervisor-class type pattern should test is_tuple even through a cross-file stub \
+         chain. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'beamtalk_supervisor'"),
+        "Supervisor-class type pattern should check the 'beamtalk_supervisor' tag even through \
+         a cross-file stub chain. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'LeafSupervisor'"),
+        "Supervisor-class type pattern should match the class name atom. Got:\n{code}"
+    );
+
+    crate::test_helpers::assert_compiles_through_erlc("leaf_supervisor", &code);
+}
+
+#[test]
 fn test_match_type_pattern_dictionary_and_tagged_class_arms_interleave_in_one_case() {
     // `Dictionary` and an exact tagged class both use an `is_map`-based
     // strategy; a `match:` mixing the two must still compile into one
