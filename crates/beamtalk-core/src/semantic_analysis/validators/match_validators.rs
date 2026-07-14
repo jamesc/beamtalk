@@ -226,6 +226,38 @@ const PHASE_A_PRIMITIVE_CLASSES: &[&str] = &[
     "Symbol",
 ];
 
+/// BT-2856 / ADR 0107 Phase A: is `class_name` a concrete, exhaustively
+/// enumerable leaf class in the exact sense `Pattern::Type` patterns already
+/// require — the identical leaf check `validate_type_pattern_class`'s
+/// "has subclasses" compile error enforces below, factored out so the
+/// `Nil`/`Type`-pattern exhaustiveness residual computation in
+/// `type_checker::inference` (`is_closed_leaf_type_union`) can never disagree
+/// with what a `Type` pattern arm is legally allowed to test: a class this
+/// function accepts is always one a `binding :: class_name` arm could
+/// legally appear in, and vice versa.
+///
+/// `Character` is excluded (shares `Integer`'s runtime representation, no
+/// distinguishing tag — see `validate_type_pattern_class`'s doc), and an
+/// unresolved class name is conservatively rejected (an exhaustiveness
+/// *gate* must not assume open-world unknowns are closed).
+pub(crate) fn is_concrete_leaf_class(class_name: &str, hierarchy: &ClassHierarchy) -> bool {
+    if class_name == "Character" {
+        return false;
+    }
+    if PHASE_A_PRIMITIVE_CLASSES.contains(&class_name) {
+        return true;
+    }
+    if !hierarchy.has_class(class_name) {
+        return false;
+    }
+    if hierarchy.is_supervisor_subclass(class_name)
+        || hierarchy.is_dynamic_supervisor_subclass(class_name)
+    {
+        return false;
+    }
+    hierarchy.direct_subclasses(class_name).is_empty()
+}
+
 /// BT-2854 / ADR 0107 Phase A: validate the class name in every
 /// `Pattern::Type` (`binding :: ClassName`) arm of a `match:` expression,
 /// including type patterns nested inside container patterns (`Tuple`,

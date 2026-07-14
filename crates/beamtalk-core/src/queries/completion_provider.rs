@@ -2593,4 +2593,33 @@ mod tests {
             "Real class should not be overwritten by protocol entry"
         );
     }
+    #[test]
+    fn completions_in_match_pattern_position_include_nil_keyword() {
+        // `nil` is a valid pattern-position keyword in `match:` arms (BT-2854,
+        // ADR 0107) — surface parity with other pattern completions (BT-2857).
+        let source = "x match: [\n  \n]";
+        let completions = completions_at(source, Position::new(1, 2));
+        assert!(
+            completions
+                .iter()
+                .any(|c| c.label == "nil" && matches!(c.kind, CompletionKind::Keyword)),
+            "Expected 'nil' keyword completion inside a match: pattern position"
+        );
+    }
+    #[test]
+    fn completions_after_double_colon_in_pattern_include_class_names() {
+        // `::` in pattern position (`binding :: ClassName`, BT-2855, ADR 0107)
+        // is a valid completion trigger — class names should be suggested,
+        // the same way they already are after `Constructor` pattern names.
+        let source = "x match: [\n  s :: \n]";
+        let completions = completions_at(source, Position::new(1, 7));
+        assert!(
+            completions.iter().any(|c| c.label == "String"),
+            "Expected 'String' class-name completion after '::' in pattern position"
+        );
+        assert!(
+            completions.iter().any(|c| c.label == "Integer"),
+            "Expected 'Integer' class-name completion after '::' in pattern position"
+        );
+    }
 }

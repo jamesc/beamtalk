@@ -18,6 +18,7 @@ use crate::ast::{
     TypeAnnotation,
 };
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
+use crate::semantic_analysis::validators::is_concrete_leaf_class;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::{EcoString, eco_format};
 
@@ -712,7 +713,12 @@ impl TypeChecker {
                 // downstream selector validation.
                 let unwrapped_target = unwrap_parens(cascade_target);
                 let is_class_ref = matches!(unwrapped_target, Expression::ClassReference { .. });
-                let is_class_side_send = Self::is_class_side_receiver(cascade_target, env);
+                // ADR 0083 / BT-2879: a Meta-typed cascade target (`someVar ::
+                // SomeClass class`) is also class-side for block-param
+                // propagation purposes, mirroring `infer_generic_send_args`'s
+                // `is_class_side` computation (~line 1241).
+                let is_class_side_send = Self::is_class_side_receiver(cascade_target, env)
+                    || matches!(dispatch_ty, InferredType::Meta { .. });
                 for msg in messages {
                     let selector_name = msg.selector.name();
                     // BT-2845: capture the inferred argument types so every
@@ -743,8 +749,64 @@ impl TypeChecker {
                                 Some(&msg.arguments),
                                 Some(env),
                             );
+                            // BT-2850: ADR 0104 Phase 2 (BT-2750) `C spawnWith:
+                            // #{...}` literal-map key check, mirroring the
+                            // ClassReference branch of
+                            // `infer_message_send_with_receiver_ty` — otherwise
+                            // a cascade's non-first `spawnWith:` message skips
+                            // typo-suggestion checking entirely.
+                            self.check_spawn_with_map_keys(
+                                &name.name,
+                                &selector_name,
+                                &msg.arguments,
+                                hierarchy,
+                            );
                             self.check_class_side_send(
                                 &name.name,
+                                &selector_name,
+                                msg.span,
+                                hierarchy,
+                                &[], // cascade return type is receiver, not send result
+                            );
+                        }
+                    } else if let InferredType::Meta {
+                        class_name: ref meta_class,
+                        ..
+                    } = dispatch_ty
+                    {
+                        // ADR 0083 / BT-2879: cascade continuation messages on
+                        // a Meta-typed receiver (`someVar :: SomeClass class`)
+                        // dispatch class-side exactly like a syntactic class
+                        // reference, mirroring `infer_message_send_with_receiver_ty`'s
+                        // `Meta` branch (~line 1541). This branch was entirely
+                        // missing — BT-2850 fixed the ClassReference and
+                        // self-in-class-method branches the cascade loop
+                        // already handled, but the Meta branch never existed
+                        // here, so these sends silently skipped
+                        // `check_argument_types` and `check_spawn_with_map_keys`.
+                        let is_equality = matches!(
+                            msg.selector,
+                            MessageSelector::Binary(ref op) if is_equality_comparison_op(op)
+                        );
+                        if !is_equality && selector_name != "class" {
+                            self.check_argument_types(
+                                meta_class,
+                                &selector_name,
+                                &arg_types,
+                                msg.span,
+                                hierarchy,
+                                true,
+                                Some(&msg.arguments),
+                                Some(env),
+                            );
+                            self.check_spawn_with_map_keys(
+                                meta_class,
+                                &selector_name,
+                                &msg.arguments,
+                                hierarchy,
+                            );
+                            self.check_class_side_send(
+                                meta_class,
                                 &selector_name,
                                 msg.span,
                                 hierarchy,
@@ -764,6 +826,18 @@ impl TypeChecker {
                                     Some(&msg.arguments),
                                     Some(env),
                                 );
+                                // BT-2850: ADR 0104 Phase 2 (BT-2750)
+                                // `spawnWith: #{...}` literal-map key check,
+                                // mirroring the Meta-typed-receiver branch of
+                                // `infer_message_send_with_receiver_ty` (this
+                                // branch is the cascade's equivalent — `self`
+                                // dispatch inside a class method).
+                                self.check_spawn_with_map_keys(
+                                    class_name,
+                                    &selector_name,
+                                    &msg.arguments,
+                                    hierarchy,
+                                );
                                 self.check_class_side_send(
                                     class_name,
                                     &selector_name,
@@ -773,27 +847,30 @@ impl TypeChecker {
                                 );
                             }
                         } else {
-                            // Skip argument type check for binary messages in
-                            // cascade continuations. `check_binary_operand_types`
-                            // is never called here (it only runs for the first
-                            // cascade send via `infer_message_send_with_receiver_ty`),
-                            // so unlike the non-cascade path this unconditionally
-                            // drops argument checking for binary sends — including
-                            // Union arguments, which BT-2843 made the non-cascade
-                            // path check via the `binary_operand_check_ran` fallback.
-                            // Pre-existing gap, tracked as BT-2871.
-                            if !matches!(msg.selector, MessageSelector::Binary(_)) {
-                                self.check_argument_types(
-                                    class_name,
-                                    &selector_name,
-                                    &arg_types,
-                                    msg.span,
-                                    hierarchy,
-                                    false,
-                                    Some(&msg.arguments),
-                                    Some(env),
-                                );
-                            }
+                            // BT-2871: unlike the non-cascade path in
+                            // `infer_message_send_with_receiver_ty`,
+                            // `check_binary_operand_types` never runs for
+                            // cascade continuation messages (it's only called
+                            // for the first message of a send/cascade), so
+                            // there is no more-specific-wording path to defer
+                            // to here. Always fall back to the generic
+                            // `check_argument_types` for binary continuation
+                            // messages too — this is the "simpler" option
+                            // from BT-2871's AC: `check_binary_operand_types`'s
+                            // only value-add over `check_argument_types` is
+                            // more specific wording for arithmetic/comparison/
+                            // concat, not broader coverage, so skipping it
+                            // here only loses phrasing, not correctness.
+                            self.check_argument_types(
+                                class_name,
+                                &selector_name,
+                                &arg_types,
+                                msg.span,
+                                hierarchy,
+                                false,
+                                Some(&msg.arguments),
+                                Some(env),
+                            );
                             self.check_instance_selector(
                                 class_name,
                                 &selector_name,
@@ -848,9 +925,14 @@ impl TypeChecker {
                 // pattern-based sealed-constructor check, which still runs
                 // separately in `validators::match_validators`.
                 if *exhaustive {
-                    self.check_asserted_match_exhaustiveness(&scrutinee_ty, arms, *span);
+                    self.check_asserted_match_exhaustiveness(&scrutinee_ty, arms, *span, hierarchy);
                 } else {
-                    self.check_singleton_match_exhaustiveness(&scrutinee_ty, arms, *span);
+                    self.check_singleton_match_exhaustiveness(
+                        &scrutinee_ty,
+                        arms,
+                        *span,
+                        hierarchy,
+                    );
                 }
 
                 // BT-2854 / ADR 0107 Phase A: a `nil` arm narrows the
@@ -1179,6 +1261,45 @@ impl TypeChecker {
         )
     }
 
+    /// Infer argument types via the generic block-context path (BT-2158
+    /// class-side detection + [`Self::infer_args_with_block_context`]).
+    ///
+    /// This is the fallback used by [`Self::infer_message_send_with_receiver_ty`]
+    /// for any selector that doesn't get bespoke narrowing/block-parameter
+    /// treatment above it (`ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`, `on:do:`,
+    /// `ifNil:`/`ifNotNil:` variants, and `notNil and:` — BT-2872). Factored
+    /// out so both the plain "no special case matched" branch and the
+    /// `notNil and:` branch's own fallback (when the narrowing match
+    /// unexpectedly has no argument to narrow) share one implementation.
+    #[allow(clippy::too_many_arguments)] // mirrors infer_args_with_block_context's shape
+    fn infer_generic_send_args(
+        &mut self,
+        arguments: &[Expression],
+        receiver: &Expression,
+        receiver_ty: &InferredType,
+        selector_name: &str,
+        hierarchy: &ClassHierarchy,
+        env: &mut TypeEnv,
+        in_abstract_method: bool,
+    ) -> Vec<InferredType> {
+        // BT-2158: detect class-side sends so block-param propagation
+        // uses `find_class_method` instead of `find_method`. Shares the
+        // helper with the downstream `is_class_side_receiver` check below.
+        // ADR 0083: a metatype-typed receiver (`Meta{C}`) is also class-side
+        // — its block params should resolve against `C`'s class methods.
+        let is_class_side = Self::is_class_side_receiver(receiver, env)
+            || matches!(receiver_ty, InferredType::Meta { .. });
+        self.infer_args_with_block_context(
+            arguments,
+            receiver_ty,
+            selector_name,
+            hierarchy,
+            env,
+            in_abstract_method,
+            is_class_side,
+        )
+    }
+
     /// Variant of [`Self::infer_message_send`] that takes a pre-computed receiver
     /// type, avoiding a second walk of the receiver subtree.
     ///
@@ -1275,22 +1396,41 @@ impl TypeChecker {
                 env,
                 in_abstract_method,
             )
+        } else if let (true, Some(var_key), Some(arg)) = (
+            selector_name == "and:",
+            Self::detect_not_nil_and_narrowing(receiver),
+            arguments.first(),
+        ) {
+            // BT-2872: `X notNil and: [...]` narrows `X` to non-nil inside the
+            // block argument. Unlike the `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`
+            // narrowing table (which narrows to a statically known branch
+            // type), the non-nil type here depends on `X`'s current type in
+            // `env`, so it's resolved here rather than through `NarrowingInfo`.
+            // Because `TypeEnv::child()` clones the whole binding map instead
+            // of layering scopes, nested sends inside the block — including
+            // further `and:` chains and binary-message argument positions
+            // like `5 >= local` in `local > 0 and: [5 >= local]` — see the
+            // narrowed type too, closing the gap where only receiver
+            // positions were narrowed.
+            let current_ty = Self::resolve_narrowing_variable_type(&var_key, env, hierarchy);
+            let non_nil_ty = Self::non_nil_type(&current_ty);
+            vec![self.infer_block_with_narrowing(
+                arg,
+                &var_key,
+                &non_nil_ty,
+                hierarchy,
+                env,
+                in_abstract_method,
+            )]
         } else {
-            // BT-2158: detect class-side sends so block-param propagation
-            // uses `find_class_method` instead of `find_method`. Shares the
-            // helper with the downstream `is_class_side_receiver` check below.
-            // ADR 0083: a metatype-typed receiver (`Meta{C}`) is also class-side
-            // — its block params should resolve against `C`'s class methods.
-            let is_class_side = Self::is_class_side_receiver(receiver, env)
-                || matches!(receiver_ty, InferredType::Meta { .. });
-            self.infer_args_with_block_context(
+            self.infer_generic_send_args(
                 arguments,
+                receiver,
                 &receiver_ty,
                 &selector_name,
                 hierarchy,
                 env,
                 in_abstract_method,
-                is_class_side,
             )
         };
 
@@ -2572,6 +2712,36 @@ impl TypeChecker {
         narrowing::detect(receiver)
     }
 
+    /// Detect `X notNil` as the receiver of `and:` (BT-2872).
+    ///
+    /// Deliberately separate from the [`narrowing::rules::RULES`] table:
+    /// that table only fires for `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` and
+    /// narrows to a *statically known* branch type baked into
+    /// [`NarrowingInfo`]. Here the "non-nil" branch type depends on `X`'s
+    /// current type in `env` (e.g. `Integer | Nil` → `Integer`), so the
+    /// caller resolves it live via [`Self::non_nil_type`] instead of
+    /// threading it through `NarrowingInfo`.
+    ///
+    /// Returns the narrowed variable's [`EnvKey`] when the receiver is
+    /// exactly `<identifier-or-self.field> notNil`; `None` for any other
+    /// shape (including `and:` sends whose receiver isn't a `notNil` test —
+    /// those fall back to the generic block-context inference).
+    fn detect_not_nil_and_narrowing(receiver: &Expression) -> Option<EnvKey> {
+        let receiver = unwrap_parens(receiver);
+        let Expression::MessageSend {
+            receiver: inner_recv,
+            selector,
+            ..
+        } = receiver
+        else {
+            return None;
+        };
+        if selector.well_known() != Some(crate::ast::WellKnownSelector::NotNil) {
+            return None;
+        }
+        extract_variable_name(inner_recv)
+    }
+
     /// Refines a `respondsTo:` narrowing from `Dynamic` to a protocol type
     /// when the protocol registry is available and exactly one protocol
     /// requires the tested selector (ADR 0068 Phase 2e, BT-1833).
@@ -2984,6 +3154,53 @@ impl TypeChecker {
         )))
     }
 
+    /// BT-2856 / ADR 0107 Phase A: `true` when `ty` is a closed union eligible
+    /// for `Nil`/`Type`-pattern exhaustiveness — a closed `Known | Nil` union,
+    /// or (more generally) a small closed union whose every member is either
+    /// the `nil` class (`UndefinedObject`) or a concrete leaf class in the
+    /// exact sense a `Type` pattern arm is already restricted to
+    /// ([`is_concrete_leaf_class`](crate::semantic_analysis::validators::is_concrete_leaf_class) —
+    /// the same check `validate_type_pattern_class`'s "has subclasses"
+    /// compile error enforces, factored out so the two mechanisms can never
+    /// disagree about which classes are "closed").
+    ///
+    /// Disjoint from [`is_closed_singleton_union`](Self::is_closed_singleton_union)
+    /// by construction: `is_concrete_leaf_class` never accepts a `#`-prefixed
+    /// name, so a bare-symbol union is never also recognised here (and vice
+    /// versa) — call sites check the singleton gate first, this one second.
+    fn is_closed_leaf_type_union(ty: &InferredType, hierarchy: &ClassHierarchy) -> bool {
+        matches!(ty, InferredType::Union { members, .. }
+        if !members.is_empty() && members.iter().all(|m| matches!(
+            m,
+            InferredType::Known { class_name, type_args, .. }
+                if type_args.is_empty()
+                    && (class_name.as_str() == WellKnownClass::UndefinedObject.as_str()
+                        || is_concrete_leaf_class(class_name, hierarchy))
+        )))
+    }
+
+    /// BT-2856 / ADR 0107 Phase A: `true` when at least one arm is an
+    /// (guarded or unguarded) `nil` or `Type` pattern.
+    ///
+    /// This is the second half of the gate alongside
+    /// [`is_closed_leaf_type_union`](Self::is_closed_leaf_type_union) —
+    /// required so a `match:`/`matchExhaustive:` that merely *happens* to
+    /// have a closed-leaf-class-union scrutinee, but whose arms are ordinary
+    /// symbol/literal patterns unrelated to that union (a match that could
+    /// never be exhaustive in the first place, and was never gated by this
+    /// mechanism before it existed), does not newly start warning/erroring.
+    /// Without this second gate, e.g. `x :: Integer | String; x match:
+    /// [#north -> ...]` would flip from silent (nothing here has ever been
+    /// closed-union-checkable) to "non-exhaustive: `Integer`, `String` are
+    /// not handled" — technically true, but out of this feature's scope
+    /// (BT-2745/ADR-0106's existing symbol-union/`Result` behaviour must stay
+    /// unaffected) and not something the programmer asked this `match:` to
+    /// prove.
+    fn arms_use_nil_or_type_pattern(arms: &[MatchArm]) -> bool {
+        arms.iter()
+            .any(|arm| matches!(arm.pattern, Pattern::Nil(_) | Pattern::Type { .. }))
+    }
+
     /// BT-2745 / ADR 0102 §4: advisory `match:` exhaustiveness for
     /// singleton-union scrutinees.
     ///
@@ -3017,12 +3234,18 @@ impl TypeChecker {
         scrutinee_ty: &InferredType,
         arms: &[MatchArm],
         match_span: Span,
+        hierarchy: &ClassHierarchy,
     ) {
-        if !Self::is_closed_singleton_union(scrutinee_ty) {
+        let residual = if Self::is_closed_singleton_union(scrutinee_ty) {
+            Self::singleton_match_residual(scrutinee_ty, arms)
+        } else if Self::is_closed_leaf_type_union(scrutinee_ty, hierarchy)
+            && Self::arms_use_nil_or_type_pattern(arms)
+        {
+            Self::nil_or_type_match_residual(scrutinee_ty, arms, hierarchy)
+        } else {
             return;
-        }
-        let Some((residual_display, missing)) = Self::singleton_match_residual(scrutinee_ty, arms)
-        else {
+        };
+        let Some((residual_display, missing)) = residual else {
             return;
         };
         let missing_str = Self::format_missing_members(&missing);
@@ -3073,31 +3296,39 @@ impl TypeChecker {
         scrutinee_ty: &InferredType,
         arms: &[MatchArm],
         match_span: Span,
+        hierarchy: &ClassHierarchy,
     ) {
-        if !Self::is_closed_singleton_union(scrutinee_ty) {
+        let residual = if Self::is_closed_singleton_union(scrutinee_ty) {
+            Self::singleton_match_residual(scrutinee_ty, arms)
+        } else if Self::is_closed_leaf_type_union(scrutinee_ty, hierarchy)
+            && Self::arms_use_nil_or_type_pattern(arms)
+        {
+            Self::nil_or_type_match_residual(scrutinee_ty, arms, hierarchy)
+        } else {
             let ty_display = scrutinee_ty.display_for_diagnostic().unwrap_or_default();
             self.diagnostics.push(
                 Diagnostic::error(
                     format!(
                         "cannot verify `matchExhaustive:` is exhaustive — scrutinee type \
-                         `{ty_display}` is not a closed union of symbol singletons"
+                         `{ty_display}` is not a closed union of symbol singletons, \
+                         `nil`, or concrete leaf classes"
                     ),
                     match_span,
                 )
                 .with_hint(
                     "matchExhaustive: only proves exhaustiveness over a closed union of \
-                     `#symbol` singletons (e.g. `x :: #north | #south`). Annotate the \
-                     scrutinee with such a type, or use `match:` if exhaustiveness cannot \
-                     be guaranteed statically."
+                     `#symbol` singletons (e.g. `x :: #north | #south`), or a closed \
+                     `Known | Nil` union covered by `nil`/`Type` patterns (e.g. \
+                     `x :: String | Nil`). Annotate the scrutinee with such a type, or use \
+                     `match:` if exhaustiveness cannot be guaranteed statically."
                         .to_string(),
                 )
                 .with_category(DiagnosticCategory::Type),
             );
             return;
-        }
+        };
 
-        let Some((residual_display, missing)) = Self::singleton_match_residual(scrutinee_ty, arms)
-        else {
+        let Some((residual_display, missing)) = residual else {
             return;
         };
         let missing_str = Self::format_missing_members(&missing);
@@ -3172,22 +3403,106 @@ impl TypeChecker {
         if matches!(residual, InferredType::Never) {
             return None;
         }
+        Some(Self::residual_missing(&residual))
+    }
 
+    /// BT-2856 / ADR 0107 Phase A: shared residual computation for `nil`/
+    /// `Type`-pattern coverage over a closed `Known | Nil` union or a small
+    /// closed union of concrete leaf classes (see
+    /// [`is_closed_leaf_type_union`](Self::is_closed_leaf_type_union), which
+    /// callers must already have checked). Structurally mirrors
+    /// [`singleton_match_residual`](Self::singleton_match_residual) — same
+    /// unguarded-wildcard/variable-binding full-coverage rule, same
+    /// guarded-arm-does-not-count rule — but collects covered members from
+    /// unguarded `Pattern::Nil` and `Pattern::Type` arms instead of `#symbol`
+    /// literal arms, and passes `hierarchy` into `difference` since the
+    /// covered members are nominal classes (subclass relationships matter),
+    /// unlike bare singletons.
+    ///
+    /// Returns `None` when the match is exhaustive, otherwise
+    /// `(residual_display, missing_members)` — identical shape to
+    /// `singleton_match_residual`'s result, so both share one caller-side
+    /// diagnostic-emission path.
+    fn nil_or_type_match_residual(
+        scrutinee_ty: &InferredType,
+        arms: &[MatchArm],
+        hierarchy: &ClassHierarchy,
+    ) -> Option<(EcoString, Vec<EcoString>)> {
+        // Same full-coverage rule as `singleton_match_residual`: an unguarded
+        // wildcard or variable-binding arm always matches.
+        if arms.iter().any(|arm| {
+            arm.guard.is_none()
+                && matches!(arm.pattern, Pattern::Wildcard(_) | Pattern::Variable(_))
+        }) {
+            return None;
+        }
+
+        // Collect covered members from unguarded `nil`/`Type` arms only — a
+        // guarded arm (`nil when: [cond] -> ...`, `s :: String when: [...] ->
+        // ...`) does not guarantee coverage, same rule as every other
+        // exhaustiveness check in this file.
+        let mut covered: Vec<InferredType> = Vec::new();
+        for arm in arms {
+            if arm.guard.is_some() {
+                continue;
+            }
+            match &arm.pattern {
+                Pattern::Nil(_) => {
+                    covered.push(InferredType::known(
+                        WellKnownClass::UndefinedObject.as_str(),
+                    ));
+                }
+                Pattern::Type { class, .. } => {
+                    covered.push(InferredType::known(class.name.clone()));
+                }
+                _ => {}
+            }
+        }
+
+        let provenance = super::TypeProvenance::Inferred(Span::default());
+        let covered_ty = InferredType::union_of(&covered);
+        // Unlike bare singletons, covered members here are nominal classes —
+        // pass `hierarchy` so `difference` can reason about subclass
+        // relationships (even though Phase A's leaf-only restriction means
+        // there is none to reason about yet; consistent with every other
+        // nominal-class `difference` call in this file).
+        let residual =
+            InferredType::difference(scrutinee_ty, &covered_ty, provenance, Some(hierarchy));
+
+        // `Never` residual ⇒ every member is covered ⇒ exhaustive.
+        if matches!(residual, InferredType::Never) {
+            return None;
+        }
+        Some(Self::residual_missing(&residual))
+    }
+
+    /// Shared "what's left over" extraction for both
+    /// [`singleton_match_residual`](Self::singleton_match_residual) and
+    /// [`nil_or_type_match_residual`](Self::nil_or_type_match_residual):
+    /// renders `residual` for the diagnostic message, and lists its member
+    /// class names — through
+    /// [`InferredType::class_name_for_diagnostic`], so a residual `Nil`
+    /// member (internally `UndefinedObject`) always renders as `Nil` in the
+    /// missing-members list, matching `residual_display`'s own rendering.
+    fn residual_missing(residual: &InferredType) -> (EcoString, Vec<EcoString>) {
         let residual_display = residual.display_for_diagnostic().unwrap_or_default();
-        let missing: Vec<EcoString> = match &residual {
+        let missing: Vec<EcoString> = match residual {
             InferredType::Union { members, .. } => members
                 .iter()
                 .filter_map(InferredType::as_known)
-                .cloned()
+                .map(|name| InferredType::class_name_for_diagnostic(name))
                 .collect(),
-            InferredType::Known { class_name, .. } => vec![class_name.clone()],
+            InferredType::Known { class_name, .. } => {
+                vec![InferredType::class_name_for_diagnostic(class_name)]
+            }
             // Not reachable in practice: `difference` over a union of bare
-            // singletons only ever normalises to `Never`, a single `Known`,
-            // or a `Union` of `Known`s — but stay conservative rather than
-            // panicking if the algebra's normal form ever changes.
+            // singletons or concrete classes only ever normalises to `Never`,
+            // a single `Known`, or a `Union` of `Known`s — but stay
+            // conservative rather than panicking if the algebra's normal form
+            // ever changes.
             _ => vec![],
         };
-        Some((residual_display, missing))
+        (residual_display, missing)
     }
 
     /// Formats a list of missing singleton member names as a

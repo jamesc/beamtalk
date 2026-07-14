@@ -197,7 +197,7 @@ get_pids_for_module(RegistryPid, ModuleName) ->
 %%% gen_server callbacks
 
 init([]) ->
-    logger:set_process_metadata(#{domain => [beamtalk, runtime]}),
+    beamtalk_logging_config:set_domain(runtime),
     {ok, #state{actors = #{}, monitors = #{}}}.
 
 handle_call({register, ActorPid, ClassName, ModuleName}, _From, State) ->

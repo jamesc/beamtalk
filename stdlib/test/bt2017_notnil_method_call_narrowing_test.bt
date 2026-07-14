@@ -5,67 +5,56 @@
 // Previously, `local := someObj method` where `method` returns `Integer | Nil`
 // produced Known("Integer | Nil") instead of Union([Integer, UndefinedObject]),
 // causing false binary-operand warnings.
+//
+// BT-2872: `local notNil and: [...]` narrows `local` to non-Nil for the rest
+// of the block, including doubly-nested block-argument positions of binary
+// sends (`5 >= local` inside `local > 0 and: [5 >= local]`), not just
+// receiver positions (`local > 0`). BT-2843 made binary-send argument
+// checking union-aware (matching pre-existing keyword-send behavior), which
+// had surfaced this as a false-positive `@expect type` diagnostic until the
+// `and:`-narrowing fix below.
 
 TestCase subclass: Bt2017NotNilMethodCallNarrowingTest
 
   // (a) local from parameter passthrough — always worked
-  //
-  // BT-2843: `local notNil and: [...]` only narrows `local` where it's the
-  // receiver of a further send (`local > 0`); it does NOT narrow `local`
-  // inside the doubly-nested block argument `[5 >= local]`, where `local` is
-  // the *argument* of `>=` rather than the receiver — there's no `and:`-aware
-  // narrowing of block-argument positions. BT-2843 made binary-send argument
-  // checking union-aware (matching the pre-existing keyword-send behavior),
-  // which now correctly flags this as statically unproven — even though it's
-  // runtime-safe due to `and:`'s short-circuit evaluation. Expected/suppressed
-  // pending dedicated `and:`-narrowing support — tracked as BT-2872.
   testParamPassthroughNotNil =>
     x :: Integer | Nil := 3
     local := x
-    @expect type
     result := (local notNil and: [
       local > 0 and: [5 >= local]
     ]) ifTrue: [true] ifFalse: [false]
     self assert: result equals: true
 
   // (b) local from literal nil — always worked
-  // same BT-2872 and:-narrowing gap, see testParamPassthroughNotNil
   testLiteralNilNotNil =>
     local :: Integer | Nil := nil
-    @expect type
     result := (local notNil and: [
       local > 0 and: [5 >= local]
     ]) ifTrue: [true] ifFalse: [false]
     self assert: result equals: false
 
   // (c) local from method call — was broken before BT-2017
-  // same BT-2872 and:-narrowing gap, see testParamPassthroughNotNil
   testMethodCallNotNil =>
     cfg := Bt2017NarrowCfg v: 3
     local := cfg v
-    @expect type
     result := (local notNil and: [
       local > 0 and: [5 >= local]
     ]) ifTrue: [true] ifFalse: [false]
     self assert: result equals: true
 
   // (c2) method call returning nil
-  // same BT-2872 and:-narrowing gap, see testParamPassthroughNotNil
   testMethodCallNotNilWithNil =>
     cfg := Bt2017NarrowCfg new
     local := cfg v
-    @expect type
     result := (local notNil and: [
       local > 0 and: [5 >= local]
     ]) ifTrue: [true] ifFalse: [false]
     self assert: result equals: false
 
   // (c3) method call returning out-of-range value
-  // same BT-2872 and:-narrowing gap, see testParamPassthroughNotNil
   testMethodCallNotNilOutOfRange =>
     cfg := Bt2017NarrowCfg v: 10
     local := cfg v
-    @expect type
     result := (local notNil and: [
       local > 0 and: [5 >= local]
     ]) ifTrue: [true] ifFalse: [false]

@@ -440,12 +440,17 @@
       "title": "Match Expression (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
+        "assign",
+        "assignment",
         "beamtalk-language-features",
         "exception",
+        "mutate",
+        "mutation",
         "raise",
+        "set",
         "throw"
       ],
-      "source": "// Basic match with literals\nx match: [1 -> \"one\"; 2 -> \"two\"; _ -> \"other\"]\n\n// Variable binding in patterns\n42 match: [n -> n + 1]\n// => 43\n\n// Symbol matching\nstatus match: [#ok -> \"success\"; #error -> \"failure\"; _ -> \"unknown\"]\n\n// String matching\ngreeting match: [\"hello\" -> \"hi\"; _ -> \"huh?\"]\n\n// Guard clauses with when:\nx match: [\n  n when: [n > 100] -> \"big\";\n  n when: [n > 10] -> \"medium\";\n  _ -> \"small\"\n]\n\n// Negative number patterns\ntemp match: [-1 -> \"minus one\"; 0 -> \"zero\"; _ -> \"other\"]\n\n// Match on computed expression\n(3 + 4) match: [7 -> \"correct\"; _ -> \"wrong\"]\n\n// Array destructuring in match arms (BT-1296)\n#[10, 20] match: [\n  #[h, t] -> h + t;\n  _ -> 0\n]\n// => 30\n\n// Dict/map destructuring in match arms (BT-1296)\n#{#event => \"click\", #x => 5} match: [\n  #{#event => evName} -> evName;\n  _ -> \"unknown\"\n]\n// => \"click\"\n\n// Nested array patterns\n#[#[1, 2], 3] match: [\n  #[#[a, b], c] -> a + b + c;\n  _ -> 0\n]\n// => 6\n\n// Constructor patterns (Result ok:/error: only in this release)\n(Result ok: 42) match: [\n  Result ok: v    -> v;\n  Result error: _ -> 0\n]\n// => 42",
+      "source": "// Basic match with literals\nx match: [1 -> \"one\"; 2 -> \"two\"; _ -> \"other\"]\n\n// Variable binding in patterns\n42 match: [n -> n + 1]\n// => 43\n\n// Symbol matching\nstatus match: [#ok -> \"success\"; #error -> \"failure\"; _ -> \"unknown\"]\n\n// String matching\ngreeting match: [\"hello\" -> \"hi\"; _ -> \"huh?\"]\n\n// Guard clauses with when:\nx match: [\n  n when: [n > 100] -> \"big\";\n  n when: [n > 10] -> \"medium\";\n  _ -> \"small\"\n]\n\n// Negative number patterns\ntemp match: [-1 -> \"minus one\"; 0 -> \"zero\"; _ -> \"other\"]\n\n// Match on computed expression\n(3 + 4) match: [7 -> \"correct\"; _ -> \"wrong\"]\n\n// Array destructuring in match arms (BT-1296)\n#[10, 20] match: [\n  #[h, t] -> h + t;\n  _ -> 0\n]\n// => 30\n\n// Dict/map destructuring in match arms (BT-1296)\n#{#event => \"click\", #x => 5} match: [\n  #{#event => evName} -> evName;\n  _ -> \"unknown\"\n]\n// => \"click\"\n\n// Nested array patterns\n#[#[1, 2], 3] match: [\n  #[#[a, b], c] -> a + b + c;\n  _ -> 0\n]\n// => 6\n\n// Constructor patterns (Result ok:/error: only in this release)\n(Result ok: 42) match: [\n  Result ok: v    -> v;\n  Result error: _ -> 0\n]\n// => 42\n\n// Nil pattern — matches nil exactly (BT-2854, ADR 0107)\nvalue := nil\nvalue match: [\n  nil -> \"was nil\";\n  s :: String -> s;\n  _ -> \"other\"\n]\n// => \"was nil\"\n\n// Type patterns — bind and test runtime class (BT-2855, ADR 0107)\nx := \"hello\"\nx match: [\n  nil -> \"nil\";\n  s :: String -> s size;\n  n :: Integer -> n + 1;\n  _ -> \"other\"\n]\n// => 5\n\n// Guard scoped over the type-pattern binding\nx := 42\nx match: [\n  n :: Integer when: [n > 100] -> \"big\";\n  n :: Integer -> \"small\";\n  _ -> \"other\"\n]\n// => \"small\"\n\n// Mixing type patterns with literal and wildcard patterns\nx := \"hi\"\nx match: [\n  nil -> 0;\n  s :: String -> s size;\n  _ -> -1\n]\n// => 2",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -494,7 +499,7 @@
         "raise",
         "throw"
       ],
-      "source": "x matchExhaustive: [#ok -> 1; _ -> 0]\n// ⛔ Error: cannot verify `matchExhaustive:` is exhaustive — scrutinee type\n//    `Dynamic` is not a closed union of symbol singletons",
+      "source": "x matchExhaustive: [#ok -> 1; _ -> 0]\n// ⛔ Error: cannot verify `matchExhaustive:` is exhaustive — scrutinee type\n//    `Dynamic` is not a closed union of symbol singletons, `nil`, or\n//    concrete leaf classes",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -11048,6 +11053,51 @@
       "explanation": "BT-1432: Tests early return (^) with super/tier2/self-dispatch values in Actor methods. These return tuples that must be unpacked correctly by the early return handler."
     },
     {
+      "id": "stdlib-test-actor-inherited-self-send-error-test",
+      "title": "ActorInheritedSelfSendErrorTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "ActorInheritedSelfSendErrorTest",
+        "TestCase",
+        "actor_inherited_self_send_error_test",
+        "assign",
+        "assignment",
+        "async",
+        "concurrent",
+        "extends",
+        "field",
+        "for each",
+        "for-each",
+        "forEach",
+        "gen_server",
+        "genserver",
+        "if not",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "iterate",
+        "iteration",
+        "loop",
+        "member",
+        "mutate",
+        "mutation",
+        "negation",
+        "object",
+        "process",
+        "property",
+        "set",
+        "setUp",
+        "subclassing",
+        "tearDown",
+        "testDirectInheritedCallRaisesRealError",
+        "testForwardedInheritedCallCarriesSelectorBreadcrumb",
+        "testForwardedInheritedCallMessageNamesSubclass",
+        "unless"
+      ],
+      "source": "// BT-2842: `generate_hierarchy_walk` unconditionally converted any\n// `{error, DispatchError}` returned by `beamtalk_dispatch:super/5` into a\n// fabricated does_not_understand, even when the selector *was* found and\n// invoked but raised a real error. Any inherited (non-overridden) method\n// reached via the runtime hierarchy walk therefore had its real error\n// silently replaced with a bogus DNU.\n//\n// Neither `triggerBadArithDirect` nor `triggerBadArithForwarded` is\n// overridden on InheritedSelfSendErrorChild, so both selectors resolve via\n// `beamtalk_dispatch:super/5`'s hierarchy walk (not Child's own local\n// dispatch/4 case statement) — exercising exactly the masked path.\n//\n// Contrast with actor_self_send_raw_error_test.bt, which covers the same\n// badarith trigger resolved via *local* dispatch (no hierarchy walk).\n//\n// Fixtures: stdlib/test/fixtures/inherited_self_send_error_base.bt,\n// stdlib/test/fixtures/inherited_self_send_error_child.bt\n\nTestCase subclass: ActorInheritedSelfSendErrorTest\n  field: c = nil\n\n  setUp => self withC: InheritedSelfSendErrorChild spawn\n\n  tearDown => self.c isNil ifFalse: [self.c stop]\n\n  testDirectInheritedCallRaisesRealError =>\n    // Single-hop, no self-send: triggerBadArithDirect is purely inherited\n    // (not overridden by Child), so it resolves via the hierarchy walk.\n    result := [self.c triggerBadArithDirect] on: TypeError do: [:e | e kind]\n    self assert: result equals: #type_error\n\n  testForwardedInheritedCallCarriesSelectorBreadcrumb =>\n    result := [\n      self.c triggerBadArithForwarded\n    ] on: TypeError do: [:e | e selector]\n    self assert: result equals: #triggerBadArithDirect\n\n  testForwardedInheritedCallMessageNamesSubclass =>\n    // The location prefix must name the runtime class (Child), not the\n    // superclass where the methods are defined (BT-2833's breadcrumb fix).\n    result := [\n      self.c triggerBadArithForwarded\n    ] on: TypeError do: [:e | e message]\n    self assert: (result includesSubstring: \"InheritedSelfSendErrorChild>>triggerBadArithDirect\") equals: true",
+      "explanation": "BT-2842: `generate_hierarchy_walk` unconditionally converted any `{error, DispatchError}` returned by `beamtalk_dispatch:super/5` into a fabricated does_not_understand, even when the selector *was* found and invoked but raised a real error. Any inherited (non-overridden) method reached via the runtime hierarchy walk therefore had its real error silently replaced with a bogus DNU.  Neither `triggerBadArithDirect` nor `triggerBadArithForwarded` is overridden on InheritedSelfSendErrorChild, so both selectors resolve via `beamtalk_dispatch:super/5`'s hierarchy walk (not Child's own local dispatch/4 case statement) — exercising exactly the masked path.  Contrast with actor_self_send_raw_error_test.bt, which covers the same badarith trigger resolved via *local* dispatch (no hierarchy walk).  Fixtures: stdlib/test/fixtures/inherited_self_send_error_base.bt, stdlib/test/fixtures/inherited_self_send_error_child.bt"
+    },
+    {
       "id": "stdlib-test-actor-inherited-selfsend-test",
       "title": "ActorInheritedSelfsendTest",
       "category": "stdlib-tests",
@@ -12943,8 +12993,8 @@
         "testParamPassthroughNotNil",
         "unless"
       ],
-      "source": "// BT-2017: notNil narrowing must work for locals bound from method calls.\n// Previously, `local := someObj method` where `method` returns `Integer | Nil`\n// produced Known(\"Integer | Nil\") instead of Union([Integer, UndefinedObject]),\n// causing false binary-operand warnings.\n\nTestCase subclass: Bt2017NotNilMethodCallNarrowingTest\n\n  // (a) local from parameter passthrough — always worked\n  //\n  // BT-2843: `local notNil and: [...]` only narrows `local` where it's the\n  // receiver of a further send (`local > 0`); it does NOT narrow `local`\n  // inside the doubly-nested block argument `[5 >= local]`, where `local` is\n  // the *argument* of `>=` rather than the receiver — there's no `and:`-aware\n  // narrowing of block-argument positions. BT-2843 made binary-send argument\n  // checking union-aware (matching the pre-existing keyword-send behavior),\n  // which now correctly flags this as statically unproven — even though it's\n  // runtime-safe due to `and:`'s short-circuit evaluation. Expected/suppressed\n  // pending dedicated `and:`-narrowing support — tracked as BT-2872.\n  testParamPassthroughNotNil =>\n    x :: Integer | Nil := 3\n    local := x\n    @expect type\n    result := (local notNil and: [\n      local > 0 and: [5 >= local]\n    ]) ifTrue: [true] ifFalse: [false]\n    self assert: result equals: true\n\n  // (b) local from literal nil — always worked\n  // same BT-2872 and:-narrowing gap, see testParamPassthroughNotNil\n  testLiteralNilNotNil =>\n    local :: Integer | Nil := nil\n    @expect type\n    result := (local notNil and: [\n      local > 0 and: [5 >= local]\n    ]) ifTrue: [true] ifFalse: [false]\n    self assert: result equals: false\n\n  // (c) local from method call — was broken before BT-2017\n  // same BT-2872 and:-narrowing gap, see testParamPassthroughNotNil\n  testMethodCallNotNil =>\n    cfg := Bt2017NarrowCfg v: 3\n    local := cfg v\n    @expect type\n    result := (local notNil and: [\n      local > 0 and: [5 >= local]\n    ]) ifTrue: [true] ifFalse: [false]\n    self assert: result equals: true\n\n  // (c2) method call returning nil\n  // same BT-2872 and:-narrowing gap, see testParamPassthroughNotNil\n  testMethodCallNotNilWithNil =>\n    cfg := Bt2017NarrowCfg new\n    local := cfg v\n    @expect type\n    result := (local notNil and: [\n      local > 0 and: [5 >= local]\n    ]) ifTrue: [true] ifFalse: [false]\n    self assert: result equals: false\n\n  // (c3) method call returning out-of-range value\n  // same BT-2872 and:-narrowing gap, see testParamPassthroughNotNil\n  testMethodCallNotNilOutOfRange =>\n    cfg := Bt2017NarrowCfg v: 10\n    local := cfg v\n    @expect type\n    result := (local notNil and: [\n      local > 0 and: [5 >= local]\n    ]) ifTrue: [true] ifFalse: [false]\n    self assert: result equals: false",
-      "explanation": "BT-2017: notNil narrowing must work for locals bound from method calls. Previously, `local := someObj method` where `method` returns `Integer | Nil` produced Known(\"Integer | Nil\") instead of Union([Integer, UndefinedObject]), causing false binary-operand warnings."
+      "source": "// BT-2017: notNil narrowing must work for locals bound from method calls.\n// Previously, `local := someObj method` where `method` returns `Integer | Nil`\n// produced Known(\"Integer | Nil\") instead of Union([Integer, UndefinedObject]),\n// causing false binary-operand warnings.\n//\n// BT-2872: `local notNil and: [...]` narrows `local` to non-Nil for the rest\n// of the block, including doubly-nested block-argument positions of binary\n// sends (`5 >= local` inside `local > 0 and: [5 >= local]`), not just\n// receiver positions (`local > 0`). BT-2843 made binary-send argument\n// checking union-aware (matching pre-existing keyword-send behavior), which\n// had surfaced this as a false-positive `@expect type` diagnostic until the\n// `and:`-narrowing fix below.\n\nTestCase subclass: Bt2017NotNilMethodCallNarrowingTest\n\n  // (a) local from parameter passthrough — always worked\n  testParamPassthroughNotNil =>\n    x :: Integer | Nil := 3\n    local := x\n    result := (local notNil and: [\n      local > 0 and: [5 >= local]\n    ]) ifTrue: [true] ifFalse: [false]\n    self assert: result equals: true\n\n  // (b) local from literal nil — always worked\n  testLiteralNilNotNil =>\n    local :: Integer | Nil := nil\n    result := (local notNil and: [\n      local > 0 and: [5 >= local]\n    ]) ifTrue: [true] ifFalse: [false]\n    self assert: result equals: false\n\n  // (c) local from method call — was broken before BT-2017\n  testMethodCallNotNil =>\n    cfg := Bt2017NarrowCfg v: 3\n    local := cfg v\n    result := (local notNil and: [\n      local > 0 and: [5 >= local]\n    ]) ifTrue: [true] ifFalse: [false]\n    self assert: result equals: true\n\n  // (c2) method call returning nil\n  testMethodCallNotNilWithNil =>\n    cfg := Bt2017NarrowCfg new\n    local := cfg v\n    result := (local notNil and: [\n      local > 0 and: [5 >= local]\n    ]) ifTrue: [true] ifFalse: [false]\n    self assert: result equals: false\n\n  // (c3) method call returning out-of-range value\n  testMethodCallNotNilOutOfRange =>\n    cfg := Bt2017NarrowCfg v: 10\n    local := cfg v\n    result := (local notNil and: [\n      local > 0 and: [5 >= local]\n    ]) ifTrue: [true] ifFalse: [false]\n    self assert: result equals: false",
+      "explanation": "BT-2017: notNil narrowing must work for locals bound from method calls. Previously, `local := someObj method` where `method` returns `Integer | Nil` produced Known(\"Integer | Nil\") instead of Union([Integer, UndefinedObject]), causing false binary-operand warnings.  BT-2872: `local notNil and: [...]` narrows `local` to non-Nil for the rest of the block, including doubly-nested block-argument positions of binary sends (`5 >= local` inside `local > 0 and: [5 >= local]`), not just receiver positions (`local > 0`). BT-2843 made binary-send argument checking union-aware (matching pre-existing keyword-send behavior), which had surfaced this as a false-positive `@expect type` diagnostic until the `and:`-narrowing fix below."
     },
     {
       "id": "stdlib-test-cast-send-test",
@@ -19039,6 +19089,48 @@
       "explanation": "BT-1951 / ADR 0078 — Phase 1 fixture. Parent actor class whose `initialize` forgets to set its own typed-no-default field. Spawning any subclass should fail with UninitializedStateError because the post-initialize check validates the inherited field too."
     },
     {
+      "id": "stdlib-test-fixtures-inherited-self-send-error-base",
+      "title": "InheritedSelfSendErrorBase",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Actor",
+        "InheritedSelfSendErrorBase",
+        "actor",
+        "async",
+        "concurrent",
+        "extends",
+        "gen_server",
+        "genserver",
+        "inherit",
+        "inheritance",
+        "inherited_self_send_error_base",
+        "process",
+        "subclassing",
+        "triggerBadArithDirect",
+        "triggerBadArithForwarded"
+      ],
+      "source": "// BT-2842: base class for a hierarchy-walk regression. A subclass instance\n// invoking `triggerBadArithForwarded` never overrides either method here, so\n// the call is resolved entirely through `beamtalk_dispatch:super/5`'s\n// hierarchy walk (see inherited_self_send_error_child.bt) rather than the\n// class's own local dispatch/4 case statement.\n//\n// See also: stdlib/test/fixtures/self_send_raw_error_actor.bt, which covers\n// the same badarith trigger for the *local* (non-hierarchy-walk) dispatch\n// path.\n\nActor subclass: InheritedSelfSendErrorBase\n\n  // Direct call: raises a raw badarith without any self-send forwarding hop.\n  triggerBadArithDirect => #(1, \"x\") sum\n\n  // Forwarded call: a plain self-send into the method that raises.\n  triggerBadArithForwarded => self triggerBadArithDirect",
+      "explanation": "BT-2842: base class for a hierarchy-walk regression. A subclass instance invoking `triggerBadArithForwarded` never overrides either method here, so the call is resolved entirely through `beamtalk_dispatch:super/5`'s hierarchy walk (see inherited_self_send_error_child.bt) rather than the class's own local dispatch/4 case statement.  See also: stdlib/test/fixtures/self_send_raw_error_actor.bt, which covers the same badarith trigger for the *local* (non-hierarchy-walk) dispatch path."
+    },
+    {
+      "id": "stdlib-test-fixtures-inherited-self-send-error-child",
+      "title": "InheritedSelfSendErrorChild",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "InheritedSelfSendErrorBase",
+        "InheritedSelfSendErrorChild",
+        "extends",
+        "inherit",
+        "inheritance",
+        "inherited_self_send_error_child",
+        "marker",
+        "object",
+        "subclassing"
+      ],
+      "source": "// BT-2842: subclass that inherits both `triggerBadArithDirect` and\n// `triggerBadArithForwarded` from InheritedSelfSendErrorBase without\n// overriding either. Neither selector is matched locally by Child's own\n// dispatch/4 case statement, so resolving them requires\n// `beamtalk_dispatch:super/5`'s hierarchy walk — the code path that\n// previously masked the raw badarith as a bogus does_not_understand.\n\nInheritedSelfSendErrorBase subclass: InheritedSelfSendErrorChild\n\n  marker => #child",
+      "explanation": "BT-2842: subclass that inherits both `triggerBadArithDirect` and `triggerBadArithForwarded` from InheritedSelfSendErrorBase without overriding either. Neither selector is matched locally by Child's own dispatch/4 case statement, so resolving them requires `beamtalk_dispatch:super/5`'s hierarchy walk — the code path that previously masked the raw badarith as a bogus does_not_understand."
+    },
+    {
       "id": "stdlib-test-fixtures-inheriting-counter",
       "title": "InheritingCounter",
       "category": "stdlib-fixtures",
@@ -24017,6 +24109,36 @@
       "explanation": "Tests the nil-testing protocol inherited from ProtoObject — isNil, notNil, ifNil:, ifNotNil:, ifNil:ifNotNil:, ifNotNil:ifNil: — on nil and non-nil values"
     },
     {
+      "id": "stdlib-test-nil-type-match-exhaustiveness-test",
+      "title": "NilTypeMatchExhaustivenessTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "NilTypeMatchExhaustivenessTest",
+        "TestCase",
+        "append",
+        "assign",
+        "assignment",
+        "concat",
+        "concatenate",
+        "extends",
+        "inherit",
+        "inheritance",
+        "mutate",
+        "mutation",
+        "nil_type_match_exhaustiveness_test",
+        "object",
+        "set",
+        "string join",
+        "subclassing",
+        "testAdvisoryMatchStillWorksAlongsideAssertedMatch",
+        "testFullNilAndTypeCoverageDispatchesNilArm",
+        "testFullNilAndTypeCoverageSatisfiesAssertedMatch",
+        "testWildcardSatisfiesAssertionAlongsideTypeArm"
+      ],
+      "source": "// BT-2856 / ADR 0107 Phase A: `nil`/`Type`-pattern exhaustiveness reaches\n// `matchExhaustive:` (BT-2763) and advisory `match:` (BT-2745).\n//\n// BUnit compiles with `--warnings-as-errors`, and both a genuinely\n// non-exhaustive `matchExhaustive:` (`Error`) and a non-exhaustive plain\n// `match:` (`Warning`, which `--warnings-as-errors` also turns fatal) would\n// fail to compile and take the whole suite down. Those failure cases are\n// therefore pinned at the Rust layer instead:\n//   crates/beamtalk-core/src/semantic_analysis/type_checker/tests/nil_type_match_exhaustiveness.rs\n//\n// What THIS file pins is that full `nil`/`Type` coverage compiles and\n// dispatches correctly end-to-end — mirroring\n// `asserted_match_exhaustiveness_test.bt` and `type_pattern_match_test.bt`,\n// the two sibling files this one composes.\n\nTestCase subclass: NilTypeMatchExhaustivenessTest\n\n  testFullNilAndTypeCoverageSatisfiesAssertedMatch =>\n    // `String | Nil`, both members covered by a `nil` arm and a `String`\n    // Type arm — matchExhaustive: is silently satisfied, and the match\n    // dispatches correctly at runtime.\n    raw :: String | Nil := \"hello\"\n    result := raw matchExhaustive: [\n      nil -> \"was nil\";\n      s :: String -> s size\n    ]\n    self assert: result equals: 5\n\n  testFullNilAndTypeCoverageDispatchesNilArm =>\n    raw :: String | Nil := nil\n    result := raw matchExhaustive: [\n      nil -> \"was nil\";\n      s :: String -> s size\n    ]\n    self assert: result equals: \"was nil\"\n\n  testWildcardSatisfiesAssertionAlongsideTypeArm =>\n    // An unguarded `_ ->` arm covers `nil` too — matchExhaustive: accepts\n    // it, and the match still dispatches correctly at runtime.\n    raw :: String | Nil := \"hi\"\n    result := raw matchExhaustive: [\n      s :: String -> s size;\n      _ -> -1\n    ]\n    self assert: result equals: 2\n\n  testAdvisoryMatchStillWorksAlongsideAssertedMatch =>\n    // Regression pin: plain `match:` (advisory) and `matchExhaustive:`\n    // (asserted) are independent keywords over the same `Known | Nil`\n    // scrutinee type — using one does not affect the other, and both\n    // require full coverage to compile clean under\n    // `--warnings-as-errors`.\n    raw :: String | Nil := \"hi\"\n    advisory := raw match: [\n      nil -> \"advisory-nil\";\n      s :: String -> \"advisory-\" ++ s\n    ]\n    asserted := raw matchExhaustive: [\n      nil -> \"asserted-nil\";\n      s :: String -> \"asserted-\" ++ s\n    ]\n    self assert: advisory equals: \"advisory-hi\"\n    self assert: asserted equals: \"asserted-hi\"",
+      "explanation": "BT-2856 / ADR 0107 Phase A: `nil`/`Type`-pattern exhaustiveness reaches `matchExhaustive:` (BT-2763) and advisory `match:` (BT-2745).  BUnit compiles with `--warnings-as-errors`, and both a genuinely non-exhaustive `matchExhaustive:` (`Error`) and a non-exhaustive plain `match:` (`Warning`, which `--warnings-as-errors` also turns fatal) would fail to compile and take the whole suite down. Those failure cases are therefore pinned at the Rust layer instead:   crates/beamtalk-core/src/semantic_analysis/type_checker/tests/nil_type_match_exhaustiveness.rs  What THIS file pins is that full `nil`/`Type` coverage compiles and dispatches correctly end-to-end — mirroring `asserted_match_exhaustiveness_test.bt` and `type_pattern_match_test.bt`, the two sibling files this one composes."
+    },
+    {
       "id": "stdlib-test-nlr-state-threading-test",
       "title": "NlrStateThreadingTest",
       "category": "stdlib-tests",
@@ -26630,7 +26752,7 @@
         "testFlushCompletedFields",
         "testObjectStateChangedFields"
       ],
-      "source": "// BUnit tests for system Announcement subclasses + runtime emit points (BT-2445).\n//\n// Each test subscribes to a well-known system event on `SystemAnnouncer current`,\n// performs the triggering action, and asserts the event was received. Handlers\n// run in transient processes, so cross-process state is captured via Ets.\n\nTestCase subclass: SystemAnnouncementsTest\n\n  // --- The system event classes exist and are Announcements ---\n  testEventClassesAreAnnouncements =>\n    self assert: (ActorSpawned new isKindOf: Announcement) equals: true\n    self assert: (ActorStopped new isKindOf: Announcement) equals: true\n    self assert: (ClassLoaded new isKindOf: Announcement) equals: true\n    self assert: (ClassRemoved new isKindOf: Announcement) equals: true\n    self assert: (BindingChanged new isKindOf: Announcement) equals: true\n    self assert: (SupervisionChildAdded new isKindOf: Announcement) equals: true\n    self assert: (SupervisionChildCrashed new isKindOf: Announcement) equals: true\n    // ADR 0095 §5 / BT-2489: per-object change event.\n    self assert: (ObjectStateChanged new isKindOf: Announcement) equals: true\n    // BT-2530: workspace flush completion event.\n    self assert: (FlushCompleted new isKindOf: Announcement) equals: true\n\n  // --- BindingChanged carries name / value / sessionId (BT-2530) ---\n  testBindingChangedFields =>\n    // Default-constructed field values (the workspace emit point fills them in).\n    e := BindingChanged new\n    self assert: e name equals: #unknown\n    self assert: e value equals: nil\n    self assert: e sessionId equals: nil\n\n  // --- FlushCompleted carries the flushed file paths (BT-2530) ---\n  testFlushCompletedFields =>\n    e := FlushCompleted new\n    self assert: e files equals: #()\n    e2 := FlushCompleted files: #(\"/ws/src/Foo.bt\")\n    self assert: e2 files size equals: 1\n\n  // --- ObjectStateChanged carries pid / actorClass / changedSlots (ADR 0095 §5) ---\n  testObjectStateChangedFields =>\n    // Default-constructed field values (the watched-actor push fills them in).\n    e := ObjectStateChanged new\n    self assert: e pid equals: nil\n    self assert: e actorClass equals: #unknown\n    self assert: e changedSlots equals: #()\n\n  // --- ActorSpawned fires when an actor is spawned ---\n  testActorSpawnedFiresOnSpawn =>\n    table := Ets new: #sysActorSpawned type: #set\n    // Filter to Counter: the SystemAnnouncer is a global singleton, so under\n    // parallel test execution other actors may spawn concurrently. Recording\n    // only Counter events keeps the assertion deterministic.\n    sub := SystemAnnouncer current when: ActorSpawned do: [:e |\n      e actorClass =:= #Counter ifTrue: [table at: #class put: e actorClass]\n    ]\n    Counter spawn\n    50 timesRepeat: [(table at: #class) isNil ifTrue: [Timer sleep: 10]]\n    self assert: (table at: #class) equals: #Counter\n    sub unsubscribe\n    table delete\n\n  // --- ActorStopped fires when an actor stops ---\n  testActorStoppedFiresOnStop =>\n    table := Ets new: #sysActorStopped type: #set\n    // Filter to Counter — see testActorSpawnedFiresOnSpawn (global singleton bus).\n    // Record only a graceful Counter stop (reason #normal); any concurrent\n    // foreign or abnormal stop on the global bus is ignored.\n    sub := SystemAnnouncer current\n      when: ActorStopped\n      do: [:e |\n        (e actorClass =:= #Counter and: [e reason =:= #normal])\n          ifTrue: [\n            table at: #class put: e actorClass\n            table at: #reason put: e reason\n          ]\n      ]\n    counter := Counter spawn\n    counter stop\n    50 timesRepeat: [(table at: #class) isNil ifTrue: [Timer sleep: 10]]\n    self assert: (table at: #class) equals: #Counter\n    self assert: (table at: #reason) equals: #normal\n    sub unsubscribe\n    table delete",
+      "source": "// BUnit tests for system Announcement subclasses + runtime emit points (BT-2445).\n//\n// Each test subscribes to a well-known system event on `SystemAnnouncer current`,\n// performs the triggering action, and asserts the event was received. Handlers\n// run in transient processes, so cross-process state is captured via Ets.\n\nTestCase subclass: SystemAnnouncementsTest\n\n  // --- The system event classes exist and are Announcements ---\n  testEventClassesAreAnnouncements =>\n    self assert: (ActorSpawned new isKindOf: Announcement)\n    self assert: (ActorStopped new isKindOf: Announcement)\n    self assert: (ClassLoaded new isKindOf: Announcement)\n    self assert: (ClassRemoved new isKindOf: Announcement)\n    self assert: (BindingChanged new isKindOf: Announcement)\n    self assert: (SupervisionChildAdded new isKindOf: Announcement)\n    self assert: (SupervisionChildCrashed new isKindOf: Announcement)\n    // ADR 0095 §5 / BT-2489: per-object change event.\n    self assert: (ObjectStateChanged new isKindOf: Announcement)\n    // BT-2530: workspace flush completion event.\n    self assert: (FlushCompleted new isKindOf: Announcement)\n\n  // --- BindingChanged carries name / value / sessionId (BT-2530) ---\n  testBindingChangedFields =>\n    // Default-constructed field values (the workspace emit point fills them in).\n    e := BindingChanged new\n    self assert: e name equals: #unknown\n    self assert: e value equals: nil\n    self assert: e sessionId equals: nil\n\n  // --- FlushCompleted carries the flushed file paths (BT-2530) ---\n  testFlushCompletedFields =>\n    e := FlushCompleted new\n    self assert: e files equals: #()\n    e2 := FlushCompleted files: #(\"/ws/src/Foo.bt\")\n    self assert: e2 files size equals: 1\n\n  // --- ObjectStateChanged carries pid / actorClass / changedSlots (ADR 0095 §5) ---\n  testObjectStateChangedFields =>\n    // Default-constructed field values (the watched-actor push fills them in).\n    e := ObjectStateChanged new\n    self assert: e pid equals: nil\n    self assert: e actorClass equals: #unknown\n    self assert: e changedSlots equals: #()\n\n  // --- ActorSpawned fires when an actor is spawned ---\n  testActorSpawnedFiresOnSpawn =>\n    table := Ets new: #sysActorSpawned type: #set\n    // Filter to Counter: the SystemAnnouncer is a global singleton, so under\n    // parallel test execution other actors may spawn concurrently. Recording\n    // only Counter events keeps the assertion deterministic.\n    sub := SystemAnnouncer current when: ActorSpawned do: [:e |\n      e actorClass =:= #Counter ifTrue: [table at: #class put: e actorClass]\n    ]\n    Counter spawn\n    50 timesRepeat: [(table at: #class) isNil ifTrue: [Timer sleep: 10]]\n    self assert: (table at: #class) equals: #Counter\n    sub unsubscribe\n    table delete\n\n  // --- ActorStopped fires when an actor stops ---\n  testActorStoppedFiresOnStop =>\n    table := Ets new: #sysActorStopped type: #set\n    // Filter to Counter — see testActorSpawnedFiresOnSpawn (global singleton bus).\n    // Record only a graceful Counter stop (reason #normal); any concurrent\n    // foreign or abnormal stop on the global bus is ignored.\n    sub := SystemAnnouncer current\n      when: ActorStopped\n      do: [:e |\n        (e actorClass =:= #Counter and: [e reason =:= #normal])\n          ifTrue: [\n            table at: #class put: e actorClass\n            table at: #reason put: e reason\n          ]\n      ]\n    counter := Counter spawn\n    counter stop\n    50 timesRepeat: [(table at: #class) isNil ifTrue: [Timer sleep: 10]]\n    self assert: (table at: #class) equals: #Counter\n    self assert: (table at: #reason) equals: #normal\n    sub unsubscribe\n    table delete",
       "explanation": "BUnit tests for system Announcement subclasses + runtime emit points (BT-2445).  Each test subscribes to a well-known system event on `SystemAnnouncer current`, performs the triggering action, and asserts the event was received. Handlers run in transient processes, so cross-process state is captured via Ets."
     },
     {
@@ -30404,6 +30526,27 @@
       ],
       "source": "// TaskWorker - actor in a subdirectory of a nested fixture directory.\n// Used by load_nested_directory.bt to regression-test that actors loaded\n// from subdirectories generate the correct BEAM module name so that\n// spawn/0 resolves correctly (bt@...@workers@task_worker, not bt@...@task_worker).\n\nActor subclass: TaskWorker\n  state: count = 0\n\n  increment => self.count := self.count + 1\n\n  getCount => self.count",
       "explanation": "TaskWorker - actor in a subdirectory of a nested fixture directory. Used by load_nested_directory.bt to regression-test that actors loaded from subdirectories generate the correct BEAM module name so that spawn/0 resolves correctly (bt@...@workers@task_worker, not bt@...@task_worker)."
+    },
+    {
+      "id": "tests-repl-protocol-fixtures-nil-type-exhaustiveness-error",
+      "title": "NilTypeExhaustivenessErrorFixture",
+      "category": "repl-protocol-fixtures",
+      "tags": [
+        "NilTypeExhaustivenessErrorFixture",
+        "Object",
+        "describe:",
+        "exception",
+        "extends",
+        "inherit",
+        "inheritance",
+        "nil_type_exhaustiveness_error",
+        "object",
+        "raise",
+        "subclassing",
+        "throw"
+      ],
+      "source": "// Fixture that triggers a compile error: `matchExhaustive:` on a closed\n// `String | Nil` union missing the `nil` arm (ADR 0107 Phase A, BT-2856).\n// Used by tests/repl-protocol/cases/nil-and-type-patterns.btscript via\n// `// @load-error`.\n\nObject subclass: NilTypeExhaustivenessErrorFixture\n\n  describe: raw :: String | Nil => raw matchExhaustive: [s :: String -> s size]",
+      "explanation": "Fixture that triggers a compile error: `matchExhaustive:` on a closed `String | Nil` union missing the `nil` arm (ADR 0107 Phase A, BT-2856). Used by tests/repl-protocol/cases/nil-and-type-patterns.btscript via `// @load-error`."
     },
     {
       "id": "tests-repl-protocol-fixtures-object-repr-foo",
