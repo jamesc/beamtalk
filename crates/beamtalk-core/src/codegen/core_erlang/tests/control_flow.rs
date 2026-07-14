@@ -1427,6 +1427,48 @@ fn test_match_arm_nested_if_true_mutation_without_value_wrapper_threads_actor_st
 }
 
 #[test]
+fn test_match_two_adjacent_nested_if_true_mutation_arms_thread_from_the_same_base_state() {
+    // BT-2880 review follow-up: the `control_flow_has_mutations` pass-through
+    // branch of `generate_match_arm_body` (a nested `ifTrue:`/`ifFalse:` arm
+    // body with no `[...] value` wrapper) is separately verified by
+    // `test_match_two_adjacent_mutating_arms_each_thread_from_the_same_base_state`
+    // ONLY for the block-literal `with_branch_context` branch — this pins
+    // the SAME two-adjacent-mutating-arms property for the OTHER branch: two
+    // sibling arms that are each themselves a nested ifTrue:/ifFalse:
+    // mutation, no [...] value wrapper on either. `ifTrue:ifFalse:`'s own
+    // codegen (`generate_if_true_if_false_with_mutations`) wraps its
+    // branches in `with_branch_context` and never advances the outer
+    // `state_version` counter itself, so arm 2's `expression_doc` call must
+    // see the exact same pre-match `base_state` arm 1's did.
+    let src = "Actor subclass: TwoIfTrueArms\n  state: a :: Integer = 0\n  state: b :: Integer = 0\n\n  run: choice -> Integer =>\n    choice match: [\n      1 -> true ifTrue: [self.a := self.a + 1] ifFalse: [self.a := self.a - 1];\n      2 -> true ifTrue: [self.b := self.b + 1] ifFalse: [self.b := self.b - 1]\n    ]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code = generate_module(&module, CodegenOptions::new("two_if_true_arms"))
+        .expect("codegen should succeed");
+
+    eprintln!("Generated code for match: with two adjacent nested ifTrue: mutation arms:\n{code}");
+
+    assert!(
+        code.contains("'maps':'put'('a'") && code.contains("'maps':'put'('b'"),
+        "both arms must thread their own field's mutation via maps:put. Got:\n{code}"
+    );
+    let run_clause = code
+        .split("<'run:'>")
+        .nth(1)
+        .expect("handle_call must have a run: clause")
+        .split("<OtherSelector>")
+        .next()
+        .expect("run: clause must be followed by the OtherSelector fallback");
+    assert!(
+        run_clause.contains("'erlang':'element'(2, "),
+        "run:'s match: result must be unpacked via erlang:element/2 before \
+         the gen_server reply, regardless of which arm fired. Got clause:\n{run_clause}"
+    );
+
+    crate::test_helpers::assert_compiles_through_erlc("two_if_true_arms", &code);
+}
+
+#[test]
 fn test_match_arm_self_mutating_value_block_threads_actor_state_all_native_fast_path() {
     // BT-2880: same bug, but with every arm using a native Core Erlang
     // pattern (`nil` and `_`, no `Pattern::Type`/`Pattern::Array`) — this
