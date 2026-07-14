@@ -1773,6 +1773,19 @@ result isOk ifTrue: [result unwrap] ifFalse: [default]
 // inferred as the common type of both arms
 ```
 
+The solo forms — `ifTrue: [...]` and `ifFalse: [...]` — can't unify to a bare `R` the way the two-armed form does: `Boolean>>ifTrue:`/`ifFalse:` are deliberately declared with no return type, because on an unnarrowed `Boolean` receiver the checker can't statically prove whether `True` or `False` handles the send, and the sibling override (e.g. `False>>ifTrue:`) never invokes the block — it returns `self` instead. Rather than collapsing all the way to `Dynamic`, a solo send infers the union of that `Boolean` self-branch and the block's own return type (BT-2868):
+
+```beamtalk
+flag :: Boolean := x > y
+flag ifTrue: [1]
+// inferred as Boolean | Integer, not Dynamic
+
+flag ifFalse: ["no"]
+// inferred as Boolean | String
+```
+
+A receiver already narrowed to exactly `True` or `False` (e.g. inside an `x isKindOf:`-style guard, or after control-flow narrowing) is unaffected — `True>>ifTrue:`/`False>>ifFalse:` declare concrete `-> R` return types and resolve normally, without the extra `Boolean` union member.
+
 `ifNil:ifNotNil:` (and `ifNotNil:ifNil:`) on nullable receivers also infers a branch-union return type — `typeof(nilBranch) | typeof(notNilBranch)`. A branch containing a non-local return (`^`) contributes `Never`, leaving only the surviving branch's type:
 
 ```beamtalk

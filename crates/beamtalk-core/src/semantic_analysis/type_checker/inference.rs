@@ -980,7 +980,25 @@ impl TypeChecker {
                         // preserves parity rather than introducing new
                         // behaviour beyond BT-2845's scope (unchecked
                         // arguments on continuation messages).
-                        self.infer_union_message_send(members, &selector_name, msg.span, hierarchy);
+                        //
+                        // BT-2868: `&msg.arguments` is this continuation
+                        // message's own arguments, but `&arg_types` is
+                        // whatever the *outer* send in this cascade computed
+                        // — they can be mismatched positionally/by-shape for
+                        // a continuation message. This is harmless here: the
+                        // call's only purpose is DNU validation (its return
+                        // value is discarded — the cascade keeps `send_ty`
+                        // from the first send), and `if_true_false_solo_boolean_ret_ty`
+                        // bails safely whenever the first arg type it reads
+                        // doesn't pattern-match `Block(...)`.
+                        self.infer_union_message_send(
+                            members,
+                            &selector_name,
+                            &msg.arguments,
+                            &arg_types,
+                            msg.span,
+                            hierarchy,
+                        );
                     }
                 }
                 send_ty
@@ -1747,6 +1765,15 @@ impl TypeChecker {
             return class_side;
         }
 
+        // BT-2868: set when a `Known`-receiver's solo `ifTrue:`/`ifFalse:`
+        // resolves to a method with no declared return type by design (e.g.
+        // `Boolean>>ifTrue:` — see `stdlib/src/Boolean.bt`). Distinguishes
+        // the terminal Dynamic fallback below from a genuinely
+        // Dynamic/unresolved receiver so the reported reason is honest
+        // instead of always `DynamicReceiver`. Deliberately narrow to this
+        // selector family — see the comment where this is set.
+        let mut known_method_unannotated_return = false;
+
         // For instance-side sends on known types
         if let InferredType::Known {
             ref class_name,
@@ -1991,6 +2018,37 @@ impl TypeChecker {
                     //    keeps both layers.
                     return Self::resolve_type_name_string(ret_ty);
                 }
+
+                // BT-2868: `ret_ty` is None — the method exists but declares
+                // no return type. For `Boolean>>ifTrue:`/`ifFalse:` this is
+                // by design (see `Boolean.bt`): a solo `ifTrue:`/`ifFalse:`
+                // on an unnarrowed `Boolean` receiver can't soundly promise
+                // `R` (the sibling branch — e.g. `False>>ifTrue:` — returns
+                // `self` without invoking the block), but collapsing all the
+                // way to `Dynamic` is more conservative than necessary: the
+                // sound type is the union of that `Boolean` self-branch and
+                // the block's own return type. Mirrors BT-2824's
+                // `if_nil_solo_union_ret_ty` fix for `ifNil:`/`ifNotNil:`.
+                if let Some(ty) = Self::if_true_false_solo_boolean_ret_ty(
+                    &selector_name,
+                    &resolve_class,
+                    arguments,
+                    &arg_types,
+                    hierarchy,
+                ) {
+                    return ty;
+                }
+
+                // Only reclassify the terminal Dynamic fallback's reason for
+                // the `ifTrue:`/`ifFalse:` family this issue targets — other
+                // deliberately-unannotated methods (e.g. `Block>>on:do:`,
+                // whose return type is a separate, unresolved soundness gap
+                // predating this fix) keep the pre-existing `DynamicReceiver`
+                // reason so they don't newly start firing the BT-1914
+                // warning as a side effect of this narrower fix.
+                if matches!(selector_name.as_str(), "ifTrue:" | "ifFalse:") {
+                    known_method_unannotated_return = true;
+                }
             }
 
             // BT-1834: Block value/value:/value:value: — return the last type arg.
@@ -2049,10 +2107,28 @@ impl TypeChecker {
         // Union-typed receiver: check selector on ALL members, warn if any lacks it.
         // Return type is the union of member return types.
         if let InferredType::Union { ref members, .. } = receiver_ty {
-            return self.infer_union_message_send(members, &selector_name, span, hierarchy);
+            return self.infer_union_message_send(
+                members,
+                &selector_name,
+                arguments,
+                &arg_types,
+                span,
+                hierarchy,
+            );
         }
 
-        InferredType::Dynamic(DynamicReason::DynamicReceiver)
+        // BT-2868: honest reason for the terminal Dynamic fallback — a solo
+        // `ifTrue:`/`ifFalse:` on a `Known` receiver whose method exists but
+        // declares no return type by design reports `UnannotatedReturn`, not
+        // `DynamicReceiver` (the receiver here is perfectly well-typed).
+        // Every other unresolved shape (genuinely Dynamic receiver,
+        // unresolvable selector, other deliberately-unannotated methods like
+        // `Block>>on:do:`, …) keeps the original `DynamicReceiver` reason.
+        InferredType::Dynamic(if known_method_unannotated_return {
+            DynamicReason::UnannotatedReturn
+        } else {
+            DynamicReason::DynamicReceiver
+        })
     }
 
     /// BT-2254 (ADR 0075 amendment): infer the element type of
@@ -2564,6 +2640,8 @@ impl TypeChecker {
         &mut self,
         members: &[InferredType],
         selector: &str,
+        arguments: &[Expression],
+        arg_types: &[InferredType],
         span: Span,
         hierarchy: &ClassHierarchy,
     ) -> InferredType {
@@ -2702,6 +2780,19 @@ impl TypeChecker {
                                 return_types.push(Self::resolve_type_name_string(ret_ty));
                             }
                         }
+                    } else if let Some(ty) = Self::if_true_false_solo_boolean_ret_ty(
+                        selector,
+                        resolve_name,
+                        arguments,
+                        arg_types,
+                        hierarchy,
+                    ) {
+                        // BT-2868: a `Boolean` union member responding to a
+                        // solo `ifTrue:`/`ifFalse:` with no declared return
+                        // type (by design) contributes `Boolean | R` instead
+                        // of poisoning the whole union to `Dynamic` — mirrors
+                        // the non-union `Known` receiver fix above.
+                        return_types.push(ty);
                     } else {
                         return_types.push(InferredType::Dynamic(DynamicReason::UnannotatedReturn));
                     }
@@ -3961,6 +4052,91 @@ impl TypeChecker {
         Some(InferredType::union_of(&[self_branch, block_ret]))
     }
 
+    /// BT-2868: Compute the return type of a solo `ifTrue:` / `ifFalse:` send
+    /// on a receiver whose type is exactly `Boolean` as the union of the
+    /// "self" branch (the sibling `True`/`False` case that does not invoke
+    /// the block, and thus statically returns `self` typed as `Boolean`) and
+    /// the block branch's inferred return type `R`. Mirrors
+    /// [`Self::if_nil_solo_union_ret_ty`]'s fix for `ifNil:`/`ifNotNil:`.
+    ///
+    /// `Boolean>>ifTrue:`/`ifFalse:` deliberately declare no `-> R` (see
+    /// `stdlib/src/Boolean.bt`): on an unnarrowed `Boolean` receiver the
+    /// checker can't statically prove whether `True` or `False` handles the
+    /// send, and the sibling override (e.g. `False>>ifTrue:`) never invokes
+    /// the block — it returns `self`. Only fires for `class_name ==
+    /// "Boolean"` exactly: `True`/`False` both override `ifTrue:`/`ifFalse:`
+    /// with concrete declared return types, so a receiver already narrowed
+    /// to either resolves through the normal `Some(ret_ty)` path and never
+    /// reaches this helper.
+    ///
+    /// The "self branch is `Boolean`" semantics are verified against the
+    /// actual resolved stdlib signature rather than assumed — mirroring
+    /// [`Self::if_nil_solo_union_ret_ty`]'s staleness guard — so a future
+    /// edit that gives `Boolean>>ifTrue:`/`ifFalse:` a declared return type
+    /// falls back to the generic dispatch path instead of silently
+    /// double-unioning with an already-resolved `R`.
+    ///
+    /// Returns `None` when the block argument isn't a well-formed `Block(...)`
+    /// type, `class_name` isn't `Boolean`, or the stdlib contract this
+    /// function relies on no longer matches, so the caller falls back to the
+    /// generic Dynamic classification for those cases.
+    fn if_true_false_solo_boolean_ret_ty(
+        selector_name: &str,
+        class_name: &str,
+        arguments: &[Expression],
+        arg_types: &[InferredType],
+        hierarchy: &ClassHierarchy,
+    ) -> Option<InferredType> {
+        if !matches!(selector_name, "ifTrue:" | "ifFalse:") {
+            return None;
+        }
+        if WellKnownClass::from_str(class_name) != Some(WellKnownClass::Boolean) {
+            return None;
+        }
+        if hierarchy
+            .find_method(WellKnownClass::Boolean.as_str(), selector_name)?
+            .return_type
+            .is_some()
+        {
+            return None;
+        }
+
+        let arg = arguments.first()?;
+        let ty = arg_types.first()?;
+        let InferredType::Known {
+            class_name: block_class,
+            type_args,
+            ..
+        } = ty
+        else {
+            return None;
+        };
+        if block_class.as_str() != "Block" {
+            return None;
+        }
+        // `block_has_any_return` is a conservative over-approximation: it
+        // reports `true` whenever a `^` appears anywhere in the block body
+        // (nested block literals are opaque to it, so a `^` buried inside
+        // one is invisible), not only when the block is guaranteed to always
+        // exit the method on every path. Some blocks that may-but-not-always
+        // diverge get widened to `Never` here — an accepted imprecision this
+        // shares with the mirror function, [`Self::if_nil_solo_union_ret_ty`].
+        let block_ret = if let Expression::Block(block) = unwrap_parens(arg) {
+            if block_has_any_return(block) {
+                InferredType::Never
+            } else {
+                type_args.last().cloned()?
+            }
+        } else {
+            type_args.last().cloned()?
+        };
+
+        Some(InferredType::union_of(&[
+            InferredType::known(WellKnownClass::Boolean.as_str()),
+            block_ret,
+        ]))
+    }
+
     /// Infer argument types for `ifTrue:` / `ifFalse:` / `ifTrue:ifFalse:` with
     /// narrowed type environments for block arguments.
     ///
@@ -4029,7 +4205,25 @@ impl TypeChecker {
                         // now populates `false_type` above — BT-2744; class =:=
                         // still leaves it None, since its false branch can't be
                         // narrowed via subtree exclusion.)
-                        let ty = self.infer_expr(arg, hierarchy, env, in_abstract_method);
+                        //
+                        // BT-2868: still preserve the block's own return type
+                        // as `Block(..., R)` (mirrors BT-2020's rationale for
+                        // the narrowed branches above) — without this, a solo
+                        // `respondsTo: ifFalse: [...]` on `Boolean` lost `R`
+                        // entirely and `if_true_false_solo_boolean_ret_ty`
+                        // couldn't union it with the `Boolean` self-branch.
+                        let ty = if let Expression::Block(block) = unwrap_parens(arg) {
+                            self.infer_block_with_typed_params(
+                                block,
+                                arg.span(),
+                                &[],
+                                hierarchy,
+                                env,
+                                in_abstract_method,
+                            )
+                        } else {
+                            self.infer_expr(arg, hierarchy, env, in_abstract_method)
+                        };
                         arg_types.push(ty);
                     }
                 }
@@ -4237,6 +4431,38 @@ impl TypeChecker {
         } else {
             receiver_ty
         };
+
+        // BT-2868: a `Union`-typed receiver sending a solo `ifTrue:` /
+        // `ifFalse:` still needs its (zero-arity) block argument's own
+        // return type preserved as `Block(..., R)`, even though there's no
+        // single declared method signature to resolve block *param* types
+        // from — these selectors' blocks never take params anyway. Without
+        // this, `infer_union_message_send`'s `Boolean` member fallback
+        // (`if_true_false_solo_boolean_ret_ty`) never sees an `R` to union
+        // with `Boolean`, since the generic `Known`-only fast path below is
+        // skipped for a `Union` receiver. Mirrors the zero-arg `Block(R)`
+        // handling in the `Known`-receiver path further down.
+        if matches!(selector_name, "ifTrue:" | "ifFalse:") {
+            if let InferredType::Union { .. } = receiver_ty {
+                return arguments
+                    .iter()
+                    .map(|arg| {
+                        if let Expression::Block(block) = unwrap_parens(arg) {
+                            self.infer_block_with_typed_params(
+                                block,
+                                arg.span(),
+                                &[],
+                                hierarchy,
+                                env,
+                                in_abstract_method,
+                            )
+                        } else {
+                            self.infer_expr(arg, hierarchy, env, in_abstract_method)
+                        }
+                    })
+                    .collect();
+            }
+        }
 
         // Fast path: receiver must be Known to look up method signatures.
         // For non-Known receivers (Dynamic, Never, etc.), we can't resolve block
