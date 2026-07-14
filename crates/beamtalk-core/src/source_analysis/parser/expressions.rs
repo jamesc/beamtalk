@@ -1387,6 +1387,10 @@ impl Parser {
     /// - `identifier :: ClassName` — type pattern (ADR 0107 Phase A)
     /// - integer, float, string, symbol, character — literal
     /// - `{p1, p2, ...}` — tuple
+    ///
+    /// Bare `true`/`false` are rejected with a diagnostic (BT-2883) rather
+    /// than parsed as a variable binding — use `x :: True`/`x :: False`/
+    /// `x :: Boolean` instead.
     #[allow(clippy::too_many_lines)] // one arm per pattern kind
     fn parse_pattern(&mut self) -> Pattern {
         // Guard against stack overflow from deeply nested tuple patterns
@@ -1434,6 +1438,34 @@ impl Parser {
                 } else {
                     Pattern::Nil(nil_span)
                 }
+            }
+
+            // Bare `true`/`false` pattern (BT-2883): unlike `nil`, `true` and
+            // `false` are *not* reserved pattern keywords — falling through
+            // to the generic "Variable binding" branch below would silently
+            // parse them as `Pattern::Variable(Identifier{name: "true"})` /
+            // `Pattern::Variable(Identifier{name: "false"})`, an
+            // unconditional catch-all binding that matches any value, not a
+            // boolean-literal test. Since arms are tried in source order, a
+            // `true ->` arm listed first would always win regardless of the
+            // scrutinee — a silent-wrong-behavior footgun with no
+            // diagnostic. Rejected here with a single targeted diagnostic
+            // (mirroring `nil`'s `nil :: ClassName` diagnostic above)
+            // pointing at the existing, already-working idiom for boolean
+            // literal/type tests: `x :: True` / `x :: False` (exact literal)
+            // or `x :: Boolean` (either), both `Pattern::Type`
+            // (ADR 0107 Phase A, `generate_type_pattern`'s
+            // `wrap_single_atom_test` / `wrap_boolean_test`).
+            TokenKind::Identifier(name) if name.as_str() == "true" || name.as_str() == "false" => {
+                let name = name.clone();
+                let bad_span = self.advance().span();
+                self.diagnostics.push(Diagnostic::error(
+                    format!(
+                        "bare '{name}' in a match: pattern always matches — it binds any value to a variable named '{name}', it does not test for the boolean literal '{name}' (use 'x :: True' / 'x :: False' for an exact literal test, or 'x :: Boolean' to match either)"
+                    ),
+                    bad_span,
+                ));
+                Pattern::Wildcard(bad_span)
             }
 
             // Variable binding, or a type pattern if followed by `:: ClassName`
@@ -3150,6 +3182,77 @@ mod tests {
         assert!(matches!(arms[0].pattern, Pattern::Nil(_)));
         assert!(matches!(arms[1].pattern, Pattern::Type { .. }));
         assert!(matches!(arms[2].pattern, Pattern::Variable(_)));
+    }
+
+    // ── BT-2883: bare `true`/`false` pattern rejection ──────────────────────
+
+    #[test]
+    fn parse_bare_true_pattern_rejected_with_single_diagnostic() {
+        let (_module, diags) = parse_source("x match: [true -> 0; _ -> 1]");
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic (no cascade), got: {diags:?}"
+        );
+        assert!(
+            diags[0].message.contains("bare 'true'") && diags[0].message.contains("x :: True"),
+            "unexpected diagnostic message: {:?}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn parse_bare_false_pattern_rejected_with_single_diagnostic() {
+        let (_module, diags) = parse_source("x match: [false -> 0; _ -> 1]");
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic (no cascade), got: {diags:?}"
+        );
+        assert!(
+            diags[0].message.contains("bare 'false'") && diags[0].message.contains("x :: False"),
+            "unexpected diagnostic message: {:?}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn parse_bare_true_false_pattern_does_not_bind_as_variable() {
+        let (module, diags) = parse_source("x match: [true -> 0; false -> 1]");
+        assert_eq!(diags.len(), 2, "expected one diagnostic per arm: {diags:?}");
+        let Expression::Match { arms, .. } = &module.expressions[0].expression else {
+            panic!("expected Expression::Match");
+        };
+        assert!(
+            matches!(arms[0].pattern, Pattern::Wildcard(_)),
+            "expected bare 'true' to recover as Pattern::Wildcard, not Pattern::Variable, got: {:?}",
+            arms[0].pattern
+        );
+        assert!(
+            matches!(arms[1].pattern, Pattern::Wildcard(_)),
+            "expected bare 'false' to recover as Pattern::Wildcard, not Pattern::Variable, got: {:?}",
+            arms[1].pattern
+        );
+    }
+
+    #[test]
+    fn parse_true_false_type_pattern_still_works() {
+        // `x :: True` / `x :: False` (ADR 0107 Phase A `Pattern::Type`) is
+        // the correct, already-working idiom this diagnostic points users
+        // at — confirm it's unaffected by the bare-identifier rejection.
+        let (module, diags) = parse_source("x match: [b :: True -> 0; b :: False -> 1; _ -> 2]");
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        let Expression::Match { arms, .. } = &module.expressions[0].expression else {
+            panic!("expected Expression::Match");
+        };
+        match &arms[0].pattern {
+            Pattern::Type { class, .. } => assert_eq!(class.name, "True"),
+            other => panic!("expected Pattern::Type, got: {other:?}"),
+        }
+        match &arms[1].pattern {
+            Pattern::Type { class, .. } => assert_eq!(class.name, "False"),
+            other => panic!("expected Pattern::Type, got: {other:?}"),
+        }
     }
 
     // ── BT-2860: Pattern::Type parser polish ────────────────────────────────

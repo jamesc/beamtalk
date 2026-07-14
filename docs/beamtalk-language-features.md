@@ -2837,6 +2837,7 @@ Three runtime-representation nuances (see ADR 0107 Implementation for the full c
 - **`Character` is not a supported type pattern.** It compiles to a plain Erlang integer with no runtime tag distinguishing it from `Integer`, so `x :: Character` could never be told apart from `x :: Integer` at runtime — use `x :: Integer` instead.
 - **`Dictionary` has no `'$beamtalk_class'` tag** — it's a bare Erlang map, unlike tagged `Value`/sealed-class instances (which are also maps, but with a class tag). `x :: Dictionary` is fully supported, but compiles to a different check shape under the hood (a nested map-key test) so it doesn't false-positive on every other map-backed value.
 - **A `Symbol` type pattern excludes `nil` and booleans.** `nil`, `true`/`false`, and symbols are all plain Erlang atoms with no distinguishing runtime tag, so `nil match: [s :: Symbol -> ...]` does **not** match, and a `Symbol` arm can never accidentally shadow a `nil ->` or `b :: Boolean` arm regardless of arm order.
+- **Bare `true`/`false` are not valid patterns.** Unlike `nil`, `true`/`false` are not reserved pattern keywords — a bare `true ->` arm would otherwise silently parse as a variable binding (`Pattern::Variable`) that matches *any* value, not a boolean-literal test, and — tried first in arm order — would always win. This is rejected with a compile-time diagnostic (BT-2883); use `x :: True` / `x :: False` (exact literal) or `x :: Boolean` (either) instead.
 
 **Supported pattern types:**
 
