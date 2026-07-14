@@ -35,6 +35,75 @@ ci: build lint test test-integration test-mcp test-parity test-repl-protocol che
 [windows]
 ci: build clippy fmt-check-rust test test-integration test-mcp test-parity test-repl-protocol check-surface-drift
 
+# Run local CI checks, skipping the slow workspace/MCP/REPL-protocol/parity
+# suites when the diff (vs origin/main, plus uncommitted changes) doesn't touch
+# paths that could affect them. GitHub Actions runs test-integration and
+# test-parity as their own jobs in parallel with everything else regardless —
+# skipping them here trades a same-machine safety net for faster local
+# iteration, not a coverage gap. Force `just ci` instead when in doubt.
+[unix]
+ci-changed:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just build
+    just lint
+    just test
+    just check-corpus
+    just check-surface-drift
+
+    merge_base="$(git merge-base HEAD origin/main 2>/dev/null || true)"
+    if [[ -n "$merge_base" ]]; then
+      changed_files="$(git diff --name-only "$merge_base"...HEAD; git status --porcelain | awk '{print $2}')"
+    else
+      changed_files="$(git status --porcelain | awk '{print $2}')"
+    fi
+
+    matches_any() {
+      local file
+      while IFS= read -r file; do
+        [[ -z "$file" ]] && continue
+        for pattern in "$@"; do
+          # shellcheck disable=SC2053
+          [[ "$file" == $pattern ]] && return 0
+        done
+      done <<< "$changed_files"
+      return 1
+    }
+
+    # Scoped to the actual workspace/REPL server surface, not all of runtime/
+    # or stdlib/ — those are already covered by `just test` (test-runtime,
+    # test-stdlib, test-bunit) above, which run regardless.
+    WORKSPACE_PATTERNS=(
+      'runtime/apps/beamtalk_workspace/*'
+      'crates/beamtalk-cli/src/commands/workspace/*'
+      'crates/beamtalk-cli/src/repl_startup.rs'
+      'crates/beamtalk-cli/tests/repl_protocol.rs'
+      'crates/beamtalk-mcp/*' 'tests/repl-protocol/*'
+    )
+    PARITY_PATTERNS=(
+      'crates/beamtalk-parity-tests/*' 'crates/beamtalk-lsp/*'
+      'crates/beamtalk-mcp/*' 'runtime/apps/beamtalk_workspace/*'
+      'crates/beamtalk-cli/src/commands/workspace/*'
+    )
+
+    if matches_any "${WORKSPACE_PATTERNS[@]}"; then
+      just test-integration
+      just test-mcp
+      just test-repl-protocol
+    else
+      echo "⏭️  workspace/MCP/REPL-protocol paths untouched — skipping test-integration/test-mcp/test-repl-protocol (CI's test-integration job still runs them)"
+    fi
+
+    if matches_any "${PARITY_PATTERNS[@]}"; then
+      just test-parity
+    else
+      echo "⏭️  REPL/MCP/CLI/LSP paths untouched — skipping test-parity (CI's test-parity job still runs it)"
+    fi
+
+# Windows: path-based skip logic below is unix-only for now — run the full suite.
+[windows]
+ci-changed: ci
+
 # Clean all build artifacts (Rust, Erlang, VS Code, caches, examples)
 [unix]
 clean: clean-rust clean-erlang clean-vscode
