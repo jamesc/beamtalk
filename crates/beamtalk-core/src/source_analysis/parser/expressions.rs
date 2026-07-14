@@ -2047,7 +2047,9 @@ impl Parser {
     /// literal — BT-2884), or a literal (integer, float, string, symbol, or
     /// negative number like `-1`). Bare `true`/`false` are rejected with a
     /// diagnostic (BT-2884) rather than parsed as a variable binding — see
-    /// the dedicated match arm below for why.
+    /// the dedicated match arm below for why. A trailing `:: ClassName` on
+    /// `nil`, `true`/`false`, or a plain variable binding is consumed and
+    /// rejected with a single diagnostic rather than left to cascade (BT-2885).
     fn parse_constructor_binding(&mut self) -> Pattern {
         match self.current_kind() {
             TokenKind::Identifier(name) if name.as_str() == "_" => {
@@ -2057,13 +2059,31 @@ impl Parser {
             // `nil` handling — `nil` is a reserved identifier, not a plain
             // variable name, so `Result ok: nil` must test the wrapped value
             // *is* nil (`Pattern::Nil`), not bind a variable named `nil`
-            // that matches unconditionally. Unlike top-level `nil`, no `::
-            // ClassName` tail is accepted here — type patterns aren't
-            // supported nested inside a constructor pattern at all (see
-            // `generate_pattern`'s `Pattern::Type` codegen restriction), so
-            // there's nothing to consume-and-reject.
+            // that matches unconditionally.
+            //
+            // A trailing `:: ClassName` (e.g. `nil :: SomeClass`) is
+            // consumed and rejected here too (BT-2885 follow-up, per Claude
+            // review on #2998) — type patterns aren't supported nested
+            // inside a constructor pattern at all (see `generate_pattern`'s
+            // `Pattern::Type` codegen restriction), but leaving `::
+            // ClassName` unconsumed would desync the constructor-pattern
+            // keyword loop and cascade into a second "Expected '->' after
+            // pattern" diagnostic, exactly like the `true`/`false` and
+            // generic-identifier arms below.
             TokenKind::Identifier(name) if name.as_str() == "nil" => {
-                Pattern::Nil(self.advance().span())
+                let nil_span = self.advance().span();
+                if matches!(self.current_kind(), TokenKind::DoubleColon) {
+                    let double_colon_span = self.advance().span(); // consume '::'
+                    let tail_span = self.consume_type_pattern_tail();
+                    let full_span = nil_span.merge(tail_span.unwrap_or(double_colon_span));
+                    self.diagnostics.push(Diagnostic::error(
+                        "a 'nil' pattern cannot have a type annotation in a constructor binding position ('nil :: ClassName' is not allowed here)",
+                        full_span,
+                    ));
+                    Pattern::Wildcard(full_span)
+                } else {
+                    Pattern::Nil(nil_span)
+                }
             }
             // Bare `true`/`false` binding (BT-2884, sibling to BT-2883's
             // top-level fix): falling through to the generic variable-binding
@@ -2083,9 +2103,20 @@ impl Parser {
             // guard semantics (a bare guard variable *does* require the
             // exact atom `true` — no other value passes — but `=:=` says so
             // without relying on that knowledge).
+            //
+            // A trailing `:: ClassName` (e.g. `true :: Boolean`) is consumed
+            // here too (BT-2885) — otherwise the unconsumed `::`/class-name
+            // would surface as a second, spurious "Expected '->' after
+            // pattern" diagnostic, exactly the cascade the generic-identifier
+            // arm below was fixed to avoid.
             TokenKind::Identifier(name) if name.as_str() == "true" || name.as_str() == "false" => {
                 let name = name.clone();
-                let bad_span = self.advance().span();
+                let mut bad_span = self.advance().span();
+                if matches!(self.current_kind(), TokenKind::DoubleColon) {
+                    let double_colon_span = self.advance().span(); // consume '::'
+                    let tail_span = self.consume_type_pattern_tail();
+                    bad_span = bad_span.merge(tail_span.unwrap_or(double_colon_span));
+                }
                 let guard_example = if name == "true" {
                     "v =:= true"
                 } else {
@@ -2099,13 +2130,34 @@ impl Parser {
                 ));
                 Pattern::Wildcard(bad_span)
             }
+            // Variable binding (BT-2885): a trailing `:: ClassName` is not
+            // supported in constructor-binding position (`Pattern::Type`
+            // has no codegen when nested inside a constructor pattern — see
+            // `generate_pattern`), but leaving it unconsumed would desync
+            // the constructor-pattern keyword loop (`::` isn't a `Keyword`
+            // token) and cascade into a generic "Expected '->' after
+            // pattern" error. Consumed and rejected here with a single
+            // targeted diagnostic instead, mirroring `parse_pattern`'s
+            // `nil ::`/`true ::`/`false ::` consume-and-reject handling
+            // (BT-2860, BT-2883).
             TokenKind::Identifier(_) => {
                 let token = self.advance();
                 let span = token.span();
                 let TokenKind::Identifier(name) = token.into_kind() else {
                     unreachable!()
                 };
-                Pattern::Variable(Identifier::new(name, span))
+                if matches!(self.current_kind(), TokenKind::DoubleColon) {
+                    let double_colon_span = self.advance().span(); // consume '::'
+                    let tail_span = self.consume_type_pattern_tail();
+                    let full_span = span.merge(tail_span.unwrap_or(double_colon_span));
+                    self.diagnostics.push(Diagnostic::error(
+                        "type annotations are not supported in a constructor pattern binding position ('x :: ClassName' is not allowed here; bind the variable and test its type in a guard clause instead, e.g. 'Result ok: v when: [v :: ClassName]')",
+                        full_span,
+                    ));
+                    Pattern::Wildcard(full_span)
+                } else {
+                    Pattern::Variable(Identifier::new(name, span))
+                }
             }
             TokenKind::Integer(_)
             | TokenKind::Float(_)
@@ -3390,6 +3442,106 @@ mod tests {
     }
 
     #[test]
+    fn parse_constructor_binding_nil_type_annotation_rejected_with_single_diagnostic() {
+        // BT-2885: the `nil` arm has the
+        // same "trailing `:: ClassName` cascades" bug as the `true`/`false`
+        // and generic-identifier arms — `nil :: SomeClass` must consume the
+        // tail rather than leaving it to cascade into a second diagnostic.
+        let (_module, diags) = parse_source("x match: [Result ok: nil :: SomeClass -> 0; _ -> 1]");
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic (no cascade), got: {diags:?}"
+        );
+        assert!(
+            diags[0]
+                .message
+                .contains("a 'nil' pattern cannot have a type annotation"),
+            "unexpected diagnostic message: {:?}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn parse_constructor_binding_nil_bare_double_colon_rejected_with_single_diagnostic() {
+        // Edge case: `consume_type_pattern_tail` returns `None` when `::`
+        // isn't followed by a class name, so the recovered span must fall
+        // back to the `::` token itself rather than panicking or leaving
+        // `->` unconsumed.
+        let src = "x match: [Result ok: nil :: -> 0; _ -> 1]";
+        let (_module, diags) = parse_source(src);
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic (no cascade), got: {diags:?}"
+        );
+        assert!(
+            diags[0]
+                .message
+                .contains("a 'nil' pattern cannot have a type annotation"),
+            "unexpected diagnostic message: {:?}",
+            diags[0].message
+        );
+        let double_colon_end = u32::try_from(src.find("::").unwrap()).unwrap() + 2;
+        assert!(
+            diags[0].span.end() >= double_colon_end,
+            "expected diagnostic span to cover '::' (end >= {double_colon_end}), got: {:?}",
+            diags[0].span
+        );
+    }
+
+    #[test]
+    fn parse_constructor_binding_bare_true_bare_double_colon_rejected_with_single_diagnostic() {
+        // Same bare-`::` edge case as the `nil` arm above, for the
+        // `true`/`false` arm.
+        let src = "x match: [Result ok: true :: -> 0; _ -> 1]";
+        let (_module, diags) = parse_source(src);
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic (no cascade), got: {diags:?}"
+        );
+        assert!(
+            diags[0].message.contains("bare 'true'"),
+            "unexpected diagnostic message: {:?}",
+            diags[0].message
+        );
+        let double_colon_end = u32::try_from(src.find("::").unwrap()).unwrap() + 2;
+        assert!(
+            diags[0].span.end() >= double_colon_end,
+            "expected diagnostic span to cover '::' (end >= {double_colon_end}), got: {:?}",
+            diags[0].span
+        );
+    }
+
+    #[test]
+    fn parse_constructor_binding_type_annotation_bare_double_colon_rejected_with_single_diagnostic()
+    {
+        // Same bare-`::` edge case as the `nil` arm above, for the generic
+        // variable-binding arm.
+        let src = "r match: [Result ok: x :: -> x; Result error: _ -> 0]";
+        let (_module, diags) = parse_source(src);
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic (no cascade), got: {diags:?}"
+        );
+        assert!(
+            diags[0].message.contains(
+                "type annotations are not supported in a constructor pattern binding position"
+            ),
+            "unexpected diagnostic message: {:?}",
+            diags[0].message
+        );
+        let double_colon_end = u32::try_from(src.find("::").unwrap()).unwrap() + 2;
+        assert!(
+            diags[0].span.end() >= double_colon_end,
+            "expected diagnostic span to cover '::' (end >= {double_colon_end}), got: {:?}",
+            diags[0].span
+        );
+    }
+
+    #[test]
     fn parse_constructor_binding_bare_true_rejected_with_single_diagnostic() {
         let (_module, diags) = parse_source("x match: [Result ok: true -> 0; _ -> 1]");
         assert_eq!(
@@ -3448,6 +3600,76 @@ mod tests {
             matches!(error_kw[0].1, Pattern::Wildcard(_)),
             "expected bare 'false' binding to recover as Pattern::Wildcard, got: {:?}",
             error_kw[0].1
+        );
+    }
+
+    // ── BT-2885: constructor binding `x :: ClassName` tail ──────────────────
+
+    #[test]
+    fn parse_constructor_binding_type_annotation_rejected_with_single_diagnostic() {
+        let (module, diags) =
+            parse_source("r match: [Result ok: x :: Integer -> x; Result error: _ -> 0]");
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic (no cascade), got: {diags:?}"
+        );
+        assert!(
+            diags[0].message.contains(
+                "type annotations are not supported in a constructor pattern binding position"
+            ),
+            "unexpected diagnostic message: {:?}",
+            diags[0].message
+        );
+        let Expression::Match { arms, .. } = &module.expressions[0].expression else {
+            panic!("expected Expression::Match");
+        };
+        let Pattern::Constructor {
+            keywords: ok_kw, ..
+        } = &arms[0].pattern
+        else {
+            panic!("expected Pattern::Constructor, got: {:?}", arms[0].pattern);
+        };
+        assert!(
+            matches!(ok_kw[0].1, Pattern::Wildcard(_)),
+            "expected 'x :: Integer' binding to recover as Pattern::Wildcard, got: {:?}",
+            ok_kw[0].1
+        );
+    }
+
+    #[test]
+    fn parse_constructor_binding_bare_true_type_annotation_rejected_with_single_diagnostic() {
+        // BT-2885: the `true`/`false` arm
+        // has the same "trailing `:: ClassName` cascades" bug as the plain
+        // identifier arm above — `true :: Boolean` must consume the tail
+        // rather than leaving it to cascade into a second diagnostic.
+        let (_module, diags) = parse_source("x match: [Result ok: true :: Boolean -> 0; _ -> 1]");
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic (no cascade), got: {diags:?}"
+        );
+        assert!(
+            diags[0].message.contains("bare 'true'"),
+            "unexpected diagnostic message: {:?}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn parse_constructor_binding_bare_false_type_annotation_rejected_with_single_diagnostic() {
+        // Symmetric coverage for the `false` path through the same branch as
+        // `parse_constructor_binding_bare_true_type_annotation_rejected_with_single_diagnostic`.
+        let (_module, diags) = parse_source("x match: [Result ok: false :: Boolean -> 0; _ -> 1]");
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic (no cascade), got: {diags:?}"
+        );
+        assert!(
+            diags[0].message.contains("bare 'false'"),
+            "unexpected diagnostic message: {:?}",
+            diags[0].message
         );
     }
 
