@@ -2057,13 +2057,31 @@ impl Parser {
             // `nil` handling — `nil` is a reserved identifier, not a plain
             // variable name, so `Result ok: nil` must test the wrapped value
             // *is* nil (`Pattern::Nil`), not bind a variable named `nil`
-            // that matches unconditionally. Unlike top-level `nil`, no `::
-            // ClassName` tail is accepted here — type patterns aren't
-            // supported nested inside a constructor pattern at all (see
-            // `generate_pattern`'s `Pattern::Type` codegen restriction), so
-            // there's nothing to consume-and-reject.
+            // that matches unconditionally.
+            //
+            // A trailing `:: ClassName` (e.g. `nil :: SomeClass`) is
+            // consumed and rejected here too (BT-2885 follow-up, per Claude
+            // review on #2998) — type patterns aren't supported nested
+            // inside a constructor pattern at all (see `generate_pattern`'s
+            // `Pattern::Type` codegen restriction), but leaving `::
+            // ClassName` unconsumed would desync the constructor-pattern
+            // keyword loop and cascade into a second "Expected '->' after
+            // pattern" diagnostic, exactly like the `true`/`false` and
+            // generic-identifier arms below.
             TokenKind::Identifier(name) if name.as_str() == "nil" => {
-                Pattern::Nil(self.advance().span())
+                let nil_span = self.advance().span();
+                if matches!(self.current_kind(), TokenKind::DoubleColon) {
+                    let double_colon_span = self.advance().span(); // consume '::'
+                    let tail_span = self.consume_type_pattern_tail();
+                    let full_span = nil_span.merge(tail_span.unwrap_or(double_colon_span));
+                    self.diagnostics.push(Diagnostic::error(
+                        "a 'nil' pattern cannot have a type annotation in a constructor binding position ('nil :: ClassName' is not allowed here)",
+                        full_span,
+                    ));
+                    Pattern::Wildcard(full_span)
+                } else {
+                    Pattern::Nil(nil_span)
+                }
             }
             // Bare `true`/`false` binding (BT-2884, sibling to BT-2883's
             // top-level fix): falling through to the generic variable-binding
@@ -3419,6 +3437,27 @@ mod tests {
             matches!(keywords[0].1, Pattern::Nil(_)),
             "expected 'nil' binding to parse as Pattern::Nil, not Pattern::Variable, got: {:?}",
             keywords[0].1
+        );
+    }
+
+    #[test]
+    fn parse_constructor_binding_nil_type_annotation_rejected_with_single_diagnostic() {
+        // BT-2885 follow-up (Claude review on #2998): the `nil` arm has the
+        // same "trailing `:: ClassName` cascades" bug as the `true`/`false`
+        // and generic-identifier arms — `nil :: SomeClass` must consume the
+        // tail rather than leaving it to cascade into a second diagnostic.
+        let (_module, diags) = parse_source("x match: [Result ok: nil :: SomeClass -> 0; _ -> 1]");
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic (no cascade), got: {diags:?}"
+        );
+        assert!(
+            diags[0]
+                .message
+                .contains("a 'nil' pattern cannot have a type annotation"),
+            "unexpected diagnostic message: {:?}",
+            diags[0].message
         );
     }
 
