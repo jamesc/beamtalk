@@ -1634,9 +1634,10 @@ impl Parser {
     }
 
     /// Consumes the malformed token(s) following an errant `::` in a `nil`
-    /// pattern (BT-2860), for error-recovery purposes only — the caller is
-    /// responsible for emitting a single diagnostic covering the whole
-    /// annotation. Mirrors the shape of a real type-pattern annotation
+    /// pattern (BT-2860) or a bare `true`/`false` pattern (BT-2883), for
+    /// error-recovery purposes only — the caller is responsible for
+    /// emitting a single diagnostic covering the whole annotation. Mirrors
+    /// the shape of a real type-pattern annotation
     /// (`Identifier` optionally followed by `(generic, args)`) so a class
     /// name with generics is consumed as one unit; a plausible mistyped
     /// literal type name (`nil :: 5`) is also consumed. Anything else is
@@ -3299,6 +3300,23 @@ mod tests {
         );
         assert!(
             diags[0].message.contains("bare 'true'"),
+            "unexpected diagnostic message: {:?}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn parse_bare_false_with_type_annotation_rejected_with_single_diagnostic() {
+        // Symmetric coverage of `parse_bare_true_with_type_annotation_rejected_with_single_diagnostic`
+        // for the `false` arm of the branch.
+        let (_module, diags) = parse_source("x match: [false :: Boolean -> 1; _ -> 0]");
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic (no cascade), got: {diags:?}"
+        );
+        assert!(
+            diags[0].message.contains("bare 'false'"),
             "unexpected diagnostic message: {:?}",
             diags[0].message
         );
