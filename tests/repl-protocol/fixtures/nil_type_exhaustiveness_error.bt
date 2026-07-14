@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture that triggers a compile error: `matchExhaustive:` on a closed
+// `String | Nil` union missing the `nil` arm (ADR 0107 Phase A, BT-2856).
+// Used by tests/repl-protocol/cases/nil-and-type-patterns.btscript via
+// `// @load-error`.
+
+Object subclass: NilTypeExhaustivenessErrorFixture
+
+  describe: raw :: String | Nil => raw matchExhaustive: [s :: String -> s size]

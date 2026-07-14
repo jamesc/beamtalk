@@ -146,14 +146,30 @@ a flat, exhaustively-checkable list.
   proved exhaustive at compile time (e.g. covering `nil` + that leaf class
   with no wildcard) can have its proof invalidated by the same live reload,
   producing a runtime `case_clause` crash in code that was compile-time
-  "proven" exhaustive. This is exactly the class of problem ADR 0105's
-  re-check machinery (Phase 2, shape-change re-check) exists to catch and
-  re-surface generically — but whether that machinery's dependency tracking
-  already extends to "this class gained a subclass" (as opposed to only
-  `state:`/`field:` shape changes) is **not verified here** and is an open
-  question for whoever implements Phase A: the leaf-classification and any
-  exhaustiveness proof built on it must be wired into ADR 0105's re-check
-  dependency tracking, the same way shape changes already are.
+  "proven" exhaustive.
+
+  **Resolved (BT-2856):** ADR 0105's existing re-check machinery does *not*
+  already extend to "this class gained a subclass" — it is a purely
+  selector-keyed (xref) or `state:`/`field:` shape-keyed dependency graph,
+  with no concept of "sites that tested this class for leafness." This gap
+  is now closed by new, dedicated plumbing rather than an extension of the
+  existing selector/shape trackers: `beamtalk_repl_loader:activate_module/4`
+  detects, immediately before each class-defining `code:load_binary/3` call,
+  whether any of the newly-installed classes' declared superclasses are
+  about to lose leaf status (`superclasses_losing_leaf_status/1`); when one
+  does, `beamtalk_recheck:trigger_leaf_change/1` re-checks every live
+  class's own recorded source against the now-updated hierarchy (there is no
+  selector to look dependents up by, so — unlike the method/shape
+  triggers — the candidate set is every live class, the same universe
+  `trigger_image/0`'s `:recheck image` command already sweeps) and publishes
+  any newly-introduced `Type`-category finding (the "has subclasses" compile
+  error, BT-2854, or a now-non-exhaustive `matchExhaustive:`, BT-2856)
+  through the same findings-store/`'ReloadCheckCompleted'` announcement
+  path BT-2779/BT-2780 established. This is the one place in ADR 0105's
+  re-check machinery that deliberately does *not* drop `error`-severity
+  diagnostics from its relevance filter (every other trigger does) — see
+  `beamtalk_recheck:trigger_leaf_change/1`'s doc for why dropping them here
+  would silently defeat the whole point of the trigger.
 
 ## Decision
 
@@ -175,10 +191,20 @@ raw match: [
 ```beamtalk
 coll match: [
   nil -> "";
-  items :: List(Printable) -> (items inject: "" into: [:acc :item | ...]);
+  items :: List -> (items inject: "" into: [:acc :item | ...]);
   _ -> ""
 ]
 ```
+
+> **Not yet supported:** an earlier draft of this example wrote
+> `items :: List(Printable)`. Generic type arguments in a type pattern are
+> not supported — `class` in `Pattern::Type` is scoped to a bare identifier
+> (BT-2854's explicit acceptance criteria), and per ADR 0068 type erasure
+> there is no reified generic tag to check at runtime regardless, so
+> `List(Printable)` in pattern position produces a dedicated diagnostic
+> rather than silently checking only `List` (BT-2860). Callers needing to
+> verify element type can hand-verify inside the arm body (e.g. a `when:`
+> guard with `allSatisfy:`).
 
 - **`nil` pattern:** matches exactly what `isNil` already returns true for —
   it delegates to the same single, canonical runtime nil representation the

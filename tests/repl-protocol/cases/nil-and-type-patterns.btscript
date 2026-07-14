@@ -1,0 +1,93 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for `nil`/`Type` patterns in `match:` (ADR 0107, BT-2853 epic).
+//
+// Unit-level checker/codegen tests (crates/beamtalk-core's
+// nil_type_match_exhaustiveness.rs, stdlib/test/type_pattern_match_test.bt,
+// stdlib/test/nil_type_match_exhaustiveness_test.bt) already cover this
+// feature in isolation. This file is the required user-level validation
+// (BT-2857): the two motivating dispatch shapes from the ADR, driven from
+// the REPL exactly as a real user would type them, plus the exhaustiveness
+// severity split (`matchExhaustive:` hard failure vs. plain `match:`
+// advisory warning) surfaced through the real compile pipeline rather than
+// the type checker's internal test harness.
+
+// ===========================================================================
+// `nil` + `s :: String` dispatch — the `workspaceRoot`-shaped motivating
+// example from ADR 0107 (Context §Problem statement).
+// ===========================================================================
+
+workspaceRoot := nil
+// => _
+
+workspaceRoot match: [
+  nil -> "default_root";
+  s :: String -> s;
+  _ -> "other"
+]
+// => default_root
+
+configuredRoot := "/custom/workspace"
+// => _
+
+configuredRoot match: [
+  nil -> "default_root";
+  s :: String -> s;
+  _ -> "other"
+]
+// => /custom/workspace
+
+// ===========================================================================
+// `nil` + `items :: List` dispatch — the `renderForBody:`-shaped motivating
+// example from ADR 0107 (Context §Problem statement).
+// ===========================================================================
+
+coll := nil
+// => _
+
+coll match: [
+  nil -> "none";
+  items :: List -> items size;
+  _ -> "other"
+]
+// => none
+
+populatedColl := #(1, 2, 3)
+// => _
+
+populatedColl match: [
+  nil -> "none";
+  items :: List -> items size;
+  _ -> "other"
+]
+// => 3
+
+// ===========================================================================
+// `matchExhaustive:` on a closed `String | Nil` union missing the `nil` arm
+// is a hard compile-time failure (BT-2856, ADR 0107 Phase A).
+// ===========================================================================
+
+// @load-error tests/repl-protocol/fixtures/nil_type_exhaustiveness_error.bt => non-exhaustive matchExhaustive: `Nil` is not handled
+
+// ===========================================================================
+// The same missing-`nil`-arm shape via plain `match:` (non-asserted) is only
+// an advisory warning — it still compiles and dispatches correctly
+// (BT-2856, ADR 0107 Phase A; advisory/asserted severity split from
+// BT-2745/BT-2763 reused verbatim).
+// ===========================================================================
+
+// BT-780 period-separated submission (declaration + match: in one eval
+// call): a typed local declaration (`raw :: String | Nil := ...`) is not
+// captured as a persistent workspace binding the way a plain `x := ...`
+// assignment is, so the declaration and the match: that depends on its
+// narrowed type must be submitted together.
+raw :: String | Nil := "hello". raw match: [s :: String -> s size]
+// => WARNING: non-exhaustive match: `Nil` is not handled
+
+// The `// => WARNING:` assertion above only checks the diagnostic text, not
+// the return value — verify separately that the narrowed `s :: String` arm
+// still dispatches to the correct value (not e.g. a silently-wrong `nil`)
+// when the same shape is fully covered.
+raw2 :: String | Nil := "hello". raw2 match: [s :: String -> s size; _ -> -1]
+// => 5

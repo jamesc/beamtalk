@@ -1753,8 +1753,11 @@ render: coll :: Printable | Nil -> String =>
 | `x isNil ifTrue: [^...] ifFalse: [...]` | `x` is non-nil in false block | False block |
 | `x ifNotNil: [:v \| ...]` | `v` is non-nil in block | Block only |
 | `x ifNil: [...] ifNotNil: [:v \| ...]` | `v` is non-nil in notNil block | NotNil block |
+| `x notNil and: [...]` | `x` is non-nil in block, including nested block-argument positions | Block only |
 
 The diverging-guard pattern (`isNil ifTrue: [self error: "..."]`) recognises any block whose body infers as `Never` — including calls to `error:`, `notImplemented`, or any `-> Never` method — not just non-local returns (`^`). Narrowing also works on `self.field` reads: inside `self.field isNil ifFalse: [...]`, the field narrows to non-nil within the block.
+
+**`notNil and:` (BT-2872):** `x notNil and: [...]` narrows `x` to non-nil for the whole block argument — not just where `x` is a further send's receiver, but in any nested position, including as an argument to a binary send inside a further-nested block (`local notNil and: [local > 0 and: [5 >= local]]` narrows `local` inside `5 >= local` too). The narrowing does not survive past the block — a later unguarded use of `x` after the `and:` send is unaffected.
 
 **`isKindOf:` guard-and-return (BT-2825):** the same diverging-guard treatment `isNil` gets also applies to `isKindOf:` — `(x isKindOf: Foo) ifFalse: [^default]` proves `x` is `Foo` for the rest of the method, and `(x isKindOf: Foo) ifTrue: [^default]` proves `x` is `T \ Foo`. This also closes a related gap: when `x`'s declared type is a Protocol (e.g. `Printable`) and `Foo` is a concrete class, the narrowed type collapses to the bare `Foo` — a runtime `isKindOf: Foo` check is a stronger proof than the protocol annotation, so the narrowed value is assignable to a `Foo`-typed local without an `@expect type` escape hatch.
 
@@ -2787,7 +2790,53 @@ temp match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
   Result error: _ -> 0
 ]
 // => 42
+
+// Nil pattern — matches nil exactly (BT-2854, ADR 0107)
+value := nil
+value match: [
+  nil -> "was nil";
+  s :: String -> s;
+  _ -> "other"
+]
+// => "was nil"
+
+// Type patterns — bind and test runtime class (BT-2855, ADR 0107)
+x := "hello"
+x match: [
+  nil -> "nil";
+  s :: String -> s size;
+  n :: Integer -> n + 1;
+  _ -> "other"
+]
+// => 5
+
+// Guard scoped over the type-pattern binding
+x := 42
+x match: [
+  n :: Integer when: [n > 100] -> "big";
+  n :: Integer -> "small";
+  _ -> "other"
+]
+// => "small"
+
+// Mixing type patterns with literal and wildcard patterns
+x := "hi"
+x match: [
+  nil -> 0;
+  s :: String -> s size;
+  _ -> -1
+]
+// => 2
 ```
+
+**Type patterns** test the runtime class of the scrutinee and bind the value to the named variable, narrowed to that class. Subsequent arms see the scrutinee type narrowed by difference (e.g. after a `s :: String` arm, the remaining arms see the type minus `String`).
+
+**Phase A scope (ADR 0107):** type patterns are restricted to concrete/leaf classes only — `binding :: SomeClass` where `SomeClass` has subclasses is a compile error (`"SomeClass has subclasses; type patterns are not yet supported for non-leaf classes"`), never silently-wrong matching. Subclass-polymorphic matching (`binding :: Shape` where `Shape` has subclasses `Circle`/`Square`) is deferred to a future ADR 0107 Phase B. Supported classes today: `String`, `Integer`, `Float`, `List`, `Dictionary`, `Boolean` (uses the `is_boolean/1` BIF; `True`/`False` use exact atom guards — all three are stdlib primitives that bypass the leaf-restriction via a BIF/atom-guard check, not the user-class hierarchy check a `Shape`/`Circle`-style class would go through), `True`, `False`, `Symbol`, `Nil`, `UndefinedObject`, `Block`, `Pid`, `Reference`, `Port`, user-defined `Value` subclasses, and `Actor` subclasses. `Supervisor`/`DynamicSupervisor` subclasses are not yet supported in type patterns (compile-time rejection — same non-leaf restriction).
+
+Three runtime-representation nuances (see ADR 0107 Implementation for the full codegen rationale):
+- **`Character` is not a supported type pattern.** It compiles to a plain Erlang integer with no runtime tag distinguishing it from `Integer`, so `x :: Character` could never be told apart from `x :: Integer` at runtime — use `x :: Integer` instead.
+- **`Dictionary` has no `'$beamtalk_class'` tag** — it's a bare Erlang map, unlike tagged `Value`/sealed-class instances (which are also maps, but with a class tag). `x :: Dictionary` is fully supported, but compiles to a different check shape under the hood (a nested map-key test) so it doesn't false-positive on every other map-backed value.
+- **A `Symbol` type pattern excludes `nil` and booleans.** `nil`, `true`/`false`, and symbols are all plain Erlang atoms with no distinguishing runtime tag, so `nil match: [s :: Symbol -> ...]` does **not** match, and a `Symbol` arm can never accidentally shadow a `nil ->` or `b :: Boolean` arm regardless of arm order.
 
 **Supported pattern types:**
 
@@ -2806,6 +2855,8 @@ temp match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
 | Array rest | `#[a, ...rest]` | Destructure first elements, bind remaining to a sub-array (destructuring assignment only) |
 | Dict/Map | `#{#k => v}` | Match a Dictionary containing key `#k`, bind value to `v`; partial match (other keys ignored) |
 | Constructor | `Result ok: v` | Match sealed type by constructor (Phase 1: Result only) |
+| Nil | `nil` | Matches `nil` exactly; narrows subsequent arms to exclude `Nil` (BT-2854, ADR 0107) |
+| Type | `x :: String` | Bind `x` and test runtime class; `x` is narrowed to the named class in the arm body and guard. Phase A: leaf/concrete classes only — see restrictions below (BT-2855, ADR 0107) |
 
 **Exhaustiveness checking (BT-1299):** `match:` on a sealed type with constructor patterns must cover all known variants or include a wildcard `_` arm, or the compiler emits an error:
 
@@ -2862,12 +2913,13 @@ direction matchExhaustive: [
 ]
 ```
 
-If the scrutinee's type is **not** a closed union of `#symbol` singletons (`Dynamic`, a bare/open `Symbol`, or a mixed union), `matchExhaustive:` cannot verify the assertion and fails loudly rather than staying silent:
+If the scrutinee's type is **not** a closed union of `#symbol` singletons (`Dynamic`, a bare/open `Symbol`, or a mixed union), nor a closed `Known | Nil` union (or small closed union of concrete leaf classes) covered by `nil`/`Type` patterns (ADR 0107), `matchExhaustive:` cannot verify the assertion and fails loudly rather than staying silent:
 
 ```beamtalk
 x matchExhaustive: [#ok -> 1; _ -> 0]
 // ⛔ Error: cannot verify `matchExhaustive:` is exhaustive — scrutinee type
-//    `Dynamic` is not a closed union of symbol singletons
+//    `Dynamic` is not a closed union of symbol singletons, `nil`, or
+//    concrete leaf classes
 ```
 
 Plain `match:`'s advisory warning behaviour is unchanged by `matchExhaustive:` — the two checks are independent, and only the keyword you write selects between them.

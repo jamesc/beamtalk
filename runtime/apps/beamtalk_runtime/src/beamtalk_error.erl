@@ -30,7 +30,8 @@ See docs/internal/design-self-as-object.md Section 3.8 for error taxonomy.
     raise/1,
     raise_type_error/3,
     generate_message/3,
-    format_reason/2
+    format_reason/2,
+    is_does_not_understand/1
 ]).
 
 %% Type definition for the internal error record.
@@ -272,6 +273,26 @@ raise(#beamtalk_error{} = Error) ->
 -spec raise_type_error(atom(), atom(), term()) -> no_return().
 raise_type_error(Class, Selector, Hint) ->
     raise(new(type_error, Class, Selector, Hint)).
+
+-doc """
+Predicate: does this error represent a genuine "selector not found anywhere
+in the hierarchy" (`does_not_understand`)?
+
+BT-2842: `beamtalk_dispatch:super/5` (and the `lookup/5` path it shares via
+`lookup_in_class_chain/5`) returns `{error, #beamtalk_error{}}` for two
+semantically different situations — the selector was never found, or the
+selector was found and invoked but the method itself raised. Generated
+dispatch code uses this predicate to tell them apart instead of pattern
+matching the record's raw tuple layout, so it can re-raise real errors
+instead of masking them as a fabricated `does_not_understand`.
+
+Example:
+  beamtalk_error:is_does_not_understand(beamtalk_error:new(does_not_understand, 'Integer'))
+  % => true
+""".
+-spec is_does_not_understand(#beamtalk_error{}) -> boolean().
+is_does_not_understand(#beamtalk_error{kind = does_not_understand}) -> true;
+is_does_not_understand(#beamtalk_error{}) -> false.
 
 -doc "Generate a human-readable error message from kind, class, and optional selector.".
 -spec generate_message(atom(), atom(), atom() | undefined) -> binary().

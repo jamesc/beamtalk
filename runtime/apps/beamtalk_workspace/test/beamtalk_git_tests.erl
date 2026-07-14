@@ -641,7 +641,20 @@ git_revert_file_discards_change_test() ->
 canonical(Path) when is_binary(Path) ->
     list_to_binary(canonical(binary_to_list(Path)));
 canonical(Path) ->
-    string:trim(os:cmd("cd " ++ shell_quote(Path) ++ " && pwd -P")).
+    case os:type() of
+        {win32, _} ->
+            %% `Path` may carry a short (8.3) name segment inherited from a
+            %% GHA Windows runner's %TEMP% (e.g. `RUNNER~1` for the
+            %% `runneradmin` account), while `git rev-parse --show-toplevel`
+            %% always resolves such segments to their long-name form.
+            %% nativename/1 alone can't undo that, so route every path
+            %% through the same `--show-toplevel` resolution the code under
+            %% test uses -- every call site here passes a repo (sub)dir, so
+            %% this is a no-op re-resolution rather than a different path.
+            string:trim(os:cmd("git -C " ++ shell_quote(Path) ++ " rev-parse --show-toplevel"));
+        _ ->
+            string:trim(os:cmd("cd " ++ shell_quote(Path) ++ " && pwd -P"))
+    end.
 
 %% Create a throwaway git repo with a committed file inside a *subdirectory*
 %% project, modify that file, run Fun(Toplevel, ProjectDir, RepoRelFile), then
@@ -706,13 +719,14 @@ with_repo_root_project(Fun) ->
 
 %% Create a unique empty temp dir (not a git repo).
 make_temp_dir() ->
-    Base = filename:basedir(user_cache, "beamtalk_git_test"),
-    ok = filelib:ensure_dir(filename:join(Base, "x")),
+    %% os:getpid/0 returns a string; ~p renders strings as quoted literals
+    %% (embedding literal `"` characters), which is a legal POSIX filename
+    %% byte but a forbidden Windows filename character -- use ~s instead.
     Unique = lists:flatten(
-        io_lib:format("repo_~p_~p", [erlang:unique_integer([positive]), os:getpid()])
+        io_lib:format("repo_~p_~s", [erlang:unique_integer([positive]), os:getpid()])
     ),
-    Dir = filename:join(Base, Unique),
-    ok = file:make_dir(Dir),
+    Dir = filename:join(binary_to_list(beamtalk_file:'tempDirectory'()), Unique),
+    ok = filelib:ensure_dir(filename:join(Dir, "x")),
     Dir.
 
 %% Create a unique temp dir and `git init` it with a deterministic identity.
@@ -736,11 +750,25 @@ git_in(Dir, Args) ->
     _ = os:cmd(Cmd),
     ok.
 
+%% os:cmd/1 never runs a POSIX shell on Windows (it shells out via `cmd /c`,
+%% which does not strip single quotes), so quoting must be platform-aware.
 shell_quote(S) ->
-    "'" ++ lists:flatten(string:replace(S, "'", "'\\''", all)) ++ "'".
+    case os:type() of
+        {win32, _} ->
+            "\"" ++ lists:flatten(string:replace(S, "\"", "\\\"", all)) ++ "\"";
+        _ ->
+            "'" ++ lists:flatten(string:replace(S, "'", "'\\''", all)) ++ "'"
+    end.
 
+%% `rm`/`pwd`/etc. from Git for Windows' usr/bin are not on PATH under
+%% `cmd /c` on Windows runners (only reachable via Git Bash), so `rm -rf`
+%% silently no-ops there; use the cmd.exe builtin instead.
 rm_rf(Dir) ->
-    _ = os:cmd("rm -rf " ++ shell_quote(Dir)),
+    _ =
+        case os:type() of
+            {win32, _} -> os:cmd("rmdir /s /q " ++ shell_quote(Dir) ++ " 2>nul");
+            _ -> os:cmd("rm -rf " ++ shell_quote(Dir))
+        end,
     ok.
 
 %% Join records with a trailing NUL after each, matching `-z` output.
