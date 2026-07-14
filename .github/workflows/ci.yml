@@ -112,7 +112,9 @@ jobs:
         # build first so clippy and test-rust reuse its artifacts.
         # Full test-stdlib/test-bunit/test-runtime run only in the Linux-only 'test' job.
         # On Windows, fmt-check skips Erlang/JS checks (platform-agnostic, Linux covers them).
-        run: just build clippy fmt-check test-rust
+        # lint-workaround-comments (BT-2347 ratchet) is a no-op on Windows and enforces
+        # the same allowlist gate here that `just ci` enforces locally (BT-2841).
+        run: just build clippy fmt-check test-rust lint-workaround-comments
 
       - name: Surface parity drift check (BT-2082)
         # Verifies REPL ops × CLI × MCP × LSP coverage matches
