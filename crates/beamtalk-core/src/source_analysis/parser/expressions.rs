@@ -2075,11 +2075,22 @@ impl Parser {
             // (`Pattern::Type` has no codegen when nested inside a
             // constructor pattern — see `generate_pattern`), so it points at
             // the guard-clause idiom instead, which is already supported
-            // (`Result ok: v when: [v]`).
+            // (`Result ok: v when: [v =:= true]`) — spelled with the
+            // explicit `=:=` (strict equality, per
+            // `docs/beamtalk-language-features.md`'s Equality section)
+            // rather than a bare `v`/`v not`, since a bare guard variable
+            // reads as a truthiness check to anyone unfamiliar with Erlang's
+            // guard semantics (a bare guard variable *does* require the
+            // exact atom `true` — no other value passes — but `=:=` says so
+            // without relying on that knowledge).
             TokenKind::Identifier(name) if name.as_str() == "true" || name.as_str() == "false" => {
                 let name = name.clone();
                 let bad_span = self.advance().span();
-                let guard_example = if name == "true" { "v" } else { "v not" };
+                let guard_example = if name == "true" {
+                    "v =:= true"
+                } else {
+                    "v =:= false"
+                };
                 self.diagnostics.push(Diagnostic::error(
                     format!(
                         "bare '{name}' in a constructor pattern binding always matches — it binds any value to a variable named '{name}', it does not test for the boolean literal '{name}' (bind a variable and test it in a guard clause instead, e.g. 'Result ok: v when: [{guard_example}]')"
