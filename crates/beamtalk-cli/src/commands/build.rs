@@ -930,9 +930,6 @@ pub(crate) fn extract_type_specs(
     has_manifest: bool,
     stdlib_mode: bool,
 ) -> Option<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry> {
-    use crate::beam_compiler;
-    use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
-
     // No manifest: only continue when compiling the stdlib (which has its own
     // FFI surface in runtime/stdlib/workspace ebins). Otherwise nothing to do.
     if !has_manifest {
@@ -943,92 +940,11 @@ pub(crate) fn extract_type_specs(
         };
     }
 
-    let cache_dir = layout.type_cache_dir();
-
-    // Discover OTP .beam files and the OTP version (for the shared cache key).
-    let otp = match beam_compiler::discover_otp_beam_files() {
-        Ok(discovery) => discovery,
-        Err(e) => {
-            debug!("Skipping OTP type spec extraction: {e}");
-            beam_compiler::OtpDiscovery::default()
-        }
-    };
-
-    // De-duplicate OTP beams by module name (file stem); first occurrence wins.
-    let mut seen_modules = std::collections::HashSet::new();
-    let mut otp_beams = otp.beam_files;
-    otp_beams.retain(|beam_file| match beam_file.file_stem() {
-        Some(stem) => seen_modules.insert(stem.to_owned()),
-        None => true,
-    });
-
-    // Discover dependency .beam files (path deps, native ebin, rebar3 hex deps).
-    let mut dep_ebin_dirs: Vec<_> = super::deps::collect_dep_ebin_paths(layout);
-    let native_ebin = layout.native_ebin_dir();
-    if native_ebin.exists() {
-        dep_ebin_dirs.push(native_ebin);
-    }
-    dep_ebin_dirs.extend(collect_rebar3_ebin_paths(layout));
-    dep_ebin_dirs.sort();
-    dep_ebin_dirs.dedup();
-
-    // De-duplicate dep beams, and drop any module already covered by OTP so the
-    // OTP-first precedence (and a single .beam per module) is preserved.
-    let mut dep_beams = beam_compiler::discover_dependency_beam_files(&dep_ebin_dirs);
-    dep_beams.retain(|beam_file| match beam_file.file_stem() {
-        Some(stem) => seen_modules.insert(stem.to_owned()),
-        None => true,
-    });
-
-    if otp_beams.is_empty() && dep_beams.is_empty() {
-        debug!("No .beam files found for type spec extraction");
-        return None;
-    }
-
-    // BT-2470: OTP specs go through the shared, version-keyed cache tier (which
-    // survives a wiped `_build/`); dependency/native specs stay project-local.
-    let shared_dir = otp
-        .version
-        .as_deref()
-        .and_then(beam_compiler::shared_otp_cache_dir);
-    if let Some(shared) = &shared_dir {
-        debug!(dir = %shared, "Using shared OTP type-spec cache");
-    }
-
-    let otp_registry = match beam_compiler::extract_beam_specs_tiered(
-        &otp_beams,
-        &cache_dir,
-        shared_dir.as_deref(),
-    ) {
-        Ok(registry) => registry,
-        Err(e) => {
-            debug!("OTP type spec extraction failed (non-fatal): {e}");
-            NativeTypeRegistry::new()
-        }
-    };
-
-    let dep_registry = match beam_compiler::extract_beam_specs(&dep_beams, &cache_dir) {
-        Ok(registry) => registry,
-        Err(e) => {
-            debug!("Dependency type spec extraction failed (non-fatal): {e}");
-            NativeTypeRegistry::new()
-        }
-    };
-
-    // Merge dependency specs into the OTP registry; OTP wins on any collision.
-    let mut registry = otp_registry;
-    registry.merge(dep_registry);
-
-    if registry.module_count() > 0 {
-        info!(
-            modules = registry.module_count(),
-            functions = registry.function_count(),
-            "Extracted Erlang FFI type specs"
-        );
-        Some(registry)
-    } else {
-        None
-    }
+    // BT-2858: the manifest-backed extraction path now lives in the
+    // `beamtalk_cli` lib crate (`native_type_specs`) so `beamtalk-mcp` can
+    // call the same single source of truth without reading a possibly-stale
+    // on-disk cache. This is a thin delegation, not a duplicate.
+    beamtalk_cli::native_type_specs::extract_project_type_specs(layout)
 }
 
 /// Collected build outputs needed for OTP application packaging.

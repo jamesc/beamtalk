@@ -2330,11 +2330,21 @@ struct LintResult {
 /// `CompilerOptions::has_package_dependencies` (BT-2794/BT-2823): true when
 /// the project's manifest declares `[dependencies]`, regardless of whether
 /// any of them could be resolved on disk.
+///
+/// `native_type_registry` (BT-2858) mirrors `beamtalk lint`'s FFI type
+/// registry (BT-2851/BT-2134): when `Some`, `(Erlang m) f:` calls get return
+/// type inference and argument-type checks from the registry instead of
+/// falling back to `Dynamic(UntypedFfi)` — the same registry `beamtalk
+/// build`/`beamtalk lint` use, so MCP `lint`/`diagnostic_summary` never
+/// diverge from them on which Erlang calls are seen as typed.
 fn run_module_analysis(
     module: &beamtalk_core::ast::Module,
     all_class_infos: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
     mut diags: Vec<beamtalk_core::source_analysis::Diagnostic>,
     has_package_dependencies: bool,
+    native_type_registry: Option<
+        std::sync::Arc<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,
+    >,
 ) -> (
     Vec<beamtalk_core::source_analysis::Diagnostic>,
     beamtalk_core::semantic_analysis::ClassHierarchy,
@@ -2348,10 +2358,11 @@ fn run_module_analysis(
         has_package_dependencies,
         ..Default::default()
     };
-    let analysis_result = beamtalk_core::semantic_analysis::analyse_with_options_and_classes(
+    let analysis_result = beamtalk_core::semantic_analysis::analyse_with_natives(
         module,
         &options,
         cross_file_classes,
+        native_type_registry,
     );
     diags.extend(
         analysis_result
@@ -2363,6 +2374,22 @@ fn run_module_analysis(
     beamtalk_core::queries::diagnostic_provider::apply_expect_directives(module, &mut diags);
 
     (diags, analysis_result.class_hierarchy)
+}
+
+/// BT-2858: Build the Erlang FFI native-type registry for `path`'s package,
+/// the same way `beamtalk lint` does (BT-2134/BT-2851's `extract_type_specs`,
+/// now shared via `beamtalk_cli::native_type_specs`) — rather than reading a
+/// possibly-absent/stale on-disk `_build/type_cache/` written by a *previous*
+/// `beamtalk build`. Returns `None` outside a manifest-backed package or when
+/// extraction finds no `.beam` files (e.g. runtime not yet compiled).
+fn build_native_type_registry(
+    path: &str,
+) -> Option<std::sync::Arc<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>> {
+    let project_root =
+        beamtalk_core::project::package::find_package_root(std::path::Path::new(path))?;
+    let project_root = camino::Utf8PathBuf::from_path_buf(project_root).ok()?;
+    let layout = beamtalk_cli::build_layout::BuildLayout::new(&project_root);
+    beamtalk_cli::native_type_specs::extract_project_type_specs(&layout).map(std::sync::Arc::new)
 }
 
 /// BT-2014: Compute a diagnostic summary (counts + type coverage) for a path.
@@ -2442,6 +2469,9 @@ fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
     // beamtalk.toml) resolve the same way `beamtalk build` does.
     let has_package_dependencies = merge_dependency_class_infos(path, &mut all_class_infos);
 
+    // BT-2858: Populate the FFI type registry the same way `beamtalk lint` does.
+    let native_type_registry = build_native_type_registry(path);
+
     // Pass 2: Analyse each file and collect diagnostics + coverage.
     let mut all_diags = Vec::new();
     let mut coverage = CoverageReport {
@@ -2466,6 +2496,7 @@ fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
             &all_class_infos,
             initial_diags,
             has_package_dependencies,
+            native_type_registry.clone(),
         );
 
         all_diags.extend(file_diags);
@@ -2711,6 +2742,9 @@ fn run_lint_structured(path: &str) -> LintResult {
     // beamtalk.toml) resolve the same way `beamtalk build` does.
     let has_package_dependencies = merge_dependency_class_infos(path, &mut all_class_infos);
 
+    // BT-2858: Populate the FFI type registry the same way `beamtalk lint` does.
+    let native_type_registry = build_native_type_registry(path);
+
     // Pass 2: Analyse each target file with cross-file class context.
     for (file, source, module, parse_diags) in parsed_targets {
         // Include parse errors (syntax problems) and warnings so files with
@@ -2735,6 +2769,7 @@ fn run_lint_structured(path: &str) -> LintResult {
             &all_class_infos,
             initial_diags,
             has_package_dependencies,
+            native_type_registry.clone(),
         );
 
         let file_name = file.to_string_lossy().into_owned();
@@ -2905,6 +2940,91 @@ mod tests {
         assert!(
             !has_dnu,
             "@expect type should suppress DNU in MCP lint, got: {result:?}",
+        );
+    }
+
+    /// BT-2858: `build_native_type_registry` extracts live from OTP `.beam`
+    /// files for a manifest-backed project with no prior `beamtalk build` —
+    /// analogous to `commands::lint`'s
+    /// `lint_extracts_type_specs_live_on_cold_cache_bt_2851` in the CLI
+    /// binary. Before this fix, MCP `lint`/`diagnostic_summary` had no way to
+    /// obtain a registry at all (`run_module_analysis` always passed `None`).
+    #[test]
+    fn build_native_type_registry_extracts_live_on_cold_cache() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = temp.path();
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(
+            dir.join("beamtalk.toml"),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+
+        // No `_build/` directory exists yet — the cold-cache case.
+        assert!(!dir.join("_build").exists());
+
+        let Some(registry) = build_native_type_registry(dir.join("src").to_str().unwrap()) else {
+            // OTP `.beam` discovery is environment-dependent (e.g. a sandbox
+            // with no OTP install on disk); skip rather than false-fail.
+            eprintln!(
+                "skipping build_native_type_registry_extracts_live_on_cold_cache: \
+                 no OTP .beam files discovered in this environment"
+            );
+            return;
+        };
+        assert!(
+            registry.lookup("lists", "reverse", 1).is_some(),
+            "live extraction with no prior build must still find lists:reverse/1"
+        );
+        // The extractor writes the same cache a `beamtalk build`/`beamtalk
+        // lint` run would, so a subsequent call reads it back instead of
+        // re-extracting.
+        assert!(dir.join("_build").join("type_cache").exists());
+    }
+
+    /// BT-2858: MCP `lint` must see the same FFI argument-type registry
+    /// `beamtalk lint`/`beamtalk build` do, so a well-specced `(Erlang m) f:`
+    /// call does not fall back to `Dynamic(UntypedFfi)` and trip the BT-1914
+    /// "Dynamic in typed class" warning — mirrors
+    /// `commands::lint`'s `ffi_call_with_registry_does_not_warn_dynamic_in_typed_class`.
+    /// Before this fix, `run_module_analysis` always analysed with `None`,
+    /// so this warning fired unconditionally regardless of whether the
+    /// runtime's `.beam` files carried a real `-spec`.
+    #[test]
+    fn run_lint_structured_ffi_call_does_not_warn_dynamic_in_typed_class() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = temp.path();
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(
+            dir.join("beamtalk.toml"),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let file = dir.join("src").join("ffi_test.bt");
+        std::fs::write(
+            &file,
+            "sealed typed Value subclass: FfiTest\n\n  check -> Dynamic =>\n    Erlang lists reverse: (1 to: 3) asArray\n",
+        )
+        .unwrap();
+
+        if build_native_type_registry(file.to_str().unwrap()).is_none() {
+            eprintln!(
+                "skipping run_lint_structured_ffi_call_does_not_warn_dynamic_in_typed_class: \
+                 no OTP .beam files discovered in this environment"
+            );
+            return;
+        }
+
+        let result = run_lint_structured(file.to_str().unwrap());
+        let untyped_ffi: Vec<_> = result
+            .warnings
+            .iter()
+            .chain(result.errors.iter())
+            .filter(|d| d.message.contains("untyped FFI"))
+            .collect();
+        assert!(
+            untyped_ffi.is_empty(),
+            "with a live registry, MCP lint must not warn untyped FFI; got: {untyped_ffi:?}"
         );
     }
 
