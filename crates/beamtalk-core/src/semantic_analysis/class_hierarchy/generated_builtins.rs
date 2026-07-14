@@ -733,7 +733,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
         ClassInfo {
             name: "Boolean".into(),
             superclass: Some("Value".into()),
-            is_sealed: false,
+            is_sealed: true,
             is_abstract: true,
             is_typed: false,
             is_internal: false,
