@@ -4454,6 +4454,30 @@ impl TypeChecker {
             );
         }
         let body_ty = self.infer_stmts(&block.body, hierarchy, &mut block_env, in_abstract_method);
+        // BT-2866: a block whose body ends in a top-level non-local return
+        // (`^expr`) never produces a *local* value — it diverges out of the
+        // enclosing method entirely, and `^expr`'s type naturally matches
+        // whatever the enclosing method itself declares as its return type
+        // (that's what makes `^` type-check). `infer_stmts` reports that
+        // expression's type as the block's "body type" regardless, since for
+        // an ordinary method body that IS the right answer. But for a block
+        // passed to a combinator like `ifOk:ifError:` (`Block(T, R) ...
+        // Block(E, R) -> R`), treating a non-local-return branch's body type
+        // as a real contribution to `R` pollutes the union with the
+        // *enclosing method's* return type — unrelated to what this block's
+        // sibling argument (e.g. `ifOk:`'s block) actually produces locally.
+        // Override to `Never` (the `union_of` identity element — see
+        // `infer_method_local_params`/`merge_method_local_binding`) so only
+        // branches that genuinely produce a local value participate in `R`.
+        // `block_has_return` (not the deeper `block_has_any_return`) matches
+        // `infer_stmts`'s own top-level-only `break` check above exactly —
+        // a `^` buried inside a conditional the block might not take
+        // shouldn't force the whole block to `Never`.
+        let body_ty = if block_has_return(block) {
+            InferredType::Never
+        } else {
+            body_ty
+        };
         // Build Block type with resolved param types + inferred return type
         let mut block_type_args: Vec<InferredType> = param_types.to_vec();
         block_type_args.push(body_ty);
