@@ -3047,6 +3047,110 @@ mod tests {
         );
     }
 
+    /// Write a fixture project declaring a *direct* git dependency `http` in
+    /// `beamtalk.toml`, where `http`'s own checked-out `beamtalk.toml`
+    /// declares a *transitive* git dependency `net` (BT-2836) — never
+    /// mentioned in the project's own manifest. Both checkouts are already
+    /// present under `_build/deps/`, simulating a prior `beamtalk build`. The
+    /// project's own `src/app.bt` references `net`'s `NetClient` class
+    /// directly, which is only reachable by walking `http`'s manifest.
+    /// Returns the fixture's `TempDir` (keep it alive for the duration of the
+    /// test) and the path to `src/app.bt`.
+    fn write_transitive_git_dependency_fixture() -> (tempfile::TempDir, std::path::PathBuf) {
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = temp.path();
+        let src_dir = dir.join("src");
+        std::fs::create_dir_all(&src_dir).unwrap();
+
+        std::fs::write(
+            dir.join("beamtalk.toml"),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n\
+             [dependencies]\nhttp = { git = \"https://example.com/http.git\", tag = \"v1.0.0\" }\n",
+        )
+        .unwrap();
+
+        // Simulate `beamtalk build` having already fetched the direct
+        // dependency, whose own manifest declares a transitive dependency.
+        let http_dir = dir.join("_build").join("deps").join("http");
+        std::fs::create_dir_all(http_dir.join("src")).unwrap();
+        std::fs::write(
+            http_dir.join("beamtalk.toml"),
+            "[package]\nname = \"http\"\nversion = \"0.1.0\"\n\n\
+             [dependencies]\nnet = { git = \"https://example.com/net.git\", tag = \"v1.0.0\" }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            http_dir.join("src").join("http_server.bt"),
+            "Object subclass: HTTPServer\n",
+        )
+        .unwrap();
+
+        // The transitive dependency's checkout, never declared in app's own
+        // `beamtalk.toml` — only discoverable by walking `http`'s manifest.
+        let net_src_dir = dir.join("_build").join("deps").join("net").join("src");
+        std::fs::create_dir_all(&net_src_dir).unwrap();
+        std::fs::write(
+            net_src_dir.join("net_client.bt"),
+            "Object subclass: NetClient\n",
+        )
+        .unwrap();
+
+        // Sentinel class so `has_cross_file_classes` isn't vacuously true/false
+        // independent of dependency resolution, matching
+        // `write_git_dependency_fixture`'s pattern.
+        std::fs::write(src_dir.join("other.bt"), "Object subclass: Other\n").unwrap();
+
+        let app_file = src_dir.join("app.bt");
+        std::fs::write(
+            &app_file,
+            "Object subclass: App\n\n  class run =>\n    NetClient new\n",
+        )
+        .unwrap();
+
+        (temp, app_file)
+    }
+
+    /// BT-2836: MCP `lint` must resolve classes from a *transitive*
+    /// dependency (declared only in a direct dependency's own
+    /// `beamtalk.toml`, not the project's) the same way `beamtalk
+    /// build`/`beamtalk lint` do, using whatever checkout is already on disk
+    /// under `_build/deps/<name>/` — without a false-positive `Unresolved
+    /// class` diagnostic.
+    #[test]
+    fn run_lint_structured_resolves_transitive_git_dependency_classes() {
+        let (_temp, app_file) = write_transitive_git_dependency_fixture();
+        let result = run_lint_structured(app_file.to_str().unwrap());
+
+        let unresolved = result
+            .warnings
+            .iter()
+            .chain(result.errors.iter())
+            .any(|d| d.message.contains("Unresolved class"));
+        assert!(
+            !unresolved,
+            "MCP lint should resolve NetClient from the transitive git dependency \
+             checkout, got: {result:?}",
+        );
+    }
+
+    /// BT-2836: Same as
+    /// `run_lint_structured_resolves_transitive_git_dependency_classes` but
+    /// for the `diagnostic_summary` tool.
+    #[test]
+    fn compute_diagnostic_summary_resolves_transitive_git_dependency_classes() {
+        let (_temp, app_file) = write_transitive_git_dependency_fixture();
+        let result = compute_diagnostic_summary(app_file.to_str().unwrap());
+
+        let unresolved_class_total = result["totals_by_category"]["UnresolvedClass"]["total"]
+            .as_u64()
+            .unwrap_or(0);
+        assert_eq!(
+            unresolved_class_total, 0,
+            "diagnostic_summary should resolve NetClient from the transitive git \
+             dependency checkout with zero UnresolvedClass diagnostics, got: {result:?}",
+        );
+    }
+
     /// BT-2056: When a package-extraction file in src/ cannot be read, MCP lint
     /// must surface a warning rather than silently dropping it from the
     /// extraction set.

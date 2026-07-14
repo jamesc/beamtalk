@@ -268,17 +268,20 @@ fn normalize_path(path: &Utf8Path) -> Utf8PathBuf {
             Utf8Component::CurDir => {
                 // Skip `.`
             }
-            Utf8Component::ParentDir => {
-                // Pop the last component if possible
-                if !components.is_empty() {
-                    let last = components.last().copied();
-                    if last != Some(Utf8Component::ParentDir) {
-                        components.pop();
-                        continue;
-                    }
+            Utf8Component::ParentDir => match components.last().copied() {
+                // Already at the filesystem root — an extra `..` is a no-op
+                // rather than something to pop or accumulate (BT-2836 review
+                // finding: popping `RootDir` here would turn `/foo/../..`
+                // into `.` instead of `/`).
+                Some(Utf8Component::RootDir) => {}
+                // Nothing to pop yet, or a run of leading `..`s in a
+                // relative path — accumulate.
+                None | Some(Utf8Component::ParentDir) => components.push(component),
+                // A real component precedes it — cancel the two out.
+                Some(_) => {
+                    components.pop();
                 }
-                components.push(component);
-            }
+            },
             _ => {
                 components.push(component);
             }
@@ -654,6 +657,15 @@ mod tests {
     fn test_normalize_path_multiple_parents() {
         let path = Utf8PathBuf::from("/home/user/project/../../dep");
         assert_eq!(normalize_path(&path), Utf8PathBuf::from("/home/dep"));
+    }
+
+    #[test]
+    fn test_normalize_path_parent_at_root() {
+        // A `..` chain that consumes every real component and then hits
+        // root must not pop `RootDir` itself — `/foo/../..` is still `/`,
+        // not `.` (BT-2836 review finding).
+        let path = Utf8PathBuf::from("/foo/../..");
+        assert_eq!(normalize_path(&path), Utf8PathBuf::from("/"));
     }
 
     #[test]
