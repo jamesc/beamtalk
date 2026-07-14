@@ -2047,7 +2047,9 @@ impl Parser {
     /// literal — BT-2884), or a literal (integer, float, string, symbol, or
     /// negative number like `-1`). Bare `true`/`false` are rejected with a
     /// diagnostic (BT-2884) rather than parsed as a variable binding — see
-    /// the dedicated match arm below for why.
+    /// the dedicated match arm below for why. A trailing `:: ClassName` on
+    /// `nil`, `true`/`false`, or a plain variable binding is consumed and
+    /// rejected with a single diagnostic rather than left to cascade (BT-2885).
     fn parse_constructor_binding(&mut self) -> Pattern {
         match self.current_kind() {
             TokenKind::Identifier(name) if name.as_str() == "_" => {
@@ -3462,6 +3464,27 @@ mod tests {
     }
 
     #[test]
+    fn parse_constructor_binding_nil_bare_double_colon_rejected_with_single_diagnostic() {
+        // Edge case flagged by Claude review on #2998: `consume_type_pattern_tail`
+        // returns `None` when `::` isn't followed by a class name, so the
+        // recovered span must fall back to the `::` token itself rather than
+        // panicking or leaving `->` unconsumed.
+        let (_module, diags) = parse_source("x match: [Result ok: nil :: -> 0; _ -> 1]");
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic (no cascade), got: {diags:?}"
+        );
+        assert!(
+            diags[0]
+                .message
+                .contains("a 'nil' pattern cannot have a type annotation"),
+            "unexpected diagnostic message: {:?}",
+            diags[0].message
+        );
+    }
+
+    #[test]
     fn parse_constructor_binding_bare_true_rejected_with_single_diagnostic() {
         let (_module, diags) = parse_source("x match: [Result ok: true -> 0; _ -> 1]");
         assert_eq!(
@@ -3571,6 +3594,24 @@ mod tests {
         );
         assert!(
             diags[0].message.contains("bare 'true'"),
+            "unexpected diagnostic message: {:?}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn parse_constructor_binding_bare_false_type_annotation_rejected_with_single_diagnostic() {
+        // Symmetric coverage for the `false` path through the same branch as
+        // `parse_constructor_binding_bare_true_type_annotation_rejected_with_single_diagnostic`
+        // (Claude review on #2998).
+        let (_module, diags) = parse_source("x match: [Result ok: false :: Boolean -> 0; _ -> 1]");
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic (no cascade), got: {diags:?}"
+        );
+        assert!(
+            diags[0].message.contains("bare 'false'"),
             "unexpected diagnostic message: {:?}",
             diags[0].message
         );
