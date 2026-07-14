@@ -6,6 +6,12 @@
 //! This ensures Rust stays in sync with runtime sources, eliminating
 //! hand-maintained lists that can drift:
 //! - `is_known_stdlib_type()` from `lib/*.bt` (BT-422)
+//!
+//! Also injects the `BEAMTALK_SPEC_MAPPING_STAMP` compile-time env var
+//! (BT-2852) that `ffi_type_specs` uses to invalidate its on-disk FFI
+//! type-spec cache when the compiler's Erlang→Beamtalk type-mapping logic
+//! changes — moved here from `beamtalk-cli`'s `build.rs` (BT-2859) since
+//! `ffi_type_specs` itself moved into this crate.
 
 use std::env;
 use std::fs;
@@ -31,6 +37,8 @@ fn main() {
 
     // Generate stdlib class names
     generate_stdlib_types(&lib_dir);
+
+    beamtalk_build::emit_spec_mapping_stamp(workspace_root);
 }
 
 fn generate_stdlib_types(lib_dir: &Path) {

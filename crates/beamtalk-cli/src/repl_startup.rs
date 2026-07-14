@@ -5,113 +5,30 @@
 //!
 //! **DDD Context:** REPL — Startup Configuration & Runtime Discovery
 //!
-//! This module provides the canonical eval command, code-path arguments,
-//! and runtime directory discovery for starting a BEAM node with the
-//! Beamtalk REPL backend.  Both the production `beamtalk repl` command
-//! (`process.rs`) and the REPL-protocol test harness (`tests/repl_protocol.rs`) consume
-//! these helpers so that any change to the startup sequence is
-//! automatically reflected in tests.
+//! This module provides the canonical eval command and code-path arguments
+//! for starting a BEAM node with the Beamtalk REPL backend.  Both the
+//! production `beamtalk repl` command (`process.rs`) and the REPL-protocol
+//! test harness (`tests/repl_protocol.rs`) consume these helpers so that any
+//! change to the startup sequence is automatically reflected in tests.
+//!
+//! BT-2859: Runtime directory discovery (`RuntimeLayout`, `BeamPaths`,
+//! `find_runtime_dir_with_layout`, etc.) moved into `beamtalk-core`'s
+//! `ffi_type_specs` module so `beamtalk-lsp` can share it too; re-exported
+//! here so existing `repl_startup::X` references keep working unchanged.
 
 use std::ffi::OsString;
 use std::net::Ipv4Addr;
-use std::path::{Path, PathBuf};
+#[cfg(test)]
+use std::path::Path;
+#[cfg(all(test, windows))]
+use std::path::PathBuf;
 
 use beamtalk_core::codegen::core_erlang::escape_atom_chars;
-use miette::{Result, miette};
 
-/// OTP kernel logger configuration that redirects the default handler to stderr.
-///
-/// Used as `-kernel logger <this>` VM arg across REPL, workspace, and compilation
-/// nodes (BT-1431). Ensures early boot OTP logger events go to stderr instead of
-/// stdout, preventing them from being lost (detached nodes) or mixed into protocol
-/// output (REPL/compilation nodes).
-pub const KERNEL_LOGGER_STDERR: &str =
-    "[{handler, default, logger_std_h, #{config => #{type => standard_error}}}]";
-
-/// Whether the runtime was found in a development checkout or an installed layout.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RuntimeLayout {
-    /// Development: `runtime/_build/default/lib/<app>/ebin/`
-    Dev,
-    /// Installed: `PREFIX/lib/beamtalk/lib/<app>/ebin/`
-    Installed,
-}
-
-/// Directories that must be on the BEAM code path (`-pa`) for the REPL to work.
-#[derive(Debug, Clone)]
-pub struct BeamPaths {
-    /// Path to the `beamtalk_runtime` application's `ebin/` directory.
-    pub runtime_ebin: PathBuf,
-    /// Path to the `beamtalk_workspace` application's `ebin/` directory.
-    pub workspace_ebin: PathBuf,
-    /// Path to the `beamtalk_compiler` application's `ebin/` directory.
-    pub compiler_ebin: PathBuf,
-    /// Path to the `beamtalk_stdlib` application's `ebin/` directory.
-    /// In Dev layout this is `apps/beamtalk_stdlib/ebin/` (Beamtalk-compiled class beams).
-    pub stdlib_ebin: PathBuf,
-    /// Path to the rebar3-compiled Erlang modules for `beamtalk_stdlib`.
-    /// In Dev layout this is `_build/default/lib/beamtalk_stdlib/ebin/`
-    /// (contains `beamtalk_json.beam`, `beamtalk_regex.beam`, etc.).
-    /// In Installed layout this equals `stdlib_ebin`.
-    pub stdlib_erlang_ebin: PathBuf,
-    /// Path to the `cowboy` HTTP server's `ebin/` directory (ADR 0020).
-    pub cowboy_ebin: PathBuf,
-    /// Path to the `cowlib` library's `ebin/` directory (cowboy dependency).
-    pub cowlib_ebin: PathBuf,
-    /// Path to the `ranch` acceptor pool's `ebin/` directory (cowboy dependency).
-    pub ranch_ebin: PathBuf,
-    /// Path to the `telemetry` event bus's `ebin/` directory (ADR 0069).
-    pub telemetry_ebin: PathBuf,
-    /// Path to the `telemetry_poller` periodic VM stats `ebin/` directory (ADR 0069).
-    pub telemetry_poller_ebin: PathBuf,
-}
-
-/// Compute the standard `-pa` directories from a runtime root.
-///
-/// For development layout (`runtime/` dir), paths are under `_build/default/lib/`.
-/// For installed layout (`PREFIX/lib/beamtalk/`), paths are under `lib/`.
-pub fn beam_paths(runtime_dir: &Path) -> BeamPaths {
-    beam_paths_for_layout(runtime_dir, RuntimeLayout::Dev)
-}
-
-/// Compute `-pa` directories for a specific layout.
-pub fn beam_paths_for_layout(runtime_dir: &Path, layout: RuntimeLayout) -> BeamPaths {
-    match layout {
-        RuntimeLayout::Dev => {
-            let build_lib_dir = runtime_dir.join("_build/default/lib");
-            BeamPaths {
-                runtime_ebin: build_lib_dir.join("beamtalk_runtime/ebin"),
-                workspace_ebin: build_lib_dir.join("beamtalk_workspace/ebin"),
-                compiler_ebin: build_lib_dir.join("beamtalk_compiler/ebin"),
-                cowboy_ebin: build_lib_dir.join("cowboy/ebin"),
-                cowlib_ebin: build_lib_dir.join("cowlib/ebin"),
-                ranch_ebin: build_lib_dir.join("ranch/ebin"),
-                telemetry_ebin: build_lib_dir.join("telemetry/ebin"),
-                telemetry_poller_ebin: build_lib_dir.join("telemetry_poller/ebin"),
-                // Stdlib class beams are produced by `beamtalk build-stdlib` under apps/, not _build/
-                stdlib_ebin: runtime_dir.join("apps/beamtalk_stdlib/ebin"),
-                // Stdlib Erlang module beams are rebar3-compiled to _build/
-                stdlib_erlang_ebin: build_lib_dir.join("beamtalk_stdlib/ebin"),
-            }
-        }
-        RuntimeLayout::Installed => {
-            let lib_dir = runtime_dir.join("lib");
-            BeamPaths {
-                runtime_ebin: lib_dir.join("beamtalk_runtime/ebin"),
-                workspace_ebin: lib_dir.join("beamtalk_workspace/ebin"),
-                compiler_ebin: lib_dir.join("beamtalk_compiler/ebin"),
-                cowboy_ebin: lib_dir.join("cowboy/ebin"),
-                cowlib_ebin: lib_dir.join("cowlib/ebin"),
-                ranch_ebin: lib_dir.join("ranch/ebin"),
-                telemetry_ebin: lib_dir.join("telemetry/ebin"),
-                telemetry_poller_ebin: lib_dir.join("telemetry_poller/ebin"),
-                stdlib_ebin: lib_dir.join("beamtalk_stdlib/ebin"),
-                // In installed layout, Erlang modules and class beams are in the same dir
-                stdlib_erlang_ebin: lib_dir.join("beamtalk_stdlib/ebin"),
-            }
-        }
-    }
-}
+pub use beamtalk_core::ffi_type_specs::{
+    BeamPaths, KERNEL_LOGGER_STDERR, RuntimeLayout, beam_paths, beam_paths_for_layout,
+    find_runtime_dir, find_runtime_dir_with_layout, has_beam_files,
+};
 
 /// Build the Erlang `-eval` command that starts the REPL backend.
 ///
@@ -304,93 +221,6 @@ pub fn beam_pa_args(paths: &BeamPaths) -> Vec<OsString> {
     args
 }
 
-// ── Runtime Discovery ──────────────────────────────────────────────
-
-/// Find the runtime directory by checking multiple locations.
-///
-/// Delegates to [`find_runtime_dir_with_layout`]; see that function for
-/// layout detection and resolution order.
-///
-/// # Errors
-///
-/// Returns an error if no valid runtime directory is found, or if
-/// `BEAMTALK_RUNTIME_DIR` is set but doesn't contain a valid runtime.
-pub fn find_runtime_dir() -> Result<PathBuf> {
-    let (path, _layout) = find_runtime_dir_with_layout()?;
-    Ok(path)
-}
-
-/// Like [`find_runtime_dir`] but also returns the detected [`RuntimeLayout`].
-///
-/// # Errors
-///
-/// Returns an error if no valid runtime directory is found, or if
-/// `BEAMTALK_RUNTIME_DIR` is set but doesn't contain a valid runtime.
-pub fn find_runtime_dir_with_layout() -> Result<(PathBuf, RuntimeLayout)> {
-    // Check explicit env var first
-    if let Ok(dir) = std::env::var("BEAMTALK_RUNTIME_DIR") {
-        let path = PathBuf::from(dir);
-        if path.join("rebar.config").exists() {
-            return Ok((path, RuntimeLayout::Dev));
-        }
-        return Err(miette!(
-            "BEAMTALK_RUNTIME_DIR is set but does not contain a valid runtime (no rebar.config)"
-        ));
-    }
-
-    // Dev-mode candidates (checked via rebar.config)
-    let dev_candidates = [
-        // 1. CARGO_MANIFEST_DIR (when running via cargo run)
-        std::env::var("CARGO_MANIFEST_DIR")
-            .ok()
-            .map(|d| PathBuf::from(d).join("../../runtime")),
-        // 2. Current working directory (running from repo root)
-        Some(PathBuf::from("runtime")),
-        // 3. Executable's grandparent (target/debug/beamtalk -> repo root)
-        std::env::current_exe().ok().and_then(|exe| {
-            exe.parent()
-                .and_then(|p| p.parent())
-                .and_then(|p| p.parent())
-                .map(|p| p.join("runtime"))
-        }),
-    ];
-
-    for candidate in dev_candidates.into_iter().flatten() {
-        if candidate.join("rebar.config").exists() {
-            return Ok((candidate, RuntimeLayout::Dev));
-        }
-    }
-
-    // Installed-mode candidate: {exe_dir}/../lib/beamtalk/
-    // Validated by checking for .beam files in the runtime ebin dir
-    if let Some(installed_root) = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(|p| p.join("../lib/beamtalk")))
-        .and_then(|p| p.canonicalize().ok())
-    {
-        if has_beam_files(&installed_root.join("lib/beamtalk_runtime/ebin")) {
-            return Ok((installed_root, RuntimeLayout::Installed));
-        }
-    }
-
-    Err(miette!(
-        "Could not find Beamtalk runtime directory.\n\
-        Please run from the repository root or set BEAMTALK_RUNTIME_DIR."
-    ))
-}
-
-/// Check whether a directory contains compiled `.beam` files.
-pub fn has_beam_files(dir: &Path) -> bool {
-    dir.is_dir()
-        && std::fs::read_dir(dir)
-            .map(|entries| {
-                entries
-                    .flatten()
-                    .any(|e| e.path().extension().is_some_and(|ext| ext == "beam"))
-            })
-            .unwrap_or(false)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -541,51 +371,6 @@ mod tests {
     }
 
     #[test]
-    fn beam_paths_uses_correct_layout() {
-        let paths = beam_paths(Path::new("/rt"));
-        assert_eq!(
-            paths.runtime_ebin,
-            PathBuf::from("/rt/_build/default/lib/beamtalk_runtime/ebin")
-        );
-        assert_eq!(
-            paths.workspace_ebin,
-            PathBuf::from("/rt/_build/default/lib/beamtalk_workspace/ebin")
-        );
-        assert_eq!(
-            paths.compiler_ebin,
-            PathBuf::from("/rt/_build/default/lib/beamtalk_compiler/ebin")
-        );
-        assert_eq!(
-            paths.cowboy_ebin,
-            PathBuf::from("/rt/_build/default/lib/cowboy/ebin")
-        );
-        assert_eq!(
-            paths.cowlib_ebin,
-            PathBuf::from("/rt/_build/default/lib/cowlib/ebin")
-        );
-        assert_eq!(
-            paths.ranch_ebin,
-            PathBuf::from("/rt/_build/default/lib/ranch/ebin")
-        );
-        assert_eq!(
-            paths.telemetry_ebin,
-            PathBuf::from("/rt/_build/default/lib/telemetry/ebin")
-        );
-        assert_eq!(
-            paths.telemetry_poller_ebin,
-            PathBuf::from("/rt/_build/default/lib/telemetry_poller/ebin")
-        );
-        assert_eq!(
-            paths.stdlib_ebin,
-            PathBuf::from("/rt/apps/beamtalk_stdlib/ebin")
-        );
-        assert_eq!(
-            paths.stdlib_erlang_ebin,
-            PathBuf::from("/rt/_build/default/lib/beamtalk_stdlib/ebin")
-        );
-    }
-
-    #[test]
     fn beam_pa_args_alternates_flag_and_path() {
         let paths = beam_paths(Path::new("/rt"));
         let args = beam_pa_args(&paths);
@@ -594,74 +379,6 @@ mod tests {
         for i in (0..args.len()).step_by(2) {
             assert_eq!(args[i], "-pa");
         }
-    }
-
-    #[test]
-    fn beam_paths_installed_layout() {
-        let paths = beam_paths_for_layout(
-            Path::new("/usr/local/lib/beamtalk"),
-            RuntimeLayout::Installed,
-        );
-        assert_eq!(
-            paths.runtime_ebin,
-            PathBuf::from("/usr/local/lib/beamtalk/lib/beamtalk_runtime/ebin")
-        );
-        assert_eq!(
-            paths.workspace_ebin,
-            PathBuf::from("/usr/local/lib/beamtalk/lib/beamtalk_workspace/ebin")
-        );
-        assert_eq!(
-            paths.compiler_ebin,
-            PathBuf::from("/usr/local/lib/beamtalk/lib/beamtalk_compiler/ebin")
-        );
-        assert_eq!(
-            paths.cowboy_ebin,
-            PathBuf::from("/usr/local/lib/beamtalk/lib/cowboy/ebin")
-        );
-        assert_eq!(
-            paths.cowlib_ebin,
-            PathBuf::from("/usr/local/lib/beamtalk/lib/cowlib/ebin")
-        );
-        assert_eq!(
-            paths.ranch_ebin,
-            PathBuf::from("/usr/local/lib/beamtalk/lib/ranch/ebin")
-        );
-        assert_eq!(
-            paths.telemetry_ebin,
-            PathBuf::from("/usr/local/lib/beamtalk/lib/telemetry/ebin")
-        );
-        assert_eq!(
-            paths.telemetry_poller_ebin,
-            PathBuf::from("/usr/local/lib/beamtalk/lib/telemetry_poller/ebin")
-        );
-        assert_eq!(
-            paths.stdlib_ebin,
-            PathBuf::from("/usr/local/lib/beamtalk/lib/beamtalk_stdlib/ebin")
-        );
-        assert_eq!(
-            paths.stdlib_erlang_ebin,
-            PathBuf::from("/usr/local/lib/beamtalk/lib/beamtalk_stdlib/ebin")
-        );
-    }
-
-    #[test]
-    fn beam_paths_dev_uses_build_dir() {
-        let paths = beam_paths_for_layout(Path::new("/rt"), RuntimeLayout::Dev);
-        // Dev layout uses _build/default/lib/ for runtime/workspace/etc.
-        assert_eq!(
-            paths.runtime_ebin,
-            PathBuf::from("/rt/_build/default/lib/beamtalk_runtime/ebin")
-        );
-        // Class beams are under apps/
-        assert_eq!(
-            paths.stdlib_ebin,
-            PathBuf::from("/rt/apps/beamtalk_stdlib/ebin")
-        );
-        // Erlang module beams are under _build/
-        assert_eq!(
-            paths.stdlib_erlang_ebin,
-            PathBuf::from("/rt/_build/default/lib/beamtalk_stdlib/ebin")
-        );
     }
 
     #[test]
