@@ -2523,8 +2523,9 @@ impl CoreErlangGenerator {
     /// - **`Supervisor`/`DynamicSupervisor`-hierarchy classes** (BT-2870): a
     ///   live supervisor reference is a third runtime shape, also a 4-tuple
     ///   but tagged `'beamtalk_supervisor'` (or transiently
-    ///   `'beamtalk_supervisor_new'` — never observable outside `class
-    ///   initialize:`, see `beamtalk_class_dispatch:class_send_dispatch/3`)
+    ///   `'beamtalk_supervisor_new'` — rewritten to `'beamtalk_supervisor'`
+    ///   by `beamtalk_class_dispatch:class_send_dispatch/3` before *any*
+    ///   caller, including `class initialize:` itself, ever observes it)
     ///   rather than `'beamtalk_object'` — [`Self::wrap_supervisor_class_tag_test`]
     ///   accepts either tag at `element(1)` before comparing `element(2)`
     ///   against the pattern's `class` field.
@@ -2884,15 +2885,18 @@ impl CoreErlangGenerator {
 
     /// Tests whether the scrutinee is a supervisor reference (a
     /// `Supervisor`/`DynamicSupervisor` subclass instance) of exactly
-    /// `class_name` (BT-2870). A live supervisor reference is
-    /// `{'beamtalk_supervisor', ClassAtom, ModuleAtom, Pid}` — or,
-    /// transiently during `class supervise`'s fresh-start branch,
-    /// `{'beamtalk_supervisor_new', ClassAtom, ModuleAtom, Pid}` (rewritten
-    /// to the `'beamtalk_supervisor'` tag by
-    /// `beamtalk_class_dispatch:class_send_dispatch/3` before the caller
-    /// ever observes it — see `beamtalk_supervisor.erl`'s `startLink/1`
-    /// doc). Neither shape is a map, so [`Self::wrap_class_tag_test`]'s
-    /// `is_map` check would never match; this reuses the same
+    /// `class_name` (BT-2870). A live supervisor reference is always
+    /// `{'beamtalk_supervisor', ClassAtom, ModuleAtom, Pid}` by the time any
+    /// caller observes it — `beamtalk_class_dispatch:class_send_dispatch/3`
+    /// rewrites the transient `{'beamtalk_supervisor_new', ClassAtom,
+    /// ModuleAtom, Pid}` fresh-start tag to `'beamtalk_supervisor'` before
+    /// `run_initialize` is even called, so `'beamtalk_supervisor_new'` is
+    /// never observable by user code, not even inside `class initialize:`
+    /// (see `beamtalk_supervisor.erl`'s `startLink/1` doc). The
+    /// `'beamtalk_supervisor_new'` arm below is defensive dead code kept for
+    /// symmetry with the tag pair, not a reachable runtime case. Neither
+    /// shape is a map, so [`Self::wrap_class_tag_test`]'s `is_map` check
+    /// would never match; this reuses the same
     /// `is_tuple`/`tuple_size`/`element(1)`/`element(2)` idiom
     /// [`Self::wrap_actor_class_tag_test`] uses, but accepts *either*
     /// reserved tag at `element(1)` before comparing `element(2)` (the

@@ -375,6 +375,12 @@ mod tests {
             "Object subclass: HTTPServer\n",
         );
 
+        // Reset to a known baseline (BT-2870 review follow-up): a prior
+        // test panicking mid-run under `#[serial]` would otherwise leave
+        // this process-wide counter at an arbitrary value, making a
+        // spurious failure here harder to diagnose than "expected 0, got N".
+        PARSE_CALLS.store(0, std::sync::atomic::Ordering::Relaxed);
+
         let (_, infos1) = resolve_dependency_class_infos(root);
         let calls_after_first = PARSE_CALLS.load(std::sync::atomic::Ordering::Relaxed);
         let (_, infos2) = resolve_dependency_class_infos(root);
@@ -399,6 +405,10 @@ mod tests {
         );
         let dep_file = tmp.path().join("_build/deps/http/src/http_server.bt");
         write(dep_file.as_path(), "Object subclass: HTTPServer\n");
+
+        // Reset to a known baseline — see the comment in
+        // `cache_hit_avoids_reparsing_unchanged_dependency` above.
+        PARSE_CALLS.store(0, std::sync::atomic::Ordering::Relaxed);
 
         let (_, infos1) = resolve_dependency_class_infos(root);
         assert!(infos1.iter().any(|c| c.name == "HTTPServer"));
