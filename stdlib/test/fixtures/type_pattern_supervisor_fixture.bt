@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2870: TypePatternSupervisorFixture — a leaf `Supervisor subclass:` with
+// no children and no subclasses anywhere in the test corpus, used to verify
+// `x :: TypePatternSupervisorFixture` type-pattern codegen against a real
+// supervisor reference (a `{'beamtalk_supervisor', ...}` 4-tuple at
+// runtime — a third shape distinct from both the tagged-map and
+// actor-tuple representations `generate_type_pattern` already handles).
+
+Supervisor subclass: TypePatternSupervisorFixture
+
+  class children => #()

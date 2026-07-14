@@ -446,28 +446,36 @@ fn validate_type_pattern_class(
         return;
     }
 
-    // `Supervisor`/`DynamicSupervisor` subclasses reference a supervisor
-    // process, tagged `{'beamtalk_supervisor' | 'beamtalk_supervisor_new',
-    // ClassName, Module, Pid}` at runtime (`beamtalk_supervisor.erl`) — a
-    // third shape distinct from both the tagged-map (`Value`/`Object`) and
-    // actor-tuple (`'beamtalk_object'`) strategies `generate_type_pattern`
-    // already handles. Rather than risk silently-wrong codegen for a shape
-    // this session hasn't fully characterised (e.g. the transient
-    // `'beamtalk_supervisor_new'` tag during `class initialize:`), reject
-    // explicitly — the same "fail loudly, not silently wrong" choice
-    // already made for `Character` above and non-leaf classes below.
-    if hierarchy.is_supervisor_subclass(class_name)
-        || hierarchy.is_dynamic_supervisor_subclass(class_name)
-    {
+    // BT-2870: `Supervisor`/`DynamicSupervisor` subclasses reference a
+    // supervisor process, tagged `{'beamtalk_supervisor' |
+    // 'beamtalk_supervisor_new', ClassName, Module, Pid}` at runtime
+    // (`beamtalk_supervisor.erl`) — a third shape distinct from both the
+    // tagged-map (`Value`/`Object`) and actor-tuple (`'beamtalk_object'`)
+    // strategies. `generate_type_pattern`'s `wrap_supervisor_class_tag_test`
+    // now handles this shape directly (accepting either reserved tag), so
+    // — unlike the earlier BT-2855 rejection this replaced — concrete
+    // subclasses fall through to the ordinary leaf-class check below rather
+    // than being rejected outright. The abstract bases themselves
+    // (`Supervisor`, `DynamicSupervisor`) are still rejected below: no live
+    // instance ever carries the abstract class's own tag.
+
+    // Abstract class — no live instance is ever tagged with an abstract
+    // class's own name (BT-2870 review follow-up), so this must be rejected
+    // unconditionally rather than relying on the non-leaf check below: an
+    // abstract class with zero subclasses *visible in this compilation
+    // unit* (e.g. stdlib's own `Supervisor`/`DynamicSupervisor`, which have
+    // no concrete `subclass:` in `src/`) would otherwise pass the leaf
+    // check and silently generate a class-tag test that can never match.
+    if hierarchy.is_abstract(class_name) {
         diagnostics.push(
             Diagnostic::error(
-                format!(
-                    "`{class_name}` is a Supervisor/DynamicSupervisor subclass; type patterns \
-                     are not yet supported for supervisor references"
-                ),
+                format!("`{class_name}` is abstract; type patterns require a concrete subclass"),
                 class.span,
             )
-            .with_hint("Use `isKindOf:` guard clauses instead.".to_string())
+            .with_hint(
+                "Match on a concrete subclass instead, or use `isKindOf:` guard clauses."
+                    .to_string(),
+            )
             .with_category(DiagnosticCategory::Type),
         );
         return;
@@ -899,6 +907,74 @@ mod tests {
             diagnostics.is_empty(),
             "Expected no diagnostics for a leaf user class, got: {diagnostics:?}"
         );
+    }
+
+    /// BT-2870: a leaf `Supervisor subclass:` is now a valid type-pattern
+    /// class — replaces the earlier BT-2855 rejection now that
+    /// `generate_type_pattern` has real codegen support
+    /// (`wrap_supervisor_class_tag_test`).
+    #[test]
+    fn type_pattern_supervisor_subclass_no_diagnostics() {
+        let (module, hierarchy) = hierarchy_for(
+            "Supervisor subclass: WebApp\n  class children => #()\nx match: [s :: WebApp -> s; _ -> 0]",
+        );
+        let mut diagnostics = Vec::new();
+        check_type_pattern_classes(&module, &hierarchy, true, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no diagnostics for a leaf Supervisor subclass, got: {diagnostics:?}"
+        );
+    }
+
+    /// BT-2870: same as above, for `DynamicSupervisor(C)` subclasses.
+    #[test]
+    fn type_pattern_dynamic_supervisor_subclass_no_diagnostics() {
+        let (module, hierarchy) = hierarchy_for(
+            "Object subclass: Widget\nDynamicSupervisor(Widget) subclass: Pool\n  class childClass => Widget\nx match: [p :: Pool -> p; _ -> 0]",
+        );
+        let mut diagnostics = Vec::new();
+        check_type_pattern_classes(&module, &hierarchy, true, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no diagnostics for a leaf DynamicSupervisor subclass, got: {diagnostics:?}"
+        );
+    }
+
+    /// BT-2870 review follow-up: matching directly on the abstract
+    /// `Supervisor` base (no concrete subclass in this compilation unit, so
+    /// the non-leaf check alone would see zero subclasses and pass it) must
+    /// still be rejected — no live supervisor reference is ever tagged
+    /// `'Supervisor'` itself, only its concrete subclass name.
+    #[test]
+    fn type_pattern_abstract_supervisor_base_is_error() {
+        let (module, hierarchy) = hierarchy_for("x match: [s :: Supervisor -> s; _ -> 0]");
+        let mut diagnostics = Vec::new();
+        check_type_pattern_classes(&module, &hierarchy, true, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 error rejecting the abstract Supervisor base, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Error);
+        assert!(diagnostics[0].message.contains("Supervisor"));
+        assert!(diagnostics[0].message.contains("abstract"));
+    }
+
+    /// BT-2870 review follow-up: same as above, for the abstract
+    /// `DynamicSupervisor` base.
+    #[test]
+    fn type_pattern_abstract_dynamic_supervisor_base_is_error() {
+        let (module, hierarchy) = hierarchy_for("x match: [s :: DynamicSupervisor -> s; _ -> 0]");
+        let mut diagnostics = Vec::new();
+        check_type_pattern_classes(&module, &hierarchy, true, &mut diagnostics);
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected 1 error rejecting the abstract DynamicSupervisor base, got: {diagnostics:?}"
+        );
+        assert_eq!(diagnostics[0].severity, Severity::Error);
+        assert!(diagnostics[0].message.contains("DynamicSupervisor"));
+        assert!(diagnostics[0].message.contains("abstract"));
     }
 
     /// `Character` is never accepted, even though it resolves in the

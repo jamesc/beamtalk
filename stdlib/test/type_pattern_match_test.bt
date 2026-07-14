@@ -16,6 +16,14 @@
 //           actor-reference arm; an actor reference is a 4-tuple at
 //           runtime, not a map, so it needs its own codegen strategy
 //           distinct from `ValuePoint`'s map-tag check)
+//           stdlib/test/fixtures/type_pattern_supervisor_fixture.bt,
+//           stdlib/test/fixtures/type_pattern_dynamic_supervisor_fixture.bt
+//           (BT-2870: leaf `Supervisor`/`DynamicSupervisor` subclasses with
+//           no other subclasses in the test corpus, used for the
+//           supervisor-reference arm; a supervisor reference is also a
+//           4-tuple at runtime, but tagged `'beamtalk_supervisor'` rather
+//           than `'beamtalk_object'`, so it needs its own codegen strategy
+//           distinct from the actor arm above)
 
 TestCase subclass: TypePatternMatchTest
 
@@ -238,3 +246,96 @@ TestCase subclass: TypePatternMatchTest
         _ -> #other
       ])
       equals: #other
+
+  // BT-2870 regression: a Supervisor subclass reference is a THIRD runtime
+  // shape — also a 4-tuple, but tagged 'beamtalk_supervisor' rather than
+  // 'beamtalk_object'. Naively reusing either the tagged-map or
+  // actor-tuple strategy would silently never match a live supervisor
+  // reference.
+  testSupervisorClassPattern =>
+    sup := (TypePatternSupervisorFixture supervise) unwrap
+    self
+      assert: (sup match: [
+        s :: TypePatternSupervisorFixture -> #wasSupervisor;
+        _ -> #other
+      ])
+      equals: #wasSupervisor
+    self
+      assert: (42 match: [
+        s :: TypePatternSupervisorFixture -> #wasSupervisor;
+        _ -> #other
+      ])
+      equals: #other
+    [sup stop] on: Error do: [:e | nil]
+
+  // BT-2870: DynamicSupervisor subclasses use the same
+  // 'beamtalk_supervisor' tuple shape as Supervisor subclasses.
+  testDynamicSupervisorClassPattern =>
+    pool := (TypePatternDynamicSupervisorFixture supervise) unwrap
+    self
+      assert: (pool match: [
+        p :: TypePatternDynamicSupervisorFixture -> #wasPool;
+        _ -> #other
+      ])
+      equals: #wasPool
+    self
+      assert: (42 match: [
+        p :: TypePatternDynamicSupervisorFixture -> #wasPool;
+        _ -> #other
+      ])
+      equals: #other
+    [pool stop] on: Error do: [:e | nil]
+
+  // BT-2870: `element(2)` must discriminate between two supervisor-tagged
+  // classes — a Supervisor instance must not match a DynamicSupervisor
+  // pattern, even though both compile to the same
+  // `{'beamtalk_supervisor', ClassAtom, ModuleAtom, Pid}` shape.
+  testSupervisorClassPatternDiscriminatesSiblingClasses =>
+    sup := (TypePatternSupervisorFixture supervise) unwrap
+    self
+      assert: (sup match: [
+        p :: TypePatternDynamicSupervisorFixture -> #wrongMatch;
+        s :: TypePatternSupervisorFixture -> #wasSupervisor;
+        _ -> #other
+      ])
+      equals: #wasSupervisor
+    [sup stop] on: Error do: [:e | nil]
+
+  // BT-2870: an actor reference must not match a supervisor type pattern
+  // (or vice versa) — both are 4-tuples, but with different `element(1)`
+  // tags ('beamtalk_object' vs 'beamtalk_supervisor').
+  testSupervisorAndActorPatternsDoNotCrossMatch =>
+    actor := TypePatternActorFixture spawn
+    self
+      assert: (actor match: [
+        s :: TypePatternSupervisorFixture -> #wrongMatch;
+        a :: TypePatternActorFixture -> #wasActor;
+        _ -> #other
+      ])
+      equals: #wasActor
+    sup := (TypePatternSupervisorFixture supervise) unwrap
+    self
+      assert: (sup match: [
+        a :: TypePatternActorFixture -> #wrongMatch;
+        s :: TypePatternSupervisorFixture -> #wasSupervisor;
+        _ -> #other
+      ])
+      equals: #wasSupervisor
+    [sup stop] on: Error do: [:e | nil]
+
+  // BT-2870: a live supervisor reference is also a plain Erlang tuple
+  // structurally, but must not match `x :: Tuple` — `wrap_tuple_test`
+  // excludes the reserved 'beamtalk_supervisor'/'beamtalk_supervisor_new'
+  // tags. Runtime counterpart to the codegen string-contains assertion in
+  // control_flow.rs's
+  // test_match_type_pattern_tuple_excludes_actor_reference_shape.
+  testSupervisorReferenceDoesNotMatchTuplePattern =>
+    sup := (TypePatternSupervisorFixture supervise) unwrap
+    self
+      assert: (sup match: [
+        t :: Tuple -> #wasTuple;
+        s :: TypePatternSupervisorFixture -> #wasSupervisor;
+        _ -> #other
+      ])
+      equals: #wasSupervisor
+    [sup stop] on: Error do: [:e | nil]

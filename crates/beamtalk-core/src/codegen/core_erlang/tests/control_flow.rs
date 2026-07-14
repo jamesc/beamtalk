@@ -1135,33 +1135,81 @@ fn test_match_type_pattern_tuple_excludes_actor_reference_shape() {
 }
 
 #[test]
-fn test_match_type_pattern_supervisor_subclass_is_compile_error() {
-    // Supervisor references use a third runtime shape
-    // (`{'beamtalk_supervisor' | 'beamtalk_supervisor_new', ...}`) distinct
-    // from both the tagged-map and actor-tuple strategies — rejected
-    // explicitly (fail loudly) rather than risk silently-wrong codegen.
-    let src = "Supervisor subclass: WebApp\n\nObject subclass: Foo\n  test: x =>\n    x match: [\n      s :: WebApp -> s;\n      _ -> \"none\"\n    ]\n";
+fn test_match_type_pattern_supervisor_subclass_uses_tuple_tag_check_and_compiles() {
+    // BT-2870: a live Supervisor reference is `{'beamtalk_supervisor' |
+    // 'beamtalk_supervisor_new', ClassAtom, ModuleAtom, Pid}` — a 4-tuple,
+    // not a map, and tagged differently from an actor reference
+    // (`'beamtalk_object'`). Naively reusing the tagged-map strategy would
+    // silently never match a live supervisor. Verifies both the generated
+    // shape and that it actually compiles through erlc.
+    // `generate_module` compiles exactly `module.classes.first()`'s methods
+    // (`generate_value_type_module`/`generate_actor_module` both key off it);
+    // other classes in the same parsed module are still registered (giving
+    // `ClassHierarchy` what it needs to resolve `is_supervisor_subclass`)
+    // but not themselves compiled. `Foo` must come first so this compiles
+    // as a value-type module whose `test:` method contains the pattern
+    // match — a concrete Supervisor subclass cannot itself carry compiled
+    // custom instance methods (OTP's supervisor behaviour owns `handle_call`).
+    let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      s :: WebApp -> s;\n      _ -> \"none\"\n    ]\n\nSupervisor subclass: WebApp\n  class children => #()\n";
     let tokens = crate::source_analysis::lex_with_eof(src);
-    let (module, diags) = crate::source_analysis::parse(tokens);
-    assert!(diags.is_empty(), "Parse failed: {diags:?}");
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code =
+        generate_module(&module, CodegenOptions::new("webapp")).expect("codegen should succeed");
 
-    let (hierarchy_result, _) =
-        crate::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module);
-    let hierarchy = hierarchy_result.expect("hierarchy build should succeed");
-    let mut diagnostics = Vec::new();
-    crate::semantic_analysis::validators::check_type_pattern_classes(
-        &module,
-        &hierarchy,
-        false,
-        &mut diagnostics,
-    );
+    eprintln!("Generated code for Supervisor type pattern match:\n{code}");
 
     assert!(
-        diagnostics
-            .iter()
-            .any(|d| d.message.contains("WebApp") && d.message.contains("Supervisor")),
-        "Expected a Supervisor-subclass type-pattern error, got: {diagnostics:?}"
+        code.contains("'erlang':'is_tuple'"),
+        "Supervisor-class type pattern should test is_tuple. Got:\n{code}"
     );
+    assert!(
+        code.contains("'beamtalk_supervisor'"),
+        "Supervisor-class type pattern should check the 'beamtalk_supervisor' tag. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'beamtalk_supervisor_new'"),
+        "Supervisor-class type pattern should also accept the transient \
+         'beamtalk_supervisor_new' tag. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'WebApp'"),
+        "Supervisor-class type pattern should match the class name atom. Got:\n{code}"
+    );
+
+    crate::test_helpers::assert_compiles_through_erlc("webapp", &code);
+}
+
+#[test]
+fn test_match_type_pattern_dynamic_supervisor_subclass_uses_tuple_tag_check_and_compiles() {
+    // BT-2870: `DynamicSupervisor` subclasses use the same
+    // `'beamtalk_supervisor'`/`'beamtalk_supervisor_new'` tuple shape as
+    // `Supervisor` subclasses — verifies the dispatch also routes a
+    // `DynamicSupervisor(C)` subclass through the supervisor strategy.
+    // See the Supervisor test above for why `Foo` (the class whose method
+    // actually gets compiled) must be `module.classes.first()`.
+    let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      p :: Pool -> p;\n      _ -> \"none\"\n    ]\n\nObject subclass: Widget\n\nDynamicSupervisor(Widget) subclass: Pool\n  class childClass => Widget\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code =
+        generate_module(&module, CodegenOptions::new("pool")).expect("codegen should succeed");
+
+    eprintln!("Generated code for DynamicSupervisor type pattern match:\n{code}");
+
+    assert!(
+        code.contains("'erlang':'is_tuple'"),
+        "DynamicSupervisor-class type pattern should test is_tuple. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'beamtalk_supervisor'"),
+        "DynamicSupervisor-class type pattern should check the 'beamtalk_supervisor' tag. \
+         Got:\n{code}"
+    );
+    assert!(
+        code.contains("'Pool'"),
+        "DynamicSupervisor-class type pattern should match the class name atom. Got:\n{code}"
+    );
+
+    crate::test_helpers::assert_compiles_through_erlc("pool", &code);
 }
 
 #[test]
