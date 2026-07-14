@@ -3484,9 +3484,9 @@ mod tests {
             "expected exactly one diagnostic (no cascade), got: {diags:?}"
         );
         assert!(
-            diags[0]
-                .message
-                .contains("type annotations are not supported in a constructor pattern binding position"),
+            diags[0].message.contains(
+                "type annotations are not supported in a constructor pattern binding position"
+            ),
             "unexpected diagnostic message: {:?}",
             diags[0].message
         );
