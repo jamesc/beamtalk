@@ -53,7 +53,7 @@ start_link(ProjectPath) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [ProjectPath], []).
 
 init([ProjectPath]) ->
-    logger:set_process_metadata(#{domain => [beamtalk, runtime]}),
+    beamtalk_logging_config:set_domain(runtime),
     %% Create the user-bindings ETS table here so that this long-lived process
     %% owns it. If created inside a short-lived eval worker instead, the table
     %% would be deleted when that worker exits (ETS tables are deleted on owner
