@@ -87,8 +87,9 @@ part_a_real_hierarchy_shape() ->
     %% maybe_trigger_leaf_change_recheck/1's per-superclass foreach never
     %% pays for more than one sweep per reload in practice.
     BtFiles = filelib:wildcard("../stdlib/src/**/*.bt"),
+    {ok, SubclassRe} = re:compile("\\bsubclass:"),
     PerFileClassCounts = [
-        {File, count_subclass_decls(File)}
+        {File, count_subclass_decls(File, SubclassRe)}
      || File <- BtFiles
     ],
     MultiClassFiles = [FC || {_File, N} = FC <- PerFileClassCounts, N > 1],
@@ -105,15 +106,16 @@ part_a_real_hierarchy_shape() ->
 %% Counts real `subclass:` declarations only — stdlib doc comments (`///`
 %% lines) routinely show hypothetical subclass examples (e.g. `Actor.bt`
 %% documents `/// Actor subclass: Counter`) that are not actual class
-%% definitions and must not be counted as such.
--spec count_subclass_decls(string()) -> non_neg_integer().
-count_subclass_decls(File) ->
+%% definitions and must not be counted as such. `SubclassRe` is compiled once
+%% by the caller and reused across every file, rather than recompiled per
+%% call.
+-spec count_subclass_decls(string(), re:mp()) -> non_neg_integer().
+count_subclass_decls(File, SubclassRe) ->
     case file:read_file(File) of
         {ok, Bin} ->
             Lines = binary:split(Bin, <<"\n">>, [global]),
             CodeLines = [L || L <- Lines, not is_doc_comment_line(L)],
-            {ok, Re} = re:compile("\\bsubclass:"),
-            length([L || L <- CodeLines, re:run(L, Re) =/= nomatch]);
+            length([L || L <- CodeLines, re:run(L, SubclassRe) =/= nomatch]);
         {error, _} ->
             0
     end.
