@@ -107,7 +107,7 @@ methodHelpText isNil
 
 // Load a fixture class
 :load tests/repl-protocol/fixtures/counter.bt
-// => _
+// => Loaded: Counter
 
 // Workspace classes includes the loaded Counter class
 wsClasses := Workspace classes
@@ -181,10 +181,10 @@ wsGlobals includesKey: #Counter
 // These give us controlled, test-owned classes/selectors so assertions do
 // not depend on live stdlib content that may churn across unrelated edits.
 :load tests/repl-protocol/fixtures/sysnavigation_fixture.bt
-// => _
+// => Loaded: SysnavFixture
 
 :load tests/repl-protocol/fixtures/sysnavigation_fixture_b.bt
-// => _
+// => Loaded: SysnavFixtureB
 
 // implementorsOf: returns a non-empty list for a selector with known implementors.
 // SysnavFixture and SysnavFixtureB both define #asString locally (see fixture),
@@ -500,13 +500,13 @@ Erlang ets delete: #beamtalk_extensions key: #(#String, #btTwoTwoOneSixBareRefEx
 // Load the announcement event fixtures first (the emitter references them),
 // then the emitter whose method bodies emit them.
 :load tests/repl-protocol/fixtures/announce_event_a.bt
-// => _
+// => Loaded: AnnounceEventA
 
 :load tests/repl-protocol/fixtures/announce_event_b.bt
-// => _
+// => Loaded: AnnounceEventB
 
 :load tests/repl-protocol/fixtures/announce_emitter.bt
-// => _
+// => Loaded: AnnounceEmitter
 
 // announcementsSentBy: returns the distinct Announcement subclasses the emitter
 // publishes (AnnounceEventA via announce:, AnnounceEventB via announceAndWait:),
@@ -616,10 +616,10 @@ Erlang ets delete: #beamtalk_extension_sources key: #(#AnnounceEmitter, #emitExt
 // Load the stable field fixtures (parent + subclass). These give
 // test-owned slots so assertions do not depend on live stdlib content.
 :load tests/repl-protocol/fixtures/field_fixture.bt
-// => _
+// => Loaded: FieldFixture
 
 :load tests/repl-protocol/fixtures/field_fixture_child.bt
-// => _
+// => Loaded: FieldChild
 
 // --- readers ---
 
@@ -943,13 +943,13 @@ SystemNavigation default selectorsMatching: "ZzZxYwQpPpNoSuchSelectorXyzzy"
 
 // Load fixtures: a deliberate typo, a DNU dispatcher, and a perform: caller.
 :load tests/repl-protocol/fixtures/typo_sender.bt
-// => _
+// => Loaded: TypoSender
 
 :load tests/repl-protocol/fixtures/dnu_dispatcher.bt
-// => _
+// => Loaded: DnuDispatcher
 
 :load tests/repl-protocol/fixtures/perform_sender.bt
-// => _
+// => Loaded: PerformSender
 
 // unimplementedSelectors returns a List of records (selector + sites).
 unimpl := SystemNavigation default unimplementedSelectors
@@ -1027,16 +1027,16 @@ unimplSelectors includes: #perform:
 // Load fixtures: a class with a used + an unused method, a runtime-called `hash`
 // override, a TestCase subclass, and a perform:-only caller.
 :load tests/repl-protocol/fixtures/unused_demo.bt
-// => _
+// => Loaded: UnusedDemo
 
 :load tests/repl-protocol/fixtures/unused_runtime_called.bt
-// => _
+// => Loaded: UnusedRuntimeCalled
 
 :load tests/repl-protocol/fixtures/unused_testcase.bt
-// => _
+// => Loaded: UnusedTestCaseFixture
 
 :load tests/repl-protocol/fixtures/unused_perform.bt
-// => _
+// => Loaded: UnusedPerform
 
 // unusedSelectors returns a List of #{#class, #selector} records.
 unused := SystemNavigation default unusedSelectors
@@ -1139,7 +1139,7 @@ unusedSelectors includes: #caller
 // Erlang functions through the `Erlang` bridge, so assertions do not depend on
 // live stdlib bodies.
 :load tests/repl-protocol/fixtures/ffi_fixture.bt
-// => _
+// => Loaded: FfiFixture
 
 // --- happy path: a real FFI call shows up with {#class, #selector, #line} ---
 
