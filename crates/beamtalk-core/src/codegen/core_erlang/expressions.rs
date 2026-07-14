@@ -2322,6 +2322,7 @@ impl CoreErlangGenerator {
         let Some(base_state) = base_state else {
             return self.expression_doc(body);
         };
+        let base_state_var = leaf::var(base_state.to_string());
         if self.is_tier2_value_call(body) {
             if let Expression::MessageSend { receiver, .. } = body {
                 if let Expression::Block(block) = receiver.as_ref() {
@@ -2330,24 +2331,25 @@ impl CoreErlangGenerator {
                     })?;
                     return Ok(docvec![
                         "let StateAcc = ",
-                        leaf::var(base_state.to_string()),
+                        base_state_var,
                         " in ",
                         branch_doc
                     ]);
                 }
+                // Any other is_tier2_value_call receiver (self.<field> value,
+                // a named tier2_local_vars/tier2_block_params identifier, or
+                // a Cascade of safe value: sends) isn't a literal block, so
+                // there's no block to inline here — fall through to
+                // expression_doc below, which already unwraps/discards that
+                // call's own state via close_tier2_value_subexpr_doc
+                // (BT-2814).
             }
         }
         if self.control_flow_has_mutations(body) {
             return self.expression_doc(body);
         }
         let body_doc = self.expression_doc(body)?;
-        Ok(docvec![
-            "{",
-            body_doc,
-            ", ",
-            leaf::var(base_state.to_string()),
-            "}"
-        ])
+        Ok(docvec!["{", body_doc, ", ", base_state_var, "}"])
     }
 
     /// Compiles match arms as a chain of nested case expressions.
