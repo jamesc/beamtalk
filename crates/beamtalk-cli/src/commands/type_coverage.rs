@@ -70,8 +70,7 @@ pub fn run(
             super::build::extract_type_specs(&layout, true, false)
         }
         None => super::build_stdlib::extract_stdlib_type_specs(),
-    }
-    .map(std::sync::Arc::new);
+    };
 
     // Pass 1: Parse all files and extract class metadata for cross-file hierarchy.
     let mut all_class_infos = Vec::new();
@@ -109,7 +108,7 @@ pub fn run(
         let type_map = infer_types(
             module,
             &analysis_result.class_hierarchy,
-            native_type_registry.as_deref(),
+            native_type_registry.as_ref(),
         );
 
         let file_report = CoverageReport::from_module(module, &type_map, file.as_str(), detail);
