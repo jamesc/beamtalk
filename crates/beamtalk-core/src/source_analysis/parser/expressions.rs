@@ -1427,9 +1427,9 @@ impl Parser {
             TokenKind::Identifier(name) if name.as_str() == "nil" => {
                 let nil_span = self.advance().span();
                 if matches!(self.current_kind(), TokenKind::DoubleColon) {
-                    self.advance(); // consume '::'
+                    let double_colon_span = self.advance().span(); // consume '::'
                     let tail_span = self.consume_type_pattern_tail();
-                    let full_span = tail_span.map_or(nil_span, |s| nil_span.merge(s));
+                    let full_span = nil_span.merge(tail_span.unwrap_or(double_colon_span));
                     self.diagnostics.push(Diagnostic::error(
                         "a 'nil' pattern cannot have a type annotation ('nil :: ClassName' is not allowed; 'nil' already fully determines the match)",
                         full_span,
@@ -1466,10 +1466,9 @@ impl Parser {
                 let name = name.clone();
                 let mut bad_span = self.advance().span();
                 if matches!(self.current_kind(), TokenKind::DoubleColon) {
-                    self.advance(); // consume '::'
-                    if let Some(tail_span) = self.consume_type_pattern_tail() {
-                        bad_span = bad_span.merge(tail_span);
-                    }
+                    let double_colon_span = self.advance().span(); // consume '::'
+                    let tail_span = self.consume_type_pattern_tail();
+                    bad_span = bad_span.merge(tail_span.unwrap_or(double_colon_span));
                 }
                 self.diagnostics.push(Diagnostic::error(
                     format!(
@@ -3373,6 +3372,43 @@ mod tests {
             diags[0].message.contains("'nil' pattern"),
             "unexpected diagnostic message: {:?}",
             diags[0].message
+        );
+    }
+
+    #[test]
+    fn parse_nil_pattern_double_colon_with_no_consumable_tail_span_covers_double_colon() {
+        // When nothing follows `::` that `consume_type_pattern_tail` can
+        // consume (e.g. the arrow comes right after), the diagnostic span
+        // must still cover the `::` token itself, not just `nil`.
+        let src = "x match: [nil :: -> 0; _ -> 1]";
+        let (_module, diags) = parse_source(src);
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic (no cascade), got: {diags:?}"
+        );
+        let double_colon_end = u32::try_from(src.find("::").unwrap()).unwrap() + 2;
+        assert!(
+            diags[0].span.end() >= double_colon_end,
+            "expected diagnostic span to cover '::' (end >= {double_colon_end}), got span {:?}",
+            diags[0].span
+        );
+    }
+
+    #[test]
+    fn parse_bare_true_double_colon_with_no_consumable_tail_span_covers_double_colon() {
+        let src = "x match: [true :: -> 0; _ -> 1]";
+        let (_module, diags) = parse_source(src);
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic (no cascade), got: {diags:?}"
+        );
+        let double_colon_end = u32::try_from(src.find("::").unwrap()).unwrap() + 2;
+        assert!(
+            diags[0].span.end() >= double_colon_end,
+            "expected diagnostic span to cover '::' (end >= {double_colon_end}), got span {:?}",
+            diags[0].span
         );
     }
 
