@@ -119,7 +119,7 @@ enqueue_leaf_change(NewlyNonLeafSuperclasses) ->
 %%====================================================================
 
 init([]) ->
-    logger:set_process_metadata(#{domain => [beamtalk, runtime]}),
+    beamtalk_logging_config:set_domain(runtime),
     {ok, undefined}.
 
 handle_cast({leaf_change, Superclasses}, State) ->

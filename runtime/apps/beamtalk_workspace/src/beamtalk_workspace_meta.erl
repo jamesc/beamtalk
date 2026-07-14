@@ -405,7 +405,7 @@ set_git_toplevel(ProjectPath, Toplevel) when is_binary(ProjectPath), is_binary(T
 %%% gen_server callbacks
 
 init(InitialMetadata) ->
-    logger:set_process_metadata(#{domain => [beamtalk, runtime]}),
+    beamtalk_logging_config:set_domain(runtime),
     WorkspaceId = maps:get(workspace_id, InitialMetadata),
     ProjectPath = maps:get(project_path, InitialMetadata, undefined),
     %% BT-775: Auto-detect package name from beamtalk.toml at project_path
