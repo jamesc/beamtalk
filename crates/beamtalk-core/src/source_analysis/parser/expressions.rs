@@ -2043,12 +2043,61 @@ impl Parser {
 
     /// Parses the binding position of a constructor pattern argument.
     ///
-    /// Accepts: wildcard `_`, variable identifier, or a literal (integer, float, string, symbol,
-    /// or negative number like `-1`).
+    /// Accepts: wildcard `_`, variable identifier, `nil` (the `Pattern::Nil`
+    /// literal — BT-2884), or a literal (integer, float, string, symbol, or
+    /// negative number like `-1`). Bare `true`/`false` are rejected with a
+    /// diagnostic (BT-2884) rather than parsed as a variable binding — see
+    /// the dedicated match arm below for why.
     fn parse_constructor_binding(&mut self) -> Pattern {
         match self.current_kind() {
             TokenKind::Identifier(name) if name.as_str() == "_" => {
                 Pattern::Wildcard(self.advance().span())
+            }
+            // `nil` binding (BT-2884): mirrors `parse_pattern`'s top-level
+            // `nil` handling — `nil` is a reserved identifier, not a plain
+            // variable name, so `Result ok: nil` must test the wrapped value
+            // *is* nil (`Pattern::Nil`), not bind a variable named `nil`
+            // that matches unconditionally. Unlike top-level `nil`, no `::
+            // ClassName` tail is accepted here — type patterns aren't
+            // supported nested inside a constructor pattern at all (see
+            // `generate_pattern`'s `Pattern::Type` codegen restriction), so
+            // there's nothing to consume-and-reject.
+            TokenKind::Identifier(name) if name.as_str() == "nil" => {
+                Pattern::Nil(self.advance().span())
+            }
+            // Bare `true`/`false` binding (BT-2884, sibling to BT-2883's
+            // top-level fix): falling through to the generic variable-binding
+            // arm below would silently parse `Result ok: true` as
+            // `Pattern::Variable(Identifier{name: "true"})` — an
+            // unconditional catch-all that matches *any* wrapped value, not
+            // a boolean-literal test. Unlike the top-level fix, the
+            // diagnostic here can't point at `x :: True`/`x :: False`
+            // (`Pattern::Type` has no codegen when nested inside a
+            // constructor pattern — see `generate_pattern`), so it points at
+            // the guard-clause idiom instead, which is already supported
+            // (`Result ok: v when: [v =:= true]`) — spelled with the
+            // explicit `=:=` (strict equality, per
+            // `docs/beamtalk-language-features.md`'s Equality section)
+            // rather than a bare `v`/`v not`, since a bare guard variable
+            // reads as a truthiness check to anyone unfamiliar with Erlang's
+            // guard semantics (a bare guard variable *does* require the
+            // exact atom `true` — no other value passes — but `=:=` says so
+            // without relying on that knowledge).
+            TokenKind::Identifier(name) if name.as_str() == "true" || name.as_str() == "false" => {
+                let name = name.clone();
+                let bad_span = self.advance().span();
+                let guard_example = if name == "true" {
+                    "v =:= true"
+                } else {
+                    "v =:= false"
+                };
+                self.diagnostics.push(Diagnostic::error(
+                    format!(
+                        "bare '{name}' in a constructor pattern binding always matches — it binds any value to a variable named '{name}', it does not test for the boolean literal '{name}' (bind a variable and test it in a guard clause instead, e.g. 'Result ok: v when: [{guard_example}]')"
+                    ),
+                    bad_span,
+                ));
+                Pattern::Wildcard(bad_span)
             }
             TokenKind::Identifier(_) => {
                 let token = self.advance();
@@ -3318,6 +3367,87 @@ mod tests {
             diags[0].message.contains("bare 'false'"),
             "unexpected diagnostic message: {:?}",
             diags[0].message
+        );
+    }
+
+    // ── BT-2884: constructor pattern keyword bindings — nil/true/false ──────
+
+    #[test]
+    fn parse_constructor_binding_nil_is_nil_pattern() {
+        let (module, diags) = parse_source("x match: [Result ok: nil -> 0; _ -> 1]");
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        let Expression::Match { arms, .. } = &module.expressions[0].expression else {
+            panic!("expected Expression::Match");
+        };
+        let Pattern::Constructor { keywords, .. } = &arms[0].pattern else {
+            panic!("expected Pattern::Constructor, got: {:?}", arms[0].pattern);
+        };
+        assert!(
+            matches!(keywords[0].1, Pattern::Nil(_)),
+            "expected 'nil' binding to parse as Pattern::Nil, not Pattern::Variable, got: {:?}",
+            keywords[0].1
+        );
+    }
+
+    #[test]
+    fn parse_constructor_binding_bare_true_rejected_with_single_diagnostic() {
+        let (_module, diags) = parse_source("x match: [Result ok: true -> 0; _ -> 1]");
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic (no cascade), got: {diags:?}"
+        );
+        assert!(
+            diags[0].message.contains("bare 'true'") && diags[0].message.contains("when:"),
+            "unexpected diagnostic message: {:?}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn parse_constructor_binding_bare_false_rejected_with_single_diagnostic() {
+        let (_module, diags) = parse_source("x match: [Result ok: false -> 0; _ -> 1]");
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic (no cascade), got: {diags:?}"
+        );
+        assert!(
+            diags[0].message.contains("bare 'false'") && diags[0].message.contains("when:"),
+            "unexpected diagnostic message: {:?}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn parse_constructor_binding_bare_true_false_recovers_as_wildcard() {
+        let (module, diags) =
+            parse_source("x match: [Result ok: true -> 0; Result error: false -> 1; _ -> 2]");
+        assert_eq!(diags.len(), 2, "expected one diagnostic per arm: {diags:?}");
+        let Expression::Match { arms, .. } = &module.expressions[0].expression else {
+            panic!("expected Expression::Match");
+        };
+        let Pattern::Constructor {
+            keywords: ok_kw, ..
+        } = &arms[0].pattern
+        else {
+            panic!("expected Pattern::Constructor, got: {:?}", arms[0].pattern);
+        };
+        assert!(
+            matches!(ok_kw[0].1, Pattern::Wildcard(_)),
+            "expected bare 'true' binding to recover as Pattern::Wildcard, got: {:?}",
+            ok_kw[0].1
+        );
+        let Pattern::Constructor {
+            keywords: error_kw, ..
+        } = &arms[1].pattern
+        else {
+            panic!("expected Pattern::Constructor, got: {:?}", arms[1].pattern);
+        };
+        assert!(
+            matches!(error_kw[0].1, Pattern::Wildcard(_)),
+            "expected bare 'false' binding to recover as Pattern::Wildcard, got: {:?}",
+            error_kw[0].1
         );
     }
 
