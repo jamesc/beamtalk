@@ -21,6 +21,7 @@ mod bt2847_nested_union_type_args;
 mod bt2850_cascade_spawn_with_keys;
 mod bt2862_self_delegate_return_type;
 mod bt2864_union_block_arg_type_inference;
+mod bt2865_dynamic_type_arg_iskindof;
 mod bt2871_cascade_binary_arg_check;
 mod bt2872_and_not_nil_narrowing;
 mod bt2879_cascade_meta_branch;

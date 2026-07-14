@@ -33,6 +33,19 @@ pub enum DynamicReason {
     /// Distinguished from `UntypedFfi` because the spec EXISTS — the function
     /// simply has a broad return type.  Not actionable in typed classes.
     DynamicSpec,
+    /// The type annotation literally is the `Dynamic` keyword (BT-2865) —
+    /// e.g. `Result(Dynamic, Error)`'s first type-arg, or a field/param
+    /// explicitly declared `:: Dynamic`.
+    ///
+    /// Distinguished from every other reason (all of which mean "we don't
+    /// have enough information to give a concrete type") because this one
+    /// means the *opposite*: the author explicitly promised the value can be
+    /// anything. `merge_method_local_binding` treats this as authoritative —
+    /// it must survive being unified with any other binding, including a
+    /// concrete one from a sibling argument position — where every other
+    /// `DynamicReason` instead loses to a concrete binding observed
+    /// elsewhere (BT-2039).
+    ExplicitDynamic,
     /// Fallback — no specific reason available.
     Unknown,
 }
@@ -49,6 +62,7 @@ impl DynamicReason {
             Self::AmbiguousControlFlow => Some("ambiguous control flow"),
             Self::UntypedFfi => Some("untyped FFI"),
             Self::DynamicSpec => Some("FFI spec is Dynamic"),
+            Self::ExplicitDynamic => Some("explicitly declared Dynamic"),
             Self::Unknown => None,
         }
     }
