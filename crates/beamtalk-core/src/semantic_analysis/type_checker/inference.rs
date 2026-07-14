@@ -4142,6 +4142,47 @@ impl TypeChecker {
         }
     }
 
+    /// Finds the `Block(...)` arm of a raw type-annotation string (BT-2864).
+    ///
+    /// Matches either a bare `Block(...)` type, or — when the declared type
+    /// is a Union — the single `Block(...)` member among its `" | "`-
+    /// separated arms (e.g. `Block(A, B) | Handler | Router`). Without this,
+    /// only a bare `Block(...)` param type propagated its expected signature
+    /// into a block-literal argument; a Union-typed param fell back to typing
+    /// every block param as `Dynamic`, even when exactly one arm was a
+    /// `Block(...)` whose signature could unambiguously be used.
+    ///
+    /// Returns `None` if no arm is a `Block(...)` type, or if more than one
+    /// arm is (ambiguous — which signature would apply is unclear, so this
+    /// conservatively falls back to the pre-fix Dynamic behaviour rather than
+    /// guessing).
+    ///
+    /// `pub(super)` so `type_checker::tests` can unit-test this directly
+    /// rather than only indirectly through diagnostics (a Dynamic receiver
+    /// never fires DNU, so a diagnostics-only test can't distinguish a
+    /// correctly-typed block param from a Dynamic one for every arm shape).
+    pub(super) fn find_block_arm(type_str: &str) -> Option<&str> {
+        // `split_union_respecting_parens` already handles the bare
+        // (non-Union) case — a string with no top-level `|` comes back as a
+        // single-element Vec — so both shapes share the matching loop below.
+        // Depth-aware splitting (rather than a naive `.split(" | ")`) matters
+        // here: a two-arm Union where every arm is itself a `Block(...)` —
+        // e.g. "Block(A, A) | Block(B, B)" — would otherwise still look like
+        // it starts with "Block(" and ends with ')' as a whole string, wrongly
+        // treating the entire ambiguous Union as one bare Block(...) type
+        // instead of correctly detecting the ambiguity.
+        let mut found: Option<&str> = None;
+        for member in Self::split_union_respecting_parens(type_str.trim()) {
+            if member.starts_with("Block(") && member.ends_with(')') {
+                if found.is_some() {
+                    return None;
+                }
+                found = Some(member);
+            }
+        }
+        found
+    }
+
     /// Infer argument types, propagating block parameter types from the callee
     /// method's signature when the receiver type is known.
     ///
@@ -4223,10 +4264,11 @@ impl TypeChecker {
             );
         };
 
-        // Check if any param type is a Block(...) type
+        // Check if any param type is a Block(...) type, or a Union containing
+        // one (BT-2864: e.g. `Block(A, B) | Handler | Router`).
         let has_block_param = method.param_types.iter().any(|pt| {
             pt.as_ref()
-                .is_some_and(|t| t.starts_with("Block(") && t.ends_with(')'))
+                .is_some_and(|t| Self::find_block_arm(t).is_some())
         });
         if !has_block_param {
             return arguments
@@ -4268,7 +4310,7 @@ impl TypeChecker {
                     .param_types
                     .get(i)
                     .and_then(|pt| pt.as_ref())
-                    .filter(|t| t.starts_with("Block(") && t.ends_with(')'));
+                    .and_then(|t| Self::find_block_arm(t));
 
                 if let Some(block_type_str) = param_type_str {
                     // Parse Block(X, Y, Z) → params = [X, Y], return = Z
