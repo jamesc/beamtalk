@@ -1456,9 +1456,21 @@ impl Parser {
             // or `x :: Boolean` (either), both `Pattern::Type`
             // (ADR 0107 Phase A, `generate_type_pattern`'s
             // `wrap_single_atom_test` / `wrap_boolean_test`).
+            //
+            // A trailing `:: ClassName` (e.g. a plausible `true :: Boolean`
+            // typo before discovering the `b :: Boolean` idiom) is consumed
+            // here too, exactly like the `nil` branch above — otherwise the
+            // unconsumed `::`/class-name would surface as a second, spurious
+            // "Expected '->' after pattern" diagnostic.
             TokenKind::Identifier(name) if name.as_str() == "true" || name.as_str() == "false" => {
                 let name = name.clone();
-                let bad_span = self.advance().span();
+                let mut bad_span = self.advance().span();
+                if matches!(self.current_kind(), TokenKind::DoubleColon) {
+                    self.advance(); // consume '::'
+                    if let Some(tail_span) = self.consume_type_pattern_tail() {
+                        bad_span = bad_span.merge(tail_span);
+                    }
+                }
                 self.diagnostics.push(Diagnostic::error(
                     format!(
                         "bare '{name}' in a match: pattern always matches — it binds any value to a variable named '{name}', it does not test for the boolean literal '{name}' (use 'x :: True' / 'x :: False' for an exact literal test, or 'x :: Boolean' to match either)"
@@ -3261,6 +3273,25 @@ mod tests {
         // bare true/false rejection must apply there too, not just at the
         // top level of a match arm.
         let (_module, diags) = parse_source("x match: [{true, y} -> y; _ -> 1]");
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic (no cascade), got: {diags:?}"
+        );
+        assert!(
+            diags[0].message.contains("bare 'true'"),
+            "unexpected diagnostic message: {:?}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn parse_bare_true_with_type_annotation_rejected_with_single_diagnostic() {
+        // A plausible typo before discovering the `b :: Boolean` idiom —
+        // the trailing `:: ClassName` must be consumed along with `true`,
+        // not left dangling to cascade into a second "Expected '->'" error
+        // (mirroring the `nil :: ClassName` case above).
+        let (_module, diags) = parse_source("x match: [true :: Boolean -> 1; _ -> 0]");
         assert_eq!(
             diags.len(),
             1,
