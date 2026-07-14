@@ -490,6 +490,11 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
 
 /// Assert the module's `type_map` contains a Union whose members' class names
 /// match `expected` (order-insensitive). Returns the matching type on success.
+///
+/// Uses `filter_map(InferredType::as_known)`, which silently drops any
+/// non-`Known` member (e.g. a nested `Union`). `union_of` always flattens
+/// nested unions into one flat member list, so a flat `Union` is the only
+/// shape this ever needs to match against in practice.
 pub(super) fn find_union_in_type_map<'a>(
     type_map: &'a crate::semantic_analysis::type_checker::TypeMap,
     expected: &[&str],

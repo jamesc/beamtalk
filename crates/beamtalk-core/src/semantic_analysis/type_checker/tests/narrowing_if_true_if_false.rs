@@ -636,6 +636,14 @@ typed Object subclass: TypeTest5
 /// `Boolean | Never` union or `Dynamic`. Mirrors the equivalent
 /// always-returns coverage `if_nil_branch_union_ret_ty` already has for the
 /// two-armed `ifNil:ifNotNil:` case.
+///
+/// This exercises the simple case where `^` is the block's sole top-level
+/// statement — a genuine "always returns". `block_has_any_return` (which
+/// backs the `Never` classification) is conservative beyond that: it also
+/// reports `true` for a `^` that merely appears somewhere in the block
+/// without dominating every exit path, so the `Never` widening isn't a
+/// precise always-diverges proof in general — see the doc comment on
+/// `if_true_false_solo_boolean_ret_ty`.
 #[test]
 fn bt2868_solo_if_true_block_always_returns_yields_plain_boolean() {
     let source = r"

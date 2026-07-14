@@ -970,6 +970,17 @@ impl TypeChecker {
                         // preserves parity rather than introducing new
                         // behaviour beyond BT-2845's scope (unchecked
                         // arguments on continuation messages).
+                        //
+                        // BT-2868: `&msg.arguments` is this continuation
+                        // message's own arguments, but `&arg_types` is
+                        // whatever the *outer* send in this cascade computed
+                        // — they can be mismatched positionally/by-shape for
+                        // a continuation message. This is harmless here: the
+                        // call's only purpose is DNU validation (its return
+                        // value is discarded — the cascade keeps `send_ty`
+                        // from the first send), and `if_true_false_solo_boolean_ret_ty`
+                        // bails safely whenever the first arg type it reads
+                        // doesn't pattern-match `Block(...)`.
                         self.infer_union_message_send(
                             members,
                             &selector_name,
@@ -4089,6 +4100,13 @@ impl TypeChecker {
         if block_class.as_str() != "Block" {
             return None;
         }
+        // `block_has_any_return` is a conservative over-approximation: it
+        // reports `true` whenever a `^` appears anywhere in the block body
+        // (nested block literals are opaque to it, so a `^` buried inside
+        // one is invisible), not only when the block is guaranteed to always
+        // exit the method on every path. Some blocks that may-but-not-always
+        // diverge get widened to `Never` here — an accepted imprecision this
+        // shares with the mirror function, [`Self::if_nil_solo_union_ret_ty`].
         let block_ret = if let Expression::Block(block) = unwrap_parens(arg) {
             if block_has_any_return(block) {
                 InferredType::Never
