@@ -271,6 +271,141 @@ re-run alongside this benchmark, unaffected (~1400x speedup vs source-scan,
 consistent with prior measurement; workspace grew from 81 to 103 classes in
 the interim, expected).
 
+## Leaf-change re-check fan-out (ADR 0107 Phase A, BT-2856 follow-up, BT-2873)
+
+BT-2856 added `beamtalk_recheck:trigger_leaf_change/1`: when a live
+class-body reload gives a previously-leaf class its first subclass, this
+re-checks **every** live class's own recorded source against the updated
+hierarchy (the same "recompile everything" strategy as `trigger_image/0`,
+since no xref index exists yet for `Type`-pattern/`matchExhaustive:` sites —
+see the moduledoc). Unlike `trigger_image/0`, this fires *automatically*,
+once per distinct base class gaining its first subclass. BT-2873's
+adversarial-review follow-up asks whether that automatic fan-out is a real
+cost during a bulk `:load dir` of a project with a deep class hierarchy
+(finding #1), and whether a single reload introducing multiple new
+hierarchies at once pays for redundant independent sweeps (finding #2),
+following BT-2781's "measure, then decide" precedent.
+
+### Harness
+
+`runtime/perf/bench_leaf_change_fanout.escript`. Run from the `runtime/`
+directory after `just build`:
+
+```bash
+escript perf/bench_leaf_change_fanout.escript
+```
+
+Two parts:
+
+- **Part A (real hierarchy shape)** — walks the full loaded stdlib class
+  hierarchy and counts classes with >= 1 direct subclass: each one underwent
+  exactly one leaf -> non-leaf transition the first time its first subclass
+  loaded, so this count is the exact number of `trigger_leaf_change/1`
+  sweeps a from-scratch bulk load of this workspace already fires today.
+  Also checks finding #2 directly: does any stdlib source file declare more
+  than one class (real declarations only — `///` doc-comment examples like
+  `Actor.bt`'s `/// Actor subclass: Counter` are filtered out, since they
+  are not real class definitions)?
+- **Part B (sweep cost vs. live-class count)** — drives the real
+  `beamtalk_recheck:trigger_leaf_change/1` orchestration (real compiler
+  port, real `beamtalk_workspace_meta`) over a synthetic set of 5 / 20 / 50 /
+  100 / 200 live class sources, to measure the sweep's wall-clock cost as a
+  function of workspace size.
+
+### Workspace
+
+The loaded standard library: **104 classes** (1 more than BT-2781's 103 —
+stdlib grows over time).
+
+### Results
+
+**Part A — today's real hierarchy shape:**
+
+- **17 of 104 classes (16.3%)** have at least one direct subclass — i.e. a
+  from-scratch bulk load of the full stdlib fires **17** independent
+  `trigger_leaf_change/1` sweeps today.
+- **0 of 104 source files declare more than one class.** Every stdlib file
+  follows a strict one-class-per-file convention, so finding #2's scenario
+  (a single reload making two or more superclasses newly-non-leaf at once,
+  paying for N independent sweeps instead of one) **cannot occur via the
+  stdlib's own bulk-load path** — `superclasses_losing_leaf_status/1`'s
+  input list is a singleton on every real stdlib reload. It remains
+  reachable in principle via other call sites that can install multiple
+  classes from one compile unit (e.g. a REPL paste defining two `subclass:`
+  statements in one expression, feeding `load_compiled_module/6`), just not
+  demonstrated as occurring anywhere in the current codebase.
+
+**Part B — sweep cost vs. live-class count:**
+
+| live classes | checked | wall-clock | ms/checked |
+|---|---|---|---|
+| 5 | 5 | ~215 ms | ~43 ms |
+| 20 | 20 | ~684 ms | ~34 ms |
+| 50 | 50 | ~1740 ms | ~35 ms |
+| 100 | 100 | ~3620 ms | ~36 ms |
+| 200 | 200 | ~7440 ms | ~37 ms |
+
+### Interpretation
+
+- **Per-check cost is flat, ~34-43 ms/candidate**, consistent with
+  `trigger/4`'s own measured ~33-48 ms/candidate (BT-2781) — no
+  superlinear blowup; `trigger_leaf_change/1` costs scale linearly with the
+  live-class count, same shape as `trigger_image/0`.
+- **Projected worst-case cost of today's real stdlib bulk load:** 17 sweeps
+  at up to ~3.6 s each (the full 104-class workspace size, an upper bound
+  since earlier transitions in the load see a smaller live-class set) is up
+  to **~61 s of serialized background compiler-port work**; a more
+  realistic estimate (transitions roughly spread through the load, so the
+  average sweep sees about half the final live-class count) is **~25-30 s**.
+  This is not a *blocking* cost — `spawn_leaf_change_recheck/1` already
+  keeps every sweep off the reload's own response path, queued through
+  `beamtalk_workspace_shape_recheck_worker`'s single-worker serialisation
+  (bounding concurrent compiler-port contention from this path to 1, same as
+  every other ADR 0105 mechanism) — but it is a real, non-trivial tail of
+  background compiler-port contention that other clients' hover/completion/
+  save requests queue up behind for tens of seconds after a full bulk load
+  "finishes" from the loading client's point of view, and it grows linearly
+  with both hierarchy depth (more leaf-change events) and workspace size
+  (more expensive per sweep).
+- **Finding #2 has zero measured benefit today** (0 of 104 files could ever
+  trigger it) but remains cheap, mechanical, and strictly non-regressive to
+  fix given the code path already exists for other reload sites capable of
+  installing multiple classes at once.
+
+### Decision (BT-2873)
+
+**Cross-reload debouncing/batching for finding #1 (collapsing the 17
+separate bulk-load sweeps above into one) is not implemented now.** The
+measured cost (tens of seconds of serialized, off-response-path background
+work for a full from-scratch stdlib load) is real but bounded, self-healing
+(resolves once the bulk load's queued sweeps drain), and — unlike BT-2798's
+xref receiver-type-key finding — does not cause any *lost* findings or
+incorrect behaviour, only a temporary latency/contention tail. It also only
+manifests on a full/deep bulk load (`:load dir` of a whole project or a
+large chunk of it), not on the ordinary single-class-at-a-time edit loop
+interactive development mostly consists of. Implementing genuine
+cross-reload debouncing (coalescing multiple queued `{leaf_change, _}`
+messages arriving within a short window into one combined sweep) would
+require the worker to peek ahead in its own mailbox or add a delay/timer
+state machine — meaningfully more complexity than this proactively-filed,
+non-urgent finding currently justifies, mirroring BT-2798's own "quantify,
+document, defer" resolution for a similarly-shaped bounded cost. Revisit if
+real-world bulk loads of deep hierarchies are reported as actually
+regressing interactive responsiveness.
+
+**Finding #2's same-reload batching is implemented** (`beamtalk_recheck:
+trigger_leaf_change/1` now takes the full list of newly-non-leaf
+superclasses from one reload event and runs a single sweep attributing
+findings to whichever of them a diagnostic names, instead of
+`maybe_trigger_leaf_change_recheck/1`'s previous one-sweep-per-superclass
+`lists:foreach`) — free today given the stdlib's one-class-per-file
+convention (0 measured benefit), but a correct, low-risk fix for any other
+reload path capable of installing multiple classes at once.
+
+No regression: `bench_recheck_fanout.escript` (BT-2781) and
+`bench_senders_xref.escript` (BT-2299) unaffected by this change (neither
+touches `trigger_leaf_change/1` or its call sites).
+
 ## Self-hosting cost: pure-BT enumeration vs native primitives (BT-2692 / BT-2708)
 
 A spike for the de-primitivization direction: how much slower is a pure-BT

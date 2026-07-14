@@ -192,12 +192,12 @@ load_class_module(ClassInfo, Expression, State) ->
     %% beamtalk_workspace_shape_store's moduledoc "Two-phase capture" for why
     %% this must run before code:load_binary, not after.
     prime_shape_capture(Classes),
-    %% BT-2856 / ADR 0107 Phase A: same "before code:load_binary" ordering
-    %% requirement as prime_shape_capture/1 above — see activate_module/4's
-    %% doc.
-    NewlyNonLeafSuperclasses = superclasses_losing_leaf_status(Classes),
-    case code:load_binary(ClassModName, "", Binary) of
-        {module, ClassModName} ->
+    %% BT-2856 / ADR 0107 Phase A, BT-2873 hardening: load_class_binary/4
+    %% bakes the "superclasses_losing_leaf_status/1 before code:load_binary/3"
+    %% ordering requirement into one call — see its own doc and
+    %% activate_module/4's doc for why.
+    case load_class_binary(ClassModName, "", Binary, Classes) of
+        {ok, NewlyNonLeafSuperclasses} ->
             activate_module(ClassModName, Classes, undefined, NewlyNonLeafSuperclasses),
             NewState1 = maybe_add_loaded_module(ClassModName, State),
             {ClassName, NewState2} = store_class_sources(
@@ -232,6 +232,41 @@ reload_method_definition(MethodInfo, Warnings, Expression, State) ->
             recompile_with_method(
                 ClassSource, MethodInfo, Expression, Warnings, State
             )
+    end.
+
+-doc """
+BT-2873 (ADR 0107 Phase A caller-discipline hardening, BT-2856 adversarial
+review finding #3): load a class-defining module's compiled `Binary` and
+compute `superclasses_losing_leaf_status/1` against `Classes` in the one
+required order, as a single call.
+
+Every generated class module's `on_load` hook (`register_class/0`,
+BT-1610) runs **synchronously inside** `code:load_binary/3` and registers
+any new subclass link before that call returns — so
+`superclasses_losing_leaf_status/1` MUST run against `Classes` *before*
+`code:load_binary/3`, never after (`activate_module/4`'s doc has the full
+mechanism). Every one of today's four class-defining call sites
+(`load_class_module/3`, `load_compiled_module/6`,
+`reload_compile_and_load/4`, `new_class_install/7`) already followed this
+exact two-step sequence by convention alone, with nothing enforcing it —
+this collapses the two steps into one call so a future call site (or a
+refactor of an existing one) cannot obtain a `{module, ModuleName}` result
+without `superclasses_losing_leaf_status/1` having already run first: there
+is no way to call this function and skip that step, unlike calling
+`code:load_binary/3` directly ever again would allow.
+
+Returns `{ok, NewlyNonLeafSuperclasses}` — feed straight into
+`activate_module/4`'s fourth argument — on a successful load, or
+`{error, Reason}` (the load itself failed; nothing installed, nothing to
+re-check) otherwise.
+""".
+-spec load_class_binary(atom(), string(), binary(), [map()]) ->
+    {ok, [binary()]} | {error, term()}.
+load_class_binary(ModuleName, LoadPath, Binary, Classes) ->
+    NewlyNonLeafSuperclasses = superclasses_losing_leaf_status(Classes),
+    case code:load_binary(ModuleName, LoadPath, Binary) of
+        {module, ModuleName} -> {ok, NewlyNonLeafSuperclasses};
+        {error, Reason} -> {error, Reason}
     end.
 
 -doc """
@@ -446,10 +481,9 @@ load_compiled_module(Binary, ClassNames, ModuleName, Source, SourcePath, State) 
         end,
     %% ADR 0105 Phase 2 (BT-2780): see load_class_module/3's identical comment.
     prime_shape_capture(ClassNames),
-    %% BT-2856 / ADR 0107 Phase A: see activate_module/4's doc.
-    NewlyNonLeafSuperclasses = superclasses_losing_leaf_status(ClassNames),
-    case code:load_binary(ModuleName, LoadPath, Binary) of
-        {module, ModuleName} ->
+    %% BT-2856 / ADR 0107 Phase A, BT-2873 hardening: see load_class_binary/4's doc.
+    case load_class_binary(ModuleName, LoadPath, Binary, ClassNames) of
+        {ok, NewlyNonLeafSuperclasses} ->
             activate_module(ModuleName, ClassNames, SourcePath, NewlyNonLeafSuperclasses),
             NewState1 = maybe_add_loaded_module(ModuleName, State),
             NewState2 = track_module_source(ModuleName, SourcePath, NewState1),
@@ -694,10 +728,10 @@ reload_compile_and_load(Source, Path, ModuleNameOverride, ExpectedClassName) ->
                     %% (the subsequent capture/1 always diffs an unchanged
                     %% shape to itself, `no_op`).
                     prime_shape_capture(ClassNames),
-                    %% BT-2856 / ADR 0107 Phase A: see activate_module/4's doc.
-                    NewlyNonLeafSuperclasses = superclasses_losing_leaf_status(ClassNames),
-                    case code:load_binary(ModuleName, Path, Binary) of
-                        {module, ModuleName} ->
+                    %% BT-2856 / ADR 0107 Phase A, BT-2873 hardening: see
+                    %% load_class_binary/4's doc.
+                    case load_class_binary(ModuleName, Path, Binary, ClassNames) of
+                        {ok, NewlyNonLeafSuperclasses} ->
                             activate_module(ModuleName, ClassNames, Path, NewlyNonLeafSuperclasses),
                             {ok, ClassNames};
                         {error, Reason} ->
@@ -1415,10 +1449,9 @@ new_class_validate_and_install(Source, TargetPath, AbsPath, Binary, ClassNames, 
     string(), string(), string(), binary(), [map()], atom(), binary()
 ) -> {ok, [#beamtalk_object{}]} | {error, #beamtalk_error{}}.
 new_class_install(Source, TargetPath, AbsPath, Binary, ClassNames, ModuleName, DeclaredName) ->
-    %% BT-2856 / ADR 0107 Phase A: see activate_module/4's doc.
-    NewlyNonLeafSuperclasses = superclasses_losing_leaf_status(ClassNames),
-    case code:load_binary(ModuleName, AbsPath, Binary) of
-        {module, ModuleName} ->
+    %% BT-2856 / ADR 0107 Phase A, BT-2873 hardening: see load_class_binary/4's doc.
+    case load_class_binary(ModuleName, AbsPath, Binary, ClassNames) of
+        {ok, NewlyNonLeafSuperclasses} ->
             activate_module(ModuleName, ClassNames, AbsPath, NewlyNonLeafSuperclasses),
             %% Record class source so subsequent `>>` / compile:source: patches
             %% against the new class resolve their span (mirrors the file-load path).
@@ -2467,27 +2500,46 @@ spawn_leaf_change_recheck(NewlyNonLeafSuperclasses) ->
     beamtalk_workspace_shape_recheck_worker:enqueue_leaf_change(NewlyNonLeafSuperclasses).
 
 -doc """
-Run the leaf-change re-check for every superclass in `Superclasses` and
-publish each one's findings. Reached in production only via
-`beamtalk_workspace_shape_recheck_worker`'s queue (mirrors
-`maybe_trigger_shape_recheck/1` exactly — see its doc — which is also why
-this is exported outside the `-ifdef(TEST)` block, same reason: the worker
-lives in a different module).
+Run the leaf-change re-check for `Superclasses` — the *whole* list one
+reload event produced — and publish each superclass's own findings.
+Reached in production only via `beamtalk_workspace_shape_recheck_worker`'s
+queue (mirrors `maybe_trigger_shape_recheck/1` exactly — see its doc — which
+is also why this is exported outside the `-ifdef(TEST)` block, same reason:
+the worker lives in a different module).
+
+**BT-2873:** `beamtalk_recheck:trigger_leaf_change/1` runs **one** shared
+whole-image sweep covering every superclass in `Superclasses` (never raises
+— see its own doc), instead of one independent sweep per superclass
+(`spawn_leaf_change_recheck/1`'s doc explains why paying for N sweeps when
+N superclasses transition in the same reload was wasteful: every sweep
+would recompile the identical candidate set against the identical,
+already-updated hierarchy). Publishing still happens once per superclass
+(`publish_leaf_change_recheck_outcome/2` filters the shared result's
+findings down to just the ones attributed to its own superclass), preserving
+the existing one-`'ReloadCheckCompleted'`-announcement-per-superclass
+contract every consumer already relies on — each publish call is
+independently try/catch-wrapped so a failure publishing one superclass's
+outcome cannot prevent another's from being published.
 """.
 -spec maybe_trigger_leaf_change_recheck([binary()]) -> ok.
+maybe_trigger_leaf_change_recheck([]) ->
+    ok;
 maybe_trigger_leaf_change_recheck(Superclasses) ->
-    lists:foreach(fun maybe_trigger_leaf_change_recheck_for_class/1, Superclasses),
+    Result = beamtalk_recheck:trigger_leaf_change(Superclasses),
+    lists:foreach(
+        fun(SuperclassBin) -> publish_leaf_change_recheck_outcome_safe(SuperclassBin, Result) end,
+        Superclasses
+    ),
     ok.
 
--spec maybe_trigger_leaf_change_recheck_for_class(binary()) -> ok.
-maybe_trigger_leaf_change_recheck_for_class(SuperclassBin) ->
+-spec publish_leaf_change_recheck_outcome_safe(binary(), beamtalk_recheck:result()) -> ok.
+publish_leaf_change_recheck_outcome_safe(SuperclassBin, Result) ->
     try
-        Result = beamtalk_recheck:trigger_leaf_change(SuperclassBin),
         publish_leaf_change_recheck_outcome(SuperclassBin, Result)
     catch
         Class:Reason:Stack ->
             ?LOG_WARNING(
-                "Leaf-change re-check trigger failed (reload unaffected)",
+                "Leaf-change re-check publish failed (reload unaffected)",
                 #{
                     error_class => Class,
                     reason => Reason,
@@ -2500,13 +2552,25 @@ maybe_trigger_leaf_change_recheck_for_class(SuperclassBin) ->
     end.
 
 -doc """
-Publish a leaf-change re-check's outcome — mirrors
+Publish a leaf-change re-check's outcome for `SuperclassBin` — mirrors
 `publish_shape_recheck_outcome/3`'s store-write/announce shape, reusing the
 exact same findings-store and `'ReloadCheckCompleted'` announcement schema
 so every existing surface renders a leaf-change finding without new wiring.
 `changedSelector` carries `SuperclassBin` itself (there is no single call
 site selector this is "about" — same reasoning `finding()`'s doc already
 gives for `shape_change`).
+
+**BT-2873:** `Result` may be a *shared* outcome covering several
+superclasses at once (`maybe_trigger_leaf_change_recheck/1`'s batched
+sweep) — `Findings` is filtered down to just the ones whose own
+`changed_class` is `SuperclassBin` before anything else runs, so a finding
+attributed to a sibling superclass in the same batch never leaks into this
+superclass's findings-store origin or announcement. `CheckedOwners`/
+`Checked`/`NotChecked`/`CapNote` are **not** filtered — they describe the
+one shared diagnostics sweep itself (identical for every superclass in the
+batch, since it is literally the same round trip), matching exactly what an
+unbatched single-superclass sweep would have reported for this superclass
+alone.
 
 Unlike `publish_shape_recheck_outcome/3`, the announce is gated on
 `Findings` being non-empty alone, not on `CheckedOwners` alone: a superclass
@@ -2523,12 +2587,13 @@ this reload's re-check comes back clean.
 publish_leaf_change_recheck_outcome(SuperclassBin, Result) ->
     #{
         checked_owners := CheckedOwners,
-        findings := Findings,
+        findings := AllFindings,
         checked := Checked,
         not_checked := NotChecked,
         cap_note := CapNote,
         not_verified_owners := NotVerifiedOwners
     } = Result,
+    Findings = [F || F <- AllFindings, maps:get(changed_class, F) =:= SuperclassBin],
     lists:foreach(
         fun(OwnerBin) ->
             OwnerFindings = [F || F <- Findings, maps:get(owner, F) =:= OwnerBin],
