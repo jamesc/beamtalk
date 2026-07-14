@@ -256,6 +256,68 @@ impl NavCache {
     }
 }
 
+/// Collects dependency/native `.beam` ebin directories under `root`'s
+/// `_build/` tree, for `beamtalk_core::ffi_type_specs::extract_type_specs`.
+///
+/// Duplicates the directory-scanning logic of `beamtalk-cli`'s
+/// `native_type_specs::collect_dependency_ebin_dirs` (itself already a
+/// deliberate BT-2858 duplicate of the CLI binary's `commands::deps`/
+/// `commands::build` versions) rather than sharing it, so `beamtalk-lsp`
+/// doesn't need a `beamtalk-lsp -> beamtalk-cli` dependency (forbidden —
+/// see `docs/development/architecture-principles.md`). Each side is a
+/// handful of `read_dir` calls over the same `_build/` layout convention
+/// this function's caller (`load_type_cache`) already assumes for
+/// `_build/type_cache/`, so duplication carries little drift risk — unlike
+/// the FFI-spec-extraction logic itself, which is *not* duplicated
+/// (`beamtalk-core`'s `ffi_type_specs` is its single source of truth).
+fn collect_dependency_ebin_dirs(root: &Utf8PathBuf) -> Vec<Utf8PathBuf> {
+    let mut dirs = Vec::new();
+    let build_root = root.join("_build");
+
+    // Path dependencies: `_build/deps/*/ebin/`.
+    if let Ok(entries) = std::fs::read_dir(build_root.join("deps")) {
+        for entry in entries.flatten() {
+            let ebin = entry.path().join("ebin");
+            if ebin.is_dir() {
+                if let Ok(utf8) = Utf8PathBuf::from_path_buf(ebin) {
+                    dirs.push(utf8);
+                }
+            }
+        }
+    }
+
+    // The project's own native/ code, compiled to `_build/dev/native/ebin/`.
+    let native_ebin = build_root.join("dev").join("native").join("ebin");
+    if native_ebin.is_dir() {
+        dirs.push(native_ebin);
+    }
+
+    // rebar3 hex/git deps: `_build/dev/native/default/lib/*/ebin/`.
+    let lib_dir = build_root
+        .join("dev")
+        .join("native")
+        .join("default")
+        .join("lib");
+    if let Ok(entries) = std::fs::read_dir(&lib_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let ebin = path.join("ebin");
+            if ebin.is_dir() {
+                if let Ok(utf8) = Utf8PathBuf::from_path_buf(ebin) {
+                    dirs.push(utf8);
+                }
+            }
+        }
+    }
+
+    dirs.sort();
+    dirs.dedup();
+    dirs
+}
+
 impl Backend {
     /// Creates a new `Backend` with the given LSP client handle.
     pub fn new(client: Client) -> Self {
@@ -730,42 +792,38 @@ impl Backend {
         }
     }
 
-    /// Loads the type cache from `_build/type_cache/` in workspace roots.
+    /// Loads Erlang FFI type specs for each workspace root, live-extracting
+    /// from OTP/dependency `.beam` files when `_build/type_cache/` is
+    /// missing or stale rather than only reading whatever it happens to
+    /// hold.
     ///
-    /// ADR 0075 Phase 1: Reads cached spec protocol lines and populates the
-    /// `NativeTypeRegistry` in the language service. This provides typed
-    /// completions for Erlang FFI calls (e.g., `reverse: list :: List -> List`).
+    /// ADR 0075 Phase 1 / BT-2859: Calls `beamtalk_core::ffi_type_specs::
+    /// extract_type_specs` — the same single source of truth `beamtalk
+    /// build`/`beamtalk lint` and the MCP `lint`/`diagnostic_summary` tools
+    /// (BT-2858) use — instead of hand-parsing whatever JSON cache entries
+    /// happen to be on disk. Before this, a workspace opened before any
+    /// `beamtalk build` had run (or after `beamtalk clean`) got an
+    /// empty `NativeTypeRegistry` for the rest of the session: no FFI
+    /// argument-type diagnostics, and any `@expect type` suppressing one
+    /// shown as stale. Runs on a blocking task since it may spawn a
+    /// `beamtalk_build_worker` BEAM node on a cold/stale cache.
     async fn load_type_cache(&self, roots: &[PathBuf]) {
-        use beamtalk_core::semantic_analysis::type_checker::{
-            NativeTypeRegistry, parse_specs_line,
-        };
+        use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
 
         let roots_owned: Vec<PathBuf> = roots.to_vec();
         let registry = tokio::task::spawn_blocking(move || {
             let mut registry = NativeTypeRegistry::new();
             for root in &roots_owned {
-                let cache_dir = root.join("_build").join("type_cache");
-                if !cache_dir.is_dir() {
-                    continue;
-                }
-                let Ok(entries) = std::fs::read_dir(&cache_dir) else {
+                let Ok(root) = Utf8PathBuf::from_path_buf(root.clone()) else {
                     continue;
                 };
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.extension().and_then(|e| e.to_str()) != Some("json") {
-                        continue;
-                    }
-                    let Ok(content) = std::fs::read_to_string(&path) else {
-                        continue;
-                    };
-                    // Extract specs_line from the JSON cache entry.
-                    // Format: {"beam_mtime_secs":N,"specs_line":"..."}
-                    if let Some(line) = extract_specs_line_from_cache(&content) {
-                        if !line.is_empty() {
-                            parse_specs_line(&line, &mut registry);
-                        }
-                    }
+                let cache_dir = root.join("_build").join("type_cache");
+                let dependency_ebin_dirs = collect_dependency_ebin_dirs(&root);
+                if let Some(root_registry) = beamtalk_core::ffi_type_specs::extract_type_specs(
+                    &cache_dir,
+                    &dependency_ebin_dirs,
+                ) {
+                    registry.merge(root_registry);
                 }
             }
             registry
@@ -4642,43 +4700,6 @@ fn position_to_offset(pos: tower_lsp::lsp_types::Position, source: &str) -> usiz
     source.len()
 }
 
-/// Extracts the `specs_line` value from a type cache JSON entry.
-///
-/// The cache format is `{"beam_mtime_secs":N,"specs_line":"..."}`.
-/// This is a simple key-value extraction — we don't need a full JSON parser.
-fn extract_specs_line_from_cache(json: &str) -> Option<String> {
-    // Look for "specs_line":" and extract until the closing unescaped "
-    let key = "\"specs_line\":\"";
-    let start = json.find(key)? + key.len();
-    let remaining = &json[start..];
-
-    // Find the end of the JSON string value, handling escaped quotes
-    let mut result = String::new();
-    let mut chars = remaining.chars();
-    loop {
-        match chars.next()? {
-            '\\' => {
-                // Handle escape sequences
-                match chars.next()? {
-                    '"' => result.push('"'),
-                    '\\' => result.push('\\'),
-                    'n' => result.push('\n'),
-                    'r' => result.push('\r'),
-                    't' => result.push('\t'),
-                    other => {
-                        result.push('\\');
-                        result.push(other);
-                    }
-                }
-            }
-            '"' => break, // End of string value
-            c => result.push(c),
-        }
-    }
-
-    Some(result)
-}
-
 /// Converts a beamtalk `Diagnostic` to an LSP `Diagnostic`.
 fn to_lsp_diagnostic(
     diag: &beamtalk_core::language_service::Diagnostic,
@@ -4933,6 +4954,69 @@ mod tests {
         let uri = path_to_stdlib_uri(&path).expect("should produce URI");
         assert_eq!(uri.scheme(), "beamtalk-stdlib");
         assert_eq!(uri.path(), "/Collection.bt");
+    }
+
+    // -----------------------------------------------------------------------
+    // load_type_cache / collect_dependency_ebin_dirs (BT-2859)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn collect_dependency_ebin_dirs_empty_project() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let dirs = collect_dependency_ebin_dirs(&root);
+        assert!(dirs.is_empty(), "fresh project has no dependency ebin dirs");
+    }
+
+    #[test]
+    fn collect_dependency_ebin_dirs_finds_path_dep_ebin() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let dep_ebin = root.join("_build").join("deps").join("json").join("ebin");
+        std::fs::create_dir_all(&dep_ebin).unwrap();
+
+        let dirs = collect_dependency_ebin_dirs(&root);
+        assert!(
+            dirs.contains(&dep_ebin),
+            "should find the path dependency's ebin dir: {dirs:?}"
+        );
+    }
+
+    /// BT-2859: `load_type_cache` extracts live from OTP `.beam` files for a
+    /// workspace root with no prior `beamtalk build` — analogous to
+    /// `beamtalk-cli`'s `lint_extracts_type_specs_live_on_cold_cache_bt_2851`
+    /// and `beamtalk-mcp`'s `build_native_type_registry_extracts_live_on_cold_cache`
+    /// (BT-2858). Before this fix, the LSP only read `_build/type_cache/`
+    /// JSON files directly, so a workspace opened before any build got an
+    /// empty registry for the rest of the session.
+    #[tokio::test]
+    async fn load_type_cache_extracts_live_on_cold_cache() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = temp.path().to_path_buf();
+        // No `_build/` directory exists yet — the cold-cache case.
+        assert!(!root.join("_build").exists());
+
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+        backend.load_type_cache(std::slice::from_ref(&root)).await;
+
+        let svc = backend.service.lock().expect("service lock poisoned");
+        let Some(registry) = svc.native_types() else {
+            eprintln!(
+                "skipping load_type_cache_extracts_live_on_cold_cache: \
+                 no OTP .beam files discovered in this environment"
+            );
+            return;
+        };
+        assert!(
+            registry.lookup("lists", "reverse", 1).is_some(),
+            "live extraction with no prior build must still find lists:reverse/1"
+        );
+        // The extractor writes the same cache a `beamtalk build`/`beamtalk
+        // lint` run would.
+        assert!(root.join("_build").join("type_cache").exists());
     }
 
     #[tokio::test]
@@ -5636,41 +5720,6 @@ mod tests {
                 "roundtrip failed for offset {byte_offset}"
             );
         }
-    }
-
-    // -----------------------------------------------------------------------
-    // Type cache JSON parsing (ADR 0075)
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn extract_specs_line_from_cache_basic() {
-        let json = r#"{"beam_mtime_secs":12345,"specs_line":"beamtalk-specs-module:lists:[#{arity => 1}]"}"#;
-        let result = extract_specs_line_from_cache(json);
-        assert_eq!(
-            result.as_deref(),
-            Some("beamtalk-specs-module:lists:[#{arity => 1}]")
-        );
-    }
-
-    #[test]
-    fn extract_specs_line_from_cache_empty() {
-        let json = r#"{"beam_mtime_secs":100,"specs_line":""}"#;
-        let result = extract_specs_line_from_cache(json);
-        assert_eq!(result.as_deref(), Some(""));
-    }
-
-    #[test]
-    fn extract_specs_line_from_cache_with_escaped_quotes() {
-        let json = r#"{"beam_mtime_secs":100,"specs_line":"name => <<\"reverse\">>"}"#;
-        let result = extract_specs_line_from_cache(json);
-        assert_eq!(result.as_deref(), Some(r#"name => <<"reverse">>"#));
-    }
-
-    #[test]
-    fn extract_specs_line_from_cache_missing_key() {
-        let json = r#"{"beam_mtime_secs":100}"#;
-        let result = extract_specs_line_from_cache(json);
-        assert!(result.is_none());
     }
 
     // ----------------------------------------------------------------------
