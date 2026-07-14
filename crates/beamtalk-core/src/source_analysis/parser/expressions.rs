@@ -2099,13 +2099,34 @@ impl Parser {
                 ));
                 Pattern::Wildcard(bad_span)
             }
+            // Variable binding (BT-2885): a trailing `:: ClassName` is not
+            // supported in constructor-binding position (`Pattern::Type`
+            // has no codegen when nested inside a constructor pattern — see
+            // `generate_pattern`), but leaving it unconsumed would desync
+            // the constructor-pattern keyword loop (`::` isn't a `Keyword`
+            // token) and cascade into a generic "Expected '->' after
+            // pattern" error. Consumed and rejected here with a single
+            // targeted diagnostic instead, mirroring `parse_pattern`'s
+            // `nil ::`/`true ::`/`false ::` consume-and-reject handling
+            // (BT-2860, BT-2883).
             TokenKind::Identifier(_) => {
                 let token = self.advance();
                 let span = token.span();
                 let TokenKind::Identifier(name) = token.into_kind() else {
                     unreachable!()
                 };
-                Pattern::Variable(Identifier::new(name, span))
+                if matches!(self.current_kind(), TokenKind::DoubleColon) {
+                    let double_colon_span = self.advance().span(); // consume '::'
+                    let tail_span = self.consume_type_pattern_tail();
+                    let full_span = span.merge(tail_span.unwrap_or(double_colon_span));
+                    self.diagnostics.push(Diagnostic::error(
+                        "type annotations are not supported in a constructor pattern binding position ('x :: ClassName' is not allowed here; bind the variable and test its type in a guard clause instead, e.g. 'Result ok: v when: [v :: ClassName]')",
+                        full_span,
+                    ));
+                    Pattern::Wildcard(full_span)
+                } else {
+                    Pattern::Variable(Identifier::new(name, span))
+                }
             }
             TokenKind::Integer(_)
             | TokenKind::Float(_)
@@ -3448,6 +3469,47 @@ mod tests {
             matches!(error_kw[0].1, Pattern::Wildcard(_)),
             "expected bare 'false' binding to recover as Pattern::Wildcard, got: {:?}",
             error_kw[0].1
+        );
+    }
+
+    // ── BT-2885: constructor binding `x :: ClassName` tail ──────────────────
+
+    #[test]
+    fn parse_constructor_binding_type_annotation_rejected_with_single_diagnostic() {
+        let (_module, diags) =
+            parse_source("r match: [Result ok: x :: Integer -> x; Result error: _ -> 0]");
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one diagnostic (no cascade), got: {diags:?}"
+        );
+        assert!(
+            diags[0]
+                .message
+                .contains("type annotations are not supported in a constructor pattern binding position"),
+            "unexpected diagnostic message: {:?}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn parse_constructor_binding_type_annotation_recovers_as_wildcard() {
+        let (module, diags) =
+            parse_source("r match: [Result ok: x :: Integer -> x; Result error: _ -> 0]");
+        assert_eq!(diags.len(), 1, "expected one diagnostic: {diags:?}");
+        let Expression::Match { arms, .. } = &module.expressions[0].expression else {
+            panic!("expected Expression::Match");
+        };
+        let Pattern::Constructor {
+            keywords: ok_kw, ..
+        } = &arms[0].pattern
+        else {
+            panic!("expected Pattern::Constructor, got: {:?}", arms[0].pattern);
+        };
+        assert!(
+            matches!(ok_kw[0].1, Pattern::Wildcard(_)),
+            "expected 'x :: Integer' binding to recover as Pattern::Wildcard, got: {:?}",
+            ok_kw[0].1
         );
     }
 
