@@ -94,6 +94,33 @@ TestCase subclass: AnnouncementsTest
     self assert: received value equals: 7
     received delete
 
+  // --- announceAndWait:timeout: (custom timeout, exercises announceAndWaitOn/3) ---
+  testAnnounceAndWaitWithCustomTimeout =>
+    received := AtomicCounter new: #announcementsTestSyncTimeout
+    self.announcer when: TestEvent do: [:e | received incrementBy: e payload]
+    self.announcer announceAndWait: (TestEvent payload: 3) timeout: 5000
+    // No sleep — announceAndWait:timeout: is synchronous.
+    self assert: received value equals: 3
+    received delete
+
+  // --- unsubscribe: receiver (bulk-remove by pid, exercises unsubscribeReceiver/2) ---
+  testUnsubscribeReceiverByPid =>
+    received := AtomicCounter new: #announcementsTestUnsubReceiverPid
+    sub1 := self.announcer when: TestEvent do: [:e | received increment]
+    sub2 := self.announcer when: TestEvent do: [:e | received increment]
+    // Both subscriptions are held by the test process; node subscriber is a
+    // raw Erlang pid (BT Pid — maps directly to pid()). Passing it to
+    // unsubscribe: drops all subscriptions for that receiver at once.
+    node := (self.announcer subscribersOf: TestEvent) first
+    subscriberPid := node subscriber
+    self.announcer unsubscribe: subscriberPid
+    self.announcer announce: (TestEvent payload: 1)
+    Timer sleep: 50
+    self assert: received value equals: 0
+    self assert: sub1 isActive equals: false
+    self assert: sub2 isActive equals: false
+    received delete
+
   // --- MRO matching ---
   testMROMatchingSubclassDelivery =>
     received := AtomicCounter new: #announcementsTestMRO
