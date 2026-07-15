@@ -128,12 +128,57 @@ about *naming*, not about *identity*. There is no new kind of type.
   Consequences.)
 - **Namespace:** aliases share the single class/protocol namespace
   (ADR 0068 established that protocols and classes share a namespace and
-  collisions are structural errors; aliases join it). Declaring
+  collisions are structural errors; aliases extend it). Declaring
   `type Printable = ...` when a protocol `Printable` exists is a compile
-  error, and vice versa.
+  error, and vice versa. Note this is *new bidirectional plumbing*, not
+  free reuse: the existing collision check
+  (`protocol_registry.rs:296-334`) is one-directional
+  (protocol-name vs. `hierarchy.has_class`); alias registration needs
+  checks against both classes and protocols, and both of those need a
+  check against aliases, with a defined registration ordering.
+- **Package scope (v1): aliases are package-local and not exported.**
+  ADR 0070's cross-package collision and qualification machinery
+  (`collision_checker.rs`, `pkg@Name`) keys on compiled BEAM module
+  names — an alias erases at resolution and produces no module, so two
+  dependencies each declaring `type Id = Integer` are invisible to it,
+  and `pkg@Id` qualification has nothing to resolve to. Rather than
+  invent an alias export/qualification story now, v1 scopes aliases to
+  the declaring package: they do not cross package boundaries, and the
+  ADR 0071 `internal` modifier does not apply (there is no `public`
+  alias to restrict). Cross-package alias export is a deliberate
+  deferral — flagged here so it is decided *with* ADR 0070's machinery
+  in view when demand materialises, not discovered as a collision bug.
+- **Single-letter names are reserved — a declaration error.** ADR 0068's
+  implicit method-local type parameters make any *single uppercase
+  letter* in type position that is not a known class a generic parameter
+  (`is_generic_type_param`, `types.rs:1290`; the inference guard at
+  `infer_method_local_params` keys on `!hierarchy.has_class(name)`,
+  which an alias would not satisfy). A `type T = ...` alias would
+  therefore silently shadow — or be silently shadowed by — every generic
+  method's `T`/`E`/`R`, depending on resolution order, with no namespace
+  check able to see the collision (implicit params are per-method and
+  never registered anywhere). The clean resolution is disjointness:
+  `type T = ...` is a declaration error ("single-letter type names are
+  reserved for type parameters"), making alias names and type-parameter
+  names non-overlapping by construction. Resolution order in
+  `resolve_type_annotation` is then: `subst` (type params) → alias table
+  → nominal class — and the two interesting lookups can never claim the
+  same name. `infer_method_local_params` must additionally consult the
+  alias table (`&& !alias_table.contains(name)`) so a multi-letter alias
+  used as a bare parameter annotation is never mistaken for an
+  inferrable param. Symmetrically, a bare unbound single letter on an
+  alias *RHS* (`type Timeout = Integer | T`) is a declaration error
+  ("unbound type parameter `T`; parametric aliases are not yet
+  supported") rather than a phantom class named `T`.
 - **No recursion.** An alias may reference other aliases; a reference
   cycle (`type A = B`, `type B = A | Integer`) is a structural compile
-  error at declaration time. Expansion therefore always terminates.
+  error at declaration time. Because hot reload can invalidate the
+  batch-time check (declare `type A = Integer` and `type B = A`, both
+  legal, then live-redefine `type A = B` — a cycle the one-shot
+  declaration check already cleared), cycle detection re-runs over the
+  alias dependency graph on every live alias (re)definition, and
+  expansion itself carries a visited-set guard so a cycle that slips
+  through is a diagnostic, never a hang.
 - **Doc comments attach.** `///` above a `type` declaration flows to
   hover and `:help`, giving the member set a single documentation site —
   one of the two main motivations.
@@ -182,10 +227,19 @@ policy =:= #temporary ifTrue: [ ... ] ifFalse: [
 ]
 ```
 
-Hover in the false branch displays
-`#transient | #permanent (from RestartStrategy)` — the residual is
-structural, with the alias name kept as context where the full alias no
-longer applies.
+**Display through normalisation — scoped honestly.** The alias name is
+shown when the type at hand is *structurally identical* to the alias
+expansion (hover on `policy` at its declaration shows
+`RestartStrategy (#temporary | #transient | #permanent)`). Residuals are
+**not** guaranteed to carry the name: ADR 0102's
+`difference`/`intersect`/`union_of` are normalising functions that build
+fresh `Union`/`Negation` values, flattening and deduplicating members —
+nothing in that algebra propagates a display name, and on dedup between
+two aliases sharing a member there is no principled owner. So the false
+branch above hovers as the structural `#transient | #permanent`, v1.
+Propagating an `(from RestartStrategy)` breadcrumb through the operators
+is a compatible later enhancement, not a v1 commitment — promising it
+would mean re-plumbing every 0102 operator for a cosmetic gain.
 
 ### Surface syntax: `type Name = ...`
 
@@ -252,9 +306,19 @@ type String = Symbol
 // ⛔ Error: `String` is already defined as a class
 
 // Reference cycle
-type A = B | Integer
-type B = A | Symbol
-// ⛔ Error: type alias cycle: `A` → `B` → `A`
+type Ab = Bc | Integer
+type Bc = Ab | Symbol
+// ⛔ Error: type alias cycle: `Ab` → `Bc` → `Ab`
+
+// Single-letter name — reserved for type parameters (ADR 0068)
+type T = Integer | Nil
+// ⛔ Error: single-letter type names are reserved for type parameters;
+//    choose a longer name (e.g. `type OptionalInt = Integer | Nil`)
+
+// Unbound type variable on the RHS — parametric aliases not yet supported
+type Timeout = Integer | T
+// ⛔ Error: unbound type parameter `T` in type alias `Timeout`;
+//    parametric aliases (`type Name(T) = ...`) are not yet supported
 
 // Value outside the named union — existing union-membership diagnostics,
 // now phrased with the alias name
@@ -394,6 +458,31 @@ rejected in favour of transparent aliases with a `type` declaration, for
 the reasons given there. Two further variants were examined and dropped
 briefly:
 
+### Hybrid: transparent assignability, nominal diagnostics/exhaustiveness
+
+The genuine midpoint between the alias and the nominal enum: keep
+structural assignability and narrowing (so FFI and the ADR 0102 algebra
+are untouched), but track alias identity as a first-class fact for
+diagnostics, hover, and exhaustiveness — closer to how Elm or OCaml
+render aliases, and a road that could later support `Meters`/`Feet`
+branding as an opt-in. This deserves naming because the chosen design
+already contains its seed: display-name provenance *is*
+nominal-for-display. The distinction is degree — the hybrid makes the
+name definitional (every operator must preserve and reason about it;
+exhaustiveness keyed on "the alias's member set" rather than the
+structural expansion), where the chosen design makes it cosmetic
+(operators stay name-blind; v1 display is scoped to
+structurally-identical types). Not chosen because the definitional
+version re-opens exactly the costs of Rejected A at the operator level —
+every `difference`/`intersect`/`union_of` call must decide what happens
+to the name, dedup between overlapping aliases needs an ownership rule,
+and exhaustiveness gains nothing (`matchExhaustive:` over the expansion
+is already the full guarantee; a name-keyed check would be the same
+computation with extra bookkeeping). If branded types are ever wanted,
+they should be their own ADR with this section as the starting point —
+the alias grammar and registry built here are forward-compatible with
+that extension.
+
 ### Class-shaped declaration (`sealed Union subclass: RestartStrategy`)
 
 Modelling the enum as a class-family (one class per member, or a sealed
@@ -425,7 +514,14 @@ reference language a user might arrive from.
   construction, because resolution produces the structural types they
   already consume.
 - Generated Dialyzer specs can emit a named `-type` per alias, making the
-  FFI boundary more idiomatic for Erlang/Elixir consumers.
+  FFI boundary more idiomatic for Erlang/Elixir consumers — **for alias
+  RHSs with a faithful Erlang spec form** (unions of singletons, classes,
+  generics). A `\`/`&` alias RHS has no exact spec form (ADR 0102;
+  `spec_codegen.rs:86-95` already widens `Difference` to its base and
+  `Intersection` to its left operand), so its `-type` is emitted widened,
+  with the exclusion lost — same over-approximation the anonymous form
+  already has today, but worth knowing before pointing Erlang tooling at
+  a named `public_tag()`.
 - Aliases generalise past enums for free (`type Timeout = Integer |
   #infinity`), because the RHS is any `TypeAnnotation`.
 
@@ -438,17 +534,27 @@ reference language a user might arrive from.
   interchangeable; users wanting `Meters`/`Feet`-style *branded* types
   will find this feature deliberately does not provide them (and the ADR
   should be cited when that request arrives).
-- Display-name provenance is genuinely new rendering machinery: hover and
-  diagnostics must decide when to show the name, the expansion, or both,
-  and residuals (`#transient | #permanent`) inherently leave the alias
-  behind. Done lazily this degrades to "expansion everywhere", which
-  would gut the readability motivation — it is the implementation-quality
-  risk to watch.
-- Alias redefinition on hot reload must re-check dependent annotations
-  (an ADR 0105-style dependency: annotation-site → alias-name). Without
-  it, a live image can hold `matchExhaustive:` proofs computed against a
-  stale member set — the same staleness class ADR 0107 resolved for leaf
-  classes, needing the same kind of trigger.
+- Display-name provenance is genuinely new machinery and is this
+  design's real cost centre, not a bolt-on: `InferredType`'s
+  `TypeProvenance` today carries spans only (`Declared|Inferred|
+  Substituted(Span)`), no name — the alias name needs new storage, and
+  the Decision section deliberately scopes v1 display to
+  structurally-identical types because the ADR 0102 operators do not
+  propagate names. Done lazily this degrades to "expansion everywhere",
+  which would gut the readability motivation — it is the
+  implementation-quality risk to watch.
+- Alias redefinition on hot reload must re-check dependent annotations —
+  and this is **new plumbing, not reuse**. ADR 0107 learned exactly this
+  lesson (its BT-2856 resolution): ADR 0105's re-check graph is purely
+  selector-keyed or state/field-shape-keyed, and a new dependency kind
+  (there, "sites that tested this class for leafness"; here,
+  "annotations that reference this alias") needs its own trigger.
+  0107's `trigger_leaf_change/1` had no lookup key and swept every live
+  class; an alias trigger is better placed — the alias *name* is a
+  natural key for an alias-name → dependent-annotation-site edge — but
+  that edge must be recorded at resolution time, which is new work.
+  Without it, a live image can hold `matchExhaustive:` proofs computed
+  against a stale member set.
 
 ### Neutral
 
@@ -465,6 +571,14 @@ reference language a user might arrive from.
   (hover, `:help`, completions cover discoverability). If reflection
   demand materialises, an alias registry in `__beamtalk_meta`-style
   metadata is a compatible extension.
+- **Sendability (ADR 0103) sees the expansion.** An alias in a
+  message-type position reduces to its RHS before any sendability
+  classification runs, so aliases add no new case to 0103's class-kind
+  keying. One pre-existing open edge is made more *reachable* (not
+  created) by alias generality: 0103 has no stated rule for
+  `Negation`/`Intersection` types, and `type Msg = Symbol \ #internal`
+  makes such a type easier to put in a send position — flagged here for
+  ADR 0103's implementation rather than resolved by this one.
 
 ## Implementation
 
@@ -480,11 +594,21 @@ To be broken into an epic via `/plan-adr` once Accepted. Expected shape:
   (`unparse/mod.rs`).
 - **Semantic analysis:** alias table threaded into
   `resolve_type_annotation` (`type_resolver.rs` — the hook its own
-  comment anticipates). Resolution: name lookup → cycle check (error) →
-  expand → resolve expansion as today. Namespace collision checks against
-  classes/protocols. Provenance: resolved `InferredType` carries the
-  alias name for display (extend `TypeProvenance` or add a display-name
-  field — design detail for the implementing issue).
+  comment anticipates). Resolution order: `subst` (type params) → alias
+  table → nominal class; disjoint by construction given the
+  single-letter ban. Declaration-time checks: single-letter name error,
+  unbound-type-variable-on-RHS error, cycle detection (re-run on live
+  redefinition; expansion carries a visited-set guard). Bidirectional
+  namespace collision checks against classes *and* protocols (new
+  plumbing — the existing `protocol_registry.rs` check is
+  one-directional). `infer_method_local_params` (`inference.rs:5497-5506`)
+  gains an alias-table consultation alongside its existing
+  `!hierarchy.has_class` guard so multi-letter aliases in bare parameter
+  positions are never inferred as method-local params. Provenance:
+  resolved `InferredType` carries the alias name for display (extend
+  `TypeProvenance` or add a display-name field — design detail for the
+  implementing issue); v1 display scope is structurally-identical types
+  only, per the Decision section.
 - **Diagnostics/hover:** render alias name with expansion on hover
   (`hover_provider.rs`); membership/exhaustiveness diagnostics name the
   alias where the annotation was written, concrete members in residuals.
@@ -495,8 +619,14 @@ To be broken into an epic via `/plan-adr` once Accepted. Expected shape:
 - **Codegen:** optional named `-type` emission per alias in
   `spec_codegen.rs`; annotation sites reference it. No other codegen
   change.
-- **Hot reload:** alias-name → dependent-annotation re-check trigger,
-  following ADR 0105's `trigger_leaf_change/1` precedent.
+- **Hot reload:** a new alias-name → dependent-annotation-site re-check
+  trigger. ADR 0105's existing graphs (selector-keyed xref,
+  state/field-shape) do not cover this dependency kind — same situation
+  ADR 0107 hit for leaf-status changes (BT-2856). Unlike 0107's
+  `trigger_leaf_change/1` (no lookup key, sweeps all live classes), the
+  alias name is a natural key: record alias-name → annotation-site edges
+  at resolution time and re-check only dependents. Cycle detection
+  re-runs on every live alias redefinition (see Semantics).
 - **LSP/REPL parity:** completions for alias names in type position;
   go-to-definition; `:help RestartStrategy`; `type` declarations accepted
   in REPL input. Update `docs/development/surface-parity.md`.
@@ -521,7 +651,11 @@ To be broken into an epic via `/plan-adr` once Accepted. Expected shape:
   ADR 0025/0100 (gradual typing / diagnostic severity policy), ADR 0053
   (`::` annotation syntax), ADR 0060 (Result — the payload-carrying
   sum-type lane this deliberately does not duplicate), ADR 0105 (live
-  re-check machinery the alias trigger follows)
+  re-check machinery the alias trigger extends with a new dependency
+  kind), ADR 0070/0071 (package namespaces and visibility — why v1
+  aliases are package-local and unexported), ADR 0103 (sendability —
+  sees the alias expansion; `Negation`/`Intersection` edge flagged
+  there)
 - Documentation: `docs/beamtalk-language-features.md` §Union Types,
   §Difference and Intersection Types; `docs/beamtalk-principles.md`
   (Non-Goals — mandatory static typing);
