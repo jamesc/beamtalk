@@ -1340,7 +1340,7 @@ impl Parser {
         matches!(self.peek_at(0), Some(TokenKind::Identifier(name)) if name == "type")
             && matches!(
                 self.peek_at(1),
-                Some(TokenKind::Identifier(name)) if name.chars().next().is_some_and(char::is_uppercase)
+                Some(TokenKind::Identifier(name)) if name.as_bytes().first().is_some_and(u8::is_ascii_uppercase)
             )
             && matches!(self.peek_at(2), Some(TokenKind::BinarySelector(op)) if op == "=")
     }
