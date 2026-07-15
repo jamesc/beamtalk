@@ -22,6 +22,8 @@ path = "src/main.rs"
 beamtalk-core = { workspace = true }
 # why: shared ETF packet framing and term helpers for OTP port protocol
 beamtalk-etf = { workspace = true }
+# why: load_type_cache_registry (BT-2891) takes a Utf8Path for _build/type_cache/
+camino = { workspace = true }
 # why: encode/decode Erlang External Term Format for compiler port protocol
 eetf = "0.12"
 # why: EcoString is the string type used by ClassInfo/MethodInfo in beamtalk-core

@@ -923,6 +923,65 @@ fn load_diagnostics_overrides_from(
     }
 }
 
+/// Process-wide cache of the project's Erlang FFI type signatures (ADR 0075,
+/// BT-2891), loaded once from `<root>/_build/type_cache/` — the same on-disk
+/// cache `beamtalk build`/`beamtalk lint` write and read (see
+/// `beamtalk_core::ffi_type_specs`).
+///
+/// Mirrors [`DIAGNOSTICS_OVERRIDES`]: loaded once per process rather than per
+/// request, using the project-root cwd every node-startup path already pins
+/// (see that static's doc comment). Reads the on-disk cache only — never
+/// live-extracts from `.beam` files (unlike the LSP's `load_type_cache`,
+/// which may spawn a `beamtalk_build_worker` BEAM node) — because
+/// `resolve_completion_type` sits on the REPL's tight completion-latency
+/// budget (ADR 0045) and a project that has never run `beamtalk build` should
+/// stay registry-blind rather than block a keystroke on a build-worker spawn.
+static NATIVE_TYPE_REGISTRY: std::sync::OnceLock<
+    beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry,
+> = std::sync::OnceLock::new();
+
+/// Returns the process-wide native type registry, loading it from the
+/// current working directory's `_build/type_cache/` on first use.
+fn native_type_registry()
+-> &'static beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry {
+    NATIVE_TYPE_REGISTRY.get_or_init(|| {
+        let cwd = std::env::current_dir().unwrap_or_default();
+        load_native_type_registry_from(&cwd)
+    })
+}
+
+/// Load the Erlang FFI type registry from `<root>/_build/type_cache/`
+/// (ADR 0075, BT-2891).
+///
+/// Lenient by design, mirroring [`load_diagnostics_overrides_from`]: a root
+/// with no `_build/type_cache/` (project never built) yields an empty
+/// registry rather than an error — `resolve_expression_type` already treats
+/// `None`/empty identically (falls back to `Dynamic`), so this degrades to
+/// exactly the pre-BT-2891 registry-blind behaviour. Pure function of `root`
+/// so it is directly unit-testable without touching the process's real
+/// working directory.
+fn load_native_type_registry_from(
+    root: &std::path::Path,
+) -> beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry {
+    use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
+
+    let Ok(root) = camino::Utf8PathBuf::from_path_buf(root.to_path_buf()) else {
+        return NativeTypeRegistry::new();
+    };
+    let cache_dir = root.join("_build").join("type_cache");
+    match beamtalk_core::ffi_type_specs::load_type_cache_registry(&cache_dir) {
+        Some(registry) => {
+            tracing::debug!(
+                modules = registry.module_count(),
+                functions = registry.function_count(),
+                "Loaded native type registry from _build/type_cache/"
+            );
+            registry
+        }
+        None => NativeTypeRegistry::new(),
+    }
+}
+
 /// Parse a Beamtalk expression source and run full diagnostics with primitive validation.
 ///
 /// Returns `Ok((module, warnings))` on success, or `Err(response_term)` containing a
@@ -1798,6 +1857,11 @@ fn handle_version() -> Term {
 /// - `expression` (binary): the full receiver expression with the incomplete prefix stripped
 /// - `class_hierarchy` (optional map): user-defined class metadata from the REPL session
 ///
+/// Also consults the process-wide native type registry (BT-2891, see
+/// [`native_type_registry`]), loaded once from `_build/type_cache/`, so an
+/// FFI expression (e.g. `Erlang lists reverse: x`) resolves its typed return
+/// class instead of falling back to `Dynamic` when the project has been built.
+///
 /// Response: `#{status => ok, class_name => <<"String">>}` on success,
 /// or `#{status => not_found}` when the type cannot be inferred.
 fn handle_resolve_completion_type(request: &Map) -> Term {
@@ -1815,9 +1879,7 @@ fn handle_resolve_completion_type(request: &Map) -> Term {
     match beamtalk_core::queries::completion_provider::resolve_expression_type(
         &expression,
         &hierarchy,
-        // BT-2887: no NativeTypeRegistry is readily available in this REPL
-        // completion-fallback call chain.
-        None,
+        Some(native_type_registry()),
     ) {
         Some(class_name) => Term::from(Map::from([
             (atom("status"), atom("ok")),
@@ -2787,6 +2849,68 @@ mod tests {
         assert_eq!(
             map_get(m, "class_name").and_then(term_to_string),
             Some("String".to_string())
+        );
+    }
+
+    /// BT-2891: `load_native_type_registry_from` reads `<module>_<16-hex>.json`
+    /// entries from `<root>/_build/type_cache/` (the same on-disk format
+    /// `beamtalk build`/`beamtalk lint` write via
+    /// `beamtalk_core::ffi_type_specs`) and replays their `specs_line` into a
+    /// `NativeTypeRegistry`.
+    #[test]
+    fn load_native_type_registry_from_reads_type_cache() {
+        use beamtalk_core::semantic_analysis::type_checker::InferredType;
+
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        let cache_dir = dir.path().join("_build").join("type_cache");
+        std::fs::create_dir_all(&cache_dir).expect("failed to create type_cache dir");
+        std::fs::write(
+            cache_dir.join("lists_0123456789abcdef.json"),
+            format!(
+                r#"{{"beam_mtime_secs":0,"beam_mtime_nanos":0,"mapping_stamp":"{}","specs_line":"beamtalk-specs-module:lists:[#{{name => <<\"reverse\">>,arity => 1,params => [#{{name => <<\"list\">>,type => <<\"List\">>}}],return_type => <<\"List\">>}}]"}}"#,
+                beamtalk_core::ffi_type_specs::current_spec_mapping_stamp()
+            ),
+        )
+        .expect("failed to write cache entry");
+
+        let registry = load_native_type_registry_from(dir.path());
+        let sig = registry
+            .lookup("lists", "reverse", 1)
+            .expect("lists:reverse/1 should be registered");
+        assert_eq!(sig.arity, 1);
+        assert_eq!(sig.return_type, InferredType::known("List"));
+    }
+
+    /// BT-2891: a project that has never run `beamtalk build` (no
+    /// `_build/type_cache/`) yields an empty registry rather than an error —
+    /// the REPL must keep evaluating, registry-blind, exactly like pre-BT-2891.
+    #[test]
+    fn load_native_type_registry_from_missing_cache_is_empty() {
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        let registry = load_native_type_registry_from(dir.path());
+        assert_eq!(registry.module_count(), 0);
+    }
+
+    /// BT-2891: with no `_build/type_cache/` in the process's cwd (the crate
+    /// root under `cargo test`), an FFI expression still falls back to
+    /// `not_found` (`Dynamic`) — unchanged from pre-BT-2891 behaviour.
+    #[test]
+    fn resolve_completion_type_ffi_expression_without_type_cache_stays_not_found() {
+        let request = Map::from([
+            (atom("command"), atom("resolve_completion_type")),
+            (
+                atom("expression"),
+                binary("Erlang lists reverse: #(1, 2, 3)"),
+            ),
+        ]);
+        let response = handle_resolve_completion_type(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response");
+        };
+        assert_eq!(
+            map_get(m, "status"),
+            Some(&atom("not_found")),
+            "{response:?}"
         );
     }
 
