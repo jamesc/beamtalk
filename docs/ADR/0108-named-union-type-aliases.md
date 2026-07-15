@@ -699,8 +699,10 @@ To be broken into an epic via `/plan-adr` once Accepted. Expected shape:
   go-to-definition on `RestartStrategy` in any annotation position jumps
   to its `type` declaration, and find-references enumerates annotation
   sites (the same resolution-time alias-name → annotation-site edges the
-  hot-reload trigger records). Hover on the alias name shows the
-  expansion. REPL: `:help <Alias>` renders declaration + expansion + doc
+  hot-reload trigger records; find-references coverage is scoped to
+  files compiled in the current build graph — uncompiled or
+  never-opened files contribute no edges until compiled). Hover on the
+  alias name shows the expansion. REPL: `:help <Alias>` renders declaration + expansion + doc
   comment (see REPL session above); `type` declarations accepted in REPL
   input; no `:t`/`:type` expression-type command (deferred per ADR 0102 —
   and `:t` is already the `:test` alias). Update
