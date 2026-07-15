@@ -966,19 +966,27 @@ fn load_native_type_registry_from(
     use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
 
     let Some(root) = camino::Utf8Path::from_path(root) else {
+        tracing::debug!(
+            root = %root.display(),
+            "Project root is not valid UTF-8; native type registry stays empty"
+        );
         return NativeTypeRegistry::new();
     };
     let cache_dir = root.join("_build").join("type_cache");
-    match beamtalk_core::ffi_type_specs::load_type_cache_registry(&cache_dir) {
-        Some(registry) => {
-            tracing::debug!(
-                modules = registry.module_count(),
-                functions = registry.function_count(),
-                "Loaded native type registry from _build/type_cache/"
-            );
-            registry
-        }
-        None => NativeTypeRegistry::new(),
+    if let Some(registry) = beamtalk_core::ffi_type_specs::load_type_cache_registry(&cache_dir) {
+        tracing::debug!(
+            modules = registry.module_count(),
+            functions = registry.function_count(),
+            "Loaded native type registry from _build/type_cache/"
+        );
+        registry
+    } else {
+        tracing::debug!(
+            cache_dir = %cache_dir,
+            "No _build/type_cache/ found; native type registry stays empty \
+             (FFI expressions fall back to Dynamic until `beamtalk build` runs)"
+        );
+        NativeTypeRegistry::new()
     }
 }
 
@@ -2902,19 +2910,23 @@ mod tests {
         assert_eq!(registry.module_count(), 0);
     }
 
-    /// BT-2891: with no `_build/type_cache/` in the process's cwd (the crate
-    /// root under `cargo test`), an FFI expression still falls back to
-    /// `not_found` (`Dynamic`) — unchanged from pre-BT-2891 behaviour.
+    /// BT-2891: with an empty native type registry (the pre-BT-2891 state,
+    /// and what a project that has never run `beamtalk build` yields), an FFI
+    /// expression still falls back to `not_found` (`Dynamic`) — unchanged
+    /// behaviour. Exercises `resolve_completion_type_response` directly with
+    /// an explicit empty registry rather than `handle_resolve_completion_type`'s
+    /// process-wide `OnceLock` (which reads the real cwd's `_build/type_cache/`
+    /// and is shared across every test in this binary) so the assertion can't
+    /// flip depending on what happens to be on disk at test time.
     #[test]
-    fn resolve_completion_type_ffi_expression_without_type_cache_stays_not_found() {
-        let request = Map::from([
-            (atom("command"), atom("resolve_completion_type")),
-            (
-                atom("expression"),
-                binary("Erlang lists reverse: #(1, 2, 3)"),
-            ),
-        ]);
-        let response = handle_resolve_completion_type(&request);
+    fn resolve_completion_type_response_ffi_expression_with_empty_registry_stays_not_found() {
+        use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
+
+        let response = resolve_completion_type_response(
+            "Erlang lists reverse: #(1, 2, 3)",
+            vec![],
+            &NativeTypeRegistry::new(),
+        );
         let Term::Map(ref m) = response else {
             panic!("Expected map response");
         };
