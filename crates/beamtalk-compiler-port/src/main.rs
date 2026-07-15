@@ -965,7 +965,7 @@ fn load_native_type_registry_from(
 ) -> beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry {
     use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
 
-    let Ok(root) = camino::Utf8PathBuf::from_path_buf(root.to_path_buf()) else {
+    let Some(root) = camino::Utf8Path::from_path(root) else {
         return NativeTypeRegistry::new();
     };
     let cache_dir = root.join("_build").join("type_cache");
@@ -1870,16 +1870,27 @@ fn handle_resolve_completion_type(request: &Map) -> Term {
     };
 
     let pre_class_hierarchy = extract_class_hierarchy(request);
+    resolve_completion_type_response(&expression, pre_class_hierarchy, native_type_registry())
+}
 
+/// Core `resolve_completion_type` resolution, taking the native type registry
+/// as a parameter rather than reading the process-wide [`native_type_registry`]
+/// directly, so the registry-provided path is unit-testable without touching
+/// the global `OnceLock` or the filesystem (BT-2891).
+fn resolve_completion_type_response(
+    expression: &str,
+    pre_class_hierarchy: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    native_type_registry: &beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry,
+) -> Term {
     let mut hierarchy = beamtalk_core::semantic_analysis::ClassHierarchy::with_builtins();
     if !pre_class_hierarchy.is_empty() {
         hierarchy.add_from_beam_meta(pre_class_hierarchy);
     }
 
     match beamtalk_core::queries::completion_provider::resolve_expression_type(
-        &expression,
+        expression,
         &hierarchy,
-        Some(native_type_registry()),
+        Some(native_type_registry),
     ) {
         Some(class_name) => Term::from(Map::from([
             (atom("status"), atom("ok")),
@@ -2911,6 +2922,48 @@ mod tests {
             map_get(m, "status"),
             Some(&atom("not_found")),
             "{response:?}"
+        );
+    }
+
+    /// BT-2891: with a populated native type registry, `resolve_completion_type`
+    /// resolves an FFI expression to its real return class instead of falling
+    /// back to `Dynamic`/`not_found`. Exercises `resolve_completion_type_response`
+    /// directly (rather than `handle_resolve_completion_type`'s process-wide
+    /// `OnceLock`) so the registry-provided path is covered without touching
+    /// the filesystem or global state — mirroring BT-2887's
+    /// `resolve_expression_type_with_native_registry_resolves_ffi_call` test in
+    /// `completion_provider.rs`.
+    #[test]
+    fn resolve_completion_type_response_resolves_ffi_call_with_populated_registry() {
+        use beamtalk_core::semantic_analysis::type_checker::{
+            FunctionSignature, InferredType, NativeTypeRegistry, ParamType, TypeProvenance,
+        };
+
+        let mut registry = NativeTypeRegistry::new();
+        registry.register_module(
+            "lists",
+            vec![FunctionSignature {
+                name: "reverse".to_string(),
+                arity: 1,
+                params: vec![ParamType {
+                    keyword: Some(ecow::EcoString::from("list")),
+                    type_: InferredType::known("List"),
+                }],
+                return_type: InferredType::known("List"),
+                provenance: TypeProvenance::Extracted,
+                line: None,
+            }],
+        );
+
+        let response =
+            resolve_completion_type_response("Erlang lists reverse: #(1, 2, 3)", vec![], &registry);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("ok")), "{response:?}");
+        assert_eq!(
+            map_get(m, "class_name").and_then(term_to_string),
+            Some("List".to_string())
         );
     }
 
