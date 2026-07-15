@@ -19,7 +19,7 @@
 // ===========================================================================
 
 workspaceRoot := nil
-// => _
+// => nil
 
 workspaceRoot match: [
   nil -> "default_root";
@@ -29,7 +29,7 @@ workspaceRoot match: [
 // => default_root
 
 configuredRoot := "/custom/workspace"
-// => _
+// => /custom/workspace
 
 configuredRoot match: [
   nil -> "default_root";
@@ -44,7 +44,7 @@ configuredRoot match: [
 // ===========================================================================
 
 coll := nil
-// => _
+// => nil
 
 coll match: [
   nil -> "none";
@@ -54,7 +54,7 @@ coll match: [
 // => none
 
 populatedColl := #(1, 2, 3)
-// => _
+// => [1,2,3]
 
 populatedColl match: [
   nil -> "none";
