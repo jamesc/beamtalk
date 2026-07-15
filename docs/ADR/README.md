@@ -134,6 +134,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0105](0105-live-image-recheck-on-reload.md) | Live Image Re-Checking on Hot Reload | Accepted | 2026-07-11 |
 | [0106](0106-opt-in-match-exhaustiveness-assertion.md) | Opt-In Asserted `match:` Exhaustiveness (`matchExhaustive:`) | Implemented | 2026-07-07 |
 | [0107](0107-nil-and-type-patterns-in-match.md) | Nil and Type Patterns in `match:` | Accepted | 2026-07-12 |
+| [0108](0108-named-union-type-aliases.md) | Named Union Type Aliases (`type` Declarations) | Proposed | 2026-07-15 |
 
 > ADR 0086 was originally numbered 0069 (a collision with *Actor Observability and Tracing*) and was renumbered on 2026-05-25.
 
