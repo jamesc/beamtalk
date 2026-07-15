@@ -177,7 +177,10 @@ about *naming*, not about *identity*. There is no new kind of type.
     signatures, not exported. An exported (public) signature referencing
     an internal alias is a compile error (the consumer could never name
     or resolve it) — the same leakage rule 0071 applies to internal
-    classes in public positions.
+    classes in public positions. Enforced via **seeding-time
+    exclusion** — an internal alias is simply never seeded into a
+    consumer's alias table (see Implementation, and the matching
+    `browse-type-aliases` filter).
   - **The leakage check must run on the expansion, not just the
     written name.** Because aliases are transparent, a *public* alias
     can still leak an internal type through substitution —
@@ -249,21 +252,26 @@ about *naming*, not about *identity*. There is no new kind of type.
   unchanged — the previous binding, if any, stays in effect, so a failed
   live edit cannot leave dependent annotations resolving against a
   missing alias.
-  **Within-alias ordering in a batch compile is a separate concern from
-  the cycle check itself and must not be a naïve single sequential
+  **Within-alias resolution order (batch compile) is a separate concern
+  from the cycle check itself and must not be a naïve single sequential
   pass.** If `type B = A | #z` and `type A = #x | #y` are declared in
-  the same compilation unit with `B` appearing first in file order, a
+  the same **package** — not necessarily the same file: `B` in one file,
+  `A` in another, compiled together — with `B` registered before `A`, a
   pass that resolves each alias's RHS immediately upon reaching it would
   try to expand `A` before `A` is registered, and spuriously report
   "unknown type `A`" on valid code — a false positive, not the cycle
-  diagnostic this section defines. The implementation must either
-  collect all alias names in a first pass before resolving any RHS in a
-  second, or topologically sort alias declarations by dependency before
-  resolving — and the same DFS the cycle check already needs (walking
-  each alias's referenced names to detect a cycle) produces this
-  topological order for free as a side effect, so this is not
-  additional design, only an explicit acceptance criterion for the
-  implementing issue.
+  diagnostic this section defines. **Topological sort by dependency,
+  package-wide, is the required approach** — not "either/or" with a
+  simpler two-pass: a two-pass "collect names, then resolve" only avoids
+  the false positive if the collection pass spans every file in the
+  package simultaneously before any resolution begins, which is
+  topological sort in a less general, easier-to-get-wrong form (a
+  per-file two-pass would still fail across the `B`-in-file-1,
+  `A`-in-file-2 case above). The same DFS the cycle check already needs
+  (walking each alias's referenced names to detect a cycle) produces
+  this topological order for free as a side effect via its post-order,
+  so this is not additional design, only an explicit acceptance
+  criterion for the implementing issue.
 - **Doc comments attach.** `///` above a `type` declaration flows to
   hover and `:help`, giving the member set a single documentation site —
   one of the two main motivations.
@@ -378,6 +386,20 @@ The `type` form is chosen because:
 > d matchExhaustive: [#north -> 0; #south -> 180; #east -> 90; #west -> 270]
 => 0
 ```
+
+**What does `type Direction = ...` evaluate to?** The `=> Direction` shown
+above is a **REPL display convention, not a derived runtime value** — a
+`type` declaration is total compile-time erasure (Semantics), so there is
+no alias object to echo. Echoing the declared name is the natural choice
+(parallel to `Actor subclass: Counter` returning/displaying `Counter`,
+and to `:help`'s existing declaration-echo convention), but this ADR does
+**not** finalize it: CLAUDE.md's REPL-output rule is explicit that any
+REPL display value, prompt format, or output behaviour needs confirmation
+with the maintainer rather than being assumed by an implementer, and
+carries its own e2e test coverage once decided. The implementing issue
+must confirm this value explicitly — and, per surface parity
+(`docs/development/surface-parity.md`), whatever is decided must agree
+across CLI REPL, MCP, and any LSP-side "evaluate" affordance.
 
 **"What does this alias map to?" — `:help <Alias>`.** The existing
 `:help <Name>` command (which already renders class and protocol docs) is
