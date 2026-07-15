@@ -57,7 +57,8 @@
 %%     permission_denied | io_error | class_not_found |
 %%     no_superclass | class_already_exists | internal_error | dispatch_error |
 %%     callback_failed | assertion_failed | runtime_error | erlang_exit |
-%%     erlang_throw | missing_parameter | stdlib_shadowing
+%%     erlang_throw | missing_parameter | stdlib_shadowing |
+%%     stateful_block_dispatch
 %% - class: The class name where the error occurred (e.g., 'Integer')
 %% - selector: The method that failed (if applicable)
 %% - message: Human-readable explanation using user-facing names
