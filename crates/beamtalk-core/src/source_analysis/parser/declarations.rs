@@ -12,7 +12,8 @@ use crate::ast::{
     ClassDefinition, ClassModifiers, CommentAttachment, DeclaredKeyword, ExpectCategory,
     Expression, ExpressionStatement, Identifier, KeywordPart, MessageSelector, MethodDefinition,
     MethodKind, MethodModifiers, ParameterDefinition, ProtocolDefinition, ProtocolMethodSignature,
-    StandaloneMethodDefinition, StateDeclaration, TypeAnnotation, TypeParamDecl,
+    StandaloneMethodDefinition, StateDeclaration, TypeAliasDefinition, TypeAnnotation,
+    TypeParamDecl,
 };
 use crate::source_analysis::{Span, TokenKind};
 use ecow::EcoString;
@@ -453,6 +454,7 @@ impl Parser {
         while !self.is_at_end()
             && !self.is_at_class_definition()
             && !self.is_at_protocol_definition()
+            && !self.is_at_type_alias_definition()
             && !self.is_at_standalone_method_definition()
         {
             let pending = self.parse_pending_declaration_expect();
@@ -1550,6 +1552,46 @@ impl Parser {
         }
     }
 
+    /// Checks whether the current position starts a new class/protocol/
+    /// type-alias/method/standalone-method declaration, or a `state:`/
+    /// `field:`/`classState:` keyword — the set of tokens that always end a
+    /// method body no matter how the body was left (a trailing period, a
+    /// cast `!`, or error recovery). Factored out of `parse_method_body`
+    /// because the same six-way check is needed at three separate exit
+    /// points there.
+    fn is_at_member_boundary(&self) -> bool {
+        self.is_at_end()
+            || self.is_at_class_definition()
+            || self.is_at_protocol_definition()
+            || self.is_at_type_alias_boundary()
+            || self.is_at_method_definition()
+            || self.is_at_standalone_method_definition()
+            || matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:" || k == "field:" || k == "classState:")
+    }
+
+    /// `is_at_type_alias_definition()`, gated by the same indentation guard
+    /// `is_at_method_definition()` uses in `parse_method_body` (BT-1294).
+    ///
+    /// Without this guard, an in-body expression like `type Port = 8080`
+    /// (`type` used as an ordinary variable, sent the unary message `Port`,
+    /// compared with `=`) token-matches the type-alias pattern and would
+    /// falsely truncate the method body — violating the ADR's promise that
+    /// `type` "remains a legal identifier everywhere else."
+    fn is_at_type_alias_boundary(&self) -> bool {
+        // When `in_class_body` is false (standalone method bodies only — protocol
+        // bodies use the unwrapped `is_at_type_alias_definition()` directly),
+        // the `!self.in_class_body` arm short-circuits the `||`, skipping the
+        // indentation check. This is safe because `= expr` is not a valid
+        // Beamtalk binary expression, so the `type Uppercase =` pattern cannot
+        // appear as a legitimate statement start outside declaration position.
+        (!self.in_class_body
+            || self
+                .current_token()
+                .indentation_after_newline()
+                .is_none_or(|col| col <= 2))
+            && self.is_at_type_alias_definition()
+    }
+
     /// Parses a method body (expressions until the next method or end of class).
     ///
     /// Statements are separated by periods or newlines (BT-360).
@@ -1573,6 +1615,7 @@ impl Parser {
         while !self.is_at_end()
             && !self.is_at_class_definition()
             && !self.is_at_protocol_definition()
+            && !self.is_at_type_alias_boundary()
             && !(
                 // Only test is_at_method_definition when the token could plausibly
                 // be a class member (indentation <= 2). Deeper tokens are continuation
@@ -1622,13 +1665,7 @@ impl Parser {
                 self.synchronize();
                 // BT-368: After synchronization, check if we can continue parsing
                 // If synchronize stopped at a method/class/state boundary, break
-                if self.is_at_end()
-                    || self.is_at_class_definition()
-                    || self.is_at_protocol_definition()
-                    || self.is_at_method_definition()
-                    || self.is_at_standalone_method_definition()
-                    || matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:" || k == "field:" || k == "classState:")
-                {
+                if self.is_at_member_boundary() {
                     break;
                 }
                 // Otherwise, synchronize stopped at a newline or period, so continue parsing
@@ -1639,13 +1676,7 @@ impl Parser {
             if self.match_token(&TokenKind::Period) {
                 // Explicit period — check if next token starts a new method/state/class
                 let period_span = self.tokens[self.current - 1].span();
-                if self.is_at_end()
-                    || self.is_at_class_definition()
-                    || self.is_at_protocol_definition()
-                    || self.is_at_method_definition()
-                    || self.is_at_standalone_method_definition()
-                    || matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:" || k == "field:" || k == "classState:")
-                {
+                if self.is_at_member_boundary() {
                     // Trailing period at end of method — not needed (BT-948)
                     self.diagnostics.push(
                         Diagnostic::lint("unnecessary trailing `.` at end of method", period_span)
@@ -1675,13 +1706,7 @@ impl Parser {
                     None => {}
                 }
                 // Check if next token starts a new method/state/class (same as period)
-                if self.is_at_end()
-                    || self.is_at_class_definition()
-                    || self.is_at_protocol_definition()
-                    || self.is_at_method_definition()
-                    || self.is_at_standalone_method_definition()
-                    || matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:" || k == "field:" || k == "classState:")
-                {
+                if self.is_at_member_boundary() {
                     break;
                 }
             } else if !self.is_at_end() && self.current_token().has_leading_newline() {
@@ -1779,6 +1804,74 @@ impl Parser {
             package,
             is_class_method,
             method,
+            span,
+        }
+    }
+
+    // ========================================================================
+    // Type Alias Definition Parsing (ADR 0108, Phase 1)
+    // ========================================================================
+
+    /// Parses a type alias definition: `type Name = <TypeAnnotation>`.
+    ///
+    /// Syntax:
+    /// ```text
+    /// /// How a supervised child restarts after exit.
+    /// type RestartStrategy = #temporary | #transient | #permanent
+    /// ```
+    ///
+    /// Only called after [`Self::is_at_type_alias_definition`] has confirmed the
+    /// `type <UppercaseName> =` shape, so the `type` keyword, the name, and the
+    /// `=` are guaranteed present here; only the right-hand-side annotation can
+    /// still be malformed (reported by `parse_type_annotation`/
+    /// `parse_single_type_annotation` themselves).
+    ///
+    /// Single-letter names (`type T = ...`) are a declaration error: ADR 0068
+    /// reserves every bare single uppercase letter in type position for
+    /// implicit method-local type parameters, so alias names and type-param
+    /// names must stay disjoint. The error is non-fatal — parsing continues so
+    /// the rest of the declaration (and any following declarations) still get
+    /// checked.
+    pub(super) fn parse_type_alias_definition(&mut self) -> TypeAliasDefinition {
+        let start = self.current_token().span();
+        let doc_comment = self.collect_doc_comment();
+        let comments = self.collect_comment_attachment();
+
+        self.advance(); // consume `type`
+
+        let name = self.parse_identifier("Expected type alias name after 'type'");
+
+        // ADR 0108 Semantics: single-letter names are reserved for ADR 0068's
+        // implicit method-local type parameters (`is_generic_type_param`).
+        if name.name.chars().count() == 1 {
+            self.diagnostics.push(Diagnostic::error(
+                "single-letter type names are reserved for type parameters; \
+                 choose a longer name (e.g. `type OptionalInt = Integer | Nil`)",
+                name.span,
+            ));
+        }
+
+        if !matches!(self.current_kind(), TokenKind::BinarySelector(op) if op == "=") {
+            self.error("Expected '=' after type alias name in 'type' declaration");
+            let span = start.merge(name.span);
+            return TypeAliasDefinition {
+                name,
+                annotation: TypeAnnotation::Simple(Identifier::new("Error", span)),
+                comments,
+                doc_comment,
+                span,
+            };
+        }
+        self.advance(); // consume `=`
+
+        let annotation = self.parse_type_annotation();
+        let span = start.merge(annotation.span());
+
+        TypeAliasDefinition {
+            name,
+            annotation,
+            comments,
+            doc_comment,
             span,
         }
     }
@@ -1896,6 +1989,7 @@ impl Parser {
         while !self.is_at_end()
             && !self.is_at_protocol_definition()
             && !self.is_at_class_definition()
+            && !self.is_at_type_alias_definition()
             && !self.is_at_standalone_method_definition()
         {
             // BT-1618: Collect doc comment *before* checking for `class` prefix,

@@ -616,6 +616,7 @@ fn false_or_param_resolves_to_union() {
         classes: vec![class],
         method_definitions: vec![],
         protocols: vec![],
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: span(),
         file_leading_comments: vec![],

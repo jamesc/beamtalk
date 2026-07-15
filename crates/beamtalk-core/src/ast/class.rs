@@ -368,6 +368,42 @@ pub struct ProtocolMethodSignature {
     pub span: Span,
 }
 
+/// A type alias definition (ADR 0108, Phase 1).
+///
+/// Names an existing [`TypeAnnotation`] for reuse across signatures. Aliases
+/// are transparent (structural, not nominal) — resolution expands the name
+/// back to the annotation it was declared with. This node captures only the
+/// declaration's surface syntax; alias-table registration and expansion are
+/// semantic-analysis concerns (BT-2895).
+///
+/// Example:
+/// ```text
+/// /// How a supervised child restarts after exit.
+/// type RestartStrategy = #temporary | #transient | #permanent
+/// ```
+///
+/// `type` is a contextual keyword, recognized only at top-level declaration
+/// position (`type` + uppercase identifier + `=` + type annotation); it
+/// remains a legal identifier everywhere else. Single-letter names (`type T
+/// = ...`) are rejected at parse time — reserved for ADR 0068's implicit
+/// method-local type parameters.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TypeAliasDefinition {
+    /// The alias name (e.g., `RestartStrategy`). Must be 2+ characters —
+    /// single-letter names are reserved for type parameters.
+    pub name: Identifier,
+    /// The type annotation this name expands to. Any `TypeAnnotation` is
+    /// accepted (unions, singletons, generics, `\`/`&`, etc.) — not just
+    /// singleton unions.
+    pub annotation: TypeAnnotation,
+    /// Non-doc comments (`//` and `/* */`) appearing before this declaration.
+    pub comments: CommentAttachment,
+    /// Doc comment attached to this declaration (`///` lines).
+    pub doc_comment: Option<String>,
+    /// Source location of the entire `type Name = ...` declaration.
+    pub span: Span,
+}
+
 /// Which keyword was used to declare an instance variable.
 ///
 /// Both `state:` and `field:` parse to [`StateDeclaration`]; this enum tracks
