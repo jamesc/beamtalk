@@ -717,6 +717,7 @@ pub struct CompileContext<'a> {
 ///
 /// Returns an error if the module name is invalid, code generation fails,
 /// or the output file cannot be written.
+#[allow(clippy::too_many_arguments)]
 pub fn write_core_erlang_with_bindings(
     module: &beamtalk_core::ast::Module,
     module_name: &str,
@@ -725,6 +726,7 @@ pub fn write_core_erlang_with_bindings(
     bindings: &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable,
     hierarchy: &ClassHierarchyContext,
     source: Option<(&str, Option<&str>)>,
+    native_type_registry: Option<std::sync::Arc<NativeTypeRegistry>>,
 ) -> Result<()> {
     if !is_valid_module_name(module_name) {
         miette::bail!(
@@ -748,6 +750,7 @@ pub fn write_core_erlang_with_bindings(
             .with_class_superclass_index(hierarchy.class_superclass_index.clone())
             .with_source_path_opt(source_path)
             .with_class_hierarchy(hierarchy.pre_loaded_classes.clone())
+            .with_native_type_registry(native_type_registry)
             // ADR 0098 Phase 3: bake the producing-toolchain identity into __beamtalk_meta.
             .with_provenance(
                 env!("BEAMTALK_VERSION"),
@@ -984,6 +987,7 @@ pub(crate) fn compile_source_with_bindings(
         bindings,
         &codegen_hierarchy,
         Some((&source, embed_source_path)),
+        ctx.native_type_registry.clone(),
     )
     .wrap_err_with(|| format!("Failed to generate Core Erlang for '{source_path}'"))?;
 

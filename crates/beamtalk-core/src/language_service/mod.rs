@@ -1595,6 +1595,7 @@ impl LanguageService for SimpleLanguageService {
                     offset.get(),
                     &selector_lookup,
                     self.project_index.hierarchy(),
+                    self.native_types.as_deref(),
                 );
             return crate::queries::definition_provider::find_method_definition_cross_file_with_receiver(
                 selector_lookup.selector_name.as_str(),
