@@ -3407,6 +3407,31 @@ impl CoreErlangGenerator {
             ]);
         }
 
+        // BT-2812: `blockValue`/`blockValue1`/`blockValue2`/`blockValue3` — Block's
+        // `value`/`value:`/`value:value:`/`value:value:value:`. Same gap as
+        // `blockValueWithArguments` above, but these can't unconditionally
+        // `erlang:apply` (a Tier 2/stateful block needs a live `StateAcc` this
+        // generic dispatch site doesn't have — see ADR-0041). See
+        // `generate_block_value_structural_fallback` for the Tier 1/Tier 2
+        // discrimination.
+        if !is_quoted {
+            let block_value_info = match name {
+                "blockValue" => Some((0usize, "value")),
+                "blockValue1" => Some((1usize, "value:")),
+                "blockValue2" => Some((2usize, "value:value:")),
+                "blockValue3" => Some((3usize, "value:value:value:")),
+                _ => None,
+            };
+            if let Some((arity, real_selector)) = block_value_info {
+                return Ok(self.generate_block_value_structural_fallback(
+                    name,
+                    arity,
+                    real_selector,
+                    &class_name,
+                ));
+            }
+        }
+
         // BT-1763: Erlang interop DNU intrinsics — forward selector/args to
         // the handler module's dispatch/3 rather than passing the intrinsic name.
         // doesNotUnderstand:args: receives (Self, Selector, Args) and we need to
@@ -3514,13 +3539,19 @@ impl CoreErlangGenerator {
         // through the call-site interception — e.g.
         // `[42] perform: #value withArguments: #()` — resolves to this
         // placeholder and raises `does_not_understand` for the intrinsic name.
-        // Confirmed to already affect every block-value structural intrinsic
-        // EXCEPT `valueWithArguments:` (special-cased above, BT-2803 review) —
-        // `value`/`value:`/`value:value:`/… still hit this gap, a pre-existing,
-        // systemic limitation in how structural intrinsics interact with
-        // dynamic dispatch, not something introduced or fixed here. See BT-2812
-        // (filed from BT-2803's adversarial review) for perform:-safe structural
-        // intrinsic dispatch.
+        //
+        // BT-2812: Block's `value`/`value:`/`value:value:`/`value:value:value:`/
+        // `valueWithArguments:` are now special-cased above and no longer hit this
+        // placeholder — those were the concrete repro. BT-2812's audit found the
+        // same root cause (wrong dispatch key) also applies, in principle, to
+        // every other structural intrinsic without a special case here — e.g.
+        // `whileTrue`/`whileFalse`/`repeat`/`onDo`/`ensure` (Block) and
+        // `listDo`/`listCollect`/`listSelect`/`listReject`/`listInjectInto`
+        // (List/Collection). Deliberately left unfixed by BT-2812: unlike the
+        // `value*` family (whose fix is "the receiver IS the fun to invoke, so
+        // `erlang:apply` it"), these need real loop/exception-handling semantics
+        // reimplemented generically over an arbitrary fun receiver/argument —
+        // a materially bigger, separately-scoped change. See BT-2888.
         let runtime_module = PrimitiveBindingTable::runtime_module_for_class(&class_name);
 
         // BT-938: Validate that the target dispatch module exists in the known stdlib

@@ -304,6 +304,17 @@ generate_message(immutable_value, Class, undefined) ->
     iolist_to_binary(io_lib:format("Cannot mutate ~s (immutable value)", [Class]));
 generate_message(immutable_value, Class, Selector) ->
     iolist_to_binary(io_lib:format("Cannot call '~s' on ~s (immutable value)", [Selector, Class]));
+generate_message(stateful_block_dispatch, Class, undefined) ->
+    iolist_to_binary(
+        io_lib:format("~s captures mutable state and cannot be invoked via perform:", [Class])
+    );
+generate_message(stateful_block_dispatch, Class, Selector) ->
+    iolist_to_binary(
+        io_lib:format(
+            "Cannot call '~s' on ~s via perform: (block captures mutable state - call it directly instead)",
+            [Selector, Class]
+        )
+    );
 generate_message(arity_mismatch, Class, undefined) ->
     iolist_to_binary(io_lib:format("Wrong number of arguments to ~s method", [Class]));
 generate_message(arity_mismatch, Class, Selector) ->

@@ -75,3 +75,28 @@ TestCase subclass: BlocksTest
   testWhilefalse =>
     // whileFalse: with true condition (returns immediately)
     self assert: ([true] whileFalse: [42]) equals: nil
+
+  testPerformOnPureBlockValueSelectors =>
+    // BT-2812: value/value:/value:value:/value:value:value: reached via
+    // perform:withArguments: (bypassing the call-site interception) used to
+    // resolve to the wrong internal intrinsic name and raise a confusing
+    // does_not_understand. Pure (Tier 1) blocks now get a real fix.
+    self assert: ([42] perform: #value withArguments: #()) equals: 42
+    self assert: ([:x | x + 1] perform: #value: withArguments: #(3)) equals: 4
+    self assert: ([:x :y |
+      x + y
+    ] perform: #value:value: withArguments: #(3, 4)) equals: 7
+    self assert: ([:x :y :z |
+      x + y + z
+    ] perform: #value:value:value: withArguments: #(1, 2, 3)) equals: 6
+
+  testPerformOnStatefulBlockRaisesClearError =>
+    // BT-2812: a stored (Tier 2) block mutates captured state via a threaded
+    // StateAcc that only a call-site-aware caller can supply — perform:
+    // has no such state, so this now raises a clear, purpose-built error
+    // instead of the wrong-selector does_not_understand it used to.
+    count := 0
+    statefulBlock := [:x | count := count + x]
+    self should: [
+      statefulBlock perform: #value: withArguments: #(3)
+    ] raise: #stateful_block_dispatch

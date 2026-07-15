@@ -1178,6 +1178,109 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(parts))
     }
 
+    /// BT-2812: Generates the fallback method body for `blockValue`/`blockValue1`/
+    /// `blockValue2`/`blockValue3` — Block's `value`/`value:`/`value:value:`/
+    /// `value:value:value:`. This body is reached only when something bypasses the
+    /// call-site interception these selectors normally get (e.g. `perform:`/
+    /// `perform:withArguments:`), the same gap `blockValueWithArguments`'s fallback
+    /// (`generate_primitive`, `mod.rs`) closed for real under BT-2803 — but unlike
+    /// that selector, these can't unconditionally `erlang:apply`: under ADR-0041's
+    /// universal state-threading protocol, a Tier 2 (stateful) block compiles to
+    /// `fun(Args..., StateAcc) -> {Result, NewStateAcc}`, and invoking it correctly
+    /// requires a live `StateAcc` that only a call-site-aware caller has (see this
+    /// file's `generate_block_value_call_runtime_discriminated`, which this mirrors
+    /// via the same `erlang:is_function/2` arity-discrimination idiom). Generic
+    /// dispatch has no such state, so:
+    /// - Tier 1 (`Self` is a plain fun of the expected arity): real `erlang:apply`
+    ///   fix — this is the common, pure-block case.
+    /// - Tier 2 (`Self` is a fun of arity+1): raises a clear `#beamtalk_error{}`
+    ///   (`stateful_block_dispatch`) instead of silently self-dispatching to the
+    ///   wrong intrinsic name via the placeholder path.
+    /// - Neither (defensive; Block is `sealed` so `Self` is always a fun in
+    ///   practice): falls through to the original runtime-dispatch placeholder,
+    ///   unchanged from before this fix.
+    pub(in crate::codegen::core_erlang) fn generate_block_value_structural_fallback(
+        &mut self,
+        intrinsic_name: &str,
+        arity: usize,
+        real_selector: &str,
+        class_name: &str,
+    ) -> Document<'static> {
+        let self_var = if self.in_class_method() {
+            "ClassSelf"
+        } else {
+            "Self"
+        };
+        let params_doc = join(
+            self.current_method_params
+                .iter()
+                .map(|p| leaf::var(p.clone())),
+            &Document::Str(", "),
+        );
+
+        let error_base = self.fresh_temp_var("Err");
+        let error_sel = self.fresh_temp_var("Err");
+        let error_hint = self.fresh_temp_var("Err");
+        let hint = leaf::binary_lit(
+            "Block captures mutable state and can't be invoked via perform: \u{2014} call it directly instead",
+        );
+        let stateful_branch = docvec![
+            "let ",
+            leaf::var(error_base.clone()),
+            " = call 'beamtalk_error':'new'('stateful_block_dispatch', ",
+            leaf::atom(class_name),
+            ") in let ",
+            leaf::var(error_sel.clone()),
+            " = call 'beamtalk_error':'with_selector'(",
+            leaf::var(error_base),
+            ", ",
+            leaf::atom(real_selector),
+            ") in let ",
+            leaf::var(error_hint.clone()),
+            " = call 'beamtalk_error':'with_hint'(",
+            leaf::var(error_sel),
+            ", ",
+            hint,
+            ") in call 'beamtalk_error':'raise'(",
+            leaf::var(error_hint),
+            ")",
+        ];
+
+        let runtime_module =
+            super::primitive_bindings::PrimitiveBindingTable::runtime_module_for_class(class_name);
+        let placeholder_branch = docvec![
+            "call ",
+            leaf::atom(runtime_module),
+            ":'dispatch'(",
+            leaf::atom(intrinsic_name),
+            ", [",
+            params_doc.clone(),
+            "], ",
+            Document::Str(self_var),
+            ")",
+        ];
+
+        docvec![
+            "case call 'erlang':'is_function'(",
+            Document::Str(self_var),
+            ", ",
+            leaf::int_lit(i64::try_from(arity).unwrap_or(i64::MAX)),
+            ") of <'true'> when 'true' -> call 'erlang':'apply'(",
+            Document::Str(self_var),
+            ", [",
+            params_doc,
+            "]) <'false'> when 'true' -> case call 'erlang':'is_function'(",
+            Document::Str(self_var),
+            ", ",
+            leaf::int_lit(i64::try_from(arity + 1).unwrap_or(i64::MAX)),
+            ") of <'true'> when 'true' -> ",
+            stateful_branch,
+            " <'false'> when 'true' -> ",
+            placeholder_branch,
+            " end end",
+        ]
+    }
+
     /// BT-2803: Generates a runtime `erlang:is_function/1` guard for
     /// `valueWithArguments:` sends.
     ///
