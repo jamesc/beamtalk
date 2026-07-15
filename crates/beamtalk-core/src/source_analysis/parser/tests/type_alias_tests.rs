@@ -175,6 +175,31 @@ fn type_alias_invalid_rhs_is_reported() {
     );
 }
 
+#[test]
+fn parametric_type_alias_is_not_recognized_yet() {
+    // ADR 0108 Consequences: `type Name(...) = ...` (parametric aliases) is
+    // deliberately deferred and reserved as a parse error, v1. The `(` right
+    // after the name means `is_at_type_alias_definition`'s lookahead (which
+    // requires a bare `=` immediately after the name) does not match, so this
+    // falls through to ordinary expression parsing rather than being treated
+    // as a type alias. This test only pins that the fallback is graceful
+    // (parses to *something*, does not panic) — not that the resulting
+    // diagnostic is polished, which is out of scope until parametric aliases
+    // are implemented.
+    let module = parse_ok_or_err_but_not_panic("type Foo(T) = Integer");
+    assert!(module.type_aliases.is_empty());
+}
+
+/// Parses `source` without asserting success or failure — used only to pin
+/// that malformed input the parser doesn't yet have a dedicated diagnostic
+/// for (e.g. parametric type aliases) is handled gracefully rather than
+/// panicking.
+fn parse_ok_or_err_but_not_panic(source: &str) -> Module {
+    let tokens = lex_with_eof(source);
+    let (module, _diagnostics) = parse(tokens);
+    module
+}
+
 // ==========================================================================
 // `type` remains an ordinary identifier everywhere else
 // ==========================================================================
