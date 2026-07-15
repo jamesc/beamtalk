@@ -179,8 +179,9 @@ about *naming*, not about *identity*. There is no new kind of type.
     or resolve it) — the same leakage rule 0071 applies to internal
     classes in public positions. Enforced via **seeding-time
     exclusion** — an internal alias is simply never seeded into a
-    consumer's alias table (see Implementation, and the matching
-    `browse-type-aliases` filter).
+    consumer's alias table (see Implementation's seeding-boundary
+    discussion, which the same exclusion also governs for
+    `browse-type-aliases`).
   - **The leakage check must run on the expansion, not just the
     written name.** Because aliases are transparent, a *public* alias
     can still leak an internal type through substitution —
