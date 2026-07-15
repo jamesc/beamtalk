@@ -831,7 +831,10 @@ All stdlib classes now have corresponding `stdlib/src/*.bt` definitions. `Collec
 
 ## Test Coverage Gaps
 
-Test coverage is now spread across both `stdlib/bootstrap-test/` (224 assertions) and `tests/repl-protocol/cases/` (1883 assertions).
+Test coverage is now spread across both `stdlib/bootstrap-test/` (224 assertions) and `tests/repl-protocol/cases/` (1883 assertions) —
+a large swing from the previous audit's 1046/213 split. These counts are a snapshot for this audit date, not a trend line:
+assertions move between suites over time as tests are added, migrated, or consolidated, so don't read the swing itself as a
+coverage regression or expansion.
 Many previously untested methods now have stdlib test coverage. The following gaps remain for methods
 with no coverage in either test suite (per-method status below has not been re-verified against the current
 counts and may itself be stale — see BT-408):
