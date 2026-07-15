@@ -1180,13 +1180,22 @@ fn deduplicate_completions(completions: &mut Vec<Completion>) {
 /// Used by the `resolve_completion_type` compiler port command to handle complex
 /// expressions that `tokenise_send_chain/1` cannot parse (parenthesised
 /// subexpressions, binary message chains, keyword sends mid-chain).
+///
+/// `native_type_registry` (BT-2887, ADR 0075) lets an expression whose type
+/// came from an FFI call resolve to its typed return. `None` when no registry
+/// is available to the caller — the `beamtalk-compiler-port` REPL completion
+/// path currently has none readily available in its call chain.
 #[must_use]
-pub fn resolve_expression_type(source: &str, hierarchy: &ClassHierarchy) -> Option<String> {
+pub fn resolve_expression_type(
+    source: &str,
+    hierarchy: &ClassHierarchy,
+    native_type_registry: Option<&NativeTypeRegistry>,
+) -> Option<String> {
     let tokens = crate::source_analysis::lex_with_eof(source);
     let (module, _diagnostics) = crate::source_analysis::parse(tokens);
     let last_expr = module.expressions.last()?;
     let span = last_expr.expression.span();
-    let type_map = crate::semantic_analysis::infer_types(&module, hierarchy, None);
+    let type_map = crate::semantic_analysis::infer_types(&module, hierarchy, native_type_registry);
     match type_map.get(span) {
         Some(InferredType::Known { class_name, .. }) => Some(class_name.to_string()),
         _ => None,
@@ -2029,53 +2038,53 @@ mod tests {
     #[test]
     fn resolve_expression_type_string_literal() {
         let hierarchy = ClassHierarchy::with_builtins();
-        let result = resolve_expression_type("\"hello\"", &hierarchy);
+        let result = resolve_expression_type("\"hello\"", &hierarchy, None);
         assert_eq!(result.as_deref(), Some("String"));
     }
     #[test]
     fn resolve_expression_type_integer_literal() {
         let hierarchy = ClassHierarchy::with_builtins();
-        let result = resolve_expression_type("42", &hierarchy);
+        let result = resolve_expression_type("42", &hierarchy, None);
         assert_eq!(result.as_deref(), Some("Integer"));
     }
     #[test]
     fn resolve_expression_type_parenthesized() {
         let hierarchy = ClassHierarchy::with_builtins();
-        let result = resolve_expression_type("(\"hello\")", &hierarchy);
+        let result = resolve_expression_type("(\"hello\")", &hierarchy, None);
         assert_eq!(result.as_deref(), Some("String"));
     }
     #[test]
     fn resolve_expression_type_binary_send() {
         // "foo" ++ "bar" should resolve to String (String#++: returns String)
         let hierarchy = ClassHierarchy::with_builtins();
-        let result = resolve_expression_type("\"foo\" ++ \"bar\"", &hierarchy);
+        let result = resolve_expression_type("\"foo\" ++ \"bar\"", &hierarchy, None);
         assert_eq!(result.as_deref(), Some("String"));
     }
     #[test]
     fn resolve_expression_type_parenthesized_binary_send() {
         // ("foo" ++ "bar") should resolve to String
         let hierarchy = ClassHierarchy::with_builtins();
-        let result = resolve_expression_type("(\"foo\" ++ \"bar\")", &hierarchy);
+        let result = resolve_expression_type("(\"foo\" ++ \"bar\")", &hierarchy, None);
         assert_eq!(result.as_deref(), Some("String"));
     }
     #[test]
     fn resolve_expression_type_chained_sends() {
         // "hello" size — String#size returns Integer
         let hierarchy = ClassHierarchy::with_builtins();
-        let result = resolve_expression_type("\"hello\" size", &hierarchy);
+        let result = resolve_expression_type("\"hello\" size", &hierarchy, None);
         assert_eq!(result.as_deref(), Some("Integer"));
     }
     #[test]
     fn resolve_expression_type_empty_source() {
         let hierarchy = ClassHierarchy::with_builtins();
-        let result = resolve_expression_type("", &hierarchy);
+        let result = resolve_expression_type("", &hierarchy, None);
         assert_eq!(result, None);
     }
     #[test]
     fn resolve_expression_type_unknown_variable() {
         // Bare variable with no bindings — type is Dynamic
         let hierarchy = ClassHierarchy::with_builtins();
-        let result = resolve_expression_type("x", &hierarchy);
+        let result = resolve_expression_type("x", &hierarchy, None);
         assert_eq!(result, None);
     }
     // --- BT-1070: parenthesised subexpression as receiver ---
@@ -2083,14 +2092,14 @@ mod tests {
     fn resolve_expression_type_parenthesized_unary_send() {
         // ("hello" size) — the result of String#size (Integer) wrapped in parens
         let hierarchy = ClassHierarchy::with_builtins();
-        let result = resolve_expression_type("(\"hello\" size)", &hierarchy);
+        let result = resolve_expression_type("(\"hello\" size)", &hierarchy, None);
         assert_eq!(result.as_deref(), Some("Integer"));
     }
     #[test]
     fn resolve_expression_type_parenthesized_unknown_variable() {
         // (myList size) — myList is untyped, graceful fallback
         let hierarchy = ClassHierarchy::with_builtins();
-        let result = resolve_expression_type("(myList size)", &hierarchy);
+        let result = resolve_expression_type("(myList size)", &hierarchy, None);
         assert_eq!(result, None);
     }
     // --- BT-1072: keyword sends mid-chain ---
@@ -2099,7 +2108,7 @@ mod tests {
         // #[1, 2, 3] collect: [:x | x * 2] — Array(E)#collect: returns Array(R)
         // BT-1576: Generic return types extract base class for completion.
         let hierarchy = ClassHierarchy::with_builtins();
-        let result = resolve_expression_type("#[1, 2, 3] collect: [:x | x * 2]", &hierarchy);
+        let result = resolve_expression_type("#[1, 2, 3] collect: [:x | x * 2]", &hierarchy, None);
         assert_eq!(result.as_deref(), Some("Array"));
     }
     #[test]
@@ -2108,16 +2117,57 @@ mod tests {
         // BT-1834: A is now resolved from the initial value argument (0 :: Integer)
         // via plain param type inference, so the return type is Integer.
         let hierarchy = ClassHierarchy::with_builtins();
-        let result =
-            resolve_expression_type("#[1, 2, 3] inject: 0 into: [:acc :x | acc + x]", &hierarchy);
+        let result = resolve_expression_type(
+            "#[1, 2, 3] inject: 0 into: [:acc :x | acc + x]",
+            &hierarchy,
+            None,
+        );
         assert_eq!(result.as_deref(), Some("Integer"));
     }
     #[test]
     fn resolve_expression_type_keyword_send_untyped_receiver_returns_none() {
         // myList collect: [...] — myList is untyped (Dynamic), graceful fallback
         let hierarchy = ClassHierarchy::with_builtins();
-        let result = resolve_expression_type("myList collect: [:x | x]", &hierarchy);
+        let result = resolve_expression_type("myList collect: [:x | x]", &hierarchy, None);
         assert_eq!(result, None);
+    }
+    #[test]
+    fn resolve_expression_type_with_native_registry_resolves_ffi_call() {
+        // BT-2887: with a NativeTypeRegistry, an FFI call's typed return
+        // resolves instead of staying Dynamic.
+        use crate::semantic_analysis::type_checker::TypeProvenance;
+        use crate::semantic_analysis::type_checker::native_type_registry::{
+            FunctionSignature, NativeTypeRegistry, ParamType,
+        };
+
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut registry = NativeTypeRegistry::new();
+        registry.register_module(
+            "lists",
+            vec![FunctionSignature {
+                name: "reverse".to_string(),
+                arity: 1,
+                params: vec![ParamType {
+                    keyword: Some(EcoString::from("list")),
+                    type_: InferredType::known("List"),
+                }],
+                return_type: InferredType::known("List"),
+                provenance: TypeProvenance::Extracted,
+                line: None,
+            }],
+        );
+
+        let result = resolve_expression_type(
+            "Erlang lists reverse: #(1, 2, 3)",
+            &hierarchy,
+            Some(&registry),
+        );
+        assert_eq!(result.as_deref(), Some("List"));
+
+        // Registry-blind default (None) preserves the previous behaviour.
+        let result_none =
+            resolve_expression_type("Erlang lists reverse: #(1, 2, 3)", &hierarchy, None);
+        assert_eq!(result_none, None);
     }
     // ── delegate completion filtering (BT-1215) ─────────────────────────────
     #[test]

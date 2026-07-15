@@ -31,7 +31,12 @@ fn run_script_mode_invokes_class_method() {
         .args(["run", "Smoke", "run"])
         .assert()
         .success()
-        .stdout(contains("Running Smoke>>run").or(contains("Smoke")));
+        // BT-2702: status/progress lines go to stderr, keeping stdout clean for
+        // the program's own output (the entry's return value is discarded here).
+        .stdout(contains("Running Smoke>>run").not())
+        .stdout(contains("Building...").not())
+        .stderr(contains("Running Smoke>>run"))
+        .stderr(contains("Building..."));
 }
 
 #[test]
