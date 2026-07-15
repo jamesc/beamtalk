@@ -1578,7 +1578,8 @@ impl Parser {
     /// falsely truncate the method body — violating the ADR's promise that
     /// `type` "remains a legal identifier everywhere else."
     fn is_at_type_alias_boundary(&self) -> bool {
-        // When `in_class_body` is false (standalone methods, protocol bodies),
+        // When `in_class_body` is false (standalone method bodies only — protocol
+        // bodies use the unwrapped `is_at_type_alias_definition()` directly),
         // the `!self.in_class_body` arm short-circuits the `||`, skipping the
         // indentation check. This is safe because `= expr` is not a valid
         // Beamtalk binary expression, so the `type Uppercase =` pattern cannot
