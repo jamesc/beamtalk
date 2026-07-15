@@ -123,6 +123,7 @@ impl TypeChecker {
                     &mut method_env,
                     &method.parameters,
                     self.protocol_registry.as_ref(),
+                    self.alias_registry.as_ref(),
                 );
                 let body_type =
                     self.infer_stmts(&method.body, hierarchy, &mut method_env, is_abstract);
@@ -170,6 +171,7 @@ impl TypeChecker {
                     &mut method_env,
                     &method.parameters,
                     self.protocol_registry.as_ref(),
+                    self.alias_registry.as_ref(),
                 );
                 let body_type =
                     self.infer_stmts(&method.body, hierarchy, &mut method_env, is_abstract);
@@ -235,6 +237,7 @@ impl TypeChecker {
                 &mut method_env,
                 &standalone.method.parameters,
                 self.protocol_registry.as_ref(),
+                self.alias_registry.as_ref(),
             );
             let body_type = self.infer_stmts(
                 &standalone.method.body,
@@ -298,17 +301,25 @@ impl TypeChecker {
     /// `protocol_registry` (ADR 0102 §1/§3, BT-2743) is passed straight
     /// through to the resolver so a parameter typed `:: P1 & P2` resolves
     /// class ∩ protocol correctly; pass `None` when no registry is available.
+    ///
+    /// `alias_registry` (ADR 0108, BT-2895) is likewise passed straight
+    /// through so a parameter typed `:: RestartStrategy` expands to its
+    /// declared union; pass `None` when no registry is available.
     pub(super) fn set_param_types(
         env: &mut TypeEnv,
         parameters: &[crate::ast::ParameterDefinition],
         protocol_registry: Option<&crate::semantic_analysis::protocol_registry::ProtocolRegistry>,
+        alias_registry: Option<&crate::semantic_analysis::alias_registry::AliasRegistry>,
     ) {
         let subst = super::type_resolver::SubstitutionMap::new();
         for param in parameters {
             let ty = match &param.type_annotation {
-                Some(ann) => {
-                    super::type_resolver::resolve_type_annotation(ann, &subst, protocol_registry)
-                }
+                Some(ann) => super::type_resolver::resolve_type_annotation(
+                    ann,
+                    &subst,
+                    protocol_registry,
+                    alias_registry,
+                ),
                 None => InferredType::Dynamic(DynamicReason::UnannotatedParam), // preserve parameter shadowing of state fields
             };
             env.set_local(param.name.name.clone(), ty);
@@ -319,16 +330,21 @@ impl TypeChecker {
     ///
     /// Thin wrapper around
     /// [`super::type_resolver::resolve_type_annotation`] that supplies an
-    /// empty substitution map and no protocol registry. Call sites that need
-    /// method-local / class-level type-parameter substitution, or correct
-    /// resolution of `&`-typed protocol intersections (ADR 0102 §1/§3,
-    /// BT-2743), should call the resolver function directly with a populated
-    /// [`super::type_resolver::SubstitutionMap`] / protocol registry.
+    /// empty substitution map and no protocol registry or alias registry
+    /// (ADR 0108, BT-2895). Test-only: every production call site needs at
+    /// least one of method-local / class-level type-parameter substitution,
+    /// correct resolution of `&`-typed protocol intersections (ADR 0102
+    /// §1/§3, BT-2743), or type-alias expansion, so they all call the
+    /// resolver function directly with a populated
+    /// [`super::type_resolver::SubstitutionMap`] / protocol registry / alias
+    /// registry instead. Kept as a convenience for tests that only care
+    /// about the "no registries" resolution path.
     ///
     /// **References:** BT-2025 — centralised parametric type resolution.
+    #[cfg(test)]
     pub(super) fn resolve_type_annotation(ann: &TypeAnnotation) -> InferredType {
         let subst = super::type_resolver::SubstitutionMap::new();
-        super::type_resolver::resolve_type_annotation(ann, &subst, None)
+        super::type_resolver::resolve_type_annotation(ann, &subst, None, None)
     }
 
     /// BT-2862: When a method body is exactly `self delegate` (the ADR 0056 /
@@ -354,13 +370,14 @@ impl TypeChecker {
     /// overwrites the `self delegate` expression's `type_map` entry so LSP
     /// hover and `beamtalk type-coverage` see the trusted type too.
     ///
-    /// Limitation: non-`Self`/`Self class`/`X class` annotations resolve via
-    /// the thin [`Self::resolve_type_annotation`] wrapper, which supplies an
-    /// empty substitution map and no protocol registry — an ADR 0102
+    /// Limitation: non-`Self`/`Self class`/`X class` annotations resolve
+    /// with an empty substitution map and no protocol registry — an ADR 0102
     /// intersection (`A & B`) or difference (`A \ B`) return-type annotation
-    /// on a `self delegate` body won't resolve precisely (that limitation
-    /// lives in the wrapper, not here). This is a narrow case with no known
-    /// `self delegate` use today.
+    /// on a `self delegate` body won't resolve precisely. This is a narrow
+    /// case with no known `self delegate` use today. Alias resolution (ADR
+    /// 0108, BT-2895) *is* threaded through via `self.alias_registry`, so a
+    /// `self delegate` method declaring `-> RestartStrategy` resolves
+    /// correctly.
     pub(super) fn resolve_self_delegate_return_type(
         &mut self,
         method: &crate::ast::MethodDefinition,
@@ -384,7 +401,12 @@ impl TypeChecker {
             TypeAnnotation::SelfClass { .. } | TypeAnnotation::ClassOf { .. } => {
                 return body_type;
             }
-            _ => Self::resolve_type_annotation(declared),
+            _ => super::type_resolver::resolve_type_annotation(
+                declared,
+                &super::type_resolver::SubstitutionMap::new(),
+                None,
+                self.alias_registry.as_ref(),
+            ),
         };
         // The method body is exactly one statement (`self delegate`) per
         // `is_self_delegate`'s definition — record the trusted type against
@@ -621,10 +643,16 @@ impl TypeChecker {
                     // ADR 0102 §1/§3 (BT-2743): thread the protocol registry
                     // through so a local `x :: P1 & P2` annotation resolves
                     // class ∩ protocol correctly rather than falling to `Never`.
+                    // ADR 0108 (BT-2895): thread the alias registry through so
+                    // a local `heading :: Direction := ...` annotation
+                    // expands to its declared union, feeding the exact same
+                    // `InferredType` a spelled-out union would into
+                    // downstream narrowing/exhaustiveness.
                     let declared = super::type_resolver::resolve_type_annotation(
                         ann,
                         &super::type_resolver::SubstitutionMap::new(),
                         self.protocol_registry.as_ref(),
+                        self.alias_registry.as_ref(),
                     );
                     // Check for type mismatch: known RHS that doesn't match declared type.
                     // Dynamic RHS (the primary use case for annotations) is accepted silently.
@@ -6656,7 +6684,7 @@ mod tests {
     fn set_param_types_untyped() {
         let params = vec![ParameterDefinition::new(ident("x"))];
         let mut env = TypeEnv::new();
-        TypeChecker::set_param_types(&mut env, &params, None);
+        TypeChecker::set_param_types(&mut env, &params, None, None);
         assert_eq!(
             env.get_local("x"),
             Some(InferredType::Dynamic(DynamicReason::Unknown))
@@ -6670,7 +6698,7 @@ mod tests {
             type_annotation: Some(TypeAnnotation::Simple(ident("Integer"))),
         }];
         let mut env = TypeEnv::new();
-        TypeChecker::set_param_types(&mut env, &params, None);
+        TypeChecker::set_param_types(&mut env, &params, None, None);
         assert_eq!(env.get_local("x"), Some(InferredType::known("Integer")));
     }
 
@@ -6684,7 +6712,7 @@ mod tests {
             ParameterDefinition::new(ident("y")),
         ];
         let mut env = TypeEnv::new();
-        TypeChecker::set_param_types(&mut env, &params, None);
+        TypeChecker::set_param_types(&mut env, &params, None, None);
         assert_eq!(env.get_local("x"), Some(InferredType::known("String")));
         assert_eq!(
             env.get_local("y"),

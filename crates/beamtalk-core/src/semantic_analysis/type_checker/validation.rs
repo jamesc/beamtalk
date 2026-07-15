@@ -1251,13 +1251,22 @@ impl TypeChecker {
         // validate this, so skip (BT-1952).
         //
         // BT-2025: All other arms — including `Generic` — go through the
-        // central `resolve_type_annotation` resolver.
+        // central `resolve_type_annotation` resolver. ADR 0108 (BT-2895):
+        // thread the alias registry (but not the protocol registry — this
+        // mirrors `Self::resolve_type_annotation`'s existing, unchanged
+        // scope) so a declared `-> RestartStrategy` return type expands to
+        // its structural union instead of an opaque unknown class.
         let expected = match declared {
             TypeAnnotation::SelfType { .. } => {
                 super::type_resolver::receiver_type_for_class(class_name, hierarchy)
             }
             TypeAnnotation::SelfClass { .. } | TypeAnnotation::ClassOf { .. } => return,
-            _ => Self::resolve_type_annotation(declared),
+            _ => super::type_resolver::resolve_type_annotation(
+                declared,
+                &super::type_resolver::SubstitutionMap::new(),
+                None,
+                self.alias_registry.as_ref(),
+            ),
         };
 
         let InferredType::Known {
