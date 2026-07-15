@@ -735,7 +735,15 @@ To be broken into an epic via `/plan-adr` once Accepted. Expected shape:
   sites (the same resolution-time alias-name → annotation-site edges the
   hot-reload trigger records; find-references coverage is scoped to
   files compiled in the current build graph — uncompiled or
-  never-opened files contribute no edges until compiled). Hover on the
+  never-opened files contribute no edges until compiled). A silent
+  partial result is a real hazard here — a user trusting an empty or
+  short reference list could delete an alias that is in fact used by an
+  uncompiled file. The LSP implementation must surface the
+  incompleteness rather than let a partial list read as exhaustive
+  (e.g. a `window/showMessage` warning when the workspace has
+  uncompiled files, mirroring how other incremental-analysis LSPs flag
+  partial results); the exact mechanism is an implementing-issue design
+  detail, but silence is not an acceptable default. Hover on the
   alias name shows the expansion. REPL: `:help <Alias>` renders declaration + expansion + doc
   comment (see REPL session above); `type` declarations accepted in REPL
   input; no `:t`/`:type` expression-type command (deferred per ADR 0102 —
