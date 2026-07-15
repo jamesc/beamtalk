@@ -700,7 +700,17 @@ To be broken into an epic via `/plan-adr` once Accepted. Expected shape:
   table → nominal class; disjoint by construction given the
   single-letter ban. Declaration-time checks: single-letter name error,
   unbound-type-variable-on-RHS error, cycle detection (re-run on live
-  redefinition; expansion carries a visited-set guard). Bidirectional
+  redefinition; expansion carries a visited-set guard). The
+  unbound-type-variable check needs its **own pass over the RHS before**
+  (or alongside) ordinary `resolve_type_annotation`, not a byproduct of
+  it: a top-level `type` declaration has no enclosing method, so `subst`
+  is always empty there, and a bare single-letter name on the RHS would
+  otherwise fall straight through to the nominal-class lookup and
+  surface as a generic "unknown type `T`" rather than the specific
+  "unbound type parameter" diagnostic the Error examples promise —
+  the alias-declaration validator must special-case single-letter RHS
+  identifiers explicitly, not rely on `resolve_type_annotation`'s
+  ordinary fallthrough to produce this message. Bidirectional
   namespace collision checks against classes *and* protocols (new
   plumbing — the existing `protocol_registry.rs` check is
   one-directional). `infer_method_local_params`
@@ -736,7 +746,10 @@ To be broken into an epic via `/plan-adr` once Accepted. Expected shape:
   (see Semantics).
 - **Codegen:** optional named `-type` emission per alias in
   `spec_codegen.rs`; annotation sites reference it. No other codegen
-  change.
+  *semantics* change — generated Core Erlang for message dispatch,
+  field access, etc. is byte-identical with or without the alias, since
+  `type_annotation_to_spec` output is the only codegen surface aliases
+  touch.
 - **Hot reload:** a new alias-name → dependent-annotation-site re-check
   trigger. ADR 0105's existing graphs (selector-keyed xref,
   state/field-shape) do not cover this dependency kind — same situation
@@ -757,6 +770,17 @@ To be broken into an epic via `/plan-adr` once Accepted. Expected shape:
   gains a matching "Type Aliases (N)" section beside its "Classes (N
   loaded)" section. Both are read-only listings — Observer-role-safe
   (ADR 0091 Decision 4: no user code triggered), same as `browse-classes`.
+  **Cross-package `internal` visibility is unspecified and must be
+  pinned by the implementing issue**: `browse-type-aliases` seeds
+  dependency-package aliases into the current compilation the same way
+  `add_pre_loaded` seeds dependency protocols (see Semantics), and an
+  `internal` alias seeded from a *dependency* can never be referenced by
+  the current package — listing it in the browser regardless would be
+  an information-exposure edge case (surfacing a dependency's private
+  vocabulary) with no compensating benefit, so the op should filter
+  `internal: true` rows whose `source_file` is outside the current
+  package, symmetric with how `internal type` already prevents those
+  names from being written or resolved cross-package.
   Update `docs/development/surface-parity.md`'s browse-op table with the
   new op alongside `browse-classes`/`browse-protocols`.
 - **LSP/REPL parity:** completions for alias names in type position.
