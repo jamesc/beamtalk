@@ -249,6 +249,21 @@ about *naming*, not about *identity*. There is no new kind of type.
   unchanged — the previous binding, if any, stays in effect, so a failed
   live edit cannot leave dependent annotations resolving against a
   missing alias.
+  **Within-alias ordering in a batch compile is a separate concern from
+  the cycle check itself and must not be a naïve single sequential
+  pass.** If `type B = A | #z` and `type A = #x | #y` are declared in
+  the same compilation unit with `B` appearing first in file order, a
+  pass that resolves each alias's RHS immediately upon reaching it would
+  try to expand `A` before `A` is registered, and spuriously report
+  "unknown type `A`" on valid code — a false positive, not the cycle
+  diagnostic this section defines. The implementation must either
+  collect all alias names in a first pass before resolving any RHS in a
+  second, or topologically sort alias declarations by dependency before
+  resolving — and the same DFS the cycle check already needs (walking
+  each alias's referenced names to detect a cycle) produces this
+  topological order for free as a side effect, so this is not
+  additional design, only an explicit acceptance criterion for the
+  implementing issue.
 - **Doc comments attach.** `///` above a `type` declaration flows to
   hover and `:help`, giving the member set a single documentation site —
   one of the two main motivations.
@@ -791,8 +806,8 @@ To be broken into an epic via `/plan-adr` once Accepted. Expected shape:
   gains a matching "Type Aliases (N)" section beside its "Classes (N
   loaded)" section. Both are read-only listings — Observer-role-safe
   (ADR 0091 Decision 4: no user code triggered), same as `browse-classes`.
-  **Cross-package `internal` visibility is unspecified and must be
-  pinned by the implementing issue**: `browse-type-aliases` seeds
+  **Cross-package `internal` alias visibility — seeding-time exclusion
+  (implementing-issue work item)**: `browse-type-aliases` seeds
   dependency-package aliases into the current compilation the same way
   `add_pre_loaded` seeds dependency protocols (see Semantics), and an
   `internal` alias seeded from a *dependency* can never be referenced by
