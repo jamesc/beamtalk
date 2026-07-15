@@ -1563,10 +1563,27 @@ impl Parser {
         self.is_at_end()
             || self.is_at_class_definition()
             || self.is_at_protocol_definition()
-            || self.is_at_type_alias_definition()
+            || self.is_at_type_alias_boundary()
             || self.is_at_method_definition()
             || self.is_at_standalone_method_definition()
             || matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:" || k == "field:" || k == "classState:")
+    }
+
+    /// `is_at_type_alias_definition()`, gated by the same indentation guard
+    /// `is_at_method_definition()` uses in `parse_method_body` (BT-1294).
+    ///
+    /// Without this guard, an in-body expression like `type Port = 8080`
+    /// (`type` used as an ordinary variable, sent the unary message `Port`,
+    /// compared with `=`) token-matches the type-alias pattern and would
+    /// falsely truncate the method body — violating the ADR's promise that
+    /// `type` "remains a legal identifier everywhere else."
+    fn is_at_type_alias_boundary(&self) -> bool {
+        (!self.in_class_body
+            || self
+                .current_token()
+                .indentation_after_newline()
+                .is_none_or(|col| col <= 2))
+            && self.is_at_type_alias_definition()
     }
 
     /// Parses a method body (expressions until the next method or end of class).
@@ -1592,7 +1609,7 @@ impl Parser {
         while !self.is_at_end()
             && !self.is_at_class_definition()
             && !self.is_at_protocol_definition()
-            && !self.is_at_type_alias_definition()
+            && !self.is_at_type_alias_boundary()
             && !(
                 // Only test is_at_method_definition when the token could plausibly
                 // be a class member (indentation <= 2). Deeper tokens are continuation

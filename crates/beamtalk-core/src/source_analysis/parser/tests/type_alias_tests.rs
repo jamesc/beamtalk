@@ -239,3 +239,46 @@ fn type_as_lowercase_unary_receiver_is_not_a_type_alias() {
         Expression::MessageSend { .. }
     ));
 }
+
+#[test]
+fn type_as_binary_expression_inside_deep_method_body_does_not_truncate() {
+    // Regression test for a bug found in review: `is_at_type_alias_definition()`
+    // was checked in `parse_method_body`'s loop guard (and `is_at_member_boundary`)
+    // with no indentation guard, unlike the sibling `is_at_method_definition()`
+    // check in the same function (BT-1294). A deeply indented line starting
+    // with `type <Uppercase> =` — e.g. `type` used as an ordinary variable,
+    // sent the unary message `Port` — token-matches the type-alias lookahead
+    // and would falsely end the body early, treating the line as a
+    // declaration boundary instead of an in-body statement. `type` must
+    // remain a legal identifier everywhere but top-level declaration
+    // position, per the ADR.
+    //
+    // `=` is not a valid Beamtalk binary operator (reserved; use `=:=`/`==`),
+    // so this snippet is not otherwise-valid code and does still produce a
+    // diagnostic — the fix under test is specifically that `type Port` is
+    // parsed as part of the method body (a second body statement) rather
+    // than never being attempted at all because the loop exited first.
+    let tokens = lex_with_eof(
+        "typed Object subclass: Foo\n\
+         \x20\x20bar =>\n\
+         \x20\x20\x20\x20self value.\n\
+         \x20\x20\x20\x20\x20\x20type Port = 8080",
+    );
+    let (module, _diagnostics) = parse(tokens);
+    assert!(module.type_aliases.is_empty());
+    assert_eq!(module.classes.len(), 1);
+    let class = &module.classes[0];
+    assert_eq!(class.methods.len(), 1);
+    let body = &class.methods[0].body;
+    assert_eq!(
+        body.len(),
+        2,
+        "the deeply-indented `type Port = ...` line must be parsed as part of \
+         the method body, not treated as a type-alias declaration boundary \
+         that ends the body early: {body:?}"
+    );
+    assert!(matches!(
+        &body[1].expression,
+        Expression::MessageSend { selector: MessageSelector::Unary(s), .. } if s == "Port"
+    ));
+}
