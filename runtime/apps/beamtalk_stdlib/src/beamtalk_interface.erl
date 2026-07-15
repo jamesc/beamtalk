@@ -213,11 +213,7 @@ found or the source cannot be parsed.
 findSendersIn(Source, Selector) when
     is_binary(Source), (is_atom(Selector) orelse is_binary(Selector))
 ->
-    SelectorBin =
-        case Selector of
-            A when is_atom(A) -> atom_to_binary(A, utf8);
-            B when is_binary(B) -> B
-        end,
+    SelectorBin = to_binary(Selector),
     case beamtalk_compiler:find_senders_in_source(Source, SelectorBin) of
         {ok, Lines} ->
             Lines;
@@ -358,11 +354,7 @@ found or the source cannot be parsed.
 findReferencesToIn(Source, ClassName) when
     is_binary(Source), (is_atom(ClassName) orelse is_binary(ClassName))
 ->
-    ClassNameBin =
-        case ClassName of
-            A when is_atom(A) -> atom_to_binary(A, utf8);
-            B when is_binary(B) -> B
-        end,
+    ClassNameBin = to_binary(ClassName),
     case beamtalk_compiler:find_references_to_in_source(Source, ClassNameBin) of
         {ok, Lines} ->
             Lines;
@@ -439,11 +431,7 @@ logged and degraded to `[]` rather than aborting the caller's whole iteration.
 find_field_access(Source, Field, Kind, Selector) when
     is_binary(Source), (is_atom(Field) orelse is_binary(Field))
 ->
-    IVarBin =
-        case Field of
-            A when is_atom(A) -> atom_to_binary(A, utf8);
-            B when is_binary(B) -> B
-        end,
+    IVarBin = to_binary(Field),
     Result =
         case Kind of
             readers -> beamtalk_compiler:find_field_readers_in_source(Source, IVarBin);
@@ -649,11 +637,7 @@ handle_erlang_help(_ModuleArg) ->
 handle_erlang_help(ModuleBin, SelectorArg) when
     is_binary(ModuleBin), (is_atom(SelectorArg) orelse is_binary(SelectorArg))
 ->
-    FunctionBin =
-        case SelectorArg of
-            A when is_atom(A) -> atom_to_binary(A, utf8);
-            B when is_binary(B) -> B
-        end,
+    FunctionBin = to_binary(SelectorArg),
     try binary_to_existing_atom(ModuleBin, utf8) of
         Module ->
             case beamtalk_erlang_help:format_function_help(Module, FunctionBin) of
@@ -1278,11 +1262,7 @@ group_by_class(Methods) ->
 -doc "Build a structured error for a class not found.".
 -spec make_class_not_found_error(atom() | binary()) -> #beamtalk_error{}.
 make_class_not_found_error(ClassName) ->
-    NameBin =
-        case ClassName of
-            A when is_atom(A) -> atom_to_binary(A, utf8);
-            B when is_binary(B) -> B
-        end,
+    NameBin = to_binary(ClassName),
     Err0 = beamtalk_error:new(class_not_found, 'BeamtalkInterface'),
     Err1 = beamtalk_error:with_message(
         Err0,
