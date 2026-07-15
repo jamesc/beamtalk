@@ -1195,7 +1195,11 @@ impl CoreErlangGenerator {
     ///   fix — this is the common, pure-block case.
     /// - Tier 2 (`Self` is a fun of arity+1): raises a clear `#beamtalk_error{}`
     ///   (`stateful_block_dispatch`) instead of silently self-dispatching to the
-    ///   wrong intrinsic name via the placeholder path.
+    ///   wrong intrinsic name via the placeholder path. Note: `erlang:is_function/2`
+    ///   can only compare arity — it can't distinguish a genuine Tier 2 block from
+    ///   a Tier 1 block simply called with the wrong argument count (both present
+    ///   as arity+1 relative to the selector's expected arity), so the error
+    ///   message/hint deliberately don't assert a specific cause.
     /// - Neither (defensive; Block is `sealed` so `Self` is always a fun in
     ///   practice): falls through to the original runtime-dispatch placeholder,
     ///   unchanged from before this fix.
@@ -1222,7 +1226,7 @@ impl CoreErlangGenerator {
         let error_sel = self.fresh_temp_var("Err");
         let error_hint = self.fresh_temp_var("Err");
         let hint = leaf::binary_lit(
-            "Block captures mutable state and can't be invoked via perform: \u{2014} call it directly instead",
+            "Wrong argument count, or the block captures mutable state and must be invoked directly instead of via perform:",
         );
         let stateful_branch = docvec![
             "let ",

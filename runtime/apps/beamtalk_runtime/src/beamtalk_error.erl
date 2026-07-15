@@ -306,12 +306,17 @@ generate_message(immutable_value, Class, Selector) ->
     iolist_to_binary(io_lib:format("Cannot call '~s' on ~s (immutable value)", [Selector, Class]));
 generate_message(stateful_block_dispatch, Class, undefined) ->
     iolist_to_binary(
-        io_lib:format("~s captures mutable state and cannot be invoked via perform:", [Class])
+        io_lib:format("~s cannot be invoked via perform: with these arguments", [Class])
     );
 generate_message(stateful_block_dispatch, Class, Selector) ->
+    %% BT-2812 code review: the underlying check (erlang:is_function/2 arity
+    %% comparison) cannot distinguish "this block captures mutable state and
+    %% needs StateAcc threading" from "this block was simply called with the
+    %% wrong argument count" — both shapes present as the same raw fun arity.
+    %% Don't assert a specific cause the check hasn't actually confirmed.
     iolist_to_binary(
         io_lib:format(
-            "Cannot call '~s' on ~s via perform: (block captures mutable state - call it directly instead)",
+            "Cannot call '~s' on ~s via perform: (wrong number of arguments, or the block captures mutable state and must be invoked directly)",
             [Selector, Class]
         )
     );

@@ -100,3 +100,16 @@ TestCase subclass: BlocksTest
     self should: [
       statefulBlock perform: #value: withArguments: #(3)
     ] raise: #stateful_block_dispatch
+
+  testPerformWithWrongArityOnPureBlockAlsoRaisesSameErrorKind =>
+    // BT-2812 code review: erlang:is_function/2 arity comparison can't tell a
+    // genuine Tier 2 (stateful) block from a Tier 1 (pure) block simply called
+    // with the wrong argument count — both present as the receiver's fun
+    // being one arity larger than the selector expects. A pure 2-arg block
+    // called via #value: (1-arg) hits the same stateful_block_dispatch
+    // branch even though it captures no state at all, so the error kind is
+    // reused for both causes and the message/hint deliberately don't assert
+    // a specific one.
+    self should: [
+      [:a :b | a + b] perform: #value: withArguments: #(3)
+    ] raise: #stateful_block_dispatch
