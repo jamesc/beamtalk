@@ -1,7 +1,7 @@
 # ADR 0108: Named Union Type Aliases (`type` Declarations)
 
 ## Status
-Proposed (2026-07-15)
+Accepted (2026-07-15)
 
 ## Context
 
