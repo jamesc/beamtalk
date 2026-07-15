@@ -355,6 +355,12 @@ pub struct CodegenOptions {
     /// ADR 0098 Phase 3: producing compound OTP version (`<release>-<erts>`) to
     /// bake into `__beamtalk_meta`. Set alongside `beamtalk_version`.
     otp_release: Option<String>,
+    /// BT-2887: optional FFI type registry (ADR 0075) threaded to the
+    /// return-type writeback pass so methods whose body type is inferred
+    /// purely via an FFI call (e.g. `foo => Erlang lists reverse: x`) get
+    /// `List` written back to `method_return_types` before codegen.
+    native_type_registry:
+        Option<std::sync::Arc<crate::semantic_analysis::type_checker::NativeTypeRegistry>>,
 }
 
 impl CodegenOptions {
@@ -373,6 +379,7 @@ impl CodegenOptions {
             codegen_diagnostics: None,
             beamtalk_version: None,
             otp_release: None,
+            native_type_registry: None,
         }
     }
 
@@ -474,6 +481,19 @@ impl CodegenOptions {
     #[must_use]
     pub fn with_stdlib_mode(mut self, enabled: bool) -> Self {
         self.stdlib_mode = enabled;
+        self
+    }
+
+    /// BT-2887: sets the native FFI type registry (ADR 0075) used by the
+    /// return-type writeback pass, from an optional value.
+    #[must_use]
+    pub fn with_native_type_registry(
+        mut self,
+        registry: Option<
+            std::sync::Arc<crate::semantic_analysis::type_checker::NativeTypeRegistry>,
+        >,
+    ) -> Self {
+        self.native_type_registry = registry;
         self
     }
 }
@@ -588,7 +608,11 @@ pub fn generate_module_with_warnings(
     // BT-1218: Also writeback supervisor_kind for Supervisor/DynamicSupervisor subclasses.
     // We clone to avoid mutating the caller's Module.
     let mut module_with_writeback = module.clone();
-    crate::semantic_analysis::apply_return_type_writeback(&mut module_with_writeback, &hierarchy);
+    crate::semantic_analysis::apply_return_type_writeback(
+        &mut module_with_writeback,
+        &hierarchy,
+        options.native_type_registry.as_deref(),
+    );
     crate::semantic_analysis::apply_supervisor_kind_writeback(
         &mut module_with_writeback,
         &hierarchy,
