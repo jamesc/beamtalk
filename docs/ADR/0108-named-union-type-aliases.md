@@ -136,12 +136,24 @@ about *naming*, not about *identity*. There is no new kind of type.
   (`protocol_registry.rs:296-334`) is one-directional
   (protocol-name vs. `hierarchy.has_class`); alias registration needs
   checks against both classes and protocols, and both of those need a
-  check against aliases. Registration order: classes, then protocols
-  (today's order — `ProtocolRegistry::register_module` already runs
-  after class-hierarchy extraction), then aliases last, so an alias
-  colliding with either a class or a protocol always has a fully-formed
-  hierarchy/registry to check against and never races a same-file
-  same-name definition of the other two kinds.
+  check against aliases. Registration order for a **batch compile**:
+  classes, then protocols (today's order — `ProtocolRegistry::
+  register_module` already runs after class-hierarchy extraction), then
+  aliases last, so an alias colliding with either a class or a protocol
+  always has a fully-formed hierarchy/registry to check against and
+  never races a same-file same-name definition of the other two kinds.
+  This ordering guarantee does **not** hold for a **live REPL/hot-reload
+  session**, where a user can declare `type Foo = ...` and later, in the
+  same or a different session turn, redefine `Foo` as a class
+  (`Foo subclass: Bar`) — arriving in the opposite order the batch
+  sequence assumes. Class and protocol registration must therefore
+  *also* query the alias table for collisions in the live path (not just
+  alias registration querying classes/protocols), symmetric with the
+  batch case — otherwise a live `class Foo` can silently shadow an
+  existing `type Foo` alias with no diagnostic. This is a live-session
+  requirement on class/protocol registration, not just a new check
+  inside alias registration — flagged explicitly for the implementing
+  issue so it isn't discovered as a live-only collision bug.
 - **Aliases are exported, like classes and protocols.** This is not
   optional: the ADR's flagship consumers are *stdlib* annotations —
   BT-2618's `RestartStrategy` and BT-2827's
@@ -166,6 +178,19 @@ about *naming*, not about *identity*. There is no new kind of type.
     an internal alias is a compile error (the consumer could never name
     or resolve it) — the same leakage rule 0071 applies to internal
     classes in public positions.
+  - **The leakage check must run on the expansion, not just the
+    written name.** Because aliases are transparent, a *public* alias
+    can still leak an internal type through substitution —
+    `public type Pub = InternalAlias | String` never writes
+    `InternalAlias` in a public *signature*, but `Pub`'s expansion
+    contains whatever `InternalAlias` expands to, exposing it to
+    consumers who can never resolve that name. The declaration-time
+    check for a public alias must therefore walk its fully-expanded
+    `TypeAnnotation` and reject any internal class, protocol, or alias
+    reachable through it — not just check the alias's own
+    `internal`/public flag — mirroring how the alias's own expansion is
+    already computed eagerly at declaration time (see No recursion,
+    below).
   - **Cross-package collisions** (two dependencies each exporting
     `type Id = ...`) are diagnosed at seeding time like pre-loaded
     protocol collisions. `pkg@Name` qualification for aliases is
@@ -699,8 +724,16 @@ To be broken into an epic via `/plan-adr` once Accepted. Expected shape:
   tables, mirroring `ProtocolRegistry::extract_protocol_infos` /
   `add_pre_loaded` (BT-2006): current-module wins, cross-package
   collisions diagnosed at seeding time. `internal type` support plus the
-  leakage check (public signature referencing an internal alias is a
-  compile error, per ADR 0071's rule for internal classes).
+  leakage check — run on the *expanded* `TypeAnnotation` of every public
+  alias and public signature, not just the written name, so a public
+  alias cannot smuggle an internal class/protocol/alias through
+  transparent substitution (see Semantics).
+- **Hot reload (live-session namespace ordering):** class and protocol
+  registration in the live/REPL path also query the alias table for
+  collisions, symmetric with alias registration querying classes and
+  protocols — the batch registration order (classes → protocols →
+  aliases) does not bound the order live redefinitions can arrive in
+  (see Semantics).
 - **Codegen:** optional named `-type` emission per alias in
   `spec_codegen.rs`; annotation sites reference it. No other codegen
   change.
