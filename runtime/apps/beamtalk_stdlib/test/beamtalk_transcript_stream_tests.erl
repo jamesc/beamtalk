@@ -608,3 +608,74 @@ start_link_named_variant_test() ->
     Result = gen_server:call(Name, recent),
     ?assertEqual([<<"named_test">>], Result),
     gen_server:stop(Name).
+
+%%% ============================================================================
+%%% Edge-path coverage tests — dispatch catch-all, handle_info, remove_subscriber
+%%% ============================================================================
+
+%% --- handle_call({Selector, Args}) unknown-selector dispatch path ---
+%%
+%% When a {Selector, Args} tuple with an unrecognised Selector reaches
+%% handle_call/3, the server spawns a process that calls
+%% beamtalk_dispatch:lookup/5. For a method that TranscriptStream does not
+%% implement, dispatch returns {error, DNU} and the spawned process replies
+%% {error, _} to the caller. Lines 173–209 in the source.
+
+sync_unknown_tuple_selector_dispatches_dnu_test() ->
+    {ok, Pid} = beamtalk_transcript_stream:start_link(),
+    %% {unknown_method, []} matches handle_call({Selector, Args}, ...) and
+    %% routes through the beamtalk_dispatch:lookup/5 path (not the bare-atom DNU path).
+    Reply = gen_server:call(Pid, {unknown_method, []}, 5000),
+    ?assertMatch({error, _}, Reply),
+    %% Server must still be alive after the dispatch.
+    ?assert(is_process_alive(Pid)),
+    gen_server:stop(Pid).
+
+%% --- handle_cast({Selector, Args, FuturePid}) unknown-selector async dispatch path ---
+%%
+%% The async variant spawns a dispatch process that rejects the future on DNU.
+%% beamtalk_future:await/2 throws {future_rejected, Reason} on rejection.
+%% Lines 265–298 in the source.
+
+async_unknown_tuple_selector_dispatches_dnu_test() ->
+    {ok, Pid} = beamtalk_transcript_stream:start_link(),
+    Future = beamtalk_future:new(),
+    FuturePid = beamtalk_future:pid(Future),
+    gen_server:cast(Pid, {unknown_async_method, [], FuturePid}),
+    try beamtalk_future:await(Future, 5000) of
+        _ -> ?assert(false)
+    catch
+        throw:{future_rejected, _} -> ok
+    end,
+    %% Server must still be alive after the async dispatch.
+    ?assert(is_process_alive(Pid)),
+    gen_server:stop(Pid).
+
+%% --- handle_info(_Info, State) catch-all ---
+%%
+%% Unexpected messages sent directly to the server pid are silently ignored.
+%% Line 307 in the source.
+
+handle_info_unknown_msg_ignored_test() ->
+    {ok, Pid} = beamtalk_transcript_stream:start_link(),
+    Pid ! some_completely_unexpected_message,
+    %% Sync barrier: a gen_server:call forces the mailbox to be drained up to
+    %% (and including) this call, so we know handle_info/2 has run.
+    Result = gen_server:call(Pid, recent),
+    ?assertEqual([], Result),
+    ?assert(is_process_alive(Pid)),
+    gen_server:stop(Pid).
+
+%% --- remove_subscriber/2 error branch — subscriber not found ---
+%%
+%% Unsubscribing a pid that was never subscribed hits the maps:find error
+%% branch in remove_subscriber/2 and is a safe no-op. Line 374 in the source.
+
+unsubscribe_never_subscribed_is_safe_test() ->
+    {ok, Pid} = beamtalk_transcript_stream:start_link(),
+    %% self() was never subscribed; handle_call delegates to remove_subscriber/2
+    %% which hits the {error -> State} branch.
+    SelfRef = gen_server:call(Pid, {unsubscribe, []}),
+    ?assertMatch({beamtalk_object, 'TranscriptStream', beamtalk_transcript_stream, Pid}, SelfRef),
+    ?assert(is_process_alive(Pid)),
+    gen_server:stop(Pid).
