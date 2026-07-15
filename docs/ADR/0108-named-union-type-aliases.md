@@ -712,6 +712,20 @@ To be broken into an epic via `/plan-adr` once Accepted. Expected shape:
   alias name is a natural key: record alias-name → annotation-site edges
   at resolution time and re-check only dependents. Cycle detection
   re-runs on every live alias redefinition (see Semantics).
+- **System Browser / LiveView IDE (ADR 0096, ADR 0046):** aliases need no
+  new creation UI — a `type` declaration is ordinary top-level source
+  text, created through the existing Editor pane (`load-source`) exactly
+  like a class or protocol definition. Display is a new sibling category,
+  not a new sidebar: `browse-classes` (ADR 0096) gets a sibling
+  `browse-type-aliases` op returning `{value, [AliasRow]}` rows
+  (`name`, `expansion`, `doc`, `source_file`, `internal`), and the System
+  Browser tree gains "Type Aliases" alongside its existing Classes/
+  Protocols panes; the VS Code Workspace Explorer sidebar (ADR 0046)
+  gains a matching "Type Aliases (N)" section beside its "Classes (N
+  loaded)" section. Both are read-only listings — Observer-role-safe
+  (ADR 0091 Decision 4: no user code triggered), same as `browse-classes`.
+  Update `docs/development/surface-parity.md`'s browse-op table with the
+  new op alongside `browse-classes`/`browse-protocols`.
 - **LSP/REPL parity:** completions for alias names in type position.
   **Go-to-definition works by construction**: `TypeAliasDefinition` is a
   real AST node with a span, and every use site resolves through the
@@ -758,7 +772,10 @@ To be broken into an epic via `/plan-adr` once Accepted. Expected shape:
   kind), ADR 0070/0071 (package namespaces and visibility — alias
   export follows the protocol-metadata seeding model, and `internal`
   applies to aliases), ADR 0103 (sendability — sees the alias
-  expansion; `Negation`/`Intersection` edge flagged there)
+  expansion; `Negation`/`Intersection` edge flagged there), ADR 0096
+  (System Browser browse-op precedent `browse-type-aliases` follows),
+  ADR 0046 (VS Code Workspace Explorer sidebar — matching "Type
+  Aliases" section)
 - Documentation: `docs/beamtalk-language-features.md` §Union Types,
   §Difference and Intersection Types; `docs/beamtalk-principles.md`
   (Non-Goals — mandatory static typing);
