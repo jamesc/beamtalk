@@ -709,8 +709,15 @@ To be broken into an epic via `/plan-adr` once Accepted. Expected shape:
   surface as a generic "unknown type `T`" rather than the specific
   "unbound type parameter" diagnostic the Error examples promise —
   the alias-declaration validator must special-case single-letter RHS
-  identifiers explicitly, not rely on `resolve_type_annotation`'s
-  ordinary fallthrough to produce this message. Bidirectional
+  identifiers explicitly: first check the class hierarchy (a class
+  actually named `T` is legitimate, if unusual, and must resolve as a
+  nominal class exactly as `resolve_type_annotation` would); only if
+  the name is not found there does it emit "unbound type parameter"
+  rather than the generic "unknown type" fallthrough — mirroring the
+  `!hierarchy.has_class(name)` guard `infer_method_local_params`
+  already applies before treating a bare single letter as inferrable
+  (see Semantics). Multi-letter unknown names are unaffected and fall
+  through to ordinary `resolve_type_annotation` as before. Bidirectional
   namespace collision checks against classes *and* protocols (new
   plumbing — the existing `protocol_registry.rs` check is
   one-directional). `infer_method_local_params`
@@ -756,8 +763,22 @@ To be broken into an epic via `/plan-adr` once Accepted. Expected shape:
   ADR 0107 hit for leaf-status changes (BT-2856). Unlike 0107's
   `trigger_leaf_change/1` (no lookup key, sweeps all live classes), the
   alias name is a natural key: record alias-name → annotation-site edges
-  at resolution time and re-check only dependents. Cycle detection
-  re-runs on every live alias redefinition (see Semantics).
+  at resolution time — spanning the **full transitive expansion walk**,
+  not just the outermost written name. Resolving `p :: B` where
+  `type B = A | #z` and `type A = #x | #y` must record edges for
+  *both* `B` and `A` against that annotation site; recording only `B`
+  would leave a live redefinition of `A` alone unable to trigger a
+  re-check of `p`'s site, even though `B`'s effective expansion changed.
+  Because alias resolution is eager (see No recursion — recursion is
+  ruled out specifically *because* expansion is eager, not lazy), the
+  alias table stores each alias's `TypeAnnotation` (the declared RHS),
+  and a re-check re-runs `resolve_type_annotation` on the dependent
+  site's original annotation from scratch — there is no pre-computed
+  `InferredType` to patch in place, so a redefinition of `A` alone
+  correctly produces a fresh, fully re-expanded `B` (and hence a fresh
+  result for `p`) the moment the transitively-recorded edge fires the
+  re-check. Cycle detection re-runs on every live alias redefinition
+  (see Semantics).
 - **System Browser / LiveView IDE (ADR 0096, ADR 0046):** aliases need no
   new creation UI — a `type` declaration is ordinary top-level source
   text, created through the existing Editor pane (`load-source`) exactly
@@ -780,7 +801,16 @@ To be broken into an epic via `/plan-adr` once Accepted. Expected shape:
   vocabulary) with no compensating benefit, so the op should filter
   `internal: true` rows whose `source_file` is outside the current
   package, symmetric with how `internal type` already prevents those
-  names from being written or resolved cross-package.
+  names from being written or resolved cross-package. The filter
+  belongs at the **seeding boundary** — a dependency's `internal`
+  aliases are simply never seeded into a consumer's alias table in the
+  first place (the `add_pre_loaded` analogue for aliases, mirroring how
+  `internal` protocols are already never seeded into consumers) — not
+  as a query-time filter over `browse-type-aliases`'s result set.
+  Seeding-time exclusion means the name is absent from the consumer's
+  compilation entirely, including from error paths, rather than merely
+  hidden from one browse op while still resolvable or leakable
+  elsewhere.
   Update `docs/development/surface-parity.md`'s browse-op table with the
   new op alongside `browse-classes`/`browse-protocols`.
 - **LSP/REPL parity:** completions for alias names in type position.
