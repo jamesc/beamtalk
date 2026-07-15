@@ -3,6 +3,30 @@
 ## Status
 Accepted (2026-07-15)
 
+## Implementation Tracking
+
+**Epic:** [BT-2893](https://linear.app/beamtalk/issue/BT-2893)
+**Issues:**
+
+| Phase | Issue | Title | Size | Blocked by |
+|---|---|---|---|---|
+| 1 | [BT-2894](https://linear.app/beamtalk/issue/BT-2894) | AST, parser, unparse for `type Name = ...` | M | – |
+| 2 | [BT-2895](https://linear.app/beamtalk/issue/BT-2895) | Alias table + `resolve_type_annotation` integration | M | BT-2894 |
+| 3 | [BT-2896](https://linear.app/beamtalk/issue/BT-2896) | Cycle detection + topological sort (batch resolution) | M | BT-2895 |
+| 4 | [BT-2897](https://linear.app/beamtalk/issue/BT-2897) | Display-name provenance for hover/diagnostics | S | BT-2895 |
+| 5 | [BT-2898](https://linear.app/beamtalk/issue/BT-2898) | Export, seeding, `internal` modifier, leakage check | M | BT-2895 |
+| 6 | [BT-2899](https://linear.app/beamtalk/issue/BT-2899) | Alias-name → annotation-site hot-reload re-check trigger | M | BT-2895, BT-2896 |
+| 7 | [BT-2900](https://linear.app/beamtalk/issue/BT-2900) | Named `-type` emission in `spec_codegen.rs` | S | BT-2895 |
+| 8 | [BT-2901](https://linear.app/beamtalk/issue/BT-2901) | LSP: completions, go-to-definition, find-references | M | BT-2895, BT-2899 |
+| 8 | [BT-2902](https://linear.app/beamtalk/issue/BT-2902) | REPL: `:help`, `type` input, display-value confirmation | S | BT-2895 |
+| 8 | [BT-2903](https://linear.app/beamtalk/issue/BT-2903) | System Browser `browse-type-aliases` + VS Code sidebar | M | BT-2898 |
+| 9 | [BT-2904](https://linear.app/beamtalk/issue/BT-2904) | Docs: language features, syntax rationale, surface parity | S | BT-2901, BT-2902, BT-2903 |
+| 10 | [BT-2905](https://linear.app/beamtalk/issue/BT-2905) | E2E btscript test (required final phase) | S | BT-2899, BT-2900, BT-2901, BT-2902 |
+
+**Status:** Planned
+
+**Downstream:** BT-2827 (`Json.parse:`/`Yaml.parse:`/`HTTPResponse.bodyAsJson` typed returns) is blocked by this epic and will retarget once it lands.
+
 ## Context
 
 ### Problem statement
