@@ -361,6 +361,7 @@ fn test_bt897_subdirectory_module_name_consistency() {
 
     let module = Module {
         classes: vec![class],
+        type_aliases: Vec::new(),
         expressions: vec![],
         method_definitions: vec![],
         protocols: Vec::new(),
@@ -1241,6 +1242,7 @@ fn test_standalone_class_reference_uses_dynamic_module_name() {
     };
 
     let module = Module {
+        type_aliases: Vec::new(),
         expressions: vec![bare(expr)],
         classes: vec![],
         method_definitions: Vec::new(),
@@ -1291,6 +1293,7 @@ fn test_standalone_class_reference_validates_undefined_classes() {
     };
 
     let module = Module {
+        type_aliases: Vec::new(),
         expressions: vec![bare(expr)],
         classes: vec![],
         method_definitions: Vec::new(),
@@ -3026,6 +3029,7 @@ fn test_qualified_class_reference_standalone() {
     };
 
     let module = Module {
+        type_aliases: Vec::new(),
         expressions: vec![bare(expr)],
         classes: vec![],
         method_definitions: Vec::new(),

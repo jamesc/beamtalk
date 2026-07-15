@@ -1159,6 +1159,7 @@ impl Parser {
         let mut classes = Vec::new();
         let mut method_definitions = Vec::new();
         let mut protocols = Vec::new();
+        let mut type_aliases = Vec::new();
         let mut expressions = Vec::new();
 
         // Parse statements until EOF.
@@ -1167,8 +1168,13 @@ impl Parser {
         // collect their own comments inside parse_class_definition() /
         // parse_standalone_method_definition() via the same helper.
         while !self.is_at_end() {
+            // Check if this looks like a type alias definition (ADR 0108, Phase 1)
+            if self.is_at_type_alias_definition() {
+                let type_alias = self.parse_type_alias_definition();
+                type_aliases.push(type_alias);
+            }
             // Check if this looks like a protocol definition
-            if self.is_at_protocol_definition() {
+            else if self.is_at_protocol_definition() {
                 let protocol = self.parse_protocol_definition();
                 protocols.push(protocol);
             }
@@ -1230,6 +1236,7 @@ impl Parser {
         let (file_leading_comments, file_trailing_comments) = if classes.is_empty()
             && method_definitions.is_empty()
             && protocols.is_empty()
+            && type_aliases.is_empty()
             && expressions.is_empty()
         {
             (eof_comments, Vec::new())
@@ -1249,6 +1256,7 @@ impl Parser {
             classes,
             method_definitions,
             protocols,
+            type_aliases,
             expressions,
             span,
             file_leading_comments,
@@ -1315,6 +1323,26 @@ impl Parser {
     pub(super) fn is_at_protocol_definition(&self) -> bool {
         matches!(self.peek_at(0), Some(TokenKind::Identifier(name)) if name == "Protocol")
             && matches!(self.peek_at(1), Some(TokenKind::Keyword(k)) if k == "define:")
+    }
+
+    /// Checks if the current position looks like a type alias definition (ADR 0108, Phase 1).
+    ///
+    /// Type alias definitions follow the pattern:
+    /// - `type <Name> = <TypeAnnotation>`
+    ///
+    /// `type` is a *contextual* keyword: it only introduces a type alias when
+    /// followed by an uppercase-leading identifier and a bare `=` (a
+    /// `BinarySelector("=")` token, not `TokenKind::Assign` which is `:=`).
+    /// Anywhere else — `type := 5`, `foo type`, `type printString` — this
+    /// predicate returns `false` and `type` parses as an ordinary identifier,
+    /// exactly as it does today.
+    pub(super) fn is_at_type_alias_definition(&self) -> bool {
+        matches!(self.peek_at(0), Some(TokenKind::Identifier(name)) if name == "type")
+            && matches!(
+                self.peek_at(1),
+                Some(TokenKind::Identifier(name)) if name.chars().next().is_some_and(char::is_uppercase)
+            )
+            && matches!(self.peek_at(2), Some(TokenKind::BinarySelector(op)) if op == "=")
     }
 
     /// Checks if the current position looks like a standalone method definition.

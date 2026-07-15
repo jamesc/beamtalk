@@ -129,6 +129,7 @@ Module {
     ],
     method_definitions: [],
     protocols: [],
+    type_aliases: [],
     expressions: [
         ExpressionStatement {
             comments: CommentAttachment {

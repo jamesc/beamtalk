@@ -129,6 +129,7 @@ Module {
         },
     ],
     protocols: [],
+    type_aliases: [],
     expressions: [],
     span: Span {
         start: 290,

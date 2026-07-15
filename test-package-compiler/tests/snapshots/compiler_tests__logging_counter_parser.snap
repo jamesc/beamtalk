@@ -317,6 +317,7 @@ Module {
     ],
     method_definitions: [],
     protocols: [],
+    type_aliases: [],
     expressions: [],
     span: Span {
         start: 350,

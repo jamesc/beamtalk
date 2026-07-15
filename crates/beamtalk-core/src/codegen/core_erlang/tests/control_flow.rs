@@ -428,6 +428,7 @@ fn test_codegen_rejects_stored_closure_with_field_assignment() {
         classes: vec![],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![bare(Expression::Assignment {
             target: Box::new(Expression::Identifier(Identifier::new(
                 "test",
@@ -500,6 +501,7 @@ fn test_codegen_allows_stored_closure_with_local_mutation() {
         classes: vec![],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![bare(Expression::Assignment {
             target: Box::new(Expression::Identifier(Identifier::new(
                 "test",

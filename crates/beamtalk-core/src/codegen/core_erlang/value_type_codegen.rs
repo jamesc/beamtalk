@@ -3951,6 +3951,7 @@ mod tests {
             classes: vec![class],
             method_definitions: Vec::new(),
             protocols: Vec::new(),
+            type_aliases: Vec::new(),
             expressions: Vec::new(),
             span: s(),
             file_leading_comments: vec![],

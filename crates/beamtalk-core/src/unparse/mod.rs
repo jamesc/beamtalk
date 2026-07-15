@@ -38,7 +38,7 @@ use crate::ast::{
     Expression, ExpressionStatement, Identifier, KeywordPart, Literal, MapPair, MapPatternKey,
     MatchArm, MessageSelector, MethodDefinition, Module, Pattern, ProtocolDefinition,
     ProtocolMethodSignature, StandaloneMethodDefinition, StateDeclaration, StringSegment,
-    TypeAnnotation,
+    TypeAliasDefinition, TypeAnnotation,
 };
 use crate::codegen::core_erlang::document::{
     DEFAULT_LINE_WIDTH, Document, break_, concat, group, line, nest, nil,
@@ -331,6 +331,12 @@ pub(crate) fn unparse_module_doc(module: &Module) -> Document<'static> {
         docs.push(line());
     }
 
+    // ADR 0108 Phase 1: Type alias definitions
+    for type_alias in &module.type_aliases {
+        docs.push(unparse_type_alias_definition(type_alias));
+        docs.push(line());
+    }
+
     // ADR 0068 Phase 2a: Protocol definitions
     for protocol in &module.protocols {
         docs.push(unparse_protocol_definition(protocol));
@@ -550,6 +556,40 @@ pub(crate) fn unparse_standalone_method_definition(
         Document::Str(" >> ")
     };
     docvec![class, separator, unparse_method_definition(&smd.method)]
+}
+
+/// Builds a [`Document`] for a [`TypeAliasDefinition`] (ADR 0108 Phase 1).
+///
+/// Emits the optional doc comment followed by the declaration header
+/// (`type Name = <TypeAnnotation>`).
+#[must_use]
+fn unparse_type_alias_definition(type_alias: &TypeAliasDefinition) -> Document<'static> {
+    let mut docs: Vec<Document<'static>> = Vec::new();
+
+    // Non-doc leading comments
+    docs.extend(unparse_comment_attachment_leading(&type_alias.comments));
+
+    // Doc comment
+    if let Some(doc) = &type_alias.doc_comment {
+        for line_text in doc.lines() {
+            if line_text.is_empty() {
+                docs.push(Document::Str("///"));
+            } else {
+                docs.push(docvec!["/// ", leaf::raw_text(line_text)]);
+            }
+            docs.push(line());
+        }
+    }
+
+    // `type Name = <TypeAnnotation>`
+    docs.push(docvec![
+        "type ",
+        leaf::ident(&type_alias.name.name),
+        " = ",
+        unparse_type_annotation(&type_alias.annotation),
+    ]);
+
+    concat(docs)
 }
 
 /// Builds a [`Document`] for a [`ProtocolDefinition`] (ADR 0068 Phase 2a).
@@ -3423,6 +3463,41 @@ mod tests {
             "  /// Convert to display string.\n",
             "  asString -> String\n",
         );
+        assert_identity(source);
+    }
+
+    // --- Type alias round-trip (ADR 0108, Phase 1, BT-2894) ---
+
+    #[test]
+    fn type_alias_simple_round_trip() {
+        let source = "type Port = Integer\n";
+        assert_identity(source);
+    }
+
+    #[test]
+    fn type_alias_singleton_union_round_trip() {
+        let source = "type RestartStrategy = #temporary | #transient | #permanent\n";
+        assert_identity(source);
+    }
+
+    #[test]
+    fn type_alias_doc_comment_round_trip() {
+        let source = concat!(
+            "/// How a supervised child restarts after exit.\n",
+            "type RestartStrategy = #temporary | #transient | #permanent\n",
+        );
+        assert_identity(source);
+    }
+
+    #[test]
+    fn type_alias_generic_round_trip() {
+        let source = "type IntList = List(Integer)\n";
+        assert_identity(source);
+    }
+
+    #[test]
+    fn type_alias_difference_round_trip() {
+        let source = "type PublicTag = Symbol \\ (#reserved | #internal)\n";
         assert_identity(source);
     }
 

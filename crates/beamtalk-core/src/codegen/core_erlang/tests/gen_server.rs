@@ -1065,6 +1065,7 @@ fn test_class_registration_generation() {
     };
 
     let module = Module {
+        type_aliases: Vec::new(),
         expressions: vec![],
         classes: vec![class],
         method_definitions: Vec::new(),
@@ -1313,6 +1314,7 @@ fn test_multiple_classes_registration() {
     }
 
     let module = Module {
+        type_aliases: Vec::new(),
         expressions: vec![],
         classes: vec![
             make_actor_class("Counter", 7, "value", 5, 20),
@@ -1452,6 +1454,7 @@ fn test_multi_class_early_error_short_circuits() {
     // ValidB is fine; ShadowA would be the one shadowing stdlib.
     // The fix must ensure that if _Reg0 is {error, ...}, we never reach _Reg1.
     let module = Module {
+        type_aliases: Vec::new(),
         expressions: vec![],
         classes: vec![make_class("ShadowA", 7, 20), make_class("ValidB", 6, 30)],
         method_definitions: Vec::new(),
@@ -1531,6 +1534,7 @@ fn test_three_class_short_circuit_nesting() {
     }
 
     let module = Module {
+        type_aliases: Vec::new(),
         expressions: vec![],
         classes: vec![make_class("A", 1), make_class("B", 1), make_class("C", 1)],
         method_definitions: Vec::new(),
@@ -1683,6 +1687,7 @@ fn test_is_actor_class_direct_actor_subclass() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: Span::new(0, 0),
         file_leading_comments: vec![],
@@ -1722,6 +1727,7 @@ fn test_is_actor_class_object_subclass_is_value_type() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: Span::new(0, 0),
         file_leading_comments: vec![],
@@ -1786,6 +1792,7 @@ fn test_is_actor_class_multi_level_inheritance() {
         classes: vec![counter, logging_counter.clone()],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: Span::new(0, 0),
         file_leading_comments: vec![],
@@ -1800,6 +1807,7 @@ fn test_is_actor_class_multi_level_inheritance() {
         classes: vec![logging_counter],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: Span::new(0, 0),
         file_leading_comments: vec![],
@@ -1848,6 +1856,7 @@ fn test_is_actor_class_unknown_superclass_defaults_to_actor() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: Span::new(0, 0),
         file_leading_comments: vec![],
@@ -1888,6 +1897,7 @@ fn test_is_actor_class_collection_subclass_is_value_type() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: Span::new(0, 0),
         file_leading_comments: vec![],
@@ -1932,6 +1942,7 @@ fn test_is_actor_class_integer_subclass_is_value_type() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: Span::new(0, 0),
         file_leading_comments: vec![],
@@ -1975,6 +1986,7 @@ fn test_is_actor_class_root_class_is_value_type() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: Span::new(0, 0),
         file_leading_comments: vec![],
@@ -2012,6 +2024,7 @@ fn test_generate_with_bindings_compiles_value_type() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: Vec::new(),
         span: Span::new(0, 0),
         file_leading_comments: vec![],
@@ -2349,6 +2362,7 @@ fn test_object_subclass_no_auto_getters() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: Vec::new(),
         span: Span::new(0, 0),
         file_leading_comments: vec![],
@@ -2423,6 +2437,7 @@ fn test_value_subclass_user_defined_overrides_auto() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: Vec::new(),
         span: Span::new(0, 0),
         file_leading_comments: vec![],
@@ -2467,6 +2482,7 @@ fn test_value_subclass_no_slots_no_keyword_constructor() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: Vec::new(),
         span: Span::new(0, 0),
         file_leading_comments: vec![],
@@ -2570,6 +2586,7 @@ fn test_value_subclass_class_method_slot_send_routes_to_constructor() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: Vec::new(),
         span: Span::new(0, 0),
         file_leading_comments: vec![],
@@ -3046,6 +3063,7 @@ fn test_value_subclass_typed_fields_emit_type_alias() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: Vec::new(),
         span: Span::new(0, 0),
         file_leading_comments: vec![],
@@ -3375,6 +3393,7 @@ fn test_bt1213_block_value_with_captured_mutation_actor() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: Vec::new(),
         span: Span::new(0, 0),
         file_leading_comments: vec![],
@@ -3468,6 +3487,7 @@ fn make_native_actor_module() -> Module {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: Vec::new(),
         span: Span::new(0, 0),
         file_leading_comments: vec![],
@@ -3807,6 +3827,7 @@ fn make_native_actor_with_class_methods() -> Module {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: Vec::new(),
         span: Span::new(0, 0),
         file_leading_comments: vec![],
@@ -4039,6 +4060,7 @@ fn protocol_only_module_generates_register_class() {
             doc_comment: None,
             span: Span::new(0, 0),
         }],
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: Span::new(0, 0),
         file_leading_comments: vec![],
@@ -4650,6 +4672,7 @@ fn make_actor_typed_no_default(field_name: &str, ty: TypeAnnotation) -> Module {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: Vec::new(),
         span: s,
         file_leading_comments: vec![],
