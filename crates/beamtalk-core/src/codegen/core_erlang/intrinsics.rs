@@ -1302,6 +1302,70 @@ impl CoreErlangGenerator {
         ]
     }
 
+    /// BT-2888: Guards a List/Collection iteration primitive's block argument
+    /// (`do:`/`collect:`/`select:`/`reject:`/`inject:into:`) against being a
+    /// Tier 2 (stateful) block.
+    ///
+    /// Unlike Block's `value*` structural intrinsics (BT-2812), these
+    /// selectors' compiled method bodies are real, already-correct BIF
+    /// lowerings (`tier1_doc`, e.g. `lists:map/2`, `beamtalk_list:do/2`) — a
+    /// Tier 1 (pure) block reached via generic dispatch (`perform:`) already
+    /// works. But that BIF body applies the block with a plain N-arg
+    /// `erlang:apply`; a Tier 2 block compiles to an (N+1)-arg fun expecting a
+    /// live `StateAcc` (ADR-0041) that generic dispatch has no way to supply,
+    /// which today hits a raw Erlang arity crash (confirmed empirically)
+    /// instead of a clear diagnostic. This wraps the existing correct Tier 1
+    /// body with the same `stateful_block_dispatch` error BT-2812
+    /// established, rather than replacing a placeholder.
+    pub(in crate::codegen::core_erlang) fn generate_stateful_block_guard(
+        &mut self,
+        block_param: &str,
+        pure_arity: usize,
+        real_selector: &str,
+        class_name: &str,
+        tier1_doc: Document<'static>,
+    ) -> Document<'static> {
+        let error_base = self.fresh_temp_var("Err");
+        let error_sel = self.fresh_temp_var("Err");
+        let error_hint = self.fresh_temp_var("Err");
+        let hint = leaf::binary_lit(
+            "Block captures mutable state and must be invoked directly instead of via perform:/dynamic dispatch",
+        );
+        let stateful_branch = docvec![
+            "let ",
+            leaf::var(error_base.clone()),
+            " = call 'beamtalk_error':'new'('stateful_block_dispatch', ",
+            leaf::atom(class_name),
+            ") in let ",
+            leaf::var(error_sel.clone()),
+            " = call 'beamtalk_error':'with_selector'(",
+            leaf::var(error_base),
+            ", ",
+            leaf::atom(real_selector),
+            ") in let ",
+            leaf::var(error_hint.clone()),
+            " = call 'beamtalk_error':'with_hint'(",
+            leaf::var(error_sel),
+            ", ",
+            hint,
+            ") in call 'beamtalk_error':'raise'(",
+            leaf::var(error_hint),
+            ")",
+        ];
+
+        docvec![
+            "case call 'erlang':'is_function'(",
+            leaf::var(block_param.to_string()),
+            ", ",
+            leaf::int_lit(i64::try_from(pure_arity + 1).unwrap_or(i64::MAX)),
+            ") of <'true'> when 'true' -> ",
+            stateful_branch,
+            " <'false'> when 'true' -> ",
+            tier1_doc,
+            " end",
+        ]
+    }
+
     /// BT-2803: Generates a runtime `erlang:is_function/1` guard for
     /// `valueWithArguments:` sends.
     ///
