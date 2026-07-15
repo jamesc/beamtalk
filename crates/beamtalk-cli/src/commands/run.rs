@@ -217,7 +217,7 @@ fn prepare_eval_environment(
     selector: &str,
     args: &[String],
 ) -> Result<Vec<OsString>> {
-    println!("Building...");
+    eprintln!("Building...");
     super::build::build(
         project_root.as_str(),
         &beamtalk_core::CompilerOptions::default(),
@@ -299,7 +299,7 @@ fn run_script(
 
     let args = prepare_eval_environment(project_root, class_name, selector, program_args)?;
 
-    println!("\nRunning {class_name}>>{selector}...");
+    eprintln!("\nRunning {class_name}>>{selector}...");
 
     let mut cmd = Command::new("erl");
     cmd.arg("-noshell")
@@ -416,10 +416,10 @@ fn run_connected(
     let host = node_info.connect_host().to_string();
     let port = node_info.port;
 
-    println!("Connecting to workspace {workspace_id} (port {port})...");
+    eprintln!("Connecting to workspace {workspace_id} (port {port})...");
     let mut client = connect_with_retries(&host, port, &cookie)?;
 
-    println!("Running {class_name}>>{selector} (connected)...\n");
+    eprintln!("Running {class_name}>>{selector} (connected)...\n");
 
     // Ctrl-C interrupts the dispatched job (parity with the REPL eval path).
     let interrupted = Arc::new(AtomicBool::new(false));
