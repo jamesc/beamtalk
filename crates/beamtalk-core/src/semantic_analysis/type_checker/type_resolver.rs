@@ -26,6 +26,7 @@ use std::collections::HashMap;
 use ecow::{EcoString, eco_format};
 
 use crate::ast::TypeAnnotation;
+use crate::semantic_analysis::alias_registry::AliasRegistry;
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 
@@ -51,7 +52,15 @@ pub(in crate::semantic_analysis) type SubstitutionMap = HashMap<EcoString, Infer
 ///   `true`, `false` are mapped to `UndefinedObject`, `True`, `False`. The
 ///   keyword `Never` becomes [`InferredType::Never`]. If the name appears in
 ///   `subst`, the substituted value wins (method-local / class-level type
-///   parameters resolve to their concrete bindings).
+///   parameters resolve to their concrete bindings). Otherwise, if the name
+///   is registered in `alias_registry` (ADR 0108, BT-2895), the reference
+///   expands *eagerly* to the alias's declared annotation, recursively
+///   resolved through this same function — so a `RestartStrategy` annotation
+///   resolves to the exact `InferredType::Union` its expansion would. This
+///   makes the resolution order `subst` → alias table → nominal class,
+///   disjoint by construction: ADR 0108 reserves every bare single-letter
+///   name for `subst`/generic type parameters and forbids it as an alias
+///   name, so the two lookups never contend for the same identifier.
 /// * [`TypeAnnotation::Generic`] — builds `Known { class_name: base, type_args }`
 ///   with every argument recursively resolved through the same rules. Provenance
 ///   is marked `Declared(span)` since the annotation is user-written.
@@ -94,8 +103,7 @@ pub(in crate::semantic_analysis) type SubstitutionMap = HashMap<EcoString, Infer
 ///
 /// The class hierarchy is *not* consulted during annotation resolution —
 /// "does this class exist?" is a call-site decision that happens *after* the
-/// annotation resolves, not during. A future evolution may thread one in for
-/// type-alias resolution; no current caller needs it.
+/// annotation resolves, not during.
 ///
 /// `protocol_registry` (ADR 0102 §1/§3, BT-2743) is threaded through purely
 /// for [`TypeAnnotation::Intersection`] resolution — every other variant
@@ -103,10 +111,68 @@ pub(in crate::semantic_analysis) type SubstitutionMap = HashMap<EcoString, Infer
 /// still resolves; `&`-typed protocol intersections just won't recognise a
 /// protocol name and will conservatively fall to `Never`, matching
 /// [`InferredType::intersect`]'s documented `None` behaviour).
+///
+/// `alias_registry` (ADR 0108, BT-2895) is consulted only by
+/// [`TypeAnnotation::Simple`] — see that variant's doc above. Pass `None`
+/// when no registry is available (a `Simple` name that would otherwise be an
+/// alias reference just resolves as an ordinary nominal class, matching
+/// pre-ADR-0108 behaviour).
 pub(in crate::semantic_analysis) fn resolve_type_annotation(
     ann: &TypeAnnotation,
     subst: &SubstitutionMap,
     protocol_registry: Option<&ProtocolRegistry>,
+    alias_registry: Option<&AliasRegistry>,
+) -> InferredType {
+    let mut expanding = Vec::new();
+    let mut memo = HashMap::new();
+    resolve_type_annotation_inner(
+        ann,
+        subst,
+        protocol_registry,
+        alias_registry,
+        &mut expanding,
+        &mut memo,
+    )
+}
+
+/// The actual resolution recursion, guarded by `expanding` — the stack of
+/// alias names currently being expanded on the current path — and cached by
+/// `memo` — every alias name already *fully* resolved earlier in this same
+/// top-level call.
+///
+/// Cycle detection *itself* (rejecting a cyclic alias at declaration time,
+/// e.g. `type A = B`, `type B = A`) is BT-2896, deliberately out of scope
+/// here (ADR 0108 "No recursion" explicitly assigns it to a later issue).
+/// But eager expansion means a cycle that slips past declaration-time
+/// checking (or simply hasn't been checked yet, since BT-2896 hasn't landed)
+/// would otherwise recurse forever the first time it's *referenced* — this
+/// guard is the "expansion itself carries a visited-set guard so a cycle
+/// that slips through is a diagnostic, never a hang" promise from that same
+/// ADR section, satisfied here defensively: a name already being expanded on
+/// this path resolves to `Dynamic` instead of recursing again.
+///
+/// `memo` exists for a different reason: without it, a *legal, acyclic*
+/// chain of aliases that each reference the previous one twice —
+/// `type L1 = L0 | L0`, `type L2 = L1 | L1`, …, `type Ln = L(n-1) | L(n-1)`
+/// — re-expands `L(n-1)` from scratch on both sides of every `|`, doubling
+/// the work at each level (`O(2ⁿ)` total). `expanding` (a path stack) does
+/// not prevent this — it only rejects a name that is an *ancestor* of
+/// itself, and `L(n-1)`'s two references here are siblings, not nested.
+/// Since resolution is a pure function of `(annotation, subst,
+/// alias_registry)` and `subst` never changes across a single top-level
+/// [`resolve_type_annotation`] call (every recursive call above threads the
+/// same `subst` unchanged), caching by alias name alone is sound *within*
+/// one call: the first full resolution of a name is reused verbatim for
+/// every subsequent reference, turning the exponential re-walk into one
+/// resolution per distinct alias name.
+#[allow(clippy::too_many_lines)] // one match arm per TypeAnnotation variant — see resolve_type_annotation's doc
+fn resolve_type_annotation_inner(
+    ann: &TypeAnnotation,
+    subst: &SubstitutionMap,
+    protocol_registry: Option<&ProtocolRegistry>,
+    alias_registry: Option<&AliasRegistry>,
+    expanding: &mut Vec<EcoString>,
+    memo: &mut HashMap<EcoString, InferredType>,
 ) -> InferredType {
     match ann {
         TypeAnnotation::Simple(type_id) => {
@@ -135,6 +201,41 @@ pub(in crate::semantic_analysis) fn resolve_type_annotation(
             if let Some(resolved) = subst.get(name) {
                 return resolved.clone();
             }
+            // ADR 0108 / BT-2895: alias table comes next in the resolution
+            // order (`subst` → alias table → nominal class). A reference to
+            // an alias name expands eagerly to its declared annotation,
+            // recursively resolved through this same function so a chain of
+            // aliases (`type B = A | #z`, `type A = #x | #y`) resolves all
+            // the way down to a plain structural `InferredType`.
+            if let Some(registry) = alias_registry {
+                if let Some(alias_info) = registry.get(name) {
+                    // See `resolve_type_annotation_inner`'s doc: a name
+                    // already fully resolved earlier in this call is reused
+                    // verbatim, avoiding the exponential re-walk a chain of
+                    // doubling aliases would otherwise trigger.
+                    if let Some(cached) = memo.get(name) {
+                        return cached.clone();
+                    }
+                    if expanding.contains(name) {
+                        // A cycle slipped through (BT-2896 not yet landed, or
+                        // not yet re-checked on a live redefinition) — never
+                        // hang. See `resolve_type_annotation_inner`'s doc.
+                        return InferredType::Dynamic(DynamicReason::Unknown);
+                    }
+                    expanding.push(name.clone());
+                    let resolved = resolve_type_annotation_inner(
+                        &alias_info.annotation,
+                        subst,
+                        protocol_registry,
+                        alias_registry,
+                        expanding,
+                        memo,
+                    );
+                    expanding.pop();
+                    memo.insert(name.clone(), resolved.clone());
+                    return resolved;
+                }
+            }
             let resolved_name = resolve_type_keyword(name);
             InferredType::Known {
                 class_name: resolved_name,
@@ -147,7 +248,16 @@ pub(in crate::semantic_analysis) fn resolve_type_annotation(
         } => {
             let type_args: Vec<InferredType> = parameters
                 .iter()
-                .map(|p| resolve_type_annotation(p, subst, protocol_registry))
+                .map(|p| {
+                    resolve_type_annotation_inner(
+                        p,
+                        subst,
+                        protocol_registry,
+                        alias_registry,
+                        expanding,
+                        memo,
+                    )
+                })
                 .collect();
             InferredType::Known {
                 class_name: base.name.clone(),
@@ -158,12 +268,28 @@ pub(in crate::semantic_analysis) fn resolve_type_annotation(
         TypeAnnotation::Union { types, .. } => {
             let members: Vec<InferredType> = types
                 .iter()
-                .map(|t| resolve_type_annotation(t, subst, protocol_registry))
+                .map(|t| {
+                    resolve_type_annotation_inner(
+                        t,
+                        subst,
+                        protocol_registry,
+                        alias_registry,
+                        expanding,
+                        memo,
+                    )
+                })
                 .collect();
             InferredType::union_of(&members)
         }
         TypeAnnotation::FalseOr { inner, .. } => {
-            let inner_ty = resolve_type_annotation(inner, subst, protocol_registry);
+            let inner_ty = resolve_type_annotation_inner(
+                inner,
+                subst,
+                protocol_registry,
+                alias_registry,
+                expanding,
+                memo,
+            );
             InferredType::union_of(&[inner_ty, InferredType::known("False")])
         }
         TypeAnnotation::Difference { base, excluded, .. } => {
@@ -171,8 +297,22 @@ pub(in crate::semantic_analysis) fn resolve_type_annotation(
             // `difference` set operation (BT-2739). Reducible cases normalise —
             // e.g. an excluded member that drops a union member, or `T \ T`
             // collapsing to `Never`.
-            let base_ty = resolve_type_annotation(base, subst, protocol_registry);
-            let excluded_ty = resolve_type_annotation(excluded, subst, protocol_registry);
+            let base_ty = resolve_type_annotation_inner(
+                base,
+                subst,
+                protocol_registry,
+                alias_registry,
+                expanding,
+                memo,
+            );
+            let excluded_ty = resolve_type_annotation_inner(
+                excluded,
+                subst,
+                protocol_registry,
+                alias_registry,
+                expanding,
+                memo,
+            );
             InferredType::difference(
                 &base_ty,
                 &excluded_ty,
@@ -186,8 +326,22 @@ pub(in crate::semantic_analysis) fn resolve_type_annotation(
             // resolver never consults it); `protocol_registry` is passed
             // through so class ∩ protocol resolves to the stored
             // `Intersection` instead of falling through to `Never`.
-            let left_ty = resolve_type_annotation(left, subst, protocol_registry);
-            let right_ty = resolve_type_annotation(right, subst, protocol_registry);
+            let left_ty = resolve_type_annotation_inner(
+                left,
+                subst,
+                protocol_registry,
+                alias_registry,
+                expanding,
+                memo,
+            );
+            let right_ty = resolve_type_annotation_inner(
+                right,
+                subst,
+                protocol_registry,
+                alias_registry,
+                expanding,
+                memo,
+            );
             InferredType::intersect(
                 &left_ty,
                 &right_ty,
@@ -406,6 +560,7 @@ pub(in crate::semantic_analysis) fn base_name_of_string(type_name: &str) -> &str
 mod tests {
     use super::*;
     use crate::ast::{Identifier, TypeAnnotation};
+    use crate::semantic_analysis::alias_registry::{AliasInfo, AliasRegistry};
     use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
     use crate::source_analysis::Span;
 
@@ -438,14 +593,14 @@ mod tests {
     #[test]
     fn simple_class_name_resolves_to_known() {
         let ann = TypeAnnotation::Simple(ident("Integer"));
-        let result = resolve_type_annotation(&ann, &empty_subst(), None);
+        let result = resolve_type_annotation(&ann, &empty_subst(), None, None);
         assert_eq!(result, InferredType::known("Integer"));
     }
 
     #[test]
     fn simple_nil_keyword_resolves_to_undefined_object() {
         let ann = TypeAnnotation::Simple(ident("nil"));
-        let result = resolve_type_annotation(&ann, &empty_subst(), None);
+        let result = resolve_type_annotation(&ann, &empty_subst(), None, None);
         assert_eq!(result, InferredType::known("UndefinedObject"));
     }
 
@@ -455,7 +610,7 @@ mod tests {
         // canonicalize to the same class as lowercase `nil` so narrowing under
         // `isNil` works regardless of which the user typed.
         let ann = TypeAnnotation::Simple(ident("Nil"));
-        let result = resolve_type_annotation(&ann, &empty_subst(), None);
+        let result = resolve_type_annotation(&ann, &empty_subst(), None, None);
         assert_eq!(result, InferredType::known("UndefinedObject"));
     }
 
@@ -464,11 +619,11 @@ mod tests {
         let true_ann = TypeAnnotation::Simple(ident("true"));
         let false_ann = TypeAnnotation::Simple(ident("false"));
         assert_eq!(
-            resolve_type_annotation(&true_ann, &empty_subst(), None),
+            resolve_type_annotation(&true_ann, &empty_subst(), None, None),
             InferredType::known("True")
         );
         assert_eq!(
-            resolve_type_annotation(&false_ann, &empty_subst(), None),
+            resolve_type_annotation(&false_ann, &empty_subst(), None, None),
             InferredType::known("False")
         );
     }
@@ -476,7 +631,7 @@ mod tests {
     #[test]
     fn simple_never_keyword_resolves_to_never() {
         let ann = TypeAnnotation::Simple(ident("Never"));
-        let result = resolve_type_annotation(&ann, &empty_subst(), None);
+        let result = resolve_type_annotation(&ann, &empty_subst(), None, None);
         assert_eq!(result, InferredType::Never);
     }
 
@@ -487,7 +642,7 @@ mod tests {
         let ann = TypeAnnotation::Simple(ident("T"));
         let mut subst = SubstitutionMap::new();
         subst.insert("T".into(), InferredType::known("Integer"));
-        let result = resolve_type_annotation(&ann, &subst, None);
+        let result = resolve_type_annotation(&ann, &subst, None, None);
         assert_eq!(result, InferredType::known("Integer"));
     }
 
@@ -497,7 +652,7 @@ mod tests {
         // downstream code (e.g. `is_generic_type_param`-aware call sites) can
         // decide whether to fall back to Dynamic.
         let ann = TypeAnnotation::Simple(ident("T"));
-        let result = resolve_type_annotation(&ann, &empty_subst(), None);
+        let result = resolve_type_annotation(&ann, &empty_subst(), None, None);
         assert_eq!(result, InferredType::known("T"));
     }
 
@@ -513,7 +668,7 @@ mod tests {
             ],
             span: span(),
         };
-        let result = resolve_type_annotation(&ann, &empty_subst(), None);
+        let result = resolve_type_annotation(&ann, &empty_subst(), None, None);
         match result {
             InferredType::Known {
                 class_name,
@@ -545,7 +700,7 @@ mod tests {
             parameters: vec![inner],
             span: span(),
         };
-        let result = resolve_type_annotation(&ann, &empty_subst(), None);
+        let result = resolve_type_annotation(&ann, &empty_subst(), None, None);
         let InferredType::Known {
             class_name,
             type_args,
@@ -584,7 +739,7 @@ mod tests {
         let mut subst = SubstitutionMap::new();
         subst.insert("T".into(), InferredType::known("Integer"));
         subst.insert("E".into(), InferredType::known("String"));
-        let result = resolve_type_annotation(&ann, &subst, None);
+        let result = resolve_type_annotation(&ann, &subst, None, None);
         let InferredType::Known {
             class_name,
             type_args,
@@ -610,7 +765,7 @@ mod tests {
             ],
             span: span(),
         };
-        let result = resolve_type_annotation(&ann, &empty_subst(), None);
+        let result = resolve_type_annotation(&ann, &empty_subst(), None, None);
         let InferredType::Union { members, .. } = result else {
             panic!("expected Union");
         };
@@ -636,7 +791,7 @@ mod tests {
             ],
             span: span(),
         };
-        let result = resolve_type_annotation(&ann, &empty_subst(), None);
+        let result = resolve_type_annotation(&ann, &empty_subst(), None, None);
         let InferredType::Union { members, .. } = result else {
             panic!("expected Union");
         };
@@ -662,7 +817,7 @@ mod tests {
             inner: Box::new(TypeAnnotation::Simple(ident("Integer"))),
             span: span(),
         };
-        let result = resolve_type_annotation(&ann, &empty_subst(), None);
+        let result = resolve_type_annotation(&ann, &empty_subst(), None, None);
         let InferredType::Union { members, .. } = result else {
             panic!("expected Union, got {result:?}");
         };
@@ -684,7 +839,7 @@ mod tests {
             },
             span(),
         );
-        let result = resolve_type_annotation(&ann, &empty_subst(), None);
+        let result = resolve_type_annotation(&ann, &empty_subst(), None, None);
         let InferredType::Negation { base, excluded, .. } = result else {
             panic!("expected Negation, got {result:?}");
         };
@@ -700,7 +855,7 @@ mod tests {
             TypeAnnotation::Simple(ident("Integer")),
             span(),
         );
-        let result = resolve_type_annotation(&ann, &empty_subst(), None);
+        let result = resolve_type_annotation(&ann, &empty_subst(), None, None);
         assert_eq!(result, InferredType::Never);
     }
 
@@ -719,7 +874,7 @@ mod tests {
             TypeAnnotation::Simple(ident("String")),
             span(),
         );
-        let result = resolve_type_annotation(&ann, &empty_subst(), None);
+        let result = resolve_type_annotation(&ann, &empty_subst(), None, None);
         assert_eq!(result, InferredType::known("Integer"));
     }
 
@@ -762,7 +917,7 @@ mod tests {
             TypeAnnotation::Simple(ident("Integer")),
             span(),
         );
-        let result = resolve_type_annotation(&ann, &empty_subst(), None);
+        let result = resolve_type_annotation(&ann, &empty_subst(), None, None);
         assert_eq!(result, InferredType::known("Integer"));
     }
 
@@ -776,7 +931,7 @@ mod tests {
             TypeAnnotation::Simple(ident("String")),
             span(),
         );
-        let result = resolve_type_annotation(&ann, &empty_subst(), None);
+        let result = resolve_type_annotation(&ann, &empty_subst(), None, None);
         assert_eq!(result, InferredType::Never);
     }
 
@@ -792,7 +947,7 @@ mod tests {
             TypeAnnotation::Simple(ident("Comparable")),
             span(),
         );
-        let result = resolve_type_annotation(&ann, &empty_subst(), Some(&registry));
+        let result = resolve_type_annotation(&ann, &empty_subst(), Some(&registry), None);
         let InferredType::Intersection { members, .. } = result else {
             panic!("expected Intersection, got {result:?}");
         };
@@ -813,7 +968,7 @@ mod tests {
             TypeAnnotation::Simple(ident("Comparable")),
             span(),
         );
-        let result = resolve_type_annotation(&ann, &empty_subst(), None);
+        let result = resolve_type_annotation(&ann, &empty_subst(), None, None);
         assert_eq!(result, InferredType::Never);
     }
 
@@ -826,7 +981,7 @@ mod tests {
             TypeAnnotation::Simple(ident("Comparable")),
             span(),
         );
-        let result = resolve_type_annotation(&ann, &empty_subst(), Some(&registry));
+        let result = resolve_type_annotation(&ann, &empty_subst(), Some(&registry), None);
         assert!(
             matches!(result, InferredType::Intersection { .. }),
             "expected Intersection, got {result:?}"
@@ -852,7 +1007,7 @@ mod tests {
             },
             span(),
         );
-        let result = resolve_type_annotation(&ann, &empty_subst(), None);
+        let result = resolve_type_annotation(&ann, &empty_subst(), None, None);
         let InferredType::Negation { base, excluded, .. } = result else {
             panic!("expected Negation, got {result:?}");
         };
@@ -865,7 +1020,7 @@ mod tests {
     #[test]
     fn self_type_resolves_to_dynamic() {
         let ann = TypeAnnotation::SelfType { span: span() };
-        let result = resolve_type_annotation(&ann, &empty_subst(), None);
+        let result = resolve_type_annotation(&ann, &empty_subst(), None, None);
         assert!(matches!(result, InferredType::Dynamic(_)));
     }
 
@@ -875,7 +1030,7 @@ mod tests {
         // reserved `Self` subst key. Without it (the free-function default),
         // it still falls back to Dynamic so existing patterns keep working.
         let ann = TypeAnnotation::SelfClass { span: span() };
-        let result = resolve_type_annotation(&ann, &empty_subst(), None);
+        let result = resolve_type_annotation(&ann, &empty_subst(), None, None);
         assert!(matches!(result, InferredType::Dynamic(_)));
     }
 
@@ -886,7 +1041,7 @@ mod tests {
         let ann = TypeAnnotation::SelfClass { span: span() };
         let mut subst = SubstitutionMap::new();
         subst.insert("Self".into(), InferredType::known("Counter"));
-        let result = resolve_type_annotation(&ann, &subst, None);
+        let result = resolve_type_annotation(&ann, &subst, None, None);
         assert_eq!(result.as_meta().map(EcoString::as_str), Some("Counter"));
     }
 
@@ -899,7 +1054,7 @@ mod tests {
             class_name: ident("Actor"),
             span: span(),
         };
-        let result = resolve_type_annotation(&ann, &empty_subst(), None);
+        let result = resolve_type_annotation(&ann, &empty_subst(), None, None);
         assert_eq!(result.as_meta().map(EcoString::as_str), Some("Actor"));
     }
 
@@ -911,8 +1066,252 @@ mod tests {
             name: "ok".into(),
             span: span(),
         };
-        let result = resolve_type_annotation(&ann, &empty_subst(), None);
+        let result = resolve_type_annotation(&ann, &empty_subst(), None, None);
         assert_eq!(result, InferredType::known("#ok"));
+    }
+
+    // ---- resolve_type_annotation: type alias expansion (ADR 0108, BT-2895) ----
+
+    /// Builds an `AliasRegistry` containing a single alias `name = annotation`.
+    fn alias_registry_with(name: &str, annotation: TypeAnnotation) -> AliasRegistry {
+        let mut registry = AliasRegistry::new();
+        registry.register_test_alias(AliasInfo {
+            name: name.into(),
+            annotation,
+            span: span(),
+        });
+        registry
+    }
+
+    #[test]
+    fn alias_reference_expands_to_singleton_union() {
+        // `type RestartStrategy = #temporary | #transient | #permanent` —
+        // referencing `RestartStrategy` must resolve to the exact same
+        // `InferredType::Union` the spelled-out union would.
+        let expansion = TypeAnnotation::Union {
+            types: vec![
+                TypeAnnotation::Singleton {
+                    name: "temporary".into(),
+                    span: span(),
+                },
+                TypeAnnotation::Singleton {
+                    name: "transient".into(),
+                    span: span(),
+                },
+                TypeAnnotation::Singleton {
+                    name: "permanent".into(),
+                    span: span(),
+                },
+            ],
+            span: span(),
+        };
+        let registry = alias_registry_with("RestartStrategy", expansion.clone());
+
+        let ann = TypeAnnotation::Simple(ident("RestartStrategy"));
+        let aliased_result = resolve_type_annotation(&ann, &empty_subst(), None, Some(&registry));
+        let spelled_out_result = resolve_type_annotation(&expansion, &empty_subst(), None, None);
+
+        assert_eq!(
+            aliased_result, spelled_out_result,
+            "an alias reference must resolve identically to its spelled-out expansion"
+        );
+        let InferredType::Union { members, .. } = aliased_result else {
+            panic!("expected Union, got {aliased_result:?}");
+        };
+        assert_eq!(members.len(), 3);
+        assert!(members.contains(&InferredType::known("#temporary")));
+    }
+
+    #[test]
+    fn alias_reference_without_registry_resolves_as_nominal_class() {
+        // Pre-ADR-0108 behaviour is preserved when no alias registry is
+        // supplied: a `Simple` name just resolves as an ordinary (unknown)
+        // nominal class.
+        let ann = TypeAnnotation::Simple(ident("RestartStrategy"));
+        let result = resolve_type_annotation(&ann, &empty_subst(), None, None);
+        assert_eq!(result, InferredType::known("RestartStrategy"));
+    }
+
+    #[test]
+    fn alias_reference_inside_union_member_expands() {
+        // `type Timeout = Integer | #infinity`, referenced as one member of
+        // a larger annotation (`Timeout | Nil`) — nested `Simple` positions
+        // must also consult the alias table.
+        let timeout_expansion = TypeAnnotation::Union {
+            types: vec![
+                TypeAnnotation::Simple(ident("Integer")),
+                TypeAnnotation::Singleton {
+                    name: "infinity".into(),
+                    span: span(),
+                },
+            ],
+            span: span(),
+        };
+        let registry = alias_registry_with("Timeout", timeout_expansion);
+
+        let ann = TypeAnnotation::Union {
+            types: vec![
+                TypeAnnotation::Simple(ident("Timeout")),
+                TypeAnnotation::Simple(ident("nil")),
+            ],
+            span: span(),
+        };
+        let result = resolve_type_annotation(&ann, &empty_subst(), None, Some(&registry));
+        let InferredType::Union { members, .. } = result else {
+            panic!("expected Union, got {result:?}");
+        };
+        assert_eq!(members.len(), 3, "Integer, #infinity, UndefinedObject");
+        assert!(members.contains(&InferredType::known("Integer")));
+        assert!(members.contains(&InferredType::known("#infinity")));
+        assert!(members.contains(&InferredType::known("UndefinedObject")));
+    }
+
+    #[test]
+    fn chained_alias_reference_expands_through_both_levels() {
+        // `type B = A | #z`, `type A = #x | #y` — referencing `B` must
+        // expand all the way down to `#x | #y | #z`, not stop at `A`.
+        let a_expansion = TypeAnnotation::Union {
+            types: vec![
+                TypeAnnotation::Singleton {
+                    name: "x".into(),
+                    span: span(),
+                },
+                TypeAnnotation::Singleton {
+                    name: "y".into(),
+                    span: span(),
+                },
+            ],
+            span: span(),
+        };
+        let b_expansion = TypeAnnotation::Union {
+            types: vec![
+                TypeAnnotation::Simple(ident("A")),
+                TypeAnnotation::Singleton {
+                    name: "z".into(),
+                    span: span(),
+                },
+            ],
+            span: span(),
+        };
+        let mut registry = alias_registry_with("A", a_expansion);
+        registry.register_test_alias(AliasInfo {
+            name: "B".into(),
+            annotation: b_expansion,
+            span: span(),
+        });
+
+        let ann = TypeAnnotation::Simple(ident("B"));
+        let result = resolve_type_annotation(&ann, &empty_subst(), None, Some(&registry));
+        let InferredType::Union { members, .. } = result else {
+            panic!("expected Union, got {result:?}");
+        };
+        assert_eq!(members.len(), 3);
+        assert!(members.contains(&InferredType::known("#x")));
+        assert!(members.contains(&InferredType::known("#y")));
+        assert!(members.contains(&InferredType::known("#z")));
+    }
+
+    #[test]
+    fn subst_wins_over_alias_table_for_same_name() {
+        // ADR 0108 resolution order: `subst` (type params) → alias table →
+        // nominal class. Disjoint by construction (single-letter alias names
+        // are a declaration error), but the resolver itself must still
+        // honour the documented order if a caller ever supplies both for
+        // the same key.
+        let registry = alias_registry_with("Shadowed", TypeAnnotation::Simple(ident("String")));
+        let mut subst = SubstitutionMap::new();
+        subst.insert("Shadowed".into(), InferredType::known("Integer"));
+
+        let ann = TypeAnnotation::Simple(ident("Shadowed"));
+        let result = resolve_type_annotation(&ann, &subst, None, Some(&registry));
+        assert_eq!(
+            result,
+            InferredType::known("Integer"),
+            "subst must win over the alias table"
+        );
+    }
+
+    #[test]
+    fn cyclic_alias_reference_resolves_to_dynamic_instead_of_hanging() {
+        // ADR 0108 "No recursion": full cycle *detection* at declaration
+        // time is BT-2896, out of scope here — but expansion itself must
+        // never hang if a cycle slips through. `type A = B`, `type B = A`.
+        let mut registry = AliasRegistry::new();
+        registry.register_test_alias(AliasInfo {
+            name: "A".into(),
+            annotation: TypeAnnotation::Simple(ident("B")),
+            span: span(),
+        });
+        registry.register_test_alias(AliasInfo {
+            name: "B".into(),
+            annotation: TypeAnnotation::Simple(ident("A")),
+            span: span(),
+        });
+
+        let ann = TypeAnnotation::Simple(ident("A"));
+        let result = resolve_type_annotation(&ann, &empty_subst(), None, Some(&registry));
+        assert!(
+            matches!(result, InferredType::Dynamic(_)),
+            "a cyclic alias must resolve to Dynamic, not hang: {result:?}"
+        );
+    }
+
+    #[test]
+    fn doubling_alias_chain_does_not_blow_up_exponentially() {
+        // A legal, acyclic chain where each level references the previous
+        // one *twice* — `type L1 = L0 | L0`, `type L2 = L1 | L1`, … — has no
+        // cycle for `expanding` to catch, but re-expanding `L(n-1)` from
+        // scratch on both sides of every `|` is `O(2ⁿ)` work without
+        // memoization. 40 levels finishes near-instantly with the `memo`
+        // cache; without it, this test would not complete in this suite's
+        // lifetime. Asserts both a bounded runtime and a correct result
+        // (the union always dedups down to the same two singleton members).
+        let mut registry = AliasRegistry::new();
+        registry.register_test_alias(AliasInfo {
+            name: "L0".into(),
+            annotation: TypeAnnotation::Union {
+                types: vec![
+                    TypeAnnotation::Singleton {
+                        name: "a".into(),
+                        span: span(),
+                    },
+                    TypeAnnotation::Singleton {
+                        name: "b".into(),
+                        span: span(),
+                    },
+                ],
+                span: span(),
+            },
+            span: span(),
+        });
+        for level in 1..=40 {
+            let prev = format!("L{}", level - 1);
+            registry.register_test_alias(AliasInfo {
+                name: format!("L{level}").into(),
+                annotation: TypeAnnotation::Union {
+                    types: vec![
+                        TypeAnnotation::Simple(ident(&prev)),
+                        TypeAnnotation::Simple(ident(&prev)),
+                    ],
+                    span: span(),
+                },
+                span: span(),
+            });
+        }
+
+        let ann = TypeAnnotation::Simple(ident("L40"));
+        let start = std::time::Instant::now();
+        let result = resolve_type_annotation(&ann, &empty_subst(), None, Some(&registry));
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "resolving a 40-level doubling alias chain must stay near-instant with memoization"
+        );
+        let InferredType::Union { members, .. } = result else {
+            panic!("expected Union, got {result:?}");
+        };
+        assert_eq!(members.len(), 2);
+        assert!(members.contains(&InferredType::known("#a")));
+        assert!(members.contains(&InferredType::known("#b")));
     }
 
     // ---- receiver_type_for_class ----

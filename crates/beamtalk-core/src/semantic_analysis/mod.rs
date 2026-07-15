@@ -19,6 +19,7 @@ use crate::source_analysis::{Diagnostic, Span};
 use ecow::EcoString;
 use std::collections::HashMap;
 
+pub mod alias_registry;
 mod block_analyzer;
 pub(crate) mod block_context;
 pub mod block_facts;
@@ -47,6 +48,7 @@ mod property_tests;
 #[cfg(test)]
 pub mod test_helpers;
 
+pub use alias_registry::{AliasInfo, AliasRegistry};
 pub use block_facts::BlockMutationAnalysis;
 pub use block_facts::analyze_block;
 pub use class_hierarchy::ClassHierarchy;
@@ -95,6 +97,9 @@ pub struct AnalysisResult {
 
     /// Protocol registry (ADR 0068 Phase 2b).
     pub protocol_registry: ProtocolRegistry,
+
+    /// Type alias registry (ADR 0108 Phase 2, BT-2895).
+    pub alias_registry: AliasRegistry,
 }
 
 impl AnalysisResult {
@@ -106,6 +111,7 @@ impl AnalysisResult {
             block_info: HashMap::new(),
             class_hierarchy: ClassHierarchy::with_builtins(),
             protocol_registry: ProtocolRegistry::new(),
+            alias_registry: AliasRegistry::new(),
         }
     }
 }
@@ -588,6 +594,21 @@ fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult {
         result.diagnostics.extend(proto_diags);
     }
 
+    // Phase 0.6: Type Alias Registration (ADR 0108 Phase 2, BT-2895)
+    // Must happen after both the class hierarchy and protocol registry are
+    // fully built for the current module — aliases share the class/protocol
+    // namespace, and this ordering (classes → protocols → aliases) is what
+    // gives `AliasRegistry::register_module` bidirectional collision
+    // detection within a single batch compile (see its doc comment).
+    if !module.type_aliases.is_empty() {
+        let alias_diags = result.alias_registry.register_module(
+            module,
+            &result.class_hierarchy,
+            &result.protocol_registry,
+        );
+        result.diagnostics.extend(alias_diags);
+    }
+
     // Phase 1: Name Resolution
     let mut name_resolver = NameResolver::new();
     name_resolver.define_known_vars(known_vars, module.span);
@@ -613,10 +634,11 @@ fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult {
     if let Some(registry) = native_type_registry {
         type_checker.set_native_type_registry(registry);
     }
-    type_checker.check_module_with_protocols(
+    type_checker.check_module_with_protocols_and_aliases(
         module,
         &result.class_hierarchy,
         &result.protocol_registry,
+        &result.alias_registry,
     );
     result.diagnostics.extend(type_checker.take_diagnostics());
     let type_map = type_checker.take_type_map();

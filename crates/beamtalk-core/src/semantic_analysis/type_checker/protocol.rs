@@ -306,10 +306,24 @@ impl TypeChecker {
                 parameters,
                 span,
             } => {
-                // Resolve the type args to InferredTypes
+                // Resolve the type args to InferredTypes. ADR 0108 (BT-2895):
+                // thread the alias registry (unlike the thin
+                // `Self::resolve_type_annotation` wrapper this replaced) so
+                // a type argument that is itself an alias name — e.g.
+                // `Logger(Small)` where `type Small = Integer` — resolves to
+                // its structural expansion before being checked against the
+                // class's declared bound, instead of an opaque unknown
+                // class that would silently skip the bound check.
                 let type_args: Vec<InferredType> = parameters
                     .iter()
-                    .map(Self::resolve_type_annotation)
+                    .map(|p| {
+                        super::type_resolver::resolve_type_annotation(
+                            p,
+                            &super::type_resolver::SubstitutionMap::new(),
+                            None,
+                            self.alias_registry.as_ref(),
+                        )
+                    })
                     .collect();
 
                 // BT-1861: Warn when type args are provided for a class with no type params.
