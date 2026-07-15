@@ -355,6 +355,12 @@ pub struct CodegenOptions {
     /// ADR 0098 Phase 3: producing compound OTP version (`<release>-<erts>`) to
     /// bake into `__beamtalk_meta`. Set alongside `beamtalk_version`.
     otp_release: Option<String>,
+    /// BT-2887: optional FFI type registry (ADR 0075) threaded to the
+    /// return-type writeback pass so methods whose body type is inferred
+    /// purely via an FFI call (e.g. `foo => Erlang lists reverse: x`) get
+    /// `List` written back to `method_return_types` before codegen.
+    native_type_registry:
+        Option<std::sync::Arc<crate::semantic_analysis::type_checker::NativeTypeRegistry>>,
 }
 
 impl CodegenOptions {
@@ -373,6 +379,7 @@ impl CodegenOptions {
             codegen_diagnostics: None,
             beamtalk_version: None,
             otp_release: None,
+            native_type_registry: None,
         }
     }
 
@@ -474,6 +481,19 @@ impl CodegenOptions {
     #[must_use]
     pub fn with_stdlib_mode(mut self, enabled: bool) -> Self {
         self.stdlib_mode = enabled;
+        self
+    }
+
+    /// BT-2887: sets the native FFI type registry (ADR 0075) used by the
+    /// return-type writeback pass, from an optional value.
+    #[must_use]
+    pub fn with_native_type_registry(
+        mut self,
+        registry: Option<
+            std::sync::Arc<crate::semantic_analysis::type_checker::NativeTypeRegistry>,
+        >,
+    ) -> Self {
+        self.native_type_registry = registry;
         self
     }
 }
@@ -588,7 +608,11 @@ pub fn generate_module_with_warnings(
     // BT-1218: Also writeback supervisor_kind for Supervisor/DynamicSupervisor subclasses.
     // We clone to avoid mutating the caller's Module.
     let mut module_with_writeback = module.clone();
-    crate::semantic_analysis::apply_return_type_writeback(&mut module_with_writeback, &hierarchy);
+    crate::semantic_analysis::apply_return_type_writeback(
+        &mut module_with_writeback,
+        &hierarchy,
+        options.native_type_registry.as_deref(),
+    );
     crate::semantic_analysis::apply_supervisor_kind_writeback(
         &mut module_with_writeback,
         &hierarchy,
@@ -3407,6 +3431,39 @@ impl CoreErlangGenerator {
             ]);
         }
 
+        // BT-2812: `blockValue`/`blockValue1`/`blockValue2`/`blockValue3` — Block's
+        // `value`/`value:`/`value:value:`/`value:value:value:`. Same gap as
+        // `blockValueWithArguments` above, but these can't unconditionally
+        // `erlang:apply` (a Tier 2/stateful block needs a live `StateAcc` this
+        // generic dispatch site doesn't have — see ADR-0041). See
+        // `generate_block_value_structural_fallback` for the Tier 1/Tier 2
+        // discrimination.
+        //
+        // Adversarial review (BT-2812): this match is intentionally exhaustive
+        // over today's four `value*` arities, not pattern-derived from them. A
+        // hypothetical 5th arity (`blockValue4`) or a change to ADR-0041's
+        // `Args..., StateAcc` shape (extra state args, different position)
+        // would silently fall through to the unfixed placeholder below rather
+        // than fail to compile — there's no static check tying this arm list
+        // to `STRUCTURAL_INTRINSICS` or to the Block.bt method declarations.
+        if !is_quoted {
+            let block_value_info = match name {
+                "blockValue" => Some((0usize, "value")),
+                "blockValue1" => Some((1usize, "value:")),
+                "blockValue2" => Some((2usize, "value:value:")),
+                "blockValue3" => Some((3usize, "value:value:value:")),
+                _ => None,
+            };
+            if let Some((arity, real_selector)) = block_value_info {
+                return Ok(self.generate_block_value_structural_fallback(
+                    name,
+                    arity,
+                    real_selector,
+                    &class_name,
+                ));
+            }
+        }
+
         // BT-1763: Erlang interop DNU intrinsics — forward selector/args to
         // the handler module's dispatch/3 rather than passing the intrinsic name.
         // doesNotUnderstand:args: receives (Self, Selector, Args) and we need to
@@ -3514,13 +3571,19 @@ impl CoreErlangGenerator {
         // through the call-site interception — e.g.
         // `[42] perform: #value withArguments: #()` — resolves to this
         // placeholder and raises `does_not_understand` for the intrinsic name.
-        // Confirmed to already affect every block-value structural intrinsic
-        // EXCEPT `valueWithArguments:` (special-cased above, BT-2803 review) —
-        // `value`/`value:`/`value:value:`/… still hit this gap, a pre-existing,
-        // systemic limitation in how structural intrinsics interact with
-        // dynamic dispatch, not something introduced or fixed here. See BT-2812
-        // (filed from BT-2803's adversarial review) for perform:-safe structural
-        // intrinsic dispatch.
+        //
+        // BT-2812: Block's `value`/`value:`/`value:value:`/`value:value:value:`/
+        // `valueWithArguments:` are now special-cased above and no longer hit this
+        // placeholder — those were the concrete repro. BT-2812's audit found the
+        // same root cause (wrong dispatch key) also applies, in principle, to
+        // every other structural intrinsic without a special case here — e.g.
+        // `whileTrue`/`whileFalse`/`repeat`/`onDo`/`ensure` (Block) and
+        // `listDo`/`listCollect`/`listSelect`/`listReject`/`listInjectInto`
+        // (List/Collection). Deliberately left unfixed by BT-2812: unlike the
+        // `value*` family (whose fix is "the receiver IS the fun to invoke, so
+        // `erlang:apply` it"), these need real loop/exception-handling semantics
+        // reimplemented generically over an arbitrary fun receiver/argument —
+        // a materially bigger, separately-scoped change. See BT-2888.
         let runtime_module = PrimitiveBindingTable::runtime_module_for_class(&class_name);
 
         // BT-938: Validate that the target dispatch module exists in the known stdlib

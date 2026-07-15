@@ -1815,6 +1815,9 @@ fn handle_resolve_completion_type(request: &Map) -> Term {
     match beamtalk_core::queries::completion_provider::resolve_expression_type(
         &expression,
         &hierarchy,
+        // BT-2887: no NativeTypeRegistry is readily available in this REPL
+        // completion-fallback call chain.
+        None,
     ) {
         Some(class_name) => Term::from(Map::from([
             (atom("status"), atom("ok")),

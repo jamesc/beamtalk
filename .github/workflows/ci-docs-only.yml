@@ -1,0 +1,49 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+# Companion to ci.yml's paths-ignore (BT-2737 follow-up).
+#
+# ci.yml doesn't trigger at all for doc-only changes, so it never reports a
+# status for the `check-corpus` job. If `check-corpus` is a required status
+# check in branch protection, GitHub then waits forever for a status that
+# will never arrive, blocking merge on doc-only PRs.
+#
+# This workflow triggers on the exact inverse paths and reports an
+# immediate success for the same job name, satisfying the required check.
+# See https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#example-excluding-branches-and-tags
+
+name: CI (docs-only)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '*.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - 'SECURITY.md'
+      - '.github/skills/**'
+      - '.devcontainer/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - '*.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - 'SECURITY.md'
+      - '.github/skills/**'
+      - '.devcontainer/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check-corpus:
+    runs-on: ubuntu-latest
+    steps:
+      - name: No Rust/corpus-affecting changes in this diff
+        run: echo "Doc-only change — skipping corpus.json drift check."
