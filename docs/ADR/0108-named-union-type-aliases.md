@@ -326,6 +326,28 @@ The `type` form is chosen because:
 => 0
 ```
 
+**"What does this alias map to?" — `:help <Alias>`.** The existing
+`:help <Name>` command (which already renders class and protocol docs) is
+extended to alias names, showing the declaration, expansion, and doc
+comment:
+
+```
+> :help RestartStrategy
+type RestartStrategy = #temporary | #transient | #permanent
+
+  How a supervised child restarts after exit.
+
+Declared in: stdlib/src/Supervisor.bt:12
+```
+
+A Haskell-style `:t <expr>` (type-of-expression) command is **not** part
+of this ADR: `:t` is already taken in the Beamtalk REPL as the alias for
+`:test`, and ADR 0102 explicitly deferred a `:type`-style command as its
+own surface-parity decision (`docs/development/surface-parity.md`) —
+that deferral stands. Alias *introspection* (`:help`) is in scope here
+because the declaration is the feature; expression-level type queries
+remain the separate, broader decision.
+
 ### Error examples
 
 ```beamtalk
@@ -670,9 +692,20 @@ To be broken into an epic via `/plan-adr` once Accepted. Expected shape:
   alias name is a natural key: record alias-name → annotation-site edges
   at resolution time and re-check only dependents. Cycle detection
   re-runs on every live alias redefinition (see Semantics).
-- **LSP/REPL parity:** completions for alias names in type position;
-  go-to-definition; `:help RestartStrategy`; `type` declarations accepted
-  in REPL input. Update `docs/development/surface-parity.md`.
+- **LSP/REPL parity:** completions for alias names in type position.
+  **Go-to-definition works by construction**: `TypeAliasDefinition` is a
+  real AST node with a span, and every use site resolves through the
+  alias table, so definition/references queries have a concrete target —
+  go-to-definition on `RestartStrategy` in any annotation position jumps
+  to its `type` declaration, and find-references enumerates annotation
+  sites (the same resolution-time alias-name → annotation-site edges the
+  hot-reload trigger records). Hover on the alias name shows the
+  expansion. REPL: `:help <Alias>` renders declaration + expansion + doc
+  comment (see REPL session above); `type` declarations accepted in REPL
+  input; no `:t`/`:type` expression-type command (deferred per ADR 0102 —
+  and `:t` is already the `:test` alias). Update
+  `docs/development/surface-parity.md` (`:help` alias support is a
+  cross-surface operation: CLI REPL, MCP, LSP hover must agree).
 - **Docs:** `docs/beamtalk-language-features.md` (new §Type Aliases under
   the type-system material), `docs/beamtalk-syntax-rationale.md` (the
   `type`-form-vs-message-form argument, recorded).
