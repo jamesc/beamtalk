@@ -1,7 +1,7 @@
 # Stdlib Implementation Status
 
-> **Last updated:** 2026-04-01
-> **Issue:** BT-247, BT-1808
+> **Last updated:** 2026-07-15
+> **Issue:** BT-247, BT-1808, BT-2869
 > **Methodology:** Audit of `stdlib/src/*.bt` files, compiler intrinsics (`intrinsics.rs`, `primitive_bindings.rs`),
 > runtime dispatch modules (`beamtalk_*.erl`), stdlib test coverage (`stdlib/bootstrap-test/*.btscript`), and REPL protocol test coverage (`tests/repl-protocol/cases/*.btscript`).
 
@@ -9,10 +9,10 @@
 
 | Metric | Value |
 |--------|-------|
-| **Stdlib .bt files** | 76 |
+| **Stdlib .bt files** | 104 |
 | **Runtime-only classes** | 0 (all classes have stdlib/src/*.bt) |
 | **Missing .bt files** | 0 |
-| **Protocols** | 1 (Printable) |
+| **Protocols** | 2 (Printable, JsonRepresentable) |
 
 ## Status Categories
 
@@ -664,36 +664,67 @@ Most stdlib classes conform because `Object` provides a default `printString` an
 
 **Usage:** `TranscriptStream >> show:` accepts `Printable`, so conforming objects can be displayed directly without manual `asString` calls.
 
+### JsonRepresentable (`stdlib/src/JsonRepresentable.bt`)
+
+**Protocol:** `JsonRepresentable` — structural protocol (ADR 0068, BT-2818)
+**Required methods:** 1
+
+| Selector | Return Type | Notes |
+|----------|-------------|-------|
+| `asJson` | `Object` | Returns a natively JSON-representable value (typically a `Dictionary` with wire-format keys) |
+
+**Conformance:** Automatic — any class implementing `asJson` conforms.
+
+**Usage:** `Json generate:` and `Json prettyPrint:` (see `Json`) dispatch to `asJson` for any value that is not one of the natively JSON-representable types (`Dictionary`, `List`, `String`, `Integer`, `Float`, `Boolean`, `nil`). The returned value is converted recursively, so it may itself contain further `JsonRepresentable` objects.
+
 ---
 
-## Classes Added Since v0.3.1
+## Additional Stdlib Classes
 
-The following stdlib `.bt` files have been added since the previous audit (2026-02-12). They are listed here for completeness; full method-level audit is tracked as future work.
+The following stdlib `.bt` classes exist but have not yet received a full method-level audit; that audit is tracked as future work (see Methodology above).
 
 | Class | Superclass | File | Notes |
 |-------|------------|------|-------|
+| `ActorSpawned` | `Announcement` | `ActorSpawned.bt` | System event: actor started (ADR 0093) |
+| `ActorStopped` | `Announcement` | `ActorStopped.bt` | System event: actor terminated (ADR 0093) |
+| `Announcement` | `Value` | `Announcement.bt` | Base event type for the typed Observer substrate (ADR 0093) |
+| `AnnouncementNavigation` | `Object` | `AnnouncementNavigation.bt` | Live subscription-graph introspection queries (ADR 0093 §7) |
+| `Announcer` | `Object` | `Announcer.bt` | Typed pub/sub dispatcher handle (ADR 0093) |
 | `Array` | `Collection` | `Array.bt` | Fixed-size O(1) indexed collection (Erlang tuple-backed) |
 | `AtomicCounter` | `Object` | `AtomicCounter.bt` | Lock-free counter via `atomics` |
 | `BEAMError` | `Error` | `BEAMError.bt` | Wraps raw BEAM exceptions |
 | `Bag` | `Collection` | `Bag.bt` | Multiset / counted collection |
 | `Behaviour` | `Object` | `Behaviour.bt` | Metaclass introspection |
+| `BindingChanged` | `Announcement` | `BindingChanged.bt` | System event: workspace binding changed (ADR 0093) |
+| `BindingsView` | `Object` | `BindingsView.bt` | Live Dictionary-protocol view over session/workspace bindings (ADR 0081) |
+| `ChangeEntry` | `Value` | `ChangeEntry.bt` | One recorded in-memory method mutation (ADR 0082 Phase 1) |
+| `ChangeLog` | `Value` | `ChangeLog.bt` | Navigable view of pending workspace changes (ADR 0082 Phase 1) |
 | `Class` | `Behaviour` | `Class.bt` | Class mirror |
 | `ClassBuilder` | `Object` | `ClassBuilder.bt` | Dynamic class creation |
+| `ClassLoaded` | `Announcement` | `ClassLoaded.bt` | System event: class loaded/redefined (ADR 0093) |
+| `ClassRemoved` | `Announcement` | `ClassRemoved.bt` | System event: class removed (ADR 0093) |
+| `Console` | `Object` | `Console.bt` | This process's stdin/stdout/stderr (ADR 0099 §1) |
 | `DateTime` | `Value` | `DateTime.bt` | Date/time value type |
 | `DynamicSupervisor` | `Object` | `DynamicSupervisor.bt` | OTP DynamicSupervisor wrapper |
 | `Erlang` | `Object` | `Erlang.bt` | Direct Erlang module access |
 | `ErlangModule` | `Object` | `ErlangModule.bt` | Erlang module wrapper |
+| `Ets` | `Object` | `Ets.bt` | Shared in-memory table wrapper (OTP `ets`) |
 | `ExitError` | `Error` | `ExitError.bt` | Process exit wrapper |
 | `FileHandle` | `Object` | `FileHandle.bt` | File I/O handle |
+| `FlushCompleted` | `Announcement` | `FlushCompleted.bt` | System event: `Workspace flush` finished (ADR 0093) |
+| `Inspector` | `Object` | `Inspector.bt` | Live, immutable cursor for navigating into a single object (ADR 0095) |
+| `InspectorField` | `Value` | `InspectorField.bt` | Immutable record for one drillable inspected field (ADR 0095 §2) |
 | `Interval` | `Collection` | `Interval.bt` | Arithmetic sequence (1 to: 10) |
 | `Json` | `Object` | `Json.bt` | JSON parse/stringify |
 | `Logger` | `Object` | `Logger.bt` | OTP logger wrapper |
 | `Metaclass` | `Behaviour` | `Metaclass.bt` | Metaclass mirror |
 | `OS` | `Object` | `OS.bt` | OS-level operations |
+| `ObjectStateChanged` | `Announcement` | `ObjectStateChanged.bt` | System event: watched actor commits a state write (ADR 0095 §5) |
 | `Package` | `Object` | `Package.bt` | Package management |
 | `Pid` | `Object` | `Pid.bt` | BEAM process identifier |
 | `Port` | `Object` | `Port.bt` | BEAM port wrapper |
-| `Printable` | protocol | `Printable.bt` | String representation protocol |
+| `ProcessNavigation` | `Value` | `ProcessNavigation.bt` | Live supervision-tree introspection queries (ADR 0092) |
+| `Program` | `Object` | `Program.bt` | The running program/invocation (ADR 0099 §2) |
 | `Protocol` | `Object` | `Protocol.bt` | Protocol mirror |
 | `Queue` | `Collection` | `Queue.bt` | FIFO queue |
 | `Random` | `Object` | `Random.bt` | Random number generation |
@@ -702,12 +733,21 @@ The following stdlib `.bt` files have been added since the previous audit (2026-
 | `Regex` | `Value` | `Regex.bt` | Regular expressions |
 | `Result` | `Value` | `Result.bt` | Ok/Error result type |
 | `Server` | `Actor` | `Server.bt` | OTP Server base class |
+| `Session` | `Object` | `Session.bt` | First-class handle to a REPL session (ADR 0081) |
 | `StackFrame` | `Object` | `StackFrame.bt` | Stack trace inspection |
 | `Stream` | `Object` | `Stream.bt` | Lazy sequences |
 | `Subprocess` | `Actor` | `Subprocess.bt` | OS subprocess management |
+| `Subscription` | `Object` | `Subscription.bt` | Unsubscribe token returned by `when:do:` et al (ADR 0093) |
+| `SubscriptionNode` | `Value` | `SubscriptionNode.bt` | Immutable snapshot record for one live subscription (ADR 0093 §7) |
+| `SupervisionChildAdded` | `Announcement` | `SupervisionChildAdded.bt` | System event: supervisor started a child (ADR 0093) |
+| `SupervisionChildCrashed` | `Announcement` | `SupervisionChildCrashed.bt` | System event: supervised child failed to start or crashed (ADR 0093) |
+| `SupervisionNode` | `Value` | `SupervisionNode.bt` | Immutable snapshot record for one process in the live supervision tree (ADR 0092) |
 | `SupervisionSpec` | `Value` | `SupervisionSpec.bt` | Supervisor child specs |
+| `SupervisionTree` | `Value` | `SupervisionTree.bt` | Navigable snapshot of the live supervision tree (ADR 0092) |
 | `Supervisor` | `Object` | `Supervisor.bt` | OTP Supervisor wrapper |
 | `System` | `Object` | `System.bt` | System info and control |
+| `SystemAnnouncer` | `Announcer` | `SystemAnnouncer.bt` | Singleton system event bus (ADR 0093 Layer 2) |
+| `SystemNavigation` | `Object` | `SystemNavigation.bt` | Class-registry navigation queries ("who implements X") |
 | `TestResult` | `Value` | `TestResult.bt` | BUnit test result |
 | `TestRunner` | `Object` | `TestRunner.bt` | BUnit test runner |
 | `ThrowError` | `Error` | `ThrowError.bt` | Non-local return error |
@@ -791,9 +831,13 @@ All stdlib classes now have corresponding `stdlib/src/*.bt` definitions. `Collec
 
 ## Test Coverage Gaps
 
-Test coverage is now spread across both `stdlib/bootstrap-test/` (1046 assertions) and `tests/repl-protocol/cases/` (213 assertions).
+Test coverage is now spread across both `stdlib/bootstrap-test/` (224 assertions) and `tests/repl-protocol/cases/` (1883 assertions) —
+a large swing from the previous audit's 1046/213 split. These counts are a snapshot for this audit date, not a trend line:
+assertions move between suites over time as tests are added, migrated, or consolidated, so don't read the swing itself as a
+coverage regression or expansion.
 Many previously untested methods now have stdlib test coverage. The following gaps remain for methods
-with no coverage in either test suite:
+with no coverage in either test suite (per-method status below has not been re-verified against the current
+counts and may itself be stale — see BT-408):
 
 ### High Priority (Core functionality untested)
 
