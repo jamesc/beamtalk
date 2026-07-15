@@ -136,7 +136,12 @@ about *naming*, not about *identity*. There is no new kind of type.
   (`protocol_registry.rs:296-334`) is one-directional
   (protocol-name vs. `hierarchy.has_class`); alias registration needs
   checks against both classes and protocols, and both of those need a
-  check against aliases, with a defined registration ordering.
+  check against aliases. Registration order: classes, then protocols
+  (today's order — `ProtocolRegistry::register_module` already runs
+  after class-hierarchy extraction), then aliases last, so an alias
+  colliding with either a class or a protocol always has a fully-formed
+  hierarchy/registry to check against and never races a same-file
+  same-name definition of the other two kinds.
 - **Aliases are exported, like classes and protocols.** This is not
   optional: the ADR's flagship consumers are *stdlib* annotations —
   BT-2618's `RestartStrategy` and BT-2827's
@@ -182,11 +187,15 @@ about *naming*, not about *identity*. There is no new kind of type.
   names non-overlapping by construction. Resolution order in
   `resolve_type_annotation` is then: `subst` (type params) → alias table
   → nominal class — and the two interesting lookups can never claim the
-  same name. `infer_method_local_params` must additionally consult the
-  alias table (`&& !alias_table.contains(name)`) so a multi-letter alias
-  used as a bare parameter annotation is never mistaken for an
-  inferrable param. Symmetrically, a bare unbound single letter on an
-  alias *RHS* (`type Timeout = Integer | T`) is a declaration error
+  same name. No corresponding change is needed in
+  `infer_method_local_params`: its `is_generic_type_param` gate
+  (`types.rs:1290`) already restricts inference to single-letter
+  uppercase names, so a multi-letter alias used as a bare parameter
+  annotation can never enter that path regardless — the single-letter
+  ban makes the two namespaces disjoint for free, at every call site,
+  with no additional guard to add or maintain. Symmetrically, a bare
+  unbound single letter on an alias *RHS* (`type Timeout = Integer | T`)
+  is a declaration error
   ("unbound type parameter `T`; parametric aliases are not yet
   supported") rather than a phantom class named `T`.
 - **No recursion.** An alias may reference other aliases; a reference
@@ -210,7 +219,11 @@ about *naming*, not about *identity*. There is no new kind of type.
   declaration check already cleared), cycle detection re-runs over the
   alias dependency graph on every live alias (re)definition, and
   expansion itself carries a visited-set guard so a cycle that slips
-  through is a diagnostic, never a hang.
+  through is a diagnostic, never a hang. A rejected redefinition (cycle
+  detected, or any other declaration-time error) leaves the alias table
+  unchanged — the previous binding, if any, stays in effect, so a failed
+  live edit cannot leave dependent annotations resolving against a
+  missing alias.
 - **Doc comments attach.** `///` above a `type` declaration flows to
   hover and `:help`, giving the member set a single documentation site —
   one of the two main motivations.
@@ -339,6 +352,12 @@ type RestartStrategy = #temporary | #transient | #permanent
 
 Declared in: stdlib/src/Supervisor.bt:12
 ```
+
+For an alias with no doc comment, the block below the declaration line
+is omitted entirely — just `type Name = ...` followed by the
+`Declared in:` line — matching how `:help` already renders an
+undocumented class or method (declaration only, no blank comment
+section).
 
 A Haskell-style `:t <expr>` (type-of-expression) command is **not** part
 of this ADR: `:t` is already taken in the Beamtalk REPL as the alias for
@@ -659,10 +678,11 @@ To be broken into an epic via `/plan-adr` once Accepted. Expected shape:
   redefinition; expansion carries a visited-set guard). Bidirectional
   namespace collision checks against classes *and* protocols (new
   plumbing — the existing `protocol_registry.rs` check is
-  one-directional). `infer_method_local_params` (`inference.rs:5497-5506`)
-  gains an alias-table consultation alongside its existing
-  `!hierarchy.has_class` guard so multi-letter aliases in bare parameter
-  positions are never inferred as method-local params. Provenance:
+  one-directional). `infer_method_local_params`
+  (`inference.rs:5497-5506`) needs **no** change — its existing
+  `is_generic_type_param` gate is single-letter-only, so multi-letter
+  alias names are already excluded from that path by construction (see
+  Semantics). Provenance:
   resolved `InferredType` carries the alias name for display (extend
   `TypeProvenance` or add a display-name field — design detail for the
   implementing issue); v1 display scope is structurally-identical types
