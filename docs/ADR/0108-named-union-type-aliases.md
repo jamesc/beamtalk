@@ -119,6 +119,7 @@ about *naming*, not about *identity*. There is no new kind of type.
   type JsonKey = String | Symbol
   type Timeout = Integer | #infinity
   type PublicTag = Symbol \ (#reserved | #internal)
+  type JsonValue = Nil | Boolean | Integer | Float | String | List | Dictionary
   ```
 
   Singleton-union enums are the motivating case, but restricting the RHS
@@ -136,18 +137,36 @@ about *naming*, not about *identity*. There is no new kind of type.
   (protocol-name vs. `hierarchy.has_class`); alias registration needs
   checks against both classes and protocols, and both of those need a
   check against aliases, with a defined registration ordering.
-- **Package scope (v1): aliases are package-local and not exported.**
-  ADR 0070's cross-package collision and qualification machinery
-  (`collision_checker.rs`, `pkg@Name`) keys on compiled BEAM module
-  names — an alias erases at resolution and produces no module, so two
-  dependencies each declaring `type Id = Integer` are invisible to it,
-  and `pkg@Id` qualification has nothing to resolve to. Rather than
-  invent an alias export/qualification story now, v1 scopes aliases to
-  the declaring package: they do not cross package boundaries, and the
-  ADR 0071 `internal` modifier does not apply (there is no `public`
-  alias to restrict). Cross-package alias export is a deliberate
-  deferral — flagged here so it is decided *with* ADR 0070's machinery
-  in view when demand materialises, not discovered as a collision bug.
+- **Aliases are exported, like classes and protocols.** This is not
+  optional: the ADR's flagship consumers are *stdlib* annotations —
+  BT-2618's `RestartStrategy` and BT-2827's
+  `Json parse: -> Result(JsonValue, JsonError)` are only useful if
+  *user* code can see, write, and get hover for `JsonValue`. A
+  package-local alias would let the stdlib abbreviate its own internals
+  while leaving every public signature as unreadable as today.
+  - **Mechanism — the protocol precedent, not the class one.** Aliases
+    erase and produce no BEAM module, so ADR 0070's module-keyed
+    collision/qualification machinery (`collision_checker.rs`,
+    `pkg@Name`) cannot see them. But protocols have the same property
+    and already solved it: protocol metadata is extracted from defining
+    modules and seeded into the consumer's registry
+    (`ProtocolRegistry::extract_protocol_infos` /
+    `add_pre_loaded`, BT-2006), with collisions diagnosed at seeding
+    time and current-module definitions winning. Alias export follows
+    this model exactly: alias declarations are carried in the package's
+    compiled metadata and seeded into the consumer's alias table.
+  - **ADR 0071's `internal` modifier applies** (`internal type Foo =
+    ...`): an internal alias is package-private — usable in `internal`
+    signatures, not exported. An exported (public) signature referencing
+    an internal alias is a compile error (the consumer could never name
+    or resolve it) — the same leakage rule 0071 applies to internal
+    classes in public positions.
+  - **Cross-package collisions** (two dependencies each exporting
+    `type Id = ...`) are diagnosed at seeding time like pre-loaded
+    protocol collisions. `pkg@Name` qualification for aliases is
+    deferred: unlike a class collision, an alias collision always has a
+    zero-cost workaround — write the expansion, or re-declare a local
+    alias under a different name — because the alias *is* its expansion.
 - **Single-letter names are reserved — a declaration error.** ADR 0068's
   implicit method-local type parameters make any *single uppercase
   letter* in type position that is not a known class a generic parameter
@@ -171,8 +190,21 @@ about *naming*, not about *identity*. There is no new kind of type.
   ("unbound type parameter `T`; parametric aliases are not yet
   supported") rather than a phantom class named `T`.
 - **No recursion.** An alias may reference other aliases; a reference
-  cycle (`type A = B`, `type B = A | Integer`) is a structural compile
-  error at declaration time. Because hot reload can invalidate the
+  cycle (`type A = B`, `type B = A | Integer`) — including
+  self-reference — is a structural compile error at declaration time.
+  This is a real divergence from Erlang, whose `-type json() :: null |
+  boolean() | number() | binary() | [json()] | #{binary() => json()}.`
+  is legal: recursion is incompatible with *eager* expansion
+  (a self-referencing alias has no finite `InferredType` tree), and
+  supporting it would mean lazy/deferred alias resolution throughout the
+  checker — a different, much larger design. Concretely for the stdlib:
+  `type JsonValue = Nil | Boolean | Integer | Float | String | List |
+  Dictionary` is expressible (unparameterized containers — which is all
+  the element-type precision erasure-checked containers give at a
+  dynamic boundary anyway), while the fully-recursive
+  `List(JsonValue)` form is not, v1. Flagged as future work alongside
+  parametric aliases — both point at the same lazy-substitution
+  machinery. Because hot reload can invalidate the
   batch-time check (declare `type A = Integer` and `type B = A`, both
   legal, then live-redefine `type A = B` — a cycle the one-shot
   declaration check already cleared), cycle detection re-runs over the
@@ -560,12 +592,16 @@ reference language a user might arrive from.
 
 - No runtime, codegen-semantics, or REPL-output change; erasure is
   total. The named `-type` emission is spec cosmetics only.
-- **Parametric aliases (`type Option(T) = T | Nil`) are deliberately
-  deferred**, not rejected: they require substitution machinery at alias
-  expansion (a second instantiation path beside ADR 0068's class
-  generics) and no motivating stdlib case exists yet. The declaration
-  grammar deliberately leaves room (`type Name(...) = ...` is a parse
-  error today, reserved).
+- **Parametric aliases (`type Option(T) = T | Nil`) and recursive
+  aliases (`type JsonValue = ... | List(JsonValue)`) are deliberately
+  deferred**, not rejected: parametric aliases require substitution
+  machinery at alias expansion (a second instantiation path beside
+  ADR 0068's class generics), and recursive aliases require lazy
+  resolution (see Semantics — eager expansion cannot represent them).
+  They are one deferral, not two: both need the same shift from
+  eager-expand-at-resolution to substitute-on-demand, so a future ADR
+  should take them together. The declaration grammar deliberately leaves
+  room (`type Name(...) = ...` is a parse error today, reserved).
 - Runtime reflection of aliases (`Beamtalk aliases`, alias objects) is a
   non-goal for v1: aliases live in the compiler-as-language-service
   (hover, `:help`, completions cover discoverability). If reflection
@@ -616,6 +652,13 @@ To be broken into an epic via `/plan-adr` once Accepted. Expected shape:
   `check_singleton_match_exhaustiveness` / `matchExhaustive:` operate on
   the expansion by construction. Regression tests pin that an
   alias-annotated scrutinee behaves identically to the spelled-out union.
+- **Export/packaging:** alias declarations carried in the package's
+  compiled metadata and seeded into consuming compilations' alias
+  tables, mirroring `ProtocolRegistry::extract_protocol_infos` /
+  `add_pre_loaded` (BT-2006): current-module wins, cross-package
+  collisions diagnosed at seeding time. `internal type` support plus the
+  leakage check (public signature referencing an internal alias is a
+  compile error, per ADR 0071's rule for internal classes).
 - **Codegen:** optional named `-type` emission per alias in
   `spec_codegen.rs`; annotation sites reference it. No other codegen
   change.
@@ -635,7 +678,12 @@ To be broken into an epic via `/plan-adr` once Accepted. Expected shape:
   `type`-form-vs-message-form argument, recorded).
 - **Stdlib follow-through:** BT-2618 retargets its tightened annotations
   at named aliases (`type RestartStrategy`, etc.) instead of repeated
-  anonymous unions.
+  anonymous unions, and BT-2827's typed JSON/YAML/HTTP APIs get
+  `type JsonValue` (unparameterized-container form — see the recursion
+  note under Semantics) as the exported vocabulary for
+  `Json parse: -> Result(JsonValue, JsonError)`-style signatures. Both
+  exercise the export path, making stdlib the first consumer of
+  alias-metadata seeding.
 
 ## References
 
@@ -652,10 +700,10 @@ To be broken into an epic via `/plan-adr` once Accepted. Expected shape:
   (`::` annotation syntax), ADR 0060 (Result — the payload-carrying
   sum-type lane this deliberately does not duplicate), ADR 0105 (live
   re-check machinery the alias trigger extends with a new dependency
-  kind), ADR 0070/0071 (package namespaces and visibility — why v1
-  aliases are package-local and unexported), ADR 0103 (sendability —
-  sees the alias expansion; `Negation`/`Intersection` edge flagged
-  there)
+  kind), ADR 0070/0071 (package namespaces and visibility — alias
+  export follows the protocol-metadata seeding model, and `internal`
+  applies to aliases), ADR 0103 (sendability — sees the alias
+  expansion; `Negation`/`Intersection` edge flagged there)
 - Documentation: `docs/beamtalk-language-features.md` §Union Types,
   §Difference and Intersection Types; `docs/beamtalk-principles.md`
   (Non-Goals — mandatory static typing);
