@@ -113,3 +113,22 @@ TestCase subclass: BlocksTest
     self should: [
       [:a :b | a + b] perform: #value: withArguments: #(3)
     ] raise: #stateful_block_dispatch
+
+  testPerformWithWrongArityOnStatefulBlockRaisesAStructuredErrorNotACrash =>
+    // BT-2812 code review (BT-2892 tracks improving this): the arity
+    // ambiguity also cuts the other way — a genuinely Tier 2 (stateful)
+    // 0-arg block has raw arity 1 (StateAcc only), which satisfies
+    // value:'s Tier 1 check, so the fallback misapplies the caller's
+    // argument into the StateAcc slot. This does NOT crash raw: an outer
+    // safety net already converts the resulting internal map-shape failure
+    // into a clean, catchable structured error (currently #type_error, not
+    // the more informative #stateful_block_dispatch — see BT-2892). This
+    // test pins "still a structured error, not a raw crash" rather than the
+    // exact kind, since the precise kind is an accident of unrelated
+    // machinery, not a designed contract.
+    count := 0
+    statefulZeroArgBlock := [count := count + 1]
+    caught := [
+      statefulZeroArgBlock perform: #value: withArguments: #(42)
+    ] on: Exception do: [:e | e]
+    self assert: (caught isKindOf: Exception)

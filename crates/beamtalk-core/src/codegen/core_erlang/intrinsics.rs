@@ -1203,6 +1203,23 @@ impl CoreErlangGenerator {
     /// - Neither (defensive; Block is `sealed` so `Self` is always a fun in
     ///   practice): falls through to the original runtime-dispatch placeholder,
     ///   unchanged from before this fix.
+    ///
+    /// Adversarial review (BT-2812): the arity ambiguity above cuts both ways.
+    /// A genuinely Tier 2 block whose *declared* arity is one less than the
+    /// selector's (e.g. a 0-arg stateful block `[count := count + 1]`, raw
+    /// arity 1, sent `#value:`) satisfies the Tier 1 `is_function(Self, N)`
+    /// check and gets `erlang:apply`'d with the caller's argument bound into
+    /// its `StateAcc` parameter instead of a map. This does *not* crash raw —
+    /// the block's internal `maps:get`/`maps:put` calls fail with `badarg`,
+    /// which an outer safety net already converts to a clean, catchable
+    /// `#beamtalk_error{kind = type_error}` — but the resulting message
+    /// ("expected a Dictionary...") doesn't explain the real cause the way
+    /// `stateful_block_dispatch` does. Precisely disambiguating would require
+    /// a try/catch around the Tier 1 `apply` that intercepts only internal
+    /// map-shape crashes and reraises everything else untouched (real
+    /// `#beamtalk_error{}`s and non-local-return throws must not be masked);
+    /// deferred as a separately-scoped follow-up rather than risking a rushed
+    /// version of that here. See BT-2892.
     pub(in crate::codegen::core_erlang) fn generate_block_value_structural_fallback(
         &mut self,
         intrinsic_name: &str,

@@ -3438,6 +3438,14 @@ impl CoreErlangGenerator {
         // generic dispatch site doesn't have — see ADR-0041). See
         // `generate_block_value_structural_fallback` for the Tier 1/Tier 2
         // discrimination.
+        //
+        // Adversarial review (BT-2812): this match is intentionally exhaustive
+        // over today's four `value*` arities, not pattern-derived from them. A
+        // hypothetical 5th arity (`blockValue4`) or a change to ADR-0041's
+        // `Args..., StateAcc` shape (extra state args, different position)
+        // would silently fall through to the unfixed placeholder below rather
+        // than fail to compile — there's no static check tying this arm list
+        // to `STRUCTURAL_INTRINSICS` or to the Block.bt method declarations.
         if !is_quoted {
             let block_value_info = match name {
                 "blockValue" => Some((0usize, "value")),
