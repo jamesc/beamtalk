@@ -124,39 +124,14 @@ impl AliasRegistry {
         for alias_def in &module.type_aliases {
             let name = &alias_def.name.name;
 
-            // Namespace collision: alias name matches a class name.
-            if hierarchy.has_class(name) {
-                diagnostics.push(
-                    Diagnostic::error(
-                        format!(
-                            "`{name}` is already defined as a class — \
-                             type aliases share the class/protocol namespace"
-                        ),
-                        alias_def.name.span,
-                    )
-                    .with_hint(format!(
-                        "Rename the type alias to avoid conflicting with class `{name}`"
-                    ))
-                    .with_category(DiagnosticCategory::Type),
-                );
-                continue;
-            }
-
-            // Namespace collision: alias name matches a protocol name.
-            if protocol_registry.has_protocol(name) {
-                diagnostics.push(
-                    Diagnostic::error(
-                        format!(
-                            "`{name}` is already defined as a protocol — \
-                             type aliases share the class/protocol namespace"
-                        ),
-                        alias_def.name.span,
-                    )
-                    .with_hint(format!(
-                        "Rename the type alias to avoid conflicting with protocol `{name}`"
-                    ))
-                    .with_category(DiagnosticCategory::Type),
-                );
+            // Namespace collision: alias name matches a class or protocol name.
+            if let Some(diag) = namespace_collision_diagnostic(
+                name,
+                alias_def.name.span,
+                hierarchy,
+                protocol_registry,
+            ) {
+                diagnostics.push(diag);
                 continue;
             }
 
@@ -183,6 +158,75 @@ impl AliasRegistry {
 
             self.aliases
                 .insert(name.clone(), AliasInfo::from_definition(alias_def));
+        }
+
+        // ADR 0108 "No recursion" / BT-2896: cycle detection + topological
+        // sort, package-wide. Runs over the *whole* accumulated `self.aliases`
+        // (not just the aliases just registered from this one module) so that
+        // calling `register_module` more than once against the same registry
+        // — the shape a future package-wide caller (BT-2898) would use to
+        // seed aliases from multiple files — still catches a cycle spanning
+        // names declared in different calls. Non-fatal, mirroring the
+        // unbound-type-variable check above: a cyclic alias still registers
+        // (its `TypeAnnotation` is stored either way), relying on
+        // `resolve_type_annotation`'s existing defensive `expanding` guard
+        // (BT-2895) to keep *expansion* safe if something resolves through it
+        // anyway — rejecting cyclic aliases outright would just cascade into
+        // spurious "unknown type" diagnostics at every reference site instead
+        // of the one precise cycle diagnostic here.
+        let (cycle_diagnostics, _resolution_order) = detect_cycles(&self.aliases);
+        diagnostics.extend(cycle_diagnostics);
+
+        diagnostics
+    }
+
+    /// (Re)defines a single alias in a live/REPL session (ADR 0108 "No
+    /// recursion", BT-2896).
+    ///
+    /// Unlike [`register_module`](Self::register_module), redefining an
+    /// existing name is the whole point here (no "duplicate" check), but
+    /// every declaration-time check — namespace collision, unbound
+    /// type-variable, and (package-wide) cycle detection — re-runs against a
+    /// *trial* copy of the alias table that includes the candidate
+    /// redefinition. If that trial is clean, the redefinition commits, i.e.
+    /// replaces the existing entry (or inserts a brand-new one, for a name
+    /// not previously registered). If any diagnostic fires — a cycle the
+    /// redefinition would introduce, or any other declaration-time error —
+    /// nothing commits: `self.aliases` is left exactly as it was, so the
+    /// previous binding (if any) stays in effect and no dependent annotation
+    /// is ever left resolving against a missing or broken alias.
+    ///
+    /// This is the alias-table-consistency half of ADR 0108's hot-reload
+    /// story. It does not, by itself, re-check other code that references
+    /// the redefined name — that dependent-site re-check trigger is BT-2899,
+    /// a separate, later issue building on this one.
+    pub fn redefine_alias(
+        &mut self,
+        alias_def: &TypeAliasDefinition,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: &ProtocolRegistry,
+    ) -> Vec<Diagnostic> {
+        let name = &alias_def.name.name;
+        let mut diagnostics = Vec::new();
+
+        if let Some(diag) =
+            namespace_collision_diagnostic(name, alias_def.name.span, hierarchy, protocol_registry)
+        {
+            diagnostics.push(diag);
+        }
+
+        check_unbound_type_vars(&alias_def.annotation, hierarchy, name, &mut diagnostics);
+
+        let mut candidate = self.aliases.clone();
+        candidate.insert(name.clone(), AliasInfo::from_definition(alias_def));
+        let (cycle_diagnostics, _resolution_order) = detect_cycles(&candidate);
+        diagnostics.extend(cycle_diagnostics);
+
+        // All-or-nothing: any declaration-time error (namespace collision,
+        // unbound type variable, or an introduced cycle) rejects the whole
+        // redefinition — the alias table stays exactly as it was.
+        if diagnostics.is_empty() {
+            self.aliases = candidate;
         }
 
         diagnostics
@@ -289,6 +333,226 @@ fn check_unbound_type_vars(
         | TypeAnnotation::ClassOf { .. }
         | TypeAnnotation::Singleton { .. } => {}
     }
+}
+
+/// Namespace collision check shared by [`AliasRegistry::register_module`]
+/// and [`AliasRegistry::redefine_alias`]: an alias name colliding with an
+/// already-registered class or protocol name (ADR 0108 Semantics — aliases
+/// share the class/protocol namespace).
+fn namespace_collision_diagnostic(
+    name: &EcoString,
+    span: Span,
+    hierarchy: &ClassHierarchy,
+    protocol_registry: &ProtocolRegistry,
+) -> Option<Diagnostic> {
+    if hierarchy.has_class(name) {
+        return Some(
+            Diagnostic::error(
+                format!(
+                    "`{name}` is already defined as a class — \
+                     type aliases share the class/protocol namespace"
+                ),
+                span,
+            )
+            .with_hint(format!(
+                "Rename the type alias to avoid conflicting with class `{name}`"
+            ))
+            .with_category(DiagnosticCategory::Type),
+        );
+    }
+    if protocol_registry.has_protocol(name) {
+        return Some(
+            Diagnostic::error(
+                format!(
+                    "`{name}` is already defined as a protocol — \
+                     type aliases share the class/protocol namespace"
+                ),
+                span,
+            )
+            .with_hint(format!(
+                "Rename the type alias to avoid conflicting with protocol `{name}`"
+            ))
+            .with_category(DiagnosticCategory::Type),
+        );
+    }
+    None
+}
+
+/// DFS visitation state for [`detect_cycles`] — standard white/grey/black
+/// cycle detection, collapsed to two states since a `Done` (black) node
+/// never needs revisiting or distinguishing from "never seen" once its
+/// subtree is fully explored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum VisitState {
+    /// On the current DFS path — an edge back to a `Visiting` node is a
+    /// cycle.
+    Visiting,
+    /// Fully explored; safe to skip without re-walking its subtree.
+    Done,
+}
+
+/// Walks the alias dependency graph — edges are RHS references to *other
+/// registered alias names* (nominal class names are not edges; see
+/// [`collect_alias_references`]) — detecting reference cycles and producing
+/// a topological resolution order as the DFS post-order, in one walk (ADR
+/// 0108 "No recursion": "the same DFS the cycle check already needs …
+/// produces this topological order for free as a side effect via its
+/// post-order").
+///
+/// Operates package-wide over whatever `aliases` map it is given — the
+/// caller decides scope (the whole registry for [`AliasRegistry::
+/// register_module`], or a trial candidate map for [`AliasRegistry::
+/// redefine_alias`]) — so a cycle spanning aliases declared across separate
+/// `register_module` calls (e.g. one call per file in a package) is still
+/// caught, and a legal forward reference across those same calls (`type B =
+/// A | #z` registered before `type A = #x | #y`) is never mistaken for one:
+/// this only walks *declared* references, it never tries to eagerly resolve
+/// them the way a naïve single sequential pass would.
+///
+/// Iteration starts from names in sorted order, and `path`/`order` are
+/// plain `Vec`s rather than a `HashSet`, so the result — which cycle is
+/// reported first, and the exact post-order — is deterministic across runs
+/// regardless of `HashMap` iteration order.
+fn detect_cycles(aliases: &HashMap<EcoString, AliasInfo>) -> (Vec<Diagnostic>, Vec<EcoString>) {
+    let mut state: HashMap<EcoString, VisitState> = HashMap::new();
+    let mut path: Vec<EcoString> = Vec::new();
+    let mut order: Vec<EcoString> = Vec::new();
+    let mut diagnostics = Vec::new();
+
+    let mut names: Vec<EcoString> = aliases.keys().cloned().collect();
+    names.sort();
+
+    for name in names {
+        if !state.contains_key(&name) {
+            visit_alias(
+                &name,
+                aliases,
+                &mut state,
+                &mut path,
+                &mut order,
+                &mut diagnostics,
+            );
+        }
+    }
+    (diagnostics, order)
+}
+
+/// The recursive DFS step behind [`detect_cycles`]. See that function's doc
+/// for the overall algorithm and its guarantees.
+fn visit_alias(
+    name: &EcoString,
+    aliases: &HashMap<EcoString, AliasInfo>,
+    state: &mut HashMap<EcoString, VisitState>,
+    path: &mut Vec<EcoString>,
+    order: &mut Vec<EcoString>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    state.insert(name.clone(), VisitState::Visiting);
+    path.push(name.clone());
+
+    if let Some(info) = aliases.get(name) {
+        let mut deps = Vec::new();
+        collect_alias_references(&info.annotation, aliases, &mut deps);
+        for dep in deps {
+            match state.get(&dep) {
+                None => visit_alias(&dep, aliases, state, path, order, diagnostics),
+                Some(VisitState::Visiting) => {
+                    // Back-edge to an ancestor still on the current path —
+                    // a cycle. The chain from that ancestor's first
+                    // occurrence through to here (plus repeating the
+                    // ancestor once more) is exactly the `A → B → A` shape
+                    // ADR 0108's Error examples specify.
+                    let start_idx = path
+                        .iter()
+                        .position(|n| *n == dep)
+                        .expect("dep is Visiting, so it must be on the current DFS path");
+                    let mut cycle: Vec<EcoString> = path[start_idx..].to_vec();
+                    cycle.push(dep.clone());
+                    let span = aliases.get(&cycle[0]).map_or(Span::new(0, 0), |i| i.span);
+                    diagnostics.push(cycle_diagnostic(&cycle, span));
+                }
+                // Already fully explored (possibly via a different path) —
+                // no cycle through this edge, and no need to re-walk it.
+                Some(VisitState::Done) => {}
+            }
+        }
+    }
+
+    state.insert(name.clone(), VisitState::Done);
+    path.pop();
+    order.push(name.clone());
+}
+
+/// Collects the names, among `ann`'s referenced identifiers, that are
+/// registered alias names in `aliases` — i.e. the dependency-graph edges
+/// out of the alias whose RHS is `ann`. A `Simple`/`Generic` name that is
+/// *not* in `aliases` is an ordinary nominal class reference, not a graph
+/// edge — existence of that class is checked elsewhere, not here.
+fn collect_alias_references(
+    ann: &TypeAnnotation,
+    aliases: &HashMap<EcoString, AliasInfo>,
+    out: &mut Vec<EcoString>,
+) {
+    match ann {
+        TypeAnnotation::Simple(type_id) => {
+            if aliases.contains_key(&type_id.name) {
+                out.push(type_id.name.clone());
+            }
+        }
+        TypeAnnotation::Generic {
+            base, parameters, ..
+        } => {
+            if aliases.contains_key(&base.name) {
+                out.push(base.name.clone());
+            }
+            for param in parameters {
+                collect_alias_references(param, aliases, out);
+            }
+        }
+        TypeAnnotation::Union { types, .. } => {
+            for member in types {
+                collect_alias_references(member, aliases, out);
+            }
+        }
+        TypeAnnotation::FalseOr { inner, .. } => {
+            collect_alias_references(inner, aliases, out);
+        }
+        TypeAnnotation::Difference { base, excluded, .. } => {
+            collect_alias_references(base, aliases, out);
+            collect_alias_references(excluded, aliases, out);
+        }
+        TypeAnnotation::Intersection { left, right, .. } => {
+            collect_alias_references(left, aliases, out);
+            collect_alias_references(right, aliases, out);
+        }
+        // SelfType / SelfClass / ClassOf / Singleton have no nested
+        // identifier position that could reference another alias.
+        TypeAnnotation::SelfType { .. }
+        | TypeAnnotation::SelfClass { .. }
+        | TypeAnnotation::ClassOf { .. }
+        | TypeAnnotation::Singleton { .. } => {}
+    }
+}
+
+/// Builds the "type alias cycle: `A` → `B` → `A`" diagnostic ADR 0108's
+/// Error examples specify, given the full cycle chain (first and last
+/// elements equal — see [`visit_alias`]).
+fn cycle_diagnostic(cycle: &[EcoString], span: Span) -> Diagnostic {
+    let chain = cycle
+        .iter()
+        .map(|n| format!("`{n}`"))
+        .collect::<Vec<_>>()
+        .join(" \u{2192} "); // "→"
+    let mut message = format!("type alias cycle: {chain}");
+    if cycle.len() == 2 && cycle[0] == cycle[1] {
+        message.push_str(" (self-reference)");
+    }
+    Diagnostic::error(message, span)
+        .with_hint(
+            "Break the cycle by removing or redirecting one of the alias references — \
+             recursive aliases are not supported (ADR 0108)",
+        )
+        .with_category(DiagnosticCategory::Type)
 }
 
 #[cfg(test)]
@@ -599,5 +863,355 @@ mod tests {
         let diags = registry.register_module(&module, &hierarchy, &protocol_registry);
 
         assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+    }
+
+    // ---- Cycle detection + topological sort (ADR 0108 "No recursion", BT-2896) ----
+
+    #[test]
+    fn self_reference_alias_is_a_cycle() {
+        // `type Loop = Loop | Integer` — a self-reference is a cycle of
+        // length one. (Multi-letter name: ADR 0108 reserves bare single
+        // uppercase letters for generic type parameters.)
+        let module = Module {
+            type_aliases: vec![alias_def(
+                "Loop",
+                TypeAnnotation::Union {
+                    types: vec![
+                        TypeAnnotation::Simple(ident("Loop")),
+                        TypeAnnotation::Simple(ident("Integer")),
+                    ],
+                    span: span(),
+                },
+            )],
+            ..empty_module()
+        };
+        let hierarchy = ClassHierarchy::with_builtins();
+        let protocol_registry = ProtocolRegistry::new();
+        let mut registry = AliasRegistry::new();
+        let diags = registry.register_module(&module, &hierarchy, &protocol_registry);
+
+        assert_eq!(diags.len(), 1, "expected one cycle diagnostic: {diags:?}");
+        assert!(diags[0].message.contains("type alias cycle"));
+        assert!(diags[0].message.contains("Loop"));
+        assert!(diags[0].message.contains("self-reference"));
+        // Non-fatal: the alias still registers (see `register_module` doc) so
+        // a slipped-through reference to it does not become a spurious
+        // "unknown type" error on top of the cycle diagnostic.
+        assert!(registry.has_alias("Loop"));
+    }
+
+    #[test]
+    fn two_alias_cycle_is_detected() {
+        // ADR 0108 Error examples, verbatim:
+        //   type Ab = Bc | Integer
+        //   type Bc = Ab | Symbol
+        //   // Error: type alias cycle: `Ab` → `Bc` → `Ab`
+        let module = Module {
+            type_aliases: vec![
+                alias_def(
+                    "Ab",
+                    TypeAnnotation::Union {
+                        types: vec![
+                            TypeAnnotation::Simple(ident("Bc")),
+                            TypeAnnotation::Simple(ident("Integer")),
+                        ],
+                        span: span(),
+                    },
+                ),
+                alias_def(
+                    "Bc",
+                    TypeAnnotation::Union {
+                        types: vec![
+                            TypeAnnotation::Simple(ident("Ab")),
+                            TypeAnnotation::Simple(ident("Symbol")),
+                        ],
+                        span: span(),
+                    },
+                ),
+            ],
+            ..empty_module()
+        };
+        let hierarchy = ClassHierarchy::with_builtins();
+        let protocol_registry = ProtocolRegistry::new();
+        let mut registry = AliasRegistry::new();
+        let diags = registry.register_module(&module, &hierarchy, &protocol_registry);
+
+        assert_eq!(diags.len(), 1, "expected one cycle diagnostic: {diags:?}");
+        assert!(
+            diags[0]
+                .message
+                .contains("type alias cycle: `Ab` \u{2192} `Bc` \u{2192} `Ab`"),
+            "unexpected message: {}",
+            diags[0].message
+        );
+        // Both aliases still register — see `self_reference_alias_is_a_cycle`.
+        assert!(registry.has_alias("Ab"));
+        assert!(registry.has_alias("Bc"));
+    }
+
+    #[test]
+    fn three_alias_cycle_is_detected() {
+        // type Xa = Yb, type Yb = Zc, type Zc = Xa | Integer
+        let module = Module {
+            type_aliases: vec![
+                alias_def("Xa", TypeAnnotation::Simple(ident("Yb"))),
+                alias_def("Yb", TypeAnnotation::Simple(ident("Zc"))),
+                alias_def(
+                    "Zc",
+                    TypeAnnotation::Union {
+                        types: vec![
+                            TypeAnnotation::Simple(ident("Xa")),
+                            TypeAnnotation::Simple(ident("Integer")),
+                        ],
+                        span: span(),
+                    },
+                ),
+            ],
+            ..empty_module()
+        };
+        let hierarchy = ClassHierarchy::with_builtins();
+        let protocol_registry = ProtocolRegistry::new();
+        let mut registry = AliasRegistry::new();
+        let diags = registry.register_module(&module, &hierarchy, &protocol_registry);
+
+        assert_eq!(diags.len(), 1, "expected one cycle diagnostic: {diags:?}");
+        assert!(
+            diags[0]
+                .message
+                .contains("type alias cycle: `Xa` \u{2192} `Yb` \u{2192} `Zc` \u{2192} `Xa`"),
+            "unexpected message: {}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn non_cyclic_chain_produces_no_cycle_diagnostic() {
+        // type Pa = Integer, type Qb = Pa, type Rc = Qb — a legal acyclic
+        // chain must not be flagged.
+        let module = Module {
+            type_aliases: vec![
+                alias_def("Pa", TypeAnnotation::Simple(ident("Integer"))),
+                alias_def("Qb", TypeAnnotation::Simple(ident("Pa"))),
+                alias_def("Rc", TypeAnnotation::Simple(ident("Qb"))),
+            ],
+            ..empty_module()
+        };
+        let hierarchy = ClassHierarchy::with_builtins();
+        let protocol_registry = ProtocolRegistry::new();
+        let mut registry = AliasRegistry::new();
+        let diags = registry.register_module(&module, &hierarchy, &protocol_registry);
+
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+    }
+
+    #[test]
+    fn multi_file_forward_reference_resolves_without_cycle() {
+        // ADR 0108 "No recursion" / BT-2896: `type B = A | #z` and `type A =
+        // #x | #y` declared in the same package but *different files* — `B`
+        // registered (via its own `register_module` call, simulating file 1)
+        // before `A` is even known (file 2's `register_module` call hasn't
+        // happened yet). A naive single sequential pass would spuriously
+        // report "unknown type `A`" here; the package-wide DFS must not,
+        // because it only walks *declared* references and defers judgement
+        // until the whole graph (both calls) is in.
+        let file1 = Module {
+            type_aliases: vec![alias_def(
+                "Gb",
+                TypeAnnotation::Union {
+                    types: vec![
+                        TypeAnnotation::Simple(ident("Fa")),
+                        TypeAnnotation::Singleton {
+                            name: "z".into(),
+                            span: span(),
+                        },
+                    ],
+                    span: span(),
+                },
+            )],
+            ..empty_module()
+        };
+        let file2 = Module {
+            type_aliases: vec![alias_def("Fa", singleton_union(&["x", "y"]))],
+            ..empty_module()
+        };
+        let hierarchy = ClassHierarchy::with_builtins();
+        let protocol_registry = ProtocolRegistry::new();
+        let mut registry = AliasRegistry::new();
+
+        let diags1 = registry.register_module(&file1, &hierarchy, &protocol_registry);
+        assert!(diags1.is_empty(), "unexpected diagnostics: {diags1:?}");
+        let diags2 = registry.register_module(&file2, &hierarchy, &protocol_registry);
+        assert!(diags2.is_empty(), "unexpected diagnostics: {diags2:?}");
+
+        assert!(registry.has_alias("Fa"));
+        assert!(registry.has_alias("Gb"));
+
+        // `Gb` resolves all the way through to `Fa`'s expansion, exactly as
+        // it would if both were declared in one file.
+        let resolved = crate::semantic_analysis::type_checker::resolve_type_annotation(
+            &TypeAnnotation::Simple(ident("Gb")),
+            &HashMap::new(),
+            None,
+            Some(&registry),
+        );
+        let crate::semantic_analysis::type_checker::InferredType::Union { members, .. } = resolved
+        else {
+            panic!("expected Union, got {resolved:?}");
+        };
+        assert_eq!(members.len(), 3, "expected #x | #y | #z, got {members:?}");
+    }
+
+    // ---- Live redefinition (ADR 0108 "No recursion", BT-2896) ----
+
+    #[test]
+    fn clean_redefinition_commits() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let protocol_registry = ProtocolRegistry::new();
+        let mut registry = AliasRegistry::new();
+        registry.register_test_alias(AliasInfo {
+            name: "Timeout".into(),
+            annotation: TypeAnnotation::Simple(ident("Integer")),
+            span: span(),
+        });
+
+        let diags = registry.redefine_alias(
+            &alias_def("Timeout", TypeAnnotation::Simple(ident("Float"))),
+            &hierarchy,
+            &protocol_registry,
+        );
+
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        assert_eq!(
+            registry.get("Timeout").unwrap().annotation,
+            TypeAnnotation::Simple(ident("Float"))
+        );
+    }
+
+    #[test]
+    fn live_redefinition_introducing_cycle_is_rejected() {
+        // `type Ha = Integer`, `type Ib = Ha` — both legal at declaration
+        // time. Live-redefining `Ha` to `type Ha = Ib` introduces a cycle the
+        // one-shot declaration check already cleared (ADR 0108 "No
+        // recursion") — it must be caught, not silently accepted.
+        let module = Module {
+            type_aliases: vec![
+                alias_def("Ha", TypeAnnotation::Simple(ident("Integer"))),
+                alias_def("Ib", TypeAnnotation::Simple(ident("Ha"))),
+            ],
+            ..empty_module()
+        };
+        let hierarchy = ClassHierarchy::with_builtins();
+        let protocol_registry = ProtocolRegistry::new();
+        let mut registry = AliasRegistry::new();
+        let diags = registry.register_module(&module, &hierarchy, &protocol_registry);
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+
+        let redefine_diags = registry.redefine_alias(
+            &alias_def("Ha", TypeAnnotation::Simple(ident("Ib"))),
+            &hierarchy,
+            &protocol_registry,
+        );
+
+        assert_eq!(
+            redefine_diags.len(),
+            1,
+            "expected one cycle diagnostic: {redefine_diags:?}"
+        );
+        assert!(redefine_diags[0].message.contains("type alias cycle"));
+    }
+
+    #[test]
+    fn rejected_redefinition_preserves_old_binding() {
+        // A rejected redefinition — whatever the reason — must leave the
+        // alias table completely unchanged, so a failed live edit can never
+        // strand a dependent annotation resolving against a missing alias
+        // (ADR 0108 "No recursion").
+        let module = Module {
+            type_aliases: vec![
+                alias_def("Ha", TypeAnnotation::Simple(ident("Integer"))),
+                alias_def("Ib", TypeAnnotation::Simple(ident("Ha"))),
+            ],
+            ..empty_module()
+        };
+        let hierarchy = ClassHierarchy::with_builtins();
+        let protocol_registry = ProtocolRegistry::new();
+        let mut registry = AliasRegistry::new();
+        registry.register_module(&module, &hierarchy, &protocol_registry);
+
+        // Cycle-triggering redefinition — must be rejected.
+        let diags = registry.redefine_alias(
+            &alias_def("Ha", TypeAnnotation::Simple(ident("Ib"))),
+            &hierarchy,
+            &protocol_registry,
+        );
+        assert!(!diags.is_empty());
+
+        // `Ha`'s original binding is untouched...
+        assert_eq!(
+            registry.get("Ha").unwrap().annotation,
+            TypeAnnotation::Simple(ident("Integer"))
+        );
+        // ...so `Ib`, which depends on `Ha`, still resolves cleanly instead
+        // of pointing at a missing or broken alias.
+        let resolved = crate::semantic_analysis::type_checker::resolve_type_annotation(
+            &TypeAnnotation::Simple(ident("Ib")),
+            &HashMap::new(),
+            None,
+            Some(&registry),
+        );
+        assert_eq!(
+            resolved,
+            crate::semantic_analysis::type_checker::InferredType::known("Integer")
+        );
+    }
+
+    #[test]
+    fn redefinition_colliding_with_class_is_rejected_and_preserves_old_binding() {
+        // A non-cycle declaration-time error (namespace collision) must also
+        // roll back — "any other declaration-time error" per ADR 0108.
+        let class_module = Module {
+            classes: vec![crate::ast::ClassDefinition::new(
+                ident("Foo"),
+                ident("Object"),
+                vec![],
+                vec![],
+                span(),
+            )],
+            ..empty_module()
+        };
+        let (hierarchy, _) = ClassHierarchy::build(&class_module);
+        let hierarchy = hierarchy.unwrap();
+        let protocol_registry = ProtocolRegistry::new();
+        let mut registry = AliasRegistry::new();
+        registry.register_test_alias(AliasInfo {
+            name: "Timeout".into(),
+            annotation: TypeAnnotation::Simple(ident("Integer")),
+            span: span(),
+        });
+
+        let diags = registry.redefine_alias(
+            &alias_def("Timeout", TypeAnnotation::Simple(ident("Foo"))),
+            &hierarchy,
+            &protocol_registry,
+        );
+        // This redefinition doesn't rename `Timeout` itself, so the
+        // collision check (which only guards the *name being defined*, not
+        // its RHS) doesn't fire here; assert the redefinition of `Timeout`
+        // to reference `Foo` succeeds, then separately verify a redefinition
+        // that collides on the name itself rolls back.
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+
+        let collision_diags = registry.redefine_alias(
+            &alias_def("Foo", TypeAnnotation::Simple(ident("String"))),
+            &hierarchy,
+            &protocol_registry,
+        );
+        assert_eq!(collision_diags.len(), 1);
+        assert!(
+            collision_diags[0]
+                .message
+                .contains("already defined as a class")
+        );
+        assert!(!registry.has_alias("Foo"));
     }
 }
