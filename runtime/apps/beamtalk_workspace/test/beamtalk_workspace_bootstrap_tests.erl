@@ -7,7 +7,7 @@
 Unit tests for beamtalk_workspace_bootstrap module (ADR 0019 Phase 2).
 
 Tests the bootstrap worker that wires singleton class variables
-during workspace startup.
+during workspace startup, including error-path and retry-exhaustion branches.
 """.
 -include_lib("eunit/include/eunit.hrl").
 
@@ -640,3 +640,297 @@ remove_temp_dir(Dir) ->
         end,
     lists:foreach(fun(F) -> file:delete(filename:join(Dir, F)) end, Files),
     file:del_dir(Dir).
+
+%%====================================================================
+%% Tests for rebootstrap message retry-exhaustion clauses
+%%====================================================================
+
+%% Test the max-retries clause for process-singleton rebootstrap.
+%% Sending Retries=5 bypasses the `when Retries < 5` guard, exercising
+%% the LOG_ERROR branch that fires when all retries are spent.
+rebootstrap_actor_max_retries_direct_test_() ->
+    {setup, fun() -> ensure_runtime() end, fun(_) -> cleanup_all() end, fun(_) ->
+        [
+            ?_test(begin
+                {ok, BPid} = beamtalk_workspace_bootstrap:start_link(),
+                BPid ! {rebootstrap, 'TestSingletonXYZ', test_singleton_xyz_reg, 5},
+                timer:sleep(50),
+                ?assert(is_process_alive(BPid))
+            end)
+        ]
+    end}.
+
+%% Test the max-retries clause for value-singleton rebootstrap (Retries >= 5).
+rebootstrap_value_max_retries_direct_test_() ->
+    {setup, fun() -> ensure_runtime() end, fun(_) -> cleanup_all() end, fun(_) ->
+        [
+            ?_test(begin
+                {ok, BPid} = beamtalk_workspace_bootstrap:start_link(),
+                BPid ! {rebootstrap_value, 'TestValueSingletonXYZ', some_nonexistent_mod_xyz, 5},
+                timer:sleep(50),
+                ?assert(is_process_alive(BPid))
+            end)
+        ]
+    end}.
+
+%% Test the Retries < 5 clause of {rebootstrap_value, ...} when the module
+%% atom does not exist. bootstrap_value_singleton catches the undef from
+%% Module:new() and schedules a follow-up retry.
+rebootstrap_value_retry_bad_module_test_() ->
+    {setup, fun() -> ensure_runtime() end, fun(_) -> cleanup_all() end, fun(_) ->
+        [
+            ?_test(begin
+                {ok, BPid} = beamtalk_workspace_bootstrap:start_link(),
+                BPid ! {rebootstrap_value, 'SomeTestClass', bt_nonexistent_module_xyz_abc_1234, 4},
+                timer:sleep(50),
+                ?assert(is_process_alive(BPid))
+            end)
+        ]
+    end}.
+
+%% Test {rebootstrap_value, ..., Retries=4} where Module:new() succeeds but
+%% the class is not registered. set_class_variable returns
+%% {error, class_not_found}, logging a warning and scheduling another retry.
+rebootstrap_value_retry_class_not_found_test_() ->
+    {setup, fun() -> ensure_runtime() end, fun(_) -> cleanup_all() end, fun(_) ->
+        [
+            ?_test(begin
+                {ok, BPid} = beamtalk_workspace_bootstrap:start_link(),
+                MockMod = compile_mock_new_module(),
+                try
+                    BPid ! {rebootstrap_value, 'BtUnregisteredClass99XYZ', MockMod, 4},
+                    timer:sleep(100),
+                    ?assert(is_process_alive(BPid))
+                after
+                    purge_mock_module(MockMod)
+                end
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% Tests for activate_project_modules edge cases
+%%====================================================================
+
+%% Test the _Other catch-all clause with an empty binary (byte_size = 0).
+activate_project_modules_empty_binary_test() ->
+    ok = beamtalk_workspace_bootstrap:activate_project_modules(<<>>).
+
+%% Test that a LOG_WARNING is emitted when some modules fail to activate.
+%% Compiles a bt@ module whose register_class/0 raises an error so that
+%% activate_ebin returns a non-empty Errors list.
+activate_project_modules_activation_error_test_() ->
+    {setup, fun() -> ensure_runtime() end,
+        fun(_) ->
+            code:purge('bt@BT_FailActivation'),
+            code:delete('bt@BT_FailActivation')
+        end,
+        fun(_) ->
+            [
+                ?_test(begin
+                    ModName = 'bt@BT_FailActivation',
+                    ClassName = 'BT_FailActivation',
+                    Forms = [
+                        {attribute, 1, module, ModName},
+                        {attribute, 2, export, [{register_class, 0}]},
+                        {attribute, 3, beamtalk_class, [{ClassName, 'Object'}]},
+                        {function, 4, register_class, 0, [
+                            {clause, 4, [], [], [
+                                {call, 4, {atom, 4, error}, [{atom, 4, deliberate_test_failure}]}
+                            ]}
+                        ]}
+                    ],
+                    {ok, ModName, BeamBin} = compile:forms(Forms, []),
+                    {ProjDir, EbinDir} = make_temp_project_dir(),
+                    try
+                        BeamFile = filename:join(EbinDir, "bt@BT_FailActivation.beam"),
+                        ok = file:write_file(BeamFile, BeamBin),
+                        ok = beamtalk_workspace_bootstrap:activate_project_modules(
+                            list_to_binary(ProjDir)
+                        )
+                    after
+                        remove_temp_project_dir(ProjDir),
+                        code:del_path(EbinDir)
+                    end
+                end)
+            ]
+        end}.
+
+%%====================================================================
+%% Tests for store_bootstrap_class_source via activation callbacks
+%%====================================================================
+
+%% Test store_bootstrap_class_source when the declared source file is absent.
+%% A module compiled with a beamtalk_source attribute pointing to a
+%% non-existent path is activated; file:read_file returns {error, enoent},
+%% triggering the LOG_DEBUG branch.
+store_bootstrap_class_source_missing_file_test_() ->
+    {setup, fun() -> ensure_runtime() end,
+        fun(_) ->
+            cleanup_test_source_class('BT_SrcMissing'),
+            code:purge('bt@BT_SrcMissing'),
+            code:delete('bt@BT_SrcMissing')
+        end,
+        fun(_) ->
+            [
+                ?_test(begin
+                    ModName = 'bt@BT_SrcMissing',
+                    ClassName = 'BT_SrcMissing',
+                    NonExistentPath = "/nonexistent/path/to/src_missing_xyz.bt",
+                    BeamBin = compile_activation_fixture_with_source(
+                        ModName, ClassName, NonExistentPath
+                    ),
+                    {ProjDir, EbinDir} = make_temp_project_dir(),
+                    try
+                        BeamFile = filename:join(EbinDir, "bt@BT_SrcMissing.beam"),
+                        ok = file:write_file(BeamFile, BeamBin),
+                        ok = beamtalk_workspace_bootstrap:activate_project_modules(
+                            list_to_binary(ProjDir)
+                        ),
+                        ?assertNotEqual(undefined, beamtalk_class_registry:whereis_class(ClassName))
+                    after
+                        remove_temp_project_dir(ProjDir),
+                        code:del_path(EbinDir)
+                    end
+                end)
+            ]
+        end}.
+
+%% Test store_bootstrap_class_source when the declared source file exists.
+%% A module compiled with a beamtalk_source attribute pointing to a real
+%% temp file is activated; file:read_file succeeds and the source text is
+%% stored in workspace_meta via set_class_source.
+store_bootstrap_class_source_success_test_() ->
+    {setup,
+        fun() ->
+            ensure_runtime(),
+            %% get_class_source/1 degrades silently to `undefined` unless
+            %% beamtalk_workspace_meta is actually running — it is started by
+            %% the beamtalk_workspace app supervision tree, not
+            %% beamtalk_runtime, so start it explicitly here (mirrors
+            %% beamtalk_repl_loader_precheck_tests.erl's fixture).
+            case whereis(beamtalk_workspace_meta) of
+                undefined ->
+                    {ok, _} = beamtalk_workspace_meta:start_link(#{
+                        workspace_id => <<"bootstrap_src_test_ws">>,
+                        project_path => undefined,
+                        created_at => erlang:system_time(second),
+                        repl => false
+                    });
+                _ ->
+                    ok
+            end
+        end,
+        fun(_) ->
+            cleanup_test_source_class('BT_SrcPresent'),
+            code:purge('bt@BT_SrcPresent'),
+            code:delete('bt@BT_SrcPresent'),
+            case whereis(beamtalk_workspace_meta) of
+                undefined -> ok;
+                MetaPid -> gen_server:stop(MetaPid)
+            end
+        end,
+        fun(_) ->
+            [
+                ?_test(begin
+                    ModName = 'bt@BT_SrcPresent',
+                    ClassName = 'BT_SrcPresent',
+                    TempDir = get_temp_dir(),
+                    SourceFile = filename:join(TempDir, "bt_src_present_test.bt"),
+                    ok = file:write_file(
+                        SourceFile, <<"Object subclass: BT_SrcPresent.\n">>
+                    ),
+                    BeamBin = compile_activation_fixture_with_source(
+                        ModName, ClassName, SourceFile
+                    ),
+                    {ProjDir, EbinDir} = make_temp_project_dir(),
+                    try
+                        BeamFile = filename:join(EbinDir, "bt@BT_SrcPresent.beam"),
+                        ok = file:write_file(BeamFile, BeamBin),
+                        ok = beamtalk_workspace_bootstrap:activate_project_modules(
+                            list_to_binary(ProjDir)
+                        ),
+                        ?assertNotEqual(
+                            undefined, beamtalk_class_registry:whereis_class(ClassName)
+                        ),
+                        ?assertEqual(
+                            "Object subclass: BT_SrcPresent.\n",
+                            beamtalk_workspace_meta:get_class_source(<<"BT_SrcPresent">>)
+                        )
+                    after
+                        remove_temp_project_dir(ProjDir),
+                        code:del_path(EbinDir),
+                        file:delete(SourceFile)
+                    end
+                end)
+            ]
+        end}.
+
+%%====================================================================
+%% Helpers for new tests above
+%%====================================================================
+
+%% Compile a bt@ module whose register_class/0 also sets the beamtalk_source
+%% attribute, so that beamtalk_module_activation:extract_source_path/1 returns
+%% the given path and store_bootstrap_class_source/2 is exercised.
+compile_activation_fixture_with_source(ModName, ClassName, SourcePath) ->
+    Forms = [
+        {attribute, 1, module, ModName},
+        {attribute, 2, export, [{register_class, 0}]},
+        {attribute, 3, beamtalk_class, [{ClassName, 'Object'}]},
+        {attribute, 4, beamtalk_source, [SourcePath]},
+        {function, 5, register_class, 0, [
+            {clause, 5, [], [], [
+                {'case', 6,
+                    {call, 6, {remote, 6, {atom, 6, beamtalk_object_class}, {atom, 6, start}}, [
+                        {atom, 6, ClassName},
+                        {map, 6, [
+                            {map_field_assoc, 6, {atom, 6, name}, {atom, 6, ClassName}},
+                            {map_field_assoc, 6, {atom, 6, superclass}, {atom, 6, 'Object'}},
+                            {map_field_assoc, 6, {atom, 6, module}, {atom, 6, ModName}},
+                            {map_field_assoc, 6, {atom, 6, instance_variables}, {nil, 6}},
+                            {map_field_assoc, 6, {atom, 6, class_methods}, {map, 6, []}},
+                            {map_field_assoc, 6, {atom, 6, instance_methods}, {map, 6, []}}
+                        ]}
+                    ]},
+                    [
+                        {clause, 7, [{tuple, 7, [{atom, 7, ok}, {var, 7, '_Pid'}]}], [], [
+                            {atom, 7, ok}
+                        ]},
+                        {clause, 8, [{tuple, 8, [{atom, 8, error}, {var, 8, '_'}]}], [], [
+                            {atom, 8, ok}
+                        ]}
+                    ]}
+            ]}
+        ]}
+    ],
+    {ok, ModName, BeamBin} = compile:forms(Forms, []),
+    BeamBin.
+
+%% Dynamically compile and load a minimal module with new/0 -> #{}.
+%% Used to exercise the class_not_found path in bootstrap_value_singleton
+%% where Module:new() succeeds but the class is not in the registry.
+compile_mock_new_module() ->
+    Idx = erlang:unique_integer([positive]),
+    ModName = list_to_atom("bt_test_mock_new_" ++ integer_to_list(Idx)),
+    Forms = [
+        {attribute, 1, module, ModName},
+        {attribute, 2, export, [{new, 0}]},
+        {function, 3, new, 0, [{clause, 3, [], [], [{map, 3, []}]}]}
+    ],
+    {ok, ModName, BeamBin} = compile:forms(Forms, []),
+    {module, ModName} = code:load_binary(ModName, [], BeamBin),
+    ModName.
+
+purge_mock_module(ModName) ->
+    code:purge(ModName),
+    code:delete(ModName).
+
+cleanup_test_source_class(ClassName) ->
+    case beamtalk_class_registry:whereis_class(ClassName) of
+        undefined ->
+            ok;
+        Pid ->
+            gen_server:stop(Pid, normal, 1000),
+            timer:sleep(50)
+    end.
