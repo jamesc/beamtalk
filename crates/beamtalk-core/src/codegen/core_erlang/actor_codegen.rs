@@ -124,10 +124,14 @@ impl CoreErlangGenerator {
         let mut docs: Vec<Document<'static>> = Vec::new();
 
         // BT-586: Generate spec attributes from type annotations
+        // BT-2900: `None` — threading the compile's `AliasRegistry` through to
+        // resolve alias-named annotations to `user_type` references is a
+        // follow-up; omitting it here reproduces pre-ADR-0108 behaviour
+        // exactly (an alias name falls through to `any()`).
         let spec_attrs = module
             .classes
             .first()
-            .map(|class| spec_codegen::generate_class_specs(class, false))
+            .map(|class| spec_codegen::generate_class_specs(class, false, None))
             .unwrap_or_default();
         let spec_suffix: Document<'static> = spec_codegen::format_spec_attributes(&spec_attrs)
             .map_or(Document::Nil, |s| docvec![",\n     ", s]);

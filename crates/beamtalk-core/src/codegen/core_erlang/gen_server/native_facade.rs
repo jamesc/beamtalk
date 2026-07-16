@@ -42,10 +42,12 @@ impl CoreErlangGenerator {
         let class_method_export_doc = Self::build_class_method_export_doc(module);
 
         // BT-586: Generate spec attributes from type annotations
+        // BT-2900: `None` — see actor_codegen.rs's identical comment; alias
+        // registry plumbing into codegen call sites is a follow-up.
         let spec_attrs = module
             .classes
             .first()
-            .map(|class| spec_codegen::generate_class_specs(class, false))
+            .map(|class| spec_codegen::generate_class_specs(class, false, None))
             .unwrap_or_default();
         let spec_suffix: Document<'static> = spec_codegen::format_spec_attributes(&spec_attrs)
             .map_or(Document::Nil, |s| docvec![",\n     ", s]);
