@@ -1222,6 +1222,33 @@ mod tests {
     }
 
     #[test]
+    fn repeated_alias_reference_in_one_annotation_both_display_the_alias_name() {
+        // `A | A` — the second reference hits `resolve_type_annotation_inner`'s
+        // per-call `memo` cache (keyed by alias name), reusing the *first*
+        // reference's already-tagged value rather than re-expanding. This
+        // pins that the reused value still displays correctly (adversarial
+        // review, BT-2897): both members carry the same `Aliased("A", …)`
+        // tag, so the union simplifies to the single tagged member, not two
+        // untagged copies.
+        let registry = alias_registry_with("A", TypeAnnotation::Simple(ident("Integer")));
+        let ann = TypeAnnotation::Union {
+            types: vec![
+                TypeAnnotation::Simple(ident("A")),
+                TypeAnnotation::Simple(ident("A")),
+            ],
+            span: span(),
+        };
+        let result = resolve_type_annotation(&ann, &empty_subst(), None, Some(&registry));
+        // `A | A` structurally collapses to a single `Integer` (dedup).
+        assert_eq!(result, InferredType::known("Integer"));
+        assert_eq!(
+            result.display_for_diagnostic().unwrap(),
+            "A (Integer)",
+            "the reused, memoized value must still carry the alias tag"
+        );
+    }
+
+    #[test]
     fn subst_wins_over_alias_table_for_same_name() {
         // ADR 0108 resolution order: `subst` (type params) → alias table →
         // nominal class. Disjoint by construction (single-letter alias names

@@ -849,7 +849,21 @@ fn find_hover_in_expr(
             receiver, field, ..
         } => {
             if offset >= field.span.start() && offset < field.span.end() {
-                // Show declared state type if available from the class hierarchy
+                // Show declared state type if available from the class hierarchy.
+                //
+                // BT-2897 boundary (not this issue's scope, tracked as a
+                // follow-up): `state_field_type` returns a bare `EcoString`
+                // from `ClassHierarchy`, not a resolved `InferredType`, so
+                // this path never sees a `TypeProvenance::Aliased` tag —
+                // hovering a state field *access* (`self someField`) shows
+                // the raw annotation text, never `AliasName (expansion)`,
+                // unlike hovering a local/parameter value (which flows
+                // through `type_map`'s `InferredType`s). Fixing this would
+                // mean threading alias-aware `InferredType`s (or at least
+                // display strings) through `ClassHierarchy`'s field-type
+                // storage — the same EcoString-based boundary
+                // `check_field_assignment`/`check_argument_types`
+                // (validation.rs) sit on, out of scope for BT-2897.
                 let field_type = match context {
                     HoverClassContext::InstanceMethod(class) => {
                         hierarchy.state_field_type(class.name.name.as_str(), field.name.as_str())

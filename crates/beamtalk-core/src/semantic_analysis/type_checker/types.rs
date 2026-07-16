@@ -98,7 +98,16 @@ pub enum TypeProvenance {
     /// honestly" rule).
     ///
     /// `span` is the annotation *reference* site (where `name` was written),
-    /// not the alias's own `type Name = ...` declaration.
+    /// not the alias's own `type Name = ...` declaration. **Not currently
+    /// consumed by anything** (only `name` drives display) and **not
+    /// reliable across repeated references within one annotation**:
+    /// `resolve_type_annotation`'s per-call `memo` is keyed by alias name
+    /// alone, so a second reference to the same alias in one annotation
+    /// (`A | A`, `Result(A, A)`) reuses the *first* reference's cached,
+    /// already-tagged value — including its `span` — rather than expanding
+    /// fresh. A future consumer (e.g. find-references, BT-2901) needing a
+    /// precise per-site span will need to record it at the `memo.get` hit
+    /// path too, not just at first expansion.
     ///
     /// This tag does **not** survive [`InferredType::difference`],
     /// [`InferredType::intersect`], or [`InferredType::union_of`] — those
@@ -436,8 +445,17 @@ impl InferredType {
     /// is the eager expansion of a named alias reference, structurally
     /// identical to that alias's declared expansion by construction (see
     /// `Aliased`'s doc).
+    ///
+    /// Scoped to `type_checker` (not merely `pub(crate)`): the "structurally
+    /// identical" guarantee only holds because [`tag_alias_expansion`]'s only
+    /// caller is `type_resolver.rs`'s own alias-expansion point — a caller
+    /// outside this module has no way to uphold that invariant.
+    ///
+    /// [`tag_alias_expansion`]: Self::tag_alias_expansion
     #[must_use]
-    pub(crate) fn alias_display_name(&self) -> Option<&EcoString> {
+    pub(in crate::semantic_analysis::type_checker) fn alias_display_name(
+        &self,
+    ) -> Option<&EcoString> {
         match self.provenance() {
             Some(TypeProvenance::Aliased { .. }) => match self {
                 Self::Known {
@@ -473,8 +491,19 @@ impl InferredType {
     /// finishes eagerly expanding a `Simple` annotation that names a
     /// registered alias. A no-op for [`Dynamic`](Self::Dynamic) and
     /// [`Never`](Self::Never), which carry no provenance slot.
+    ///
+    /// Callers **must** only call this with `self` already equal to the
+    /// exact expansion `name` resolves to — the display layer trusts the tag
+    /// unconditionally (see `alias_display_name`'s doc), so tagging an
+    /// unrelated value would silently produce a false `Name (…)` diagnostic.
+    /// Kept out of `pub(crate)` for this reason: `type_resolver.rs` is the
+    /// only call site able to uphold the invariant.
     #[must_use]
-    pub(crate) fn tag_alias_expansion(self, name: EcoString, span: Span) -> Self {
+    pub(in crate::semantic_analysis::type_checker) fn tag_alias_expansion(
+        self,
+        name: EcoString,
+        span: Span,
+    ) -> Self {
         let aliased = TypeProvenance::Aliased { name, span };
         match self {
             Self::Known {
@@ -709,6 +738,15 @@ impl InferredType {
     /// `best_provenance`) needs no corresponding change: `Aliased` already
     /// fails its `matches!(.., Inferred(_))` guard today, so an aliased
     /// singleton member is already never overwritten.
+    ///
+    /// **Pre-existing, order-dependent edge case (not new to BT-2897):**
+    /// when two *structurally-equal* members disagree only in provenance
+    /// (e.g. `union_of([Port_aliased, Integer_plain])` where `type Port =
+    /// Integer`), dedup (`flat.contains`, which is provenance-blind) keeps
+    /// whichever operand was pushed first and drops the other — so the
+    /// surviving member's display depends on input order. This already held
+    /// for `Declared` vs. `Inferred` before this change; `Aliased` inherits
+    /// the same characteristic rather than introducing a new one.
     pub(crate) fn union_of(members: &[Self]) -> Self {
         let mut flat: Vec<InferredType> = Vec::new();
         let mut best_provenance = TypeProvenance::Inferred(Span::default());
@@ -1584,6 +1622,46 @@ mod display_tests {
         assert_eq!(
             InferredType::Never.tag_alias_expansion("X".into(), Span::new(0, 1)),
             InferredType::Never
+        );
+    }
+
+    #[test]
+    fn tag_alias_expansion_prefixes_meta_negation_and_intersection() {
+        // Adversarial review (BT-2897): the hover/diagnostic tests only
+        // exercised `Union`/`Known` end-to-end. This pins the other three
+        // provenance-bearing variants `tag_alias_expansion` also supports —
+        // an alias RHS can legally be any `TypeAnnotation` (ADR 0108
+        // Semantics), including ones that resolve to `Meta`, `Negation`
+        // (`Symbol \ #foo`), or `Intersection` (`P1 & P2`).
+        let meta =
+            InferredType::meta("List").tag_alias_expansion("ListClass".into(), Span::new(0, 1));
+        assert_eq!(
+            meta.display_for_diagnostic().unwrap(),
+            "ListClass (List class)"
+        );
+
+        let negation = InferredType::Negation {
+            base: Box::new(InferredType::known("Symbol")),
+            excluded: Box::new(InferredType::known("#internal")),
+            provenance: TypeProvenance::Inferred(Span::default()),
+        }
+        .tag_alias_expansion("PublicTag".into(), Span::new(0, 1));
+        assert_eq!(
+            negation.display_for_diagnostic().unwrap(),
+            "PublicTag (Symbol \\ #internal)"
+        );
+
+        let intersection = InferredType::Intersection {
+            members: vec![
+                InferredType::known("Printable"),
+                InferredType::known("Comparable"),
+            ],
+            provenance: TypeProvenance::Inferred(Span::default()),
+        }
+        .tag_alias_expansion("Sortable".into(), Span::new(0, 1));
+        assert_eq!(
+            intersection.display_for_diagnostic().unwrap(),
+            "Sortable (Printable & Comparable)"
         );
     }
 
