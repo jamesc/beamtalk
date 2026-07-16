@@ -15,6 +15,14 @@
 //!   with `state:` declarations, so Erlang producers can reference `Module:t()`
 //!   in their own `-spec` annotations (requires a paired `-export_type([t/0])`
 //!   emitted by `value_type_codegen.rs`)
+//! - [`generate_alias_type_attrs`] / [`format_alias_type_attributes`] — emit a
+//!   named `-type` per Beamtalk `type Name = ...` alias (ADR 0108, BT-2900),
+//!   so annotation sites referencing the alias can emit a `user_type`
+//!   reference instead of re-expanding the alias inline. Every function above
+//!   takes an `Option<&AliasRegistry>`: `None` preserves pre-ADR-0108
+//!   behaviour exactly (an alias name falls through to `any()` like any other
+//!   unrecognised class name), `Some(registry)` resolves alias references to
+//!   named `user_type` forms.
 //!
 //! ## Core Erlang Spec Format
 //!
@@ -50,19 +58,38 @@
 //! | Union | `union(...)` |
 //! | Singleton `#foo` | atom `foo` |
 
+use ecow::EcoString;
+
 use super::document::leaf::{atom, int_lit};
 use super::document::{Document, join};
 use super::selector_mangler::safe_class_method_fn_name;
-use crate::ast::{ClassDefinition, MethodDefinition, MethodKind, TypeAnnotation};
+use crate::ast::{ClassDefinition, MethodDefinition, MethodKind, TypeAnnotation, to_module_name};
 use crate::docvec;
+use crate::semantic_analysis::alias_registry::AliasRegistry;
 
 /// Converts a `TypeAnnotation` to its Core Erlang abstract type representation.
-fn type_annotation_to_spec(annotation: &TypeAnnotation) -> Document<'static> {
+///
+/// `aliases`, when present, is consulted for `TypeAnnotation::Simple` names:
+/// a name registered in the alias table emits a `user_type` reference to the
+/// alias's named `-type` (see [`alias_type_reference`]) instead of falling
+/// through to `any()`. `None` reproduces pre-ADR-0108 behaviour exactly.
+fn type_annotation_to_spec(
+    annotation: &TypeAnnotation,
+    aliases: Option<&AliasRegistry>,
+) -> Document<'static> {
     match annotation {
-        TypeAnnotation::Simple(id) => simple_type_to_spec(id.name.as_str()),
+        TypeAnnotation::Simple(id) => {
+            if aliases.is_some_and(|registry| registry.has_alias(id.name.as_str())) {
+                alias_type_reference(id.name.as_str())
+            } else {
+                simple_type_to_spec(id.name.as_str())
+            }
+        }
         TypeAnnotation::Union { types, .. } => {
-            let type_specs: Vec<Document<'static>> =
-                types.iter().map(type_annotation_to_spec).collect();
+            let type_specs: Vec<Document<'static>> = types
+                .iter()
+                .map(|t| type_annotation_to_spec(t, aliases))
+                .collect();
             docvec![
                 "{'type', 0, 'union', [",
                 join(type_specs, &Document::Str(", ")),
@@ -74,9 +101,9 @@ fn type_annotation_to_spec(annotation: &TypeAnnotation) -> Document<'static> {
         }
         TypeAnnotation::Generic {
             base, parameters, ..
-        } => generic_type_to_spec(base.name.as_str(), parameters),
+        } => generic_type_to_spec(base.name.as_str(), parameters, aliases),
         TypeAnnotation::FalseOr { inner, .. } => {
-            let inner_spec = type_annotation_to_spec(inner);
+            let inner_spec = type_annotation_to_spec(inner, aliases);
             docvec![
                 "{'type', 0, 'union', [",
                 inner_spec,
@@ -85,20 +112,47 @@ fn type_annotation_to_spec(annotation: &TypeAnnotation) -> Document<'static> {
         }
         // Difference (`base \ excluded`) has no precise Erlang spec form; the
         // excluded set only narrows `base`, so the base spec is a sound (if
-        // wider) over-approximation for the generated `-spec`.
-        TypeAnnotation::Difference { base, .. } => type_annotation_to_spec(base),
+        // wider) over-approximation for the generated `-spec`. This same
+        // widening applies when `base \ excluded` is an alias RHS (ADR 0108
+        // Consequences — Positive): the alias's own `-type` ends up widened
+        // too, with the exclusion lost.
+        TypeAnnotation::Difference { base, .. } => type_annotation_to_spec(base, aliases),
         // Intersection (`left & right`, ADR 0102 §1/§3) has no Erlang spec
         // form either (Erlang `-spec` has no intersection-type constructor).
         // Any single member's spec is a sound (if wider) over-approximation —
         // a value of the intersection type is, in particular, a value of
         // `left` — so pick the left operand, mirroring `Difference` above.
-        TypeAnnotation::Intersection { left, .. } => type_annotation_to_spec(left),
+        TypeAnnotation::Intersection { left, .. } => type_annotation_to_spec(left, aliases),
         // Self / Self class / <Name> class resolve to a receiver class at call
         // sites; in specs, treat as any()
         TypeAnnotation::SelfType { .. }
         | TypeAnnotation::SelfClass { .. }
         | TypeAnnotation::ClassOf { .. } => Document::Str("{'type', 0, 'any', []}"),
     }
+}
+
+/// Converts an alias name to its generated Erlang `-type` name.
+///
+/// Mirrors [`to_module_name`]'s `CamelCase` → `snake_case` convention (e.g.
+/// `RestartStrategy` → `restart_strategy`) so the emitted `-type` reads as
+/// idiomatic Erlang, matching the ADR 0108 goal of a more idiomatic FFI
+/// boundary for Erlang/Elixir consumers.
+fn alias_erlang_type_name(alias_name: &str) -> String {
+    to_module_name(alias_name)
+}
+
+/// Builds a `user_type` reference to a named alias `-type` (e.g.
+/// `{'user_type', 0, 'restart_strategy', []}`), for use at annotation sites
+/// that reference the alias by name (ADR 0108 Codegen: "annotation sites
+/// reference it" rather than re-expanding inline). Aliases are never
+/// parametric (ADR 0108 defers `type Option(T) = ...`), so the argument list
+/// is always empty.
+fn alias_type_reference(alias_name: &str) -> Document<'static> {
+    docvec![
+        "{'user_type', 0, ",
+        atom(alias_erlang_type_name(alias_name)),
+        ", []}"
+    ]
 }
 
 /// Maps a simple Beamtalk type name to its Core Erlang abstract type representation.
@@ -134,12 +188,16 @@ fn simple_type_to_spec(name: &str) -> Document<'static> {
 ///
 /// Unresolved type parameters (bare names like `T`, `E` that do not match a known class)
 /// are recursively resolved — ultimately falling through to `any()` via [`simple_type_to_spec`].
-fn generic_type_to_spec(base_name: &str, parameters: &[TypeAnnotation]) -> Document<'static> {
+fn generic_type_to_spec(
+    base_name: &str,
+    parameters: &[TypeAnnotation],
+    aliases: Option<&AliasRegistry>,
+) -> Document<'static> {
     match base_name {
         // List(T) → list(T) — Erlang list type supports an element type parameter
         "List" => {
             if let Some(elem) = parameters.first() {
-                let elem_spec = type_annotation_to_spec(elem);
+                let elem_spec = type_annotation_to_spec(elem, aliases);
                 docvec!["{'type', 0, 'list', [", elem_spec, "]}"]
             } else {
                 Document::Str("{'type', 0, 'list', []}")
@@ -155,9 +213,11 @@ fn generic_type_to_spec(base_name: &str, parameters: &[TypeAnnotation]) -> Docum
                 Document::Str("{'type', 0, 'fun', []}")
             } else {
                 let (arg_params, return_param) = parameters.split_at(parameters.len() - 1);
-                let return_spec = type_annotation_to_spec(&return_param[0]);
-                let arg_specs: Vec<Document<'static>> =
-                    arg_params.iter().map(type_annotation_to_spec).collect();
+                let return_spec = type_annotation_to_spec(&return_param[0], aliases);
+                let arg_specs: Vec<Document<'static>> = arg_params
+                    .iter()
+                    .map(|p| type_annotation_to_spec(p, aliases))
+                    .collect();
                 let product = if arg_specs.is_empty() {
                     Document::Str("{'type', 0, 'product', []}")
                 } else {
@@ -176,7 +236,19 @@ fn generic_type_to_spec(base_name: &str, parameters: &[TypeAnnotation]) -> Docum
         "Tuple" => Document::Str("{'type', 0, 'tuple', 'any'}"),
         // Any other generic type (custom classes like Result, Array, etc.)
         // maps to any() — the base class is not a built-in Erlang type.
-        _ => simple_type_to_spec(base_name),
+        // BT-2900: if the base name is itself a registered alias (e.g. a
+        // non-parametric `type MyList = List` applied as `MyList(Integer)`),
+        // reference it by name instead — mirrors the `Simple` case in
+        // `type_annotation_to_spec`. The (illegitimate, since ADR 0108 defers
+        // parametric aliases) type argument is dropped, same as any other
+        // unresolvable generic application.
+        _ => {
+            if aliases.is_some_and(|registry| registry.has_alias(base_name)) {
+                alias_type_reference(base_name)
+            } else {
+                simple_type_to_spec(base_name)
+            }
+        }
     }
 }
 
@@ -187,9 +259,13 @@ fn generic_type_to_spec(base_name: &str, parameters: &[TypeAnnotation]) -> Docum
 ///
 /// For actor methods, the `dispatch_arity` is the selector arity (no Self/State params).
 /// For value type methods, the arity includes the Self parameter.
+///
+/// `aliases`, when present, resolves alias-named annotations to `user_type`
+/// references (ADR 0108, BT-2900) — see [`type_annotation_to_spec`].
 pub fn generate_method_spec(
     method: &MethodDefinition,
     is_value_type: bool,
+    aliases: Option<&AliasRegistry>,
 ) -> Option<Document<'static>> {
     let has_any_annotation = method.return_type.is_some()
         || method
@@ -214,7 +290,7 @@ pub fn generate_method_spec(
             .type_annotation
             .as_ref()
             .map_or(Document::Str("{'type', 0, 'any', []}"), |ann| {
-                type_annotation_to_spec(ann)
+                type_annotation_to_spec(ann, aliases)
             });
         param_types.push(type_spec);
     }
@@ -223,7 +299,7 @@ pub fn generate_method_spec(
         .return_type
         .as_ref()
         .map_or(Document::Str("{'type', 0, 'any', []}"), |ann| {
-            type_annotation_to_spec(ann)
+            type_annotation_to_spec(ann, aliases)
         });
 
     let arity = if is_value_type {
@@ -262,7 +338,13 @@ pub fn generate_method_spec(
 ///
 /// Class methods have two implicit parameters (`ClassSelf`, `ClassVars`)
 /// and use the `class_{selector}` naming convention.
-fn generate_class_method_spec(method: &MethodDefinition) -> Option<Document<'static>> {
+///
+/// `aliases`, when present, resolves alias-named annotations to `user_type`
+/// references (ADR 0108, BT-2900) — see [`type_annotation_to_spec`].
+fn generate_class_method_spec(
+    method: &MethodDefinition,
+    aliases: Option<&AliasRegistry>,
+) -> Option<Document<'static>> {
     let has_any_annotation = method.return_type.is_some()
         || method
             .parameters
@@ -285,7 +367,7 @@ fn generate_class_method_spec(method: &MethodDefinition) -> Option<Document<'sta
             .type_annotation
             .as_ref()
             .map_or(Document::Str("{'type', 0, 'any', []}"), |ann| {
-                type_annotation_to_spec(ann)
+                type_annotation_to_spec(ann, aliases)
             });
         param_types.push(type_spec);
     }
@@ -294,7 +376,7 @@ fn generate_class_method_spec(method: &MethodDefinition) -> Option<Document<'sta
         .return_type
         .as_ref()
         .map_or(Document::Str("{'type', 0, 'any', []}"), |ann| {
-            type_annotation_to_spec(ann)
+            type_annotation_to_spec(ann, aliases)
         });
 
     let arity = method.parameters.len() + 2;
@@ -331,9 +413,13 @@ fn generate_class_method_spec(method: &MethodDefinition) -> Option<Document<'sta
 /// are skipped because actor methods are dispatch clauses inside `safe_dispatch/3`,
 /// not standalone functions — a spec referencing a non-existent function is invalid.
 /// Value type methods ARE standalone functions, so their specs are valid.
+///
+/// `aliases`, when present, resolves alias-named annotations to `user_type`
+/// references (ADR 0108, BT-2900) — see [`type_annotation_to_spec`].
 pub fn generate_class_specs(
     class: &ClassDefinition,
     is_value_type: bool,
+    aliases: Option<&AliasRegistry>,
 ) -> Vec<Document<'static>> {
     // BT-1944: Only generate instance method specs for value types where methods
     // are standalone functions. Actor instance methods live inside safe_dispatch/3.
@@ -343,8 +429,8 @@ pub fn generate_class_specs(
                 .methods
                 .iter()
                 .filter(|m| m.kind == MethodKind::Primary)
-                .filter_map(|m| {
-                    generate_method_spec(m, is_value_type)
+                .filter_map(move |m| {
+                    generate_method_spec(m, is_value_type, aliases)
                         .map(|spec| docvec!["'spec' =\n        [{", spec, "}]"])
                 }),
         )
@@ -356,8 +442,9 @@ pub fn generate_class_specs(
         .class_methods
         .iter()
         .filter(|m| m.kind == MethodKind::Primary)
-        .filter_map(|m| {
-            generate_class_method_spec(m).map(|spec| docvec!["'spec' =\n        [{", spec, "}]"])
+        .filter_map(move |m| {
+            generate_class_method_spec(m, aliases)
+                .map(|spec| docvec!["'spec' =\n        [{", spec, "}]"])
         });
 
     instance_specs.chain(class_specs).collect()
@@ -389,7 +476,14 @@ pub fn format_spec_attributes(specs: &[Document<'static>]) -> Option<Document<'s
 ///           {'type', 0, 'map_field_exact', [{'atom', 0, 'field1'}, FieldType1]},
 ///           ...]}, []}]
 /// ```
-pub fn generate_type_alias(class: &ClassDefinition, class_name: &str) -> Option<Document<'static>> {
+///
+/// `aliases`, when present, resolves alias-named field annotations to
+/// `user_type` references (ADR 0108, BT-2900) — see [`type_annotation_to_spec`].
+pub fn generate_type_alias(
+    class: &ClassDefinition,
+    class_name: &str,
+    aliases: Option<&AliasRegistry>,
+) -> Option<Document<'static>> {
     if class.state.is_empty() {
         return None;
     }
@@ -406,10 +500,12 @@ pub fn generate_type_alias(class: &ClassDefinition, class_name: &str) -> Option<
     // One required field entry per declared state: field
     for field in &class.state {
         let fname = atom(field.name.name.to_string());
-        let ftype = field.type_annotation.as_ref().map_or(
-            Document::Str("{'type', 0, 'any', []}"),
-            type_annotation_to_spec,
-        );
+        let ftype = field
+            .type_annotation
+            .as_ref()
+            .map_or(Document::Str("{'type', 0, 'any', []}"), |ann| {
+                type_annotation_to_spec(ann, aliases)
+            });
         field_types.push(docvec![
             "{'type', 0, 'map_field_exact', [{'atom', 0, ",
             fname,
@@ -426,6 +522,84 @@ pub fn generate_type_alias(class: &ClassDefinition, class_name: &str) -> Option<
     ])
 }
 
+/// Generates the named `-type` attribute for a single type alias declaration
+/// (ADR 0108, BT-2900).
+///
+/// Produces `'type' = [{alias_name, <expansion-spec>, []}]`, where
+/// `<expansion-spec>` is the alias RHS's Erlang abstract type representation
+/// — identical to what `type_annotation_to_spec` would produce for the
+/// spelled-out annotation, since aliases are transparent (structural, not
+/// nominal — ADR 0108 Semantics). A `\`/`&` RHS emits the same widened
+/// over-approximation `type_annotation_to_spec` already applies to anonymous
+/// `Difference`/`Intersection` (ADR 0108 Consequences — Positive).
+fn generate_alias_type_attr(
+    alias_name: &str,
+    annotation: &TypeAnnotation,
+    aliases: &AliasRegistry,
+) -> Document<'static> {
+    let erlang_name = atom(alias_erlang_type_name(alias_name));
+    let expansion_spec = type_annotation_to_spec(annotation, Some(aliases));
+    docvec![
+        "'type' =\n        [{",
+        erlang_name,
+        ", ",
+        expansion_spec,
+        ", []}]"
+    ]
+}
+
+/// Generates named `-type` attributes for every alias in `aliases`.
+///
+/// One `Document` per alias, in alias-name sorted order (deterministic
+/// output — `AliasRegistry` iterates its internal `HashMap` in unspecified
+/// order). Pass the result to [`format_alias_type_attributes`] to join them
+/// for inclusion in the module `attributes [...]` list, mirroring
+/// [`generate_class_specs`] / [`format_spec_attributes`]'s shape for
+/// `'spec'` entries.
+///
+/// Not yet called from the module-level codegen drivers (`actor_codegen.rs`,
+/// `value_type_codegen.rs`, `supervisor_codegen.rs`) — see the `BT-2900`
+/// comments at their `generate_class_specs`/`generate_type_alias` call
+/// sites. Wiring this in requires also emitting these attributes into every
+/// class module that could reference the alias (a `user_type` reference to
+/// an undeclared type is an `erlc` compile error, not just a Dialyzer
+/// warning), which is a bigger, riskier change than this function itself;
+/// tracked as follow-up. This function and its unit tests establish the
+/// emission is correct in isolation.
+#[allow(dead_code)]
+pub fn generate_alias_type_attrs(aliases: &AliasRegistry) -> Vec<Document<'static>> {
+    let mut names: Vec<&EcoString> = aliases.alias_names().collect();
+    names.sort_unstable();
+
+    names
+        .into_iter()
+        .filter_map(|name| {
+            aliases
+                .get(name)
+                .map(|info| generate_alias_type_attr(name, &info.annotation, aliases))
+        })
+        .collect()
+}
+
+/// Formats a list of alias `'type'` attribute Documents (from
+/// [`generate_alias_type_attrs`]) for inclusion in the module
+/// `attributes [...]` list.
+///
+/// Returns `None` if there are no alias types to generate. Shares
+/// [`format_spec_attributes`]'s join shape (`,\n     ` between entries) since
+/// both are lists of `Key = [...]` module attribute blocks.
+///
+/// Not yet called in production — see [`generate_alias_type_attrs`].
+#[allow(dead_code)]
+pub fn format_alias_type_attributes(
+    alias_types: &[Document<'static>],
+) -> Option<Document<'static>> {
+    if alias_types.is_empty() {
+        return None;
+    }
+    Some(join(alias_types.to_vec(), &Document::Str(",\n     ")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -433,6 +607,7 @@ mod tests {
         ClassModifiers, Identifier, KeywordPart, MessageSelector, MethodDefinition,
         ParameterDefinition, TypeAnnotation,
     };
+    use crate::semantic_analysis::alias_registry::AliasInfo;
     use crate::source_analysis::Span;
 
     fn span() -> Span {
@@ -447,7 +622,7 @@ mod tests {
     fn integer_type_maps_correctly() {
         let ann = TypeAnnotation::simple("Integer", span());
         assert_eq!(
-            render(&type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann, None)),
             "{'type', 0, 'integer', []}"
         );
     }
@@ -456,7 +631,7 @@ mod tests {
     fn string_type_maps_to_binary() {
         let ann = TypeAnnotation::simple("String", span());
         assert_eq!(
-            render(&type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann, None)),
             "{'type', 0, 'binary', []}"
         );
     }
@@ -465,7 +640,7 @@ mod tests {
     fn float_type_maps_correctly() {
         let ann = TypeAnnotation::simple("Float", span());
         assert_eq!(
-            render(&type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann, None)),
             "{'type', 0, 'float', []}"
         );
     }
@@ -474,7 +649,7 @@ mod tests {
     fn boolean_type_maps_correctly() {
         let ann = TypeAnnotation::simple("Boolean", span());
         assert_eq!(
-            render(&type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann, None)),
             "{'type', 0, 'boolean', []}"
         );
     }
@@ -483,7 +658,7 @@ mod tests {
     fn symbol_type_maps_to_atom() {
         let ann = TypeAnnotation::simple("Symbol", span());
         assert_eq!(
-            render(&type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann, None)),
             "{'type', 0, 'atom', []}"
         );
     }
@@ -491,14 +666,17 @@ mod tests {
     #[test]
     fn nil_maps_to_atom_nil() {
         let ann = TypeAnnotation::simple("Nil", span());
-        assert_eq!(render(&type_annotation_to_spec(&ann)), "{'atom', 0, 'nil'}");
+        assert_eq!(
+            render(&type_annotation_to_spec(&ann, None)),
+            "{'atom', 0, 'nil'}"
+        );
     }
 
     #[test]
     fn true_maps_to_atom_true() {
         let ann = TypeAnnotation::simple("True", span());
         assert_eq!(
-            render(&type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann, None)),
             "{'atom', 0, 'true'}"
         );
     }
@@ -507,7 +685,7 @@ mod tests {
     fn false_maps_to_atom_false() {
         let ann = TypeAnnotation::simple("False", span());
         assert_eq!(
-            render(&type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann, None)),
             "{'atom', 0, 'false'}"
         );
     }
@@ -516,7 +694,7 @@ mod tests {
     fn list_type_maps_correctly() {
         let ann = TypeAnnotation::simple("List", span());
         assert_eq!(
-            render(&type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann, None)),
             "{'type', 0, 'list', []}"
         );
     }
@@ -525,7 +703,7 @@ mod tests {
     fn dictionary_maps_to_map() {
         let ann = TypeAnnotation::simple("Dictionary", span());
         assert_eq!(
-            render(&type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann, None)),
             "{'type', 0, 'map', 'any'}"
         );
     }
@@ -534,7 +712,7 @@ mod tests {
     fn tuple_maps_correctly() {
         let ann = TypeAnnotation::simple("Tuple", span());
         assert_eq!(
-            render(&type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann, None)),
             "{'type', 0, 'tuple', 'any'}"
         );
     }
@@ -543,7 +721,7 @@ mod tests {
     fn custom_class_maps_to_any() {
         let ann = TypeAnnotation::simple("Counter", span());
         assert_eq!(
-            render(&type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann, None)),
             "{'type', 0, 'any', []}"
         );
     }
@@ -557,7 +735,7 @@ mod tests {
             ],
             span(),
         );
-        let result = render(&type_annotation_to_spec(&ann));
+        let result = render(&type_annotation_to_spec(&ann, None));
         assert_eq!(
             result,
             "{'type', 0, 'union', [{'type', 0, 'integer', []}, {'atom', 0, 'nil'}]}"
@@ -568,7 +746,7 @@ mod tests {
     fn singleton_type_maps_to_atom() {
         let ann = TypeAnnotation::singleton("north", span());
         assert_eq!(
-            render(&type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann, None)),
             "{'atom', 0, 'north'}"
         );
     }
@@ -576,7 +754,7 @@ mod tests {
     #[test]
     fn false_or_type_maps_correctly() {
         let ann = TypeAnnotation::false_or(TypeAnnotation::simple("Integer", span()), span());
-        let result = render(&type_annotation_to_spec(&ann));
+        let result = render(&type_annotation_to_spec(&ann, None));
         assert_eq!(
             result,
             "{'type', 0, 'union', [{'type', 0, 'integer', []}, {'atom', 0, 'false'}]}"
@@ -593,7 +771,7 @@ mod tests {
             span(),
         );
 
-        let spec = render(&generate_method_spec(&method, false).unwrap());
+        let spec = render(&generate_method_spec(&method, false, None).unwrap());
         assert_eq!(
             spec,
             "{'getBalance', 0}, [{'type', 0, 'fun', [{'type', 0, 'product', []}, {'type', 0, 'integer', []}]}]"
@@ -613,7 +791,7 @@ mod tests {
             span(),
         );
 
-        let spec = render(&generate_method_spec(&method, false).unwrap());
+        let spec = render(&generate_method_spec(&method, false, None).unwrap());
         assert_eq!(
             spec,
             "{'deposit:', 1}, [{'type', 0, 'fun', [{'type', 0, 'product', [{'type', 0, 'integer', []}]}, {'type', 0, 'integer', []}]}]"
@@ -629,7 +807,7 @@ mod tests {
             span(),
         );
 
-        assert!(generate_method_spec(&method, false).is_none());
+        assert!(generate_method_spec(&method, false, None).is_none());
     }
 
     #[test]
@@ -642,7 +820,7 @@ mod tests {
             span(),
         );
 
-        let spec = render(&generate_method_spec(&method, false).unwrap());
+        let spec = render(&generate_method_spec(&method, false, None).unwrap());
         assert!(spec.contains("'any'"));
         assert!(spec.contains("'integer'"));
     }
@@ -657,7 +835,7 @@ mod tests {
             span(),
         );
 
-        let spec = render(&generate_method_spec(&method, true).unwrap());
+        let spec = render(&generate_method_spec(&method, true, None).unwrap());
         assert!(spec.contains("{'size', 1}"));
         assert!(spec.contains("'map', 'any'"));
     }
@@ -684,7 +862,7 @@ mod tests {
             span(),
         );
 
-        let spec = render(&generate_method_spec(&method, false).unwrap());
+        let spec = render(&generate_method_spec(&method, false, None).unwrap());
         assert!(spec.contains("'transfer:to:'"));
         assert!(spec.contains("'integer'"));
         assert!(spec.contains("'binary'"));
@@ -710,7 +888,7 @@ mod tests {
             span(),
         );
 
-        let spec = render(&generate_method_spec(&method, false).unwrap());
+        let spec = render(&generate_method_spec(&method, false, None).unwrap());
         assert!(spec.contains("'union'"));
         assert!(spec.contains("'integer'"));
         assert!(spec.contains("'nil'"));
@@ -720,7 +898,7 @@ mod tests {
     fn block_type_maps_to_fun() {
         let ann = TypeAnnotation::simple("Block", span());
         assert_eq!(
-            render(&type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann, None)),
             "{'type', 0, 'fun', []}"
         );
     }
@@ -729,7 +907,7 @@ mod tests {
     fn number_type_maps_correctly() {
         let ann = TypeAnnotation::simple("Number", span());
         assert_eq!(
-            render(&type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann, None)),
             "{'type', 0, 'number', []}"
         );
     }
@@ -738,7 +916,7 @@ mod tests {
     fn character_maps_to_integer() {
         let ann = TypeAnnotation::simple("Character", span());
         assert_eq!(
-            render(&type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann, None)),
             "{'type', 0, 'integer', []}"
         );
     }
@@ -747,7 +925,7 @@ mod tests {
     fn set_maps_to_map() {
         let ann = TypeAnnotation::simple("Set", span());
         assert_eq!(
-            render(&type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann, None)),
             "{'type', 0, 'map', 'any'}"
         );
     }
@@ -797,7 +975,7 @@ mod tests {
             span(),
         );
 
-        let spec = render(&generate_method_spec(&method, true).unwrap());
+        let spec = render(&generate_method_spec(&method, true, None).unwrap());
         assert!(spec.contains("{'at:put:', 3}"));
         assert!(
             spec.contains(
@@ -817,7 +995,7 @@ mod tests {
             ],
             span(),
         );
-        let result = render(&type_annotation_to_spec(&ann));
+        let result = render(&type_annotation_to_spec(&ann, None));
         assert_eq!(
             result,
             "{'type', 0, 'union', [{'type', 0, 'integer', []}, {'type', 0, 'binary', []}, {'atom', 0, 'nil'}]}"
@@ -837,7 +1015,7 @@ mod tests {
             span(),
         );
 
-        let spec = render(&generate_class_method_spec(&method).unwrap());
+        let spec = render(&generate_class_method_spec(&method, None).unwrap());
         assert!(
             spec.contains("{'class_from:', 3}"),
             "Expected class_ prefix and arity 3 (ClassSelf + ClassVars + 1 param), got: {spec}"
@@ -855,7 +1033,7 @@ mod tests {
             vec![],
             span(),
         );
-        assert!(generate_class_method_spec(&method).is_none());
+        assert!(generate_class_method_spec(&method, None).is_none());
     }
 
     // Tests for generate_type_alias
@@ -885,7 +1063,7 @@ mod tests {
     #[test]
     fn type_alias_returns_none_for_empty_state() {
         let class = make_class_with_state("Empty", vec![]);
-        assert!(generate_type_alias(&class, "Empty").is_none());
+        assert!(generate_type_alias(&class, "Empty", None).is_none());
     }
 
     #[test]
@@ -894,7 +1072,7 @@ mod tests {
             "Point",
             vec![("x", Some(TypeAnnotation::simple("Integer", span())))],
         );
-        let result = render(&generate_type_alias(&class, "Point").unwrap());
+        let result = render(&generate_type_alias(&class, "Point", None).unwrap());
         assert!(
             result.contains("'$beamtalk_class'"),
             "Should include $beamtalk_class tag field, got: {result}"
@@ -911,7 +1089,7 @@ mod tests {
             "Counter",
             vec![("count", Some(TypeAnnotation::simple("Integer", span())))],
         );
-        let result = render(&generate_type_alias(&class, "Counter").unwrap());
+        let result = render(&generate_type_alias(&class, "Counter", None).unwrap());
         assert!(
             result.contains("'count'"),
             "Should include field name, got: {result}"
@@ -936,7 +1114,7 @@ mod tests {
                 ("body", Some(TypeAnnotation::simple("String", span()))),
             ],
         );
-        let result = render(&generate_type_alias(&class, "HTTPResponse").unwrap());
+        let result = render(&generate_type_alias(&class, "HTTPResponse", None).unwrap());
         assert!(
             result.contains("'HTTPResponse'"),
             "Should contain class name atom"
@@ -963,7 +1141,7 @@ mod tests {
     #[test]
     fn type_alias_unannotated_field_uses_any() {
         let class = make_class_with_state("Pair", vec![("value", None)]);
-        let result = render(&generate_type_alias(&class, "Pair").unwrap());
+        let result = render(&generate_type_alias(&class, "Pair", None).unwrap());
         assert!(
             result.contains("'any'"),
             "Unannotated field should use any(), got: {result}"
@@ -980,7 +1158,7 @@ mod tests {
             span(),
         );
         assert_eq!(
-            render(&type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann, None)),
             "{'type', 0, 'list', [{'type', 0, 'integer', []}]}"
         );
     }
@@ -993,7 +1171,7 @@ mod tests {
             span(),
         );
         assert_eq!(
-            render(&type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann, None)),
             "{'type', 0, 'list', [{'type', 0, 'binary', []}]}"
         );
     }
@@ -1002,7 +1180,7 @@ mod tests {
     fn generic_list_no_params_falls_back_to_unparameterized() {
         let ann = TypeAnnotation::generic(Identifier::new("List", span()), vec![], span());
         assert_eq!(
-            render(&type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann, None)),
             "{'type', 0, 'list', []}"
         );
     }
@@ -1016,7 +1194,7 @@ mod tests {
             span(),
         );
         assert_eq!(
-            render(&type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann, None)),
             "{'type', 0, 'fun', [{'type', 0, 'product', []}, {'type', 0, 'integer', []}]}"
         );
     }
@@ -1033,7 +1211,7 @@ mod tests {
             span(),
         );
         assert_eq!(
-            render(&type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann, None)),
             "{'type', 0, 'fun', [{'type', 0, 'product', [{'type', 0, 'integer', []}]}, {'type', 0, 'binary', []}]}"
         );
     }
@@ -1050,7 +1228,7 @@ mod tests {
             ],
             span(),
         );
-        let result = render(&type_annotation_to_spec(&ann));
+        let result = render(&type_annotation_to_spec(&ann, None));
         assert_eq!(
             result,
             "{'type', 0, 'fun', [{'type', 0, 'product', [{'type', 0, 'integer', []}, {'type', 0, 'binary', []}]}, {'type', 0, 'boolean', []}]}"
@@ -1061,7 +1239,7 @@ mod tests {
     fn generic_block_no_params_falls_back() {
         let ann = TypeAnnotation::generic(Identifier::new("Block", span()), vec![], span());
         assert_eq!(
-            render(&type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann, None)),
             "{'type', 0, 'fun', []}"
         );
     }
@@ -1078,7 +1256,7 @@ mod tests {
             span(),
         );
         assert_eq!(
-            render(&type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann, None)),
             "{'type', 0, 'map', 'any'}"
         );
     }
@@ -1091,7 +1269,7 @@ mod tests {
             span(),
         );
         assert_eq!(
-            render(&type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann, None)),
             "{'type', 0, 'map', 'any'}"
         );
     }
@@ -1107,7 +1285,7 @@ mod tests {
             span(),
         );
         assert_eq!(
-            render(&type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann, None)),
             "{'type', 0, 'tuple', 'any'}"
         );
     }
@@ -1124,7 +1302,7 @@ mod tests {
             span(),
         );
         assert_eq!(
-            render(&type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann, None)),
             "{'type', 0, 'any', []}"
         );
     }
@@ -1134,7 +1312,7 @@ mod tests {
         // Bare type variable T maps to any() via simple_type_to_spec catch-all
         let ann = TypeAnnotation::simple("T", span());
         assert_eq!(
-            render(&type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann, None)),
             "{'type', 0, 'any', []}"
         );
     }
@@ -1148,7 +1326,7 @@ mod tests {
             span(),
         );
         assert_eq!(
-            render(&type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann, None)),
             "{'type', 0, 'list', [{'type', 0, 'any', []}]}"
         );
     }
@@ -1163,7 +1341,7 @@ mod tests {
         );
         let ann = TypeAnnotation::generic(Identifier::new("List", span()), vec![inner], span());
         assert_eq!(
-            render(&type_annotation_to_spec(&ann)),
+            render(&type_annotation_to_spec(&ann, None)),
             "{'type', 0, 'list', [{'type', 0, 'list', [{'type', 0, 'integer', []}]}]}"
         );
     }
@@ -1181,7 +1359,7 @@ mod tests {
             vec![TypeAnnotation::simple("Integer", span()), return_type],
             span(),
         );
-        let result = render(&type_annotation_to_spec(&ann));
+        let result = render(&type_annotation_to_spec(&ann, None));
         assert_eq!(
             result,
             "{'type', 0, 'fun', [{'type', 0, 'product', [{'type', 0, 'integer', []}]}, {'type', 0, 'list', [{'type', 0, 'binary', []}]}]}"
@@ -1206,7 +1384,7 @@ mod tests {
             span(),
         );
 
-        let spec = render(&generate_method_spec(&method, false).unwrap());
+        let spec = render(&generate_method_spec(&method, false, None).unwrap());
         assert!(
             spec.contains("'list', [{'type', 0, 'integer', []}]"),
             "Should contain parameterized list type, got: {spec}"
@@ -1232,7 +1410,7 @@ mod tests {
             span(),
         );
 
-        let spec = render(&generate_method_spec(&method, false).unwrap());
+        let spec = render(&generate_method_spec(&method, false, None).unwrap());
         assert!(
             spec.contains("'list', [{'type', 0, 'binary', []}]"),
             "Return type should be parameterized list, got: {spec}"
@@ -1260,7 +1438,7 @@ mod tests {
             span(),
         );
 
-        let spec = render(&generate_method_spec(&method, false).unwrap());
+        let spec = render(&generate_method_spec(&method, false, None).unwrap());
         assert!(
             spec.contains("'fun'"),
             "Block param should generate fun type, got: {spec}"
@@ -1292,10 +1470,377 @@ mod tests {
             vec![],
             span(),
         );
-        let result = render(&generate_type_alias(&class, "Container").unwrap());
+        let result = render(&generate_type_alias(&class, "Container", None).unwrap());
         assert!(
             result.contains("'list', [{'type', 0, 'integer', []}]"),
             "Field type should be parameterized list, got: {result}"
         );
+    }
+
+    // ---- Named `-type` emission for type aliases (ADR 0108, BT-2900) ----
+
+    /// Builds an `AliasRegistry` containing a single alias `name = annotation`.
+    fn alias_registry_with(name: &str, annotation: TypeAnnotation) -> AliasRegistry {
+        let mut registry = AliasRegistry::new();
+        registry.register_test_alias(AliasInfo {
+            name: name.into(),
+            annotation,
+            span: span(),
+        });
+        registry
+    }
+
+    fn restart_strategy_expansion() -> TypeAnnotation {
+        TypeAnnotation::Union {
+            types: vec![
+                TypeAnnotation::singleton("temporary", span()),
+                TypeAnnotation::singleton("transient", span()),
+                TypeAnnotation::singleton("permanent", span()),
+            ],
+            span: span(),
+        }
+    }
+
+    #[test]
+    fn alias_reference_emits_user_type_reference() {
+        // A `Simple` annotation naming a registered alias must emit a
+        // `user_type` reference, not `any()` and not an inlined re-expansion
+        // of the union.
+        let registry = alias_registry_with("RestartStrategy", restart_strategy_expansion());
+        let ann = TypeAnnotation::simple("RestartStrategy", span());
+
+        let result = render(&type_annotation_to_spec(&ann, Some(&registry)));
+        assert_eq!(result, "{'user_type', 0, 'restart_strategy', []}");
+    }
+
+    #[test]
+    fn alias_reference_without_registry_falls_back_to_any() {
+        // `None` (no alias registry supplied) reproduces pre-ADR-0108
+        // behaviour exactly: an unrecognised `Simple` name is any().
+        let ann = TypeAnnotation::simple("RestartStrategy", span());
+        let result = render(&type_annotation_to_spec(&ann, None));
+        assert_eq!(result, "{'type', 0, 'any', []}");
+    }
+
+    #[test]
+    fn alias_reference_with_registry_not_containing_name_falls_back_to_any() {
+        // A registry that doesn't have this particular name behaves like `None`
+        // for that name — only registered aliases get `user_type` treatment.
+        let registry = alias_registry_with("Timeout", TypeAnnotation::simple("Integer", span()));
+        let ann = TypeAnnotation::simple("Counter", span());
+        let result = render(&type_annotation_to_spec(&ann, Some(&registry)));
+        assert_eq!(result, "{'type', 0, 'any', []}");
+    }
+
+    #[test]
+    fn alias_reference_inside_union_member_uses_user_type() {
+        // Nested `Simple` positions (e.g. a member of a larger union) must
+        // also consult the alias table, mirroring resolve_type_annotation's
+        // recursive alias lookup (BT-2895).
+        let registry = alias_registry_with("Timeout", TypeAnnotation::simple("Integer", span()));
+        let ann = TypeAnnotation::union(
+            vec![
+                TypeAnnotation::simple("Timeout", span()),
+                TypeAnnotation::simple("Nil", span()),
+            ],
+            span(),
+        );
+        let result = render(&type_annotation_to_spec(&ann, Some(&registry)));
+        assert_eq!(
+            result,
+            "{'type', 0, 'union', [{'user_type', 0, 'timeout', []}, {'atom', 0, 'nil'}]}"
+        );
+    }
+
+    #[test]
+    fn alias_reference_as_generic_base_uses_user_type() {
+        // A non-parametric alias applied generically (e.g. `MyList(Integer)`
+        // where `type MyList = List`) is ill-formed, but the generic-base
+        // catch-all should still reference the alias by name (dropping the
+        // type argument) rather than falling through to any() — mirrors the
+        // `Simple` case for symmetry.
+        let registry = alias_registry_with("MyList", TypeAnnotation::simple("List", span()));
+        let ann = TypeAnnotation::generic(
+            Identifier::new("MyList", span()),
+            vec![TypeAnnotation::simple("Integer", span())],
+            span(),
+        );
+        let result = render(&type_annotation_to_spec(&ann, Some(&registry)));
+        assert_eq!(result, "{'user_type', 0, 'my_list', []}");
+    }
+
+    #[test]
+    fn generate_alias_type_attr_for_singleton_union() {
+        // `type RestartStrategy = #temporary | #transient | #permanent`
+        let registry = alias_registry_with("RestartStrategy", restart_strategy_expansion());
+        let result = render(&generate_alias_type_attr(
+            "RestartStrategy",
+            &restart_strategy_expansion(),
+            &registry,
+        ));
+        assert_eq!(
+            result,
+            "'type' =\n        [{'restart_strategy', {'type', 0, 'union', \
+             [{'atom', 0, 'temporary'}, {'atom', 0, 'transient'}, {'atom', 0, 'permanent'}]}, []}]"
+        );
+    }
+
+    #[test]
+    fn generate_alias_type_attr_widens_difference() {
+        // `type PublicTag = Symbol \ (#reserved | #internal)` — no exact
+        // Erlang spec form for difference; widens to the base (Symbol),
+        // same over-approximation `type_annotation_to_spec` already applies
+        // to anonymous `Difference` (ADR 0108 Consequences — Positive).
+        let excluded = TypeAnnotation::union(
+            vec![
+                TypeAnnotation::singleton("reserved", span()),
+                TypeAnnotation::singleton("internal", span()),
+            ],
+            span(),
+        );
+        let rhs = TypeAnnotation::Difference {
+            base: Box::new(TypeAnnotation::simple("Symbol", span())),
+            excluded: Box::new(excluded),
+            span: span(),
+        };
+        let registry = alias_registry_with("PublicTag", rhs.clone());
+        let result = render(&generate_alias_type_attr("PublicTag", &rhs, &registry));
+        assert_eq!(
+            result,
+            "'type' =\n        [{'public_tag', {'type', 0, 'atom', []}, []}]"
+        );
+    }
+
+    #[test]
+    fn generate_alias_type_attr_widens_intersection() {
+        // `type X = Collection(Object) & Comparable` — widens to the left
+        // operand, same as anonymous `Intersection`.
+        let rhs = TypeAnnotation::Intersection {
+            left: Box::new(TypeAnnotation::simple("Integer", span())),
+            right: Box::new(TypeAnnotation::simple("Comparable", span())),
+            span: span(),
+        };
+        let registry = alias_registry_with("X", rhs.clone());
+        let result = render(&generate_alias_type_attr("X", &rhs, &registry));
+        assert_eq!(
+            result,
+            "'type' =\n        [{'x', {'type', 0, 'integer', []}, []}]"
+        );
+    }
+
+    #[test]
+    fn generate_alias_type_attr_references_another_alias_by_name() {
+        // `type B = A | #z`, `type A = #x | #y` — B's generated `-type` must
+        // reference `a()` via `user_type`, not re-expand A inline (ADR 0108
+        // Codegen: "annotation sites reference it").
+        let a_expansion = TypeAnnotation::union(
+            vec![
+                TypeAnnotation::singleton("x", span()),
+                TypeAnnotation::singleton("y", span()),
+            ],
+            span(),
+        );
+        let b_expansion = TypeAnnotation::union(
+            vec![
+                TypeAnnotation::simple("A", span()),
+                TypeAnnotation::singleton("z", span()),
+            ],
+            span(),
+        );
+        let mut registry = AliasRegistry::new();
+        registry.register_test_alias(AliasInfo {
+            name: "A".into(),
+            annotation: a_expansion,
+            span: span(),
+        });
+        registry.register_test_alias(AliasInfo {
+            name: "B".into(),
+            annotation: b_expansion.clone(),
+            span: span(),
+        });
+
+        let result = render(&generate_alias_type_attr("B", &b_expansion, &registry));
+        assert!(
+            result.contains("{'user_type', 0, 'a', []}"),
+            "B's -type should reference A by name, not inline it, got: {result}"
+        );
+        assert!(
+            !result.contains("'x'") && !result.contains("'y'"),
+            "B's -type should not contain A's expansion inline, got: {result}"
+        );
+    }
+
+    #[test]
+    fn generate_alias_type_attrs_sorted_deterministic() {
+        let mut registry = AliasRegistry::new();
+        registry.register_test_alias(AliasInfo {
+            name: "Zeta".into(),
+            annotation: TypeAnnotation::simple("Integer", span()),
+            span: span(),
+        });
+        registry.register_test_alias(AliasInfo {
+            name: "Alpha".into(),
+            annotation: TypeAnnotation::simple("String", span()),
+            span: span(),
+        });
+
+        let attrs: Vec<String> = generate_alias_type_attrs(&registry)
+            .iter()
+            .map(render)
+            .collect();
+        assert_eq!(attrs.len(), 2);
+        assert!(
+            attrs[0].contains("'alpha'"),
+            "Alpha should sort before Zeta, got: {attrs:?}"
+        );
+        assert!(
+            attrs[1].contains("'zeta'"),
+            "Zeta should sort after Alpha, got: {attrs:?}"
+        );
+    }
+
+    #[test]
+    fn generate_alias_type_attrs_empty_registry_returns_empty_vec() {
+        let registry = AliasRegistry::new();
+        assert!(generate_alias_type_attrs(&registry).is_empty());
+    }
+
+    #[test]
+    fn format_alias_type_attributes_empty() {
+        assert!(format_alias_type_attributes(&[]).is_none());
+    }
+
+    #[test]
+    fn format_alias_type_attributes_joins_multiple() {
+        let attrs = vec![
+            Document::Str("'type' =\n        [{'a', {'type', 0, 'integer', []}, []}]"),
+            Document::Str("'type' =\n        [{'b', {'type', 0, 'binary', []}, []}]"),
+        ];
+        let result = render(&format_alias_type_attributes(&attrs).unwrap());
+        assert!(result.contains("'a'"));
+        assert!(result.contains("'b'"));
+        assert!(result.contains(",\n     "));
+    }
+
+    // ---- Annotation-site reference correctness (method/class/field specs) ----
+
+    #[test]
+    fn method_param_annotated_with_alias_emits_user_type_reference() {
+        // `deposit: strategy :: RestartStrategy -> Nil`
+        let registry = alias_registry_with("RestartStrategy", restart_strategy_expansion());
+        let method = MethodDefinition::with_return_type(
+            MessageSelector::Keyword(vec![KeywordPart::new("deposit:", span())]),
+            vec![ParameterDefinition::with_type(
+                Identifier::new("strategy", span()),
+                TypeAnnotation::simple("RestartStrategy", span()),
+            )],
+            vec![],
+            TypeAnnotation::simple("Nil", span()),
+            span(),
+        );
+
+        let spec = render(&generate_method_spec(&method, false, Some(&registry)).unwrap());
+        assert!(
+            spec.contains("{'user_type', 0, 'restart_strategy', []}"),
+            "Method param typed with an alias should reference the named -type, got: {spec}"
+        );
+        assert!(
+            !spec.contains("'temporary'"),
+            "Should not inline the alias's expansion, got: {spec}"
+        );
+    }
+
+    #[test]
+    fn method_without_alias_registry_unaffected_by_unrelated_aliases() {
+        // Confirms `generate_class_specs`/`generate_method_spec` output is
+        // byte-identical whether an (unrelated or absent) alias registry is
+        // supplied, when the method's own annotations never reference an
+        // alias — the only codegen surface aliases touch is `type_annotation_to_spec`
+        // resolving a name that IS in the table (ADR 0108 Consequences).
+        let method = MethodDefinition::with_return_type(
+            MessageSelector::Unary("getBalance".into()),
+            vec![],
+            vec![],
+            TypeAnnotation::simple("Integer", span()),
+            span(),
+        );
+        let registry = alias_registry_with("RestartStrategy", restart_strategy_expansion());
+
+        let without_registry = render(&generate_method_spec(&method, false, None).unwrap());
+        let with_unrelated_registry =
+            render(&generate_method_spec(&method, false, Some(&registry)).unwrap());
+        assert_eq!(without_registry, with_unrelated_registry);
+    }
+
+    #[test]
+    fn class_method_param_annotated_with_alias_emits_user_type_reference() {
+        let registry = alias_registry_with("RestartStrategy", restart_strategy_expansion());
+        let method = MethodDefinition::with_return_type(
+            MessageSelector::Keyword(vec![KeywordPart::new("from:", span())]),
+            vec![ParameterDefinition::with_type(
+                Identifier::new("strategy", span()),
+                TypeAnnotation::simple("RestartStrategy", span()),
+            )],
+            vec![],
+            TypeAnnotation::simple("Nil", span()),
+            span(),
+        );
+
+        let spec = render(&generate_class_method_spec(&method, Some(&registry)).unwrap());
+        assert!(
+            spec.contains("{'user_type', 0, 'restart_strategy', []}"),
+            "Class method param typed with an alias should reference the named -type, got: {spec}"
+        );
+    }
+
+    #[test]
+    fn value_type_field_annotated_with_alias_emits_user_type_reference() {
+        let registry = alias_registry_with("RestartStrategy", restart_strategy_expansion());
+        let class = make_class_with_state(
+            "Child",
+            vec![(
+                "strategy",
+                Some(TypeAnnotation::simple("RestartStrategy", span())),
+            )],
+        );
+        let result = render(&generate_type_alias(&class, "Child", Some(&registry)).unwrap());
+        assert!(
+            result.contains("{'user_type', 0, 'restart_strategy', []}"),
+            "State field typed with an alias should reference the named -type, got: {result}"
+        );
+    }
+
+    #[test]
+    fn generate_class_specs_byte_identical_with_and_without_unrelated_alias_registry() {
+        // ADR 0108 Consequences: "generated Core Erlang for message dispatch,
+        // field access, etc. is byte-identical with or without the alias" —
+        // for a class whose signatures never reference the alias, the spec
+        // output (the only surface aliases touch) must also be unaffected.
+        let method = MethodDefinition::with_return_type(
+            MessageSelector::Unary("size".into()),
+            vec![],
+            vec![],
+            TypeAnnotation::simple("Integer", span()),
+            span(),
+        );
+        let class = ClassDefinition::with_modifiers(
+            Identifier::new("Bag", span()),
+            Some(Identifier::new("Value", span())),
+            ClassModifiers::default(),
+            vec![],
+            vec![method],
+            span(),
+        );
+        let registry = alias_registry_with("RestartStrategy", restart_strategy_expansion());
+
+        let without: Vec<String> = generate_class_specs(&class, true, None)
+            .iter()
+            .map(render)
+            .collect();
+        let with: Vec<String> = generate_class_specs(&class, true, Some(&registry))
+            .iter()
+            .map(render)
+            .collect();
+        assert_eq!(without, with);
     }
 }

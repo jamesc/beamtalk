@@ -89,7 +89,9 @@ impl CoreErlangGenerator {
         let beamtalk_class_attr = super::util::beamtalk_class_attribute(&module.classes);
         let file_attr = self.file_attr();
         let source_path_attr = self.source_path_attr();
-        let spec_attrs = spec_codegen::generate_class_specs(class, true);
+        // BT-2900: `None` — see actor_codegen.rs's identical comment; alias
+        // registry plumbing into codegen call sites is a follow-up.
+        let spec_attrs = spec_codegen::generate_class_specs(class, true, None);
         let spec_suffix: Document<'static> = spec_codegen::format_spec_attributes(&spec_attrs)
             .map_or(Document::Nil, |s| docvec![",\n     ", s]);
 
@@ -165,7 +167,9 @@ impl CoreErlangGenerator {
         let beamtalk_class_attr = super::util::beamtalk_class_attribute(&module.classes);
         let file_attr = self.file_attr();
         let source_path_attr = self.source_path_attr();
-        let spec_attrs = spec_codegen::generate_class_specs(class, true);
+        // BT-2900: `None` — see actor_codegen.rs's identical comment; alias
+        // registry plumbing into codegen call sites is a follow-up.
+        let spec_attrs = spec_codegen::generate_class_specs(class, true, None);
         let spec_suffix: Document<'static> = spec_codegen::format_spec_attributes(&spec_attrs)
             .map_or(Document::Nil, |s| docvec![",\n     ", s]);
 
