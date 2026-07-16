@@ -113,6 +113,20 @@ pub struct AnalysisResult {
     /// alias-name-keyed candidate lookup a live alias redefinition's
     /// re-check trigger needs (unlike ADR 0107's `trigger_leaf_change/1`,
     /// which has no such key and sweeps every live class).
+    ///
+    /// **Scope boundary:** only spans the annotation-resolution call sites
+    /// that were switched to `resolve_type_annotation_with_alias_deps`
+    /// (method parameters, return types, local `::` assignments, generic
+    /// type-parameter bounds — every production caller that already threads
+    /// `alias_registry`). A `state:`/`field:` declared type does **not**
+    /// currently flow through alias resolution at all (`check_state_defaults`
+    /// compares against `type_annotation.type_name()`, the raw written name,
+    /// never `resolve_type_annotation`), so a state field typed with an
+    /// alias is invisible to this set today — harmless *only* because state
+    /// fields don't expand aliases yet either. If a future change adds alias
+    /// expansion to state-field types, that call site must also be switched
+    /// to the `_with_alias_deps` variant, or its class silently drops out of
+    /// `beamtalk_alias_xref` and a live redefinition stops re-checking it.
     pub referenced_aliases: Vec<EcoString>,
 }
 

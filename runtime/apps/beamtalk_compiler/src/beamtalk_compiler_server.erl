@@ -68,18 +68,32 @@ to avoid temp files on disk (BT-48).
     %% Populated via register_class/2 casts and crash recovery on init.
     classes = #{} :: #{atom() => map()},
     %% ADR 0108 hot-reload re-check trigger (BT-2899): ambient session type
-    %% alias cache — one reparseable `type Name = <expansion>` line per
-    %% currently-known alias (the same shape
-    %% `beamtalk_repl_state:known_type_alias_sources/1` produces). Mirrors
-    %% `classes` above: threaded into `diagnostics/3`'s request whenever the
-    %% caller opts into ambient context via `class_hierarchy => true`, so a
-    %% re-check round trip (`beamtalk_recheck.erl`) resolves `::` annotations
-    %% against the *current* alias table instead of treating every alias
-    %% name as an unresolved nominal class. Whole-list replacement via
-    %% register_aliases/1 (unlike classes' per-name accumulation) — session
-    %% alias state is small and always resent in full by its one writer
-    %% (`beamtalk_repl_eval:handle_type_alias_definition/3`).
-    aliases = [] :: [binary()],
+    %% alias cache, keyed by alias name -> its reparseable `type Name =
+    %% <expansion>` source line. Mirrors `classes` above: threaded into
+    %% `diagnostics/3`'s request whenever the caller opts into ambient
+    %% context via `class_hierarchy => true`, so a re-check round trip
+    %% (`beamtalk_recheck.erl`) resolves `::` annotations against the
+    %% *current* alias table instead of treating every alias name as an
+    %% unresolved nominal class.
+    %%
+    %% Merged by name (adversarial review finding), NOT whole-map
+    %% replacement: `beamtalk_compiler_server` is a single node-global
+    %% process (`{local, ?MODULE}`), but each REPL session has its own
+    %% independent `beamtalk_repl_state` alias table — a naive "replace with
+    %% whatever this cast's caller currently has" would let one connected
+    %% session's `register_aliases/1` wipe every *other* session's aliases
+    %% from the ambient cache the moment two sessions are open concurrently
+    %% (`beamtalk_session_sup` supports exactly this topology). Since alias
+    %% names are the merge key and a name collision across two independent
+    %% sessions is already a structural error the compiler itself would
+    %% reject if either session tried to reference the other's colliding
+    %% name, last-write-wins-per-name is the correct merge semantics here —
+    %% it exactly mirrors `classes`' own per-name accumulation
+    %% (`maps:put/3` in `register_class/2`'s cast handler) rather than
+    %% diverging from that precedent. Like `classes`, there is no removal on
+    %% session disconnect — an accepted limitation this shares with every
+    %% ambient cache in this module.
+    aliases = #{} :: #{binary() => binary()},
     %% BT-2832 (test-only): when set (via inject_diagnostics_failure/1, only
     %% exported in TEST builds), the *next* diagnostics/3 call fails with this
     %% reason instead of reaching the real compiler port, then self-clears.
@@ -506,32 +520,43 @@ get_classes() ->
     end.
 
 -doc """
-Replace the ambient session type-alias cache (ADR 0108 hot-reload re-check
-trigger, BT-2899) with `AliasSources` — one reparseable `type Name =
-<expansion>` line per currently-known alias.
+Merge `AliasSources` — one reparseable `type Name = <expansion>` line per
+currently-known alias in *this caller's own session* — into the ambient
+session type-alias cache (ADR 0108 hot-reload re-check trigger, BT-2899),
+keyed by alias name (see the `aliases` field's doc for why this is a
+per-name merge, not a whole-cache replacement — two independent REPL
+sessions concurrently registering their own, disjoint alias tables must not
+be able to wipe each other's entries).
 
-Fire-and-forget cast, mirroring `register_class/2`'s degrade-silently
-contract. Whole-list replacement, not accumulation: the one production
-caller (`beamtalk_repl_eval:handle_type_alias_definition/3`) always resends
-the session's complete current alias table on every declaration/redefinition
-(`beamtalk_repl_state:known_type_alias_sources/1`), so there is nothing to
-merge — the latest cast always reflects the current, authoritative session
-state.
+Synchronous `call`, not a fire-and-forget `cast`: the one production caller
+(`beamtalk_repl_eval:handle_type_alias_definition/3`) enqueues the
+alias-change re-check trigger immediately afterwards
+(`beamtalk_repl_loader:spawn_alias_change_recheck/1`), and that trigger's
+`diagnostics/3` round trip needs this cache update to have *already landed*
+by the time it runs — a `cast` only guarantees same-process mailbox
+ordering (this call and the subsequent enqueue are sent from the same
+process, so a cast would in practice already be safe today), but a `call`
+makes that ordering an explicit contract rather than an implicit one two
+different message sends must continue to satisfy by construction. Still
+degrades silently (returns `ok` instead of raising) if the server is not
+running, matching every other ambient-cache API in this module.
 """.
 -spec register_aliases([binary()]) -> ok.
 register_aliases(AliasSources) when is_list(AliasSources) ->
     try
-        gen_server:cast(?MODULE, {register_aliases, AliasSources})
+        gen_server:call(?MODULE, {register_aliases, AliasSources}, 5000)
     catch
-        _:_ -> ok
-    end,
-    ok.
+        exit:{noproc, _} -> ok;
+        exit:{timeout, _} -> ok
+    end.
 
 -doc """
-Return the current ambient alias cache (`register_aliases/1`'s latest
-value). Production caller: `diagnostics/3` (via `handle_call`, below) reads
-this the same way it reads `get_classes/0`'s cache. Also used directly by
-tests. Returns `[]` (not an error) if the server is not running.
+Return the current ambient alias cache — every currently-registered alias's
+source line, across every session that has called `register_aliases/1`
+(order unspecified; callers needing determinism should sort). Production
+caller: `diagnostics/3` (via `handle_call`, below) reads this the same way
+it reads `get_classes/0`'s cache. Also used directly by tests. Returns `[]`
+(not an error) if the server is not running.
 """.
 -spec get_aliases() -> [binary()].
 get_aliases() ->
@@ -653,14 +678,14 @@ handle_call({compile, Source, Options}, _From, State) ->
     %% = Integer` then `Actor subclass: Point` in a later turn/`:load`).
     Options1 = Options#{
         class_hierarchy => State#state.classes,
-        known_type_aliases => State#state.aliases
+        known_type_aliases => alias_source_list(State#state.aliases)
     },
     Result = do_compile(State#state.port, Source, Options1),
     {reply, Result, State};
 handle_call({compile_method, ClassSource, MethodSource, Options}, _From, State) ->
     Options1 = Options#{
         class_hierarchy => State#state.classes,
-        known_type_aliases => State#state.aliases
+        known_type_aliases => alias_source_list(State#state.aliases)
     },
     Result = do_compile_method(State#state.port, ClassSource, MethodSource, Options1),
     {reply, Result, State};
@@ -693,7 +718,7 @@ handle_call({diagnostics, Source, Mode, Options}, _From, State) ->
     %% rather than adding a second, overlapping flag.
     {Classes, Aliases} =
         case maps:get(class_hierarchy, Options, false) of
-            true -> {State#state.classes, State#state.aliases};
+            true -> {State#state.classes, alias_source_list(State#state.aliases)};
             false -> {#{}, []}
         end,
     Result = do_diagnostics(State#state.port, Source, Mode, Classes, Aliases),
@@ -747,13 +772,26 @@ handle_call(version, _From, State) ->
     Result = do_version(State#state.port),
     {reply, Result, State};
 handle_call(clear_classes, _From, State) ->
-    {reply, ok, State#state{classes = #{}, aliases = []}};
+    {reply, ok, State#state{classes = #{}, aliases = #{}}};
 handle_call({inject_diagnostics_failure, Reason}, _From, State) ->
     {reply, ok, State#state{diagnostics_fault = Reason}};
 handle_call(get_classes, _From, State) ->
     {reply, State#state.classes, State};
 handle_call(get_aliases, _From, State) ->
-    {reply, State#state.aliases, State};
+    {reply, alias_source_list(State#state.aliases), State};
+handle_call({register_aliases, AliasSources}, _From, State) ->
+    %% ADR 0108 hot-reload re-check trigger (BT-2899): merge by alias name
+    %% (adversarial review finding) — see the `aliases` field's doc for why
+    %% this must not be a whole-cache replacement. `alias_name_from_source/1`
+    %% parses each `type Name = Expansion` line to extract its merge key;
+    %% a line that fails to parse (should be unreachable — every entry comes
+    %% from `beamtalk_repl_state:known_type_alias_sources/1`, which always
+    %% emits this exact shape) is skipped rather than crashing this call.
+    NewEntries = maps:from_list([
+        {Name, Source}
+     || Source <- AliasSources, {ok, Name} <- [alias_name_from_source(Source)]
+    ]),
+    {reply, ok, State#state{aliases = maps:merge(State#state.aliases, NewEntries)}};
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
@@ -761,10 +799,6 @@ handle_cast({register_class, ClassName, MetaMap}, State) ->
     %% ADR 0050 Phase 3: Accumulate class metadata; overwrite on redefinition.
     NewClasses = maps:put(ClassName, MetaMap, State#state.classes),
     {noreply, State#state{classes = NewClasses}};
-handle_cast({register_aliases, AliasSources}, State) ->
-    %% ADR 0108 hot-reload re-check trigger (BT-2899): whole-list
-    %% replacement — see register_aliases/1's doc.
-    {noreply, State#state{aliases = AliasSources}};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -790,6 +824,36 @@ terminate(_Reason, _State) ->
     ok.
 
 %%% Internal functions
+
+-doc """
+The ambient alias cache's values, as the `[binary()]` shape every consumer
+(`known_type_aliases` request field, `get_aliases/0`'s public contract)
+expects — order is whatever `maps:values/1` gives, which is unspecified but
+stable within one call; no consumer of `known_type_aliases` depends on
+ordering (see `extract_known_type_aliases`'s Rust-side doc, which reparses
+each line into an `AliasInfo` independently of its position).
+""".
+-spec alias_source_list(#{binary() => binary()}) -> [binary()].
+alias_source_list(AliasesMap) ->
+    maps:values(AliasesMap).
+
+-doc """
+Parse a `type Name = Expansion` source line (the exact shape
+`beamtalk_repl_state:known_type_alias_sources/1` produces) into its alias
+name, for use as `aliases`' merge key. `{ok, Name}` on the expected shape;
+`error` for anything else (should be unreachable in production — see this
+function's one call site's doc — but degrading to "skip this entry" rather
+than crashing the whole `register_aliases/1` call keeps one malformed entry
+from taking the rest of a session's alias table down with it).
+""".
+-spec alias_name_from_source(binary()) -> {ok, binary()} | error.
+alias_name_from_source(<<"type ", Rest/binary>>) ->
+    case binary:split(Rest, <<" = ">>) of
+        [Name, _Expansion] when byte_size(Name) > 0 -> {ok, Name};
+        _ -> error
+    end;
+alias_name_from_source(_) ->
+    error.
 
 -doc """
 Scan all currently loaded BEAM modules and recover user-class metadata.

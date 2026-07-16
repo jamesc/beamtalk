@@ -286,3 +286,56 @@ live_alias_redefinition_to_same_expansion_does_not_produce_findings_test_() ->
                 end)
             ]
         end}}.
+
+%%====================================================================
+%% Regression (adversarial review, BT-2899): the `>>` method-patch path
+%% (`beamtalk_repl_compiler:compile_method_reload/3`, the structured
+%% single-method compile backing IDE save / `compile:source:` / REPL `>>`)
+%% must populate `beamtalk_alias_xref` exactly like a fresh class load does
+%% — only `handle_load/2`'s path (a full file compile) was covered above;
+%% a class whose alias-typed method arrives via a *patch* instead is a
+%% materially different code path (`compile_method_reload/3` ->
+%% `register_alias_xref_for_classes/2`, not `compile_file_core/4`) that
+%% needs its own proof it wires the index the same way.
+%%====================================================================
+
+compile_method_patch_registers_alias_dependency_test_() ->
+    {timeout, 30,
+        {setup, fun alias_recheck_setup/0, fun alias_recheck_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    State0 = beamtalk_repl_state:new(undefined, 0),
+                    _State1 = declare_alias(
+                        <<"AliasChangeMethodPatchDirection">>,
+                        <<"#north | #south">>,
+                        State0
+                    ),
+
+                    ClassSource =
+                        <<"Object subclass: AliasChangeMethodPatchUser\n  hello => 42\n">>,
+                    MethodSource =
+                        <<
+                            "test: x :: AliasChangeMethodPatchDirection => x matchExhaustive: [\n"
+                            "    #north -> 0;\n"
+                            "    #south -> 1\n"
+                            "  ]\n"
+                        >>,
+                    Options = #{
+                        class_name => <<"AliasChangeMethodPatchUser">>,
+                        is_class_method => false,
+                        workspace_mode => true
+                    },
+                    Result = beamtalk_repl_compiler:compile_method_reload(
+                        ClassSource, MethodSource, Options
+                    ),
+                    ?assertMatch({ok, _}, Result),
+
+                    ?assertEqual(
+                        [<<"AliasChangeMethodPatchUser">>],
+                        beamtalk_alias_xref:dependents_of(
+                            <<"AliasChangeMethodPatchDirection">>
+                        )
+                    )
+                end)
+            ]
+        end}}.

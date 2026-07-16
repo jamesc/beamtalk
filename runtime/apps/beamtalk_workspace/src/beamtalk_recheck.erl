@@ -645,10 +645,23 @@ Aliases are different: `beamtalk_alias_xref` is a real alias-name -> class
 index, populated at every class-defining compile from the compiler port's
 `referenced_aliases` response field (ADR 0108 Implementation: "the alias
 name is a natural key"). `alias_change_candidates/1` queries it directly —
-no whole-image sweep, no per-reload caller cap bypass; the ordinary
-`apply_cap/2`/`recheck_caller_cap/0` machinery `trigger/4`/`trigger_shape/2`
-already use applies here too, since a hot alias could in principle still
-have an unbounded dependent set.
+no whole-image sweep. The ordinary `apply_cap/2`/`recheck_caller_cap/0`
+machinery `trigger/4`/`trigger_shape/2` already use applies here too, since
+a hot stdlib-style alias (`RestartStrategy`, `JsonValue`) could plausibly
+exceed the default cap (20) of dependents in a large project.
+
+**Caveat on ADR 0108's "impossible after this lands" guarantee (AC5):** that
+guarantee holds for every *checked* dependent, but a dependent dropped by
+the cap (named in the result's `not_checked_owners`/`cap_note`, published on
+the `'ReloadCheckCompleted'` event exactly like every other trigger's
+cap-dropped candidates) is not re-verified this redefinition — it keeps
+whatever finding state (stale or clean) it already had. This mirrors the
+identical, already-accepted caveat on `trigger/4`/`trigger_shape/2`'s own
+guarantees; it is not a gap specific to this trigger, and a workspace with
+more than `recheck_caller_cap` live dependents of one alias is the same
+"interim guard, not the final word" tradeoff ADR 0105's Alternatives section
+already accepts for every other selector-fan-out trigger (see
+`apply_cap/2`'s own doc).
 
 ## Re-check re-runs `resolve_type_annotation` from scratch (AC3)
 
