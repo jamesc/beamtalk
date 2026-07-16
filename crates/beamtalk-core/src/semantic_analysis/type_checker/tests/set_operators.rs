@@ -720,7 +720,7 @@ fn negation_display_parenthesises_excluded_union() {
 #[test]
 fn difference_threads_provenance_into_negation() {
     let declared = TypeProvenance::Declared(Span::new(3, 9));
-    let result = InferredType::difference(&symbol(), &singleton("#foo"), declared, None);
+    let result = InferredType::difference(&symbol(), &singleton("#foo"), declared.clone(), None);
     assert_eq!(result.provenance(), Some(declared));
 }
 
@@ -978,7 +978,7 @@ fn intersection_provenance_accessor() {
     let result = InferredType::intersect(
         &InferredType::known("Printable"),
         &InferredType::known("Comparable"),
-        declared,
+        declared.clone(),
         None,
         Some(&registry),
     );

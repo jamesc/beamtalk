@@ -11,11 +11,17 @@
 //! - Unresolved FFI modules — `Erlang <module>` with unknown module
 //! - Arity mismatches — known Erlang functions called with wrong argument count
 
-use crate::ast::{Expression, ExpressionStatement, MessageSelector, Module};
+use crate::ast::{
+    Expression, ExpressionStatement, MessageSelector, MethodDefinition, Module, TypeAnnotation,
+};
 use crate::ast_walker::{walk_expression, walk_module};
 use crate::semantic_analysis::ClassHierarchy;
+use crate::semantic_analysis::alias_registry::AliasRegistry;
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
+use crate::semantic_analysis::string_utils::edit_distance;
+use crate::semantic_analysis::type_checker::is_generic_type_param;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
+use ecow::EcoString;
 
 // ── Unresolved class references ──────────────────────────────────────────────
 
@@ -143,6 +149,230 @@ fn visit_unresolved_class(
             .with_category(DiagnosticCategory::UnresolvedClass),
         );
     }
+}
+
+// ── Unresolved type-alias references (ADR 0108, BT-2897) ───────────────────
+
+/// BT-2897 / ADR 0108: warn when a type annotation names something that
+/// isn't a class, protocol, alias, or (single-letter) type parameter, but
+/// closely resembles a *registered* alias name — the "unknown alias"
+/// diagnostic ADR 0108's Error examples call for
+/// (`unknown type RestartStrateg (did you mean RestartStrategy?)`), reusing
+/// [`visit_unresolved_class`]'s diagnostic category/message shape and the
+/// same `edit_distance` "did you mean" machinery `validation.rs` already
+/// uses for state-key typos.
+///
+/// Deliberately scoped to near-misses of an *alias* name specifically, not
+/// every unresolvable type name in the codebase: no general
+/// annotation-existence checker exists yet (state/param/return annotations
+/// are not otherwise validated for existence — see the module doc), and
+/// building one is out of this issue's scope. Scoping to alias typos keeps
+/// this a strict no-op on every alias-free module — including the entire
+/// pre-ADR-0108 stdlib/test corpus — since `alias_registry.alias_names()`
+/// is empty there.
+///
+/// **Callers should gate this the same way as [`check_unresolved_classes`]**
+/// (on cross-file metadata being loaded): without it, a name that looks like
+/// a near-miss of a *local* alias might actually be a legitimate cross-file
+/// class not yet loaded, which would make this a false positive rather than
+/// a real typo — the exact same open-world hazard that check exists to
+/// avoid.
+pub(crate) fn check_unresolved_type_aliases(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    protocol_registry: &ProtocolRegistry,
+    alias_registry: &AliasRegistry,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if alias_registry.alias_names().next().is_none() {
+        return;
+    }
+    for class in &module.classes {
+        for state in &class.state {
+            if let Some(ann) = &state.type_annotation {
+                check_annotation_for_unresolved_alias(
+                    ann,
+                    hierarchy,
+                    protocol_registry,
+                    alias_registry,
+                    diagnostics,
+                );
+            }
+        }
+        for method in class.methods.iter().chain(class.class_methods.iter()) {
+            check_method_annotations_for_unresolved_alias(
+                method,
+                hierarchy,
+                protocol_registry,
+                alias_registry,
+                diagnostics,
+            );
+        }
+    }
+    for smd in &module.method_definitions {
+        check_method_annotations_for_unresolved_alias(
+            &smd.method,
+            hierarchy,
+            protocol_registry,
+            alias_registry,
+            diagnostics,
+        );
+    }
+}
+
+fn check_method_annotations_for_unresolved_alias(
+    method: &MethodDefinition,
+    hierarchy: &ClassHierarchy,
+    protocol_registry: &ProtocolRegistry,
+    alias_registry: &AliasRegistry,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for param in &method.parameters {
+        if let Some(ann) = &param.type_annotation {
+            check_annotation_for_unresolved_alias(
+                ann,
+                hierarchy,
+                protocol_registry,
+                alias_registry,
+                diagnostics,
+            );
+        }
+    }
+    if let Some(ann) = &method.return_type {
+        check_annotation_for_unresolved_alias(
+            ann,
+            hierarchy,
+            protocol_registry,
+            alias_registry,
+            diagnostics,
+        );
+    }
+}
+
+/// Walks a type annotation's structure, checking every [`TypeAnnotation::Simple`]
+/// position — mirroring `alias_registry.rs`'s `check_unbound_type_vars` walk
+/// shape (same recursion, different leaf check).
+fn check_annotation_for_unresolved_alias(
+    ann: &TypeAnnotation,
+    hierarchy: &ClassHierarchy,
+    protocol_registry: &ProtocolRegistry,
+    alias_registry: &AliasRegistry,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    match ann {
+        TypeAnnotation::Simple(type_id) => {
+            let name = type_id.name.as_str();
+            if BUILTIN_CLASS_NAMES.contains(&name)
+                || is_generic_type_param(name)
+                || hierarchy.has_class(name)
+                || protocol_registry.has_protocol(name)
+                || alias_registry.has_alias(name)
+            {
+                return;
+            }
+            if let Some(suggestion) = closest_alias_name(name, alias_registry) {
+                diagnostics.push(
+                    Diagnostic::warning(
+                        format!("unknown type `{name}` (did you mean `{suggestion}`?)"),
+                        type_id.span,
+                    )
+                    .with_hint(
+                        "No class, protocol, or type alias with this name is defined in the \
+                         current compilation unit. Suppress with @expect unresolved_class if \
+                         it exists elsewhere.",
+                    )
+                    .with_category(DiagnosticCategory::UnresolvedClass),
+                );
+            }
+        }
+        TypeAnnotation::Generic { parameters, .. } => {
+            for param in parameters {
+                check_annotation_for_unresolved_alias(
+                    param,
+                    hierarchy,
+                    protocol_registry,
+                    alias_registry,
+                    diagnostics,
+                );
+            }
+        }
+        TypeAnnotation::Union { types, .. } => {
+            for member in types {
+                check_annotation_for_unresolved_alias(
+                    member,
+                    hierarchy,
+                    protocol_registry,
+                    alias_registry,
+                    diagnostics,
+                );
+            }
+        }
+        TypeAnnotation::FalseOr { inner, .. } => {
+            check_annotation_for_unresolved_alias(
+                inner,
+                hierarchy,
+                protocol_registry,
+                alias_registry,
+                diagnostics,
+            );
+        }
+        TypeAnnotation::Difference { base, excluded, .. } => {
+            check_annotation_for_unresolved_alias(
+                base,
+                hierarchy,
+                protocol_registry,
+                alias_registry,
+                diagnostics,
+            );
+            check_annotation_for_unresolved_alias(
+                excluded,
+                hierarchy,
+                protocol_registry,
+                alias_registry,
+                diagnostics,
+            );
+        }
+        TypeAnnotation::Intersection { left, right, .. } => {
+            check_annotation_for_unresolved_alias(
+                left,
+                hierarchy,
+                protocol_registry,
+                alias_registry,
+                diagnostics,
+            );
+            check_annotation_for_unresolved_alias(
+                right,
+                hierarchy,
+                protocol_registry,
+                alias_registry,
+                diagnostics,
+            );
+        }
+        // SelfType / SelfClass / ClassOf / Singleton have no nested Simple
+        // identifier position that could be an alias reference.
+        TypeAnnotation::SelfType { .. }
+        | TypeAnnotation::SelfClass { .. }
+        | TypeAnnotation::ClassOf { .. }
+        | TypeAnnotation::Singleton { .. } => {}
+    }
+}
+
+/// Finds the closest registered alias name to `target` by edit distance,
+/// mirroring `validation.rs`'s `closest_state_slot` thresholding (distance
+/// > 0, distance ≤ 3, distance less than half the target's length).
+fn closest_alias_name(target: &str, alias_registry: &AliasRegistry) -> Option<EcoString> {
+    let mut best: Option<(EcoString, usize)> = None;
+    for name in alias_registry.alias_names() {
+        let dist = edit_distance(target, name.as_str());
+        if dist > 0
+            && dist <= 3
+            && dist < target.len() / 2 + 1
+            && best.as_ref().is_none_or(|(_, d)| dist < *d)
+        {
+            best = Some((name.clone(), dist));
+        }
+    }
+    best.map(|(name, _)| name)
 }
 
 // ── Workspace binding shadows class ─────────────────────────────────────────
@@ -691,6 +921,126 @@ mod tests {
             diags.is_empty(),
             "Protocol names should not trigger unresolved class warnings"
         );
+    }
+
+    // ── Unresolved type-alias tests (ADR 0108, BT-2897) ─────────────────────
+    //
+    // Called directly (like the unresolved-class tests above), not through
+    // `analyse_full` — `check_unresolved_type_aliases` has no internal
+    // cross-file gate of its own (see its doc: callers are responsible for
+    // gating on `has_cross_file_classes`, exactly like `check_unresolved_classes`).
+
+    fn parse_and_build(source: &str) -> (Module, ClassHierarchy) {
+        let tokens = crate::source_analysis::lex_with_eof(source);
+        let (module, parse_diags) = crate::source_analysis::parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        (module, hierarchy.unwrap())
+    }
+
+    fn registered_aliases(
+        module: &Module,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: &ProtocolRegistry,
+    ) -> crate::semantic_analysis::AliasRegistry {
+        let mut registry = crate::semantic_analysis::AliasRegistry::new();
+        let diags = registry.register_module(module, hierarchy, protocol_registry);
+        assert!(diags.is_empty(), "unexpected alias diagnostics: {diags:?}");
+        registry
+    }
+
+    #[test]
+    fn test_unresolved_type_alias_suggests_close_match() {
+        let source = "type RestartStrategy = #temporary | #transient | #permanent\n\n\
+                       Object subclass: Supervisor\n  restart: policy :: RestartStrateg => policy\n";
+        let (module, hierarchy) = parse_and_build(source);
+        let protocol_registry = ProtocolRegistry::new();
+        let alias_registry = registered_aliases(&module, &hierarchy, &protocol_registry);
+        let mut diags = Vec::new();
+
+        check_unresolved_type_aliases(
+            &module,
+            &hierarchy,
+            &protocol_registry,
+            &alias_registry,
+            &mut diags,
+        );
+
+        assert_eq!(diags.len(), 1, "expected one diagnostic, got: {diags:?}");
+        assert!(
+            diags[0]
+                .message
+                .contains("unknown type `RestartStrateg` (did you mean `RestartStrategy`?)"),
+            "got: {}",
+            diags[0].message
+        );
+        assert_eq!(diags[0].category, Some(DiagnosticCategory::UnresolvedClass));
+    }
+
+    #[test]
+    fn test_unresolved_type_alias_ignores_unrelated_unknown_names() {
+        // A totally unrelated unresolved name (nowhere near any alias) must
+        // not be flagged — this checker's job is alias typos specifically,
+        // not general annotation-existence checking (see its doc).
+        let source = "type RestartStrategy = #temporary | #transient | #permanent\n\n\
+                       Object subclass: Supervisor\n  restart: policy :: SomeTotallyUnrelatedName => policy\n";
+        let (module, hierarchy) = parse_and_build(source);
+        let protocol_registry = ProtocolRegistry::new();
+        let alias_registry = registered_aliases(&module, &hierarchy, &protocol_registry);
+        let mut diags = Vec::new();
+
+        check_unresolved_type_aliases(
+            &module,
+            &hierarchy,
+            &protocol_registry,
+            &alias_registry,
+            &mut diags,
+        );
+
+        assert!(diags.is_empty(), "expected no diagnostics, got: {diags:?}");
+    }
+
+    #[test]
+    fn test_unresolved_type_alias_is_noop_without_any_aliases() {
+        // No aliases registered at all — strict no-op, even on a near-miss
+        // of a *class* name (not this checker's job).
+        let source = "Object subclass: Foo\n  bar: x :: Integr => x\n";
+        let (module, hierarchy) = parse_and_build(source);
+        let protocol_registry = ProtocolRegistry::new();
+        let alias_registry = registered_aliases(&module, &hierarchy, &protocol_registry);
+        let mut diags = Vec::new();
+
+        check_unresolved_type_aliases(
+            &module,
+            &hierarchy,
+            &protocol_registry,
+            &alias_registry,
+            &mut diags,
+        );
+
+        assert!(diags.is_empty(), "expected no diagnostics, got: {diags:?}");
+    }
+
+    #[test]
+    fn test_unresolved_type_alias_skips_known_alias_and_class_names() {
+        // A correctly-spelled alias reference and an ordinary class
+        // reference must never be flagged.
+        let source = "type RestartStrategy = #temporary | #transient | #permanent\n\n\
+                       Object subclass: Supervisor\n  restart: policy :: RestartStrategy from: origin :: Object => policy\n";
+        let (module, hierarchy) = parse_and_build(source);
+        let protocol_registry = ProtocolRegistry::new();
+        let alias_registry = registered_aliases(&module, &hierarchy, &protocol_registry);
+        let mut diags = Vec::new();
+
+        check_unresolved_type_aliases(
+            &module,
+            &hierarchy,
+            &protocol_registry,
+            &alias_registry,
+            &mut diags,
+        );
+
+        assert!(diags.is_empty(), "expected no diagnostics, got: {diags:?}");
     }
 
     // ── FFI module tests ────────────────────────────────────────────────────

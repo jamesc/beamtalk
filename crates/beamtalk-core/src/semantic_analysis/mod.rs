@@ -844,6 +844,22 @@ fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult {
             &mut result.diagnostics,
         );
     }
+    // BT-2897 / ADR 0108: warn when a type annotation closely resembles a
+    // registered alias name but doesn't resolve to one. Gated on
+    // `has_cross_file_classes` for the same open-world reason as the
+    // unresolved-class check above: without cross-file metadata, a name
+    // that looks like a near-miss of a *local* alias might actually be a
+    // legitimate cross-file class we simply haven't loaded yet — flagging it
+    // would be a false positive, not a real typo.
+    if has_cross_file_classes {
+        validators::check_unresolved_type_aliases(
+            module,
+            &result.class_hierarchy,
+            &result.protocol_registry,
+            &result.alias_registry,
+            &mut result.diagnostics,
+        );
+    }
     // BT-2854 / ADR 0107 Phase A: validate `Pattern::Type` class names in
     // `match:` arms (unknown class, non-leaf class, `Character` exclusion).
     // The unknown-class branch is internally gated on `has_cross_file_classes`,

@@ -18,6 +18,7 @@ use crate::ast::{
     TypeAnnotation,
 };
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
+use crate::semantic_analysis::string_utils::edit_distance;
 use crate::semantic_analysis::validators::is_concrete_leaf_class;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::{EcoString, eco_format};
@@ -2466,7 +2467,7 @@ impl TypeChecker {
         InferredType::Known {
             class_name: ret_class.clone(),
             type_args: arg_type_args.clone(),
-            provenance: *provenance,
+            provenance: provenance.clone(),
         }
     }
 
@@ -3064,8 +3065,13 @@ impl TypeChecker {
         // `check_impossible_singleton_comparison`.
         // Out of scope for narrowing (ADR 0102 §2 group 3 / BT-2743): singleton
         // narrowing never intersects with a protocol name, so `None` here.
-        let holds =
-            InferredType::intersect(&current_ty, &matched, provenance, Some(hierarchy), None);
+        let holds = InferredType::intersect(
+            &current_ty,
+            &matched,
+            provenance.clone(),
+            Some(hierarchy),
+            None,
+        );
         let removed = InferredType::difference(&current_ty, &matched, provenance, Some(hierarchy));
         if eq.negated {
             // `x /= #foo`: the true branch removes the singleton; the false
@@ -3295,16 +3301,69 @@ impl TypeChecker {
         {
             return;
         }
+        // BT-2897 / ADR 0108: `display_for_diagnostic` already prefixes an
+        // alias name here when `current_ty` is the eager expansion of a
+        // registered alias (`TypeProvenance::Aliased`) — see that method's
+        // doc — so this membership diagnostic names the alias with no
+        // bespoke code beyond the display layer, e.g. `RestartStrategy
+        // (#temporary | #transient | #permanent)`.
         let ty_display = current_ty.display_for_diagnostic().unwrap_or_default();
-        let message = if negated {
+        let mut message = if negated {
             format!("comparison is always true: `{singleton}` is never a value of `{ty_display}`")
         } else {
             format!("comparison can never be true: `{singleton}` is not a value of `{ty_display}`")
         };
+        // "Did you mean" suggestion (ADR 0108 Error examples): only for the
+        // non-negated ("can never be true") case — a mistyped singleton
+        // literal is the concrete membership-violation shape the ADR gives
+        // (`#premanent` vs `#permanent`), and only when the receiver is a
+        // *closed* singleton union, so the suggestion pool is the finite,
+        // known member set rather than an open-ended guess.
+        if !negated {
+            if let Some(suggestion) =
+                Self::closest_singleton_member(singleton.as_type_name(), current_ty)
+            {
+                use std::fmt::Write;
+                let _ = write!(message, " — did you mean `{suggestion}`?");
+            }
+        }
         self.diagnostics.push(
             Diagnostic::hint(message, test_span)
                 .with_category(crate::source_analysis::DiagnosticCategory::Type),
         );
+    }
+
+    /// Finds the closest singleton member of `ty` (a closed singleton union)
+    /// to `target` by edit distance, for the "did you mean" suggestion in
+    /// [`check_impossible_singleton_comparison`]. Mirrors
+    /// `validation.rs`'s `closest_state_slot` thresholding (distance > 0,
+    /// distance ≤ 3, distance less than half the target's length) so typo
+    /// suggestions read consistently across the checker. Returns `None` for
+    /// anything other than a closed singleton union (including `Symbol`
+    /// itself, `Negation`, and every other shape `type_admits_singleton`
+    /// already lets through unchanged).
+    fn closest_singleton_member(target: &EcoString, ty: &InferredType) -> Option<EcoString> {
+        let InferredType::Union { members, .. } = ty else {
+            return None;
+        };
+        let mut best: Option<(EcoString, usize)> = None;
+        for member in members {
+            let InferredType::Known { class_name, .. } = member else {
+                continue;
+            };
+            if !class_name.starts_with('#') {
+                continue;
+            }
+            let dist = edit_distance(target.as_str(), class_name.as_str());
+            if dist > 0
+                && dist <= 3
+                && dist < target.len() / 2 + 1
+                && best.as_ref().is_none_or(|(_, d)| dist < *d)
+            {
+                best = Some((class_name.clone(), dist));
+            }
+        }
+        best.map(|(name, _)| name)
     }
 
     /// BT-2624 / ADR 0102 §2: whether the singleton `singleton` (`#foo`) could
