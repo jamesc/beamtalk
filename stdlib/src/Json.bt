@@ -1,6 +1,11 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
-
+/// A parsed or parseable JSON value (BT-2827).
+///
+/// JSON objects become Dictionary, arrays become List, strings become
+/// String, numbers become Integer or Float, booleans stay true/false,
+/// and null becomes nil — see `Json`'s class comment for the full mapping.
+type JsonValue = Nil | Boolean | Integer | Float | String | List | Dictionary
 /// Json — JSON encoding and decoding.
 ///
 /// Provides class methods for parsing JSON strings into Beamtalk values
@@ -63,7 +68,8 @@ sealed typed Object subclass: Json native: beamtalk_json
   /// (Json parse: "42") unwrap          // => 42
   /// (Json parse: "null") unwrap        // => nil
   /// ```
-  class sealed parse: jsonString :: String -> Result => self delegate
+  class sealed parse: jsonString :: String -> Result(JsonValue, Error) =>
+    self delegate
 
   /// Generate a JSON string from a Beamtalk value (class method).
   ///
