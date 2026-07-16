@@ -1092,6 +1092,8 @@ mod tests {
         registry.register_test_alias(AliasInfo {
             name: name.into(),
             annotation,
+            is_internal: false,
+            package: None,
             span: span(),
         });
         registry
@@ -1211,6 +1213,8 @@ mod tests {
         registry.register_test_alias(AliasInfo {
             name: "B".into(),
             annotation: b_expansion,
+            is_internal: false,
+            package: None,
             span: span(),
         });
 
@@ -1285,11 +1289,15 @@ mod tests {
         registry.register_test_alias(AliasInfo {
             name: "A".into(),
             annotation: TypeAnnotation::Simple(ident("B")),
+            is_internal: false,
+            package: None,
             span: span(),
         });
         registry.register_test_alias(AliasInfo {
             name: "B".into(),
             annotation: TypeAnnotation::Simple(ident("A")),
+            is_internal: false,
+            package: None,
             span: span(),
         });
 
@@ -1327,6 +1335,8 @@ mod tests {
                 ],
                 span: span(),
             },
+            is_internal: false,
+            package: None,
             span: span(),
         });
         for level in 1..=40 {
@@ -1340,6 +1350,8 @@ mod tests {
                     ],
                     span: span(),
                 },
+                is_internal: false,
+                package: None,
                 span: span(),
             });
         }

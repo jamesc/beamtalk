@@ -1812,19 +1812,23 @@ impl Parser {
     // Type Alias Definition Parsing (ADR 0108, Phase 1)
     // ========================================================================
 
-    /// Parses a type alias definition: `type Name = <TypeAnnotation>`.
+    /// Parses a type alias definition: `type Name = <TypeAnnotation>`, or
+    /// `internal type Name = <TypeAnnotation>` (ADR 0071, ADR 0108 Phase 5).
     ///
     /// Syntax:
     /// ```text
     /// /// How a supervised child restarts after exit.
     /// type RestartStrategy = #temporary | #transient | #permanent
+    ///
+    /// internal type ParserState = Integer | String
     /// ```
     ///
     /// Only called after [`Self::is_at_type_alias_definition`] has confirmed the
-    /// `type <UppercaseName> =` shape, so the `type` keyword, the name, and the
-    /// `=` are guaranteed present here; only the right-hand-side annotation can
-    /// still be malformed (reported by `parse_type_annotation`/
-    /// `parse_single_type_annotation` themselves).
+    /// `(internal)? type <UppercaseName> =` shape, so the optional `internal`
+    /// modifier, `type` keyword, the name, and the `=` are guaranteed present
+    /// here; only the right-hand-side annotation can still be malformed
+    /// (reported by `parse_type_annotation`/`parse_single_type_annotation`
+    /// themselves).
     ///
     /// Single-letter names (`type T = ...`) are a declaration error: ADR 0068
     /// reserves every bare single uppercase letter in type position for
@@ -1836,6 +1840,12 @@ impl Parser {
         let start = self.current_token().span();
         let doc_comment = self.collect_doc_comment();
         let comments = self.collect_comment_attachment();
+
+        let is_internal =
+            matches!(self.current_kind(), TokenKind::Identifier(name) if name == "internal");
+        if is_internal {
+            self.advance(); // consume `internal`
+        }
 
         self.advance(); // consume `type`
 
@@ -1857,6 +1867,7 @@ impl Parser {
             return TypeAliasDefinition {
                 name,
                 annotation: TypeAnnotation::Simple(Identifier::new("Error", span)),
+                is_internal,
                 comments,
                 doc_comment,
                 span,
@@ -1870,6 +1881,7 @@ impl Parser {
         TypeAliasDefinition {
             name,
             annotation,
+            is_internal,
             comments,
             doc_comment,
             span,

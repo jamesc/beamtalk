@@ -1329,20 +1329,27 @@ impl Parser {
     ///
     /// Type alias definitions follow the pattern:
     /// - `type <Name> = <TypeAnnotation>`
+    /// - `internal type <Name> = <TypeAnnotation>` (ADR 0071, ADR 0108 Phase 5)
     ///
     /// `type` is a *contextual* keyword: it only introduces a type alias when
     /// followed by an uppercase-leading identifier and a bare `=` (a
     /// `BinarySelector("=")` token, not `TokenKind::Assign` which is `:=`).
     /// Anywhere else — `type := 5`, `foo type`, `type printString` — this
     /// predicate returns `false` and `type` parses as an ordinary identifier,
-    /// exactly as it does today.
+    /// exactly as it does today. An optional leading `internal` modifier
+    /// (mirroring `is_at_class_definition`'s modifier skip) is likewise only
+    /// consumed here when directly followed by the `type Name =` shape — a
+    /// bare `internal` anywhere else remains an ordinary identifier.
     pub(super) fn is_at_type_alias_definition(&self) -> bool {
-        matches!(self.peek_at(0), Some(TokenKind::Identifier(name)) if name == "type")
+        let offset = usize::from(
+            matches!(self.peek_at(0), Some(TokenKind::Identifier(name)) if name == "internal"),
+        );
+        matches!(self.peek_at(offset), Some(TokenKind::Identifier(name)) if name == "type")
             && matches!(
-                self.peek_at(1),
+                self.peek_at(offset + 1),
                 Some(TokenKind::Identifier(name)) if name.as_bytes().first().is_some_and(u8::is_ascii_uppercase)
             )
-            && matches!(self.peek_at(2), Some(TokenKind::BinarySelector(op)) if op == "=")
+            && matches!(self.peek_at(offset + 2), Some(TokenKind::BinarySelector(op)) if op == "=")
     }
 
     /// Checks if the current position looks like a standalone method definition.
