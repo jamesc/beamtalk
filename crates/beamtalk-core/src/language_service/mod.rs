@@ -553,23 +553,10 @@ impl SimpleLanguageService {
             .then_some(ident.name)
     }
 
-    /// Returns the name at `position` when the cursor sits on an identifier in
-    /// a syntactic type-reference position (a type annotation, superclass
-    /// clause, `extending:` target, type-param bound, or constructor/type
-    /// pattern class name) that does **not** resolve to any known class,
-    /// protocol, or alias (BT-2919).
+    /// Returns `true` when the cursor at `position` sits on an identifier that
+    /// either resolves to a known alias, or is in a syntactic type-reference
+    /// position that doesn't resolve to any known class, protocol, or alias.
     ///
-    /// This is the counterpart to [`Self::alias_name_at`] for the gap BT-2919
-    /// identified: `alias_name_at` (and the `has_class`/`has_alias` routing
-    /// gate in [`Self::find_references`]) can only recognize a name that's
-    /// *already* registered in the project index — but if the name's own
-    /// declaring file hasn't been indexed yet (preload hasn't reached it, or
-    /// the preload budget ran out first), the name looks like a plain unknown
-    /// identifier even though the cursor position proves it can only be a
-    /// class, protocol, or alias reference. The LSP genuinely cannot tell
-    /// whether this is a typo or an as-yet-unindexed name, so callers use this
-    /// to decide whether an empty or short find-references result needs the
-    /// same "coverage may be incomplete" warning that a *resolved* alias gets.
     /// Single-AST-walk combination of [`Self::alias_name_at`] and
     /// [`Self::unresolved_type_reference_at`] for the LSP `references()`
     /// incompleteness-warning gate (BT-2919).
@@ -595,6 +582,23 @@ impl SimpleLanguageService {
             && !self.project_index.hierarchy().has_class(&ident.name)
     }
 
+    /// Returns the name at `position` when the cursor sits on an identifier in
+    /// a syntactic type-reference position (a type annotation, superclass
+    /// clause, `extending:` target, type-param bound, or constructor/type
+    /// pattern class name) that does **not** resolve to any known class,
+    /// protocol, or alias (BT-2919).
+    ///
+    /// This is the counterpart to [`Self::alias_name_at`] for the gap BT-2919
+    /// identified: `alias_name_at` (and the `has_class`/`has_alias` routing
+    /// gate in [`Self::find_references`]) can only recognize a name that's
+    /// *already* registered in the project index — but if the name's own
+    /// declaring file hasn't been indexed yet (preload hasn't reached it, or
+    /// the preload budget ran out first), the name looks like a plain unknown
+    /// identifier even though the cursor position proves it can only be a
+    /// class, protocol, or alias reference. The LSP genuinely cannot tell
+    /// whether this is a typo or an as-yet-unindexed name, so callers use this
+    /// to decide whether an empty or short find-references result needs the
+    /// same "coverage may be incomplete" warning that a *resolved* alias gets.
     #[must_use]
     pub fn unresolved_type_reference_at(
         &self,
@@ -4218,7 +4222,8 @@ mod tests {
         );
         assert!(service.has_incomplete_reference_coverage_at(&file_c, Position::new(1, 20)));
 
-        // Plain local identifier (bar, at columns 2-4): neither check fires.
+        // Method selector (bar, at columns 2-4): neither check fires — method
+        // headers are not walked by find_identifier_at_position.
         let file_d = Utf8PathBuf::from("plain.bt");
         service.update_file(
             file_d.clone(),
