@@ -1466,6 +1466,107 @@ handle_protocol_definition_no_register_class_test() ->
     code:delete(ModuleName).
 
 %%====================================================================
+%% Type alias definition tests (ADR 0108 Phase 8, BT-2902)
+%%====================================================================
+
+-doc "handle_type_alias_definition/3 registers the alias and echoes its name.".
+handle_type_alias_definition_success_test() ->
+    State = beamtalk_repl_state:new(undefined, 0),
+    AliasInfo = #{
+        alias_name => <<"Direction">>,
+        expansion => <<"#north | #south | #east | #west">>,
+        doc_comment => undefined
+    },
+    Result = beamtalk_repl_eval:handle_type_alias_definition(AliasInfo, [], State),
+    ?assertMatch({ok, <<"Direction">>, <<>>, [], _}, Result),
+    {ok, _, _, _, NewState} = Result,
+    ?assertEqual(
+        #{expansion => <<"#north | #south | #east | #west">>, doc_comment => undefined},
+        maps:get(<<"Direction">>, beamtalk_repl_state:get_alias_table(NewState))
+    ).
+
+-doc "handle_type_alias_definition/3 overwrites an existing entry on redefinition.".
+handle_type_alias_definition_redefine_overwrites_test() ->
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    First = #{
+        alias_name => <<"Direction">>,
+        expansion => <<"#north | #south">>,
+        doc_comment => undefined
+    },
+    {ok, _, _, _, State1} = beamtalk_repl_eval:handle_type_alias_definition(First, [], State0),
+    Second = #{
+        alias_name => <<"Direction">>,
+        expansion => <<"#north | #south | #east | #west">>,
+        doc_comment => undefined
+    },
+    {ok, _, _, _, State2} = beamtalk_repl_eval:handle_type_alias_definition(Second, [], State1),
+    ?assertEqual(
+        #{expansion => <<"#north | #south | #east | #west">>, doc_comment => undefined},
+        maps:get(<<"Direction">>, beamtalk_repl_state:get_alias_table(State2))
+    ).
+
+-doc "format_alias_help/2 omits the comment block when there is no doc comment.".
+format_alias_help_without_doc_comment_test() ->
+    Entry = #{expansion => <<"#north | #south | #east | #west">>, doc_comment => undefined},
+    Result = beamtalk_repl_eval:format_alias_help(<<"Direction">>, Entry),
+    ?assertEqual(
+        <<"type Direction = #north | #south | #east | #west\n\nDeclared in: REPL">>,
+        Result
+    ).
+
+-doc "format_alias_help/2 renders the indented doc comment block when present.".
+format_alias_help_with_doc_comment_test() ->
+    Entry = #{
+        expansion => <<"#temporary | #transient | #permanent">>,
+        doc_comment => <<"How a supervised child restarts after exit.">>
+    },
+    Result = beamtalk_repl_eval:format_alias_help(<<"RestartStrategy">>, Entry),
+    ?assertEqual(
+        <<
+            "type RestartStrategy = #temporary | #transient | #permanent\n\n"
+            "  How a supervised child restarts after exit.\n\n"
+            "Declared in: REPL"
+        >>,
+        Result
+    ).
+
+-doc "maybe_help_for_alias/2 answers a bare `Beamtalk help: <Alias>` for a known alias.".
+maybe_help_for_alias_found_test() ->
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    Entry = #{expansion => <<"#north | #south">>, doc_comment => undefined},
+    State = beamtalk_repl_state:put_alias(<<"Direction">>, Entry, State0),
+    Result = beamtalk_repl_eval:maybe_help_for_alias("Beamtalk help: Direction", State),
+    ?assertEqual(
+        {ok, <<"type Direction = #north | #south\n\nDeclared in: REPL">>}, Result
+    ).
+
+-doc "maybe_help_for_alias/2 falls through for a name that is not a session alias.".
+maybe_help_for_alias_not_an_alias_test() ->
+    State = beamtalk_repl_state:new(undefined, 0),
+    ?assertEqual(
+        not_found, beamtalk_repl_eval:maybe_help_for_alias("Beamtalk help: Integer", State)
+    ).
+
+-doc """
+maybe_help_for_alias/2 does not intercept the `selector:`/`class` forms
+`:help` also builds, even when the receiver names a known alias (aliases
+have no methods to introspect — falls through to the ordinary eval path,
+which will report the usual does-not-understand/not-found error).
+""".
+maybe_help_for_alias_ignores_selector_and_class_forms_test() ->
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    Entry = #{expansion => <<"#north | #south">>, doc_comment => undefined},
+    State = beamtalk_repl_state:put_alias(<<"Direction">>, Entry, State0),
+    ?assertEqual(
+        not_found,
+        beamtalk_repl_eval:maybe_help_for_alias("Beamtalk help: Direction selector: #foo", State)
+    ),
+    ?assertEqual(
+        not_found,
+        beamtalk_repl_eval:maybe_help_for_alias("Beamtalk help: Direction class", State)
+    ).
+
+%%====================================================================
 %% Success-path tests (require the beamtalk_compiler + beamtalk_runtime apps)
 %%
 %% The tests above exercise pure helpers and the compile-error path that

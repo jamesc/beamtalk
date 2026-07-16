@@ -59,7 +59,16 @@ pub struct AliasInfo {
 }
 
 impl AliasInfo {
-    fn from_definition(def: &TypeAliasDefinition) -> Self {
+    /// Builds an [`AliasInfo`] from a parsed [`TypeAliasDefinition`].
+    ///
+    /// `pub` (ADR 0108 Phase 8, BT-2902): the REPL's cross-turn alias
+    /// persistence re-parses each previously-declared `type Name = ...` line
+    /// standalone (the session has no live BEAM artifact to recover an
+    /// alias from, unlike a class — see `AliasRegistry::add_pre_loaded`) and
+    /// needs this constructor to turn the result into an `AliasInfo` without
+    /// going through a full `Module`/`register_module` batch.
+    #[must_use]
+    pub fn from_definition(def: &TypeAliasDefinition) -> Self {
         Self {
             name: def.name.name.clone(),
             annotation: def.annotation.clone(),
@@ -186,6 +195,24 @@ impl AliasRegistry {
         }
 
         diagnostics
+    }
+
+    /// Seeds the registry with already-validated aliases from outside the
+    /// current module (ADR 0108 Phase 8, BT-2902).
+    ///
+    /// Unlike [`register_module`](Self::register_module), this performs no
+    /// collision or unbound-type-variable checks — callers are expected to
+    /// pass entries that were already validated once (e.g. a REPL session's
+    /// previously-declared `type Name = ...` lines, re-parsed each turn
+    /// since aliases erase to nothing at runtime and have no live BEAM
+    /// artifact to recover cross-file class metadata from). A caller that
+    /// wants the current module's own declarations to win a name collision
+    /// (live redefinition) should filter `aliases` before calling this —
+    /// see `AnalysisContext::pre_loaded_aliases`.
+    pub fn add_pre_loaded(&mut self, aliases: Vec<AliasInfo>) {
+        for info in aliases {
+            self.aliases.insert(info.name.clone(), info);
+        }
     }
 
     /// Looks up an alias by name.

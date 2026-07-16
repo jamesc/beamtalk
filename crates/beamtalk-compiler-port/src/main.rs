@@ -346,6 +346,37 @@ fn extract_class_hierarchy(
     }
 }
 
+/// Extract an optional `known_type_aliases` field: a list of standalone
+/// `type Name = <expansion>` source strings (ADR 0108 Phase 8, BT-2902),
+/// re-parsing each into an `AliasInfo`.
+///
+/// Aliases erase to nothing at runtime, so — unlike `class_hierarchy`, which
+/// the REPL session recovers from live BEAM class metadata every turn —
+/// there is nothing to query on a later turn. The REPL layer is the source
+/// of truth: it stores the exact `type Name = <expansion>` text this port
+/// returned when the alias was first declared (see
+/// `type_alias_definition_ok_response`'s `expansion` field) and resends the
+/// full set on every subsequent `compile_expression` call. A malformed
+/// entry (should not happen — the text round-trips through this port's own
+/// unparse output) is skipped rather than failing the whole request, so a
+/// corrupted session doesn't wedge the REPL.
+fn extract_known_type_aliases(request: &Map) -> Vec<beamtalk_core::semantic_analysis::AliasInfo> {
+    let Some(sources) = map_get(request, "known_type_aliases").and_then(term_to_string_list) else {
+        return vec![];
+    };
+    sources
+        .iter()
+        .filter_map(|src| {
+            let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+            let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+            module
+                .type_aliases
+                .first()
+                .map(beamtalk_core::semantic_analysis::AliasInfo::from_definition)
+        })
+        .collect()
+}
+
 // ---------------------------------------------------------------------------
 // Diagnostic filtering helpers
 // ---------------------------------------------------------------------------
@@ -536,6 +567,39 @@ fn protocol_definition_ok_response(
         (atom("core_erlang"), binary(core_erlang)),
         (atom("module_name"), binary(module_name)),
         (atom("protocols"), Term::from(List::from(protocol_terms))),
+        (
+            atom("warnings"),
+            Term::from(List::from(build_warning_terms(warnings))),
+        ),
+    ]))
+}
+
+/// Build a response map for a successful `type Name = ...` declaration in
+/// the REPL (ADR 0108 Phase 8, BT-2902).
+///
+/// No `core_erlang`/bytecode: an alias erases entirely at annotation
+/// resolution and has no runtime representation to compile (ADR 0108
+/// Semantics). `expansion` is the unparsed `TypeAnnotation` display form
+/// (e.g. `#north | #south | #east | #west`) — both what `:help` shows and
+/// what the REPL session resends verbatim as a `type Name = <expansion>`
+/// line in `known_type_aliases` on later turns (see
+/// `extract_known_type_aliases`). `doc_comment` is `None` when the
+/// declaration had no `///` doc comment.
+fn type_alias_definition_ok_response(
+    alias_name: &str,
+    expansion: &str,
+    doc_comment: Option<&str>,
+    warnings: &[String],
+) -> Term {
+    Term::from(Map::from([
+        (atom("status"), atom("ok")),
+        (atom("kind"), atom("type_alias_definition")),
+        (atom("alias_name"), binary(alias_name)),
+        (atom("expansion"), binary(expansion)),
+        (
+            atom("doc_comment"),
+            doc_comment.map_or_else(|| atom("undefined"), binary),
+        ),
         (
             atom("warnings"),
             Term::from(List::from(build_warning_terms(warnings))),
@@ -994,21 +1058,29 @@ fn load_native_type_registry_from(
 ///
 /// Returns `Ok((module, warnings))` on success, or `Err(response_term)` containing a
 /// formatted `diagnostic_error_response` that the caller should return directly.
+///
+/// `pre_loaded_aliases` (ADR 0108 Phase 8, BT-2902) carries type aliases
+/// declared in earlier turns of the same REPL session, re-parsed standalone
+/// by [`extract_known_type_aliases`] — see that function's doc for why
+/// aliases need their own re-parse path rather than `pre_class_hierarchy`'s
+/// recover-from-live-BEAM-state mechanism.
 fn parse_and_check_expression(
     source: &str,
     known_vars: &[String],
     pre_class_hierarchy: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    pre_loaded_aliases: Vec<beamtalk_core::semantic_analysis::AliasInfo>,
 ) -> Result<(beamtalk_core::ast::Module, Vec<String>), Term> {
     let tokens = beamtalk_core::source_analysis::lex_with_eof(source);
     let (module, parse_diagnostics) = beamtalk_core::source_analysis::parse(tokens);
 
     let known_var_refs: Vec<&str> = known_vars.iter().map(String::as_str).collect();
     let mut all_diagnostics =
-        beamtalk_core::queries::diagnostic_provider::compute_diagnostics_with_known_vars_and_classes(
+        beamtalk_core::queries::diagnostic_provider::compute_diagnostics_with_known_vars_classes_and_aliases(
             &module,
             parse_diagnostics,
             &known_var_refs,
             pre_class_hierarchy,
+            pre_loaded_aliases,
             diagnostics_overrides(),
         );
 
@@ -1054,12 +1126,17 @@ fn handle_compile_expression(request: &Map) -> Term {
         Err(resp) => return resp,
     };
     let pre_class_hierarchy = extract_class_hierarchy(request);
+    let pre_loaded_aliases = extract_known_type_aliases(request);
 
-    let (module, warnings) =
-        match parse_and_check_expression(&source, &known_vars, pre_class_hierarchy.clone()) {
-            Ok(r) => r,
-            Err(resp) => return resp,
-        };
+    let (module, warnings) = match parse_and_check_expression(
+        &source,
+        &known_vars,
+        pre_class_hierarchy.clone(),
+        pre_loaded_aliases,
+    ) {
+        Ok(r) => r,
+        Err(resp) => return resp,
+    };
 
     // BT-1670: Extract optional module_name override for inline class definitions
     // so they produce the same module name as file-based compilation in package mode.
@@ -1124,6 +1201,15 @@ fn handle_compile_expression(request: &Map) -> Term {
         );
     }
 
+    // ADR 0108 Phase 8 (BT-2902): If the parsed module contains a `type
+    // Name = ...` declaration, return alias metadata for the REPL session
+    // to register — no Core Erlang / bytecode step, since aliases erase
+    // entirely at resolution time (ADR 0108 Semantics) and have no runtime
+    // representation to compile.
+    if !module.type_aliases.is_empty() {
+        return handle_inline_type_alias_definition(&module, &warnings);
+    }
+
     if module.expressions.is_empty() {
         return error_response(&["No expressions to compile".to_string()]);
     }
@@ -1167,20 +1253,26 @@ fn handle_compile_expression_trace(request: &Map) -> Term {
         Err(resp) => return resp,
     };
     let pre_class_hierarchy = extract_class_hierarchy(request);
+    let pre_loaded_aliases = extract_known_type_aliases(request);
 
-    let (module, warnings) =
-        match parse_and_check_expression(&source, &known_vars, pre_class_hierarchy) {
-            Ok(r) => r,
-            Err(resp) => return resp,
-        };
+    let (module, warnings) = match parse_and_check_expression(
+        &source,
+        &known_vars,
+        pre_class_hierarchy,
+        pre_loaded_aliases,
+    ) {
+        Ok(r) => r,
+        Err(resp) => return resp,
+    };
 
     if !module.classes.is_empty()
         || !module.method_definitions.is_empty()
         || !module.protocols.is_empty()
+        || !module.type_aliases.is_empty()
     {
         return error_response(&[
-            "trace mode does not support class, method, or protocol definitions; \
-             use eval without trace to define them"
+            "trace mode does not support class, method, protocol, or type alias \
+             definitions; use eval without trace to define them"
                 .to_string(),
         ]);
     }
@@ -1371,6 +1463,46 @@ fn handle_inline_protocol_definition(
         }
         Err(e) => error_response(&[format_codegen_error(&e, source)]),
     }
+}
+
+/// Handle a single `type Name = ...` declaration typed directly at the REPL
+/// (ADR 0108 Phase 8, BT-2902).
+///
+/// By the time this is called, `parse_and_check_expression` has already run
+/// full semantic analysis (`AliasRegistry::register_module` — namespace
+/// collision, duplicate, and unbound-type-variable checks) and returned no
+/// error diagnostics, so the declaration is already known-valid; this just
+/// shapes the response. Mirrors the standalone-method-definition precedent
+/// of requiring exactly one declaration per turn — batch multi-alias
+/// resolution (topological ordering across several declarations at once) is
+/// BT-2896's file-compile concern, not a single REPL turn's.
+fn handle_inline_type_alias_definition(
+    module: &beamtalk_core::ast::Module,
+    warnings: &[String],
+) -> Term {
+    if module.type_aliases.len() > 1 {
+        return error_response(&[
+            "Multiple type alias definitions in a single expression are not supported. \
+             Define each `type Name = ...` alias separately."
+                .to_string(),
+        ]);
+    }
+    if !module.expressions.is_empty() {
+        return error_response(&[
+            "A type alias declaration cannot be combined with other expressions in the \
+             same input; declare it on its own, then use it in a later expression."
+                .to_string(),
+        ]);
+    }
+
+    let alias = &module.type_aliases[0];
+    let expansion = beamtalk_core::unparse::unparse_type_annotation_display(&alias.annotation);
+    type_alias_definition_ok_response(
+        &alias.name.name,
+        &expansion,
+        alias.doc_comment.as_deref(),
+        warnings,
+    )
 }
 
 /// Handle a `compile` request (file/class compilation).
@@ -4175,5 +4307,178 @@ mod property_tests {
                 }
             }
         }
+    }
+
+    // -------------------------------------------------------------------
+    // ADR 0108 Phase 8 (BT-2902): `type Name = ...` REPL declarations
+    // -------------------------------------------------------------------
+
+    /// True when a response field is present and is the atom `undefined`
+    /// (Rust's `None`, e.g. an alias declaration with no doc comment).
+    fn response_field_is_undefined_atom(term: &Term, key: &str) -> bool {
+        let Term::Map(map) = term else {
+            return false;
+        };
+        matches!(map_get(map, key), Some(Term::Atom(a)) if a.name == "undefined")
+    }
+
+    #[test]
+    fn type_alias_declaration_without_doc_comment() {
+        let response = handle_compile_expression(&compile_expression_request(
+            "type Direction = #north | #south | #east | #west",
+        ));
+        assert_eq!(
+            response_status(&response).as_deref(),
+            Some("ok"),
+            "resp: {response:?}"
+        );
+        let Term::Map(m) = &response else {
+            panic!("expected a map response, got: {response:?}");
+        };
+        assert_eq!(map_get(m, "kind"), Some(&atom("type_alias_definition")));
+        assert_eq!(
+            response_field_str(&response, "alias_name").as_deref(),
+            Some("Direction")
+        );
+        assert_eq!(
+            response_field_str(&response, "expansion").as_deref(),
+            Some("#north | #south | #east | #west")
+        );
+        assert!(
+            response_field_is_undefined_atom(&response, "doc_comment"),
+            "no doc comment on the declaration must round-trip as `undefined`, \
+             not an empty string: {response:?}"
+        );
+    }
+
+    #[test]
+    fn type_alias_declaration_with_doc_comment() {
+        let response = handle_compile_expression(&compile_expression_request(
+            "/// How a supervised child restarts after exit.\n\
+             type RestartStrategy = #temporary | #transient | #permanent",
+        ));
+        assert_eq!(
+            response_status(&response).as_deref(),
+            Some("ok"),
+            "resp: {response:?}"
+        );
+        assert_eq!(
+            response_field_str(&response, "alias_name").as_deref(),
+            Some("RestartStrategy")
+        );
+        assert_eq!(
+            response_field_str(&response, "expansion").as_deref(),
+            Some("#temporary | #transient | #permanent")
+        );
+        assert_eq!(
+            response_field_str(&response, "doc_comment").as_deref(),
+            Some("How a supervised child restarts after exit.")
+        );
+    }
+
+    #[test]
+    fn multiple_type_alias_declarations_in_one_turn_is_an_error() {
+        let response = handle_compile_expression(&compile_expression_request(
+            "type A = Integer\ntype B = String",
+        ));
+        assert_eq!(
+            response_status(&response).as_deref(),
+            Some("error"),
+            "resp: {response:?}"
+        );
+    }
+
+    /// `known_type_aliases` (ADR 0108 Phase 8) makes an alias declared in an
+    /// *earlier* REPL turn resolvable in the current turn's `::` annotation
+    /// — the cross-turn persistence mechanism this issue adds, since an
+    /// alias has no live BEAM artifact for the session to recover it from
+    /// the way a REPL-declared class is recovered. Asserts on the
+    /// `matchExhaustive:` diagnostic text (not just "no unresolved-type
+    /// error") so this also proves `Direction` expanded to the exact
+    /// closed singleton union — not merely a silently-accepted unknown name.
+    #[test]
+    fn known_type_aliases_resolves_alias_from_earlier_turn() {
+        let request = Map::from([
+            (atom("command"), atom("compile_expression")),
+            (
+                atom("source"),
+                binary(
+                    "scrutinee :: Direction := #north. \
+                     scrutinee matchExhaustive: [#north -> 0; #south -> 1; #east -> 2]",
+                ),
+            ),
+            (atom("module"), binary("bt@test_module")),
+            (
+                atom("known_type_aliases"),
+                Term::from(List::from(vec![binary(
+                    "type Direction = #north | #south | #east | #west",
+                )])),
+            ),
+        ]);
+        let response = handle_compile_expression(&request);
+        assert_eq!(
+            response_status(&response).as_deref(),
+            Some("error"),
+            "resp: {response:?}"
+        );
+        let diags = response_diagnostics(&response).expect("diagnostics");
+        let found = diags.elements.iter().any(|d| {
+            let Term::Map(m) = d else { return false };
+            map_get(m, "message")
+                .and_then(term_to_string)
+                .is_some_and(|msg| {
+                    msg.contains("non-exhaustive matchExhaustive:") && msg.contains("#west")
+                })
+        });
+        assert!(
+            found,
+            "expected a non-exhaustive matchExhaustive: `#west` diagnostic \
+             (proves Direction resolved to the closed union, not an unresolved-type \
+             fallback), got: {response:?}"
+        );
+    }
+
+    /// The `known_type_aliases` round trip (declare → `unparse_type_annotation_display`
+    /// → resend as `type Name = <expansion>` → reparse) is not limited to simple
+    /// singleton unions — ADR 0108 Semantics explicitly allows any `TypeAnnotation`
+    /// on the RHS, including `\`/`&` forms (`type PublicTag = Symbol \ (#reserved |
+    /// #internal)`). Pins that a `Difference` RHS survives the same declare-then-use
+    /// two-turn round trip `known_type_aliases_resolves_alias_from_earlier_turn`
+    /// exercises for a plain union, since the reparse path
+    /// (`extract_known_type_aliases`) silently drops any alias whose expansion text
+    /// fails to reparse — a regression here would fail closed (the alias just
+    /// vanishes) rather than loudly, so it needs its own pin.
+    #[test]
+    fn known_type_aliases_round_trips_a_difference_rhs() {
+        let declare_response = handle_compile_expression(&compile_expression_request(
+            "type PublicTag = Symbol \\ (#reserved | #internal)",
+        ));
+        assert_eq!(
+            response_status(&declare_response).as_deref(),
+            Some("ok"),
+            "resp: {declare_response:?}"
+        );
+        let expansion = response_field_str(&declare_response, "expansion")
+            .expect("expansion field must be present");
+
+        let request = Map::from([
+            (atom("command"), atom("compile_expression")),
+            (atom("source"), binary("tag :: PublicTag := #anything")),
+            (atom("module"), binary("bt@test_module")),
+            (
+                atom("known_type_aliases"),
+                Term::from(List::from(vec![binary(&format!(
+                    "type PublicTag = {expansion}"
+                ))])),
+            ),
+        ]);
+        let response = handle_compile_expression(&request);
+        assert_eq!(
+            response_status(&response).as_deref(),
+            Some("ok"),
+            "a Difference-RHS alias declared in an earlier turn must still resolve \
+             (not silently vanish) when referenced in a later turn's `::` annotation: \
+             {response:?}"
+        );
     }
 }

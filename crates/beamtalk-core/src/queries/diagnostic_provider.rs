@@ -294,6 +294,39 @@ pub fn compute_diagnostics_with_known_vars_and_classes(
     )
 }
 
+/// Computes diagnostics with pre-defined REPL variables, pre-loaded classes,
+/// and pre-loaded type aliases from earlier REPL turns (ADR 0108 Phase 8,
+/// BT-2902).
+///
+/// Mirrors [`compute_diagnostics_with_known_vars_and_classes`] — see its doc
+/// — with `pre_loaded_aliases` additionally injected into the `AliasRegistry`
+/// before `TypeChecking`, so a `::` annotation referencing a `type Name = ...`
+/// declared in an *earlier* turn of the same session resolves instead of
+/// producing an unresolved-type diagnostic.
+#[must_use]
+pub fn compute_diagnostics_with_known_vars_classes_and_aliases(
+    module: &crate::ast::Module,
+    parse_diagnostics: Vec<Diagnostic>,
+    known_vars: &[&str],
+    pre_loaded_classes: Vec<crate::semantic_analysis::class_hierarchy::ClassInfo>,
+    pre_loaded_aliases: Vec<crate::semantic_analysis::AliasInfo>,
+    diagnostics_overrides: &crate::compilation::diagnostics_policy::DiagnosticsTable,
+) -> Vec<Diagnostic> {
+    let mut all_diagnostics = parse_diagnostics;
+    let analysis_result = crate::semantic_analysis::analyse_with_known_vars_classes_and_aliases(
+        module,
+        known_vars,
+        pre_loaded_classes,
+        pre_loaded_aliases,
+    );
+    all_diagnostics.extend(analysis_result.diagnostics);
+    apply_expect_directives(module, &mut all_diagnostics);
+    crate::compilation::diagnostics_policy::apply_diagnostics_table(
+        all_diagnostics,
+        diagnostics_overrides,
+    )
+}
+
 /// Applies `@expect` directives to suppress matching diagnostics.
 ///
 /// For each `@expect category` directive in the module, any diagnostic
