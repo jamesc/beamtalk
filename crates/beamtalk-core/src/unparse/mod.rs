@@ -1951,12 +1951,13 @@ fn unparse_comment_attachment_leading(ca: &CommentAttachment) -> Vec<Document<'s
 /// header with no blank line, and this must not force one in.
 ///
 /// Checking only the *last* entry (not `any()` over the whole slice) is
-/// correct because a [`CommentKind::Doc`] entry can only ever be the last
-/// item in `comments.leading`, by construction: `collect_comment_attachment`
-/// appends orphaned `///` blocks as it scans trivia in source order, and the
-/// block that wins attachment (the one glued to the following declaration)
-/// always sits at the *end* of that trivia sequence — so no attached doc
-/// comment can trail after a preserved, unattached one.
+/// correct because a [`CommentKind::Doc`] entry that *needs* a blank-line
+/// separator (i.e., nothing in the original source separated it from what
+/// follows) will always be the last item in `comments.leading`. If a
+/// [`CommentKind::Line`] (`//` comment) follows an orphaned `///` block in
+/// the trivia, it is appended to `leading` *after* the `Doc` entry and
+/// already provides the separation — so this function correctly returns
+/// `false` and no extra blank line is inserted.
 fn leading_ends_with_orphaned_doc_comment(comments: &CommentAttachment) -> bool {
     comments
         .leading
