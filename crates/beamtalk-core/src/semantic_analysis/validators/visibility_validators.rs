@@ -858,6 +858,13 @@ fn check_alias_leak_ref(
                 ))
                 .with_category(DiagnosticCategory::Visibility),
             );
+            // Don't recurse into the internal alias's own expansion — it would
+            // double-report the same leak (e.g. a further internal class inside
+            // it) as a second, noisier diagnostic on the same `alias_name`
+            // declaration. `check_alias_leaked_visibility` iterates every
+            // top-level alias independently, so `type_name` itself still gets
+            // checked as its own declaration if/when it's public.
+            return;
         }
         check_type_annotation_alias_leak(
             &alias_info.annotation,
@@ -1633,6 +1640,35 @@ mod tests {
             1,
             "expected exactly one leak diagnostic for 'Priv' reached via both 'A' and 'B', got: {diags:?}"
         );
+    }
+
+    #[test]
+    fn alias_leak_chained_internal_aliases_reports_only_the_first_hop() {
+        // `type Pub = InternalMid`, `internal type InternalMid = InternalClass`
+        // (also internal) — reviewer-flagged: once `InternalMid` itself is
+        // reported as the leak, recursing further into its own expansion to
+        // separately flag `InternalClass` is redundant noise (both diagnostics
+        // are "true", but the user only needs to fix the first boundary).
+        let module = parse_module(
+            "internal Object subclass: InternalClass\n  reset => nil\n\n\
+             internal type InternalMid = InternalClass\n\
+             type Pub = InternalMid",
+        );
+        let (h, alias_registry) = build_hierarchy_and_aliases(&module, "json");
+        let mut diags = Vec::new();
+        check_alias_leaked_visibility(&module, &h, &alias_registry, Some("json"), &mut diags);
+
+        let pub_leaks: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("public type alias 'Pub'"))
+            .collect();
+        assert_eq!(
+            pub_leaks.len(),
+            1,
+            "expected exactly one leak diagnostic on 'Pub' (the 'InternalMid' boundary), \
+             not a second one for 'InternalClass' inside it, got: {diags:?}"
+        );
+        assert!(pub_leaks[0].message.contains("InternalMid"));
     }
 
     #[test]
