@@ -1,6 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
-
+/// The ETS table type — see the "Table Types" section on `Ets` for the
+/// semantics of each member.
+type EtsTableType = #set | #orderedSet | #bag | #duplicateBag
 /// Ets — shared in-memory table for actor state sharing.
 ///
 /// Wraps OTP ets tables with a Beamtalk-friendly API. Tables are named and
@@ -62,7 +64,7 @@ typed Object subclass: Ets(K, V) native: beamtalk_ets
   /// cache := Ets new: #myCache type: #set
   /// counters := Ets new: #counters type: #set
   /// ```
-  class sealed new: name :: Symbol type: tableType :: #set | #orderedSet | #bag | #duplicateBag -> Ets =>
+  class sealed new: name :: Symbol type: tableType :: EtsTableType -> Ets =>
     self delegate
 
   /// Look up an existing named ETS table (class method).
@@ -99,7 +101,7 @@ typed Object subclass: Ets(K, V) native: beamtalk_ets
   /// ```beamtalk
   /// table := Ets newOrExisting: #events type: #set
   /// ```
-  class sealed newOrExisting: name :: Symbol type: tableType :: #set | #orderedSet | #bag | #duplicateBag -> Ets =>
+  class sealed newOrExisting: name :: Symbol type: tableType :: EtsTableType -> Ets =>
     self delegate
 
   /// Look up a key. Returns the value, or `nil` if the key is absent.

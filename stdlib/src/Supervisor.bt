@@ -1,6 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
-
+/// OTP supervisor restart strategy — how sibling children are affected when
+/// one of them crashes.
+type SupervisionStrategy = #oneForOne | #oneForAll | #restForOne
 /// Supervisor — Abstract base class for static OTP supervision trees.
 ///
 /// Subclass `Supervisor` to define a static supervision tree: one whose
@@ -31,7 +33,7 @@ abstract Object subclass: Supervisor
   ///
   /// Valid values: `#oneForOne`, `#oneForAll`, `#restForOne`.
   /// Default: `#oneForOne`.
-  class strategy -> #oneForOne | #oneForAll | #restForOne => #oneForOne
+  class strategy -> SupervisionStrategy => #oneForOne
 
   /// Maximum number of restarts within `restartWindow` seconds.
   ///
