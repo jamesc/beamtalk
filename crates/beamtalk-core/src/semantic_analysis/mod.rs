@@ -217,6 +217,14 @@ pub struct AnalysisContext<'a> {
     /// Protocol definitions extracted from other source files, e.g. `BUnit`
     /// fixtures (BT-2006).
     pub pre_loaded_protocols: Vec<protocol_registry::ProtocolInfo>,
+    /// Type aliases declared in earlier turns of the same REPL session
+    /// (ADR 0108 Phase 8, BT-2902). Aliases erase to nothing at runtime, so
+    /// (unlike `pre_loaded_classes`) there is no live BEAM artifact to
+    /// recover them from — the REPL layer re-parses each previously
+    /// successfully-declared `type Name = ...` line standalone every turn
+    /// and passes the result here so `resolve_type_annotation` sees names
+    /// declared in prior turns.
+    pub pre_loaded_aliases: Vec<alias_registry::AliasInfo>,
     /// Known package names for package-qualifier validation (ADR 0070
     /// Phase 2). `None` skips the check entirely.
     pub known_packages: Option<std::collections::HashSet<String>>,
@@ -435,6 +443,32 @@ pub fn analyse_with_known_vars_and_classes(
     )
 }
 
+/// Analyse a module with pre-defined variables, pre-loaded class entries,
+/// and pre-loaded type aliases from earlier REPL turns (ADR 0108 Phase 8,
+/// BT-2902).
+///
+/// Mirrors [`analyse_with_known_vars_and_classes`] — see its doc — with one
+/// addition: `pre_loaded_aliases` makes alias names declared in *earlier*
+/// turns of the same REPL session resolvable in the current turn's `::`
+/// annotations (`resolve_type_annotation`'s `subst → alias table → nominal
+/// class` order, ADR 0108 Semantics).
+pub fn analyse_with_known_vars_classes_and_aliases(
+    module: &Module,
+    known_vars: &[&str],
+    pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
+    pre_loaded_aliases: Vec<alias_registry::AliasInfo>,
+) -> AnalysisResult {
+    analyse_full(
+        module,
+        AnalysisContext {
+            known_vars,
+            pre_loaded_classes,
+            pre_loaded_aliases,
+            ..Default::default()
+        },
+    )
+}
+
 /// Analyse a module with known package dependencies (ADR 0070 Phase 2).
 ///
 /// Package qualifiers in class references and extension targets are validated
@@ -474,6 +508,7 @@ fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult {
         skip_module_expression_lint,
         pre_loaded_classes,
         pre_loaded_protocols,
+        pre_loaded_aliases,
         known_packages,
         current_package,
         native_type_registry,
@@ -592,6 +627,24 @@ fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult {
             .protocol_registry
             .register_module(module, &result.class_hierarchy);
         result.diagnostics.extend(proto_diags);
+    }
+
+    // ADR 0108 Phase 8 (BT-2902): seed aliases declared in earlier REPL
+    // turns *before* registering the current module's own aliases, mirroring
+    // pre_loaded_classes/pre_loaded_protocols above. Filter out any name the
+    // current module itself redeclares — a live `type Foo = ...` redefinition
+    // must win over the prior turn's binding rather than tripping
+    // `register_module`'s duplicate-name check (ADR 0108 Semantics: a live
+    // session can legally redefine an alias; re-checking dependents is
+    // BT-2899's separate hot-reload concern, out of scope here).
+    if !pre_loaded_aliases.is_empty() {
+        let current_alias_names: std::collections::HashSet<&EcoString> =
+            module.type_aliases.iter().map(|a| &a.name.name).collect();
+        let carried_over: Vec<_> = pre_loaded_aliases
+            .into_iter()
+            .filter(|a| !current_alias_names.contains(&a.name))
+            .collect();
+        result.alias_registry.add_pre_loaded(carried_over);
     }
 
     // Phase 0.6: Type Alias Registration (ADR 0108 Phase 2, BT-2895)

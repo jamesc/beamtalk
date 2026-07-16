@@ -49,6 +49,7 @@
 - Fix `match:` arm with a self-mutating multi-statement block inside an Actor method returning the internal state-threading tuple instead of the block's final value (BT-2880, #2983).
 - Fix `self delegate` method bodies with a declared return type inferring `Dynamic` (actors) or `Never` (objects) instead of the annotated return type (BT-2862, #2986).
 - Fix cascade continuation messages (`;`-chained sends) on a metatype receiver silently skipping argument type-checking and block parameter inference (BT-2879, #2982).
+- **`type Name = ...` — named type aliases (ADR 0108)** — a new top-level `type` declaration introduces a transparent type alias: `type RestartStrategy = #temporary | #transient | #permanent`. The alias expands to its structural annotation everywhere type annotations are used — parameter types, return types, typed locals, `match:`/`matchExhaustive:` exhaustiveness — so `heading :: Direction` behaves identically to spelling out the full union. `type` is a contextual keyword (three-token lookahead: `type` + uppercase name + `=`); it remains a legal identifier everywhere else. Single-letter names are rejected (reserved for type parameters). Alias names share the class/protocol namespace — collisions are diagnosed. The RHS accepts any type annotation (unions, singletons, generics, `\`/`&`). Parametric aliases (`type Foo(T) = ...`) are not yet supported (BT-2894, BT-2895, #3015, #3017).
 
 ### Standard Library
 
@@ -97,6 +98,7 @@
 
 ### Runtime
 
+- Fix `perform:`/`perform:withArguments:` on Block `value`/`value:`/`value:value:`/`value:value:value:` raising a confusing `does_not_understand` naming the wrong selector — pure (Tier 1) blocks now dispatch correctly via `erlang:apply`; stateful (Tier 2) blocks raise a clear `stateful_block_dispatch` error explaining that the block captures mutable state and must be invoked directly (BT-2812, #3013).
 - **`run-entry` server-side selector validation** — the WebSocket `run-entry` op now validates that the selector is either a unary selector (no `:`) or a single arity-1 keyword (exactly one trailing `:`). Multi-keyword selectors (e.g. `run:with:`) are rejected with a structured `#beamtalk_error{kind = invalid_argument}` instead of a confusing `badarg`/`undef` (BT-2699, #2951).
 - Fix self-dispatch error breadcrumb showing the defining superclass instead of the actual runtime class under inheritance — the `class` field in error messages from self-sends now reflects the runtime class (BT-2833, #2941).
 - Fix self-dispatch reraise missing `ClassName>>selector:` location prefix in error messages — self-send forwarding errors now carry the same breadcrumb context as cross-actor errors (BT-2822, #2931).
@@ -147,6 +149,9 @@
 
 ### Tooling
 
+- **`beamtalk run` routes status/progress to stderr** — `Building...`, `Running ClassName>>selector...`, and `Connecting to workspace...` lines now go to stderr instead of stdout. Stdout is program-output-only, matching Unix convention for piped/programmatic consumers (BT-2702, #3010).
+- **LSP return-type writeback and go-to-definition for FFI-typed receivers** — methods whose return type is inferred purely from an FFI call now get the resolved type written back before codegen, improving downstream inference. Go-to-definition on a receiver typed via an FFI call now resolves correctly (BT-2887, #3011).
+- **REPL tab-completion resolves FFI expression return types** — typing an FFI expression at the REPL prompt (e.g. `Erlang lists reverse: x`) and pressing tab now offers completions for the resolved return class instead of falling back to `Dynamic`. Requires a prior `beamtalk build` to populate `_build/type_cache/` (BT-2891, #3016).
 - Fix LSP not applying the `beamtalk.toml` `[diagnostics]` severity-override table — a category escalated to `"error"` now shows as `Error` in the editor, matching `beamtalk build` (surface-parity fix, BT-2800, #2935).
 - Fix REPL diagnostics not applying the `beamtalk.toml` `[diagnostics]` severity-override table — closes the last ADR 0100 Rule 3 surface-parity gap: a `dnu = "error"` override now shows as `Error` on all three surfaces (CLI build, LSP, REPL) (BT-2839, #2952).
 - Fix `@expect type` on FFI argument-type mismatches being falsely reported as stale by `beamtalk lint` — lint now uses the same live `.beam` type extractor as `beamtalk build`, so the two surfaces produce identical FFI diagnostics (BT-2851, #2953).
