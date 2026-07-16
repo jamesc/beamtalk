@@ -570,6 +570,31 @@ impl SimpleLanguageService {
     /// whether this is a typo or an as-yet-unindexed name, so callers use this
     /// to decide whether an empty or short find-references result needs the
     /// same "coverage may be incomplete" warning that a *resolved* alias gets.
+    /// Single-AST-walk combination of [`Self::alias_name_at`] and
+    /// [`Self::unresolved_type_reference_at`] for the LSP `references()`
+    /// incompleteness-warning gate (BT-2919).
+    ///
+    /// The two checks are mutually exclusive at a given cursor — an alias
+    /// name that already resolves can't also count as "unresolved" — so
+    /// calling both separately runs [`Self::find_identifier_at_position`]'s
+    /// full AST walk twice per request for no benefit. This does the walk
+    /// once and evaluates both conditions against the same match.
+    #[must_use]
+    pub fn has_incomplete_reference_coverage_at(
+        &self,
+        file: &Utf8PathBuf,
+        position: Position,
+    ) -> bool {
+        let Some((ident, _span, ctx)) = self.find_identifier_at_position(file, position) else {
+            return false;
+        };
+        if self.project_index.alias_registry().has_alias(&ident.name) {
+            return true;
+        }
+        ctx == IdentifierContext::TypeReference
+            && !self.project_index.hierarchy().has_class(&ident.name)
+    }
+
     #[must_use]
     pub fn unresolved_type_reference_at(
         &self,
@@ -4160,6 +4185,46 @@ mod tests {
             1,
             "expected the annotation-site reference itself, got {refs:?}"
         );
+    }
+
+    /// BT-2919: `has_incomplete_reference_coverage_at` must agree with the
+    /// two checks it combines (`alias_name_at` for an already-resolved
+    /// alias, `unresolved_type_reference_at` for a not-yet-indexed one) —
+    /// it's a single-AST-walk optimization, not a behavior change.
+    #[test]
+    fn has_incomplete_reference_coverage_at_matches_split_checks() {
+        let mut service = SimpleLanguageService::new();
+        let file_a = Utf8PathBuf::from("aliases.bt");
+        let file_b = Utf8PathBuf::from("supervisor.bt");
+        service.update_file(
+            file_a,
+            "type RestartStrategy = #temporary | #transient | #permanent\n".to_string(),
+        );
+        service.update_file(
+            file_b.clone(),
+            "Object subclass: Supervisor\n  restart: policy :: RestartStrategy => policy\n"
+                .to_string(),
+        );
+
+        // Resolved alias reference (RestartStrategy is indexed via file_a).
+        assert!(service.has_incomplete_reference_coverage_at(&file_b, Position::new(1, 22)));
+
+        // Unresolved type-reference position (Foo, at columns 19-21, is
+        // never declared anywhere).
+        let file_c = Utf8PathBuf::from("unresolved.bt");
+        service.update_file(
+            file_c.clone(),
+            "Object subclass: Widget\n  render: shape :: Foo => shape\n".to_string(),
+        );
+        assert!(service.has_incomplete_reference_coverage_at(&file_c, Position::new(1, 20)));
+
+        // Plain local identifier (bar, at columns 2-4): neither check fires.
+        let file_d = Utf8PathBuf::from("plain.bt");
+        service.update_file(
+            file_d.clone(),
+            "Object subclass: Plain\n  bar => 1\n".to_string(),
+        );
+        assert!(!service.has_incomplete_reference_coverage_at(&file_d, Position::new(1, 3)));
     }
 
     /// BT-2027: `SimpleLanguageService::diagnostics` must hand off the

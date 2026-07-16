@@ -1980,17 +1980,17 @@ impl LanguageServer for Backend {
             // file still uses. Surface that via `window/showMessage` below
             // rather than staying silent.
             //
-            // BT-2919: `alias_name_at` alone misses the case where the
-            // *alias's own declaring file* hasn't been indexed yet — `Foo`
-            // in `policy :: Foo` doesn't look like a known alias if `type
-            // Foo = ...` hasn't been compiled, even though the cursor
+            // BT-2919: a plain `alias_name_at` check alone misses the case
+            // where the *alias's own declaring file* hasn't been indexed yet
+            // — `Foo` in `policy :: Foo` doesn't look like a known alias if
+            // `type Foo = ...` hasn't been compiled, even though the cursor
             // position proves it can only be a class/protocol/alias
-            // reference. `unresolved_type_reference_at` closes that gap (and
-            // the equivalent one for not-yet-indexed class names) without
-            // needing the name to resolve first.
-            let incomplete_coverage_warning = !svc.is_project_complete()
-                && (svc.alias_name_at(&path, pos).is_some()
-                    || svc.unresolved_type_reference_at(&path, pos).is_some());
+            // reference. `has_incomplete_reference_coverage_at` closes that
+            // gap (and the equivalent one for not-yet-indexed class names)
+            // without needing the name to resolve first, in a single AST
+            // walk of the cursor position.
+            let incomplete_coverage_warning =
+                !svc.is_project_complete() && svc.has_incomplete_reference_coverage_at(&path, pos);
             (pos, runtime_query, incomplete_coverage_warning)
         };
 
