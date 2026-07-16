@@ -1151,7 +1151,7 @@ Object subclass: Compass
 - Alias names share the class/protocol namespace — declaring an alias with the same name as an existing class or protocol is a compile error.
 - The RHS accepts any type annotation: unions (`|`), singletons (`#foo`), generics (`List(Integer)`), difference (`\`), intersection (`&`), and combinations.
 - Parametric aliases (`type Foo(T) = ...`) are not yet supported.
-- Doc comments (`///`) above a `type` declaration are preserved and shown by `:help`.
+- Doc comments (`///`) above a `type` declaration are preserved and will be shown by `:help` once BT-2902 lands.
 
 ### Local Variable Type Annotations
 
