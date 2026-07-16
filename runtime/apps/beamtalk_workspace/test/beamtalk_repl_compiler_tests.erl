@@ -346,18 +346,21 @@ compile_standard_expression_bad_core_test() ->
     ?assertMatch({error, _}, Result).
 
 %%====================================================================
-%% compile_file_core/3
+%% compile_file_core/4
 %%====================================================================
 
 compile_file_core_bad_core_test() ->
-    Result = beamtalk_repl_compiler:compile_file_core(<<"not core erlang">>, my_mod, []),
+    Result = beamtalk_repl_compiler:compile_file_core(<<"not core erlang">>, my_mod, [], []),
     ?assertMatch({error, {core_compile_error, _}}, Result).
 
 compile_file_core_class_extraction_test() ->
     %% Even if compile fails, the class list transform logic is pure — test error path
-    Result = beamtalk_repl_compiler:compile_file_core(<<"garbage">>, my_mod, [
-        #{name => <<"Foo">>, superclass => <<"Object">>}
-    ]),
+    Result = beamtalk_repl_compiler:compile_file_core(
+        <<"garbage">>,
+        my_mod,
+        [#{name => <<"Foo">>, superclass => <<"Object">>}],
+        []
+    ),
     %% Core erlang compile will fail, but we're just verifying it handles the error
     ?assertMatch({error, _}, Result).
 
@@ -559,9 +562,12 @@ compile_file_core_ok() ->
         beamtalk_compiler:compile_expression(<<"1 + 1">>, <<"file_core_ok">>, []),
     %% binary_to_atom of the module name in the Core Erlang would mismatch, but
     %% compile_file_core only needs a valid atom + the class metadata transform.
-    Result = beamtalk_repl_compiler:compile_file_core(CoreErlang, file_core_ok_mod, [
-        #{name => <<"Foo">>, superclass => <<"Object">>}
-    ]),
+    Result = beamtalk_repl_compiler:compile_file_core(
+        CoreErlang,
+        file_core_ok_mod,
+        [#{name => <<"Foo">>, superclass => <<"Object">>}],
+        []
+    ),
     {ok, Binary, ClassNames, ModuleName} = Result,
     ?assert(is_binary(Binary)),
     ?assertEqual(file_core_ok_mod, ModuleName),

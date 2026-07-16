@@ -327,6 +327,42 @@ pub fn compute_diagnostics_with_known_vars_classes_and_aliases(
     )
 }
 
+/// [`compute_diagnostics_with_known_vars_classes_and_aliases`], additionally
+/// returning the alias names this compile's annotations transitively
+/// referenced (ADR 0108 hot-reload re-check trigger, BT-2899).
+///
+/// Used by the compiler port's `compile`/`compile_method`/`diagnostics`
+/// handlers, which need this set to populate the Erlang-side alias-name →
+/// dependent-class index (`beamtalk_alias_xref`) — the lookup key a live
+/// alias redefinition's re-check trigger consults instead of sweeping every
+/// live class (unlike ADR 0107's `trigger_leaf_change/1`). Every other
+/// caller of the sibling function only needs diagnostics, so that function's
+/// signature is left unchanged rather than widened for this one consumer.
+#[must_use]
+pub fn compute_diagnostics_and_referenced_aliases(
+    module: &crate::ast::Module,
+    parse_diagnostics: Vec<Diagnostic>,
+    known_vars: &[&str],
+    pre_loaded_classes: Vec<crate::semantic_analysis::class_hierarchy::ClassInfo>,
+    pre_loaded_aliases: Vec<crate::semantic_analysis::AliasInfo>,
+    diagnostics_overrides: &crate::compilation::diagnostics_policy::DiagnosticsTable,
+) -> (Vec<Diagnostic>, Vec<EcoString>) {
+    let mut all_diagnostics = parse_diagnostics;
+    let analysis_result = crate::semantic_analysis::analyse_with_known_vars_classes_and_aliases(
+        module,
+        known_vars,
+        pre_loaded_classes,
+        pre_loaded_aliases,
+    );
+    all_diagnostics.extend(analysis_result.diagnostics);
+    apply_expect_directives(module, &mut all_diagnostics);
+    let diagnostics = crate::compilation::diagnostics_policy::apply_diagnostics_table(
+        all_diagnostics,
+        diagnostics_overrides,
+    );
+    (diagnostics, analysis_result.referenced_aliases)
+}
+
 /// Applies `@expect` directives to suppress matching diagnostics.
 ///
 /// For each `@expect category` directive in the module, any diagnostic

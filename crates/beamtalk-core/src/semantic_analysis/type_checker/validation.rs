@@ -1261,12 +1261,21 @@ impl TypeChecker {
                 super::type_resolver::receiver_type_for_class(class_name, hierarchy)
             }
             TypeAnnotation::SelfClass { .. } | TypeAnnotation::ClassOf { .. } => return,
-            _ => super::type_resolver::resolve_type_annotation(
-                declared,
-                &super::type_resolver::SubstitutionMap::new(),
-                None,
-                self.alias_registry.as_ref(),
-            ),
+            _ => {
+                // ADR 0108 hot-reload re-check trigger (BT-2899): a declared
+                // `-> RestartStrategy` return type is an annotation site too
+                // — record its (transitive) alias deps the same as every
+                // other resolved annotation.
+                let (expected, deps) =
+                    super::type_resolver::resolve_type_annotation_with_alias_deps(
+                        declared,
+                        &super::type_resolver::SubstitutionMap::new(),
+                        None,
+                        self.alias_registry.as_ref(),
+                    );
+                self.referenced_aliases.extend(deps);
+                expected
+            }
         };
 
         let InferredType::Known {

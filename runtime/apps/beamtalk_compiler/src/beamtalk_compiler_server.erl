@@ -34,6 +34,8 @@ to avoid temp files on disk (BT-48).
     compile_core_erlang/1,
     register_class/2,
     get_classes/0,
+    register_aliases/1,
+    get_aliases/0,
     resolve_completion_type/1,
     find_senders_in_source/2,
     find_all_sends_in_source/1,
@@ -65,6 +67,19 @@ to avoid temp files on disk (BT-48).
     %% Maps class name atom → __beamtalk_meta/0 map.
     %% Populated via register_class/2 casts and crash recovery on init.
     classes = #{} :: #{atom() => map()},
+    %% ADR 0108 hot-reload re-check trigger (BT-2899): ambient session type
+    %% alias cache — one reparseable `type Name = <expansion>` line per
+    %% currently-known alias (the same shape
+    %% `beamtalk_repl_state:known_type_alias_sources/1` produces). Mirrors
+    %% `classes` above: threaded into `diagnostics/3`'s request whenever the
+    %% caller opts into ambient context via `class_hierarchy => true`, so a
+    %% re-check round trip (`beamtalk_recheck.erl`) resolves `::` annotations
+    %% against the *current* alias table instead of treating every alias
+    %% name as an unresolved nominal class. Whole-list replacement via
+    %% register_aliases/1 (unlike classes' per-name accumulation) — session
+    %% alias state is small and always resent in full by its one writer
+    %% (`beamtalk_repl_eval:handle_type_alias_definition/3`).
+    aliases = [] :: [binary()],
     %% BT-2832 (test-only): when set (via inject_diagnostics_failure/1, only
     %% exported in TEST builds), the *next* diagnostics/3 call fails with this
     %% reason instead of reaching the real compiler port, then self-clears.
@@ -206,10 +221,12 @@ version() ->
 
 -ifdef(TEST).
 -doc """
-Clear all cached class metadata (test use only).
+Clear all cached class metadata *and* the ambient alias cache (test use
+only).
 
-ADR 0050 Phase 3: Used for test isolation — call before tests that need a
-clean class cache. Synchronous so the next compile sees an empty cache.
+ADR 0050 Phase 3 / ADR 0108 (BT-2899): used for test isolation — call before
+tests that need a clean ambient cache. Synchronous so the next compile sees
+both caches empty.
 """.
 -spec clear_classes() -> ok.
 clear_classes() ->
@@ -489,6 +506,43 @@ get_classes() ->
     end.
 
 -doc """
+Replace the ambient session type-alias cache (ADR 0108 hot-reload re-check
+trigger, BT-2899) with `AliasSources` — one reparseable `type Name =
+<expansion>` line per currently-known alias.
+
+Fire-and-forget cast, mirroring `register_class/2`'s degrade-silently
+contract. Whole-list replacement, not accumulation: the one production
+caller (`beamtalk_repl_eval:handle_type_alias_definition/3`) always resends
+the session's complete current alias table on every declaration/redefinition
+(`beamtalk_repl_state:known_type_alias_sources/1`), so there is nothing to
+merge — the latest cast always reflects the current, authoritative session
+state.
+""".
+-spec register_aliases([binary()]) -> ok.
+register_aliases(AliasSources) when is_list(AliasSources) ->
+    try
+        gen_server:cast(?MODULE, {register_aliases, AliasSources})
+    catch
+        _:_ -> ok
+    end,
+    ok.
+
+-doc """
+Return the current ambient alias cache (`register_aliases/1`'s latest
+value). Production caller: `diagnostics/3` (via `handle_call`, below) reads
+this the same way it reads `get_classes/0`'s cache. Also used directly by
+tests. Returns `[]` (not an error) if the server is not running.
+""".
+-spec get_aliases() -> [binary()].
+get_aliases() ->
+    try
+        gen_server:call(?MODULE, get_aliases, 5000)
+    catch
+        exit:{noproc, _} -> [];
+        exit:{timeout, _} -> []
+    end.
+
+-doc """
 Compile Core Erlang source to BEAM bytecode in memory.
 
 Two input shapes are accepted:
@@ -587,11 +641,27 @@ handle_call({compile_expression_trace, Source, ModuleName, KnownVars, Options}, 
     {reply, Result, State};
 handle_call({compile, Source, Options}, _From, State) ->
     %% ADR 0050 Phase 4: Inject class cache so the Rust compiler sees REPL-session classes.
-    Options1 = Options#{class_hierarchy => State#state.classes},
+    %% ADR 0108 hot-reload re-check trigger (BT-2899): likewise inject the
+    %% ambient alias cache, unconditionally — unlike diagnostics/3's
+    %% `class_hierarchy => true` opt-in (which stays class-context-free by
+    %% default for the cockpit editor path, BT-2556), every `compile` caller
+    %% installing a class/protocol into the live image needs session alias
+    %% context: `AliasRegistry::add_pre_loaded`'s existing collision check
+    %% (alias name vs. `hierarchy`/`protocol_registry`) can only fire when
+    %% the alias table it's checking against actually includes earlier-turn
+    %% aliases — this is the fix for the BT-2912 concrete repro (`type Point
+    %% = Integer` then `Actor subclass: Point` in a later turn/`:load`).
+    Options1 = Options#{
+        class_hierarchy => State#state.classes,
+        known_type_aliases => State#state.aliases
+    },
     Result = do_compile(State#state.port, Source, Options1),
     {reply, Result, State};
 handle_call({compile_method, ClassSource, MethodSource, Options}, _From, State) ->
-    Options1 = Options#{class_hierarchy => State#state.classes},
+    Options1 = Options#{
+        class_hierarchy => State#state.classes,
+        known_type_aliases => State#state.aliases
+    },
     Result = do_compile_method(State#state.port, ClassSource, MethodSource, Options1),
     {reply, Result, State};
 handle_call({resolve_completion_type, Expression}, _From, State) ->
@@ -615,12 +685,18 @@ handle_call({diagnostics, Source, Mode, Options}, _From, State) ->
     %% explicitly requested (see diagnostics/3's moduledoc) — the default
     %% stays class-context-free so the keystroke-driven cockpit editor path
     %% (BT-2556) is unaffected by this option's addition.
-    Classes =
+    %%
+    %% ADR 0108 hot-reload re-check trigger (BT-2899): the ambient alias
+    %% cache rides the same opt-in — a caller asking for ambient class
+    %% context (a re-check round trip) needs ambient alias context for
+    %% exactly the same reason, so this reuses `class_hierarchy => true`
+    %% rather than adding a second, overlapping flag.
+    {Classes, Aliases} =
         case maps:get(class_hierarchy, Options, false) of
-            true -> State#state.classes;
-            false -> #{}
+            true -> {State#state.classes, State#state.aliases};
+            false -> {#{}, []}
         end,
-    Result = do_diagnostics(State#state.port, Source, Mode, Classes),
+    Result = do_diagnostics(State#state.port, Source, Mode, Classes, Aliases),
     {reply, Result, State};
 handle_call({find_senders_in_source, Source, Selector}, _From, State) ->
     Result = beamtalk_compiler_port:find_senders_in_source(
@@ -671,11 +747,13 @@ handle_call(version, _From, State) ->
     Result = do_version(State#state.port),
     {reply, Result, State};
 handle_call(clear_classes, _From, State) ->
-    {reply, ok, State#state{classes = #{}}};
+    {reply, ok, State#state{classes = #{}, aliases = []}};
 handle_call({inject_diagnostics_failure, Reason}, _From, State) ->
     {reply, ok, State#state{diagnostics_fault = Reason}};
 handle_call(get_classes, _From, State) ->
     {reply, State#state.classes, State};
+handle_call(get_aliases, _From, State) ->
+    {reply, State#state.aliases, State};
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
@@ -683,6 +761,10 @@ handle_cast({register_class, ClassName, MetaMap}, State) ->
     %% ADR 0050 Phase 3: Accumulate class metadata; overwrite on redefinition.
     NewClasses = maps:put(ClassName, MetaMap, State#state.classes),
     {noreply, State#state{classes = NewClasses}};
+handle_cast({register_aliases, AliasSources}, State) ->
+    %% ADR 0108 hot-reload re-check trigger (BT-2899): whole-list
+    %% replacement — see register_aliases/1's doc.
+    {noreply, State#state{aliases = AliasSources}};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -870,10 +952,19 @@ do_compile(Port, Source, Options) ->
         end,
     %% ADR 0050 Phase 4: Inject accumulated class metadata into the port request.
     Classes = maps:get(class_hierarchy, Options, #{}),
-    RequestFinal =
+    Request5 =
         case map_size(Classes) of
             0 -> Request4;
             _ -> Request4#{class_hierarchy => Classes}
+        end,
+    %% ADR 0108 hot-reload re-check trigger (BT-2899): likewise inject the
+    %% ambient session alias cache — see handle_call({compile, ...})'s doc
+    %% for why this is unconditional (not opt-in like diagnostics/3's).
+    Aliases = maps:get(known_type_aliases, Options, []),
+    RequestFinal =
+        case Aliases of
+            [] -> Request5;
+            _ -> Request5#{known_type_aliases => Aliases}
         end,
     case send_port_request(Port, RequestFinal, 30000) of
         {ok, Response} ->
@@ -937,10 +1028,18 @@ do_compile_method(Port, ClassSource, MethodSource, Options) ->
             _ -> Request3#{class_module_index => ClassModuleIndex}
         end,
     Classes = maps:get(class_hierarchy, Options, #{}),
-    RequestFinal =
+    Request5 =
         case map_size(Classes) of
             0 -> Request4;
             _ -> Request4#{class_hierarchy => Classes}
+        end,
+    %% ADR 0108 hot-reload re-check trigger (BT-2899): see do_compile/3's
+    %% identical addition.
+    Aliases = maps:get(known_type_aliases, Options, []),
+    RequestFinal =
+        case Aliases of
+            [] -> Request5;
+            _ -> Request5#{known_type_aliases => Aliases}
         end,
     case send_port_request(Port, RequestFinal, 30000) of
         {ok, Response} ->
@@ -962,9 +1061,17 @@ do_compile_method(Port, ClassSource, MethodSource, Options) ->
 %% (BT-2569): `<<"expression">>' (default, top-level script) or `<<"method">>'
 %% (bare method body — the System Browser method editor). `Classes' is the
 %% ambient class cache (ADR 0105 Phase 1, BT-2778) — ignored by the port in
-%% `"method"' mode, which stays class-context-free by design.
-do_diagnostics(Port, Source, Mode, Classes) ->
-    Request = #{command => diagnostics, source => Source, mode => Mode, class_hierarchy => Classes},
+%% `"method"' mode, which stays class-context-free by design. `Aliases' is
+%% the ambient session type-alias cache (ADR 0108 hot-reload re-check
+%% trigger, BT-2899), same opt-in and same `"method"'-mode exclusion.
+do_diagnostics(Port, Source, Mode, Classes, Aliases) ->
+    Request = #{
+        command => diagnostics,
+        source => Source,
+        mode => Mode,
+        class_hierarchy => Classes,
+        known_type_aliases => Aliases
+    },
     case send_port_request(Port, Request, 30000) of
         {ok, Response} ->
             handle_diagnostics_response(Response);
@@ -998,18 +1105,27 @@ do_version(Port) ->
     end.
 
 %% Handle response from compile command.
-handle_compile_response(#{
-    status := ok,
-    core_erlang := CoreErlang,
-    module_name := ModuleName,
-    classes := Classes,
-    warnings := Warnings
-}) ->
+handle_compile_response(
+    #{
+        status := ok,
+        core_erlang := CoreErlang,
+        module_name := ModuleName,
+        classes := Classes,
+        warnings := Warnings
+    } = Response
+) ->
+    %% ADR 0108 hot-reload re-check trigger (BT-2899): the alias names this
+    %% compile's annotations transitively referenced — `[]` when omitted
+    %% (an older compiler-port binary predating BT-2899). Forwarded so
+    %% `beamtalk_repl_compiler`/`beamtalk_repl_loader` can populate
+    %% `beamtalk_alias_xref` at class-install time.
+    ReferencedAliases = maps:get(referenced_aliases, Response, []),
     {ok, #{
         core_erlang => CoreErlang,
         module_name => ModuleName,
         classes => Classes,
-        warnings => Warnings
+        warnings => Warnings,
+        referenced_aliases => ReferencedAliases
     }};
 %% BT-1950: Protocol definitions use a different response shape (kind := protocol_definition)
 %% and have no `classes` key — they have `protocols` instead.
@@ -1055,6 +1171,9 @@ handle_compile_method_response(
     %% compiler-port binary (pre-BT-2777) that omits these keys still decodes.
     ReturnType = maps:get(return_type, Response, <<"Dynamic">>),
     ParamTypes = maps:get(param_types, Response, []),
+    %% ADR 0108 hot-reload re-check trigger (BT-2899): see
+    %% handle_compile_response/1's identical field.
+    ReferencedAliases = maps:get(referenced_aliases, Response, []),
     {ok, #{
         core_erlang => CoreErlang,
         module_name => ModuleName,
@@ -1065,7 +1184,8 @@ handle_compile_method_response(
         merged_class_source => MergedClassSource,
         return_type => ReturnType,
         param_types => ParamTypes,
-        warnings => Warnings
+        warnings => Warnings,
+        referenced_aliases => ReferencedAliases
     }};
 handle_compile_method_response(#{status := error, diagnostics := Diagnostics}) ->
     {error, Diagnostics};

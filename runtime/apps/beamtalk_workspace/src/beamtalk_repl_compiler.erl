@@ -43,7 +43,7 @@ Uses the beamtalk_compiler OTP application (ADR 0022) exclusively.
     assemble_class_result/5,
     compile_trailing_expressions/2,
     compile_standard_expression/2,
-    compile_file_core/3,
+    compile_file_core/4,
     format_core_error/1
 ]).
 -endif.
@@ -382,10 +382,15 @@ compile_method_reload(ClassSource, MethodSource, Options) ->
                     ModName = binary_to_atom(ModNameBin, utf8),
                     case beamtalk_compiler:compile_core_erlang(CoreErlang) of
                         {ok, _CompiledMod, Binary} ->
+                            Classes = maps:get(classes, CR, []),
+                            %% ADR 0108 hot-reload re-check trigger (BT-2899):
+                            %% see compile_file_core/4's identical registration.
+                            ReferencedAliases = maps:get(referenced_aliases, CR, []),
+                            register_alias_xref_for_classes(Classes, ReferencedAliases),
                             {ok, #{
                                 binary => Binary,
                                 module_name => ModName,
-                                classes => maps:get(classes, CR, []),
+                                classes => Classes,
                                 selector => maps:get(selector, CR),
                                 is_class_method => maps:get(is_class_method, CR, false),
                                 method_source => maps:get(method_source, CR),
@@ -584,14 +589,16 @@ compile_file_via_port(Source, Path, StdlibMode, ModuleNameOverride, PrebuiltInde
     wrap_compiler_errors(
         fun() ->
             case beamtalk_compiler:compile(SourceBin, Options) of
-                {ok, #{
-                    core_erlang := CoreErlang,
-                    module_name := ModNameBin,
-                    classes := Classes
-                }} ->
+                {ok,
+                    #{
+                        core_erlang := CoreErlang,
+                        module_name := ModNameBin,
+                        classes := Classes
+                    } = CR} ->
                     % elp:fixme W0023 intentional atom creation
                     ModuleName = binary_to_atom(ModNameBin, utf8),
-                    compile_file_core(CoreErlang, ModuleName, Classes);
+                    ReferencedAliases = maps:get(referenced_aliases, CR, []),
+                    compile_file_core(CoreErlang, ModuleName, Classes, ReferencedAliases);
                 %% BT-1950: Protocol definitions from the compile path — compile
                 %% Core Erlang to BEAM and return a protocol_definition result.
                 {ok, protocol_definition, ProtocolInfo} ->
@@ -604,9 +611,18 @@ compile_file_via_port(Source, Path, StdlibMode, ModuleNameOverride, PrebuiltInde
     ).
 
 %% Compile the Core Erlang generated for a file and extract class metadata.
--spec compile_file_core(binary(), atom(), list()) ->
+%%
+%% ADR 0108 hot-reload re-check trigger (BT-2899): also registers
+%% `ReferencedAliases` into `beamtalk_alias_xref` for every class this
+%% compile installs — see `register_alias_xref_for_classes/2`'s doc for why
+%% the same flat set is registered against every class in a multi-class
+%% source, and why registering slightly before `code:load_binary/3` actually
+%% installs the class is an accepted, harmless imprecision (this index is
+%% advisory-only, matching every other ADR 0105/0108 store's risk
+%% tolerance).
+-spec compile_file_core(binary(), atom(), list(), [binary()]) ->
     {ok, binary(), list(), atom()} | {error, term()}.
-compile_file_core(CoreErlang, ModuleName, Classes) ->
+compile_file_core(CoreErlang, ModuleName, Classes, ReferencedAliases) ->
     case beamtalk_compiler:compile_core_erlang(CoreErlang) of
         {ok, _CompiledMod, Binary} ->
             ClassNames = [
@@ -616,10 +632,41 @@ compile_file_core(CoreErlang, ModuleName, Classes) ->
                 }
              || C <- Classes
             ],
+            register_alias_xref_for_classes(Classes, ReferencedAliases),
             {ok, Binary, ClassNames, ModuleName};
         {error, Reason} ->
             {error, {core_compile_error, Reason}}
     end.
+
+-doc """
+Register `ReferencedAliases` into `beamtalk_alias_xref` for every class name
+in `Classes` (the raw compiler-port `#{name := ..., superclass := ...}`
+maps, ADR 0108 hot-reload re-check trigger, BT-2899).
+
+`ReferencedAliases` is a **flat, whole-module** set
+(`AnalysisResult::referenced_aliases`) — for a multi-class source (REPL
+inline multi-class, a dependency file with several classes), a class that
+itself referenced no alias still gets registered against every alias a
+*sibling* class in the same source referenced. This is an accepted
+over-approximation, not a bug: it means that sibling is occasionally an
+unnecessary re-check candidate (comes back clean) on a later redefinition of
+that alias, never a *missed* one — the same "advisory noise, not
+correctness gap" tolerance every other ADR 0105/0108 mechanism accepts.
+Per-class precision would need per-class alias-dependency tracking on the
+Rust side, which BT-2899 deliberately scopes to a flat per-compile set (see
+`resolve_type_annotation_with_alias_deps`'s doc).
+""".
+-spec register_alias_xref_for_classes([map()], [binary()]) -> ok.
+register_alias_xref_for_classes(Classes, ReferencedAliases) ->
+    lists:foreach(
+        fun(C) ->
+            case maps:get(name, C, <<>>) of
+                <<>> -> ok;
+                ClassNameBin -> beamtalk_alias_xref:register_class(ClassNameBin, ReferencedAliases)
+            end
+        end,
+        Classes
+    ).
 
 %% Build and merge class superclass and module indexes into a compile options map.
 %%

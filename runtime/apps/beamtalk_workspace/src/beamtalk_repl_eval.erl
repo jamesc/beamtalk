@@ -238,6 +238,20 @@ handle_type_alias_definition(AliasInfo, Warnings, State) ->
     #{alias_name := Name, expansion := Expansion, doc_comment := DocComment} = AliasInfo,
     Entry = #{expansion => Expansion, doc_comment => DocComment},
     NewState = beamtalk_repl_state:put_alias(Name, Entry, State),
+    %% ADR 0108 hot-reload re-check trigger (BT-2899): keep the compiler
+    %% server's ambient alias cache in sync with session state so a later
+    %% `diagnostics/3` re-check round trip (`beamtalk_recheck.erl`) — and
+    %% every subsequent `compile`/`compile_method` this session — resolves
+    %% `::` annotations against this (possibly just-redefined) alias table.
+    %% Then trigger the dependent-site re-check: a redefinition of `Name`
+    %% invalidates any annotation-resolution or exhaustiveness proof
+    %% computed against its previous expansion — this is a no-op query
+    %% (`beamtalk_alias_xref:dependents_of/1` returns `[]`) for a brand-new
+    %% alias name with no recorded dependents yet.
+    beamtalk_compiler_server:register_aliases(
+        beamtalk_repl_state:known_type_alias_sources(NewState)
+    ),
+    beamtalk_repl_loader:spawn_alias_change_recheck([Name]),
     %% REPL display-value decision (flagged in the PR description for
     %% maintainer sign-off per CLAUDE.md's REPL-output rule): echo the
     %% declared name as a plain binary, mirroring the class-declaration

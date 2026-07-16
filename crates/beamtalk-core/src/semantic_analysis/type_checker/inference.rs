@@ -125,6 +125,7 @@ impl TypeChecker {
                     &method.parameters,
                     self.protocol_registry.as_ref(),
                     self.alias_registry.as_ref(),
+                    &mut self.referenced_aliases,
                 );
                 let body_type =
                     self.infer_stmts(&method.body, hierarchy, &mut method_env, is_abstract);
@@ -173,6 +174,7 @@ impl TypeChecker {
                     &method.parameters,
                     self.protocol_registry.as_ref(),
                     self.alias_registry.as_ref(),
+                    &mut self.referenced_aliases,
                 );
                 let body_type =
                     self.infer_stmts(&method.body, hierarchy, &mut method_env, is_abstract);
@@ -239,6 +241,7 @@ impl TypeChecker {
                 &standalone.method.parameters,
                 self.protocol_registry.as_ref(),
                 self.alias_registry.as_ref(),
+                &mut self.referenced_aliases,
             );
             let body_type = self.infer_stmts(
                 &standalone.method.body,
@@ -306,21 +309,36 @@ impl TypeChecker {
     /// `alias_registry` (ADR 0108, BT-2895) is likewise passed straight
     /// through so a parameter typed `:: RestartStrategy` expands to its
     /// declared union; pass `None` when no registry is available.
+    ///
+    /// `referenced_aliases` (ADR 0108 hot-reload re-check trigger, BT-2899)
+    /// accumulates every alias name touched while resolving each typed
+    /// parameter's annotation — see
+    /// [`super::type_resolver::resolve_type_annotation_with_alias_deps`]'s
+    /// doc for why this already covers the full transitive expansion walk.
+    /// An associated function (not `&mut self`) since it also takes `env:
+    /// &mut TypeEnv`; callers pass `&mut self.referenced_aliases` directly
+    /// (a disjoint field borrow from `self.protocol_registry`/
+    /// `self.alias_registry`, so no aliasing conflict).
     pub(super) fn set_param_types(
         env: &mut TypeEnv,
         parameters: &[crate::ast::ParameterDefinition],
         protocol_registry: Option<&crate::semantic_analysis::protocol_registry::ProtocolRegistry>,
         alias_registry: Option<&crate::semantic_analysis::alias_registry::AliasRegistry>,
+        referenced_aliases: &mut std::collections::HashSet<EcoString>,
     ) {
         let subst = super::type_resolver::SubstitutionMap::new();
         for param in parameters {
             let ty = match &param.type_annotation {
-                Some(ann) => super::type_resolver::resolve_type_annotation(
-                    ann,
-                    &subst,
-                    protocol_registry,
-                    alias_registry,
-                ),
+                Some(ann) => {
+                    let (ty, deps) = super::type_resolver::resolve_type_annotation_with_alias_deps(
+                        ann,
+                        &subst,
+                        protocol_registry,
+                        alias_registry,
+                    );
+                    referenced_aliases.extend(deps);
+                    ty
+                }
                 None => InferredType::Dynamic(DynamicReason::UnannotatedParam), // preserve parameter shadowing of state fields
             };
             env.set_local(param.name.name.clone(), ty);
@@ -402,12 +420,17 @@ impl TypeChecker {
             TypeAnnotation::SelfClass { .. } | TypeAnnotation::ClassOf { .. } => {
                 return body_type;
             }
-            _ => super::type_resolver::resolve_type_annotation(
-                declared,
-                &super::type_resolver::SubstitutionMap::new(),
-                None,
-                self.alias_registry.as_ref(),
-            ),
+            _ => {
+                let (resolved, deps) =
+                    super::type_resolver::resolve_type_annotation_with_alias_deps(
+                        declared,
+                        &super::type_resolver::SubstitutionMap::new(),
+                        None,
+                        self.alias_registry.as_ref(),
+                    );
+                self.referenced_aliases.extend(deps);
+                resolved
+            }
         };
         // The method body is exactly one statement (`self delegate`) per
         // `is_self_delegate`'s definition — record the trusted type against
@@ -649,12 +672,19 @@ impl TypeChecker {
                     // expands to its declared union, feeding the exact same
                     // `InferredType` a spelled-out union would into
                     // downstream narrowing/exhaustiveness.
-                    let declared = super::type_resolver::resolve_type_annotation(
-                        ann,
-                        &super::type_resolver::SubstitutionMap::new(),
-                        self.protocol_registry.as_ref(),
-                        self.alias_registry.as_ref(),
-                    );
+                    //
+                    // ADR 0108 hot-reload re-check trigger (BT-2899): this is
+                    // exactly the `heading :: Direction := ...` site the ADR's
+                    // REPL example builds on, so recording its alias deps here
+                    // is load-bearing, not incidental.
+                    let (declared, alias_deps) =
+                        super::type_resolver::resolve_type_annotation_with_alias_deps(
+                            ann,
+                            &super::type_resolver::SubstitutionMap::new(),
+                            self.protocol_registry.as_ref(),
+                            self.alias_registry.as_ref(),
+                        );
+                    self.referenced_aliases.extend(alias_deps);
                     // Check for type mismatch: known RHS that doesn't match declared type.
                     // Dynamic RHS (the primary use case for annotations) is accepted silently.
                     // Never RHS (diverging expressions like `self error:`) is compatible
@@ -6743,7 +6773,13 @@ mod tests {
     fn set_param_types_untyped() {
         let params = vec![ParameterDefinition::new(ident("x"))];
         let mut env = TypeEnv::new();
-        TypeChecker::set_param_types(&mut env, &params, None, None);
+        TypeChecker::set_param_types(
+            &mut env,
+            &params,
+            None,
+            None,
+            &mut std::collections::HashSet::new(),
+        );
         assert_eq!(
             env.get_local("x"),
             Some(InferredType::Dynamic(DynamicReason::Unknown))
@@ -6757,7 +6793,13 @@ mod tests {
             type_annotation: Some(TypeAnnotation::Simple(ident("Integer"))),
         }];
         let mut env = TypeEnv::new();
-        TypeChecker::set_param_types(&mut env, &params, None, None);
+        TypeChecker::set_param_types(
+            &mut env,
+            &params,
+            None,
+            None,
+            &mut std::collections::HashSet::new(),
+        );
         assert_eq!(env.get_local("x"), Some(InferredType::known("Integer")));
     }
 
@@ -6771,7 +6813,13 @@ mod tests {
             ParameterDefinition::new(ident("y")),
         ];
         let mut env = TypeEnv::new();
-        TypeChecker::set_param_types(&mut env, &params, None, None);
+        TypeChecker::set_param_types(
+            &mut env,
+            &params,
+            None,
+            None,
+            &mut std::collections::HashSet::new(),
+        );
         assert_eq!(env.get_local("x"), Some(InferredType::known("String")));
         assert_eq!(
             env.get_local("y"),

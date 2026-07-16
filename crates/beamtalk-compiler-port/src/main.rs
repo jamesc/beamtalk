@@ -433,6 +433,17 @@ fn build_class_terms(classes: &[(String, String)]) -> Vec<Term> {
         .collect()
 }
 
+/// Build ETF terms for the `referenced_aliases` response field (ADR 0108
+/// hot-reload re-check trigger, BT-2899) — every alias name this compile's
+/// annotations transitively depended on
+/// (`AnalysisResult::referenced_aliases`, already sorted/deduplicated
+/// there), as a plain list of binaries. The Erlang side
+/// (`beamtalk_repl_loader`) feeds this into `beamtalk_alias_xref:
+/// register_class/2` at class-install time.
+fn build_referenced_alias_terms(referenced_aliases: &[ecow::EcoString]) -> Vec<Term> {
+    referenced_aliases.iter().map(|n| binary(n)).collect()
+}
+
 /// Build a response map for a successful `compile_expression`.
 fn ok_response(core_erlang: &str, warnings: &[String]) -> Term {
     Term::from(Map::from([
@@ -613,6 +624,7 @@ fn compile_ok_response(
     module_name: &str,
     classes: &[(String, String)],
     warnings: &[String],
+    referenced_aliases: &[ecow::EcoString],
 ) -> Term {
     Term::from(Map::from([
         (atom("status"), atom("ok")),
@@ -625,6 +637,10 @@ fn compile_ok_response(
         (
             atom("warnings"),
             Term::from(List::from(build_warning_terms(warnings))),
+        ),
+        (
+            atom("referenced_aliases"),
+            Term::from(List::from(build_referenced_alias_terms(referenced_aliases))),
         ),
     ]))
 }
@@ -644,6 +660,7 @@ fn compile_method_ok_response(
     return_type: &str,
     param_types: &[String],
     warnings: &[String],
+    referenced_aliases: &[ecow::EcoString],
 ) -> Term {
     Term::from(Map::from([
         (atom("status"), atom("ok")),
@@ -673,11 +690,18 @@ fn compile_method_ok_response(
             atom("warnings"),
             Term::from(List::from(build_warning_terms(warnings))),
         ),
+        (
+            atom("referenced_aliases"),
+            Term::from(List::from(build_referenced_alias_terms(referenced_aliases))),
+        ),
     ]))
 }
 
 /// Build a response map for a successful `diagnostics` query.
-fn diagnostics_ok_response(diagnostics: &[DiagInfo]) -> Term {
+fn diagnostics_ok_response(
+    diagnostics: &[DiagInfo],
+    referenced_aliases: &[ecow::EcoString],
+) -> Term {
     let diag_terms: Vec<Term> = diagnostics
         .iter()
         .map(|d| {
@@ -709,6 +733,10 @@ fn diagnostics_ok_response(diagnostics: &[DiagInfo]) -> Term {
     Term::from(Map::from([
         (atom("status"), atom("ok")),
         (atom("diagnostics"), Term::from(List::from(diag_terms))),
+        (
+            atom("referenced_aliases"),
+            Term::from(List::from(build_referenced_alias_terms(referenced_aliases))),
+        ),
     ]))
 }
 
@@ -1521,18 +1549,31 @@ fn handle_compile(request: &Map) -> Term {
         .unwrap_or(true);
 
     let pre_class_hierarchy = extract_class_hierarchy(request);
+    // BT-2899 (ADR 0108): a class/protocol-defining compile needs session
+    // carried-over type aliases too, not just `compile_expression` — see
+    // `extract_known_type_aliases`'s doc. Without this, a live REPL
+    // redefinition of a class/protocol over an earlier turn's `type Foo =
+    // ...` never sees the alias at all, so `AliasRegistry::add_pre_loaded`'s
+    // existing collision check (alias name vs. `hierarchy`/
+    // `protocol_registry`) never gets a chance to run.
+    let pre_loaded_aliases = extract_known_type_aliases(request);
 
     // Parse the source
     let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
     let (module, parse_diagnostics) = beamtalk_core::source_analysis::parse(tokens);
 
-    // Run semantic analysis
-    let mut all_diagnostics =
-        beamtalk_core::queries::diagnostic_provider::compute_diagnostics_with_known_vars_and_classes(
+    // Run semantic analysis. BT-2899: also capture `referenced_aliases` —
+    // shipped back in the response so the Erlang side can populate
+    // `beamtalk_alias_xref`'s alias-name → dependent-class index at class
+    // install time (see `diagnostics_ok_response`/this handler's response
+    // builder for where the field is attached).
+    let (mut all_diagnostics, referenced_aliases) =
+        beamtalk_core::queries::diagnostic_provider::compute_diagnostics_and_referenced_aliases(
             &module,
             parse_diagnostics,
             &[],
             pre_class_hierarchy.clone(),
+            pre_loaded_aliases,
             diagnostics_overrides(),
         );
 
@@ -1672,7 +1713,13 @@ fn handle_compile(request: &Map) -> Term {
             .with_class_hierarchy(pre_class_hierarchy)
             .with_source_path_opt(source_path.as_deref()),
     ) {
-        Ok(code) => compile_ok_response(&code, &module_name, &classes, &warning_msgs),
+        Ok(code) => compile_ok_response(
+            &code,
+            &module_name,
+            &classes,
+            &warning_msgs,
+            &referenced_aliases,
+        ),
         Err(e) => error_response(&[format_codegen_error(&e, &source)]),
     }
 }
@@ -1710,6 +1757,10 @@ fn handle_compile_method(request: &Map) -> Term {
         .and_then(term_to_bool)
         .unwrap_or(true);
     let pre_class_hierarchy = extract_class_hierarchy(request);
+    // BT-2899 (ADR 0108): see `handle_compile`'s equivalent comment — a
+    // `compile_method` patch is a class-defining/-patching compile too, so
+    // it needs session carried-over aliases for the same reason.
+    let pre_loaded_aliases = extract_known_type_aliases(request);
 
     // 1. Parse the bare method body directly — no `Class >>`, no normalize.
     let method_tokens = beamtalk_core::source_analysis::lex_with_eof(&method_source);
@@ -1830,12 +1881,13 @@ fn handle_compile_method(request: &Map) -> Term {
     //    relative to the patched method (so the method editor shows a snippet-local
     //    line) while rarer class-context errors keep their merged-source line — all
     //    accurate and in-range (BT-2563 #2).
-    let mut all_diagnostics =
-        beamtalk_core::queries::diagnostic_provider::compute_diagnostics_with_known_vars_and_classes(
+    let (mut all_diagnostics, referenced_aliases) =
+        beamtalk_core::queries::diagnostic_provider::compute_diagnostics_and_referenced_aliases(
             &merged_module,
             merged_parse_diags,
             &[],
             pre_class_hierarchy.clone(),
+            pre_loaded_aliases,
             diagnostics_overrides(),
         );
     let options = beamtalk_core::CompilerOptions {
@@ -1904,6 +1956,7 @@ fn handle_compile_method(request: &Map) -> Term {
             &patched_return_type,
             &patched_param_types,
             &warning_msgs,
+            &referenced_aliases,
         ),
         // Codegen spans are now relative to the re-parsed merged module, so the
         // error location resolves against the merged source.
@@ -1941,24 +1994,33 @@ fn handle_diagnostics(request: &Map) -> Term {
 
     let mode = map_get(request, "mode").and_then(term_to_string);
     let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
-    let diagnostics = if mode.as_deref() == Some("method") {
+    let (diagnostics, referenced_aliases) = if mode.as_deref() == Some("method") {
         let (_method, parse_diagnostics) = beamtalk_core::source_analysis::parse_method(tokens);
-        parse_diagnostics
+        (parse_diagnostics, Vec::new())
     } else {
         let (module, parse_diagnostics) = beamtalk_core::source_analysis::parse(tokens);
         let pre_class_hierarchy = extract_class_hierarchy(request);
-        beamtalk_core::queries::diagnostic_provider::compute_diagnostics_with_known_vars_and_classes(
+        // BT-2899 (ADR 0108): `known_type_aliases` (the same channel
+        // `compile_expression`/`compile_method` accept) so a re-check
+        // round trip (`beamtalk_recheck.erl`) resolves `::` annotations
+        // against the *current* session alias table — without this, a
+        // candidate class referencing a live-redefined alias would resolve
+        // it as an unknown nominal class instead of picking up the
+        // redefinition, defeating the whole point of re-checking it.
+        let pre_loaded_aliases = extract_known_type_aliases(request);
+        beamtalk_core::queries::diagnostic_provider::compute_diagnostics_and_referenced_aliases(
             &module,
             parse_diagnostics,
             &[],
             pre_class_hierarchy,
+            pre_loaded_aliases,
             diagnostics_overrides(),
         )
     };
 
     let all_diags: Vec<DiagInfo> = diagnostics.iter().map(diag_info).collect();
 
-    diagnostics_ok_response(&all_diags)
+    diagnostics_ok_response(&all_diags, &referenced_aliases)
 }
 
 /// Map a compiler `Diagnostic` to the wire `DiagInfo` (byte-offset span +
@@ -2840,6 +2902,94 @@ mod tests {
         }
     }
 
+    /// ADR 0108 hot-reload re-check trigger (BT-2899): `diagnostics` now
+    /// threads `known_type_aliases` through (mirroring `compile_expression`)
+    /// and reports the resolved compile's `referenced_aliases` — the
+    /// alias-name → dependent-class index's raw material. Both the alias
+    /// resolving correctly (proven the same way
+    /// `known_type_aliases_resolves_alias_from_earlier_turn` proves it: a
+    /// `matchExhaustive:` non-exhaustive diagnostic naming the residual
+    /// member) and the new field being populated with the referenced name
+    /// are pinned here.
+    #[test]
+    fn diagnostics_with_known_type_aliases_resolves_and_reports_referenced_aliases() {
+        let request = Map::from([
+            (atom("command"), atom("diagnostics")),
+            (
+                atom("source"),
+                binary(
+                    "scrutinee :: Direction := #north. \
+                     scrutinee matchExhaustive: [#north -> 0; #south -> 1; #east -> 2]",
+                ),
+            ),
+            (
+                atom("known_type_aliases"),
+                Term::from(List::from(vec![binary(
+                    "type Direction = #north | #south | #east | #west",
+                )])),
+            ),
+        ]);
+
+        let response = handle_diagnostics(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("ok")));
+
+        let Some(Term::List(diagnostics)) = map_get(m, "diagnostics") else {
+            panic!("Expected diagnostics list: {response:?}");
+        };
+        let found = diagnostics.elements.iter().any(|d| {
+            let Term::Map(dm) = d else { return false };
+            map_get(dm, "message")
+                .and_then(term_to_string)
+                .is_some_and(|msg| {
+                    msg.contains("non-exhaustive matchExhaustive:") && msg.contains("#west")
+                })
+        });
+        assert!(
+            found,
+            "expected Direction to resolve to the closed union via known_type_aliases: {response:?}"
+        );
+
+        let Some(Term::List(referenced)) = map_get(m, "referenced_aliases") else {
+            panic!("Expected referenced_aliases list: {response:?}");
+        };
+        let names: Vec<String> = referenced
+            .elements
+            .iter()
+            .filter_map(term_to_string)
+            .collect();
+        assert_eq!(
+            names,
+            vec!["Direction".to_string()],
+            "expected Direction to be recorded as referenced: {response:?}"
+        );
+    }
+
+    /// Without `known_type_aliases`, `referenced_aliases` is simply absent
+    /// any alias touch — an ordinary compile with no aliases in scope must
+    /// not report anything.
+    #[test]
+    fn diagnostics_without_known_type_aliases_reports_empty_referenced_aliases() {
+        let request = Map::from([
+            (atom("command"), atom("diagnostics")),
+            (atom("source"), binary("1 + 1.")),
+        ]);
+
+        let response = handle_diagnostics(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response");
+        };
+        let Some(Term::List(referenced)) = map_get(m, "referenced_aliases") else {
+            panic!("Expected referenced_aliases list: {response:?}");
+        };
+        assert!(
+            referenced.elements.is_empty(),
+            "expected no referenced aliases: {response:?}"
+        );
+    }
+
     /// Without `class_hierarchy`, `diagnostics` behaves exactly as before
     /// (Counter is unknown, so no diagnostic is produced for the `+ 1` — the
     /// checker treats an undeclared receiver type as unresolved-class, not
@@ -2964,6 +3114,104 @@ mod tests {
             map_get(m, "status"),
             Some(&atom("ok")),
             "compile with class_hierarchy should succeed: {response:?}"
+        );
+    }
+
+    /// ADR 0108 hot-reload re-check trigger (BT-2899): `compile` now threads
+    /// `known_type_aliases` through too (previously only
+    /// `compile_expression` did), so a class-defining compile reports which
+    /// alias names its own annotations referenced — the raw material for
+    /// `beamtalk_alias_xref`'s alias-name → dependent-class index.
+    #[test]
+    fn compile_with_known_type_aliases_reports_referenced_aliases() {
+        let request = Map::from([
+            (atom("command"), atom("compile")),
+            (
+                atom("source"),
+                binary(
+                    "Object subclass: Dashboard\n  \
+                     heading: h :: Direction -> Integer => 0\n",
+                ),
+            ),
+            (atom("module_name"), binary("bt@dashboard")),
+            (
+                atom("known_type_aliases"),
+                Term::from(List::from(vec![binary(
+                    "type Direction = #north | #south | #east | #west",
+                )])),
+            ),
+        ]);
+
+        let response = handle_compile(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response");
+        };
+        assert_eq!(
+            map_get(m, "status"),
+            Some(&atom("ok")),
+            "expected compile to succeed: {response:?}"
+        );
+        let Some(Term::List(referenced)) = map_get(m, "referenced_aliases") else {
+            panic!("Expected referenced_aliases list: {response:?}");
+        };
+        let names: Vec<String> = referenced
+            .elements
+            .iter()
+            .filter_map(term_to_string)
+            .collect();
+        assert_eq!(
+            names,
+            vec!["Direction".to_string()],
+            "expected Direction to be recorded as referenced: {response:?}"
+        );
+    }
+
+    /// The concrete BT-2912 repro, exercised through the compiler port
+    /// exactly as a live REPL turn would present it: turn 1 declares `type
+    /// Point = Integer` (carried forward via `known_type_aliases`, mirroring
+    /// how the workspace re-seeds it every turn — ADR 0108 Phase 8); turn 2
+    /// sends `Object subclass: Point`. Before BT-2899, `compile` never
+    /// threaded `known_type_aliases` at all, so
+    /// `AliasRegistry::add_pre_loaded`'s existing collision check
+    /// (`alias_registry.rs`) never had a chance to see the class — the class
+    /// compiled clean, silently shadowing the alias in every subsequent `::`
+    /// annotation. It must now fail with the namespace-collision diagnostic.
+    #[test]
+    fn compile_class_over_earlier_turn_alias_is_flagged() {
+        let request = Map::from([
+            (atom("command"), atom("compile")),
+            (
+                atom("source"),
+                binary("Object subclass: Point\n  hello => 42\n"),
+            ),
+            (atom("module_name"), binary("bt@point")),
+            (
+                atom("known_type_aliases"),
+                Term::from(List::from(vec![binary("type Point = Integer")])),
+            ),
+        ]);
+
+        let response = handle_compile(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response");
+        };
+        assert_eq!(
+            map_get(m, "status"),
+            Some(&atom("error")),
+            "expected the class-vs-alias collision to fail the compile: {response:?}"
+        );
+        let Some(Term::List(diags)) = map_get(m, "diagnostics") else {
+            panic!("Expected diagnostics list: {response:?}");
+        };
+        let found = diags.elements.iter().any(|d| {
+            let Term::Map(dm) = d else { return false };
+            map_get(dm, "message")
+                .and_then(term_to_string)
+                .is_some_and(|msg| msg.contains("Point") && msg.contains("collides with class"))
+        });
+        assert!(
+            found,
+            "expected a Point-vs-alias collision diagnostic: {response:?}"
         );
     }
 

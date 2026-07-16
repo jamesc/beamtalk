@@ -20,10 +20,18 @@
 //! bidirectional collision detection *within a single batch compile* for
 //! free: since the whole module is parsed up front, a class or protocol that
 //! textually follows a `type` declaration in source is still registered
-//! first in *processing* order, so the alias side always sees it. (A live
+//! first in *processing* order, so the alias side always sees it. A live
 //! REPL/hot-reload session can arrive in the opposite order — a `type Foo`
 //! declared in one turn, then a live `class Foo` redefinition in a later
-//! turn — which is out of scope here; see ADR 0108 Semantics and BT-2899.)
+//! turn — which this module's own registration order cannot see across
+//! turns. BT-2899 closed that gap not with new logic here, but by fixing
+//! the compiler-port wiring (`beamtalk-compiler-port/src/main.rs`'s
+//! `handle_compile`/`handle_compile_method`) to thread session
+//! carried-over aliases (`known_type_aliases`) into every class/protocol-
+//! defining compile, not just `compile_expression` — once
+//! [`add_pre_loaded`](AliasRegistry::add_pre_loaded) actually sees the
+//! earlier-turn alias, its existing `hierarchy.has_class`/
+//! `protocol_registry.has_protocol` check already catches the collision.
 //!
 //! **Cycle detection + topological sort** (ADR 0108 "No recursion",
 //! BT-2896): [`register_module`](AliasRegistry::register_module) and
@@ -1032,6 +1040,33 @@ mod tests {
         assert!(diags[0].message.contains("already defined as a class"));
         assert!(!registry.has_alias("Foo"));
     }
+
+    // ---- Live-session namespace-collision ordering (BT-2899, consolidated
+    // BT-2912): class/protocol vs. an already-registered alias ----
+    //
+    // The fix lives at the compiler-port boundary
+    // (`beamtalk-compiler-port/src/main.rs`'s `handle_compile`/
+    // `handle_compile_method`/`handle_diagnostics`), not here: a class- or
+    // protocol-defining compile never threaded `known_type_aliases` through
+    // to `compute_diagnostics_with_known_vars_and_classes`, so
+    // `AnalysisContext::pre_loaded_aliases` was always empty for that path
+    // even when a session-local `type Foo = ...` existed from an earlier
+    // REPL turn — meaning `AliasRegistry::add_pre_loaded`'s *existing*
+    // `hierarchy.has_class`/`protocol_registry.has_protocol` collision check
+    // (this file, above) never got a chance to run, not that it was missing
+    // logic. `ClassHierarchy`/`ProtocolRegistry` are always fully built
+    // *before* `AliasRegistry`'s Phase 0.6 seeding runs in `analyse_full`
+    // (classes → protocols → aliases, this module's own doc), so once
+    // `pre_loaded_aliases` is populated end-to-end, `add_pre_loaded`'s
+    // pre-existing hierarchy/protocol check already produces the collision
+    // diagnostic — see
+    // `beamtalk_repl_alias_change_recheck_tests.erl`/the compiler-port test
+    // suite for the end-to-end proof. A duplicate "class/protocol vs.
+    // alias" check added directly to this module was found to be
+    // unreachable dead code (every name `AliasRegistry` accepts has already
+    // been checked against the current-compile `ClassHierarchy`/
+    // `ProtocolRegistry` by `add_pre_loaded`/`register_module` before being
+    // inserted) and was removed rather than shipped as inert defense.
 
     #[test]
     fn duplicate_alias_definition() {

@@ -167,7 +167,14 @@ covering all three "never actually re-verified" cases.
 
 -include_lib("kernel/include/logger.hrl").
 
--export([trigger/4, trigger_shape/2, trigger_pending/5, trigger_image/0, trigger_leaf_change/1]).
+-export([
+    trigger/4,
+    trigger_shape/2,
+    trigger_pending/5,
+    trigger_image/0,
+    trigger_leaf_change/1,
+    trigger_alias_change/1
+]).
 
 -ifdef(TEST).
 -export([
@@ -183,13 +190,15 @@ covering all three "never actually re-verified" cases.
     field_change_note/3,
     not_verified_owners/2,
     relevant_diagnostic_leaf_change/2,
-    class_name_mentioned/2
+    class_name_mentioned/2,
+    relevant_diagnostic_alias_change/1,
+    alias_change_candidates/1
 ]).
 -endif.
 
 -export_type([finding/0, result/0, classification/0, image_finding/0, image_result/0]).
 
--type classification() :: signature_change | removal | shape_change | leaf_change.
+-type classification() :: signature_change | removal | shape_change | leaf_change | alias_change.
 
 -type shape_field_change() :: beamtalk_shape_diff:field_change().
 
@@ -611,6 +620,78 @@ trigger_leaf_change(SuperclassBins) ->
                     reason => Reason,
                     stack => Stack,
                     superclasses => SuperclassBins,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            empty_result()
+    end.
+
+-doc """
+ADR 0108 hot-reload re-check trigger (BT-2899): re-check every live class
+recorded as a dependent of any alias name in `AliasNameBins` — a live
+redefinition of `type Foo = ...` (or of any alias transitively reachable
+through it, since `AliasNameBins` is expected to already be the redefined
+alias plus every alias that references it — see
+`beamtalk_repl_eval:handle_type_alias_definition/3`, this trigger's one
+production caller) invalidates any annotation-resolution or exhaustiveness
+proof computed against the old expansion.
+
+## Why this is NOT `trigger_leaf_change/1`'s whole-image sweep
+
+ADR 0107's `trigger_leaf_change/1` has no lookup key for its dependency kind
+(no selector a `Type`-pattern/`matchExhaustive:` site "sends" names the
+class it tests) and falls back to recompiling every live class's source.
+Aliases are different: `beamtalk_alias_xref` is a real alias-name -> class
+index, populated at every class-defining compile from the compiler port's
+`referenced_aliases` response field (ADR 0108 Implementation: "the alias
+name is a natural key"). `alias_change_candidates/1` queries it directly —
+no whole-image sweep, no per-reload caller cap bypass; the ordinary
+`apply_cap/2`/`recheck_caller_cap/0` machinery `trigger/4`/`trigger_shape/2`
+already use applies here too, since a hot alias could in principle still
+have an unbounded dependent set.
+
+## Re-check re-runs `resolve_type_annotation` from scratch (AC3)
+
+Each candidate's re-check is the ordinary `beamtalk_compiler:diagnostics/3`
+round trip (`recheck_owner/5`-shaped: read the live source, compile it
+fresh). Because `class_hierarchy => true` now also threads the *ambient
+session alias cache* (`beamtalk_compiler_server:get_aliases/0` — see
+`do_diagnostics/5`'s doc), and that cache reflects the alias's *just-
+committed* redefinition by the time this trigger runs
+(`beamtalk_repl_eval:handle_type_alias_definition/3` calls
+`beamtalk_compiler_server:register_aliases/1` before enqueuing this
+trigger), the candidate's `::` annotations resolve through
+`resolve_type_annotation` against the redefined alias table from a clean
+slate — never a patched `InferredType`, exactly as ADR 0108's Implementation
+section requires.
+
+## Relevance filter is coarse, like `trigger_leaf_change/1`'s
+
+`relevant_diagnostic_alias_change/1` is "any non-`error` `Dnu`/`Type`
+diagnostic" — the same `trigger_image/0`/`trigger_leaf_change/1` shape,
+for the same reason: an alias redefinition's fallout (a `matchExhaustive:`
+newly non-exhaustive, an annotation that now names a different structural
+type) has no reliable "mentions this alias name" signal in the diagnostic
+message text the way a removed-selector `Dnu` does for `trigger/4`'s
+`removal` classification — the message describes the *residual* structural
+type, not the alias name that produced it.
+
+Never raises: any internal failure degrades to an empty `result()`, exactly
+like every other trigger in this module.
+""".
+-spec trigger_alias_change([binary()]) -> result().
+trigger_alias_change(AliasNameBins) ->
+    try
+        do_trigger_alias_change(AliasNameBins)
+    catch
+        Class:Reason:Stack ->
+            ?LOG_WARNING(
+                "Alias-change re-check orchestration failed (redefinition unaffected)",
+                #{
+                    error_class => Class,
+                    reason => Reason,
+                    stack => Stack,
+                    aliases => AliasNameBins,
                     domain => [beamtalk, runtime]
                 }
             ),
@@ -1563,6 +1644,166 @@ to_finding_leaf_change(
         note =>
             <<SuperclassBin/binary,
                 " gained a new subclass live, invalidating a leaf-only Type-pattern/matchExhaustive: proof (ADR 0107)">>,
+        sites => [],
+        start => Start,
+        'end' => End
+    }.
+
+%%====================================================================
+%% Alias-change re-check (ADR 0108 hot-reload re-check trigger, BT-2899)
+%%====================================================================
+
+-doc """
+The candidate owner classes for a live redefinition of any alias in
+`AliasNameBins` — the union of `beamtalk_alias_xref:dependents_of/1` over
+every name, deduplicated and sorted for deterministic ordering (mirrors
+`group_by_owner/1`'s ordering guarantee for `apply_cap/2`'s benefit — see
+that function's doc for what the ordering means for which candidates get
+dropped when the cap bites).
+""".
+-spec alias_change_candidates([binary()]) -> [binary()].
+alias_change_candidates(AliasNameBins) ->
+    lists:usort(lists:flatmap(fun beamtalk_alias_xref:dependents_of/1, AliasNameBins)).
+
+-spec do_trigger_alias_change([binary()]) -> result().
+do_trigger_alias_change(AliasNameBins) ->
+    Candidates = alias_change_candidates(AliasNameBins),
+    Cap = recheck_caller_cap(),
+    {Kept, NotChecked} = apply_cap(Candidates, Cap),
+    Outcomes = [
+        {OwnerBin, recheck_owner_for_alias_change(OwnerBin, AliasNameBins)}
+     || OwnerBin <- Kept
+    ],
+    Findings = lists:flatmap(
+        fun({_Owner, {_Status, OwnerFindings}}) -> OwnerFindings end, Outcomes
+    ),
+    CheckedOwners = [OwnerBin || {OwnerBin, {ok, _}} <- Outcomes],
+    NotCheckedOwners = Candidates -- Kept,
+    #{
+        findings => Findings,
+        checked => length(CheckedOwners),
+        total_candidates => length(Candidates),
+        not_checked => NotChecked,
+        cap_note => cap_note(NotChecked),
+        checked_owners => CheckedOwners,
+        not_checked_owners => NotCheckedOwners,
+        not_verified_owners => not_verified_owners_alias_change(NotCheckedOwners, Outcomes)
+    }.
+
+-doc """
+Same "not verified" widening `not_verified_owners/2` does for `trigger/4`/
+`trigger_shape/2` — `NotCheckedOwners` (cap-dropped) unioned with every
+`Kept` candidate whose `recheck_owner_for_alias_change/2` outcome status
+wasn't `ok`. Kept as its own small function (rather than reusing
+`not_verified_owners/2` directly) because this trigger's `Outcomes`/
+`NotCheckedOwners` are already plain binaries, not the `atom()`-keyed shape
+`not_verified_owners/2`'s spec expects (this trigger has no selector to
+convert candidate owners to atoms for — `beamtalk_alias_xref` stores class
+names as binaries throughout).
+""".
+-spec not_verified_owners_alias_change([binary()], [
+    {binary(), {ok | skipped | failed, [finding()]}}
+]) ->
+    [binary()].
+not_verified_owners_alias_change(NotCheckedOwners, Outcomes) ->
+    UnverifiedFromOutcomes = [OwnerBin || {OwnerBin, {Status, _}} <- Outcomes, Status =/= ok],
+    lists:usort(NotCheckedOwners ++ UnverifiedFromOutcomes).
+
+-doc """
+Re-check one candidate caller class for diagnostics attributable to a
+redefinition of any alias in `AliasNameBins` — mirrors `recheck_owner/5`'s
+live-source read and `class_hierarchy => true` diagnostics round trip (see
+`trigger_alias_change/1`'s doc for why that round trip now also resolves
+against the *current* ambient alias cache), but filters via
+`relevant_diagnostic_alias_change/1` instead of `relevant_diagnostic/4`.
+""".
+-spec recheck_owner_for_alias_change(binary(), [binary()]) -> {ok | skipped | failed, [finding()]}.
+recheck_owner_for_alias_change(OwnerBin, AliasNameBins) ->
+    case beamtalk_workspace_meta:get_class_source(OwnerBin) of
+        undefined ->
+            ?LOG_WARNING(
+                "Alias-change re-check skipped: no live source recorded for candidate caller",
+                #{owner => OwnerBin, domain => [beamtalk, runtime]}
+            ),
+            {skipped, []};
+        Source ->
+            SourceBin = unicode:characters_to_binary(Source),
+            case
+                beamtalk_compiler:diagnostics(SourceBin, <<"expression">>, #{
+                    class_hierarchy => true
+                })
+            of
+                {ok, Diagnostics} ->
+                    %% AliasNameBins is 1 name for the overwhelmingly common
+                    %% single-alias redefinition; a rename-affecting-a-chain
+                    %% caller can pass more, but the *finding* is always
+                    %% attributed to the first (primary) name — the exact
+                    %% redefined alias, not a transitively-affected one it
+                    %% happens to also reference — mirroring how a
+                    %% `signature_change` finding names the one changed
+                    %% selector, not every selector a caller's class exposes.
+                    [PrimaryAliasBin | _] = AliasNameBins,
+                    Findings = [
+                        to_finding_alias_change(OwnerBin, PrimaryAliasBin, D)
+                     || D <- Diagnostics, relevant_diagnostic_alias_change(D)
+                    ],
+                    {ok, Findings};
+                {error, Reason} ->
+                    ?LOG_WARNING(
+                        "Alias-change re-check compile failed for candidate caller (no findings reported)",
+                        #{owner => OwnerBin, reason => Reason, domain => [beamtalk, runtime]}
+                    ),
+                    {failed, []}
+            end
+    end.
+
+-doc """
+Is `Diagnostic` relevant to an alias-change scan? Coarse, like
+`relevant_image_diagnostic/1`/`relevant_diagnostic_leaf_change/2` — see
+`trigger_alias_change/1`'s doc for why a message-text alias-name match
+(`trigger/4`'s `removal` classification's approach) isn't reliable here:
+a `matchExhaustive:` diagnostic names the *residual* structural type, not
+the alias. `error`-severity is deliberately **not** dropped — mirrors
+`relevant_diagnostic_leaf_change/2`'s exception to this module's usual rule:
+a genuinely non-exhaustive `matchExhaustive:` over a redefined alias compiles
+to `Error`, and dropping it would silently defeat the entire point of this
+trigger (ADR 0108: "a live image holding a `matchExhaustive:` proof against
+a stale alias member set is impossible after this lands").
+""".
+-spec relevant_diagnostic_alias_change(map()) -> boolean().
+relevant_diagnostic_alias_change(#{category := Category}) when
+    Category =:= <<"Dnu">>; Category =:= <<"Type">>
+->
+    true;
+relevant_diagnostic_alias_change(_Diagnostic) ->
+    false.
+
+-doc """
+Build an alias-change finding. `changed_class`/`selector` both name
+`AliasNameBin` — there is no single call-site selector this is "about" (the
+same shape/leaf-change precedent), and `sites` is always `[]` — the
+`beamtalk_alias_xref` lookup that found this candidate is class-level, not
+per-site (see that module's moduledoc for why: `AnalysisResult::
+referenced_aliases` is a flat per-compile set, matching every other ADR
+0105/0108 trigger's "re-check unit is the caller's whole class" granularity).
+""".
+-spec to_finding_alias_change(binary(), binary(), map()) -> finding().
+to_finding_alias_change(
+    OwnerBin,
+    AliasNameBin,
+    #{message := Message, severity := Severity, start := Start, 'end' := End} = Diagnostic
+) ->
+    #{
+        owner => OwnerBin,
+        changed_class => AliasNameBin,
+        selector => AliasNameBin,
+        classification => alias_change,
+        severity => Severity,
+        category => maps:get(category, Diagnostic, undefined),
+        message => Message,
+        note =>
+            <<"type alias `", AliasNameBin/binary,
+                "` was redefined live, invalidating an annotation-resolution or matchExhaustive: proof against its previous expansion (ADR 0108)">>,
         sites => [],
         start => Start,
         'end' => End

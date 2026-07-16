@@ -62,7 +62,8 @@ children_count_test() ->
     %% ADR 0105 Phase 1 (BT-2779): workspace_findings_store added.
     %% ADR 0105 Phase 2 (BT-2780): workspace_shape_store and
     %% workspace_shape_recheck_worker added.
-    ?assertEqual(13, length(ChildSpecs)).
+    %% ADR 0108 hot-reload re-check trigger (BT-2899): beamtalk_alias_xref added.
+    ?assertEqual(14, length(ChildSpecs)).
 
 children_ids_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
@@ -77,6 +78,8 @@ children_ids_test() ->
     ?assert(lists:member(beamtalk_workspace_shape_store, Ids)),
     ?assert(lists:member(beamtalk_workspace_shape_recheck_worker, Ids)),
     ?assert(lists:member(beamtalk_workspace_findings_store, Ids)),
+    %% ADR 0108 hot-reload re-check trigger (BT-2899).
+    ?assert(lists:member(beamtalk_alias_xref, Ids)),
     ?assert(lists:member(beamtalk_transcript_stream, Ids)),
     ?assertNot(lists:member('bt@stdlib@beamtalk_interface', Ids)),
     ?assertNot(lists:member('bt@stdlib@workspace_interface', Ids)),
@@ -305,6 +308,8 @@ all_children_alive_test() ->
             beamtalk_workspace_shape_recheck_worker,
             %% ADR 0105 Phase 1 (BT-2779).
             beamtalk_workspace_findings_store,
+            %% ADR 0108 hot-reload re-check trigger (BT-2899).
+            beamtalk_alias_xref,
             beamtalk_transcript_stream,
             beamtalk_actor_registry,
             beamtalk_workspace_bootstrap,
