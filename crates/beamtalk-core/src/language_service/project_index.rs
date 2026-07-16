@@ -201,8 +201,23 @@ impl ProjectIndex {
     ///
     /// An empty `aliases` clears the file's prior entry (mirrors
     /// [`Self::set_file_extensions`]).
+    ///
+    /// No-ops (skips [`Self::rebuild_alias_registry`] entirely) when `file`
+    /// had no tracked aliases before *and* `aliases` is empty now — this
+    /// method is called on every [`Self::update_file`]-adjacent LSP
+    /// `update_file`/keystroke, and the overwhelming majority of files in a
+    /// project declare no `type` aliases at all, so the common case must not
+    /// pay for an O(every-file-with-aliases) rebuild it can't possibly
+    /// change the outcome of (unlike [`Self::update_file`]'s
+    /// `ClassHierarchy::merge`, which is bounded by the *incoming* file's
+    /// own class count, `rebuild_alias_registry` has no incremental API and
+    /// must re-walk every alias-bearing file from scratch — see its doc).
     pub fn update_file_aliases(&mut self, file: Utf8PathBuf, aliases: Vec<AliasInfo>) {
+        let had_aliases = self.file_aliases.contains_key(&file);
         if aliases.is_empty() {
+            if !had_aliases {
+                return;
+            }
             self.file_aliases.remove(&file);
         } else {
             self.file_aliases.insert(file, aliases);
@@ -696,6 +711,40 @@ mod tests {
     }
 
     // ---- ADR 0108 Phase 8 (BT-2901): project-wide alias registry ----
+
+    #[test]
+    fn update_file_aliases_no_op_for_alias_less_file_preserves_other_files_aliases() {
+        // Perf guard: a file with zero aliases (the common case) must not
+        // trigger a registry rebuild that could accidentally disturb
+        // aliases tracked for *other* files — and repeatedly calling
+        // `update_file_aliases([])` for it (as every keystroke-triggered
+        // `SimpleLanguageService::update_file` does) must stay a true no-op.
+        let mut index = ProjectIndex::new();
+
+        let alias_tokens = lex_with_eof("type RestartStrategy = #temporary | #transient");
+        let (alias_module, _) = parse(alias_tokens);
+        let alias_hierarchy = ClassHierarchy::build(&alias_module).0.unwrap();
+        index.update_file(Utf8PathBuf::from("aliases.bt"), &alias_hierarchy);
+        index.update_file_aliases(
+            Utf8PathBuf::from("aliases.bt"),
+            crate::semantic_analysis::AliasRegistry::extract_alias_infos(&alias_module),
+        );
+        assert!(index.alias_registry().has_alias("RestartStrategy"));
+
+        // Now repeatedly "edit" an unrelated, alias-less file.
+        let plain_tokens = lex_with_eof("Object subclass: Foo\n  bar => 1");
+        let (plain_module, _) = parse(plain_tokens);
+        let plain_hierarchy = ClassHierarchy::build(&plain_module).0.unwrap();
+        for _ in 0..3 {
+            index.update_file(Utf8PathBuf::from("foo.bt"), &plain_hierarchy);
+            index.update_file_aliases(Utf8PathBuf::from("foo.bt"), Vec::new());
+        }
+
+        assert!(
+            index.alias_registry().has_alias("RestartStrategy"),
+            "an unrelated alias-less file's updates must not disturb other files' aliases"
+        );
+    }
 
     #[test]
     fn update_file_aliases_adds_alias_to_merged_registry() {
