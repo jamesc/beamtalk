@@ -747,6 +747,30 @@ pub(super) struct Parser {
     /// represent doc comments before non-declaration tokens, and a warning is
     /// emitted for each.
     unattached_doc_comment_indices: HashSet<usize>,
+    /// Result of the most recent `collect_doc_comment()` call: the token
+    /// index it ran on, paired with the positions (within *that* token's
+    /// `leading_trivia()`) of the `///` lines that ended up in the returned
+    /// doc comment (the last consecutive block immediately before the
+    /// token).
+    ///
+    /// A single token's leading trivia can contain *more than one*
+    /// blank-line-separated `///` block — e.g. a class's doc comment
+    /// followed by a blank line, then a `type` alias's own doc comment,
+    /// then the alias declaration itself. `collect_doc_comment()` only ever
+    /// returns the last block; earlier blocks are discarded from `lines` but
+    /// must not vanish from the source entirely. `collect_comment_attachment()`
+    /// — always called immediately after, on the same token (see its own
+    /// doc comment) — consults this to tell "already captured as the doc
+    /// comment" apart from "an earlier orphaned block that must round-trip
+    /// as a plain comment instead" (BT-2924).
+    ///
+    /// `None`, or a stale entry for a different token index, means
+    /// `collect_doc_comment()` was not just called for the current token
+    /// (e.g. leading trivia before a non-declaration expression) — in that
+    /// case every `///` line in the current token's leading trivia is
+    /// treated as unattached and preserved as a plain comment, matching the
+    /// pre-existing fallback behavior.
+    attached_doc_comment_positions: Option<(usize, HashSet<usize>)>,
 }
 
 impl Parser {
@@ -771,6 +795,7 @@ impl Parser {
             in_class_body: false,
             nesting_depth: 0,
             unattached_doc_comment_indices,
+            attached_doc_comment_positions: None,
         }
     }
 
@@ -875,9 +900,25 @@ impl Parser {
     /// the collection, so only the last consecutive block of `///` lines
     /// is returned.
     ///
-    /// When doc comment lines are found and then discarded because a blank
-    /// line or a regular `//` comment breaks the attachment, a
-    /// [`Severity::Warning`] diagnostic is emitted immediately.
+    /// A single leading-trivia run can contain more than one blank-line- or
+    /// comment-separated `///` block (e.g. a class's doc comment, a blank
+    /// line, then a `type` alias's own doc comment immediately before the
+    /// alias token). Only the *last* block ever attaches to this
+    /// declaration; earlier blocks are not this declaration's doc comment.
+    /// This method records (via `attached_doc_comment_positions`) exactly
+    /// which trivia positions made it into the returned block, so
+    /// [`Self::collect_comment_attachment`] — always called immediately
+    /// after, on the same token — can preserve any earlier block as a plain
+    /// comment instead of silently dropping it when the source is
+    /// reformatted (BT-2924).
+    ///
+    /// A [`Severity::Warning`] diagnostic is emitted only when *this*
+    /// declaration itself ends up with no doc comment at all (the returned
+    /// block is empty) because its own directly-adjacent `///` lines were
+    /// broken away by a blank line or `//` comment. An earlier, unrelated
+    /// block breaking away while this declaration's own adjacent block still
+    /// attaches cleanly is not a problem with this declaration's
+    /// documentation, so it does not warn (BT-2924).
     pub(super) fn collect_doc_comment(&mut self) -> Option<String> {
         // Clone leading trivia to release the shared borrow of `self` so we
         // can push to `self.diagnostics` inside the loop.
@@ -886,9 +927,10 @@ impl Parser {
         let current_idx = self.current;
 
         let mut lines: Vec<String> = Vec::new();
+        let mut block_positions: Vec<usize> = Vec::new();
         let mut had_unattached = false;
 
-        for trivia in &leading_trivia {
+        for (pos, trivia) in leading_trivia.iter().enumerate() {
             match trivia {
                 super::Trivia::DocComment(text) => {
                     let text = text.as_str();
@@ -897,6 +939,7 @@ impl Parser {
                         .strip_prefix("/// ")
                         .unwrap_or_else(|| text.strip_prefix("///").unwrap_or(text));
                     lines.push(stripped.to_string());
+                    block_positions.push(pos);
                 }
                 super::Trivia::Whitespace(ws) => {
                     // A blank line (>1 newline) breaks consecutive doc comments
@@ -905,6 +948,7 @@ impl Parser {
                             had_unattached = true;
                         }
                         lines.clear();
+                        block_positions.clear();
                     }
                 }
                 _ => {
@@ -913,11 +957,15 @@ impl Parser {
                         had_unattached = true;
                     }
                     lines.clear();
+                    block_positions.clear();
                 }
             }
         }
 
-        if had_unattached {
+        self.attached_doc_comment_positions =
+            Some((current_idx, block_positions.into_iter().collect()));
+
+        if had_unattached && lines.is_empty() {
             self.diagnostics.push(
                 Diagnostic::warning(
                     "doc comment not attached to any declaration \
@@ -926,16 +974,19 @@ impl Parser {
                 )
                 .with_category(DiagnosticCategory::Lint),
             );
-            // Remove from pre-scan set so the post-parse sweep does not
-            // emit a second warning for the same token.
+        }
+
+        if had_unattached || !lines.is_empty() {
+            // This token's doc-comment trivia have been fully handled — either
+            // warned about above, or successfully attached below — so remove
+            // it from the pre-scan set to prevent the post-parse sweep from
+            // emitting a second, differently-worded warning for it.
             self.unattached_doc_comment_indices.remove(&current_idx);
         }
 
         if lines.is_empty() {
             None
         } else {
-            // Successfully attached — remove from the pre-scan set.
-            self.unattached_doc_comment_indices.remove(&current_idx);
             Some(lines.join("\n"))
         }
     }
@@ -958,7 +1009,16 @@ impl Parser {
         let token_span = self.current_token().span();
         let mut leading = Vec::new();
         let mut saw_blank_line = false;
-        for trivia in self.current_token().leading_trivia() {
+        // Positions (within this token's leading trivia) already captured by
+        // the immediately-preceding `collect_doc_comment()` call, if any —
+        // see `attached_doc_comment_positions` for why this is positional
+        // rather than a single per-token flag (BT-2924).
+        let attached_positions = self
+            .attached_doc_comment_positions
+            .as_ref()
+            .filter(|(idx, _)| *idx == self.current)
+            .map(|(_, positions)| positions);
+        for (pos, trivia) in self.current_token().leading_trivia().iter().enumerate() {
             match trivia {
                 super::Trivia::LineComment(text) => {
                     // Strip `// ` (with space) or `//` — Comment.content is
@@ -994,22 +1054,23 @@ impl Parser {
                     }
                 }
                 // DocComment is normally handled by collect_doc_comment for
-                // declarations.  When it wasn't consumed (e.g. before module-level
-                // expressions), preserve it as a regular line comment so the
-                // formatter doesn't drop it.
+                // declarations.  When a `///` line wasn't part of the block
+                // collect_doc_comment() just attached to this declaration —
+                // either because it wasn't consumed at all (e.g. before
+                // module-level expressions) or because it belongs to an
+                // earlier, blank-line-separated block in the same leading
+                // trivia (BT-2924) — preserve it as a `Comment::doc` leading
+                // comment (renders back as `///`, not `//`) so the formatter
+                // doesn't drop or mangle it.
                 super::Trivia::DocComment(text) => {
-                    if self.unattached_doc_comment_indices.contains(&self.current) {
+                    let already_attached =
+                        attached_positions.is_some_and(|positions| positions.contains(&pos));
+                    if !already_attached {
                         let s = text.as_str();
                         let content = s
                             .strip_prefix("/// ")
                             .unwrap_or_else(|| s.strip_prefix("///").unwrap_or(s));
-                        // Prefix with "/" so it round-trips as `/// content`
-                        let prefixed = if content.is_empty() {
-                            "/".to_string()
-                        } else {
-                            format!("/ {content}")
-                        };
-                        let mut comment = Comment::line(&prefixed, token_span);
+                        let mut comment = Comment::doc(content, token_span);
                         comment.preceding_blank_line = saw_blank_line;
                         leading.push(comment);
                         saw_blank_line = false;
