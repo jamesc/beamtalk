@@ -82,6 +82,15 @@ TestCase subclass: ArrayTest
       #[1, 2, 3] perform: #collect: withArguments: #(statefulBlock)
     ] raise: #stateful_block_dispatch
 
+    count := 0
+    statefulInjectBlock := [:acc :x |
+      count := count + 1
+      acc + x
+    ]
+    self should: [
+      #[1, 2, 3] perform: #inject:into: withArguments: #(0, statefulInjectBlock)
+    ] raise: #stateful_block_dispatch
+
   testPrintString =>
     self assert: #[1, 2, 3] printString equals: "#[1, 2, 3]"
     self assert: #[] printString equals: "#[]"
