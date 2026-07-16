@@ -191,6 +191,22 @@ impl ProjectIndex {
         self.file_classes.insert(file.clone(), new_names);
         self.file_hierarchies.insert(file, hierarchy.clone());
         self.merged_hierarchy.merge(hierarchy);
+
+        // ADR 0108 Phase 8 (BT-2901): a class/protocol change in *this* file
+        // can create or resolve a namespace collision with an alias
+        // declared in a *different* file — `rebuild_alias_registry`'s
+        // collision check runs against `merged_hierarchy`, not just
+        // same-file siblings, so e.g. this file newly defining `class Foo`
+        // must evict an already-registered `type Foo = ...` alias from
+        // elsewhere in the project (the class wins the namespace), and
+        // removing/renaming a colliding class must let a previously-shadowed
+        // alias re-register. Skipped when no file has any tracked alias
+        // (`file_aliases.is_empty()`) — the common case for a project that
+        // doesn't use type aliases at all — so an alias-less project's class
+        // edits pay no extra cost from this check.
+        if !self.file_aliases.is_empty() {
+            self.rebuild_alias_registry();
+        }
     }
 
     /// Add or update a file's type alias declarations in the project index
@@ -288,6 +304,7 @@ impl ProjectIndex {
             return;
         }
         self.file_extensions.remove(file);
+        let mut classes_changed = false;
         if let Some(old_names) = self.file_classes.remove(file) {
             self.file_hierarchies.remove(file);
 
@@ -297,10 +314,16 @@ impl ProjectIndex {
             // Re-merge classes from remaining files that shared a name
             // (this restores stdlib definitions if they were shadowed)
             self.remerge_classes(&old_names);
+            classes_changed = true;
         }
         // ADR 0108 Phase 8 (BT-2901): drop this file's aliases too, mirroring
-        // the class-removal handling above.
-        if self.file_aliases.remove(file).is_some() {
+        // the class-removal handling above. A rebuild is also needed (once,
+        // not twice) when this file's *classes* changed and some other
+        // file's alias might have been shadowed by (or is now unshadowed
+        // from) one of them — the same cross-file collision case
+        // `update_file` now guards against; see its doc.
+        let had_aliases = self.file_aliases.remove(file).is_some();
+        if had_aliases || (classes_changed && !self.file_aliases.is_empty()) {
             self.rebuild_alias_registry();
         }
     }
@@ -829,6 +852,51 @@ mod tests {
         assert!(
             !index.alias_registry().has_alias("Foo"),
             "alias colliding with a real class must not be registered"
+        );
+    }
+
+    #[test]
+    fn alias_evicted_when_a_later_alias_less_file_defines_a_colliding_class() {
+        // Adversarial-review regression: the collision test above only
+        // covers the *alias* file's own `update_file`/`update_file_aliases`
+        // call triggering the collision check. This pins the other
+        // direction — a plain class-only file (`update_file` with no
+        // `update_file_aliases` call at all, the common shape for the vast
+        // majority of files in a project) must *also* evict an
+        // already-registered alias it collides with, not just leave the
+        // stale (invalid) alias sitting in the merged registry until some
+        // unrelated alias-file edit happens to trigger a rebuild.
+        let mut index = ProjectIndex::new();
+
+        // File A: alias `Foo` registers cleanly (no collision yet).
+        let alias_tokens = lex_with_eof("type Foo = Integer");
+        let (alias_module, _) = parse(alias_tokens);
+        let alias_hierarchy = ClassHierarchy::build(&alias_module).0.unwrap();
+        index.update_file(Utf8PathBuf::from("alias_foo.bt"), &alias_hierarchy);
+        let infos = crate::semantic_analysis::AliasRegistry::extract_alias_infos(&alias_module);
+        index.update_file_aliases(Utf8PathBuf::from("alias_foo.bt"), infos);
+        assert!(index.alias_registry().has_alias("Foo"));
+
+        // File B: a plain class-only file (never calls `update_file_aliases`
+        // at all) later defines a colliding class `Foo`.
+        let class_tokens = lex_with_eof("Object subclass: Foo\n  bar => 1");
+        let (class_module, _) = parse(class_tokens);
+        let class_hierarchy = ClassHierarchy::build(&class_module).0.unwrap();
+        index.update_file(Utf8PathBuf::from("foo.bt"), &class_hierarchy);
+
+        assert!(
+            !index.alias_registry().has_alias("Foo"),
+            "a colliding class defined in an alias-less file's update_file call must evict \
+             the already-registered alias, not leave it stale"
+        );
+
+        // Removing the colliding class (file B) must let the alias
+        // re-register — the inverse direction, exercised via `remove_file`.
+        index.remove_file(&Utf8PathBuf::from("foo.bt"));
+        assert!(
+            index.alias_registry().has_alias("Foo"),
+            "removing the colliding class should let the previously-shadowed alias \
+             re-register"
         );
     }
 }
