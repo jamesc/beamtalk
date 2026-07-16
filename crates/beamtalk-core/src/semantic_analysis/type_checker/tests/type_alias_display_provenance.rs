@@ -119,62 +119,16 @@ Object subclass: Supervisor
     );
 }
 
-// ── Unknown-alias diagnostic (ADR 0108 Error examples) ──────────────────────
-
-#[test]
-fn misspelled_alias_reference_suggests_the_real_name() {
-    // ADR 0108's own example: `RestartStrateg` vs `RestartStrategy`.
-    let source = r"
-type RestartStrategy = #temporary | #transient | #permanent
-
-Object subclass: Supervisor
-  restart: policy :: RestartStrateg => policy
-";
-    let diags = analyse_diagnostics(source);
-    let hits: Vec<_> = diags
-        .iter()
-        .filter(|d| d.message.contains("unknown type"))
-        .collect();
-    assert_eq!(hits.len(), 1, "expected one diagnostic, got: {diags:?}");
-    assert!(
-        hits[0]
-            .message
-            .contains("unknown type `RestartStrateg` (did you mean `RestartStrategy`?)"),
-        "got: {}",
-        hits[0].message
-    );
-}
-
-#[test]
-fn unrelated_unknown_class_reference_is_not_flagged_by_alias_check() {
-    // A totally unrelated unresolved name (nowhere near any alias) must not
-    // be flagged by the alias-typo checker — that's `check_unresolved_classes`'s
-    // job (and only fires for expression-position class references, not
-    // annotations, which this checker deliberately does not duplicate).
-    let source = r"
-type RestartStrategy = #temporary | #transient | #permanent
-
-Object subclass: Supervisor
-  restart: policy :: SomeTotallyUnrelatedName => policy
-";
-    let diags = analyse_diagnostics(source);
-    assert!(
-        diags.iter().all(|d| !d.message.contains("unknown type")),
-        "unrelated unknown name must not trigger the alias-typo check, got: {diags:?}"
-    );
-}
-
-#[test]
-fn alias_free_module_never_triggers_unknown_alias_check() {
-    // No aliases registered at all — the checker must be a strict no-op
-    // (including on a near-miss of a *class* name, which is not its job).
-    let source = "Object subclass: Foo\n  bar: x :: Integr => x\n";
-    let diags = analyse_diagnostics(source);
-    assert!(
-        diags.iter().all(|d| !d.message.contains("unknown type")),
-        "alias-free module must never trigger the unknown-alias check, got: {diags:?}"
-    );
-}
+// Note: the "unknown-alias" diagnostic (`check_unresolved_type_aliases`,
+// ADR 0108 Error examples — `unknown type RestartStrateg (did you mean
+// RestartStrategy?)`) is gated on cross-file metadata being loaded, exactly
+// like the pre-existing `check_unresolved_classes` (see both functions'
+// docs) — this file's `analyse_diagnostics` helper passes no pre-loaded
+// classes, so that gate is always closed here. Its tests live directly
+// alongside `check_unresolved_classes`'s own in
+// `semantic_analysis::validators::structural_validators`'s test module,
+// which calls the checker function directly rather than through the full
+// pipeline (matching that module's existing convention).
 
 #[test]
 fn negated_singleton_comparison_names_alias_without_did_you_mean() {
