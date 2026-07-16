@@ -152,11 +152,21 @@ TestCase subclass: CollectionsTest
     // BIF-lowered bodies (unlike Block's value* structural intrinsics fixed
     // by BT-2812) — a Tier 1 (pure) block reached via perform: already
     // worked correctly before this issue; pinned here as a baseline.
-    self assert: (#(1, 2, 3) perform: #collect: withArguments: #([:x | x * 2])) equals: #(2, 4, 6)
-    self assert: (#(1, 2, 3, 4) perform: #select: withArguments: #([:x | x > 2])) equals: #(3, 4)
-    self assert: (#(1, 2, 3, 4) perform: #reject: withArguments: #([:x | x > 2])) equals: #(1, 2)
-    self assert: (#(1, 2, 3) perform: #inject:into: withArguments: #(0, [:acc :x | acc + x])) equals: 6
-    self assert: (#(1, 2, 3) perform: #do: withArguments: #([:x | x + 1])) equals: nil
+    self assert: (#(1, 2, 3) perform: #collect: withArguments: #([:x |
+      x * 2
+    ])) equals: #(2, 4, 6)
+    self assert: (#(1, 2, 3, 4) perform: #select: withArguments: #([:x |
+      x > 2
+    ])) equals: #(3, 4)
+    self assert: (#(1, 2, 3, 4) perform: #reject: withArguments: #([:x |
+      x > 2
+    ])) equals: #(1, 2)
+    self assert: (#(1, 2, 3) perform: #inject:into: withArguments: #(0, [:acc :x |
+      acc + x
+    ])) equals: 6
+    self assert: (#(1, 2, 3) perform: #do: withArguments: #([:x |
+      x + 1
+    ])) equals: nil
 
   testPerformOnStatefulIterationBlockRaisesClearErrorInsteadOfCrashing =>
     // BT-2888: a stored (Tier 2) block mutates captured state via a threaded
@@ -167,7 +177,10 @@ TestCase subclass: CollectionsTest
     // `type_error`, ...) instead of the clear stateful_block_dispatch error
     // BT-2812 established for the same situation on Block's value*.
     count := 0
-    statefulBlock := [:x | count := count + 1. x * 2]
+    statefulBlock := [:x |
+      count := count + 1
+      x * 2
+    ]
     self should: [
       #(1, 2, 3) perform: #collect: withArguments: #(statefulBlock)
     ] raise: #stateful_block_dispatch
@@ -179,19 +192,28 @@ TestCase subclass: CollectionsTest
     ] raise: #stateful_block_dispatch
 
     count := 0
-    statefulSelectBlock := [:x | count := count + 1. x > 1]
+    statefulSelectBlock := [:x |
+      count := count + 1
+      x > 1
+    ]
     self should: [
       #(1, 2, 3) perform: #select: withArguments: #(statefulSelectBlock)
     ] raise: #stateful_block_dispatch
 
     count := 0
-    statefulRejectBlock := [:x | count := count + 1. x > 1]
+    statefulRejectBlock := [:x |
+      count := count + 1
+      x > 1
+    ]
     self should: [
       #(1, 2, 3) perform: #reject: withArguments: #(statefulRejectBlock)
     ] raise: #stateful_block_dispatch
 
     count := 0
-    statefulInjectBlock := [:acc :x | count := count + 1. acc + x]
+    statefulInjectBlock := [:acc :x |
+      count := count + 1
+      acc + x
+    ]
     self should: [
       #(1, 2, 3) perform: #inject:into: withArguments: #(0, statefulInjectBlock)
     ] raise: #stateful_block_dispatch
