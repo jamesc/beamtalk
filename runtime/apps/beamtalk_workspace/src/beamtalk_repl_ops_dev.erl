@@ -956,23 +956,43 @@ Detect type-annotation position (immediately after `::`) from a
 so far (BT-2918).
 
 `::` is built from identifier chars (`is_identifier_char/1` treats `:` as one,
-so keyword selectors like `ifTrue:` complete as a unit) so it surfaces in two
-shapes depending on whether a space follows it: `"policy :: R"` parses as
-`{expression, <<"policy ::">>, <<"R">>}` (space after `::`), while
-`"policy ::R"` parses as `{<<"policy">>, <<"::R">>}` (no space). Both are
-annotation position; a single-colon keyword-selector prefix (e.g. `"foo:"`)
-is not, since it lacks the second colon.
+so keyword selectors like `ifTrue:` complete as a unit) so it surfaces in a
+few shapes depending on whether a space follows `::` and whether the receiver
+is a single token or a multi-token expression:
+  `"policy :: R"`                   -> `{expression, <<"policy ::">>, <<"R">>}` (space, single-token receiver)
+  `"policy ::R"`                    -> `{<<"policy">>, <<"::R">>}` (no space, single-token receiver)
+  `"deposit: amount :: I"`          -> `{expression, <<"deposit: amount ::">>, <<"I">>}` (space, keyword receiver)
+  `"deposit: amount ::I"`           -> `{expression, <<"deposit: amount">>, <<"::I">>}` (no space, keyword receiver —
+                                        the attached `::` lands in Prefix, not the receiver expression, since
+                                        parse_receiver_and_prefix/1 always splits on the last whitespace run)
+All four are annotation position; checked by looking at *both* halves — a
+literal `::`-suffixed receiver expression, or a `::`-prefixed completion
+token — so the no-space attached form isn't missed just because the receiver
+happens to be a keyword-send expression rather than a bare token. A
+single-colon keyword-selector prefix (e.g. `"foo:"`) is not annotation
+position, since it lacks the second colon.
 """.
 -spec type_annotation_prefix({binary() | undefined, binary()} | {expression, binary(), binary()}) ->
     {true, binary()} | false.
 type_annotation_prefix({expression, ReceiverExpr, Prefix}) ->
-    case ends_with_double_colon(ReceiverExpr) of
-        true -> {true, Prefix};
-        false -> false
+    case strip_double_colon_prefix(Prefix) of
+        {true, _} = Result ->
+            Result;
+        false ->
+            case ends_with_double_colon(ReceiverExpr) of
+                true -> {true, Prefix};
+                false -> false
+            end
     end;
-type_annotation_prefix({Receiver, <<"::", Rest/binary>>}) when is_binary(Receiver) ->
-    {true, Rest};
+type_annotation_prefix({Receiver, Prefix}) when is_binary(Receiver) ->
+    strip_double_colon_prefix(Prefix);
 type_annotation_prefix(_) ->
+    false.
+
+-spec strip_double_colon_prefix(binary()) -> {true, binary()} | false.
+strip_double_colon_prefix(<<"::", Rest/binary>>) ->
+    {true, Rest};
+strip_double_colon_prefix(_) ->
     false.
 
 -spec ends_with_double_colon(binary()) -> boolean().

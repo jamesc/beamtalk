@@ -1207,6 +1207,8 @@ dev_runtime_test_() ->
                 fun type_annotation_completion_class_name_spaced/0},
             {"type-annotation position (no space before ::) offers class names",
                 fun type_annotation_completion_class_name_attached/0},
+            {"type-annotation position (no space, keyword-send receiver) offers class names",
+                fun type_annotation_completion_class_name_attached_keyword_receiver/0},
             {"type-annotation position offers live alias names alongside classes",
                 fun type_annotation_completion_alias_name/0},
             {"type-annotation position with empty prefix offers all candidates",
@@ -1646,8 +1648,24 @@ type_annotation_completion_class_name_spaced() ->
 type_annotation_completion_class_name_attached() ->
     %% "policy ::Widg" (no space before the prefix) — parse_receiver_and_prefix
     %% returns {<<"policy">>, <<"::Widg">>}; type_annotation_prefix/1 strips the
-    %% leading "::" via its {Receiver, <<"::", Rest/binary>>} clause.
+    %% leading "::" via strip_double_colon_prefix/1.
     Result = beamtalk_repl_ops_dev:get_context_completions(<<"policy ::Widg">>),
+    ?assert(lists:member(<<"WidgetDev">>, Result)).
+
+type_annotation_completion_class_name_attached_keyword_receiver() ->
+    %% "deposit: amount ::Widg" — a MULTI-TOKEN keyword-send receiver with an
+    %% attached (no-space) "::" prefix. parse_receiver_and_prefix/1 returns
+    %% {expression, <<"deposit: amount">>, <<"::Widg">>} — the receiver
+    %% expression does NOT end in "::" here (the attached "::" landed in
+    %% Prefix instead), so this exercises type_annotation_prefix/1's
+    %% strip_double_colon_prefix/1 check on Prefix within the {expression, _,
+    %% _} clause, not just ends_with_double_colon/1 on ReceiverExpr.
+    %% Regression coverage for a gap an adversarial review pass caught: this
+    %% previously fell through to resolve_chain_type/2 (which cannot resolve
+    %% a keyword-send receiver) and silently returned [] instead of offering
+    %% class names — exactly the annotation position a method's keyword
+    %% parameter list types are declared in.
+    Result = beamtalk_repl_ops_dev:get_context_completions(<<"deposit: amount ::Widg">>),
     ?assert(lists:member(<<"WidgetDev">>, Result)).
 
 type_annotation_completion_alias_name() ->
