@@ -23,6 +23,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
+use serde::de::DeserializeOwned;
 use tokio::net::TcpStream;
 use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio_tungstenite::tungstenite::Message;
@@ -32,8 +33,6 @@ use tracing::{debug, info, warn};
 use beamtalk_core::language_service::{
     NavQuery, NavQueryResponse, NavSite, NavSymbolClass, NavSymbolsResponse,
 };
-use serde::de::DeserializeOwned;
-
 use beamtalk_repl_protocol::{ReplResponse, RequestBuilder};
 
 /// How long to wait for individual WebSocket reads / writes during the auth
@@ -682,8 +681,64 @@ fn decode_rpc_reply<T: DeserializeOwned>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde::Deserialize;
     use serde_json::json;
     use tokio::sync::mpsc::unbounded_channel;
+
+    #[derive(Debug, Deserialize, PartialEq)]
+    struct DummyPayload {
+        foo: String,
+    }
+
+    #[test]
+    fn decode_rpc_reply_success() {
+        let response: ReplResponse =
+            serde_json::from_value(json!({"id": "1", "value": {"foo": "bar"}})).unwrap();
+        let payload: DummyPayload = decode_rpc_reply(response, "dummy-op").unwrap();
+        assert_eq!(
+            payload,
+            DummyPayload {
+                foo: "bar".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn decode_rpc_reply_error_flag_set() {
+        let response: ReplResponse = serde_json::from_value(json!({
+            "id": "1",
+            "status": ["done", "error"],
+            "error": "boom"
+        }))
+        .unwrap();
+        let err = decode_rpc_reply::<DummyPayload>(response, "dummy-op").unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "runtime protocol error: dummy-op error: boom"
+        );
+    }
+
+    #[test]
+    fn decode_rpc_reply_missing_value() {
+        let response: ReplResponse = serde_json::from_value(json!({"id": "1"})).unwrap();
+        let err = decode_rpc_reply::<DummyPayload>(response, "dummy-op").unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "runtime protocol error: dummy-op: reply missing `value`"
+        );
+    }
+
+    #[test]
+    fn decode_rpc_reply_malformed_payload() {
+        let response: ReplResponse =
+            serde_json::from_value(json!({"id": "1", "value": {"foo": 42}})).unwrap();
+        let err = decode_rpc_reply::<DummyPayload>(response, "dummy-op").unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.starts_with("runtime protocol error: dummy-op: malformed reply payload:"),
+            "unexpected error message: {msg}"
+        );
+    }
 
     #[tokio::test]
     async fn push_frame_with_files_is_forwarded() {
