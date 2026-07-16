@@ -1439,11 +1439,7 @@ impl SimpleLanguageService {
                 class, keywords, ..
             } => {
                 if offset_val >= class.span.start() && offset_val < class.span.end() {
-                    return Some((
-                        class.clone(),
-                        class.span,
-                        IdentifierContext::TypeReference,
-                    ));
+                    return Some((class.clone(), class.span, IdentifierContext::TypeReference));
                 }
                 keywords
                     .iter()
