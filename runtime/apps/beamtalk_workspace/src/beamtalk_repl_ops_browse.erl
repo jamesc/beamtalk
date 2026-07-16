@@ -1066,6 +1066,19 @@ backing_source_file(Backing) ->
 %% *consumer* of both would hit `add_pre_loaded`'s collision diagnostic) —
 %% deduping here would silently hide one package's real declaration instead
 %% of surfacing both, distinguished by their `package`/`source_origin` tags.
+%%
+%% **Known gap — a package with only `type` declarations (no classes) is
+%% invisible here (BT-2915):** discovery walks `beamtalk_package:all/0`,
+%% which recognises a package solely by a non-empty `classes` app-env key
+%% (ADR 0070) — a hypothetical types-only "shared vocabulary" package with
+%% zero classes would never be enumerated, so its aliases (even public ones)
+%% never appear, regardless of the seeding-boundary logic above. Every
+%% concrete consumer this ADR ships against (stdlib's `RestartStrategy`,
+%% `JsonValue`) declares aliases alongside real classes, so this has not
+%% bitten a real package yet; broadening `beamtalk_package:all/0`'s discovery
+%% signal is shared infra touching every other consumer of that function
+%% (`browse-native-modules`, `Package packageNameFor:`, …), so it is tracked
+%% as a follow-up rather than folded into this op.
 -spec browse_type_aliases() -> [map()].
 browse_type_aliases() ->
     Packages =
@@ -1086,17 +1099,38 @@ browse_type_aliases() ->
 %% The alias rows for one package: resolve its owning app, read its declared
 %% `type_aliases` env, drop internal aliases that fail the seeding-boundary
 %% check, and tag each surviving row with the package's name + origin.
+%%
+%% Wrapped in a try/catch — unlike `native_modules_of_package/1`, whose row
+%% builder only touches `module_info/1` reflection (itself already
+%% defensively wrapped in `backing_source_file/1`) — because `alias_row/3`
+%% assumes each `type_aliases` env entry is a map (`maps:get/2,3` raises
+%% `{badmap, _}` otherwise). That assumption holds for every entry this
+%% workspace's own `beamtalk build` ever writes (`app_file.rs`
+%% `format_type_aliases_entry`), but a hand-edited or toolchain-mismatched
+%% `.app` file is still just a text file on disk — one malformed package must
+%% not take down every other package's rows in the same response, mirroring
+%% `class_row/2`'s per-class isolation.
 -spec type_aliases_of_package(binary()) -> [map()].
 type_aliases_of_package(PkgName) ->
-    case find_app_for_package(PkgName) of
-        {ok, App} ->
-            Origin = package_origin(App, PkgName),
-            [
-                alias_row(Entry, PkgName, Origin)
-             || Entry <- package_type_aliases(App),
-                alias_visible(Entry, Origin)
-            ];
-        error ->
+    try
+        case find_app_for_package(PkgName) of
+            {ok, App} ->
+                Origin = package_origin(App, PkgName),
+                [
+                    alias_row(Entry, PkgName, Origin)
+                 || Entry <- package_type_aliases(App),
+                    alias_visible(Entry, Origin)
+                ];
+            error ->
+                []
+        end
+    catch
+        Class:Reason ->
+            ?LOG_WARNING(
+                "browse-type-aliases: skipping package ~p: ~p:~p",
+                [PkgName, Class, Reason],
+                #{domain => [beamtalk, runtime]}
+            ),
             []
     end.
 

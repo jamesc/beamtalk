@@ -573,6 +573,20 @@ type_aliases_sorted_test() ->
         end
     ).
 
+%% Resilience: a malformed `type_aliases` env entry (e.g. a hand-edited or
+%% toolchain-mismatched `.app` file, not a map) must not crash the whole
+%% browse — `type_aliases_of_package/1` catches and skips, mirroring
+%% `class_row/2`'s per-class isolation elsewhere in this module.
+type_aliases_malformed_entry_does_not_crash_test() ->
+    with_stdlib_aliases(
+        [not_a_map],
+        fun() ->
+            Rows = type_aliases(),
+            ?assert(is_list(Rows)),
+            ?assertEqual([], [R || R <- Rows, maps:get(<<"package">>, R) =:= <<"stdlib">>])
+        end
+    ).
+
 %% alias_visible/2 — pure seeding-boundary decision (BT-2903).
 alias_visible_internal_project_is_visible_test() ->
     ?assert(beamtalk_repl_ops_browse:alias_visible(#{internal => true}, <<"project">>)).

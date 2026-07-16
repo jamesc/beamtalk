@@ -702,6 +702,30 @@ mod tests {
     }
 
     #[test]
+    fn test_format_type_aliases_entry_escapes_backslash_in_expansion() {
+        // BT-2903: a `Difference`-typed alias's rendered expansion contains a
+        // literal `\` (e.g. `type PublicTag = Symbol \ (#reserved | #internal)`
+        // unparses to `"Symbol \\ (#reserved | #internal)"`, see
+        // `unparse::tests::difference_type_unparse` for the Beamtalk-source
+        // form). Since the `.app` file is a literal Erlang string (escaped via
+        // `escape_erlang_string`, not a binary), an un-escaped `\` would
+        // corrupt the next character when the `.app` file is `file:consult`ed
+        // — this proves the escape survives the round trip textually.
+        let aliases = vec![AliasMetadata {
+            name: "PublicTag".to_string(),
+            expansion: "Symbol \\ (#reserved | #internal)".to_string(),
+            doc: None,
+            source_file: "src/public_tag.bt".to_string(),
+            internal: false,
+        }];
+        let result = format_type_aliases_entry(&aliases);
+        assert!(
+            result.contains(r#"expansion => "Symbol \\ (#reserved | #internal)""#),
+            "backslash must be doubled for a valid Erlang string literal. Got: {result}"
+        );
+    }
+
+    #[test]
     fn test_format_type_aliases_entry_without_doc() {
         let aliases = vec![AliasMetadata {
             name: "TimeoutMs".to_string(),
