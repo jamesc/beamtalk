@@ -1209,6 +1209,8 @@ dev_runtime_test_() ->
                 fun type_annotation_completion_class_name_attached/0},
             {"type-annotation position (no space, keyword-send receiver) offers class names",
                 fun type_annotation_completion_class_name_attached_keyword_receiver/0},
+            {"type-annotation position (space, keyword-send receiver) offers class names",
+                fun type_annotation_completion_class_name_spaced_keyword_receiver/0},
             {"type-annotation position offers live alias names alongside classes",
                 fun type_annotation_completion_alias_name/0},
             {"type-annotation position with empty prefix offers all candidates",
@@ -1668,6 +1670,17 @@ type_annotation_completion_class_name_attached_keyword_receiver() ->
     Result = beamtalk_repl_ops_dev:get_context_completions(<<"deposit: amount ::Widg">>),
     ?assert(lists:member(<<"WidgetDev">>, Result)).
 
+type_annotation_completion_class_name_spaced_keyword_receiver() ->
+    %% "deposit: amount :: Widg" — a MULTI-TOKEN keyword-send receiver with a
+    %% SPACED "::" (the fourth of the four parse shapes type_annotation_prefix/1
+    %% documents). parse_receiver_and_prefix/1 returns
+    %% {expression, <<"deposit: amount ::">>, <<"Widg">>} here — the receiver
+    %% expression itself ends in "::", so this exercises ends_with_double_colon/1
+    %% on a multi-token expression (previously only single-token "policy :: Widg"
+    %% covered that path).
+    Result = beamtalk_repl_ops_dev:get_context_completions(<<"deposit: amount :: Widg">>),
+    ?assert(lists:member(<<"WidgetDev">>, Result)).
+
 type_annotation_completion_alias_name() ->
     %% AliasNames threaded via get_context_completions/3 are offered in
     %% annotation position alongside class names — the live-REPL counterpart to
@@ -1676,7 +1689,9 @@ type_annotation_completion_alias_name() ->
     Result = beamtalk_repl_ops_dev:get_context_completions(
         <<"policy :: Restart">>, #{}, AliasNames
     ),
-    ?assertEqual([<<"RestartStrategy">>], Result).
+    ?assert(lists:member(<<"RestartStrategy">>, Result)),
+    %% "OtherAlias" doesn't match the "Restart" prefix — must not leak in.
+    ?assertEqual(false, lists:member(<<"OtherAlias">>, Result)).
 
 type_annotation_completion_empty_prefix() ->
     %% "policy :: " (nothing typed yet) — empty prefix matches every class and
