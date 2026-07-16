@@ -4332,16 +4332,11 @@ internal Actor subclass: ConnectionPool
   release: conn => ...
 ```
 
-Cross-package references to internal classes produce a compile error:
+Cross-package references to internal classes produce a compile error (`E0401`):
 
 ```text
-error[E0401]: Class 'ConnectionPool' is internal to package 'http' and cannot be referenced from 'my_app'
-  --> src/app.bt:5:12
-   |
- 5 |     http@ConnectionPool new
-   |          ^^^^^^^^^^^^^^
-   |
-   = note: 'ConnectionPool' is declared 'internal' in package 'http'
+Class 'ConnectionPool' is internal to package 'http' and cannot be referenced from 'my_app'
+  help: 'ConnectionPool' is declared 'internal' in package 'http'
 ```
 
 #### Method-Level `internal`
@@ -4361,14 +4356,11 @@ Actor subclass: HttpClient
   internal retryWithBackoff: block maxAttempts: n => ...
 ```
 
-When the compiler can determine the receiver type (via type annotations, literal class references, or type inference), cross-package sends to internal methods produce a compile error:
+When the compiler can determine the receiver type (via type annotations, literal class references, or type inference), cross-package sends to internal methods produce a compile error (`E0403`):
 
 ```text
-error[E0403]: Method 'buildHeaders:' is internal to package 'http' and cannot be called from 'my_app'
-  --> src/app.bt:10:5
-   |
-10 |     client buildHeaders: req
-   |            ^^^^^^^^^^^^^^
+Method 'buildHeaders:' is internal to package 'http' and cannot be called from 'my_app'
+  help: 'buildHeaders:' is declared 'internal' in 'HttpClient'
 ```
 
 For untyped dynamic sends where the receiver type is unknown, no enforcement — the message send succeeds at runtime, consistent with the "visibility controls dependency, not knowledge" principle.
@@ -4428,16 +4420,11 @@ internal Value subclass: TokenBuffer
   field: tokens = #()
 ```
 
-**Leaked visibility** — if an internal class appears in the public signature of a public method, the compiler emits a hard error. This prevents accidentally exposing implementation types:
+**Leaked visibility** — if an internal class appears in the public signature of a public method, the compiler emits a hard error (`E0402`). This prevents accidentally exposing implementation types:
 
 ```text
-error[E0402]: Internal class 'TokenBuffer' appears in public signature of 'Parser >> tokenize:'
-  --> src/parser.bt:12:3
-   |
-12 |   tokenize: input :: String -> TokenBuffer =>
-   |                                ^^^^^^^^^^^
-   |
-   = note: 'TokenBuffer' is declared 'internal' — make it public, or change the return type
+Internal class 'TokenBuffer' appears in public signature of 'Parser >> tokenize:'
+  help: 'TokenBuffer' is declared 'internal' — make it public, or change the type
 ```
 
 All methods on an internal class are effectively internal. The method-level modifier is only meaningful on public classes.

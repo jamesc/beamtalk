@@ -81,3 +81,36 @@ tc := TypedCounter spawn
 // `myList collect: [:x | x] <TAB>` — myList is untyped (Dynamic) → graceful fallback.
 :complete myList collect: [:x | x]
 // =>
+
+// ===========================================================================
+// TYPE-ANNOTATION-POSITION COMPLETION — class/protocol + alias names (BT-2918)
+// ===========================================================================
+//
+// Immediately after `::`, the live `complete` op now offers class/protocol
+// names — same as the static LSP path — plus this session's live type
+// alias names (ADR 0108 Phase 8), the live-REPL counterpart to
+// completion_provider.rs's add_alias_name_completions (BT-2901).
+//
+// get_completions() (the harness helper behind `:complete`) always appends a
+// trailing space to simulate pressing TAB right after the last full token —
+// needed so chain-resolution cases above (`"hello" size <TAB>`) distinguish
+// "complete on the *result* of size" from "complete String methods starting
+// with size". That convention means a *partial* type name typed right after
+// `::` (no space) can't be exercised through this harness — the appended
+// space would land inside the receiver expression instead of after `::`,
+// same as it would for any other in-progress token. Empty prefix (bare
+// `::<TAB>`, nothing typed yet) is unaffected and still exercises annotation-
+// position detection precisely — see beamtalk_repl_ops_dev_tests.erl's
+// type_annotation_completion_* tests for partial-prefix filtering coverage.
+
+// A live class name is offered in annotation position.
+:complete restartPolicy ::
+// => INCLUDES:Integer
+
+// A session-declared type alias, from an earlier turn, joins class/protocol
+// names in the same position.
+type RestartStrategy = #permanent | #transient | #temporary
+// => RestartStrategy
+
+:complete restartPolicy ::
+// => INCLUDES:RestartStrategy

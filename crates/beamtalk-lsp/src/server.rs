@@ -1959,7 +1959,7 @@ impl LanguageServer for Backend {
         // Compute everything that depends on `svc` up front so the lock is
         // released before any async runtime call (delegate_nav_query awaits
         // a runtime round-trip when the flag is on).
-        let (pos, runtime_query, alias_incomplete_warning) = {
+        let (pos, runtime_query, incomplete_coverage_warning) = {
             let svc = self.service.lock().expect("service lock poisoned");
             let Some(source) = svc.file_source(&path) else {
                 return Ok(None);
@@ -1979,18 +1979,28 @@ impl LanguageServer for Backend {
             // a caller trusting it could delete an alias a not-yet-compiled
             // file still uses. Surface that via `window/showMessage` below
             // rather than staying silent.
-            let alias_incomplete_warning =
-                !svc.is_project_complete() && svc.alias_name_at(&path, pos).is_some();
-            (pos, runtime_query, alias_incomplete_warning)
+            //
+            // BT-2919: a plain `alias_name_at` check alone misses the case
+            // where the *alias's own declaring file* hasn't been indexed yet
+            // — `Foo` in `policy :: Foo` doesn't look like a known alias if
+            // `type Foo = ...` hasn't been compiled, even though the cursor
+            // position proves it can only be a class/protocol/alias
+            // reference. `has_incomplete_reference_coverage_at` closes that
+            // gap (and the equivalent one for not-yet-indexed class names)
+            // without needing the name to resolve first, in a single AST
+            // walk of the cursor position.
+            let incomplete_coverage_warning =
+                !svc.is_project_complete() && svc.has_incomplete_reference_coverage_at(&path, pos);
+            (pos, runtime_query, incomplete_coverage_warning)
         };
 
-        if alias_incomplete_warning {
+        if incomplete_coverage_warning {
             self.client
                 .show_message(
                     MessageType::WARNING,
-                    "Find-references for this type alias may be incomplete: not all workspace \
-                     files have been compiled yet, so references in uncompiled files aren't \
-                     included in this result.",
+                    "Find-references for this name may be incomplete: not all workspace files \
+                     have been compiled yet, so references in uncompiled files aren't included \
+                     in this result.",
                 )
                 .await;
         }
@@ -6538,6 +6548,44 @@ mod tests {
             pending.is_none(),
             "expected no notification when the project is complete, got {pending:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn references_warns_on_unresolved_type_reference_when_declaring_file_unindexed() {
+        // BT-2919: `Foo` is referenced in parameter-annotation position
+        // (`policy :: Foo`) but no file declaring `type Foo = ...` (or
+        // `Object subclass: Foo`) has ever been opened/indexed in this test.
+        // `alias_name_at` alone would return `None` here (it only recognizes
+        // already-registered aliases), which used to mean the incompleteness
+        // warning never fired for this case — even though the cursor
+        // position proves `Foo` can only be a class/protocol/alias
+        // reference, and the project isn't known-complete. The handler must
+        // still surface the `window/showMessage` warning via
+        // `unresolved_type_reference_at`.
+        use futures_util::StreamExt;
+
+        const UNRESOLVED_TYPE_REF_SOURCE: &str =
+            "Object subclass: Supervisor\n  restart: policy :: Foo => policy\n";
+
+        let (service, mut socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+        let path = Utf8PathBuf::from_path_buf(
+            unique_temp_dir("bt-2919-unresolved-type-ref").with_extension("bt"),
+        )
+        .expect("temp path is UTF-8");
+        let uri = open_test_file(backend, &path, UNRESOLVED_TYPE_REF_SOURCE);
+
+        // "  restart: policy :: Foo => policy" — `Foo` occupies columns 21-23.
+        backend
+            .references(references_params(uri, 1, 22, true))
+            .await
+            .expect("rpc ok");
+
+        let notification = socket
+            .next()
+            .await
+            .expect("expected a window/showMessage notification");
+        assert_eq!(notification.method(), "window/showMessage");
     }
 
     #[test]

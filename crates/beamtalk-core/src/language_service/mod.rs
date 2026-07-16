@@ -178,6 +178,25 @@ struct FileData {
     diagnostics: Vec<Diagnostic>,
 }
 
+/// Tags whether an identifier match from [`SimpleLanguageService::find_identifier_at_position`]
+/// came from a syntactic type-reference position or a plain expression.
+///
+/// This is a purely syntactic classification — it doesn't require the name to
+/// resolve to anything. `TypeReference` covers every AST position where the
+/// grammar guarantees a name can only denote a class, protocol, or alias: type
+/// annotations (state/class-var/param/return, alias RHS), superclass clauses,
+/// `extending:` targets, type-parameter bounds, and constructor/type-pattern
+/// class names. `Expression` covers everything else (locals, message args,
+/// fields, class-literal references, declaration names). BT-2919: this lets
+/// callers like [`SimpleLanguageService::unresolved_type_reference_at`] detect
+/// "cursor is on a name that must be a class/alias, but isn't a known one yet"
+/// without waiting for the name to resolve.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IdentifierContext {
+    TypeReference,
+    Expression,
+}
+
 impl SimpleLanguageService {
     /// Creates a new language service with an empty `ProjectIndex`.
     #[must_use]
@@ -493,7 +512,7 @@ impl SimpleLanguageService {
         ) {
             return Some(NavQuery::SendersOf(selector_name));
         }
-        let (ident, _span) = self.find_identifier_at_position(file, position)?;
+        let (ident, _span, _ctx) = self.find_identifier_at_position(file, position)?;
         if self.project_index.hierarchy().has_class(&ident.name) {
             return Some(NavQuery::ReferencesTo(ident.name));
         }
@@ -527,11 +546,72 @@ impl SimpleLanguageService {
     /// `ast_declarations_for_cursor` route never fires for one.
     #[must_use]
     pub fn alias_name_at(&self, file: &Utf8PathBuf, position: Position) -> Option<EcoString> {
-        let (ident, _span) = self.find_identifier_at_position(file, position)?;
+        let (ident, _span, _ctx) = self.find_identifier_at_position(file, position)?;
         self.project_index
             .alias_registry()
             .has_alias(&ident.name)
             .then_some(ident.name)
+    }
+
+    /// Returns `true` when the cursor at `position` sits on an identifier that
+    /// either resolves to a known alias, or is in a syntactic type-reference
+    /// position that doesn't resolve to any known class, protocol, or alias.
+    ///
+    /// Single-AST-walk combination of [`Self::alias_name_at`] and
+    /// [`Self::unresolved_type_reference_at`] for the LSP `references()`
+    /// incompleteness-warning gate (BT-2919).
+    ///
+    /// The two checks are mutually exclusive at a given cursor — an alias
+    /// name that already resolves can't also count as "unresolved" — so
+    /// calling both separately runs [`Self::find_identifier_at_position`]'s
+    /// full AST walk twice per request for no benefit. This does the walk
+    /// once and evaluates both conditions against the same match.
+    #[must_use]
+    pub fn has_incomplete_reference_coverage_at(
+        &self,
+        file: &Utf8PathBuf,
+        position: Position,
+    ) -> bool {
+        let Some((ident, _span, ctx)) = self.find_identifier_at_position(file, position) else {
+            return false;
+        };
+        if self.project_index.alias_registry().has_alias(&ident.name) {
+            return true;
+        }
+        ctx == IdentifierContext::TypeReference
+            && !self.project_index.hierarchy().has_class(&ident.name)
+    }
+
+    /// Returns the name at `position` when the cursor sits on an identifier in
+    /// a syntactic type-reference position (a type annotation, superclass
+    /// clause, `extending:` target, type-param bound, or constructor/type
+    /// pattern class name) that does **not** resolve to any known class,
+    /// protocol, or alias (BT-2919).
+    ///
+    /// This is the counterpart to [`Self::alias_name_at`] for the gap BT-2919
+    /// identified: `alias_name_at` (and the `has_class`/`has_alias` routing
+    /// gate in [`Self::find_references`]) can only recognize a name that's
+    /// *already* registered in the project index — but if the name's own
+    /// declaring file hasn't been indexed yet (preload hasn't reached it, or
+    /// the preload budget ran out first), the name looks like a plain unknown
+    /// identifier even though the cursor position proves it can only be a
+    /// class, protocol, or alias reference. The LSP genuinely cannot tell
+    /// whether this is a typo or an as-yet-unindexed name, so callers use this
+    /// to decide whether an empty or short find-references result needs the
+    /// same "coverage may be incomplete" warning that a *resolved* alias gets.
+    #[must_use]
+    pub fn unresolved_type_reference_at(
+        &self,
+        file: &Utf8PathBuf,
+        position: Position,
+    ) -> Option<EcoString> {
+        let (ident, _span, ctx) = self.find_identifier_at_position(file, position)?;
+        if ctx != IdentifierContext::TypeReference {
+            return None;
+        }
+        let known = self.project_index.hierarchy().has_class(&ident.name)
+            || self.project_index.alias_registry().has_alias(&ident.name);
+        (!known).then_some(ident.name)
     }
 
     /// BT-2240: Find the **declaration sites** (method-definition headers)
@@ -669,7 +749,7 @@ impl SimpleLanguageService {
         // Re-use the identifier walker the references handler uses — it
         // already rejects selectors and parameter names, and returns the
         // identifier *and* its span at the cursor.
-        let (ident, _span) = self.find_identifier_at_position(file, position)?;
+        let (ident, _span, _ctx) = self.find_identifier_at_position(file, position)?;
         if !self.project_index.hierarchy().has_class(&ident.name) {
             return None;
         }
@@ -982,7 +1062,7 @@ impl SimpleLanguageService {
         &self,
         file: &Utf8PathBuf,
         position: Position,
-    ) -> Option<(Identifier, Span)> {
+    ) -> Option<(Identifier, Span, IdentifierContext)> {
         let file_data = self.get_file(file)?;
         let offset = position.to_byte_offset(&file_data.source)?;
         let offset_val = offset.get();
@@ -1007,7 +1087,11 @@ impl SimpleLanguageService {
         // ...` or a reference to another alias inside the RHS.
         for alias in &file_data.module.type_aliases {
             if offset_val >= alias.name.span.start() && offset_val < alias.name.span.end() {
-                return Some((alias.name.clone(), alias.name.span));
+                return Some((
+                    alias.name.clone(),
+                    alias.name.span,
+                    IdentifierContext::TypeReference,
+                ));
             }
             if let Some(ident) =
                 Self::find_identifier_in_type_annotation(&alias.annotation, offset_val)
@@ -1042,13 +1126,21 @@ impl SimpleLanguageService {
         class: &crate::ast::ClassDefinition,
         offset: ByteOffset,
         offset_val: u32,
-    ) -> Option<(Identifier, Span)> {
+    ) -> Option<(Identifier, Span, IdentifierContext)> {
         if offset_val >= class.name.span.start() && offset_val < class.name.span.end() {
-            return Some((class.name.clone(), class.name.span));
+            return Some((
+                class.name.clone(),
+                class.name.span,
+                IdentifierContext::TypeReference,
+            ));
         }
         if let Some(ref superclass) = class.superclass {
             if offset_val >= superclass.span.start() && offset_val < superclass.span.end() {
-                return Some((superclass.clone(), superclass.span));
+                return Some((
+                    superclass.clone(),
+                    superclass.span,
+                    IdentifierContext::TypeReference,
+                ));
             }
         }
         if let Some(ident) = Self::find_identifier_in_type_params(&class.type_params, offset_val) {
@@ -1084,13 +1176,21 @@ impl SimpleLanguageService {
     fn find_identifier_in_protocol(
         protocol: &crate::ast::ProtocolDefinition,
         offset_val: u32,
-    ) -> Option<(Identifier, Span)> {
+    ) -> Option<(Identifier, Span, IdentifierContext)> {
         if offset_val >= protocol.name.span.start() && offset_val < protocol.name.span.end() {
-            return Some((protocol.name.clone(), protocol.name.span));
+            return Some((
+                protocol.name.clone(),
+                protocol.name.span,
+                IdentifierContext::TypeReference,
+            ));
         }
         if let Some(ref extending) = protocol.extending {
             if offset_val >= extending.span.start() && offset_val < extending.span.end() {
-                return Some((extending.clone(), extending.span));
+                return Some((
+                    extending.clone(),
+                    extending.span,
+                    IdentifierContext::TypeReference,
+                ));
             }
         }
         if let Some(ident) = Self::find_identifier_in_type_params(&protocol.type_params, offset_val)
@@ -1127,9 +1227,13 @@ impl SimpleLanguageService {
         smd: &crate::ast::StandaloneMethodDefinition,
         offset: ByteOffset,
         offset_val: u32,
-    ) -> Option<(Identifier, Span)> {
+    ) -> Option<(Identifier, Span, IdentifierContext)> {
         if offset_val >= smd.class_name.span.start() && offset_val < smd.class_name.span.end() {
-            return Some((smd.class_name.clone(), smd.class_name.span));
+            return Some((
+                smd.class_name.clone(),
+                smd.class_name.span,
+                IdentifierContext::TypeReference,
+            ));
         }
         Self::find_identifier_in_method_signature_and_body(
             &smd.method.parameters,
@@ -1148,7 +1252,7 @@ impl SimpleLanguageService {
         body: &[crate::ast::ExpressionStatement],
         offset: ByteOffset,
         offset_val: u32,
-    ) -> Option<(Identifier, Span)> {
+    ) -> Option<(Identifier, Span, IdentifierContext)> {
         for parameter in parameters {
             if let Some(type_annotation) = &parameter.type_annotation {
                 if let Some(ident) =
@@ -1181,11 +1285,11 @@ impl SimpleLanguageService {
     fn find_identifier_in_type_params(
         type_params: &[crate::ast::TypeParamDecl],
         offset_val: u32,
-    ) -> Option<(Identifier, Span)> {
+    ) -> Option<(Identifier, Span, IdentifierContext)> {
         for param in type_params {
             if let Some(bound) = &param.bound {
                 if offset_val >= bound.span.start() && offset_val < bound.span.end() {
-                    return Some((bound.clone(), bound.span));
+                    return Some((bound.clone(), bound.span, IdentifierContext::TypeReference));
                 }
             }
         }
@@ -1195,11 +1299,15 @@ impl SimpleLanguageService {
     fn find_identifier_in_type_annotation(
         annotation: &TypeAnnotation,
         offset_val: u32,
-    ) -> Option<(Identifier, Span)> {
+    ) -> Option<(Identifier, Span, IdentifierContext)> {
         match annotation {
             TypeAnnotation::Simple(identifier) => {
                 if offset_val >= identifier.span.start() && offset_val < identifier.span.end() {
-                    Some((identifier.clone(), identifier.span))
+                    Some((
+                        identifier.clone(),
+                        identifier.span,
+                        IdentifierContext::TypeReference,
+                    ))
                 } else {
                     None
                 }
@@ -1211,7 +1319,7 @@ impl SimpleLanguageService {
                 base, parameters, ..
             } => {
                 if offset_val >= base.span.start() && offset_val < base.span.end() {
-                    return Some((base.clone(), base.span));
+                    return Some((base.clone(), base.span, IdentifierContext::TypeReference));
                 }
                 parameters
                     .iter()
@@ -1230,7 +1338,11 @@ impl SimpleLanguageService {
             }
             TypeAnnotation::ClassOf { class_name, .. } => {
                 if offset_val >= class_name.span.start() && offset_val < class_name.span.end() {
-                    Some((class_name.clone(), class_name.span))
+                    Some((
+                        class_name.clone(),
+                        class_name.span,
+                        IdentifierContext::TypeReference,
+                    ))
                 } else {
                     None
                 }
@@ -1245,7 +1357,7 @@ impl SimpleLanguageService {
     fn find_identifier_in_expr(
         expr: &Expression,
         offset: ByteOffset,
-    ) -> Option<(Identifier, Span)> {
+    ) -> Option<(Identifier, Span, IdentifierContext)> {
         let offset_val = offset.get();
         let span = expr.span();
         if offset_val < span.start() || offset_val >= span.end() {
@@ -1255,14 +1367,14 @@ impl SimpleLanguageService {
         match expr {
             Expression::Identifier(ident) => {
                 if offset_val >= ident.span.start() && offset_val < ident.span.end() {
-                    Some((ident.clone(), ident.span))
+                    Some((ident.clone(), ident.span, IdentifierContext::Expression))
                 } else {
                     None
                 }
             }
             Expression::ClassReference { name, .. } => {
                 if offset_val >= name.span.start() && offset_val < name.span.end() {
-                    Some((name.clone(), name.span))
+                    Some((name.clone(), name.span, IdentifierContext::Expression))
                 } else {
                     None
                 }
@@ -1292,7 +1404,7 @@ impl SimpleLanguageService {
                 receiver, field, ..
             } => {
                 if offset_val >= field.span.start() && offset_val < field.span.end() {
-                    Some((field.clone(), field.span))
+                    Some((field.clone(), field.span, IdentifierContext::Expression))
                 } else {
                     Self::find_identifier_in_expr(receiver, offset)
                 }
@@ -1346,7 +1458,7 @@ impl SimpleLanguageService {
     fn find_identifier_in_pattern(
         pattern: &Pattern,
         offset_val: u32,
-    ) -> Option<(Identifier, Span)> {
+    ) -> Option<(Identifier, Span, IdentifierContext)> {
         let span = pattern.span();
         if offset_val < span.start() || offset_val >= span.end() {
             return None;
@@ -1356,7 +1468,7 @@ impl SimpleLanguageService {
                 class, keywords, ..
             } => {
                 if offset_val >= class.span.start() && offset_val < class.span.end() {
-                    return Some((class.clone(), class.span));
+                    return Some((class.clone(), class.span, IdentifierContext::TypeReference));
                 }
                 keywords
                     .iter()
@@ -1387,7 +1499,7 @@ impl SimpleLanguageService {
                 .find_map(|seg| Self::find_identifier_in_pattern(&seg.value, offset_val)),
             Pattern::Type { class, .. } => {
                 if offset_val >= class.span.start() && offset_val < class.span.end() {
-                    Some((class.clone(), class.span))
+                    Some((class.clone(), class.span, IdentifierContext::TypeReference))
                 } else {
                     // The binding (e.g. `path` in `path :: String`) is a
                     // local variable, not a class reference — this function
@@ -1718,7 +1830,7 @@ impl LanguageService for SimpleLanguageService {
         }
 
         // 3. Try identifier-based go-to-definition (cursor on a name)
-        let (ident, _span) = self.find_identifier_at_position(file, position)?;
+        let (ident, _span, _ctx) = self.find_identifier_at_position(file, position)?;
 
         // Cross-file definition lookup via definition provider
         crate::queries::definition_provider::find_definition_cross_file(
@@ -1767,7 +1879,7 @@ impl LanguageService for SimpleLanguageService {
         }
 
         // 3. Try identifier-based references (cursor on a name)
-        let Some((ident, _span)) = self.find_identifier_at_position(file, position) else {
+        let Some((ident, _span, ctx)) = self.find_identifier_at_position(file, position) else {
             return Vec::new();
         };
 
@@ -1779,8 +1891,21 @@ impl LanguageService for SimpleLanguageService {
         // `find_class_references` itself walks `module.type_aliases` (both
         // the declaration site and RHS references), so it already handles
         // an alias name correctly once routed here.
+        //
+        // BT-2919: also route here when the cursor is in a syntactic
+        // type-reference position (annotation, superclass, `extending:`,
+        // type-param bound, constructor/type pattern) even if the name
+        // *doesn't* resolve to a known class/protocol/alias yet — e.g. the
+        // name's declaring file hasn't been indexed. `find_class_references`
+        // matches by name text across every indexed file rather than
+        // requiring the name to be pre-registered, so it's always a superset
+        // of what the identifier-only fallback below could find for this
+        // position; that fallback only walks `Expression` nodes and never
+        // looks at type annotations at all, so it was structurally
+        // guaranteed to return nothing here.
         if self.project_index.hierarchy().has_class(&ident.name)
             || self.project_index.alias_registry().has_alias(&ident.name)
+            || ctx == IdentifierContext::TypeReference
         {
             return crate::queries::references_provider::find_class_references(
                 &ident.name,
@@ -4019,6 +4144,92 @@ mod tests {
             Some(EcoString::from("RestartStrategy"))
         );
         assert_eq!(service.alias_name_at(&file, Position::new(2, 20)), None);
+    }
+
+    /// BT-2919: a cursor on `Foo` in `policy :: Foo` (parameter-annotation
+    /// position) must be recognized as an unresolved type reference even
+    /// though the file declaring `type Foo = ...` is deliberately never
+    /// passed to `update_file` here — this simulates workspace preload not
+    /// having reached that file yet (or the preload budget exhausting
+    /// first). `alias_name_at` alone misses this case because it requires
+    /// the alias to already be registered in the project-wide index.
+    #[test]
+    fn unresolved_type_reference_at_detects_annotation_position_before_declaring_file_indexed() {
+        let mut service = SimpleLanguageService::new();
+        let file_b = Utf8PathBuf::from("supervisor.bt");
+        service.update_file(
+            file_b.clone(),
+            "Object subclass: Supervisor\n  restart: policy :: Foo => policy\n".to_string(),
+        );
+
+        assert!(
+            !service.is_project_complete(),
+            "preload hasn't run in this test; project_complete defaults to false"
+        );
+        // "  restart: policy :: Foo => policy" — `Foo` occupies columns 21-23.
+        assert_eq!(
+            service.unresolved_type_reference_at(&file_b, Position::new(1, 22)),
+            Some(EcoString::from("Foo")),
+            "cursor on `Foo` in annotation position must be flagged as an \
+             unresolved type reference even though no file declares it yet"
+        );
+        assert_eq!(
+            service.alias_name_at(&file_b, Position::new(1, 22)),
+            None,
+            "alias_name_at only recognizes already-registered aliases"
+        );
+
+        // find_references must route through the class-aware walker (which
+        // matches by name text, not registry membership) instead of
+        // silently falling through to the identifier-only fallback, which
+        // never looks at type annotations and would return nothing here.
+        let refs = service.find_references(&file_b, Position::new(1, 22));
+        assert_eq!(
+            refs.len(),
+            1,
+            "expected the annotation-site reference itself, got {refs:?}"
+        );
+    }
+
+    /// BT-2919: `has_incomplete_reference_coverage_at` must agree with the
+    /// two checks it combines (`alias_name_at` for an already-resolved
+    /// alias, `unresolved_type_reference_at` for a not-yet-indexed one) —
+    /// it's a single-AST-walk optimization, not a behavior change.
+    #[test]
+    fn has_incomplete_reference_coverage_at_matches_split_checks() {
+        let mut service = SimpleLanguageService::new();
+        let file_a = Utf8PathBuf::from("aliases.bt");
+        let file_b = Utf8PathBuf::from("supervisor.bt");
+        service.update_file(
+            file_a,
+            "type RestartStrategy = #temporary | #transient | #permanent\n".to_string(),
+        );
+        service.update_file(
+            file_b.clone(),
+            "Object subclass: Supervisor\n  restart: policy :: RestartStrategy => policy\n"
+                .to_string(),
+        );
+
+        // Resolved alias reference (RestartStrategy is indexed via file_a).
+        assert!(service.has_incomplete_reference_coverage_at(&file_b, Position::new(1, 22)));
+
+        // Unresolved type-reference position (Foo, at columns 19-21, is
+        // never declared anywhere).
+        let file_c = Utf8PathBuf::from("unresolved.bt");
+        service.update_file(
+            file_c.clone(),
+            "Object subclass: Widget\n  render: shape :: Foo => shape\n".to_string(),
+        );
+        assert!(service.has_incomplete_reference_coverage_at(&file_c, Position::new(1, 20)));
+
+        // Method selector (bar, at columns 2-4): neither check fires — method
+        // headers are not walked by find_identifier_at_position.
+        let file_d = Utf8PathBuf::from("plain.bt");
+        service.update_file(
+            file_d.clone(),
+            "Object subclass: Plain\n  bar => 1\n".to_string(),
+        );
+        assert!(!service.has_incomplete_reference_coverage_at(&file_d, Position::new(1, 3)));
     }
 
     /// BT-2027: `SimpleLanguageService::diagnostics` must hand off the

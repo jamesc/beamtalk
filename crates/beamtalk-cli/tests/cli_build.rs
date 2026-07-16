@@ -77,6 +77,80 @@ fn build_force_recompiles_unchanged_sources() {
 }
 
 // ---------------------------------------------------------------------------
+// BT-2920: E0401/E0402 visibility checks must fire at build time
+// ---------------------------------------------------------------------------
+
+#[test]
+fn build_fails_with_e0402_for_cross_file_internal_class_leak() {
+    // Regression for BT-2920: `current_package` was never threaded into the
+    // CLI build path, so `check_class_visibility` silently emitted zero
+    // diagnostics. Mirrors docs/beamtalk-language-features.md's
+    // TokenBuffer/Parser example — the internal class lives in a *sibling*
+    // file from the public method that leaks it, exercising the cross-file
+    // package-stamping fix (`ClassHierarchy::stamp_package_on_infos`), not
+    // just same-file visibility.
+    let project = cli_common::fixture_project();
+    std::fs::write(
+        project.path().join("src/TokenBuffer.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         internal Object subclass: TokenBuffer\n\
+         \x20\x20data => nil\n",
+    )
+    .unwrap();
+    std::fs::write(
+        project.path().join("src/Parser.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Object subclass: Parser\n\
+         \x20\x20tokenize: input :: String -> TokenBuffer => nil\n",
+    )
+    .unwrap();
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("build")
+        .assert()
+        .failure()
+        // miette word-wraps the message to terminal width, so match the two
+        // halves separately rather than the exact single-line string.
+        .stderr(
+            contains("Internal class 'TokenBuffer' appears in public signature of")
+                .and(contains("tokenize:'")),
+        );
+}
+
+#[test]
+fn build_fails_with_e0402_for_internal_type_alias_leak() {
+    // Regression for BT-2920 (ADR 0108 Semantics, BT-2898): a public type
+    // alias whose expansion transitively reaches an internal alias must fail
+    // the build with E0402, not just an LSP squiggle.
+    let project = cli_common::fixture_project();
+    std::fs::write(
+        project.path().join("src/Types.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         internal type Priv = Integer\n\
+         type Pub = Priv | String\n",
+    )
+    .unwrap();
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("build")
+        .assert()
+        .failure()
+        // See the comment in the class-leak test above re: miette wrapping.
+        .stderr(
+            contains("Internal type alias 'Priv' appears in the expansion of public type alias")
+                .and(contains("'Pub'")),
+        );
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
