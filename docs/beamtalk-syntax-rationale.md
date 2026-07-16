@@ -1,6 +1,6 @@
 # Beamtalk Syntax Rationale
 
-**Status:** Complete — Syntax design decisions finalized. Updated 2026-03-20 to reflect ADR 0041 (universal block mutations), ADR 0036 (metaclass tower), ADR 0059 (supervision), and REPL inline class support.
+**Status:** Complete — Syntax design decisions finalized. Updated 2026-07-16 to reflect ADR 0041 (universal block mutations), ADR 0036 (metaclass tower), ADR 0059 (supervision), REPL inline class support, and ADR 0108 (named type alias `type Name = ...` declarations).
 
 > **tl;dr** — Beamtalk is Smalltalk-**like**, not Smalltalk-**compatible**. We use Smalltalk's message-passing syntax with modern pragmatic improvements: `//` comments, standard math precedence, optional statement terminators, field access, and string interpolation. This makes Beamtalk familiar to Smalltalkers while removing friction for modern developers.
 
@@ -339,6 +339,26 @@ Despite being parsed as syntax, the compiler and runtime support dynamic class c
 - **Full metaclass tower** — `Counter class` returns a metaclass object (ADR 0036). Classes are first-class objects with `methods`, `superclass`, `allMethods`, and `respondsTo:`.
 
 The design is: **syntax for ergonomics, dynamic semantics for liveness.** The parser treats `subclass:` as syntax to enable static analysis and fast compilation, but the runtime supports the dynamic class creation and modification that Smalltalk developers expect.
+
+### Type Alias Declaration: Dedicated Form vs. Keyword Message
+
+**The question:** how should `type RestartStrategy = #temporary | #transient | #permanent` (ADR 0108, naming a reusable type annotation) be spelled? Two forms were seriously considered:
+
+```beamtalk
+// Chosen — dedicated declaration form
+type RestartStrategy = #temporary | #transient | #permanent
+
+// Rejected — keyword-message style, following `Protocol define:`
+Type define: RestartStrategy as: #temporary | #transient | #permanent
+```
+
+The keyword-message form has a real uniformity argument behind it: `subclass:` and `Protocol define:` are both keyword-message-shaped declarations (or, per the section above, *parsed as* keyword messages), so spelling a third declaration kind the same way is "discoverable by analogy" — learn one declaration shape, recognize all three.
+
+**Why a dedicated form was chosen instead — the analogy doesn't hold.** `subclass:`/`Protocol define:` describe *runtime-reflective objects*: a class is something you later send `new` or `methods` to; a protocol is something you send `requiredMethods` to. Both `Object` and `Protocol` are real receivers with a real metaclass tower behind them (ADR 0036). A type alias has none of this — it is **pure compile-time erasure** (see [Named Type Aliases](beamtalk-language-features.md#named-type-aliases-type-declarations-adr-0108)): `RestartStrategy` never becomes a BEAM module, is never a message receiver, and has no runtime representation to reflect on. Dressing its declaration as a send to a pseudo-class `Type` — which, unlike `Protocol`, is not a real registry surface — would be a **false affordance**: it invites `Type respondsTo: #define:`-style reasoning about an object that doesn't exist. Honesty of form outweighs the uniformity argument here, the same trade this document's [Class Definition](#class-definition-message-send--syntax) section already makes for `subclass:` itself (parsed syntax that merely *looks* like a send, chosen over inventing yet another shape).
+
+A dedicated `type` form also wins on the feature's own terms: the whole point of naming a union is to make repeating it *cheap* — `Type define: X as: ...` is three keywords longer for zero expressive gain, working against the ergonomics the feature exists to deliver. And every language a newcomer might arrive from spells an alias this way — Erlang `-type restart() :: ... .`, Gleam `type X = ...`, TypeScript `type X = ...`, Elixir `@type` — so `type Name = ...` is guessable cold, with no Beamtalk-specific lookup required.
+
+**Parsing cost is bounded.** `type` becomes a contextual keyword only in top-level declaration position (`type` + uppercase identifier + `=`, a three-token lookahead) — it stays a legal identifier everywhere else (`type := 5`, `foo type`, `type printString`), so no reserved word is added and no existing code can break. See ADR 0108's Decision section and Rejected B for the full steelman on both sides.
 
 ---
 

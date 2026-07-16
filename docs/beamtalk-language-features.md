@@ -17,11 +17,11 @@ Language features for Beamtalk. See [beamtalk-principles.md](beamtalk-principles
   - [Erlang FFI](#erlang-ffi)
   - [Loading Code into the Workspace](#loading-code-into-the-workspace)
 - [Gradual Typing (ADR 0025)](#gradual-typing-adr-0025)
-  - [Named Type Aliases (`type` Declarations) (ADR 0108)](#named-type-aliases-type-declarations-adr-0108)
 - [Parametric Types — Generics (ADR 0068)](#parametric-types--generics-adr-0068)
 - [Structural Protocols (ADR 0068)](#structural-protocols-adr-0068)
   - [Printable Protocol and Display Methods](#printable-protocol-and-display-methods)
 - [Union Types and Narrowing (ADR 0068)](#union-types-and-narrowing-adr-0068)
+  - [Named Type Aliases (`type` Declarations) (ADR 0108)](#named-type-aliases-type-declarations-adr-0108)
 - [Actor Message Passing](#actor-message-passing)
 - [Server — OTP Interop (ADR 0065)](#server--otp-interop-adr-0065)
 - [Supervision Trees (ADR 0059)](#supervision-trees-adr-0059)
@@ -1114,45 +1114,6 @@ klass instanceCount         // resolves class-side method
 - Complex annotations (e.g., unions/generics) are parsed and accepted; deeper checking is phased in.
 - `Self` in return position resolves to the static receiver class. Using `Self` as a parameter type is an error (unsound with subclassing).
 
-### Named Type Aliases (`type` Declarations) (ADR 0108)
-
-A `type` declaration introduces a transparent type alias — a name for an existing type annotation:
-
-```beamtalk
-type RestartStrategy = #temporary | #transient | #permanent
-
-type OptionalString = String | Nil
-
-type JsonKey = String | Symbol
-```
-
-The alias expands to its structural annotation everywhere type annotations are used — parameter types, return types, typed locals, and `match:`/`matchExhaustive:` exhaustiveness checking. A type alias is purely compile-time; it is erased at codegen with no runtime representation.
-
-```beamtalk
-type Direction = #north | #south | #east | #west
-
-Object subclass: Compass
-  heading: h :: Direction =>
-    h matchExhaustive: [
-      #north -> 0;
-      #south -> 180;
-      #east  -> 90;
-      #west  -> 270
-    ]
-
-  defaultHeading -> Direction => #north
-```
-
-**`type` is a contextual keyword.** It is recognized only at top-level declaration position via a three-token lookahead (`type` + uppercase identifier + `=`). It remains a legal identifier everywhere else — `type := 5`, `foo type`, `type printString` are all unaffected.
-
-**Constraints:**
-
-- Single-letter names are rejected at parse time (reserved for ADR 0068's implicit method-local type parameters): `type T = Integer | Nil` produces an error.
-- Alias names share the class/protocol namespace — declaring an alias with the same name as an existing class or protocol is a compile error.
-- The RHS accepts any type annotation: unions (`|`), singletons (`#foo`), generics (`List(Integer)`), difference (`\`), intersection (`&`), and combinations.
-- Parametric aliases (`type Foo(T) = ...`) are not yet supported.
-- Doc comments (`///`) above a `type` declaration are preserved and shown by `:help`.
-
 ### Local Variable Type Annotations
 
 Local variables can carry a type annotation using `name :: Type := expr`. The declared type overrides the inferred type of the right-hand side, which is useful at type-erasure boundaries (FFI returns, deserialization, untyped APIs). The annotation is erased at codegen — there is no runtime effect.
@@ -1744,6 +1705,92 @@ narrow -> A & (B \ #c) => ...
 The lexer also greedily merges `\\` (two backslashes) into the Smalltalk modulo selector, so a doubled backslash in type position — the natural typo for `\` — gets a targeted diagnostic ("did you mean `\`?") instead of a confusing generic parse error.
 
 Difference types show up in [Control Flow Narrowing](#control-flow-narrowing) too: the false branch of a singleton equality test (`x =:= #foo`) narrows `x` to `Symbol \ #foo`, and hover displays that co-finite type directly.
+
+### Named Type Aliases (`type` Declarations) (ADR 0108)
+
+A `type` declaration names an existing type annotation for reuse across signatures:
+
+```beamtalk
+/// How a supervised child restarts after exit.
+type RestartStrategy = #temporary | #transient | #permanent
+
+type OptionalString = String | Nil
+type JsonKey = String | Symbol
+type Timeout = Integer | #infinity
+type PublicTag = Symbol \ (#reserved | #internal)
+type PrintableInt = Integer & Printable
+```
+
+**Transparent, not nominal.** `RestartStrategy` and `#temporary | #transient | #permanent` are the same type — a reference to the alias expands to its right-hand-side annotation everywhere type annotations are resolved: parameter types, return types, typed locals, both sides of `|`/`\`/`&`, [narrowing](#control-flow-narrowing), and `match:`/`matchExhaustive:` exhaustiveness. Two aliases with the same expansion are interchangeable, and there is no runtime tag distinguishing them — a `RestartStrategy` value *is* the atom `temporary`, exactly the value a hand-written union annotation would carry. A `type` declaration is erased entirely at compile time: no BEAM module, no runtime object, no live process.
+
+```beamtalk
+type Direction = #north | #south | #east | #west
+
+Object subclass: Compass
+  heading: h :: Direction =>
+    h matchExhaustive: [
+      #north -> 0;
+      #south -> 180;
+      #east  -> 90;
+      #west  -> 270
+    ]
+
+  defaultHeading -> Direction => #north
+```
+
+**`type` is a contextual keyword.** It is recognized only at top-level declaration position via a three-token lookahead (`type` + uppercase identifier + `=`). It remains a legal identifier everywhere else — `type := 5`, `foo type`, `type printString` are all unaffected.
+
+**Exhaustiveness is inherited, not new.** Because an alias reference expands to its structural annotation before any checker runs, the [advisory `match:` warning and asserted `matchExhaustive:` error](#match-expression) apply exactly as they would to the spelled-out union — no new exhaustiveness machinery. Adding a member to the alias declaration makes every `matchExhaustive:` over it non-exhaustive in one edit:
+
+```beamtalk
+heading match: [
+  #north -> 0;
+  #south -> 180;
+  #east  -> 90
+]
+// ⚠ Warning: non-exhaustive match: `#west` is not handled (residual type: `#west`)
+
+heading matchExhaustive: [
+  #north -> 0;
+  #south -> 180;
+  #east  -> 90
+]
+// ⛔ Error: non-exhaustive matchExhaustive: `#west` is not handled (residual type: `#west`)
+```
+
+A value outside the named union is flagged the same way an inline union would be:
+
+```beamtalk
+p :: RestartStrategy := #premanent
+// ⚠ Warning: Type mismatch: declared as RestartStrategy
+//    (#temporary | #transient | #permanent), got #premanent
+```
+
+**Exported by default, like classes and protocols.** A `type` declaration is visible to any package that depends on the declaring one, unless marked `internal`:
+
+```beamtalk
+internal type ParserState = Integer | String
+```
+
+An `internal` alias is package-private, following the same model as [class- and method-level `internal`](#visibility-and-access-control-adr-0071) (ADR 0071): usable within the declaring package, a compile error to reference from outside it. Because aliases are transparent, referencing an internal alias from a *public* signature is also a compile error even within the same package (the same "leaked visibility" rule 0071 already applies to internal classes) — and so is reaching one through the expansion of a public alias, since a public alias has no "internal signature" escape hatch of its own:
+
+```beamtalk
+internal type Priv = Integer
+type Pub = Priv | String
+// ⛔ Error: Internal type alias 'Priv' appears in the expansion of
+//    public type alias 'Pub'
+```
+
+**Constraints:**
+
+- Single-letter names are rejected at parse time — reserved for [ADR 0068's implicit method-local type parameters](#parametric-types--generics-adr-0068): `type T = Integer | Nil` is a declaration error.
+- Alias names share the class/protocol namespace: declaring an alias with the same name as an existing class or protocol (or vice versa) is a compile error.
+- The RHS accepts any type annotation: unions (`|`), singletons (`#foo`), generics (`List(Integer)`), difference (`\`), intersection (`&`), and combinations of these.
+- Aliases may reference other aliases; a reference cycle — including self-reference — is a compile error at declaration time (`type Ab = Bc | Integer` / `type Bc = Ab | Symbol` → `type alias cycle: 'Ab' → 'Bc' → 'Ab'`).
+- Parametric aliases (`type Option(T) = T | Nil`) and recursive aliases (`type JsonValue = ... | List(JsonValue)`) are **not yet supported** — both need deferred (lazy) resolution in place of the eager expansion aliases use today. `type Name(...) = ...` is reserved syntax for the future parametric form.
+- Doc comments (`///`) above a `type` declaration are preserved and shown by `:help <Alias>` and LSP hover.
+
+**Tooling.** The LSP offers completions, go-to-definition, find-references, and hover for alias names in `.bt` files. In the REPL, `type` declarations are accepted as input and persist for the rest of the session; declaring `type Direction = ...` at the prompt echoes the declared name (`=> Direction`), the same convention a class declaration echoes (`Actor subclass: Counter` → `Counter`); `:help <Alias>` renders the declaration, its expansion, and any doc comment. The System Browser and the VS Code Workspace Explorer sidebar list declared aliases in a "Type Aliases" section alongside Classes and Protocols. See [`docs/development/surface-parity.md`](development/surface-parity.md) for the full cross-surface matrix.
 
 ### Control Flow Narrowing
 

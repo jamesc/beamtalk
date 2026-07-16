@@ -317,6 +317,41 @@ migration in Phase 5; the navigable wire form is already reachable via
 `evaluate`. Epic: [BT-2501](https://linear.app/beamtalk/issue/BT-2501) (design
 [BT-2397](https://linear.app/beamtalk/issue/BT-2397)).
 
+### Declaration-echo values (`type`, `subclass:`, `reload`)
+
+A handful of top-level forms are **declarations, not value expressions** —
+evaluating them has no natural runtime value to print, so each has its own
+"what does the REPL show" convention. These are recorded here because, per
+CLAUDE.md's REPL-output rule, a display convention is deliberate and must
+agree across every surface that evaluates source (CLI REPL, MCP `evaluate`;
+the LSP has no eval affordance and is unaffected).
+
+- **`Actor subclass: Counter` / `Object subclass: Foo` echoes the bare class
+  name** (`=> Counter`) — the existing, longest-standing convention. `Counter
+  reload` / `:reload Counter` echo the same bare name on a successful
+  hot-swap (`=> Counter`).
+- **`type Direction = ...` echoes the bare declared alias name**
+  (`=> Direction`), mirroring the class-declaration convention above rather
+  than a protocol-declaration-style confirmation message. This is the
+  **current, shipped, e2e-tested behaviour** (ADR 0108 Phase 8, BT-2902),
+  pinned by `tests/repl-protocol/cases/type_alias_repl.btscript`. **Not yet
+  formally signed off by the maintainer** — BT-2902's own PR description
+  flagged it as an ADR-suggested default adopted in the absence of an
+  available maintainer, per CLAUDE.md's REPL-output rule (any REPL display
+  value needs confirmation before being treated as permanent); it is
+  recorded here as the documented status quo, not as a closed decision.
+  Revisit if the maintainer prefers different wording. Implemented as a
+  plain binary echo (not promoted through `binary_to_atom`, unlike a class
+  name becoming a BEAM module atom) — an alias never needs to become a BEAM
+  module name, so the class path's unbounded-atom-creation trade-off does
+  not apply here.
+- A **session-local** alias (one declared directly at the REPL prompt, not
+  loaded from a `.bt` file) has no source file for `:help <Alias>`'s
+  `Declared in:` line to point at; that line reads **`Declared in: REPL`** —
+  new display text with no prior precedent, also pinned by the same
+  `.btscript` test. A file-declared alias's `:help` shows its real
+  `source_file` path instead (see the `docs` row in Core Operations).
+
 ## Drift Check (CI)
 
 The `beamtalk-surface-drift` binary (`crates/beamtalk-surface-drift/`,
