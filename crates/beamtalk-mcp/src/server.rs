@@ -2337,6 +2337,12 @@ struct LintResult {
 /// falling back to `Dynamic(UntypedFfi)` — the same registry `beamtalk
 /// build`/`beamtalk lint` use, so MCP `lint`/`diagnostic_summary` never
 /// diverge from them on which Erlang calls are seen as typed.
+///
+/// `current_package` (BT-2921) mirrors `beamtalk lint`'s
+/// `CompilerOptions::current_package`: when `Some`, `check_class_visibility`/
+/// `check_alias_leaked_visibility` (E0401/E0402/E0403) actually run — they
+/// are gated on `current_package: Some(_)` and silently emit zero
+/// diagnostics otherwise.
 fn run_module_analysis(
     module: &beamtalk_core::ast::Module,
     all_class_infos: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
@@ -2345,6 +2351,7 @@ fn run_module_analysis(
     native_type_registry: Option<
         std::sync::Arc<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,
     >,
+    current_package: Option<&str>,
 ) -> (
     Vec<beamtalk_core::source_analysis::Diagnostic>,
     beamtalk_core::semantic_analysis::ClassHierarchy,
@@ -2356,6 +2363,7 @@ fn run_module_analysis(
     let cross_file_classes = ClassHierarchy::cross_file_class_infos(all_class_infos, module);
     let options = beamtalk_core::CompilerOptions {
         has_package_dependencies,
+        current_package: current_package.map(str::to_string),
         ..Default::default()
     };
     let analysis_result = beamtalk_core::semantic_analysis::analyse_with_natives(
@@ -2432,6 +2440,10 @@ fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
     // so cross-file class references resolve correctly.
     let (extraction_files, target_set) = resolve_extraction_files(path, &source_files);
 
+    // BT-2921: Resolve the current package once, mirroring `beamtalk lint`,
+    // so E0401/E0402/E0403 visibility checks fire the same way in MCP.
+    let current_package = resolve_current_package(path);
+
     // Pass 1: Parse all files and extract class metadata.
     let mut all_class_infos = Vec::new();
     let mut parsed_files = Vec::new();
@@ -2456,7 +2468,15 @@ fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
         let file_str = file.to_string_lossy().into_owned();
         let tokens = lex_with_eof(&source);
         let (module, parse_diags) = parse(tokens);
-        all_class_infos.extend(ClassHierarchy::extract_class_infos(&module));
+        let mut class_infos = ClassHierarchy::extract_class_infos(&module);
+        // BT-2921: Stamp the package per-file, same as build's/lint's Pass 1 —
+        // without this, a same-package class defined in a sibling file is
+        // indistinguishable from a builtin/REPL class and never flagged as a
+        // leak by `check_class_visibility`.
+        if let Some(pkg) = current_package.as_deref() {
+            ClassHierarchy::stamp_package_on_infos(&mut class_infos, pkg);
+        }
+        all_class_infos.extend(class_infos);
 
         let canonical = canonicalize_or_clone(file);
         if target_set.contains(&canonical) {
@@ -2497,6 +2517,7 @@ fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
             initial_diags,
             has_package_dependencies,
             native_type_registry.clone(),
+            current_package.as_deref(),
         );
 
         all_diags.extend(file_diags);
@@ -2630,6 +2651,34 @@ fn resolve_extraction_files(
     )
 }
 
+/// BT-2921: Resolve the current package name from `path`'s `beamtalk.toml`,
+/// mirroring `beamtalk lint`'s `find_manifest_full` resolution
+/// (`beamtalk_cli::commands::lint::run_lint`) so `CompilerOptions::current_package`
+/// gets set the same way for MCP `lint`/`diagnostic_summary` as it does for
+/// the CLI. Without this, `check_class_visibility`/`check_alias_leaked_visibility`
+/// (E0401/E0402/E0403) never fire — both are gated on `current_package: Some(_)`.
+///
+/// Returns `None` outside a manifest-backed package or when the manifest is
+/// malformed (visibility checks conservatively disabled, matching CLI lint's
+/// error-path behaviour).
+fn resolve_current_package(path: &str) -> Option<String> {
+    let project_root =
+        beamtalk_core::project::package::find_package_root(std::path::Path::new(path))?;
+    let project_root = camino::Utf8PathBuf::from_path_buf(project_root).ok()?;
+    match beamtalk_cli::manifest::find_manifest_full(&project_root) {
+        Ok(Some(m)) => Some(m.package.name),
+        Ok(None) => None,
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "Failed to parse beamtalk.toml for MCP lint/diagnostic_summary; \
+                 E0401/E0402/E0403 visibility checks disabled"
+            );
+            None
+        }
+    }
+}
+
 /// BT-2823: Merge class metadata from `path`'s package dependencies (as
 /// declared in `beamtalk.toml`) into `all_class_infos`, so `Unresolved
 /// class` diagnostics see the same class hierarchy as `beamtalk
@@ -2685,6 +2734,10 @@ fn run_lint_structured(path: &str) -> LintResult {
     // so cross-file class references resolve correctly.
     let (extraction_files, target_set) = resolve_extraction_files(path, &source_files);
 
+    // BT-2921: Resolve the current package once, mirroring `beamtalk lint`,
+    // so E0401/E0402/E0403 visibility checks fire the same way in MCP.
+    let current_package = resolve_current_package(path);
+
     // Pass 1: Parse files and extract class metadata.
     let mut all_class_infos = Vec::new();
     let mut parsed_targets: Vec<(
@@ -2729,7 +2782,15 @@ fn run_lint_structured(path: &str) -> LintResult {
         let tokens = lex_with_eof(&source);
         let (module, parse_diags) = parse(tokens);
 
-        all_class_infos.extend(ClassHierarchy::extract_class_infos(&module));
+        let mut class_infos = ClassHierarchy::extract_class_infos(&module);
+        // BT-2921: Stamp the package per-file, same as build's/lint's Pass 1 —
+        // without this, a same-package class defined in a sibling file is
+        // indistinguishable from a builtin/REPL class and never flagged as a
+        // leak by `check_class_visibility`.
+        if let Some(pkg) = current_package.as_deref() {
+            ClassHierarchy::stamp_package_on_infos(&mut class_infos, pkg);
+        }
+        all_class_infos.extend(class_infos);
 
         let canonical = canonicalize_or_clone(file);
         if target_set.contains(&canonical) {
@@ -2770,6 +2831,7 @@ fn run_lint_structured(path: &str) -> LintResult {
             initial_diags,
             has_package_dependencies,
             native_type_registry.clone(),
+            current_package.as_deref(),
         );
 
         let file_name = file.to_string_lossy().into_owned();
@@ -3078,6 +3140,75 @@ mod tests {
         assert!(
             !stale,
             "MCP lint with cross-file classes should not report @expect as stale, got: {result:?}",
+        );
+    }
+
+    /// Write a fixture project whose `src/` declares an `internal` class in
+    /// one file and leaks it through a public method's signature in a
+    /// *sibling* file, mirroring `docs/beamtalk-language-features.md`'s
+    /// TokenBuffer/Parser example (and the CLI's `cli_build.rs` regression
+    /// for the same fixture, BT-2920). Returns the fixture's `TempDir` (keep
+    /// it alive for the duration of the test) and the path to
+    /// `src/parser.bt`.
+    fn write_cross_file_visibility_leak_fixture() -> (tempfile::TempDir, std::path::PathBuf) {
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = temp.path();
+        let src_dir = dir.join("src");
+        std::fs::create_dir_all(&src_dir).unwrap();
+
+        std::fs::write(
+            dir.join("beamtalk.toml"),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+
+        std::fs::write(
+            src_dir.join("token_buffer.bt"),
+            "internal Object subclass: TokenBuffer\n  data => nil\n",
+        )
+        .unwrap();
+        let parser_file = src_dir.join("parser.bt");
+        std::fs::write(
+            &parser_file,
+            "Object subclass: Parser\n  tokenize: input :: String -> TokenBuffer => nil\n",
+        )
+        .unwrap();
+
+        (temp, parser_file)
+    }
+
+    /// Regression for BT-2921: `current_package` was never threaded into
+    /// `run_module_analysis`'s `CompilerOptions`, so `check_class_visibility`
+    /// (E0401/E0402) silently emitted zero diagnostics for MCP `lint`, unlike
+    /// `beamtalk build`/`beamtalk lint` after BT-2920.
+    #[test]
+    fn run_lint_structured_reports_e0402_for_cross_file_internal_class_leak() {
+        let (_temp, parser_file) = write_cross_file_visibility_leak_fixture();
+        let result = run_lint_structured(parser_file.to_str().unwrap());
+
+        let leaked = result.warnings.iter().chain(result.errors.iter()).any(|d| {
+            d.message
+                .contains("Internal class 'TokenBuffer' appears in public signature")
+        });
+        assert!(
+            leaked,
+            "MCP lint should report E0402 for the cross-file internal class leak, got: {result:?}",
+        );
+    }
+
+    /// Same as `run_lint_structured_reports_e0402_for_cross_file_internal_class_leak`
+    /// but for the `diagnostic_summary` tool (BT-2921).
+    #[test]
+    fn compute_diagnostic_summary_reports_e0402_for_cross_file_internal_class_leak() {
+        let (_temp, parser_file) = write_cross_file_visibility_leak_fixture();
+        let result = compute_diagnostic_summary(parser_file.to_str().unwrap());
+
+        let visibility_total = result["totals_by_category"]["Visibility"]["total"]
+            .as_u64()
+            .unwrap_or(0);
+        assert!(
+            visibility_total > 0,
+            "diagnostic_summary should report the E0402 visibility leak, got: {result:?}",
         );
     }
 
