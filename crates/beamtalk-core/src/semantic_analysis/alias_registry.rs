@@ -340,6 +340,37 @@ impl AliasRegistry {
         diagnostics
     }
 
+    /// Builds an alias registry directly from a module's parsed type-alias
+    /// declarations, with no validation (ADR 0108, BT-2909).
+    ///
+    /// Unlike [`register_module`](Self::register_module), this constructor
+    /// does not check for namespace collisions, duplicate definitions,
+    /// unbound type variables, or reference cycles — it is for **codegen**
+    /// consumption only. By the time a module reaches codegen it has already
+    /// passed semantic analysis (including `register_module`'s diagnostics),
+    /// so codegen only needs the name → annotation map to resolve
+    /// [`TypeAnnotation::Simple`] references to `user_type` forms (see
+    /// `codegen::core_erlang::spec_codegen::type_annotation_to_spec`); it
+    /// does not need to re-run those checks.
+    ///
+    /// A duplicate name in `module.type_aliases` (which should be
+    /// unreachable post-semantic-analysis, since `register_module` would
+    /// have already rejected it) keeps the first definition, mirroring
+    /// `register_module`'s "first definition wins" behaviour.
+    #[must_use]
+    pub fn from_module_declarations(module: &Module) -> Self {
+        let mut aliases = HashMap::new();
+        for alias_def in &module.type_aliases {
+            aliases
+                .entry(alias_def.name.name.clone())
+                .or_insert_with(|| AliasInfo::from_definition(alias_def));
+        }
+        Self {
+            aliases,
+            reported_cycles: std::collections::HashSet::new(),
+        }
+    }
+
     /// Extract `AliasInfo` entries from a parsed module without registering them.
     ///
     /// BT-2898: Mirrors `ProtocolRegistry::extract_protocol_infos` /

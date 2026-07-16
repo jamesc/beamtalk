@@ -339,3 +339,91 @@ fn test_static_supervisor_with_user_class_method_exports_it() {
         "Static supervisor with user class method must export class_children/2. Got:\n{code}"
     );
 }
+
+#[test]
+fn test_static_supervisor_class_method_alias_param_emits_user_type_and_named_type() {
+    // BT-2909: `supervisor_codegen.rs`'s `generate_class_specs` call site
+    // must resolve alias-typed annotations to `user_type` references,
+    // with the module also declaring the matching named `-type` in the
+    // same attribute list (an `erlc` compile error otherwise).
+    let strategy_alias = TypeAliasDefinition {
+        name: Identifier::new("RestartStrategy", Span::new(0, 0)),
+        annotation: TypeAnnotation::union(
+            vec![
+                TypeAnnotation::singleton("temporary", Span::new(0, 0)),
+                TypeAnnotation::singleton("transient", Span::new(0, 0)),
+                TypeAnnotation::singleton("permanent", Span::new(0, 0)),
+            ],
+            Span::new(0, 0),
+        ),
+        is_internal: false,
+        comments: CommentAttachment::default(),
+        doc_comment: None,
+        span: Span::new(0, 0),
+    };
+    let strategy_method = MethodDefinition {
+        selector: MessageSelector::Keyword(vec![KeywordPart::new(
+            "defaultStrategy:",
+            Span::new(0, 0),
+        )]),
+        parameters: vec![ParameterDefinition::with_type(
+            Identifier::new("policy", Span::new(0, 0)),
+            TypeAnnotation::simple("RestartStrategy", Span::new(0, 0)),
+        )],
+        body: vec![bare(Expression::Identifier(Identifier::new(
+            "policy",
+            Span::new(0, 0),
+        )))],
+        kind: MethodKind::Primary,
+        return_type: None,
+        is_sealed: false,
+        is_internal: false,
+        is_class_method: false,
+        span: Span::new(0, 0),
+        doc_comment: None,
+        expect: None,
+        comments: CommentAttachment::default(),
+    };
+    let class = ClassDefinition {
+        name: Identifier::new("WebApp", Span::new(0, 0)),
+        superclass: Some(Identifier::new("Supervisor", Span::new(0, 0))),
+        superclass_package: None,
+        class_kind: ClassKind::Object,
+        is_abstract: false,
+        is_sealed: false,
+        is_typed: false,
+        is_internal: false,
+        supervisor_kind: Some(SupervisorKind::Static),
+        state: vec![],
+        methods: vec![],
+        class_methods: vec![strategy_method],
+        class_variables: vec![],
+        type_params: vec![],
+        superclass_type_args: vec![],
+        comments: CommentAttachment::default(),
+        doc_comment: None,
+        backing_module: None,
+        handle_scope: None,
+        span: Span::new(0, 0),
+    };
+    let module = Module {
+        classes: vec![class],
+        method_definitions: vec![],
+        protocols: Vec::new(),
+        type_aliases: vec![strategy_alias],
+        expressions: vec![],
+        span: Span::new(0, 0),
+        file_leading_comments: vec![],
+        file_trailing_comments: vec![],
+    };
+    let code =
+        generate_module(&module, CodegenOptions::new("bt@webapp")).expect("codegen should succeed");
+    assert!(
+        code.contains("{'user_type', 0, 'restart_strategy', []}"),
+        "class method param typed with the alias should emit a user_type reference. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'restart_strategy'"),
+        "module must declare the matching named -type for the alias. Got:\n{code}"
+    );
+}

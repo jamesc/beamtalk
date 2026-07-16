@@ -28,6 +28,7 @@ use super::util::ClassIdentity;
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, spec_codegen};
 use crate::ast::{MethodKind, Module, SupervisorKind};
 use crate::docvec;
+use crate::semantic_analysis::alias_registry::AliasRegistry;
 
 impl CoreErlangGenerator {
     /// Generates an OTP supervisor module for `Supervisor subclass:` or
@@ -89,11 +90,22 @@ impl CoreErlangGenerator {
         let beamtalk_class_attr = super::util::beamtalk_class_attribute(&module.classes);
         let file_attr = self.file_attr();
         let source_path_attr = self.source_path_attr();
-        // BT-2900: `None` — see actor_codegen.rs's identical comment; alias
-        // registry plumbing into codegen call sites is a follow-up.
-        let spec_attrs = spec_codegen::generate_class_specs(class, true, None);
+        // BT-2909: build the alias registry once from this module's own
+        // `type_aliases` so alias-named annotations resolve to `user_type`
+        // references (ADR 0108) instead of falling through to `any()`.
+        let alias_registry = AliasRegistry::from_module_declarations(module);
+        let spec_attrs = spec_codegen::generate_class_specs(class, true, Some(&alias_registry));
         let spec_suffix: Document<'static> = spec_codegen::format_spec_attributes(&spec_attrs)
             .map_or(Document::Nil, |s| docvec![",\n     ", s]);
+        // BT-2909: every class module that could contain a `user_type`
+        // reference must also declare the matching named `-type` in the same
+        // module attribute list (an `erlc` compile error otherwise) — empty
+        // for a module with no `type_aliases`, so this is a no-op change for
+        // the common case.
+        let alias_type_attrs = spec_codegen::generate_alias_type_attrs(&alias_registry);
+        let alias_type_suffix: Document<'static> =
+            spec_codegen::format_alias_type_attributes(&alias_type_attrs)
+                .map_or(Document::Nil, |s| docvec![",\n     ", s]);
 
         let mut docs: Vec<Document<'static>> = Vec::new();
 
@@ -108,6 +120,7 @@ impl CoreErlangGenerator {
             beamtalk_class_attr,
             file_attr,
             source_path_attr,
+            alias_type_suffix,
             spec_suffix,
             "]\n",
             "\n",
@@ -167,11 +180,22 @@ impl CoreErlangGenerator {
         let beamtalk_class_attr = super::util::beamtalk_class_attribute(&module.classes);
         let file_attr = self.file_attr();
         let source_path_attr = self.source_path_attr();
-        // BT-2900: `None` — see actor_codegen.rs's identical comment; alias
-        // registry plumbing into codegen call sites is a follow-up.
-        let spec_attrs = spec_codegen::generate_class_specs(class, true, None);
+        // BT-2909: build the alias registry once from this module's own
+        // `type_aliases` so alias-named annotations resolve to `user_type`
+        // references (ADR 0108) instead of falling through to `any()`.
+        let alias_registry = AliasRegistry::from_module_declarations(module);
+        let spec_attrs = spec_codegen::generate_class_specs(class, true, Some(&alias_registry));
         let spec_suffix: Document<'static> = spec_codegen::format_spec_attributes(&spec_attrs)
             .map_or(Document::Nil, |s| docvec![",\n     ", s]);
+        // BT-2909: every class module that could contain a `user_type`
+        // reference must also declare the matching named `-type` in the same
+        // module attribute list (an `erlc` compile error otherwise) — empty
+        // for a module with no `type_aliases`, so this is a no-op change for
+        // the common case.
+        let alias_type_attrs = spec_codegen::generate_alias_type_attrs(&alias_registry);
+        let alias_type_suffix: Document<'static> =
+            spec_codegen::format_alias_type_attributes(&alias_type_attrs)
+                .map_or(Document::Nil, |s| docvec![",\n     ", s]);
 
         let mut docs: Vec<Document<'static>> = Vec::new();
 
@@ -188,6 +212,7 @@ impl CoreErlangGenerator {
             beamtalk_class_attr,
             file_attr,
             source_path_attr,
+            alias_type_suffix,
             spec_suffix,
             "]\n",
             "\n",

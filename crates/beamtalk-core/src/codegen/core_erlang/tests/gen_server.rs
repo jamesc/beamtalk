@@ -3121,6 +3121,125 @@ fn test_value_subclass_untyped_fields_still_emit_type_alias() {
 }
 
 #[test]
+fn test_actor_class_method_alias_param_emits_user_type_and_named_type() {
+    // BT-2909: wiring the compile's `AliasRegistry` into `actor_codegen.rs`'s
+    // `generate_class_specs` call site must make an alias-typed annotation
+    // emit a `user_type` reference — and the module must also declare the
+    // matching named `-type` in its own attribute list (an `erlc` compile
+    // error otherwise). Actor *instance* methods don't get standalone specs
+    // (BT-1944 — they're dispatch clauses inside `safe_dispatch/3`), so this
+    // exercises the class-side method spec path, the only spec surface a
+    // full `gen_server` actor module has.
+    let src = "
+type RestartStrategy = #temporary | #transient | #permanent
+
+Actor subclass: Supervisor
+  class defaultStrategy: policy :: RestartStrategy => policy
+";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, diags) = crate::source_analysis::parse(tokens);
+    assert!(diags.is_empty(), "parse should succeed: {diags:?}");
+    let code = generate_module(&module, CodegenOptions::new("bt@supervisor"))
+        .expect("codegen should succeed");
+
+    assert!(
+        code.contains("{'user_type', 0, 'restart_strategy', []}"),
+        "class method param typed with the alias should emit a user_type reference. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'restart_strategy'"),
+        "module must declare the matching named -type for the alias. Got:\n{code}"
+    );
+    assert!(
+        code.contains(
+            "{'type', 0, 'union', [{'atom', 0, 'temporary'}, {'atom', 0, 'transient'}, \
+             {'atom', 0, 'permanent'}]}"
+        ),
+        "named -type declaration must expand the alias's RHS. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_value_subclass_field_alias_emits_user_type_and_named_type() {
+    // BT-2909: same wiring check as the actor test above, but for
+    // `value_type_codegen.rs`'s `generate_type_alias`/`generate_class_specs`
+    // call sites — a Value subclass's `state:` field typed with an alias
+    // must reference the alias's named `-type` from inside the class's own
+    // `-type t()` map alias (BT-1156), with the named `-type` declared
+    // alongside it in the same module.
+    let src = "
+type RestartStrategy = #temporary | #transient | #permanent
+
+Value subclass: Child
+  state: strategy :: RestartStrategy = #temporary
+";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, diags) = crate::source_analysis::parse(tokens);
+    assert!(diags.is_empty(), "parse should succeed: {diags:?}");
+    let code =
+        generate_module(&module, CodegenOptions::new("bt@child")).expect("codegen should succeed");
+
+    assert!(
+        code.contains("{'user_type', 0, 'restart_strategy', []}"),
+        "state field typed with the alias should emit a user_type reference. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'export_type' = [{'t', 0}]"),
+        "Value subclass's own -type t() alias (BT-1156) must be unaffected. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_module_without_type_aliases_is_unaffected_by_alias_wiring() {
+    // BT-2909 acceptance criterion: confirm generated Core Erlang for
+    // message dispatch/field access is unaffected for modules with no
+    // `type_aliases` — `generate_alias_type_attrs` returns an empty `Vec`
+    // for an empty registry, so no `'type'` attribute for aliases (and no
+    // spurious `user_type` reference) should appear anywhere.
+    let src = "
+Actor subclass: Counter
+  state: value :: Integer = 0
+  class from: start :: Integer => start
+";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, diags) = crate::source_analysis::parse(tokens);
+    assert!(diags.is_empty(), "parse should succeed: {diags:?}");
+    let code = generate_module(&module, CodegenOptions::new("bt@counter"))
+        .expect("codegen should succeed");
+
+    assert!(
+        !code.contains("user_type"),
+        "a module with no type_aliases must never emit a user_type reference. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_alias_annotated_actor_module_compiles_through_erlc() {
+    // BT-2909: the correctness trap this issue exists to close — a
+    // `-spec`/`-type` referencing an undeclared local type is a hard `erlc`
+    // compile error, not just a Dialyzer warning. This exercises the full
+    // `generate_module` pipeline end-to-end through `erlc` (mirroring
+    // `test_generated_core_erlang_compiles`/`test_while_true_compiles_through_erlc`)
+    // to catch that failure mode directly rather than via string assertions
+    // alone: if `Some(registry)` were ever wired into the spec-generating
+    // calls without also emitting the matching named `-type` declaration,
+    // this test would fail to compile through `erlc`.
+    let src = "
+type RestartStrategy = #temporary | #transient | #permanent
+
+Actor subclass: Supervisor
+  class defaultStrategy: policy :: RestartStrategy => policy
+";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, diags) = crate::source_analysis::parse(tokens);
+    assert!(diags.is_empty(), "parse should succeed: {diags:?}");
+    let code = generate_module(&module, CodegenOptions::new("bt_alias_erlc_check"))
+        .expect("codegen should succeed");
+
+    crate::test_helpers::assert_compiles_through_erlc("bt_alias_erlc_check", &code);
+}
+
+#[test]
 fn test_class_method_local_var_assignment_of_self_class_method() {
     // BT-1201: class method `x := self classMethod` must NOT produce `in  in`.
     // Previously generated invalid Core Erlang:
@@ -3844,6 +3963,46 @@ fn test_native_facade_class_methods_exported() {
     assert!(
         code.contains("'class_connect:'/3"),
         "Should export class method 'class_connect:'/3. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_native_facade_class_method_alias_param_emits_user_type_and_named_type() {
+    // BT-2909: `gen_server/native_facade.rs`'s `generate_class_specs` call
+    // site must resolve alias-typed annotations to `user_type` references,
+    // with the module also declaring the matching named `-type` in the
+    // same attribute list (an `erlc` compile error otherwise). Native
+    // facade modules use the same `is_value_type: false` spec path as
+    // regular actors (BT-1944 — instance methods don't get standalone
+    // specs), so this uses the class-side `connect:` method.
+    let mut module = make_native_actor_with_class_methods();
+    module.type_aliases.push(TypeAliasDefinition {
+        name: Identifier::new("RestartStrategy", Span::new(0, 0)),
+        annotation: TypeAnnotation::union(
+            vec![
+                TypeAnnotation::singleton("temporary", Span::new(0, 0)),
+                TypeAnnotation::singleton("transient", Span::new(0, 0)),
+                TypeAnnotation::singleton("permanent", Span::new(0, 0)),
+            ],
+            Span::new(0, 0),
+        ),
+        is_internal: false,
+        comments: CommentAttachment::default(),
+        doc_comment: None,
+        span: Span::new(0, 0),
+    });
+    module.classes[0].class_methods[0].parameters[0].type_annotation =
+        Some(TypeAnnotation::simple("RestartStrategy", Span::new(0, 0)));
+
+    let code = generate_module(&module, CodegenOptions::new("bt@test_rich"))
+        .expect("codegen should succeed");
+    assert!(
+        code.contains("{'user_type', 0, 'restart_strategy', []}"),
+        "class method param typed with the alias should emit a user_type reference. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'restart_strategy'"),
+        "module must declare the matching named -type for the alias. Got:\n{code}"
     );
 }
 
