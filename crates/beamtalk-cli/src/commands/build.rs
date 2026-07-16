@@ -1837,6 +1837,10 @@ pub(crate) fn build_class_metadata(
 /// (best-effort, matching `build_class_module_index`'s handling of unreadable
 /// files) rather than failing the whole build — alias metadata is a browse-op
 /// convenience, not required for compilation to succeed.
+///
+/// Returned in `source_files` order, **not** sorted by name —
+/// [`app_file::format_type_aliases_entry`] owns the sort for deterministic
+/// `.app` output, so sorting here too would be redundant.
 pub(crate) fn build_alias_metadata(source_files: &[Utf8PathBuf]) -> Vec<app_file::AliasMetadata> {
     let mut result = Vec::new();
     for file in source_files {
@@ -1857,7 +1861,6 @@ pub(crate) fn build_alias_metadata(source_files: &[Utf8PathBuf]) -> Vec<app_file
             });
         }
     }
-    result.sort_by(|a, b| a.name.cmp(&b.name));
     result
 }
 
@@ -2921,7 +2924,10 @@ mod tests {
     }
 
     #[test]
-    fn test_build_alias_metadata_sorted_by_name() {
+    fn test_build_alias_metadata_preserves_declaration_order() {
+        // Sorting is `format_type_aliases_entry`'s job (app_file.rs), not
+        // this function's — see `test_format_type_aliases_entry_sorted`.
+        // `build_alias_metadata` itself just collects in source-file order.
         let temp = TempDir::new().unwrap();
         let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
         let src_path = project_path.join("src");
@@ -2931,7 +2937,7 @@ mod tests {
 
         let result = build_alias_metadata(&[alias_file]);
         let names: Vec<&str> = result.iter().map(|a| a.name.as_str()).collect();
-        assert_eq!(names, vec!["Alpha", "Zebra"]);
+        assert_eq!(names, vec!["Zebra", "Alpha"]);
     }
 
     #[test]
