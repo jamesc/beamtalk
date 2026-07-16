@@ -135,7 +135,11 @@ that was but no longer is) — never an error, matching every other ADR 0105/
 """.
 -spec dependents_of(binary()) -> [binary()].
 dependents_of(AliasNameBin) when is_binary(AliasNameBin) ->
-    gen_server:call(?MODULE, {dependents_of, AliasNameBin}).
+    try
+        gen_server:call(?MODULE, {dependents_of, AliasNameBin})
+    catch
+        exit:{noproc, _} -> []
+    end.
 
 -doc "Clear every recorded edge (tests; a future `Workspace changes revert:`).".
 -spec clear() -> ok.

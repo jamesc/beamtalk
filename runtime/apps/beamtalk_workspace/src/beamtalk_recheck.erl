@@ -629,12 +629,12 @@ trigger_leaf_change(SuperclassBins) ->
 -doc """
 ADR 0108 hot-reload re-check trigger (BT-2899): re-check every live class
 recorded as a dependent of any alias name in `AliasNameBins` — a live
-redefinition of `type Foo = ...` (or of any alias transitively reachable
-through it, since `AliasNameBins` is expected to already be the redefined
-alias plus every alias that references it — see
-`beamtalk_repl_eval:handle_type_alias_definition/3`, this trigger's one
-production caller) invalidates any annotation-resolution or exhaustiveness
-proof computed against the old expansion.
+redefinition of `type Foo = ...` invalidates any annotation-resolution or
+exhaustiveness proof computed against the old expansion. Transitive fan-out
+(aliases that reference the redefined one) is resolved internally by
+`alias_change_candidates/1` via `beamtalk_alias_xref:dependents_of/1` — the
+caller does not need to pre-expand; `beamtalk_repl_eval:handle_type_alias_definition/3`,
+this trigger's one production caller, always passes just `[Name]`.
 
 ## Why this is NOT `trigger_leaf_change/1`'s whole-image sweep
 
