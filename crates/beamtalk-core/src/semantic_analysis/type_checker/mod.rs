@@ -346,6 +346,34 @@ pub fn infer_types_and_returns(
     (checker.take_type_map(), checker.take_method_return_types())
 }
 
+/// [`infer_types_and_returns`], additionally threading a type alias registry
+/// (ADR 0108, BT-2897) so a `Simple` annotation naming a registered alias
+/// (e.g. `policy :: RestartStrategy`) resolves to its structural expansion —
+/// tagged with the alias's display name (see [`TypeProvenance::Aliased`]) —
+/// instead of an unresolved nominal class.
+///
+/// Used by [`crate::queries::hover_provider`] so hover on an alias-typed
+/// binding shows `RestartStrategy (#temporary | #transient | #permanent)`
+/// rather than either the bare expansion or an "unresolved class" mis-read.
+/// `alias_registry = None` is identical to [`infer_types_and_returns`].
+#[must_use]
+pub fn infer_types_and_returns_with_aliases(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    native_type_registry: Option<&NativeTypeRegistry>,
+    alias_registry: Option<&AliasRegistry>,
+) -> (TypeMap, HashMap<MethodReturnKey, InferredType>) {
+    let mut checker = TypeChecker::new();
+    if let Some(registry) = native_type_registry {
+        checker.set_native_type_registry(registry.clone());
+    }
+    if let Some(aliases) = alias_registry {
+        checker.set_alias_registry(aliases.clone());
+    }
+    checker.check_module(module, hierarchy);
+    (checker.take_type_map(), checker.take_method_return_types())
+}
+
 /// Type checking domain service.
 ///
 /// **DDD Context:** Semantic Analysis - Domain Service
@@ -438,6 +466,22 @@ impl TypeChecker {
     /// and parameter types in the registry instead of defaulting to `Dynamic`.
     pub fn set_native_type_registry(&mut self, registry: impl Into<Arc<NativeTypeRegistry>>) {
         self.native_type_registry = Some(registry.into());
+    }
+
+    /// Sets the type alias registry (ADR 0108, BT-2897) for the *base*
+    /// [`Self::check_module`] pass — a lighter-weight alternative to
+    /// [`Self::check_module_with_protocols_and_aliases`] for callers (e.g.
+    /// hover) that only need alias-aware `resolve_type_annotation` (so
+    /// `policy :: RestartStrategy` resolves and displays correctly) and not
+    /// the additional protocol-conformance passes (2b/2d/2f) the full
+    /// wrapper also runs.
+    ///
+    /// `check_module` itself already reads `self.alias_registry` at every
+    /// `resolve_type_annotation` call site (see that field's doc), so
+    /// setting it here before calling `check_module` directly is sufficient
+    /// — no separate "aliases-only" entry point is needed.
+    pub fn set_alias_registry(&mut self, registry: AliasRegistry) {
+        self.alias_registry = Some(registry);
     }
 
     /// Returns all diagnostics collected during type checking.

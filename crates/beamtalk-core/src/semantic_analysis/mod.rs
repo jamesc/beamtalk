@@ -791,6 +791,20 @@ fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult {
             &mut result.diagnostics,
         );
     }
+    // BT-2897 / ADR 0108: warn when a type annotation closely resembles a
+    // registered alias name but doesn't resolve to one — see
+    // `check_unresolved_type_aliases`'s doc for why this runs unconditionally
+    // (not gated on `has_cross_file_classes` like the class check above): it
+    // only ever compares against `result.alias_registry`, which is always
+    // fully known for the current compilation unit regardless of cross-file
+    // metadata.
+    validators::check_unresolved_type_aliases(
+        module,
+        &result.class_hierarchy,
+        &result.protocol_registry,
+        &result.alias_registry,
+        &mut result.diagnostics,
+    );
     // BT-2854 / ADR 0107 Phase A: validate `Pattern::Type` class names in
     // `match:` arms (unknown class, non-leaf class, `Character` exclusion).
     // The unknown-class branch is internally gated on `has_cross_file_classes`,

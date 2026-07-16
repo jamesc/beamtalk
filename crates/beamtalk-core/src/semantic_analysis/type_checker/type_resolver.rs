@@ -232,6 +232,16 @@ fn resolve_type_annotation_inner(
                         memo,
                     );
                     expanding.pop();
+                    // BT-2897 / ADR 0108: tag the *exact* value just produced
+                    // with the alias name for display — see `InferredType::
+                    // tag_alias_expansion`'s doc. This is the single
+                    // construction point for `TypeProvenance::Aliased`, so
+                    // every hover/diagnostic use of this resolved type can
+                    // render `RestartStrategy (#temporary | …)` instead of
+                    // the bare expansion. Tagged *before* memoizing so a
+                    // later reference to the same alias reuses the tagged
+                    // value verbatim (see the `memo.get` early-return above).
+                    let resolved = resolved.tag_alias_expansion(name.clone(), type_id.span);
                     memo.insert(name.clone(), resolved.clone());
                     return resolved;
                 }
