@@ -219,6 +219,18 @@ impl SimpleLanguageService {
         self.project_complete = complete;
     }
 
+    /// Returns whether workspace preload completed with full coverage (BT-2796).
+    ///
+    /// ADR 0108 Phase 8 (BT-2901): the LSP server consults this before
+    /// answering `textDocument/references` for a type-alias name — when
+    /// `false`, files outside the current build graph haven't contributed
+    /// their alias reference sites yet, so the response may be incomplete
+    /// (see [`Self::is_alias_reference_query`]).
+    #[must_use]
+    pub fn is_project_complete(&self) -> bool {
+        self.project_complete
+    }
+
     /// Declare whether the workspace has package dependencies (BT-2794).
     ///
     /// Pre-WS3, dependency extension contributions are invisible, so when
@@ -485,7 +497,41 @@ impl SimpleLanguageService {
         if self.project_index.hierarchy().has_class(&ident.name) {
             return Some(NavQuery::ReferencesTo(ident.name));
         }
+        // ADR 0108 Phase 8 (BT-2901): deliberately `None` for a type-alias
+        // name, even though `find_references` (the cold-file AST path)
+        // does resolve aliases — type aliases erase entirely at compile
+        // time (no BEAM artifact carries the name), so the live runtime's
+        // `SystemNavigation referencesTo:` has nothing to answer with for
+        // one. Returning `None` here routes the caller (the LSP
+        // `references` handler) straight to its `ast_fallback`, which is
+        // the only path that can see alias reference sites.
         None
+    }
+
+    /// Returns the type alias name at `position`, if the identifier there is
+    /// a known alias (ADR 0108 Phase 8, BT-2901).
+    ///
+    /// Used by the LSP server for two things: (1) deciding whether a
+    /// `textDocument/references` response needs the "coverage may be
+    /// incomplete" `window/showMessage` warning — find-references coverage
+    /// is explicitly scoped to files compiled into the current build graph,
+    /// so when [`Self::is_project_complete`] is `false`, a short or empty
+    /// alias reference list must not read as exhaustive, since a caller
+    /// trusting it could delete an alias still used by an uncompiled file;
+    /// and (2) finding the alias's own declaration site (via
+    /// [`Self::find_class_declarations`]) to correctly exclude it from a
+    /// cold-file `include_declaration = false` request — unlike a class or
+    /// protocol name, [`Self::references_query_at`] is always `None` for an
+    /// alias (aliases have no runtime representation for
+    /// `NavQuery::ReferencesTo` to target), so the usual
+    /// `ast_declarations_for_cursor` route never fires for one.
+    #[must_use]
+    pub fn alias_name_at(&self, file: &Utf8PathBuf, position: Position) -> Option<EcoString> {
+        let (ident, _span) = self.find_identifier_at_position(file, position)?;
+        self.project_index
+            .alias_registry()
+            .has_alias(&ident.name)
+            .then_some(ident.name)
     }
 
     /// BT-2240: Find the **declaration sites** (method-definition headers)
@@ -950,6 +996,22 @@ impl SimpleLanguageService {
         // BT-1936: Check protocol definitions (name, extending, type-param bounds, method sigs)
         for protocol in &file_data.module.protocols {
             if let Some(ident) = Self::find_identifier_in_protocol(protocol, offset_val) {
+                return Some(ident);
+            }
+        }
+
+        // ADR 0108 Phase 8 (BT-2901): Check type alias declarations (the
+        // alias name itself, and any name referenced in its RHS
+        // annotation) so goto-definition/find-references work when the
+        // cursor is on the declaration site, e.g. `type RestartStrategy =
+        // ...` or a reference to another alias inside the RHS.
+        for alias in &file_data.module.type_aliases {
+            if offset_val >= alias.name.span.start() && offset_val < alias.name.span.end() {
+                return Some((alias.name.clone(), alias.name.span));
+            }
+            if let Some(ident) =
+                Self::find_identifier_in_type_annotation(&alias.annotation, offset_val)
+            {
                 return Some(ident);
             }
         }
@@ -1455,6 +1517,14 @@ impl LanguageService for SimpleLanguageService {
             extensions.add_module(&module, file.as_std_path());
             self.project_index
                 .set_file_extensions(file.clone(), extensions);
+
+            // ADR 0108 Phase 8 (BT-2901): track this file's `type`
+            // declarations in the project-wide alias registry, so
+            // completions/goto-definition/find-references/hover can resolve
+            // alias names cross-file the same way they resolve classes.
+            let alias_infos = crate::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
+            self.project_index
+                .update_file_aliases(file.clone(), alias_infos);
         } else {
             // Hierarchy build failed: store the file with merged diagnostics
             // but do not update the project index for this file.
@@ -1546,32 +1616,35 @@ impl LanguageService for SimpleLanguageService {
 
         // Use project-wide hierarchy for completions (cross-file class awareness)
         // ADR 0075: Pass native type registry for typed Erlang FFI completions
-        crate::queries::completion_provider::compute_completions(
+        // ADR 0108 Phase 8 (BT-2901): Pass the project-wide alias registry so
+        // alias names are offered alongside class/protocol names in
+        // type-annotation position.
+        crate::queries::completion_provider::compute_completions_with_aliases(
             &file_data.module,
             &file_data.source,
             position,
             self.project_index.hierarchy(),
             current_package.as_deref(),
             self.native_types.as_deref(),
+            Some(self.project_index.alias_registry()),
         )
     }
 
     fn hover(&self, file: &Utf8PathBuf, position: Position) -> Option<HoverInfo> {
         let file_data = self.get_file(file)?;
 
-        // BT-2897 / ADR 0108: `ProjectIndex` does not yet track a
-        // project-wide `AliasRegistry` (that's LSP integration, deferred to
-        // the later ADR 0108 phase, BT-2901) — `None` here means an
-        // alias-typed value's hover falls back to its bare structural
-        // expansion rather than `AliasName (expansion)`, matching pre-BT-2897
-        // behaviour until that phase lands.
+        // ADR 0108 Phase 8 (BT-2901): `ProjectIndex` now tracks a
+        // project-wide `AliasRegistry` (see `update_file`), so an
+        // alias-typed value's hover resolves and renders
+        // `AliasName (expansion)` instead of falling back to its bare
+        // structural expansion.
         crate::queries::hover_provider::compute_hover(
             &file_data.module,
             &file_data.source,
             position,
             self.project_index.hierarchy(),
             self.native_types.as_deref(),
-            None,
+            Some(self.project_index.alias_registry()),
         )
     }
 
@@ -1698,8 +1771,17 @@ impl LanguageService for SimpleLanguageService {
             return Vec::new();
         };
 
-        // If the identifier is a class name, use class-aware references
-        if self.project_index.hierarchy().has_class(&ident.name) {
+        // If the identifier is a class, protocol, or type-alias name, use
+        // class-aware references. ADR 0108 Phase 8 (BT-2901): aliases are
+        // never registered into `ClassHierarchy` (they're a peer namespace,
+        // collision-checked against it instead), so `has_class` alone can't
+        // see them — the `alias_registry().has_alias` check closes that gap.
+        // `find_class_references` itself walks `module.type_aliases` (both
+        // the declaration site and RHS references), so it already handles
+        // an alias name correctly once routed here.
+        if self.project_index.hierarchy().has_class(&ident.name)
+            || self.project_index.alias_registry().has_alias(&ident.name)
+        {
             return crate::queries::references_provider::find_class_references(
                 &ident.name,
                 self.files.iter().map(|(path, data)| (path, &data.module)),
@@ -3770,6 +3852,173 @@ mod tests {
         assert!(refs.iter().any(|r| r.file == file_proto));
         assert!(refs.iter().any(|r| r.file == file_logger));
         assert!(refs.iter().any(|r| r.file == file_sortable));
+    }
+
+    // -----------------------------------------------------------------------
+    // ADR 0108 Phase 8 (BT-2901): completions, goto-definition, find-
+    // references, and hover for type aliases via `SimpleLanguageService`
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn alias_visible_in_project_wide_registry_after_update_file() {
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("aliases.bt");
+        service.update_file(
+            file.clone(),
+            "type RestartStrategy = #temporary | #transient | #permanent\n".to_string(),
+        );
+
+        assert!(
+            service
+                .project_index
+                .alias_registry()
+                .has_alias("RestartStrategy"),
+            "alias should be tracked in the project-wide registry after update_file"
+        );
+    }
+
+    #[test]
+    fn alias_removed_from_registry_when_file_removed() {
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("aliases.bt");
+        service.update_file(
+            file.clone(),
+            "type RestartStrategy = #temporary | #transient | #permanent\n".to_string(),
+        );
+        assert!(
+            service
+                .project_index
+                .alias_registry()
+                .has_alias("RestartStrategy")
+        );
+
+        service.remove_file(&file);
+        assert!(
+            !service
+                .project_index
+                .alias_registry()
+                .has_alias("RestartStrategy"),
+            "alias should be dropped from the project-wide registry when its file is removed"
+        );
+    }
+
+    #[test]
+    fn completions_include_alias_name_cross_file() {
+        let mut service = SimpleLanguageService::new();
+        let file_a = Utf8PathBuf::from("aliases.bt");
+        let file_b = Utf8PathBuf::from("supervisor.bt");
+        service.update_file(
+            file_a,
+            "type RestartStrategy = #temporary | #transient | #permanent\n".to_string(),
+        );
+        service.update_file(
+            file_b.clone(),
+            "Object subclass: Supervisor\n  restart: policy :: \n".to_string(),
+        );
+
+        let completions = service.completions(&file_b, Position::new(1, 20));
+        assert!(
+            completions.iter().any(|c| c.label == "RestartStrategy"),
+            "Expected cross-file alias name in completions, got: {:?}",
+            completions.iter().map(|c| &c.label).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn goto_definition_alias_from_annotation_site_cross_file() {
+        let mut service = SimpleLanguageService::new();
+        let file_a = Utf8PathBuf::from("aliases.bt");
+        let file_b = Utf8PathBuf::from("supervisor.bt");
+        service.update_file(
+            file_a.clone(),
+            "type RestartStrategy = #temporary | #transient | #permanent\n".to_string(),
+        );
+        service.update_file(
+            file_b.clone(),
+            "Object subclass: Supervisor\n  restart: policy :: RestartStrategy => policy\n"
+                .to_string(),
+        );
+
+        // "  restart: policy :: RestartStrategy =>" — "RestartStrategy" starts at column 21.
+        let def = service.goto_definition(&file_b, Position::new(1, 25));
+        let loc = def.expect("goto-def should navigate to the alias declaration");
+        assert_eq!(loc.file, file_a);
+        assert_eq!(loc.span.start(), 5); // "type " is 5 chars.
+    }
+
+    #[test]
+    fn find_references_alias_from_definition_site_cross_file() {
+        let mut service = SimpleLanguageService::new();
+        let file_a = Utf8PathBuf::from("aliases.bt");
+        let file_b = Utf8PathBuf::from("supervisor.bt");
+        service.update_file(
+            file_a.clone(),
+            "type RestartStrategy = #temporary | #transient | #permanent\n".to_string(),
+        );
+        service.update_file(
+            file_b.clone(),
+            "Object subclass: Supervisor\n  restart: policy :: RestartStrategy => policy\n"
+                .to_string(),
+        );
+
+        // Cursor on the alias declaration name in file_a, col 10.
+        let refs = service.find_references(&file_a, Position::new(0, 10));
+        assert_eq!(
+            refs.len(),
+            2,
+            "expected 2 refs (decl + annotation site), got {refs:?}"
+        );
+        assert!(refs.iter().any(|r| r.file == file_a));
+        assert!(refs.iter().any(|r| r.file == file_b));
+    }
+
+    #[test]
+    fn hover_resolves_alias_through_project_wide_registry() {
+        // Regression guard for the `hover()` call site: it must thread the
+        // project-wide `AliasRegistry` (not `None`) so a cross-file
+        // alias-typed reference resolves to `AliasName (expansion)`.
+        let mut service = SimpleLanguageService::new();
+        let file_a = Utf8PathBuf::from("aliases.bt");
+        let file_b = Utf8PathBuf::from("supervisor.bt");
+        service.update_file(
+            file_a,
+            "type RestartStrategy = #temporary | #transient | #permanent\n".to_string(),
+        );
+        service.update_file(
+            file_b.clone(),
+            "Object subclass: Supervisor\n  restart: policy :: RestartStrategy => policy\n"
+                .to_string(),
+        );
+
+        // Hover on the final `policy` (the alias-typed parameter's use,
+        // mirroring `hover_provider`'s flagship test) — line 1, column 40:
+        // "  restart: policy :: RestartStrategy => policy".
+        let hover = service.hover(&file_b, Position::new(1, 40));
+        let hover = hover.expect("should get hover for the alias-typed parameter reference");
+        assert!(
+            hover
+                .contents
+                .contains("RestartStrategy (#temporary | #transient | #permanent)"),
+            "Expected `AliasName (expansion)` via the project-wide registry, got: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn alias_name_at_identifies_alias_and_rejects_class_name() {
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("mixed.bt");
+        service.update_file(
+            file.clone(),
+            "type RestartStrategy = #temporary | #transient | #permanent\n\nObject subclass: Foo\n  bar => 1\n"
+                .to_string(),
+        );
+
+        assert_eq!(
+            service.alias_name_at(&file, Position::new(0, 10)),
+            Some(EcoString::from("RestartStrategy"))
+        );
+        assert_eq!(service.alias_name_at(&file, Position::new(2, 20)), None);
     }
 
     /// BT-2027: `SimpleLanguageService::diagnostics` must hand off the

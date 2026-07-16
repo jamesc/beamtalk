@@ -246,7 +246,51 @@ fn find_hover_in_declarations(
         }
     }
 
+    // ADR 0108 Phase 8 (BT-2901): hover on the alias name in its own `type
+    // Name = ...` declaration shows the (immediate, as-written) expansion —
+    // the reference-site case (hovering a value/annotation typed *through*
+    // an alias) is already handled by `compute_hover`'s `alias_registry`
+    // threading (BT-2897); this covers the declaration site itself, which
+    // that threading doesn't reach (there's no inferred/annotation type at
+    // the declaration token to look up).
+    for alias in &module.type_aliases {
+        if offset >= alias.name.span.start() && offset < alias.name.span.end() {
+            return Some(alias_definition_hover_info(alias));
+        }
+    }
+
     None
+}
+
+/// Builds hover info for the alias name token in a `type Name = ...` (or
+/// `internal type Name = ...`) declaration (ADR 0108 Phase 8, BT-2901).
+/// Shows the RHS as written (mirrors [`state_declaration_hover_info`]'s
+/// shape) plus the doc comment, if any.
+fn alias_definition_hover_info(alias: &crate::ast::TypeAliasDefinition) -> HoverInfo {
+    let keyword = if alias.is_internal {
+        "internal type"
+    } else {
+        "type"
+    };
+    let title = format!(
+        "`{keyword} {} = {}`",
+        alias.name.name,
+        type_annotation_label(&alias.annotation)
+    );
+    let mut hover = HoverInfo::new(title, alias.name.span);
+
+    let mut doc_parts: Vec<String> = Vec::new();
+    if let Some(doc) = alias
+        .doc_comment
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        doc_parts.push(doc.to_string());
+    }
+    doc_parts.push("_type alias_".to_string());
+    hover = hover.with_documentation(doc_parts.join("\n\n"));
+    hover
 }
 
 /// Returns hover info when the cursor is over method declaration syntax.
@@ -434,7 +478,7 @@ fn parameter_name_span_in_signature(span: Span, source: &str) -> Span {
     }
 }
 
-fn type_annotation_label(type_annotation: &crate::ast::TypeAnnotation) -> String {
+pub(crate) fn type_annotation_label(type_annotation: &crate::ast::TypeAnnotation) -> String {
     match type_annotation {
         crate::ast::TypeAnnotation::Simple(id) => id.name.to_string(),
         crate::ast::TypeAnnotation::Singleton { name, .. } => format!("#{name}"),
@@ -2720,6 +2764,56 @@ mod tests {
         assert!(
             !hover.contents.contains("RestartStrategy"),
             "Narrowing residual must not carry the alias name (ADR 0108 v1 scope). Got: {}",
+            hover.contents
+        );
+    }
+
+    // ---- ADR 0108 Phase 8 (BT-2901): hover on the alias declaration itself ----
+
+    #[test]
+    fn hover_on_alias_declaration_name_shows_expansion() {
+        // Cursor directly on `RestartStrategy` in `type RestartStrategy =
+        // ...` — distinct from the reference-site case above (hovering a
+        // value/annotation *typed through* the alias); this is the
+        // declaration token itself.
+        let source = "type RestartStrategy = #temporary | #transient | #permanent\n";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let offset = source.find("RestartStrategy").unwrap() + 3;
+        let pos = pos_at(source, offset);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
+        let hover = hover.expect("should get hover on the alias declaration name");
+        assert!(
+            hover.contents.contains("RestartStrategy"),
+            "Got: {}",
+            hover.contents
+        );
+        assert!(
+            hover
+                .contents
+                .contains("#temporary | #transient | #permanent"),
+            "Should show the RHS expansion. Got: {}",
+            hover.contents
+        );
+        assert_eq!(hover.span, module.type_aliases[0].name.span);
+    }
+
+    #[test]
+    fn hover_on_internal_alias_declaration_name_shows_internal_keyword() {
+        let source = "internal type JsonKey = #a | #b\n";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let offset = source.find("JsonKey").unwrap() + 2;
+        let pos = pos_at(source, offset);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
+        let hover = hover.expect("should get hover on the internal alias declaration name");
+        assert!(
+            hover.contents.contains("internal type"),
+            "Got: {}",
             hover.contents
         );
     }
