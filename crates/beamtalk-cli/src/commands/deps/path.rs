@@ -555,6 +555,12 @@ fn generate_dependency_app_file(
         own_class_module_index,
         dep_name,
     );
+    // ADR 0108 Phase 8 (BT-2903): a path dependency is itself a fully-built
+    // Beamtalk package, so its own `internal type` declarations must round-
+    // trip into its `.app` file the same way the root package's do — the
+    // seeding-boundary exclusion of a dependency's internal aliases happens
+    // downstream, at browse time (`beamtalk_repl_ops_browse.erl`), not here.
+    let alias_metadata = crate::commands::build::build_alias_metadata(source_files);
     // Read full manifest to get dependency names for {applications} list
     let full_manifest = manifest::find_manifest_full(dep_root)?;
     let dep_hex_dep_names: Vec<String> = full_manifest
@@ -577,6 +583,7 @@ fn generate_dependency_app_file(
         &[],
         &dep_bt_dep_names,
         &dep_hex_dep_names,
+        &alias_metadata,
     )?;
 
     // BT-1722: Generate per-package corpus files for MCP discovery.

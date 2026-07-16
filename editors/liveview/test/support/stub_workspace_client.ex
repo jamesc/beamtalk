@@ -890,6 +890,44 @@ defmodule BtAttachWeb.StubWorkspaceClient do
      ]}
   end
 
+  # BT-2903 (ADR 0108 Phase 8): every loaded package's declared `type`
+  # aliases. A project alias, a public dependency alias, and a stdlib alias —
+  # deliberately no internal-from-a-dependency row, since the seeding-boundary
+  # exclusion (ADR 0108 Implementation) means the real op never returns one;
+  # the LiveView layer has nothing to filter and must not attempt to.
+  def browse_type_aliases do
+    {:value,
+     [
+       %{
+         "name" => "RestartStrategy",
+         "expansion" => "#temporary | #transient | #permanent",
+         "doc" => "Restart strategy for a supervised child.",
+         "source_file" => "src/restart_strategy.bt",
+         "internal" => false,
+         "package" => "my_app",
+         "source_origin" => "project"
+       },
+       %{
+         "name" => "JsonValue",
+         "expansion" => "String | Number | Boolean | Nil | List | Dictionary",
+         "doc" => :null,
+         "source_file" => "src/json_value.bt",
+         "internal" => false,
+         "package" => "json",
+         "source_origin" => "dependency"
+       },
+       %{
+         "name" => "TimeoutMs",
+         "expansion" => "Integer",
+         "doc" => :null,
+         "source_file" => "apps/beamtalk_stdlib/src/timeout.bt",
+         "internal" => false,
+         "package" => "stdlib",
+         "source_origin" => "stdlib"
+       }
+     ]}
+  end
+
   # BT-2648: the read-only native pane keyed by a standalone native module.
   # BT-2668: the real `browse_native_module_source` op returns the ABSOLUTE on-disk
   # path (e.g. `/home/.../_build/.../*.erl`), so the stub mirrors that — the

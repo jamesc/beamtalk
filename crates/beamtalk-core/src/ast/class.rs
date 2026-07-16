@@ -387,6 +387,11 @@ pub struct ProtocolMethodSignature {
 /// remains a legal identifier everywhere else. Single-letter names (`type T
 /// = ...`) are rejected at parse time — reserved for ADR 0068's implicit
 /// method-local type parameters.
+///
+/// An optional leading `internal` modifier (ADR 0071, ADR 0108 Phase 5,
+/// BT-2898) marks the alias package-private: `internal type Foo = ...`.
+/// An internal alias is usable only in `internal` signatures within its
+/// declaring package and is never seeded into a consumer's alias table.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeAliasDefinition {
     /// The alias name (e.g., `RestartStrategy`). Must be 2+ characters —
@@ -396,6 +401,9 @@ pub struct TypeAliasDefinition {
     /// accepted (unions, singletons, generics, `\`/`&`, etc.) — not just
     /// singleton unions.
     pub annotation: TypeAnnotation,
+    /// Whether this alias is package-private (ADR 0071 `internal` modifier,
+    /// ADR 0108 Phase 5). `internal type Foo = ...`.
+    pub is_internal: bool,
     /// Non-doc comments (`//` and `/* */`) appearing before this declaration.
     pub comments: CommentAttachment,
     /// Doc comment attached to this declaration (`///` lines).

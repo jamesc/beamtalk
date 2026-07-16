@@ -7,7 +7,7 @@ use super::*;
 use crate::ast::{
     Block, BlockParameter, ClassDefinition, ClassKind, CommentAttachment, DeclaredKeyword,
     Expression, ExpressionStatement, Identifier, Literal, MatchArm, MessageSelector,
-    MethodDefinition, Pattern, StateDeclaration, StringSegment,
+    MethodDefinition, Pattern, StateDeclaration, StringSegment, TypeAnnotation,
 };
 use crate::source_analysis::{Severity, Span};
 
@@ -4331,6 +4331,164 @@ fn fixture_sourced_protocol_name_is_not_unresolved() {
     assert!(
         unresolved.is_empty(),
         "Fixture-sourced protocol name should not trigger unresolved-class warnings, got: {unresolved:?}"
+    );
+}
+
+// BT-2898 (ADR 0108 Phase 5): pre-loaded aliases must be seeded into the
+// alias registry the same way pre-loaded protocols are (BT-2006), with
+// current-module definitions winning and cross-package `internal` entries
+// excluded at the seeding boundary.
+#[test]
+fn pre_loaded_alias_is_seeded_and_current_module_wins() {
+    use crate::semantic_analysis::alias_registry::AliasInfo;
+
+    // Current module declares its own `Id` alias — this must win over the
+    // pre-loaded (cross-file) `Id` of the same name.
+    let src = "type Id = String";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _parse_diags) = crate::source_analysis::parse(tokens);
+
+    let cross_file_alias = AliasInfo {
+        name: EcoString::from("Timeout"),
+        annotation: TypeAnnotation::Simple(Identifier {
+            name: EcoString::from("Integer"),
+            span: Span::default(),
+        }),
+        is_internal: false,
+        package: Some(EcoString::from("app")),
+        span: Span::default(),
+    };
+    let shadowed_alias = AliasInfo {
+        name: EcoString::from("Id"),
+        annotation: TypeAnnotation::Simple(Identifier {
+            name: EcoString::from("Integer"),
+            span: Span::default(),
+        }),
+        is_internal: false,
+        package: Some(EcoString::from("app")),
+        span: Span::default(),
+    };
+    // Internal alias declared in a *different* package — must be excluded.
+    let foreign_internal_alias = AliasInfo {
+        name: EcoString::from("ParserState"),
+        annotation: TypeAnnotation::Simple(Identifier {
+            name: EcoString::from("Integer"),
+            span: Span::default(),
+        }),
+        is_internal: true,
+        package: Some(EcoString::from("other_pkg")),
+        span: Span::default(),
+    };
+
+    let options = crate::CompilerOptions {
+        current_package: Some("app".to_string()),
+        ..Default::default()
+    };
+    let result = analyse_with_natives_and_protocols_and_aliases(
+        &module,
+        &options,
+        vec![],
+        vec![],
+        vec![cross_file_alias, shadowed_alias, foreign_internal_alias],
+        None,
+        &crate::compilation::extension_index::ExtensionIndex::new(),
+    );
+
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .all(|d| d.severity != Severity::Error),
+        "unexpected errors: {:?}",
+        result.diagnostics
+    );
+
+    // Cross-file alias is visible.
+    assert!(result.alias_registry.has_alias("Timeout"));
+    // Current-module's own definition wins over the same-named pre-loaded one.
+    assert_eq!(
+        result
+            .alias_registry
+            .get("Id")
+            .unwrap()
+            .annotation
+            .type_name()
+            .as_str(),
+        "String",
+        "current-module alias definition must win"
+    );
+    // A different-package internal alias is never seeded — seeding-boundary exclusion.
+    assert!(
+        !result.alias_registry.has_alias("ParserState"),
+        "a different-package internal pre-loaded alias must never be visible in the consumer's table"
+    );
+}
+
+// BT-2898: an `internal` alias from the *same* package (e.g. another file in
+// a same-package multi-file compilation) must still be seeded — ADR 0108
+// scopes `internal` to the whole declaring package, not just the declaring
+// file, so this is not the seeding-boundary exclusion case above.
+#[test]
+fn pre_loaded_internal_alias_from_same_package_is_still_seeded() {
+    use crate::semantic_analysis::alias_registry::AliasInfo;
+
+    let module = Module::new(vec![], Span::default());
+
+    let same_package_internal_alias = AliasInfo {
+        name: EcoString::from("ParserState"),
+        annotation: TypeAnnotation::Simple(Identifier {
+            name: EcoString::from("Integer"),
+            span: Span::default(),
+        }),
+        is_internal: true,
+        package: Some(EcoString::from("json")),
+        span: Span::default(),
+    };
+
+    let options = crate::CompilerOptions {
+        current_package: Some("json".to_string()),
+        ..Default::default()
+    };
+    let result = analyse_with_natives_and_protocols_and_aliases(
+        &module,
+        &options,
+        vec![],
+        vec![],
+        vec![same_package_internal_alias],
+        None,
+        &crate::compilation::extension_index::ExtensionIndex::new(),
+    );
+
+    assert!(
+        result.alias_registry.has_alias("ParserState"),
+        "a same-package internal alias from another file must remain visible"
+    );
+}
+
+// BT-2898: end-to-end wiring check — the E0402 alias-leak checks (Phase 8)
+// must fire through the full `analyse_with_options` pipeline, not just when
+// the validator functions are called directly in `visibility_validators.rs`.
+#[test]
+fn analyse_full_pipeline_reports_internal_alias_leaked_in_public_signature() {
+    let src = "internal type ParserState = Integer\n\n\
+               Object subclass: Parser\n  tokenize: input :: String -> ParserState => nil";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _parse_diags) = crate::source_analysis::parse(tokens);
+
+    let options = crate::CompilerOptions {
+        current_package: Some("json".to_string()),
+        ..Default::default()
+    };
+    let result = analyse_with_options(&module, &options);
+
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.severity == Severity::Error
+                && d.message.contains("Internal type alias 'ParserState'")),
+        "expected the full pipeline to report the leaked internal alias, got: {:?}",
+        result.diagnostics
     );
 }
 

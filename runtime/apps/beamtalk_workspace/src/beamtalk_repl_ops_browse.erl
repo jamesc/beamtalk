@@ -23,6 +23,7 @@ panes against a live workspace, sourced **static-first / live-augmented**
 | `browse-class-definition` | class-definition pane | `{value, ClassDefinition}` |
 | `browse-native-source` | read-only native pane | `{value, NativeSource}` |
 | `browse-native-modules` | native-modules section | `{value, [NativeModuleRow]}` |
+| `browse-type-aliases` | type-aliases section | `{value, [AliasRow]}` |
 
 ## Term contract (BT-2399)
 
@@ -88,14 +89,19 @@ See `docs/ADR/0096-system-browser-data-source.md`.
 %% Pure helpers exercised directly in EUnit (BT-2578): clause parsing and the
 %% delegate-source marker have no live-class dependency. BT-2643: the
 %% source_origin (classification) / package (name) split helpers. BT-2732: the
-%% `dispatch_<selector>` export → `self delegate` selector recovery.
+%% `dispatch_<selector>` export → `self delegate` selector recovery. BT-2903:
+%% the seeding-boundary exclusion + row-shaping helpers behind
+%% `browse-type-aliases`.
 -export([
     handle_call_clause_lines/1,
     clause_selector/1,
     delegate_exported/2,
     self_delegate_selectors/1,
     package_of/2,
-    package_of_module/1
+    package_of_module/1,
+    alias_visible/2,
+    alias_row/3,
+    package_type_aliases/1
 ]).
 -endif.
 
@@ -157,7 +163,9 @@ handle_term(<<"browse-native-source">>, Params, _Msg, _SessionPid) ->
             arg_error(<<"browse-native-source">>, Reason)
     end;
 handle_term(<<"browse-native-modules">>, _Params, _Msg, _SessionPid) ->
-    {value, browse_native_modules()}.
+    {value, browse_native_modules()};
+handle_term(<<"browse-type-aliases">>, _Params, _Msg, _SessionPid) ->
+    {value, browse_type_aliases()}.
 
 -doc "Advertise the browse ops in `describe`.".
 -spec describe_ops() -> map().
@@ -176,7 +184,10 @@ describe_ops() ->
         <<"browse-native-source">> => #{<<"params">> => [<<"class">>, <<"module">>]},
         %% BT-2648: enumerate a loaded package's hand-written native Erlang
         %% modules (no params).
-        <<"browse-native-modules">> => #{<<"params">> => []}
+        <<"browse-native-modules">> => #{<<"params">> => []},
+        %% BT-2903 (ADR 0108 Phase 8): enumerate every loaded package's
+        %% declared `type` aliases (no params).
+        <<"browse-type-aliases">> => #{<<"params">> => []}
     }.
 
 %%% ====================================================================
@@ -1017,6 +1028,179 @@ backing_source_file(Backing) ->
     catch
         _:_ -> undefined
     end.
+
+%%% ====================================================================
+%%% Op 7 — browse-type-aliases (ADR 0108 Phase 8, BT-2903)
+%%% ====================================================================
+
+%% Enumerate every loaded package's declared `type` aliases (ADR 0108).
+%%
+%% Aliases erase entirely at compile time — no BEAM module, no live process —
+%% so unlike `browse-classes` there is nothing to reflect on. The `.app`
+%% file's `{type_aliases, [...]}` env key (BT-2903, `app_file.rs`
+%% `AliasMetadata`/`format_type_aliases_entry`) is the only durable record of
+%% a package's declarations once compiled, so this walks `beamtalk_package:
+%% all/0` and reads each package's env, the same enumeration strategy
+%% `browse-native-modules` uses.
+%%
+%% **Seeding-boundary exclusion (ADR 0108 Implementation — "System Browser /
+%% LiveView IDE"):** an `internal` alias declared in a package other than the
+%% browsing session's current project package is dropped — the browse-op
+%% analogue of how `AliasRegistry::add_pre_loaded` (BT-2898) never seeds a
+%% dependency's internal aliases into a consumer's alias table at compile
+%% time. There is no live "current compilation" alias table to consult here
+%% (this op runs against a loaded system, not a single in-flight compile), so
+%% the equivalent guarantee is reconstructed per row instead of per seeded
+%% table: an alias belonging to the current project package is visible
+%% regardless of `internal` (an internal alias is usable within its own
+%% package — ADR 0108 Semantics), and every other package's (including
+%% stdlib's) internal aliases are excluded, mirroring the ADR's explicit
+%% instruction that this filter "belongs at the seeding boundary ... not as a
+%% query-time filter over `browse-type-aliases`'s result set" — the entries
+%% are dropped during enumeration, before a row is ever built, not filtered
+%% out of an already-built result list.
+%%
+%% Unlike `browse-native-modules`, rows are **not** deduped by name: a native
+%% module atom is a genuine BEAM-global identity, but two independently
+%% loaded packages can each legally declare an alias of the same name (only a
+%% *consumer* of both would hit `add_pre_loaded`'s collision diagnostic) —
+%% deduping here would silently hide one package's real declaration instead
+%% of surfacing both, distinguished by their `package`/`source_origin` tags.
+%%
+%% **Known gap — a package with only `type` declarations (no classes) is
+%% invisible here (BT-2915):** discovery walks `beamtalk_package:all/0`,
+%% which recognises a package solely by a non-empty `classes` app-env key
+%% (ADR 0070) — a hypothetical types-only "shared vocabulary" package with
+%% zero classes would never be enumerated, so its aliases (even public ones)
+%% never appear, regardless of the seeding-boundary logic above. Every
+%% concrete consumer this ADR ships against (stdlib's `RestartStrategy`,
+%% `JsonValue`) declares aliases alongside real classes, so this has not
+%% bitten a real package yet; broadening `beamtalk_package:all/0`'s discovery
+%% signal is shared infra touching every other consumer of that function
+%% (`browse-native-modules`, `Package packageNameFor:`, …), so it is tracked
+%% as a follow-up rather than folded into this op.
+-spec browse_type_aliases() -> [map()].
+browse_type_aliases() ->
+    Packages =
+        try
+            beamtalk_package:all()
+        catch
+            _:_ -> []
+        end,
+    Rows = lists:flatmap(fun type_aliases_of_package/1, Packages),
+    lists:sort(
+        fun(A, B) ->
+            {maps:get(<<"name">>, A), maps:get(<<"package">>, A)} =<
+                {maps:get(<<"name">>, B), maps:get(<<"package">>, B)}
+        end,
+        Rows
+    ).
+
+%% The alias rows for one package: resolve its owning app, read its declared
+%% `type_aliases` env, drop internal aliases that fail the seeding-boundary
+%% check, and tag each surviving row with the package's name + origin.
+%%
+%% Wrapped in a try/catch — unlike `native_modules_of_package/1`, whose row
+%% builder only touches `module_info/1` reflection (itself already
+%% defensively wrapped in `backing_source_file/1`) — because `alias_row/3`
+%% assumes each `type_aliases` env entry is a map (`maps:get/2,3` raises
+%% `{badmap, _}` otherwise). That assumption holds for every entry this
+%% workspace's own `beamtalk build` ever writes (`app_file.rs`
+%% `format_type_aliases_entry`), but a hand-edited or toolchain-mismatched
+%% `.app` file is still just a text file on disk — one malformed package must
+%% not take down every other package's rows in the same response, mirroring
+%% `class_row/2`'s per-class isolation.
+-spec type_aliases_of_package(binary()) -> [map()].
+type_aliases_of_package(PkgName) ->
+    try
+        case find_app_for_package(PkgName) of
+            {ok, App} ->
+                Origin = package_origin(App, PkgName),
+                [
+                    alias_row(Entry, PkgName, Origin)
+                 || Entry <- package_type_aliases(App),
+                    alias_visible(Entry, Origin)
+                ];
+            error ->
+                []
+        end
+    catch
+        Class:Reason ->
+            ?LOG_WARNING(
+                "browse-type-aliases: skipping package ~p: ~p:~p",
+                [PkgName, Class, Reason],
+                #{domain => [beamtalk, runtime]}
+            ),
+            []
+    end.
+
+%% An app's declared type aliases — the `.app` `{type_aliases, [...]}` env key
+%% (BT-2903). `[]` for a package with no `type` declarations (most packages),
+%% or one built before this key existed — no fallback reconstruction needed,
+%% unlike `package_native_modules/1`'s stdlib special case, since there is no
+%% legacy alias surface to recover data from.
+-spec package_type_aliases(atom()) -> [map()].
+package_type_aliases(App) ->
+    case application:get_env(App, type_aliases) of
+        {ok, Aliases} when is_list(Aliases) -> Aliases;
+        _ -> []
+    end.
+
+%% Seeding-boundary exclusion (see `browse_type_aliases/0` doc): an internal
+%% alias is visible only from its own package (`Origin =:= project`) — every
+%% other package's internal aliases, including stdlib's, are dropped. A
+%% non-internal (public) alias is always visible.
+-spec alias_visible(map(), binary()) -> boolean().
+alias_visible(#{internal := true}, Origin) ->
+    Origin =:= <<"project">>;
+alias_visible(#{internal := _}, _Origin) ->
+    true;
+alias_visible(_Entry, _Origin) ->
+    %% No `internal` key at all (should not happen — every entry the Rust
+    %% build pipeline emits carries it) — fail safe by treating as internal.
+    false.
+
+%% One AliasRow (ADR 0108: `name`, `expansion`, `doc`, `source_file`,
+%% `internal`), extended with `package`/`source_origin` the way `ClassRow`
+%% and `NativeModuleRow` are — the LiveView "Type Aliases" panel and the VS
+%% Code sidebar both group/badge by package the same way the Classes and
+%% Native panels already do.
+-spec alias_row(map(), binary(), binary()) -> map().
+alias_row(Entry, PkgName, Origin) ->
+    #{
+        <<"name">> => alias_field_binary(maps:get(name, Entry, <<>>)),
+        <<"expansion">> => alias_field_binary(maps:get(expansion, Entry, <<>>)),
+        <<"doc">> => alias_field_or_null(maps:get(doc, Entry, undefined)),
+        <<"source_file">> => alias_field_binary(maps:get(source_file, Entry, <<>>)),
+        <<"internal">> => maps:get(internal, Entry, false),
+        <<"package">> => PkgName,
+        <<"source_origin">> => Origin
+    }.
+
+%% `.app`-file alias fields round-trip as atoms (`name`), Erlang strings
+%% (`expansion`/`source_file`/`doc`, via `escape_erlang_string` +
+%% `file:consult`), or `undefined` (`doc`) — never binaries, since
+%% `app_file.rs` emits a literal `.app` Erlang term, not a JSON payload.
+%% Normalise whichever shape comes back to the binary the BT-2399 term
+%% contract requires.
+-spec alias_field_binary(atom() | binary() | string()) -> binary().
+alias_field_binary(V) when is_binary(V) ->
+    V;
+alias_field_binary(V) when is_atom(V) ->
+    atom_to_binary(V, utf8);
+alias_field_binary(V) when is_list(V) ->
+    case unicode:characters_to_binary(V) of
+        B when is_binary(B) -> B;
+        _ -> list_to_binary(V)
+    end;
+alias_field_binary(_) ->
+    <<>>.
+
+-spec alias_field_or_null(undefined | atom() | binary() | string()) -> binary() | null.
+alias_field_or_null(undefined) ->
+    null;
+alias_field_or_null(V) ->
+    alias_field_binary(V).
 
 %% Best-effort `handle_call` clause line-map: each clause whose first message
 %% element is a concrete selector (a quoted atom like `'writeLine:'` or a bare

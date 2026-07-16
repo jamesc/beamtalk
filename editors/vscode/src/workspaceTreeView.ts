@@ -11,6 +11,7 @@ import type {
   MethodInfo,
   StateVarInfo,
   PushEvent,
+  TypeAliasInfo,
   WorkspaceClient,
 } from "./workspaceClient";
 
@@ -36,6 +37,11 @@ export interface ClassesSectionNode {
   readonly kind: "classes-section";
 }
 
+/** ADR 0108 Phase 8 (BT-2903): the "Type Aliases" section, sibling to Classes. */
+export interface TypeAliasesSectionNode {
+  readonly kind: "type-aliases-section";
+}
+
 export interface BindingItemNode {
   readonly kind: "binding-item";
   readonly name: string;
@@ -50,6 +56,16 @@ export interface ActorItemNode {
 export interface ClassItemNode {
   readonly kind: "class-item";
   readonly info: ClassInfo;
+}
+
+/**
+ * ADR 0108 Phase 8 (BT-2903): one `type` alias declaration. Unlike
+ * `ClassItemNode`, this is always a leaf — an alias produces no BEAM module,
+ * so it has no methods/state to expand into.
+ */
+export interface TypeAliasItemNode {
+  readonly kind: "type-alias-item";
+  readonly info: TypeAliasInfo;
 }
 
 export interface MethodGroupNode {
@@ -90,9 +106,11 @@ export type WorkspaceNode =
   | BindingsSectionNode
   | ActorsSectionNode
   | ClassesSectionNode
+  | TypeAliasesSectionNode
   | BindingItemNode
   | ActorItemNode
   | ClassItemNode
+  | TypeAliasItemNode
   | StateGroupNode
   | StateVarItemNode
   | MethodGroupNode
@@ -106,6 +124,7 @@ const DISCONNECTED_ROOT: DisconnectedRootNode = { kind: "disconnected-root" };
 const BINDINGS_SECTION: BindingsSectionNode = { kind: "bindings-section" };
 const ACTORS_SECTION: ActorsSectionNode = { kind: "actors-section" };
 const CLASSES_SECTION: ClassesSectionNode = { kind: "classes-section" };
+const TYPE_ALIASES_SECTION: TypeAliasesSectionNode = { kind: "type-aliases-section" };
 
 // ─── WorkspaceTreeDataProvider ────────────────────────────────────────────────
 
@@ -135,6 +154,8 @@ export class WorkspaceTreeDataProvider
   private bindings: BindingsMap = {};
   private actors: ActorInfo[] = [];
   private classes: ClassInfo[] = [];
+  /** ADR 0108 Phase 8 (BT-2903): every loaded package's declared `type` aliases. */
+  private typeAliases: TypeAliasInfo[] = [];
   private disposed = false;
   /** Active session ID captured from terminal output; used to query session bindings. */
   private sessionId: string | null = null;
@@ -298,12 +319,16 @@ export class WorkspaceTreeDataProvider
         return this._actorsSectionItem();
       case "classes-section":
         return this._classesSectionItem();
+      case "type-aliases-section":
+        return this._typeAliasesSectionItem();
       case "binding-item":
         return this._bindingItem(element);
       case "actor-item":
         return this._actorItem(element);
       case "class-item":
         return this._classItem(element);
+      case "type-alias-item":
+        return this._typeAliasItem(element);
       case "state-group":
         return this._stateGroupItem(element);
       case "state-item":
@@ -329,6 +354,7 @@ export class WorkspaceTreeDataProvider
           ...(this.sessionId !== null ? [BINDINGS_SECTION] : []),
           ACTORS_SECTION,
           CLASSES_SECTION,
+          TYPE_ALIASES_SECTION,
         ];
 
       case "bindings-section":
@@ -345,6 +371,9 @@ export class WorkspaceTreeDataProvider
 
       case "classes-section":
         return this.classes.map((info) => ({ kind: "class-item" as const, info }));
+
+      case "type-aliases-section":
+        return this.typeAliases.map((info) => ({ kind: "type-alias-item" as const, info }));
 
       case "actor-item": {
         const cacheKey = `actor:${element.info.pid}`;
@@ -628,6 +657,20 @@ export class WorkspaceTreeDataProvider
     return item;
   }
 
+  // ADR 0108 Phase 8 (BT-2903): "Type Aliases (N)" — a sibling section to
+  // "Classes (N loaded)". Deliberately no "loaded" qualifier: an alias
+  // produces no BEAM module, so "loaded" would misdescribe what the count
+  // means (every declared alias appears here, not a subset that happened to
+  // get pulled into the running image).
+  private _typeAliasesSectionItem(): vscode.TreeItem {
+    const count = this.typeAliases.length;
+    const item = new vscode.TreeItem("Type Aliases", vscode.TreeItemCollapsibleState.Collapsed);
+    item.description = count > 0 ? `(${count})` : "(none)";
+    item.iconPath = new vscode.ThemeIcon("symbol-interface");
+    item.contextValue = "type-aliases-section";
+    return item;
+  }
+
   private _bindingItem(node: BindingItemNode): vscode.TreeItem {
     const item = new vscode.TreeItem(node.name, vscode.TreeItemCollapsibleState.None);
     item.description = this._displayValue(node.value);
@@ -665,6 +708,33 @@ export class WorkspaceTreeDataProvider
     if (node.info.actor_count !== undefined && node.info.actor_count > 0) {
       item.description = `${node.info.actor_count} instance${node.info.actor_count !== 1 ? "s" : ""}`;
     }
+    return item;
+  }
+
+  // ADR 0108 Phase 8 (BT-2903): one `type` alias row. Always a leaf
+  // (`TreeItemCollapsibleState.None`) — an alias has no methods/state to
+  // expand into. The expansion (right-hand side) shows inline as the
+  // description, mirroring how a class's instance count is shown; the doc
+  // comment (if any) and internal flag surface in the tooltip only, so the
+  // row itself stays a single compact line.
+  private _typeAliasItem(node: TypeAliasItemNode): vscode.TreeItem {
+    const item = new vscode.TreeItem(node.info.name, vscode.TreeItemCollapsibleState.None);
+    item.iconPath = new vscode.ThemeIcon("symbol-interface");
+    item.contextValue = "type-alias-item";
+    if (node.info.expansion) {
+      item.description = `= ${node.info.expansion}`;
+    }
+    const tooltipLines = [`**type ${node.info.name}** = \`${node.info.expansion ?? "?"}\``];
+    if (node.info.doc) {
+      tooltipLines.push("", node.info.doc);
+    }
+    if (node.info.internal) {
+      tooltipLines.push("", "_internal — package-private_");
+    }
+    if (node.info.source_file) {
+      tooltipLines.push("", node.info.source_file);
+    }
+    item.tooltip = new vscode.MarkdownString(tooltipLines.join("\n"));
     return item;
   }
 
@@ -805,21 +875,27 @@ export class WorkspaceTreeDataProvider
     this.bindings = {};
     this.actors = [];
     this.classes = [];
+    this.typeAliases = [];
     this.inspectCache.clear();
     this.methodsCache.clear();
     this._onDidChangeTreeData.fire(undefined);
   }
 
-  /** Fetch bindings, actors, and classes from a newly-connected client. */
+  /** Fetch bindings, actors, classes, and type aliases from a newly-connected client. */
   private async _fetchInitialData(client: WorkspaceClient): Promise<void> {
     const gen = ++this.initialFetchGeneration;
     // Prefer the active session ID (for the user's variables) over the extension's own WS session.
     const sessionId = this.sessionId ?? client.currentSessionId;
-    const [bindingsResult, actorsResult, classesResult] = await Promise.allSettled([
-      sessionId ? client.bindings(sessionId) : Promise.resolve<BindingsMap>({}),
-      client.actors(),
-      client.classes(),
-    ]);
+    const [bindingsResult, actorsResult, classesResult, typeAliasesResult] =
+      await Promise.allSettled([
+        sessionId ? client.bindings(sessionId) : Promise.resolve<BindingsMap>({}),
+        client.actors(),
+        client.classes(),
+        // ADR 0108 Phase 8 (BT-2903): no push channel exists for alias changes
+        // (unlike `class-loaded`), so this is refresh-on-connect only — a new
+        // `type` declaration appears on the next reconnect/refresh, not live.
+        client.typeAliases(),
+      ]);
 
     // Guard: client may have been detached, or a newer fetch superseded this one.
     if (this.client !== client || this.initialFetchGeneration !== gen) {
@@ -841,6 +917,9 @@ export class WorkspaceTreeDataProvider
     }
     if (classesResult.status === "fulfilled") {
       this.classes = classesResult.value;
+    }
+    if (typeAliasesResult.status === "fulfilled") {
+      this.typeAliases = typeAliasesResult.value;
     }
 
     this._onDidChangeTreeData.fire(undefined);

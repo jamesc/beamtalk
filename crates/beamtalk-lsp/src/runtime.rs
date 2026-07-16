@@ -24,6 +24,7 @@ use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
+use serde::de::DeserializeOwned;
 use tokio::net::TcpStream;
 use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio_tungstenite::tungstenite::Message;
@@ -425,20 +426,7 @@ impl RuntimeClient {
 
         let response = self.dispatch_request(request, &id, "nav-query").await?;
 
-        if response.is_error() {
-            let msg = response
-                .error
-                .or(response.message)
-                .unwrap_or_else(|| "unknown error".to_string());
-            return Err(RuntimeError::Protocol(format!("nav-query error: {msg}")));
-        }
-
-        let value = response.value.ok_or_else(|| {
-            RuntimeError::Protocol("nav-query: reply missing `value`".to_string())
-        })?;
-        let payload: NavQueryResponse = serde_json::from_value(value).map_err(|e| {
-            RuntimeError::Protocol(format!("nav-query: malformed reply payload: {e}"))
-        })?;
+        let payload: NavQueryResponse = decode_rpc_reply(response, "nav-query")?;
         Ok(payload.sites)
     }
 
@@ -474,20 +462,7 @@ impl RuntimeClient {
 
         let response = self.dispatch_request(request, &id, "nav-symbols").await?;
 
-        if response.is_error() {
-            let msg = response
-                .error
-                .or(response.message)
-                .unwrap_or_else(|| "unknown error".to_string());
-            return Err(RuntimeError::Protocol(format!("nav-symbols error: {msg}")));
-        }
-
-        let value = response.value.ok_or_else(|| {
-            RuntimeError::Protocol("nav-symbols: reply missing `value`".to_string())
-        })?;
-        let payload: NavSymbolsResponse = serde_json::from_value(value).map_err(|e| {
-            RuntimeError::Protocol(format!("nav-symbols: malformed reply payload: {e}"))
-        })?;
+        let payload: NavSymbolsResponse = decode_rpc_reply(response, "nav-symbols")?;
         Ok(payload.classes)
     }
 
@@ -518,22 +493,7 @@ impl RuntimeClient {
             .dispatch_request(request, &id, "reload-findings")
             .await?;
 
-        if response.is_error() {
-            let msg = response
-                .error
-                .or(response.message)
-                .unwrap_or_else(|| "unknown error".to_string());
-            return Err(RuntimeError::Protocol(format!(
-                "reload-findings error: {msg}"
-            )));
-        }
-
-        let value = response.value.ok_or_else(|| {
-            RuntimeError::Protocol("reload-findings: reply missing `value`".to_string())
-        })?;
-        let payload: ReloadFindingsResponse = serde_json::from_value(value).map_err(|e| {
-            RuntimeError::Protocol(format!("reload-findings: malformed reply payload: {e}"))
-        })?;
+        let payload: ReloadFindingsResponse = decode_rpc_reply(response, "reload-findings")?;
         Ok(payload.findings)
     }
 
@@ -830,11 +790,92 @@ async fn read_text(ws: &mut WsStream) -> Result<String, String> {
         .map_err(|_| format!("websocket read timed out after {}s", IO_TIMEOUT.as_secs()))?
 }
 
+/// Decode a typed payload from a [`ReplResponse`] received after a named RPC op.
+///
+/// Shared by [`RuntimeClient::nav_query`] and [`RuntimeClient::nav_symbols`]
+/// (and any future typed ops) to avoid repeating the same three-step check:
+/// 1. error flag → `RuntimeError::Protocol("{op} error: {msg}")`
+/// 2. missing `value` field → `RuntimeError::Protocol("{op}: reply missing `value`")`
+/// 3. JSON deserialise failure → `RuntimeError::Protocol("{op}: malformed reply payload: {e}")`
+fn decode_rpc_reply<T: DeserializeOwned>(
+    response: ReplResponse,
+    op: &str,
+) -> Result<T, RuntimeError> {
+    if response.is_error() {
+        let msg = response
+            .error
+            .or(response.message)
+            .unwrap_or_else(|| "unknown error".to_string());
+        return Err(RuntimeError::Protocol(format!("{op} error: {msg}")));
+    }
+    let value = response
+        .value
+        .ok_or_else(|| RuntimeError::Protocol(format!("{op}: reply missing `value`")))?;
+    serde_json::from_value(value)
+        .map_err(|e| RuntimeError::Protocol(format!("{op}: malformed reply payload: {e}")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde::Deserialize;
     use serde_json::json;
     use tokio::sync::mpsc::unbounded_channel;
+
+    #[derive(Debug, Deserialize, PartialEq)]
+    struct DummyPayload {
+        foo: String,
+    }
+
+    #[test]
+    fn decode_rpc_reply_success() {
+        let response: ReplResponse =
+            serde_json::from_value(json!({"id": "1", "value": {"foo": "bar"}})).unwrap();
+        let payload: DummyPayload = decode_rpc_reply(response, "dummy-op").unwrap();
+        assert_eq!(
+            payload,
+            DummyPayload {
+                foo: "bar".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn decode_rpc_reply_error_flag_set() {
+        let response: ReplResponse = serde_json::from_value(json!({
+            "id": "1",
+            "status": ["done", "error"],
+            "error": "boom"
+        }))
+        .unwrap();
+        let err = decode_rpc_reply::<DummyPayload>(response, "dummy-op").unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "runtime protocol error: dummy-op error: boom"
+        );
+    }
+
+    #[test]
+    fn decode_rpc_reply_missing_value() {
+        let response: ReplResponse = serde_json::from_value(json!({"id": "1"})).unwrap();
+        let err = decode_rpc_reply::<DummyPayload>(response, "dummy-op").unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "runtime protocol error: dummy-op: reply missing `value`"
+        );
+    }
+
+    #[test]
+    fn decode_rpc_reply_malformed_payload() {
+        let response: ReplResponse =
+            serde_json::from_value(json!({"id": "1", "value": {"foo": 42}})).unwrap();
+        let err = decode_rpc_reply::<DummyPayload>(response, "dummy-op").unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.starts_with("runtime protocol error: dummy-op: malformed reply payload:"),
+            "unexpected error message: {msg}"
+        );
+    }
 
     #[tokio::test]
     async fn push_frame_with_files_is_forwarded() {

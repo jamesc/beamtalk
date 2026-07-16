@@ -236,6 +236,16 @@ fn resolve_type_annotation_inner(
                         memo,
                     );
                     expanding.pop();
+                    // BT-2897 / ADR 0108: tag the *exact* value just produced
+                    // with the alias name for display — see `InferredType::
+                    // tag_alias_expansion`'s doc. This is the single
+                    // construction point for `TypeProvenance::Aliased`, so
+                    // every hover/diagnostic use of this resolved type can
+                    // render `RestartStrategy (#temporary | …)` instead of
+                    // the bare expansion. Tagged *before* memoizing so a
+                    // later reference to the same alias reuses the tagged
+                    // value verbatim (see the `memo.get` early-return above).
+                    let resolved = resolved.tag_alias_expansion(name.clone(), type_id.span);
                     memo.insert(name.clone(), resolved.clone());
                     return resolved;
                 }
@@ -1082,6 +1092,8 @@ mod tests {
         registry.register_test_alias(AliasInfo {
             name: name.into(),
             annotation,
+            is_internal: false,
+            package: None,
             span: span(),
         });
         registry
@@ -1201,6 +1213,8 @@ mod tests {
         registry.register_test_alias(AliasInfo {
             name: "B".into(),
             annotation: b_expansion,
+            is_internal: false,
+            package: None,
             span: span(),
         });
 
@@ -1213,6 +1227,33 @@ mod tests {
         assert!(members.contains(&InferredType::known("#x")));
         assert!(members.contains(&InferredType::known("#y")));
         assert!(members.contains(&InferredType::known("#z")));
+    }
+
+    #[test]
+    fn repeated_alias_reference_in_one_annotation_both_display_the_alias_name() {
+        // `A | A` — the second reference hits `resolve_type_annotation_inner`'s
+        // per-call `memo` cache (keyed by alias name), reusing the *first*
+        // reference's already-tagged value rather than re-expanding. This
+        // pins that the reused value still displays correctly (adversarial
+        // review, BT-2897): both members carry the same `Aliased("A", …)`
+        // tag, so the union simplifies to the single tagged member, not two
+        // untagged copies.
+        let registry = alias_registry_with("A", TypeAnnotation::Simple(ident("Integer")));
+        let ann = TypeAnnotation::Union {
+            types: vec![
+                TypeAnnotation::Simple(ident("A")),
+                TypeAnnotation::Simple(ident("A")),
+            ],
+            span: span(),
+        };
+        let result = resolve_type_annotation(&ann, &empty_subst(), None, Some(&registry));
+        // `A | A` structurally collapses to a single `Integer` (dedup).
+        assert_eq!(result, InferredType::known("Integer"));
+        assert_eq!(
+            result.display_for_diagnostic().unwrap(),
+            "A (Integer)",
+            "the reused, memoized value must still carry the alias tag"
+        );
     }
 
     #[test]
@@ -1248,11 +1289,15 @@ mod tests {
         registry.register_test_alias(AliasInfo {
             name: "A".into(),
             annotation: TypeAnnotation::Simple(ident("B")),
+            is_internal: false,
+            package: None,
             span: span(),
         });
         registry.register_test_alias(AliasInfo {
             name: "B".into(),
             annotation: TypeAnnotation::Simple(ident("A")),
+            is_internal: false,
+            package: None,
             span: span(),
         });
 
@@ -1290,6 +1335,8 @@ mod tests {
                 ],
                 span: span(),
             },
+            is_internal: false,
+            package: None,
             span: span(),
         });
         for level in 1..=40 {
@@ -1303,6 +1350,8 @@ mod tests {
                     ],
                     span: span(),
                 },
+                is_internal: false,
+                package: None,
                 span: span(),
             });
         }

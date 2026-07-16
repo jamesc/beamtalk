@@ -871,6 +871,16 @@ fn format_stdlib_classes_list(class_metadata: &[ClassMeta], separator: &str) -> 
 ///
 /// Lists all modules and embeds class hierarchy metadata in the `env` section.
 /// The metadata is used by `beamtalk_stdlib` to load modules in dependency order.
+///
+/// **No `type_aliases` env key (ADR 0108 Phase 8, BT-2903):** unlike
+/// [`super::app_file::generate_app_file`] (the real `beamtalk build`
+/// pipeline, which now emits `{type_aliases, [...]}` via
+/// [`super::build::build_alias_metadata`]), this stdlib-specific writer does
+/// not — stdlib itself declares no `type` aliases yet. When the ADR's
+/// "Stdlib follow-through" work lands (`RestartStrategy`, `JsonValue`,
+/// tracked against BT-2618/BT-2827 in the ADR), this function needs the same
+/// `build_alias_metadata`/`format_type_aliases_entry` wiring, or
+/// `browse-type-aliases` will never show stdlib's own aliases.
 fn generate_app_file(
     ebin_dir: &Utf8Path,
     source_files: &[Utf8PathBuf],

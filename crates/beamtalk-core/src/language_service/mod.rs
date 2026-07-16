@@ -1559,12 +1559,19 @@ impl LanguageService for SimpleLanguageService {
     fn hover(&self, file: &Utf8PathBuf, position: Position) -> Option<HoverInfo> {
         let file_data = self.get_file(file)?;
 
+        // BT-2897 / ADR 0108: `ProjectIndex` does not yet track a
+        // project-wide `AliasRegistry` (that's LSP integration, deferred to
+        // the later ADR 0108 phase, BT-2901) — `None` here means an
+        // alias-typed value's hover falls back to its bare structural
+        // expansion rather than `AliasName (expansion)`, matching pre-BT-2897
+        // behaviour until that phase lands.
         crate::queries::hover_provider::compute_hover(
             &file_data.module,
             &file_data.source,
             position,
             self.project_index.hierarchy(),
             self.native_types.as_deref(),
+            None,
         )
     }
 

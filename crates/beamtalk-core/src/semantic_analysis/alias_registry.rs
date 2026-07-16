@@ -65,15 +65,50 @@ pub struct AliasInfo {
     /// still resolves through the same `resolve_type_annotation` recursion
     /// used for every other annotation).
     pub annotation: TypeAnnotation,
+    /// Whether this alias is package-private (ADR 0071 `internal` modifier,
+    /// ADR 0108 Phase 5, BT-2898): `internal type Foo = ...`.
+    ///
+    /// An internal alias declared in a *different* package than the current
+    /// compilation is never seeded into the consumer's alias table at all
+    /// ([`AliasRegistry::add_pre_loaded`] excludes it at the seeding
+    /// boundary) — so by the time an `AliasInfo` with `is_internal: true` is
+    /// visible in *any* registry, it is guaranteed to belong to the current
+    /// package. Leakage checks therefore don't need to re-derive "current
+    /// package" from `package` themselves the way
+    /// [`crate::semantic_analysis::class_hierarchy::ClassInfo`]'s checks do
+    /// — but `add_pre_loaded` itself still needs `package` to tell a
+    /// same-package cross-file alias (must stay visible — ADR 0108: internal
+    /// aliases are usable in `internal` signatures *within their declaring
+    /// package*, not just their declaring file) apart from a dependency's
+    /// internal alias (must never be seeded).
+    pub is_internal: bool,
+    /// Package that declares this alias (ADR 0070/0071), mirroring
+    /// [`crate::semantic_analysis::class_hierarchy::ClassInfo::package`].
+    /// `None` for `extract_alias_infos`'s raw output — populated by the
+    /// caller (build pipeline) before merging into `pre_loaded_aliases`, the
+    /// same way `ClassInfo::package` is populated downstream of
+    /// `ClassHierarchy::extract_class_infos`.
+    pub package: Option<EcoString>,
     /// Source span of the `type Name = ...` declaration (for diagnostics).
     pub span: Span,
 }
 
 impl AliasInfo {
-    fn from_definition(def: &TypeAliasDefinition) -> Self {
+    /// Builds an [`AliasInfo`] from a parsed [`TypeAliasDefinition`].
+    ///
+    /// `pub` (ADR 0108 Phase 8, BT-2902): the REPL's cross-turn alias
+    /// persistence re-parses each previously-declared `type Name = ...` line
+    /// standalone (the session has no live BEAM artifact to recover an
+    /// alias from, unlike a class — see `AliasRegistry::add_pre_loaded`) and
+    /// needs this constructor to turn the result into an `AliasInfo` without
+    /// going through a full `Module`/`register_module` batch.
+    #[must_use]
+    pub fn from_definition(def: &TypeAliasDefinition) -> Self {
         Self {
             name: def.name.name.clone(),
             annotation: def.annotation.clone(),
+            is_internal: def.is_internal,
+            package: None,
             span: def.span,
         }
     }
@@ -294,6 +329,153 @@ impl AliasRegistry {
             self.reported_cycles.clear();
         }
 
+        diagnostics
+    }
+
+    /// Extract `AliasInfo` entries from a parsed module without registering them.
+    ///
+    /// BT-2898: Mirrors `ProtocolRegistry::extract_protocol_infos` /
+    /// `ClassHierarchy::extract_class_infos` — used to collect alias metadata
+    /// from a package's compiled sources ahead of compiling a downstream
+    /// module that references those alias names (ADR 0108 Semantics:
+    /// "Aliases are exported, like classes and protocols").
+    ///
+    /// Includes `internal` aliases — the seeding-boundary exclusion happens
+    /// in [`Self::add_pre_loaded`], not here, so this function stays a
+    /// faithful, unfiltered snapshot of the module's declarations (useful
+    /// for same-package callers that *do* want to see internal aliases,
+    /// e.g. a future same-package System Browser query).
+    #[must_use]
+    pub fn extract_alias_infos(module: &Module) -> Vec<AliasInfo> {
+        module
+            .type_aliases
+            .iter()
+            .map(AliasInfo::from_definition)
+            .collect()
+    }
+
+    /// Seed the registry with aliases pre-compiled from other source files or
+    /// packages, or carried over from earlier turns of the same REPL session.
+    ///
+    /// BT-2898: Mirrors `ProtocolRegistry::add_pre_loaded` (BT-2006). Skips
+    /// entries whose names are already registered (current-module
+    /// definitions win) and reports diagnostics for namespace collisions —
+    /// a pre-loaded alias name that matches a class, protocol, or another
+    /// already-seeded alias (e.g. two dependencies each exporting `type Id
+    /// = ...`; ADR 0108 Semantics: "Cross-package collisions ... are
+    /// diagnosed at seeding time").
+    ///
+    /// Also used for REPL cross-turn continuity (ADR 0108 Phase 8, BT-2902):
+    /// callers pass previously-declared `type Name = ...` lines re-parsed
+    /// standalone each turn (aliases erase to nothing at runtime, so unlike
+    /// `pre_loaded_classes` there is no live BEAM artifact to recover them
+    /// from). Those entries were already validated once when first declared;
+    /// the collision checks below are harmless in that context since a
+    /// caller is expected to have already filtered out any name the current
+    /// turn itself redeclares (current turn wins — see
+    /// `AnalysisContext::pre_loaded_aliases`), and `current_package` is
+    /// `None` for a REPL/script session, which — per the seeding-boundary
+    /// rule below — makes every carried-over `internal` alias visible again
+    /// (there is no package boundary to enforce in an open-world REPL).
+    ///
+    /// **Seeding-boundary exclusion** (ADR 0108 Semantics / Implementation):
+    /// an `internal` alias declared in a *different* package than
+    /// `current_package` is *never* seeded — it is filtered out before the
+    /// collision check even runs, so it is entirely absent from the
+    /// consumer's alias table (and thus from every subsequent error path,
+    /// resolution, or browse query), not merely hidden by a query-time
+    /// filter layered on top. An internal alias from the *same* package
+    /// (e.g. another file in a same-package multi-file compilation) is still
+    /// seeded — ADR 0108: an internal alias is "usable in `internal`
+    /// signatures within its declaring package", not just its declaring
+    /// file. An entry whose `package` is unknown (`None`, e.g. a caller that
+    /// hasn't populated it yet) is conservatively treated as foreign and
+    /// excluded, unless `current_package` is also `None` (REPL/script
+    /// open-world context, where there is no package boundary to enforce at
+    /// all — mirrors [`crate::semantic_analysis::class_hierarchy::ClassHierarchy::add_from_beam_meta`]'s
+    /// unconditional accept in that context).
+    pub fn add_pre_loaded(
+        &mut self,
+        aliases: Vec<AliasInfo>,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: &ProtocolRegistry,
+        current_package: Option<&str>,
+    ) -> Vec<Diagnostic> {
+        let mut diagnostics = Vec::new();
+        for info in aliases {
+            // Seeding-boundary exclusion: an internal alias is seeded only
+            // when it belongs to the package currently being compiled (or
+            // there is no package context at all, e.g. REPL/script). An
+            // internal alias from any other package — including one whose
+            // `package` hasn't been populated (`None`) while `current_package`
+            // is `Some` — is never seeded.
+            if info.is_internal
+                && current_package.is_some()
+                && info.package.as_deref() != current_package
+            {
+                continue;
+            }
+
+            if hierarchy.has_class(&info.name) {
+                diagnostics.push(
+                    Diagnostic::error(
+                        format!(
+                            "Pre-loaded type alias `{}` collides with class of the same name — \
+                             type aliases share the class/protocol namespace",
+                            info.name
+                        ),
+                        info.span,
+                    )
+                    .with_hint(format!(
+                        "Rename the type alias in its defining file to avoid conflicting with class `{}`",
+                        info.name
+                    ))
+                    .with_category(DiagnosticCategory::Type),
+                );
+                continue;
+            }
+
+            if protocol_registry.has_protocol(&info.name) {
+                diagnostics.push(
+                    Diagnostic::error(
+                        format!(
+                            "Pre-loaded type alias `{}` collides with protocol of the same name — \
+                             type aliases share the class/protocol namespace",
+                            info.name
+                        ),
+                        info.span,
+                    )
+                    .with_hint(format!(
+                        "Rename the type alias in its defining file to avoid conflicting with protocol `{}`",
+                        info.name
+                    ))
+                    .with_category(DiagnosticCategory::Type),
+                );
+                continue;
+            }
+
+            if self.aliases.contains_key(&info.name) {
+                diagnostics.push(
+                    Diagnostic::error(
+                        format!(
+                            "Pre-loaded type alias `{}` collides with another type alias of the same name",
+                            info.name
+                        ),
+                        info.span,
+                    )
+                    .with_hint(format!(
+                        "Rename one of the `{}` type aliases — cross-package alias name collisions \
+                         always have a zero-cost workaround (write the expansion, or re-declare a \
+                         local alias under a different name)",
+                        info.name
+                    ))
+                    .with_category(DiagnosticCategory::Type),
+                );
+                continue;
+            }
+
+            self.aliases.entry(info.name.clone()).or_insert(info);
+        }
         diagnostics
     }
 
@@ -679,9 +861,18 @@ mod tests {
     }
 
     fn alias_def(name: &str, annotation: TypeAnnotation) -> TypeAliasDefinition {
+        internal_alias_def(name, annotation, false)
+    }
+
+    fn internal_alias_def(
+        name: &str,
+        annotation: TypeAnnotation,
+        is_internal: bool,
+    ) -> TypeAliasDefinition {
         TypeAliasDefinition {
             name: ident(name),
             annotation,
+            is_internal,
             comments: crate::ast::CommentAttachment::default(),
             doc_comment: None,
             span: span(),
@@ -1126,6 +1317,8 @@ mod tests {
             AliasInfo {
                 name: "Pa".into(),
                 annotation: TypeAnnotation::Simple(ident("Integer")),
+                is_internal: false,
+                package: None,
                 span: span(),
             },
         );
@@ -1134,6 +1327,8 @@ mod tests {
             AliasInfo {
                 name: "Qb".into(),
                 annotation: TypeAnnotation::Simple(ident("Pa")),
+                is_internal: false,
+                package: None,
                 span: span(),
             },
         );
@@ -1142,6 +1337,8 @@ mod tests {
             AliasInfo {
                 name: "Rc".into(),
                 annotation: TypeAnnotation::Simple(ident("Qb")),
+                is_internal: false,
+                package: None,
                 span: span(),
             },
         );
@@ -1287,6 +1484,8 @@ mod tests {
         registry.register_test_alias(AliasInfo {
             name: "Timeout".into(),
             annotation: TypeAnnotation::Simple(ident("Integer")),
+            is_internal: false,
+            package: None,
             span: span(),
         });
 
@@ -1402,6 +1601,8 @@ mod tests {
         registry.register_test_alias(AliasInfo {
             name: "Timeout".into(),
             annotation: TypeAnnotation::Simple(ident("Integer")),
+            is_internal: false,
+            package: None,
             span: span(),
         });
 
@@ -1643,6 +1844,8 @@ mod tests {
         registry.register_test_alias(AliasInfo {
             name: "Timeout".into(),
             annotation: TypeAnnotation::Simple(ident("Integer")),
+            is_internal: false,
+            package: None,
             span: span(),
         });
 
@@ -1724,5 +1927,269 @@ mod tests {
             "a successful redefinition must clear stale cycle memory: {:?}",
             registry.reported_cycles
         );
+    }
+
+    // ---- `internal` modifier parsing (ADR 0071, BT-2898) ----
+
+    #[test]
+    fn internal_type_alias_definition_parses_as_internal() {
+        let module = Module {
+            type_aliases: vec![internal_alias_def(
+                "ParserState",
+                TypeAnnotation::Simple(ident("Integer")),
+                true,
+            )],
+            ..empty_module()
+        };
+        let hierarchy = ClassHierarchy::with_builtins();
+        let protocol_registry = ProtocolRegistry::new();
+        let mut registry = AliasRegistry::new();
+        let diags = registry.register_module(&module, &hierarchy, &protocol_registry);
+
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+        let info = registry.get("ParserState").unwrap();
+        assert!(
+            info.is_internal,
+            "expected the alias to register as internal"
+        );
+    }
+
+    // ---- BT-2898: extract_alias_infos (pattern to mirror:
+    //      ProtocolRegistry::extract_protocol_infos) ----
+
+    #[test]
+    fn extract_alias_infos_returns_all_declarations() {
+        let module = Module {
+            type_aliases: vec![
+                alias_def("Public", TypeAnnotation::Simple(ident("String"))),
+                internal_alias_def("Internal", TypeAnnotation::Simple(ident("Integer")), true),
+            ],
+            ..empty_module()
+        };
+
+        let infos = AliasRegistry::extract_alias_infos(&module);
+        assert_eq!(infos.len(), 2);
+        assert!(
+            infos
+                .iter()
+                .any(|i| i.name.as_str() == "Public" && !i.is_internal)
+        );
+        assert!(
+            infos
+                .iter()
+                .any(|i| i.name.as_str() == "Internal" && i.is_internal)
+        );
+    }
+
+    // ---- BT-2898: add_pre_loaded (pattern to mirror:
+    //      ProtocolRegistry::add_pre_loaded, BT-2006) ----
+
+    fn alias_info(name: &str, annotation: TypeAnnotation, is_internal: bool) -> AliasInfo {
+        alias_info_with_package(name, annotation, is_internal, None)
+    }
+
+    fn alias_info_with_package(
+        name: &str,
+        annotation: TypeAnnotation,
+        is_internal: bool,
+        package: Option<&str>,
+    ) -> AliasInfo {
+        AliasInfo {
+            name: name.into(),
+            annotation,
+            is_internal,
+            package: package.map(EcoString::from),
+            span: span(),
+        }
+    }
+
+    #[test]
+    fn add_pre_loaded_accepts_non_colliding_alias() {
+        let hierarchy = ClassHierarchy::with_builtins();
+        let protocol_registry = ProtocolRegistry::new();
+        let mut registry = AliasRegistry::new();
+
+        let alias = alias_info("Timeout", TypeAnnotation::Simple(ident("Integer")), false);
+        let diags = registry.add_pre_loaded(vec![alias], &hierarchy, &protocol_registry, None);
+
+        assert!(diags.is_empty());
+        assert!(registry.has_alias("Timeout"));
+    }
+
+    #[test]
+    fn add_pre_loaded_reports_collision_with_class() {
+        // `Integer` is a built-in class — a pre-loaded alias of the same
+        // name must be rejected and must not shadow the class.
+        let hierarchy = ClassHierarchy::with_builtins();
+        let protocol_registry = ProtocolRegistry::new();
+        let mut registry = AliasRegistry::new();
+
+        let alias = alias_info("Integer", TypeAnnotation::Simple(ident("String")), false);
+        let diags = registry.add_pre_loaded(vec![alias], &hierarchy, &protocol_registry, None);
+
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("collides with class"));
+        assert!(!registry.has_alias("Integer"));
+    }
+
+    #[test]
+    fn add_pre_loaded_reports_collision_with_protocol() {
+        let printable = crate::ast::ProtocolDefinition {
+            name: ident("Printable"),
+            type_params: vec![],
+            extending: None,
+            method_signatures: vec![],
+            class_method_signatures: vec![],
+            comments: crate::ast::CommentAttachment::default(),
+            doc_comment: None,
+            span: span(),
+        };
+        let proto_module = Module {
+            protocols: vec![printable],
+            ..empty_module()
+        };
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut protocol_registry = ProtocolRegistry::new();
+        let proto_diags = protocol_registry.register_module(&proto_module, &hierarchy);
+        assert!(proto_diags.is_empty());
+
+        let mut registry = AliasRegistry::new();
+        let alias = alias_info("Printable", TypeAnnotation::Simple(ident("String")), false);
+        let diags = registry.add_pre_loaded(vec![alias], &hierarchy, &protocol_registry, None);
+
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("collides with protocol"));
+        assert!(!registry.has_alias("Printable"));
+    }
+
+    #[test]
+    fn add_pre_loaded_reports_cross_package_alias_collision() {
+        // Two dependencies each exporting `type Id = ...` — ADR 0108
+        // Semantics: "Cross-package collisions ... are diagnosed at seeding
+        // time." First entry wins; the second is reported and dropped.
+        let hierarchy = ClassHierarchy::with_builtins();
+        let protocol_registry = ProtocolRegistry::new();
+        let mut registry = AliasRegistry::new();
+
+        let from_pkg_a = alias_info("Id", TypeAnnotation::Simple(ident("String")), false);
+        let from_pkg_b = alias_info("Id", TypeAnnotation::Simple(ident("Integer")), false);
+        let diags = registry.add_pre_loaded(
+            vec![from_pkg_a, from_pkg_b],
+            &hierarchy,
+            &protocol_registry,
+            None,
+        );
+
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected exactly one collision, got: {diags:?}"
+        );
+        assert!(
+            diags[0]
+                .message
+                .contains("collides with another type alias")
+        );
+        // First entry (pkg_a's) wins.
+        assert_eq!(
+            registry.get("Id").unwrap().annotation,
+            TypeAnnotation::Simple(ident("String"))
+        );
+    }
+
+    #[test]
+    fn add_pre_loaded_never_seeds_internal_alias_from_different_package() {
+        // ADR 0108 Semantics: seeding-boundary exclusion — an `internal`
+        // alias from a *different* package is never seeded into the
+        // consumer's alias table at all, not merely hidden behind a
+        // query-time filter.
+        let hierarchy = ClassHierarchy::with_builtins();
+        let protocol_registry = ProtocolRegistry::new();
+        let mut registry = AliasRegistry::new();
+
+        let internal = alias_info_with_package(
+            "ParserState",
+            TypeAnnotation::Simple(ident("Integer")),
+            true,
+            Some("other_pkg"),
+        );
+        let diags =
+            registry.add_pre_loaded(vec![internal], &hierarchy, &protocol_registry, Some("app"));
+
+        assert!(
+            diags.is_empty(),
+            "an internal alias must not produce a collision diagnostic"
+        );
+        assert!(
+            !registry.has_alias("ParserState"),
+            "a different-package internal alias must never be visible in the consumer's table"
+        );
+    }
+
+    #[test]
+    fn add_pre_loaded_seeds_internal_alias_from_same_package() {
+        // ADR 0108: `internal` scopes an alias to its *declaring package*,
+        // not just its declaring file — another file in the same package
+        // must still see it.
+        let hierarchy = ClassHierarchy::with_builtins();
+        let protocol_registry = ProtocolRegistry::new();
+        let mut registry = AliasRegistry::new();
+
+        let internal = alias_info_with_package(
+            "ParserState",
+            TypeAnnotation::Simple(ident("Integer")),
+            true,
+            Some("json"),
+        );
+        let diags =
+            registry.add_pre_loaded(vec![internal], &hierarchy, &protocol_registry, Some("json"));
+
+        assert!(diags.is_empty());
+        assert!(
+            registry.has_alias("ParserState"),
+            "a same-package internal alias from another file must remain visible"
+        );
+    }
+
+    #[test]
+    fn add_pre_loaded_never_seeds_internal_alias_with_unknown_package() {
+        // An internal entry whose `package` hasn't been populated (`None`)
+        // is conservatively treated as foreign when `current_package` is
+        // `Some` — it must not be seeded just because we can't prove it's
+        // foreign.
+        let hierarchy = ClassHierarchy::with_builtins();
+        let protocol_registry = ProtocolRegistry::new();
+        let mut registry = AliasRegistry::new();
+
+        let internal = alias_info(
+            "ParserState",
+            TypeAnnotation::Simple(ident("Integer")),
+            true,
+        );
+        let diags =
+            registry.add_pre_loaded(vec![internal], &hierarchy, &protocol_registry, Some("app"));
+
+        assert!(diags.is_empty());
+        assert!(!registry.has_alias("ParserState"));
+    }
+
+    #[test]
+    fn add_pre_loaded_seeds_internal_alias_when_no_package_context() {
+        // REPL/script open-world context (`current_package: None`) — there
+        // is no package boundary to enforce at all, mirroring
+        // `ClassHierarchy::add_from_beam_meta`'s unconditional accept.
+        let hierarchy = ClassHierarchy::with_builtins();
+        let protocol_registry = ProtocolRegistry::new();
+        let mut registry = AliasRegistry::new();
+
+        let internal = alias_info(
+            "ParserState",
+            TypeAnnotation::Simple(ident("Integer")),
+            true,
+        );
+        let diags = registry.add_pre_loaded(vec![internal], &hierarchy, &protocol_registry, None);
+
+        assert!(diags.is_empty());
+        assert!(registry.has_alias("ParserState"));
     }
 }

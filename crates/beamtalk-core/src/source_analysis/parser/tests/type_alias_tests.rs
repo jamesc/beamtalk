@@ -131,6 +131,76 @@ fn parse_type_alias_after_class_definition() {
 }
 
 // ==========================================================================
+// `internal` modifier (ADR 0071, ADR 0108 Phase 5, BT-2898)
+// ==========================================================================
+
+#[test]
+fn parse_internal_type_alias() {
+    let module = parse_ok("internal type ParserState = Integer | String");
+    assert_eq!(module.type_aliases.len(), 1);
+    let alias = &module.type_aliases[0];
+    assert_eq!(alias.name.name, "ParserState");
+    assert!(alias.is_internal);
+}
+
+#[test]
+fn parse_public_type_alias_is_not_internal() {
+    let module = parse_ok("type Port = Integer");
+    assert!(!module.type_aliases[0].is_internal);
+}
+
+#[test]
+fn parse_internal_type_alias_with_doc_comment() {
+    // Leading trivia (doc comment) must still attach correctly with the
+    // `internal` modifier in between it and `type`.
+    let module = parse_ok(
+        "/// Package-private parser state representation.\ninternal type ParserState = Integer",
+    );
+    let alias = &module.type_aliases[0];
+    assert!(alias.is_internal);
+    assert_eq!(
+        alias.doc_comment.as_deref(),
+        Some("Package-private parser state representation.")
+    );
+}
+
+#[test]
+fn parse_multiple_type_aliases_mixed_internal_and_public() {
+    let module = parse_ok("internal type Priv = Integer\ntype Pub = Priv | String");
+    assert_eq!(module.type_aliases.len(), 2);
+    assert!(module.type_aliases[0].is_internal);
+    assert_eq!(module.type_aliases[0].name.name, "Priv");
+    assert!(!module.type_aliases[1].is_internal);
+    assert_eq!(module.type_aliases[1].name.name, "Pub");
+}
+
+#[test]
+fn internal_as_bare_identifier_is_not_a_type_alias() {
+    // `internal` remains a legal ordinary identifier when not immediately
+    // followed by the `type <Uppercase> =` shape — mirrors the existing
+    // `type_as_assignment_target_is_not_a_type_alias` disambiguation tests
+    // below for the bare `type` keyword.
+    let module = parse_ok("internal := 5");
+    assert!(module.type_aliases.is_empty());
+    assert_eq!(module.expressions.len(), 1);
+    assert!(matches!(
+        module.expressions[0].expression,
+        Expression::Assignment { .. }
+    ));
+}
+
+#[test]
+fn internal_followed_by_non_type_identifier_is_not_a_type_alias() {
+    let module = parse_ok("internal printString");
+    assert!(module.type_aliases.is_empty());
+    assert_eq!(module.expressions.len(), 1);
+    assert!(matches!(
+        module.expressions[0].expression,
+        Expression::MessageSend { .. }
+    ));
+}
+
+// ==========================================================================
 // Single-letter name rejection (ADR 0068's implicit type parameters)
 // ==========================================================================
 

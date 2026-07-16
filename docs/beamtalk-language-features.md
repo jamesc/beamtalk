@@ -17,6 +17,7 @@ Language features for Beamtalk. See [beamtalk-principles.md](beamtalk-principles
   - [Erlang FFI](#erlang-ffi)
   - [Loading Code into the Workspace](#loading-code-into-the-workspace)
 - [Gradual Typing (ADR 0025)](#gradual-typing-adr-0025)
+  - [Named Type Aliases (`type` Declarations) (ADR 0108)](#named-type-aliases-type-declarations-adr-0108)
 - [Parametric Types — Generics (ADR 0068)](#parametric-types--generics-adr-0068)
 - [Structural Protocols (ADR 0068)](#structural-protocols-adr-0068)
   - [Printable Protocol and Display Methods](#printable-protocol-and-display-methods)
@@ -1112,6 +1113,45 @@ klass instanceCount         // resolves class-side method
 - Local variable annotations (`name :: Type := expr`) declare the binding's type at type-erasure boundaries. See [Local Variable Type Annotations](#local-variable-type-annotations) below.
 - Complex annotations (e.g., unions/generics) are parsed and accepted; deeper checking is phased in.
 - `Self` in return position resolves to the static receiver class. Using `Self` as a parameter type is an error (unsound with subclassing).
+
+### Named Type Aliases (`type` Declarations) (ADR 0108)
+
+A `type` declaration introduces a transparent type alias — a name for an existing type annotation:
+
+```beamtalk
+type RestartStrategy = #temporary | #transient | #permanent
+
+type OptionalString = String | Nil
+
+type JsonKey = String | Symbol
+```
+
+The alias expands to its structural annotation everywhere type annotations are used — parameter types, return types, typed locals, and `match:`/`matchExhaustive:` exhaustiveness checking. A type alias is purely compile-time; it is erased at codegen with no runtime representation.
+
+```beamtalk
+type Direction = #north | #south | #east | #west
+
+Object subclass: Compass
+  heading: h :: Direction =>
+    h matchExhaustive: [
+      #north -> 0;
+      #south -> 180;
+      #east  -> 90;
+      #west  -> 270
+    ]
+
+  defaultHeading -> Direction => #north
+```
+
+**`type` is a contextual keyword.** It is recognized only at top-level declaration position via a three-token lookahead (`type` + uppercase identifier + `=`). It remains a legal identifier everywhere else — `type := 5`, `foo type`, `type printString` are all unaffected.
+
+**Constraints:**
+
+- Single-letter names are rejected at parse time (reserved for ADR 0068's implicit method-local type parameters): `type T = Integer | Nil` produces an error.
+- Alias names share the class/protocol namespace — declaring an alias with the same name as an existing class or protocol is a compile error.
+- The RHS accepts any type annotation: unions (`|`), singletons (`#foo`), generics (`List(Integer)`), difference (`\`), intersection (`&`), and combinations.
+- Parametric aliases (`type Foo(T) = ...`) are not yet supported.
+- Doc comments (`///`) above a `type` declaration are preserved and shown by `:help`.
 
 ### Local Variable Type Annotations
 
@@ -4863,6 +4903,8 @@ hash => @intrinsic hash
 The full list of structural intrinsics: `actorSpawn`, `actorSpawnWith`, `blockValue`, `blockValue1`–`blockValue3`, `whileTrue`, `whileFalse`, `repeat`, `onDo`, `ensure`, `timesRepeat`, `toDo`, `toByDo`, `basicNew`, `basicNewWith`, `hash`, `respondsTo`, `fieldNames`, `fieldAt`, `fieldAtPut`, `dynamicSend`, `dynamicSendWithArgs`, `error`.
 
 **Relationship to `native:` (ADR 0101).** `@primitive` and `@intrinsic` cover native BEAM *value types* and compiler *substrate*. A third mechanism, the class-level `native:` declaration with `=> self delegate` bodies, covers whole-class **delegation** to a single Erlang module (a stateless `Object` such as `Stream`, or an `Actor` gen_server). Pick by what the method needs: guarded dispatch + the open-world extension registry → `@primitive`; the dispatch act itself (`==`, `class`, `perform:`, actor lifecycle) → `@intrinsic`; pure pass-through to one module → `native:`. See [`native:` for stateless Objects](beamtalk-native-erlang.md#native-stateless-objects--native-for-object).
+
+**Known limitation: `whileTrue:`/`whileFalse:`/`repeat`/`on:do:`/`ensure:` via `perform:`.** These five structural intrinsics have real semantics only at the call-site interception the compiler recognizes for a literal message send (e.g. `[cond] whileTrue: [body]` written directly in source). Reaching the compiled method body through any other dispatch path — `perform:`, `perform:withArguments:`, or other generic/dynamic sends — resolves to a placeholder and raises a misleading `does_not_understand` naming the wrong (internal) selector, e.g. `[i < 3] perform: #whileTrue: withArguments: #([i := i + 1])` fails with `Block does not understand 'whileTrue'` rather than working or raising a clear error. `respondsTo:` still returns `true` for these selectors, since the method genuinely is defined — this is a runtime dispatch gap, not a missing method. Fixing it generically would require reimplementing loop and exception-handling control flow (condition re-evaluation, catch/handler dispatch, cleanup-on-exit) over an opaque runtime fun rather than the literal block AST the call-site codegen relies on — a materially bigger change, tracked separately (BT-2908) rather than accepted as part of the smaller List/Collection iteration fix (BT-2888) that closed the equivalent gap for `do:`/`collect:`/`select:`/`reject:`/`inject:into:`.
 
 ---
 

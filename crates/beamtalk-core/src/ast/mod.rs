@@ -36,6 +36,7 @@
 //!     classes: Vec::new(),
 //!     method_definitions: Vec::new(),
 //!     protocols: Vec::new(),
+//!     type_aliases: Vec::new(),
 //!     expressions: vec![
 //!         ExpressionStatement::bare(Expression::Assignment {
 //!             target: Box::new(Expression::Identifier(Identifier {

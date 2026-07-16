@@ -1485,6 +1485,8 @@ mod tests {
         registry.register_test_alias(AliasInfo {
             name: name.into(),
             annotation,
+            is_internal: false,
+            package: None,
             span: span(),
         });
         registry
@@ -1651,11 +1653,15 @@ mod tests {
         registry.register_test_alias(AliasInfo {
             name: "A".into(),
             annotation: a_expansion,
+            is_internal: false,
+            package: None,
             span: span(),
         });
         registry.register_test_alias(AliasInfo {
             name: "B".into(),
             annotation: b_expansion.clone(),
+            is_internal: false,
+            package: None,
             span: span(),
         });
 
@@ -1676,11 +1682,15 @@ mod tests {
         registry.register_test_alias(AliasInfo {
             name: "Zeta".into(),
             annotation: TypeAnnotation::simple("Integer", span()),
+            is_internal: false,
+            package: None,
             span: span(),
         });
         registry.register_test_alias(AliasInfo {
             name: "Alpha".into(),
             annotation: TypeAnnotation::simple("String", span()),
+            is_internal: false,
+            package: None,
             span: span(),
         });
 

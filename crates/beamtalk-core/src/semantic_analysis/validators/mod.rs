@@ -53,11 +53,12 @@ pub(crate) use sendability_validators::{
 };
 pub(crate) use structural_validators::{
     check_ffi_arity, check_unresolved_classes, check_unresolved_ffi_modules,
-    check_workspace_shadows, erlang_arity, erlang_function_name,
+    check_unresolved_type_aliases, check_workspace_shadows, erlang_arity, erlang_function_name,
 };
 pub(crate) use supervision_validators::{
     check_children_supervision_policy, check_supervision_policy_override,
 };
 pub(crate) use visibility_validators::{
-    check_class_visibility, check_internal_method_shadow, check_leaked_method_visibility,
+    check_alias_leaked_visibility, check_class_visibility, check_internal_method_shadow,
+    check_leaked_method_visibility,
 };

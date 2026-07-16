@@ -7,28 +7,30 @@
 // barrier ensuring the cast was processed before asserting
 
 TestCase subclass: CastSendTest
+  field: c = nil
+
+  setUp => self withC: Counter spawn
+
+  tearDown => self.c isNil ifFalse: [self.c stop]
 
   testCastSendIncrements =>
     // Cast send fires and forgets; sync getValue acts as ordering barrier
-    c := Counter spawn
-    c increment!
+    self.c increment!
     // Sync barrier: forces ordering — cast must be processed before getValue reply
-    self assert: c getValue equals: 1
+    self assert: self.c getValue equals: 1
 
   testMultipleCastSendsAreProcessed =>
-    c := Counter spawn
-    c increment!
-    c increment!
-    c increment!
+    self.c increment!
+    self.c increment!
+    self.c increment!
     // Sync barrier ensures all three casts were processed
-    self assert: c getValue equals: 3
+    self assert: self.c getValue equals: 3
 
   testCastSendDoesNotBlockCaller =>
     // Cast sends are fire-and-forget: multiple casts return immediately
     // The sync getValue at the end acts as an ordering barrier
-    c := Counter spawn
-    c increment!
-    c decrement!
-    c increment!
+    self.c increment!
+    self.c decrement!
+    self.c increment!
     // Net effect: +1 -1 +1 = 1
-    self assert: c getValue equals: 1
+    self assert: self.c getValue equals: 1

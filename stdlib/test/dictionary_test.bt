@@ -62,6 +62,16 @@ TestCase subclass: DictionaryTest
     self assert: (d1 merge: d2) equals: #{#a => 1, #b => 20, #c => 3}
     self assert: ((#{#a => 1} merge: #{#a => 99}) at: #a) equals: 99
 
+  testPerformOnStatefulDoBlockRaisesClearErrorInsteadOfCrashing =>
+    // BT-2888: the do: stateful_block_dispatch guard also applies
+    // to Dictionary, since the guard is keyed on selector name, not receiver
+    // class.
+    count := 0
+    statefulBlock := [:v | count := count + v]
+    self should: [
+      #{#a => 1, #b => 2} perform: #do: withArguments: #(statefulBlock)
+    ] raise: #stateful_block_dispatch
+
   testDowithkey =>
     // Returns nil
     self assert: (#{#a => 1} doWithKey: [:k :v | nil]) equals: nil

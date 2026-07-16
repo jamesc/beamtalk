@@ -52,6 +52,10 @@ defmodule BtAttach.FacadeTest do
       do:
         record({:browse_native_module_source, module}) && {:value, %{"backing_module" => module}}
 
+    # BT-2903 (ADR 0108 Phase 8): the "Type Aliases" browse op.
+    def browse_type_aliases,
+      do: record({:browse_type_aliases}) && {:value, [%{"name" => "RestartStrategy"}]}
+
     # BT-2495: the navigation aids — senders/implementors (nav-query) + the
     # omni-search symbol index (nav-symbols).
     def senders_of(selector),
@@ -167,7 +171,8 @@ defmodule BtAttach.FacadeTest do
                      subscribe_object unsubscribe_object pid_stats
                      browse_classes browse_protocols browse_method_source
                      browse_class_definition browse_native_source
-                     browse_native_modules browse_native_module_source list_tests
+                     browse_native_modules browse_native_module_source browse_type_aliases
+                     list_tests
                      senders implementors required_methods conforming_classes
                      callers_of_native_module symbols
                      git_status git_diff git_log
@@ -305,6 +310,14 @@ defmodule BtAttach.FacadeTest do
                {:error, :invalid_params}
     end
 
+    # BT-2903 (ADR 0108 Phase 8): the "Type Aliases" browse op.
+    test "browse_type_aliases routes with no params and returns the live term" do
+      assert Facade.dispatch(:browse_type_aliases, %{}) ==
+               {:value, [%{"name" => "RestartStrategy"}]}
+
+      assert {:browse_type_aliases} in RecordingClient.calls()
+    end
+
     test "the observer role may browse (read capability) but not eval" do
       observer = %{role: :observer}
 
@@ -312,6 +325,9 @@ defmodule BtAttach.FacadeTest do
 
       assert Facade.dispatch(:browse_class_definition, %{class: "Counter"}, observer) ==
                {:value, %{"class" => "Counter"}}
+
+      assert Facade.dispatch(:browse_type_aliases, %{}, observer) ==
+               {:value, [%{"name" => "RestartStrategy"}]}
 
       # The same role is denied an execute op, with no dist call.
       assert Facade.dispatch(:eval, %{session_pid: self(), code: "1"}, observer) ==

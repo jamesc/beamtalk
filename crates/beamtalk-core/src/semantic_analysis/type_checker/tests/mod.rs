@@ -55,6 +55,7 @@ mod singleton_match_exhaustiveness;
 mod spawn_with_keys;
 mod state_fields;
 mod super_and_binary;
+mod type_alias_display_provenance;
 mod type_alias_exhaustiveness;
 mod typed_class;
 mod union_types;

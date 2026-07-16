@@ -581,8 +581,14 @@ fn unparse_type_alias_definition(type_alias: &TypeAliasDefinition) -> Document<'
         }
     }
 
-    // `type Name = <TypeAnnotation>`
+    // `(internal )?type Name = <TypeAnnotation>`
+    let internal_prefix = if type_alias.is_internal {
+        Document::Str("internal ")
+    } else {
+        Document::Nil
+    };
     docs.push(docvec![
+        internal_prefix,
         "type ",
         leaf::ident(&type_alias.name.name),
         " = ",
@@ -3498,6 +3504,13 @@ mod tests {
     #[test]
     fn type_alias_difference_round_trip() {
         let source = "type PublicTag = Symbol \\ (#reserved | #internal)\n";
+        assert_identity(source);
+    }
+
+    #[test]
+    fn internal_type_alias_round_trip() {
+        // ADR 0071, ADR 0108 Phase 5, BT-2898.
+        let source = "internal type ParserState = Integer | String\n";
         assert_identity(source);
     }
 

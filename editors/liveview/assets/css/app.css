@@ -692,6 +692,23 @@
 }
 .actionbar.sb-side.native-count .count { margin-left: auto; color: var(--muted); }
 
+/* BT-2903 (ADR 0108 Phase 8): the "Type Aliases" browser — a third panel mode
+   sibling to Native, reusing the same `.tree`/`.row` chrome and the Native
+   count footer's `.native-count` styling (a `type` declaration has no
+   methods/state, so there is no equivalent to `.native-module-block`'s
+   expandable body). The alias `name` (the primary navigable label, `.cls`
+   elsewhere) is pinned to its natural width here — unlike the class tree,
+   where `.cls` is the flexible element — so it never truncates; the
+   (potentially long) expansion is the flexible, muted, ellipsizing element,
+   matching how the class tree pins trailing badges and flexes the name. */
+.type-aliases-list { padding: 2px 0 6px; }
+.type-aliases-list .row .cls { flex: 0 0 auto; }
+.type-aliases-list .row .alias-expansion {
+  flex: 1 1 auto; min-width: 0; margin-left: 4px;
+  color: var(--muted); font-size: 11px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
 /* ============================================================================
    Workspace dock — tabbed Workspace / Transcript / Changes (BT-2490)
    ----------------------------------------------------------------------------

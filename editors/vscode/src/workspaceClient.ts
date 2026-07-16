@@ -28,6 +28,22 @@ export interface ClassInfo {
   actor_count?: number;
 }
 
+/**
+ * A `type` alias declaration (ADR 0108 Phase 8, BT-2903), as returned by the
+ * `browse-type-aliases` op's `AliasRow` shape: `name`, `expansion` (the
+ * alias's right-hand side, rendered to Beamtalk display form), `doc`,
+ * `source_file`, and `internal`. Aliases erase entirely at compile time (no
+ * BEAM module, no live process) — unlike `ClassInfo`, there is no
+ * `actor_count` or anything else live to report.
+ */
+export interface TypeAliasInfo {
+  name: string;
+  expansion?: string;
+  doc?: string;
+  source_file?: string;
+  internal?: boolean;
+}
+
 export interface MethodInfo {
   name: string;
   selector: string;
@@ -273,6 +289,36 @@ export class WorkspaceClient {
       name: c.name,
       source_file: c.source_file ?? undefined,
       actor_count: c.actor_count,
+    }));
+  }
+
+  /**
+   * List every loaded package's declared `type` aliases for the Workspace
+   * Explorer sidebar's "Type Aliases" section (ADR 0108 Phase 8, BT-2903).
+   *
+   * Unlike `classes()` (which still goes through the older `list-classes`
+   * REPL op, ADR 0096), there is no equivalent legacy alias-listing op — this
+   * is the one sidebar consumer of the new `browse-type-aliases` op directly.
+   * A dependency's `internal` alias is already excluded server-side at the
+   * seeding boundary (ADR 0108 Implementation), so every row returned here is
+   * visible-by-construction; this method does no client-side filtering.
+   */
+  async typeAliases(): Promise<TypeAliasInfo[]> {
+    const resp = (await this._request({ op: "browse-type-aliases" })) as {
+      value?: Array<{
+        name: string;
+        expansion?: string | null;
+        doc?: string | null;
+        source_file?: string | null;
+        internal?: boolean;
+      }>;
+    };
+    return (resp.value ?? []).map((a) => ({
+      name: a.name,
+      expansion: a.expansion ?? undefined,
+      doc: a.doc ?? undefined,
+      source_file: a.source_file ?? undefined,
+      internal: a.internal,
     }));
   }
 

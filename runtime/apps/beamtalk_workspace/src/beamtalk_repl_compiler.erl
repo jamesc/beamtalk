@@ -15,6 +15,7 @@ Uses the beamtalk_compiler OTP application (ADR 0022) exclusively.
 
 -export([
     compile_expression/3,
+    compile_expression/4,
     compile_expression_trace/3,
     compile_file/4,
     compile_file/5,
@@ -36,6 +37,7 @@ Uses the beamtalk_compiler OTP application (ADR 0022) exclusively.
 -ifdef(TEST).
 -export([
     compile_expression_via_port/3,
+    compile_expression_via_port/4,
     compile_file_via_port/4,
     compile_file_via_port/5,
     assemble_class_result/5,
@@ -54,9 +56,28 @@ Uses the beamtalk_compiler OTP application (ADR 0022) exclusively.
     | {ok, class_definition, map(), [binary()]}
     | {ok, method_definition, map(), [binary()]}
     | {ok, protocol_definition, map(), [binary()]}
+    | {ok, type_alias_definition, map(), [binary()]}
     | {error, term()}.
 compile_expression(Expression, ModuleName, Bindings) ->
     compile_expression_via_port(Expression, ModuleName, Bindings).
+
+-doc """
+Compile a Beamtalk expression to bytecode, with earlier-turn type aliases.
+
+`KnownTypeAliasSources' (ADR 0108 Phase 8, BT-2902) is the reparseable
+`type Name = <expansion>' list from `beamtalk_repl_state:known_type_alias_sources/1'
+— aliases declared in earlier turns of the same REPL session, forwarded so
+`::' annotations in `Expression' resolve names this session already knows.
+""".
+-spec compile_expression(string(), atom(), map(), [binary()]) ->
+    {ok, binary(), term(), [binary()]}
+    | {ok, class_definition, map(), [binary()]}
+    | {ok, method_definition, map(), [binary()]}
+    | {ok, protocol_definition, map(), [binary()]}
+    | {ok, type_alias_definition, map(), [binary()]}
+    | {error, term()}.
+compile_expression(Expression, ModuleName, Bindings, KnownTypeAliasSources) ->
+    compile_expression_via_port(Expression, ModuleName, Bindings, KnownTypeAliasSources).
 
 -doc """
 Compile a Beamtalk expression in trace mode (BT-1238).
@@ -390,10 +411,20 @@ compile_method_reload(ClassSource, MethodSource, Options) ->
 
 %% Compile expression via beamtalk_compiler OTP app (port backend).
 compile_expression_via_port(Expression, ModuleName, Bindings) ->
+    compile_expression_via_port(Expression, ModuleName, Bindings, []).
+
+%% Compile expression via beamtalk_compiler OTP app (port backend), forwarding
+%% earlier-turn type aliases (ADR 0108 Phase 8, BT-2902).
+compile_expression_via_port(Expression, ModuleName, Bindings, KnownTypeAliasSources) ->
     SourceBin = list_to_binary(Expression),
     ModNameBin = atom_to_binary(ModuleName, utf8),
     KnownVars = known_vars(Bindings),
-    CompileOpts = add_class_indexes(#{}),
+    CompileOpts0 = add_class_indexes(#{}),
+    CompileOpts =
+        case KnownTypeAliasSources of
+            [] -> CompileOpts0;
+            _ -> CompileOpts0#{known_type_aliases => KnownTypeAliasSources}
+        end,
     wrap_compiler_errors(
         fun() ->
             case
@@ -422,6 +453,12 @@ compile_expression_via_port(Expression, ModuleName, Bindings) ->
                 %% BT-1612: Protocol definition — compile Core Erlang to BEAM
                 {ok, protocol_definition, ProtocolInfo} ->
                     compile_protocol_definition_result(ProtocolInfo);
+                %% ADR 0108 Phase 8 (BT-2902): type alias definition — no
+                %% Core Erlang/bytecode step (aliases erase entirely).
+                {ok, type_alias_definition, AliasInfo} ->
+                    Warnings = maps:get(warnings, AliasInfo, []),
+                    {ok, type_alias_definition,
+                        maps:with([alias_name, expansion, doc_comment], AliasInfo), Warnings};
                 {ok, CoreErlang, Warnings} ->
                     compile_standard_expression(CoreErlang, Warnings);
                 {error, Diagnostics} ->
