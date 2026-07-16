@@ -6575,7 +6575,7 @@ mod tests {
         .expect("temp path is UTF-8");
         let uri = open_test_file(backend, &path, UNRESOLVED_TYPE_REF_SOURCE);
 
-        // "  restart: policy :: Foo => policy" — `Foo` starts at column 21.
+        // "  restart: policy :: Foo => policy" — `Foo` occupies columns 21-23.
         backend
             .references(references_params(uri, 1, 22, true))
             .await

@@ -4137,7 +4137,7 @@ mod tests {
             !service.is_project_complete(),
             "preload hasn't run in this test; project_complete defaults to false"
         );
-        // "  restart: policy :: Foo => policy" — `Foo` starts at column 21.
+        // "  restart: policy :: Foo => policy" — `Foo` occupies columns 21-23.
         assert_eq!(
             service.unresolved_type_reference_at(&file_b, Position::new(1, 22)),
             Some(EcoString::from("Foo")),
