@@ -218,10 +218,20 @@ pub struct AnalysisContext<'a> {
     /// fixtures (BT-2006).
     pub pre_loaded_protocols: Vec<protocol_registry::ProtocolInfo>,
     /// Type alias definitions extracted from other source files or packages
-    /// (BT-2898, ADR 0108 Phase 5). Seeded into the alias registry the same
-    /// way `pre_loaded_protocols` is — `internal` entries are excluded at
-    /// the seeding boundary before this ever reaches
-    /// `AliasRegistry::add_pre_loaded`.
+    /// (BT-2898, ADR 0108 Phase 5), *or* type aliases declared in earlier
+    /// turns of the same REPL session (ADR 0108 Phase 8, BT-2902) — both
+    /// uses funnel through the same field and the same
+    /// `AliasRegistry::add_pre_loaded` seeding call in `analyse_full`.
+    /// `internal` entries are excluded at the seeding boundary before this
+    /// ever reaches `AliasRegistry::add_pre_loaded` when compiling with a
+    /// package context; a REPL/script session (no `current_package`) has no
+    /// package boundary to enforce, so carried-over `internal` aliases stay
+    /// visible. Aliases erase to nothing at runtime, so (unlike
+    /// `pre_loaded_classes`) there is no live BEAM artifact to recover a
+    /// REPL session's prior declarations from — the REPL layer re-parses
+    /// each previously successfully-declared `type Name = ...` line
+    /// standalone every turn and passes the result here so
+    /// `resolve_type_annotation` sees names declared in prior turns.
     pub pre_loaded_aliases: Vec<alias_registry::AliasInfo>,
     /// Known package names for package-qualifier validation (ADR 0070
     /// Phase 2). `None` skips the check entirely.
@@ -476,6 +486,32 @@ pub fn analyse_with_known_vars_and_classes(
     )
 }
 
+/// Analyse a module with pre-defined variables, pre-loaded class entries,
+/// and pre-loaded type aliases from earlier REPL turns (ADR 0108 Phase 8,
+/// BT-2902).
+///
+/// Mirrors [`analyse_with_known_vars_and_classes`] — see its doc — with one
+/// addition: `pre_loaded_aliases` makes alias names declared in *earlier*
+/// turns of the same REPL session resolvable in the current turn's `::`
+/// annotations (`resolve_type_annotation`'s `subst → alias table → nominal
+/// class` order, ADR 0108 Semantics).
+pub fn analyse_with_known_vars_classes_and_aliases(
+    module: &Module,
+    known_vars: &[&str],
+    pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
+    pre_loaded_aliases: Vec<alias_registry::AliasInfo>,
+) -> AnalysisResult {
+    analyse_full(
+        module,
+        AnalysisContext {
+            known_vars,
+            pre_loaded_classes,
+            pre_loaded_aliases,
+            ..Default::default()
+        },
+    )
+}
+
 /// Analyse a module with known package dependencies (ADR 0070 Phase 2).
 ///
 /// Package qualifiers in class references and extension targets are validated
@@ -636,7 +672,8 @@ fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult {
         result.diagnostics.extend(proto_diags);
     }
 
-    // Phase 0.6: Type Alias Registration (ADR 0108 Phase 2/5, BT-2895/BT-2898)
+    // Phase 0.6: Type Alias Registration (ADR 0108 Phase 2/5/8,
+    // BT-2895/BT-2898/BT-2902)
     // Must happen after both the class hierarchy and protocol registry are
     // fully built for the current module — aliases share the class/protocol
     // namespace, and this ordering (classes → protocols → aliases) is what
@@ -653,6 +690,16 @@ fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult {
     // a same-package `internal` entry (e.g. another file in the same
     // multi-file package) is still seeded, since ADR 0108 scopes `internal`
     // aliases to the whole declaring *package*, not just the declaring file.
+    //
+    // ADR 0108 Phase 8 (BT-2902): the same field/call also carries aliases
+    // declared in earlier turns of the same REPL session — filtering out any
+    // name the current module/turn itself redeclares (current turn wins,
+    // same as above) keeps a live `type Foo = ...` redefinition from
+    // tripping `register_module`'s duplicate-name check (ADR 0108 Semantics:
+    // a live session can legally redefine an alias; re-checking dependents
+    // is BT-2899's separate hot-reload concern, out of scope here). A REPL
+    // session has no `current_package`, so the seeding-boundary exclusion
+    // above never filters a carried-over `internal` alias out.
     if !pre_loaded_aliases.is_empty() {
         let current_alias_names: std::collections::HashSet<&EcoString> =
             module.type_aliases.iter().map(|a| &a.name.name).collect();
@@ -856,6 +903,22 @@ fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult {
             &result.class_hierarchy,
             &result.protocol_registry,
             known_vars,
+            &mut result.diagnostics,
+        );
+    }
+    // BT-2897 / ADR 0108: warn when a type annotation closely resembles a
+    // registered alias name but doesn't resolve to one. Gated on
+    // `has_cross_file_classes` for the same open-world reason as the
+    // unresolved-class check above: without cross-file metadata, a name
+    // that looks like a near-miss of a *local* alias might actually be a
+    // legitimate cross-file class we simply haven't loaded yet — flagging it
+    // would be a false positive, not a real typo.
+    if has_cross_file_classes {
+        validators::check_unresolved_type_aliases(
+            module,
+            &result.class_hierarchy,
+            &result.protocol_registry,
+            &result.alias_registry,
             &mut result.diagnostics,
         );
     }

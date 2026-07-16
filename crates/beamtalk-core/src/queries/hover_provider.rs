@@ -31,10 +31,10 @@ use crate::ast::{
     StateDeclaration,
 };
 use crate::language_service::{HoverInfo, Position};
-use crate::queries::enrich_hierarchy_with_inferred_returns;
+use crate::queries::enrich_hierarchy_with_inferred_returns_and_aliases;
 use crate::semantic_analysis::type_checker::TypeMap;
 use crate::semantic_analysis::type_checker::native_type_registry::NativeTypeRegistry;
-use crate::semantic_analysis::{ClassHierarchy, InferredType};
+use crate::semantic_analysis::{AliasRegistry, ClassHierarchy, InferredType};
 use crate::source_analysis::Span;
 
 /// Computes hover information at a given position.
@@ -45,6 +45,13 @@ use crate::source_analysis::Span;
 /// * `source` - The source text
 /// * `position` - The cursor position
 /// * `hierarchy` - The class hierarchy for type context
+/// * `native_types` - Native (Erlang FFI) type registry, for typed FFI hover
+/// * `alias_registry` - Type alias registry (ADR 0108, BT-2897), so hover on
+///   an alias-typed value or annotation resolves and displays
+///   `AliasName (expansion)` instead of an unresolved nominal class. `None`
+///   when the caller has no project-wide alias table available yet (see
+///   [`crate::queries::enrich_hierarchy_with_inferred_returns_and_aliases`]'s
+///   doc).
 ///
 /// # Returns
 ///
@@ -63,7 +70,7 @@ use crate::source_analysis::Span;
 /// let (module, _) = parse(tokens);
 /// let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 ///
-/// let hover = compute_hover(&module, source, Position::new(0, 0), &hierarchy, None);
+/// let hover = compute_hover(&module, source, Position::new(0, 0), &hierarchy, None, None);
 /// assert!(hover.is_some());
 /// ```
 #[must_use]
@@ -73,6 +80,7 @@ pub fn compute_hover(
     position: Position,
     hierarchy: &ClassHierarchy,
     native_types: Option<&NativeTypeRegistry>,
+    alias_registry: Option<&AliasRegistry>,
 ) -> Option<HoverInfo> {
     let offset = position.to_byte_offset(source)?;
     let offset_val = offset.get();
@@ -83,11 +91,15 @@ pub fn compute_hover(
     // Enrich hierarchy with inferred return types and get the type map in a single
     // TypeChecker pass (BT-1014, BT-1047). This enables chain-resolved hover for methods
     // whose return type is not explicitly annotated but can be inferred from the method
-    // body (BT-1005).
+    // body (BT-1005). BT-2897: also alias-aware (see `alias_registry`'s doc above).
     let enriched_hierarchy;
     let (hierarchy, type_map) = {
-        let (enriched, type_map) =
-            enrich_hierarchy_with_inferred_returns(module, hierarchy, native_types);
+        let (enriched, type_map) = enrich_hierarchy_with_inferred_returns_and_aliases(
+            module,
+            hierarchy,
+            native_types,
+            alias_registry,
+        );
         let h = match enriched {
             Some(h) => {
                 enriched_hierarchy = h;
@@ -837,7 +849,21 @@ fn find_hover_in_expr(
             receiver, field, ..
         } => {
             if offset >= field.span.start() && offset < field.span.end() {
-                // Show declared state type if available from the class hierarchy
+                // Show declared state type if available from the class hierarchy.
+                //
+                // BT-2897 boundary (not this issue's scope, tracked as a
+                // follow-up): `state_field_type` returns a bare `EcoString`
+                // from `ClassHierarchy`, not a resolved `InferredType`, so
+                // this path never sees a `TypeProvenance::Aliased` tag —
+                // hovering a state field *access* (`self someField`) shows
+                // the raw annotation text, never `AliasName (expansion)`,
+                // unlike hovering a local/parameter value (which flows
+                // through `type_map`'s `InferredType`s). Fixing this would
+                // mean threading alias-aware `InferredType`s (or at least
+                // display strings) through `ClassHierarchy`'s field-type
+                // storage — the same EcoString-based boundary
+                // `check_field_assignment`/`check_argument_types`
+                // (validation.rs) sit on, out of scope for BT-2897.
                 let field_type = match context {
                     HoverClassContext::InstanceMethod(class) => {
                         hierarchy.state_field_type(class.name.name.as_str(), field.name.as_str())
@@ -1460,7 +1486,7 @@ mod tests {
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-        compute_hover(&module, source, position, &hierarchy, None)
+        compute_hover(&module, source, position, &hierarchy, None, None)
     }
 
     /// Converts a byte offset (as returned by `str::find`/`str::rfind`) to a
@@ -1582,7 +1608,7 @@ mod tests {
 
         let selector_offset = source.rfind("increment").unwrap();
         let pos = pos_at(source, selector_offset);
-        let hover = compute_hover(&module, source, pos, &hierarchy, None);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
         assert!(hover.is_some(), "Should hover call-site selector");
         let hover = hover.unwrap();
         assert!(
@@ -1629,7 +1655,7 @@ mod tests {
 
         // Position at "Parser" (after "json@")
         let pos = Position::new(0, 5);
-        let hover = compute_hover(&module, source, pos, &hierarchy, None);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
         assert!(hover.is_some(), "Should hover on package-qualified class");
         let hover = hover.unwrap();
         assert!(
@@ -1711,7 +1737,7 @@ mod tests {
         // Find the exact offset of "self" in the source
         let self_offset = source.find("self.count").unwrap();
         let pos = pos_at(source, self_offset);
-        let hover = compute_hover(&module, source, pos, &hierarchy, None);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
         assert!(hover.is_some(), "Should find hover for self");
         let hover = hover.unwrap();
         assert!(
@@ -1731,7 +1757,7 @@ mod tests {
         // Find "self" in the class method body
         let class_method_self = source.find("self new:").unwrap();
         let pos = pos_at(source, class_method_self);
-        let hover = compute_hover(&module, source, pos, &hierarchy, None);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
         assert!(
             hover.is_some(),
             "Should find hover for self in class method"
@@ -1755,7 +1781,7 @@ mod tests {
         // Find the position of the top-level "Counter" reference
         let counter_pos = source.rfind("Counter").unwrap();
         let pos = pos_at(source, counter_pos);
-        let hover = compute_hover(&module, source, pos, &hierarchy, None);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
         assert!(hover.is_some(), "Should find hover for Counter reference");
         let hover = hover.unwrap();
         assert!(
@@ -1784,7 +1810,7 @@ mod tests {
 
         let offset = source.find("count ::").unwrap();
         let pos = pos_at(source, offset);
-        let hover = compute_hover(&module, source, pos, &hierarchy, None);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
 
         assert!(hover.is_some(), "Should hover state declaration name");
         let hover = hover.unwrap();
@@ -1822,7 +1848,7 @@ mod tests {
 
         let offset = source.find("count =").unwrap();
         let pos = pos_at(source, offset);
-        let hover = compute_hover(&module, source, pos, &hierarchy, None);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
 
         assert!(
             hover.is_some(),
@@ -1861,7 +1887,7 @@ mod tests {
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
-        let hover = compute_hover(&module, source, Position::new(0, 0), &hierarchy, None);
+        let hover = compute_hover(&module, source, Position::new(0, 0), &hierarchy, None, None);
         assert!(hover.is_some());
         let hover = hover.unwrap();
         assert!(
@@ -1906,7 +1932,7 @@ mod tests {
         // declaration or the guard.
         let offset = source.rfind("[x]").unwrap() + 1;
         let pos = pos_at(source, offset);
-        let hover = compute_hover(&module, source, pos, &hierarchy, None);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
         assert!(hover.is_some(), "Should hover on narrowed `x`");
         let hover = hover.unwrap();
         assert!(
@@ -1942,7 +1968,7 @@ mod tests {
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
-        let hover = compute_hover(&module, source, Position::new(1, 0), &hierarchy, None);
+        let hover = compute_hover(&module, source, Position::new(1, 0), &hierarchy, None, None);
         assert!(hover.is_some(), "Should find hover");
         let hover = hover.unwrap();
         assert!(
@@ -1961,7 +1987,7 @@ mod tests {
 
         let self_offset = source.find("self.count").unwrap();
         let pos = pos_at(source, self_offset);
-        let hover = compute_hover(&module, source, pos, &hierarchy, None);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
         assert!(
             hover.is_some(),
             "Should find hover for self in standalone method"
@@ -1983,7 +2009,7 @@ mod tests {
 
         let self_offset = source.find("self new:").unwrap();
         let pos = pos_at(source, self_offset);
-        let hover = compute_hover(&module, source, pos, &hierarchy, None);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
         assert!(
             hover.is_some(),
             "Should find hover for self in standalone class method"
@@ -2005,7 +2031,7 @@ mod tests {
 
         let selector_offset = source.find("increment =>").unwrap();
         let pos = pos_at(source, selector_offset);
-        let hover = compute_hover(&module, source, pos, &hierarchy, None);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
 
         assert!(hover.is_some(), "Should hover method declaration selector");
         let hover = hover.unwrap();
@@ -2025,7 +2051,7 @@ mod tests {
 
         let selector_offset = source.find("at:").unwrap();
         let pos = pos_at(source, selector_offset);
-        let hover = compute_hover(&module, source, pos, &hierarchy, None);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
 
         assert!(hover.is_some(), "Should hover keyword declaration selector");
         let hover = hover.unwrap();
@@ -2045,7 +2071,7 @@ mod tests {
 
         let param_offset = source.find("aBlock ::").unwrap();
         let pos = pos_at(source, param_offset);
-        let hover = compute_hover(&module, source, pos, &hierarchy, None);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
 
         assert!(hover.is_some(), "Should hover typed parameter name");
         let hover = hover.unwrap();
@@ -2065,7 +2091,8 @@ mod tests {
 
         let param_type_offset = source.find("Block ->").unwrap();
         let param_type_pos = pos_at(source, param_type_offset);
-        let param_type_hover = compute_hover(&module, source, param_type_pos, &hierarchy, None);
+        let param_type_hover =
+            compute_hover(&module, source, param_type_pos, &hierarchy, None, None);
         assert!(param_type_hover.is_some(), "Should hover parameter type");
         let param_type_hover = param_type_hover.unwrap();
         assert!(
@@ -2078,7 +2105,8 @@ mod tests {
 
         let return_type_offset = source.find("-> Boolean").unwrap() + 3;
         let return_type_pos = pos_at(source, return_type_offset);
-        let return_type_hover = compute_hover(&module, source, return_type_pos, &hierarchy, None);
+        let return_type_hover =
+            compute_hover(&module, source, return_type_pos, &hierarchy, None, None);
         assert!(return_type_hover.is_some(), "Should hover return type");
         let return_type_hover = return_type_hover.unwrap();
         assert!(
@@ -2099,7 +2127,7 @@ mod tests {
 
         let selector_offset = source.find("increment ->").unwrap();
         let pos = pos_at(source, selector_offset);
-        let hover = compute_hover(&module, source, pos, &hierarchy, None);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
 
         assert!(hover.is_some(), "Should hover declaration selector");
         let hover = hover.unwrap();
@@ -2128,7 +2156,7 @@ mod tests {
 
         let object_offset = source.find("Object").unwrap();
         let pos = pos_at(source, object_offset);
-        let hover = compute_hover(&module, source, pos, &hierarchy, None);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
 
         assert!(hover.is_some(), "Should hover superclass identifier");
         let hover = hover.unwrap();
@@ -2148,7 +2176,7 @@ mod tests {
 
         let class_offset = source.find("Counter").unwrap();
         let pos = pos_at(source, class_offset);
-        let hover = compute_hover(&module, source, pos, &hierarchy, None);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
 
         assert!(hover.is_some(), "Should hover class declaration name");
         let hover = hover.unwrap();
@@ -2207,7 +2235,7 @@ mod tests {
 
         let selector_offset = source.rfind("value").unwrap();
         let pos = pos_at(source, selector_offset);
-        let hover = compute_hover(&module, source, pos, &hierarchy, None);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
         assert!(
             hover.is_some(),
             "Should hover on user-defined annotated selector"
@@ -2230,7 +2258,7 @@ mod tests {
 
         let selector_offset = source.rfind("value").unwrap();
         let pos = pos_at(source, selector_offset);
-        let hover = compute_hover(&module, source, pos, &hierarchy, None);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
         assert!(
             hover.is_some(),
             "Should hover on user-defined inferred selector"
@@ -2383,7 +2411,7 @@ mod tests {
 
         // Hover over "Foo" (class name declaration at offset 17)
         let pos = Position::new(0, 17);
-        let hover = compute_hover(&module, source, pos, &hierarchy, None);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
         assert!(hover.is_some(), "Should hover on internal class name");
         let hover = hover.unwrap();
         assert!(
@@ -2403,7 +2431,7 @@ mod tests {
         // Hover over "helper" method selector
         let helper_offset = source.find("helper").unwrap();
         let pos = pos_at(source, helper_offset);
-        let hover = compute_hover(&module, source, pos, &hierarchy, None);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
         assert!(hover.is_some(), "Should hover on internal method selector");
         let hover = hover.unwrap();
         let doc = hover.documentation.as_deref().unwrap_or("");
@@ -2448,7 +2476,7 @@ mod tests {
         //         0123456789012345678901234
         let reverse_offset = source.find("reverse").unwrap();
         let pos = pos_at(source, reverse_offset);
-        let hover = compute_hover(&module, source, pos, &hierarchy, Some(&registry));
+        let hover = compute_hover(&module, source, pos, &hierarchy, Some(&registry), None);
         let hover = hover.expect("should get hover for FFI selector");
         assert!(
             hover.contents.contains("reverse:"),
@@ -2510,7 +2538,7 @@ mod tests {
         // Hover over the second (downstream) use of `y`, not the assignment.
         let y_use_offset = source.rfind('y').unwrap();
         let pos = pos_at(source, y_use_offset);
-        let hover = compute_hover(&module, source, pos, &hierarchy, Some(&registry));
+        let hover = compute_hover(&module, source, pos, &hierarchy, Some(&registry), None);
         let hover = hover.expect("should get hover for downstream identifier");
         assert!(
             hover.contents.contains("List"),
@@ -2530,7 +2558,7 @@ mod tests {
         // Hover over "reverse:" — no registry provided
         let reverse_offset = source.find("reverse").unwrap();
         let pos = pos_at(source, reverse_offset);
-        let hover = compute_hover(&module, source, pos, &hierarchy, None);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
         let hover = hover.expect("should get hover even without registry");
         let doc = hover.documentation.as_deref().unwrap_or("");
         assert!(
@@ -2550,7 +2578,7 @@ mod tests {
         // Hover over the `x` in the method body (the return expression)
         let body_x_offset = source.rfind('x').unwrap();
         let pos = pos_at(source, body_x_offset);
-        let hover = compute_hover(&module, source, pos, &hierarchy, None);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
         let hover = hover.expect("should get hover for unannotated param reference");
         assert!(
             hover.contents.contains("Dynamic (unannotated parameter)"),
@@ -2570,7 +2598,7 @@ mod tests {
         // Hover over the `x` in the method body
         let body_x_offset = source.rfind('x').unwrap();
         let pos = pos_at(source, body_x_offset);
-        let hover = compute_hover(&module, source, pos, &hierarchy, None);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
         let hover = hover.expect("should get hover for annotated param reference");
         assert!(
             hover.contents.contains("Integer"),
@@ -2580,6 +2608,118 @@ mod tests {
         assert!(
             !hover.contents.contains("Dynamic"),
             "Annotated param should not be Dynamic. Got: {}",
+            hover.contents
+        );
+    }
+
+    // ── BT-2897 / ADR 0108: display-name provenance for hover ──────────────
+
+    /// Builds an `AliasRegistry` registered against `module`/`hierarchy`,
+    /// mirroring the batch registration order (classes → protocols →
+    /// aliases) `analyse_full` uses (see `alias_registry.rs`'s module doc).
+    fn alias_registry_for(module: &Module, hierarchy: &ClassHierarchy) -> AliasRegistry {
+        let protocol_registry =
+            crate::semantic_analysis::protocol_registry::ProtocolRegistry::new();
+        let mut registry = AliasRegistry::new();
+        let diags = registry.register_module(module, hierarchy, &protocol_registry);
+        assert!(diags.is_empty(), "unexpected alias diagnostics: {diags:?}");
+        registry
+    }
+
+    #[test]
+    fn hover_on_alias_typed_param_shows_alias_name_and_expansion() {
+        // ADR 0108's flagship example: hover on a `RestartStrategy`-typed
+        // value shows the alias name *and* the structural expansion, not
+        // just one or the other.
+        let source = "type RestartStrategy = #temporary | #transient | #permanent\n\n\
+                       Object subclass: Supervisor\n  restart: policy :: RestartStrategy => policy\n";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let alias_registry = alias_registry_for(&module, &hierarchy);
+
+        // Hover over `policy` in the method body (the return expression).
+        let offset = source.rfind("=> policy").unwrap() + "=> ".len();
+        let pos = pos_at(source, offset);
+        let hover = compute_hover(
+            &module,
+            source,
+            pos,
+            &hierarchy,
+            None,
+            Some(&alias_registry),
+        );
+        let hover = hover.expect("should get hover for alias-typed param reference");
+        assert!(
+            hover
+                .contents
+                .contains("RestartStrategy (#temporary | #transient | #permanent)"),
+            "Alias-typed value should show `AliasName (expansion)`. Got: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_without_alias_registry_does_not_resolve_alias() {
+        // Sanity check for the `alias_registry: None` default (real LSP
+        // callers today — see `language_service::mod::hover`'s doc): without
+        // a registry, `RestartStrategy` resolves as an ordinary (unresolved)
+        // nominal class name, exactly like pre-BT-2897 behaviour — it must
+        // never show the `AliasName (expansion)` format by accident.
+        let source = "type RestartStrategy = #temporary | #transient | #permanent\n\n\
+                       Object subclass: Supervisor\n  restart: policy :: RestartStrategy => policy\n";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let offset = source.rfind("=> policy").unwrap() + "=> ".len();
+        let pos = pos_at(source, offset);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
+        let hover = hover.expect("should get hover for alias-typed param reference");
+        assert!(
+            !hover.contents.contains('('),
+            "Without an alias registry, hover must not show `AliasName (expansion)`. Got: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_singleton_eq_false_branch_shows_structural_type_no_alias_name() {
+        // ADR 0108 v1 scope: narrowing residuals never carry the alias name
+        // — the false branch of `policy =:= #temporary` renders the plain
+        // structural `#transient | #permanent`, not `RestartStrategy
+        // (#transient | #permanent)`. Pins this as intentional (see
+        // `TypeProvenance::Aliased`'s doc and `union_of`'s "best provenance"
+        // exclusion), not a regression to fix later.
+        let source = "type RestartStrategy = #temporary | #transient | #permanent\n\
+                       policy :: RestartStrategy := #transient\n\
+                       (policy =:= #temporary) ifFalse: [policy]";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let alias_registry = alias_registry_for(&module, &hierarchy);
+
+        // Position at `policy` inside the `ifFalse:` block, not the
+        // declaration or the guard.
+        let offset = source.rfind("[policy]").unwrap() + 1;
+        let pos = pos_at(source, offset);
+        let hover = compute_hover(
+            &module,
+            source,
+            pos,
+            &hierarchy,
+            None,
+            Some(&alias_registry),
+        );
+        let hover = hover.expect("should hover on narrowed `policy`");
+        assert!(
+            hover.contents.contains("#transient | #permanent"),
+            "Should show the narrowed structural union. Got: {}",
+            hover.contents
+        );
+        assert!(
+            !hover.contents.contains("RestartStrategy"),
+            "Narrowing residual must not carry the alias name (ADR 0108 v1 scope). Got: {}",
             hover.contents
         );
     }

@@ -94,7 +94,16 @@ pub struct AliasInfo {
 }
 
 impl AliasInfo {
-    fn from_definition(def: &TypeAliasDefinition) -> Self {
+    /// Builds an [`AliasInfo`] from a parsed [`TypeAliasDefinition`].
+    ///
+    /// `pub` (ADR 0108 Phase 8, BT-2902): the REPL's cross-turn alias
+    /// persistence re-parses each previously-declared `type Name = ...` line
+    /// standalone (the session has no live BEAM artifact to recover an
+    /// alias from, unlike a class — see `AliasRegistry::add_pre_loaded`) and
+    /// needs this constructor to turn the result into an `AliasInfo` without
+    /// going through a full `Module`/`register_module` batch.
+    #[must_use]
+    pub fn from_definition(def: &TypeAliasDefinition) -> Self {
         Self {
             name: def.name.name.clone(),
             annotation: def.annotation.clone(),
@@ -346,7 +355,7 @@ impl AliasRegistry {
     }
 
     /// Seed the registry with aliases pre-compiled from other source files or
-    /// packages.
+    /// packages, or carried over from earlier turns of the same REPL session.
     ///
     /// BT-2898: Mirrors `ProtocolRegistry::add_pre_loaded` (BT-2006). Skips
     /// entries whose names are already registered (current-module
@@ -355,6 +364,19 @@ impl AliasRegistry {
     /// already-seeded alias (e.g. two dependencies each exporting `type Id
     /// = ...`; ADR 0108 Semantics: "Cross-package collisions ... are
     /// diagnosed at seeding time").
+    ///
+    /// Also used for REPL cross-turn continuity (ADR 0108 Phase 8, BT-2902):
+    /// callers pass previously-declared `type Name = ...` lines re-parsed
+    /// standalone each turn (aliases erase to nothing at runtime, so unlike
+    /// `pre_loaded_classes` there is no live BEAM artifact to recover them
+    /// from). Those entries were already validated once when first declared;
+    /// the collision checks below are harmless in that context since a
+    /// caller is expected to have already filtered out any name the current
+    /// turn itself redeclares (current turn wins — see
+    /// `AnalysisContext::pre_loaded_aliases`), and `current_package` is
+    /// `None` for a REPL/script session, which — per the seeding-boundary
+    /// rule below — makes every carried-over `internal` alias visible again
+    /// (there is no package boundary to enforce in an open-world REPL).
     ///
     /// **Seeding-boundary exclusion** (ADR 0108 Semantics / Implementation):
     /// an `internal` alias declared in a *different* package than
