@@ -1672,6 +1672,44 @@ mod tests {
     }
 
     #[test]
+    fn alias_leak_chain_of_public_aliases_cascades_one_diagnostic_per_alias() {
+        // `internal type Priv = Integer`, `type Mid = Priv` (public), `type
+        // High = Mid` (public) — reviewer-flagged mirror of the internal-chain
+        // case above: `check_alias_leaked_visibility` checks every top-level
+        // *public* alias independently (its own fresh `visited` set), so a
+        // chain of N public aliases reaching the same internal root produces
+        // N diagnostics, one per alias, all naming 'Priv'. This is accepted
+        // behavior (fixing the innermost boundary, 'Mid', makes both
+        // diagnostics disappear) — pinned explicitly so the count doesn't
+        // silently change in either direction.
+        let module = parse_module("internal type Priv = Integer\ntype Mid = Priv\ntype High = Mid");
+        let (h, alias_registry) = build_hierarchy_and_aliases(&module, "json");
+        let mut diags = Vec::new();
+        check_alias_leaked_visibility(&module, &h, &alias_registry, Some("json"), &mut diags);
+
+        let priv_leaks: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("Priv"))
+            .collect();
+        assert_eq!(
+            priv_leaks.len(),
+            2,
+            "expected one cascading diagnostic each for 'Mid' and 'High' (both reach \
+             'Priv' independently), got: {diags:?}"
+        );
+        assert!(
+            priv_leaks
+                .iter()
+                .any(|d| d.message.contains("public type alias 'Mid'"))
+        );
+        assert!(
+            priv_leaks
+                .iter()
+                .any(|d| d.message.contains("public type alias 'High'"))
+        );
+    }
+
+    #[test]
     fn alias_leak_through_generic_type_argument() {
         // `type Pub = List(Priv)` — the leak-check must recurse into a
         // Generic annotation's type arguments, not just its base name.
