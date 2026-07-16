@@ -1,6 +1,9 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
-
+/// The OTP primary log level severities that `Beamtalk logLevel:` accepts.
+type LogLevel = #emergency | #alert | #critical | #error | #warning | #notice | #info | #debug
+/// The log output format on the file handler.
+type LogFormat = #text | #json
 /// BeamtalkInterface — Workspace-level reflection and class registry.
 ///
 /// Provides access to the class registry, global namespace, and
@@ -130,7 +133,7 @@ sealed typed Object subclass: BeamtalkInterface
   /// ```beamtalk
   /// Beamtalk logLevel
   /// ```
-  logLevel -> #emergency | #alert | #critical | #error | #warning | #notice | #info | #debug | #all | #none =>
+  logLevel -> LogLevel | #all | #none =>
     (Erlang beamtalk_logging_config) logLevel
 
   /// Set the OTP primary log level.
@@ -139,7 +142,7 @@ sealed typed Object subclass: BeamtalkInterface
   /// ```beamtalk
   /// Beamtalk logLevel: #debug
   /// ```
-  logLevel: level :: #emergency | #alert | #critical | #error | #warning | #notice | #info | #debug -> Nil =>
+  logLevel: level :: LogLevel -> Nil =>
     (Erlang beamtalk_logging_config) logLevel: level
 
   /// Return the current log format as a singleton symbol (`#text` or `#json`).
@@ -148,7 +151,7 @@ sealed typed Object subclass: BeamtalkInterface
   /// ```beamtalk
   /// Beamtalk logFormat
   /// ```
-  logFormat -> #text | #json => (Erlang beamtalk_logging_config) logFormat
+  logFormat -> LogFormat => (Erlang beamtalk_logging_config) logFormat
 
   /// Switch the log format on the file handler.
   ///
@@ -157,7 +160,7 @@ sealed typed Object subclass: BeamtalkInterface
   /// Beamtalk logFormat: #json
   /// Beamtalk logFormat: #text
   /// ```
-  logFormat: format :: #text | #json -> Nil =>
+  logFormat: format :: LogFormat -> Nil =>
     (Erlang beamtalk_logging_config) logFormat: format
 
   /// Return the list of available debug target symbols.

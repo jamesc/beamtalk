@@ -101,6 +101,32 @@ fn parse_type_alias_doc_comment() {
 }
 
 #[test]
+fn parse_type_alias_own_adjacent_doc_comment_not_falsely_unattached() {
+    // BT-2924 regression (secondary bug): a `type` alias with a
+    // directly-adjacent `///` doc comment (no blank line) must attach
+    // cleanly and must NOT be reported as unattached, even when an earlier,
+    // unrelated `///` block (meant for a different declaration further down)
+    // shares the same leading trivia. `parse_ok` asserts zero
+    // `Severity::Warning` diagnostics, so this fails if the false-positive
+    // "doc comment not attached" lint fires.
+    let module = parse_ok(
+        "/// HTTPServer doc, meant for the class declared further below.
+
+/// Anything HTTPServer accepts as a request handler.
+type HTTPHandlerLike = Integer | String
+
+Actor subclass: HTTPServer
+  start => 1",
+    );
+    assert_eq!(module.type_aliases.len(), 1);
+    assert_eq!(
+        module.type_aliases[0].doc_comment.as_deref(),
+        Some("Anything HTTPServer accepts as a request handler.")
+    );
+    assert_eq!(module.classes.len(), 1);
+}
+
+#[test]
 fn parse_multiple_type_aliases() {
     let module = parse_ok("type Port = Integer\ntype Timeout = Integer | #infinity");
     assert_eq!(module.type_aliases.len(), 2);
