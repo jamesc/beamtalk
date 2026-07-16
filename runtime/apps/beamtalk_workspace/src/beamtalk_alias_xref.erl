@@ -145,7 +145,12 @@ dependents_of(AliasNameBin) when is_binary(AliasNameBin) ->
 -doc "Clear every recorded edge (tests; a future `Workspace changes revert:`).".
 -spec clear() -> ok.
 clear() ->
-    gen_server:call(?MODULE, clear).
+    try
+        gen_server:call(?MODULE, clear)
+    catch
+        exit:{noproc, _} -> ok;
+        exit:{timeout, _} -> ok
+    end.
 
 %%====================================================================
 %% gen_server callbacks
