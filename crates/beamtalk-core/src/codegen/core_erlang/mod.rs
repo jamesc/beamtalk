@@ -3528,6 +3528,26 @@ impl CoreErlangGenerator {
         if is_quoted {
             let params = self.current_method_params.clone();
             if let Some(code) = primitives::generate_primitive_bif(&class_name, name, &params) {
+                // BT-2888: `do:`/`collect:`/`select:`/`reject:`/`inject:into:` are
+                // real BIF-lowered bodies, already correct for a Tier 1 (pure)
+                // block via generic dispatch. Guard against a Tier 2 (stateful)
+                // block hitting a raw arity crash instead of a clear error — see
+                // `generate_stateful_block_guard`.
+                let stateful_guard_block_param = match name {
+                    "do:" | "collect:" | "select:" | "reject:" => params.first(),
+                    "inject:into:" => params.get(1),
+                    _ => None,
+                };
+                if let Some(block_param) = stateful_guard_block_param {
+                    let pure_arity = if name == "inject:into:" { 2 } else { 1 };
+                    return Ok(self.generate_stateful_block_guard(
+                        block_param,
+                        pure_arity,
+                        name,
+                        &class_name,
+                        code,
+                    ));
+                }
                 return Ok(code);
             }
 

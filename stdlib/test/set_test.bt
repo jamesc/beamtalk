@@ -77,6 +77,15 @@ TestCase subclass: SetTest
       sum + x
     ]) equals: 6
 
+  testPerformOnStatefulDoBlockRaisesClearErrorInsteadOfCrashing =>
+    // BT-2888: the do: stateful_block_dispatch guard also applies
+    // to Set, since the guard is keyed on selector name, not receiver class.
+    count := 0
+    statefulBlock := [:x | count := count + x]
+    self should: [
+      ((Set new) fromList: #(1, 2, 3)) perform: #do: withArguments: #(statefulBlock)
+    ] raise: #stateful_block_dispatch
+
   testRespondstoMethodReflection =>
     s4 := (Set new) add: 1
     self assert: (s4 respondsTo: #size)
