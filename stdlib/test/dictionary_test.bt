@@ -63,7 +63,7 @@ TestCase subclass: DictionaryTest
     self assert: ((#{#a => 1} merge: #{#a => 99}) at: #a) equals: 99
 
   testPerformOnStatefulDoBlockRaisesClearErrorInsteadOfCrashing =>
-    // BT-2888: the do: stateful_block_dispatch guard List gets also applies
+    // BT-2888: the do: stateful_block_dispatch guard also applies
     // to Dictionary, since the guard is keyed on selector name, not receiver
     // class.
     count := 0

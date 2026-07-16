@@ -78,7 +78,7 @@ TestCase subclass: SetTest
     ]) equals: 6
 
   testPerformOnStatefulDoBlockRaisesClearErrorInsteadOfCrashing =>
-    // BT-2888: the do: stateful_block_dispatch guard List gets also applies
+    // BT-2888: the do: stateful_block_dispatch guard also applies
     // to Set, since the guard is keyed on selector name, not receiver class.
     count := 0
     statefulBlock := [:x | count := count + x]

@@ -70,9 +70,11 @@ TestCase subclass: ArrayTest
     self assert: (#[] inject: 0 into: [:acc :x | acc + x]) equals: 0
 
   testPerformOnStatefulBlockRaisesClearErrorInsteadOfCrashing =>
-    // BT-2888: the same do:/collect:/select:/inject:into: stateful_block_dispatch
-    // guard List gets also applies to Array, since the guard is keyed on
-    // selector name, not receiver class.
+    // BT-2888: the collect:/inject:into: stateful_block_dispatch guard also
+    // applies to Array, since the guard is keyed on selector name, not
+    // receiver class. (Array has no reject: primitive, so that selector
+    // isn't guarded here; do:/select: are covered the same way, just not
+    // duplicated per-class — see CollectionsTest for those on List.)
     count := 0
     statefulBlock := [:x |
       count := count + 1
