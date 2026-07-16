@@ -987,6 +987,10 @@ type_annotation_prefix({expression, ReceiverExpr, Prefix}) ->
 type_annotation_prefix({Receiver, Prefix}) when is_binary(Receiver) ->
     strip_double_colon_prefix(Prefix);
 type_annotation_prefix(_) ->
+    %% Covers {undefined, Prefix} — a bare `::` with no preceding token
+    %% (nothing before it on the line) is not valid Beamtalk syntax, so
+    %% falling through to ordinary prefix completion (which finds nothing
+    %% for a "::"-containing prefix) is correct, not just a missed case.
     false.
 
 -spec strip_double_colon_prefix(binary()) -> {true, binary()} | false.
