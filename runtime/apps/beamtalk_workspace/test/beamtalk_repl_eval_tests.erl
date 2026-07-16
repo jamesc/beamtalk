@@ -1604,6 +1604,8 @@ eval_success_test_() ->
         {"do_eval runtime error wraps in _error", fun do_eval_runtime_error/0},
         {"do_eval inline class definition", fun do_eval_class_definition/0},
         {"do_eval protocol definition", fun do_eval_protocol_definition/0},
+        {"do_eval class over earlier-turn alias is a collision error",
+            fun do_eval_class_definition_over_earlier_turn_alias_is_a_collision_error/0},
         {"do_eval/3 with undefined subscriber", fun do_eval_with_undefined_subscriber/0},
         {"do_show_codegen returns core erlang", fun do_show_codegen_success/0},
         {"do_show_codegen invalid returns error", fun do_show_codegen_error/0},
@@ -1674,6 +1676,37 @@ do_eval_protocol_definition() ->
     {ok, Display, _Output, _Warnings, _State} = beamtalk_repl_eval:do_eval(Source, state0()),
     ?assert(is_binary(Display)),
     ?assert(binary:match(Display, <<"EvalSuccessProto">>) =/= nomatch).
+
+%% ADR 0108 Semantics / BT-2899 (consolidated BT-2912): the concrete repro,
+%% exercised through the real `do_eval/2` REPL path end to end — turn 1
+%% declares `type EvalCollisionPoint = Integer` (a session-local alias, via
+%% the SAME `type_alias_definition` handling `do_eval_type_alias_definition`
+%% exercises); turn 2 (threading turn 1's resulting `State`, exactly how a
+%% real multi-turn session chains) sends `Object subclass:
+%% EvalCollisionPoint` — before BT-2899, `compile`/`compile_method` never
+%% threaded `known_type_aliases` at all (only `compile_expression` did), so
+%% `AliasRegistry::add_pre_loaded`'s existing collision check never got a
+%% chance to run and the class compiled clean, silently shadowing the alias.
+%% This is the un-diagnosed-collision bug this issue closes — the class
+%% define must now fail with a namespace-collision error.
+do_eval_class_definition_over_earlier_turn_alias_is_a_collision_error() ->
+    AliasSource = "type EvalCollisionPoint = Integer",
+    {ok, <<"EvalCollisionPoint">>, _Output0, _Warnings0, State1} =
+        beamtalk_repl_eval:do_eval(AliasSource, state0()),
+
+    ClassSource = "Object subclass: EvalCollisionPoint\n  hello => 42",
+    Result = beamtalk_repl_eval:do_eval(ClassSource, State1),
+    ?assertMatch({error, #beamtalk_error{}, _, _, _}, Result),
+    {error, #beamtalk_error{message = Msg}, _, _, _} = Result,
+    ?assert(
+        binary:match(Msg, <<"EvalCollisionPoint">>) =/= nomatch,
+        io_lib:format("expected the collision message to name the alias, got: ~p", [Msg])
+    ),
+    ?assert(
+        binary:match(Msg, <<"namespace">>) =/= nomatch orelse
+            binary:match(Msg, <<"collides">>) =/= nomatch,
+        io_lib:format("expected a namespace-collision message, got: ~p", [Msg])
+    ).
 
 do_eval_with_undefined_subscriber() ->
     %% do_eval/3 with an explicit undefined subscriber exercises the streaming arg.

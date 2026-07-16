@@ -156,7 +156,13 @@ fn set_param_types_resolves_generic_annotation() {
     }];
 
     let mut env = TypeEnv::new();
-    TypeChecker::set_param_types(&mut env, &params, None, None);
+    TypeChecker::set_param_types(
+        &mut env,
+        &params,
+        None,
+        None,
+        &mut std::collections::HashSet::new(),
+    );
 
     let r_type = env.get_local("r").expect("r should be in env");
     match r_type {

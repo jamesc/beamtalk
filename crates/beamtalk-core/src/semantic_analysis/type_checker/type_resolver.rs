@@ -135,6 +135,50 @@ pub(in crate::semantic_analysis) fn resolve_type_annotation(
     )
 }
 
+/// [`resolve_type_annotation`], additionally returning the full transitive
+/// set of alias names touched while resolving `ann` (ADR 0108 hot-reload
+/// re-check trigger, BT-2899).
+///
+/// `memo` (see [`resolve_type_annotation_inner`]'s doc) already accumulates
+/// exactly one entry per alias name *fully* resolved during this one
+/// top-level call — including alias-of-alias chains, since expanding `B` in
+/// `type B = A | #z` recurses into resolving `A` through the same `memo`
+/// before `B` itself is memoized. So `memo`'s keys *are* the transitive
+/// dependency set this function needs to report: resolving `p :: B` records
+/// both `B` and `A`, exactly the "full transitive expansion walk" ADR 0108's
+/// Implementation section requires — a live redefinition of `A` alone must
+/// still invalidate `p`'s site even though `A` is never the annotation's own
+/// written name.
+///
+/// Returned as a sorted `Vec` (not the `HashSet` `memo`'s keys would give)
+/// so callers get a deterministic order for free — useful for tests and for
+/// building a stable compiler-port response field without an extra sort at
+/// the call site.
+///
+/// A plain, non-alias annotation (or one resolved with `alias_registry =
+/// None`) returns an empty `Vec`, matching [`resolve_type_annotation`]'s
+/// existing "no registry, no alias behaviour" contract.
+pub(in crate::semantic_analysis) fn resolve_type_annotation_with_alias_deps(
+    ann: &TypeAnnotation,
+    subst: &SubstitutionMap,
+    protocol_registry: Option<&ProtocolRegistry>,
+    alias_registry: Option<&AliasRegistry>,
+) -> (InferredType, Vec<EcoString>) {
+    let mut expanding = Vec::new();
+    let mut memo = HashMap::new();
+    let resolved = resolve_type_annotation_inner(
+        ann,
+        subst,
+        protocol_registry,
+        alias_registry,
+        &mut expanding,
+        &mut memo,
+    );
+    let mut touched: Vec<EcoString> = memo.into_keys().collect();
+    touched.sort();
+    (resolved, touched)
+}
+
 /// The actual resolution recursion, guarded by `expanding` — the stack of
 /// alias names currently being expanded on the current path — and cached by
 /// `memo` — every alias name already *fully* resolved earlier in this same
@@ -1227,6 +1271,102 @@ mod tests {
         assert!(members.contains(&InferredType::known("#x")));
         assert!(members.contains(&InferredType::known("#y")));
         assert!(members.contains(&InferredType::known("#z")));
+    }
+
+    // ---- resolve_type_annotation_with_alias_deps (ADR 0108 hot-reload
+    // re-check trigger, BT-2899) ----
+
+    #[test]
+    fn alias_deps_records_both_levels_of_a_chained_alias() {
+        // `type B = A | #z`, `type A = #x | #y` — resolving `p :: B` must
+        // record dependency edges for *both* `B` and `A` (ADR 0108
+        // Implementation: "recording only the outermost written name would
+        // leave a live redefinition of `A` alone unable to trigger a
+        // re-check of `p`'s site").
+        let a_expansion = TypeAnnotation::Union {
+            types: vec![
+                TypeAnnotation::Singleton {
+                    name: "x".into(),
+                    span: span(),
+                },
+                TypeAnnotation::Singleton {
+                    name: "y".into(),
+                    span: span(),
+                },
+            ],
+            span: span(),
+        };
+        let b_expansion = TypeAnnotation::Union {
+            types: vec![
+                TypeAnnotation::Simple(ident("A")),
+                TypeAnnotation::Singleton {
+                    name: "z".into(),
+                    span: span(),
+                },
+            ],
+            span: span(),
+        };
+        let mut registry = alias_registry_with("A", a_expansion);
+        registry.register_test_alias(AliasInfo {
+            name: "B".into(),
+            annotation: b_expansion,
+            is_internal: false,
+            package: None,
+            span: span(),
+        });
+
+        let ann = TypeAnnotation::Simple(ident("B"));
+        let (_resolved, deps) =
+            resolve_type_annotation_with_alias_deps(&ann, &empty_subst(), None, Some(&registry));
+
+        assert_eq!(
+            deps,
+            vec![EcoString::from("A"), EcoString::from("B")],
+            "expected both transitively-referenced alias names, sorted: {deps:?}"
+        );
+    }
+
+    #[test]
+    fn alias_deps_is_empty_for_a_plain_nominal_annotation() {
+        // No alias registry consulted, or a name that isn't an alias at
+        // all — no dependency edges to record.
+        let ann = TypeAnnotation::Simple(ident("Integer"));
+        let (_resolved, deps) =
+            resolve_type_annotation_with_alias_deps(&ann, &empty_subst(), None, None);
+        assert!(deps.is_empty(), "expected no deps, got: {deps:?}");
+
+        let registry = alias_registry_with("A", TypeAnnotation::Simple(ident("Integer")));
+        let (_resolved, deps) =
+            resolve_type_annotation_with_alias_deps(&ann, &empty_subst(), None, Some(&registry));
+        assert!(
+            deps.is_empty(),
+            "a plain nominal name must not be recorded as an alias dep: {deps:?}"
+        );
+    }
+
+    #[test]
+    fn alias_deps_records_every_member_of_a_union_of_aliases() {
+        // `type Combined = X | Y` where both `X` and `Y` are themselves
+        // aliases — every alias name touched anywhere in the annotation
+        // must be recorded, not just the first.
+        let mut registry = alias_registry_with("X", TypeAnnotation::Simple(ident("Integer")));
+        registry.register_test_alias(AliasInfo {
+            name: "Y".into(),
+            annotation: TypeAnnotation::Simple(ident("String")),
+            is_internal: false,
+            package: None,
+            span: span(),
+        });
+        let ann = TypeAnnotation::Union {
+            types: vec![
+                TypeAnnotation::Simple(ident("X")),
+                TypeAnnotation::Simple(ident("Y")),
+            ],
+            span: span(),
+        };
+        let (_resolved, deps) =
+            resolve_type_annotation_with_alias_deps(&ann, &empty_subst(), None, Some(&registry));
+        assert_eq!(deps, vec![EcoString::from("X"), EcoString::from("Y")]);
     }
 
     #[test]

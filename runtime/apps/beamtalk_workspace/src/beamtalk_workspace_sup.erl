@@ -30,6 +30,7 @@ beamtalk_workspace_sup
   │   -- REPL mode only (repl=true) below this line --
   ├─ beamtalk_workspace_signature_store % Signature-generation store (ADR 0105, BT-2777)
   ├─ beamtalk_workspace_shape_store % Shape-generation store (ADR 0105, BT-2780)
+  ├─ beamtalk_alias_xref          % Alias-name -> dependent-class index (ADR 0108, BT-2899)
   ├─ beamtalk_workspace_shape_recheck_worker % Serialised shape re-check queue (ADR 0105, BT-2780)
   ├─ beamtalk_workspace_findings_store % Reload-induced findings store (ADR 0105, BT-2779)
   ├─ beamtalk_session_sup         % Supervises session shell processes (before repl_server)
@@ -247,6 +248,22 @@ repl_child_specs(true, TcpPort, WorkspaceId, BindAddr, AutoCleanup, MaxIdleSecon
             shutdown => 5000,
             type => worker,
             modules => [beamtalk_workspace_shape_store]
+        },
+
+        %% Alias-name -> dependent-class index (ADR 0108 hot-reload re-check
+        %% trigger, BT-2899). Populated at class-install time from the
+        %% compiler port's `referenced_aliases` response field; consulted by
+        %% `beamtalk_recheck:trigger_alias_change/1` so a live alias
+        %% redefinition re-checks only its recorded dependents instead of
+        %% sweeping every live class. Same REPL-mode-only rationale as its
+        %% siblings above.
+        #{
+            id => beamtalk_alias_xref,
+            start => {beamtalk_alias_xref, start_link, []},
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [beamtalk_alias_xref]
         },
 
         %% Shape re-check worker (ADR 0105 Phase 2, BT-2780).

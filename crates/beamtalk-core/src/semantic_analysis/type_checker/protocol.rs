@@ -314,17 +314,25 @@ impl TypeChecker {
                 // its structural expansion before being checked against the
                 // class's declared bound, instead of an opaque unknown
                 // class that would silently skip the bound check.
-                let type_args: Vec<InferredType> = parameters
-                    .iter()
-                    .map(|p| {
-                        super::type_resolver::resolve_type_annotation(
-                            p,
-                            &super::type_resolver::SubstitutionMap::new(),
-                            None,
-                            self.alias_registry.as_ref(),
-                        )
-                    })
-                    .collect();
+                //
+                // ADR 0108 hot-reload re-check trigger (BT-2899): a plain
+                // `for` loop (not `.map()`) so each iteration's dependency
+                // set can be folded into `self.referenced_aliases` directly
+                // — a closure capturing both `self.alias_registry` (read)
+                // and `self.referenced_aliases` (write) would need disjoint
+                // field capture through a `&mut self` receiver, which this
+                // sidesteps entirely.
+                let mut type_args: Vec<InferredType> = Vec::with_capacity(parameters.len());
+                for p in parameters {
+                    let (ty, deps) = super::type_resolver::resolve_type_annotation_with_alias_deps(
+                        p,
+                        &super::type_resolver::SubstitutionMap::new(),
+                        None,
+                        self.alias_registry.as_ref(),
+                    );
+                    self.referenced_aliases.extend(deps);
+                    type_args.push(ty);
+                }
 
                 // BT-1861: Warn when type args are provided for a class with no type params.
                 // Block is exempt — parameterized Block annotations (e.g., Block(E, Boolean))

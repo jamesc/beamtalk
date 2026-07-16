@@ -100,6 +100,34 @@ pub struct AnalysisResult {
 
     /// Type alias registry (ADR 0108 Phase 2, BT-2895).
     pub alias_registry: AliasRegistry,
+
+    /// Every alias name transitively referenced by an annotation resolved
+    /// during this compile (ADR 0108 hot-reload re-check trigger, BT-2899).
+    ///
+    /// Sorted and deduplicated. Populated from
+    /// [`type_checker::TypeChecker::take_referenced_aliases`] — see that
+    /// method's doc for why the set already spans the full transitive
+    /// expansion walk (resolving `p :: B` where `type B = A | #z` records
+    /// both `B` and `A`). Consumed by the compiler port to answer "does this
+    /// class's compile depend on alias X?" without re-parsing — the
+    /// alias-name-keyed candidate lookup a live alias redefinition's
+    /// re-check trigger needs (unlike ADR 0107's `trigger_leaf_change/1`,
+    /// which has no such key and sweeps every live class).
+    ///
+    /// **Scope boundary:** only spans the annotation-resolution call sites
+    /// that were switched to `resolve_type_annotation_with_alias_deps`
+    /// (method parameters, return types, local `::` assignments, generic
+    /// type-parameter bounds — every production caller that already threads
+    /// `alias_registry`). A `state:`/`field:` declared type does **not**
+    /// currently flow through alias resolution at all (`check_state_defaults`
+    /// compares against `type_annotation.type_name()`, the raw written name,
+    /// never `resolve_type_annotation`), so a state field typed with an
+    /// alias is invisible to this set today — harmless *only* because state
+    /// fields don't expand aliases yet either. If a future change adds alias
+    /// expansion to state-field types, that call site must also be switched
+    /// to the `_with_alias_deps` variant, or its class silently drops out of
+    /// `beamtalk_alias_xref` and a live redefinition stops re-checking it.
+    pub referenced_aliases: Vec<EcoString>,
 }
 
 impl AnalysisResult {
@@ -112,6 +140,7 @@ impl AnalysisResult {
             class_hierarchy: ClassHierarchy::with_builtins(),
             protocol_registry: ProtocolRegistry::new(),
             alias_registry: AliasRegistry::new(),
+            referenced_aliases: Vec::new(),
         }
     }
 }
@@ -696,10 +725,12 @@ fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult {
     // name the current module/turn itself redeclares (current turn wins,
     // same as above) keeps a live `type Foo = ...` redefinition from
     // tripping `register_module`'s duplicate-name check (ADR 0108 Semantics:
-    // a live session can legally redefine an alias; re-checking dependents
-    // is BT-2899's separate hot-reload concern, out of scope here). A REPL
-    // session has no `current_package`, so the seeding-boundary exclusion
-    // above never filters a carried-over `internal` alias out.
+    // a live session can legally redefine an alias). `referenced_aliases`
+    // (ADR 0108 hot-reload re-check trigger, BT-2899, below) is what lets
+    // the Erlang side re-check dependent annotation sites once this
+    // redefinition installs. A REPL session has no `current_package`, so
+    // the seeding-boundary exclusion above never filters a carried-over
+    // `internal` alias out.
     if !pre_loaded_aliases.is_empty() {
         let current_alias_names: std::collections::HashSet<&EcoString> =
             module.type_aliases.iter().map(|a| &a.name.name).collect();
@@ -756,6 +787,13 @@ fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult {
         &result.alias_registry,
     );
     result.diagnostics.extend(type_checker.take_diagnostics());
+    // ADR 0108 hot-reload re-check trigger (BT-2899): sorted, deduplicated
+    // snapshot of every alias name this compile's annotations transitively
+    // depended on — see the field's own doc.
+    let mut referenced_aliases: Vec<EcoString> =
+        type_checker.take_referenced_aliases().into_iter().collect();
+    referenced_aliases.sort();
+    result.referenced_aliases = referenced_aliases;
     let type_map = type_checker.take_type_map();
 
     // BT-2140: Lint redundant local-variable type annotations using the

@@ -78,7 +78,7 @@ class-body reload path in run mode for this to guard).
 
 -include_lib("kernel/include/logger.hrl").
 
--export([start_link/0, enqueue/1, enqueue_leaf_change/1]).
+-export([start_link/0, enqueue/1, enqueue_leaf_change/1, enqueue_alias_change/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -113,6 +113,20 @@ why this shares `enqueue/1`'s worker rather than getting its own.
 -spec enqueue_leaf_change([binary()]) -> ok.
 enqueue_leaf_change(NewlyNonLeafSuperclasses) ->
     gen_server:cast(?MODULE, {leaf_change, NewlyNonLeafSuperclasses}).
+
+-doc """
+ADR 0108 hot-reload re-check trigger (BT-2899): queue an alias-change
+re-check for `AliasNameBins` (the redefined alias name, primary first — see
+`beamtalk_repl_loader:maybe_trigger_alias_change_recheck/1`) and return
+immediately — reuses this worker's queue for the same reason
+`enqueue_leaf_change/1` does: `beamtalk_recheck:trigger_alias_change/1`'s
+`diagnostics/3` round trips per candidate would otherwise compete with a
+concurrent shape/leaf-change reload's round trips for the same
+`beamtalk_compiler_server` mailbox.
+""".
+-spec enqueue_alias_change([binary()]) -> ok.
+enqueue_alias_change(AliasNameBins) ->
+    gen_server:cast(?MODULE, {alias_change, AliasNameBins}).
 
 %%====================================================================
 %% gen_server callbacks
@@ -151,6 +165,25 @@ handle_cast({recheck, Classes}, State) ->
         Class:Reason:Stack ->
             ?LOG_WARNING(
                 "Shape re-check worker: unexpected crash swallowed (queue continues)",
+                #{
+                    error_class => Class,
+                    reason => Reason,
+                    stack => Stack,
+                    domain => [beamtalk, runtime]
+                }
+            )
+    end,
+    {noreply, State};
+handle_cast({alias_change, AliasNameBins}, State) ->
+    try
+        beamtalk_repl_loader:maybe_trigger_alias_change_recheck(AliasNameBins)
+    catch
+        %% Defensive only — see the moduledoc's "Crash isolation" section.
+        %% maybe_trigger_alias_change_recheck/1 is already self-swallowing,
+        %% so this should be unreachable in practice.
+        Class:Reason:Stack ->
+            ?LOG_WARNING(
+                "Alias-change re-check worker: unexpected crash swallowed (queue continues)",
                 #{
                     error_class => Class,
                     reason => Reason,

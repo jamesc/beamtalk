@@ -26,6 +26,72 @@ fn annotated_assignment_uses_declared_type() {
 }
 
 #[test]
+fn annotated_assignment_with_chained_alias_records_transitive_referenced_aliases() {
+    // ADR 0108 hot-reload re-check trigger (BT-2899): the exact
+    // `heading :: Direction := ...` shape from the ADR's REPL example.
+    // `type Direction = Compass` where `type Compass = #n | #s` — resolving
+    // this site must record dependency edges for *both* alias names, not
+    // just the outermost written `Direction`.
+    use crate::semantic_analysis::alias_registry::{AliasInfo, AliasRegistry};
+
+    let mut alias_registry = AliasRegistry::new();
+    alias_registry.register_test_alias(AliasInfo {
+        name: "Compass".into(),
+        annotation: TypeAnnotation::Union {
+            types: vec![
+                TypeAnnotation::Singleton {
+                    name: "n".into(),
+                    span: span(),
+                },
+                TypeAnnotation::Singleton {
+                    name: "s".into(),
+                    span: span(),
+                },
+            ],
+            span: span(),
+        },
+        is_internal: false,
+        package: None,
+        span: span(),
+    });
+    alias_registry.register_test_alias(AliasInfo {
+        name: "Direction".into(),
+        annotation: TypeAnnotation::simple("Compass", span()),
+        is_internal: false,
+        package: None,
+        span: span(),
+    });
+
+    let mut checker = TypeChecker::new();
+    checker.set_alias_registry(alias_registry);
+    let mut env = TypeEnv::new();
+    let hierarchy = ClassHierarchy::with_builtins();
+
+    let expr = Expression::Assignment {
+        target: Box::new(var("heading")),
+        value: Box::new(Expression::Identifier(Identifier::new(
+            "readHeading",
+            span(),
+        ))),
+        type_annotation: Some(TypeAnnotation::simple("Direction", span())),
+        span: span(),
+    };
+    checker.infer_expr(&expr, &hierarchy, &mut env, false);
+
+    let mut referenced: Vec<_> = checker
+        .take_referenced_aliases()
+        .into_iter()
+        .map(|n| n.to_string())
+        .collect();
+    referenced.sort();
+    assert_eq!(
+        referenced,
+        vec!["Compass".to_string(), "Direction".to_string()],
+        "expected both the written alias name and its transitively-referenced alias"
+    );
+}
+
+#[test]
 fn annotated_assignment_dynamic_rhs_no_warning() {
     // Dynamic RHS (the primary use case) should be accepted silently
     let mut checker = TypeChecker::new();

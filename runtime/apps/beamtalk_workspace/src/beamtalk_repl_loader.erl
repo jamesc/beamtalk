@@ -40,6 +40,14 @@ Extracted from beamtalk_repl_eval (BT-863).
     %% BT-2856 / ADR 0107 Phase A: same cross-module reason as
     %% maybe_trigger_shape_recheck/1 above — see activate_module/3's doc.
     maybe_trigger_leaf_change_recheck/1,
+    %% ADR 0108 hot-reload re-check trigger (BT-2899): same cross-module
+    %% reason as maybe_trigger_leaf_change_recheck/1 above — called from
+    %% beamtalk_workspace_shape_recheck_worker via enqueue_alias_change/1.
+    maybe_trigger_alias_change_recheck/1,
+    %% ADR 0108 hot-reload re-check trigger (BT-2899): the enqueue half —
+    %% called from beamtalk_repl_eval:handle_type_alias_definition/3, the
+    %% one production site that commits a live alias (re)definition.
+    spawn_alias_change_recheck/1,
     precheck_method/4
 ]).
 
@@ -75,7 +83,9 @@ Extracted from beamtalk_repl_eval (BT-863).
     %% BT-2856 / ADR 0107 Phase A: leaf-change detection/publish helpers.
     superclasses_losing_leaf_status/1,
     was_leaf_class/1,
-    publish_leaf_change_recheck_outcome/2
+    publish_leaf_change_recheck_outcome/2,
+    %% ADR 0108 hot-reload re-check trigger (BT-2899): publish helper.
+    publish_alias_change_recheck_outcome/2
 ]).
 -endif.
 
@@ -2620,6 +2630,129 @@ publish_leaf_change_recheck_outcome(SuperclassBin, Result) ->
                 changedClass => SuperclassBin,
                 changedSelector => SuperclassBin,
                 classification => leaf_change,
+                checked => Checked,
+                notChecked => NotChecked,
+                capNote => CapNote,
+                checkedOwners => CheckedOwners,
+                findings => Findings
+            }),
+            ok
+    end.
+
+%% ── ADR 0108 hot-reload re-check trigger (BT-2899): alias-change re-check ──
+
+-doc """
+Hand `AliasNameBins` off to the shape-recheck worker's queue and return
+immediately — reuses `beamtalk_workspace_shape_recheck_worker`'s existing
+single-worker serialisation, exactly like `spawn_leaf_change_recheck/1`
+(see its doc): `beamtalk_recheck:trigger_alias_change/1` is a batch of
+`diagnostics/3` round trips, same contention profile as a shape/leaf-change
+re-check.
+
+`AliasNameBins` is expected to be the redefined alias name — as a
+single-element list for the ordinary case — with the *primary* (actually
+redefined) name first if a caller ever has more than one (this trigger's
+one production caller, `beamtalk_repl_eval:handle_type_alias_definition/3`,
+always passes exactly one).
+
+A no-op when the list is empty.
+""".
+-spec spawn_alias_change_recheck([binary()]) -> ok.
+spawn_alias_change_recheck([]) ->
+    ok;
+spawn_alias_change_recheck(AliasNameBins) ->
+    beamtalk_workspace_shape_recheck_worker:enqueue_alias_change(AliasNameBins).
+
+-doc """
+Run the alias-change re-check for `AliasNameBins` and publish the outcome.
+Reached in production only via `beamtalk_workspace_shape_recheck_worker`'s
+queue (mirrors `maybe_trigger_leaf_change_recheck/1` exactly — see its doc —
+which is also why this is exported outside the `-ifdef(TEST)` block, same
+reason: the worker lives in a different module).
+
+Unlike the leaf-change trigger's batch-of-superclasses shape, this always
+publishes against the *first* (primary) name in `AliasNameBins` — see
+`recheck_owner_for_alias_change/2`'s doc for why a finding is always
+attributed to the redefined alias itself, not a transitively-affected one.
+""".
+-spec maybe_trigger_alias_change_recheck([binary()]) -> ok.
+maybe_trigger_alias_change_recheck([]) ->
+    ok;
+maybe_trigger_alias_change_recheck([PrimaryAliasBin | _] = AliasNameBins) ->
+    Result = beamtalk_recheck:trigger_alias_change(AliasNameBins),
+    publish_alias_change_recheck_outcome_safe(PrimaryAliasBin, Result),
+    ok.
+
+-spec publish_alias_change_recheck_outcome_safe(binary(), beamtalk_recheck:result()) -> ok.
+publish_alias_change_recheck_outcome_safe(AliasNameBin, Result) ->
+    try
+        publish_alias_change_recheck_outcome(AliasNameBin, Result)
+    catch
+        Class:Reason:Stack ->
+            ?LOG_WARNING(
+                "Alias-change re-check publish failed (redefinition unaffected)",
+                #{
+                    error_class => Class,
+                    reason => Reason,
+                    stack => Stack,
+                    alias => AliasNameBin,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            ok
+    end.
+
+-doc """
+Publish an alias-change re-check's outcome for `AliasNameBin` — mirrors
+`publish_leaf_change_recheck_outcome/2`'s store-write/announce shape,
+reusing the exact same findings-store and `'ReloadCheckCompleted'`
+announcement schema so every existing surface renders an alias-change
+finding without new wiring. `changedSelector` carries `AliasNameBin` itself
+(there is no single call-site selector this is "about" — same reasoning
+`finding()`'s doc already gives for `shape_change`/`leaf_change`).
+
+Announce is gated on `Findings` being non-empty, matching
+`publish_leaf_change_recheck_outcome/2` — an alias redefinition that
+introduces no new staleness has nothing worth announcing, but the
+findings-store write still runs for every checked owner unconditionally, so
+a stale prior finding is always replaced.
+""".
+-spec publish_alias_change_recheck_outcome(binary(), beamtalk_recheck:result()) -> ok.
+publish_alias_change_recheck_outcome(AliasNameBin, Result) ->
+    #{
+        checked_owners := CheckedOwners,
+        findings := Findings,
+        checked := Checked,
+        not_checked := NotChecked,
+        cap_note := CapNote,
+        not_verified_owners := NotVerifiedOwners
+    } = Result,
+    lists:foreach(
+        fun(OwnerBin) ->
+            OwnerFindings = [F || F <- Findings, maps:get(owner, F) =:= OwnerBin],
+            findings_store_put_owner_origin(OwnerBin, AliasNameBin, OwnerFindings)
+        end,
+        CheckedOwners
+    ),
+    mark_unverified_findings_stale(AliasNameBin, NotVerifiedOwners),
+    case Findings of
+        [] ->
+            ok;
+        _ ->
+            ?LOG_INFO(
+                "Alias-change reload re-check produced findings",
+                #{
+                    alias => AliasNameBin,
+                    callers_checked => Checked,
+                    callers_not_checked => NotChecked,
+                    finding_count => length(Findings),
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            beamtalk_announcements:system_announce('ReloadCheckCompleted', #{
+                changedClass => AliasNameBin,
+                changedSelector => AliasNameBin,
+                classification => alias_change,
                 checked => Checked,
                 notChecked => NotChecked,
                 capNote => CapNote,

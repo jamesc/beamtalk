@@ -180,6 +180,67 @@ register_when_down() ->
     application:start(beamtalk_compiler).
 
 %%% ---------------------------------------------------------------
+%%% ADR 0108 hot-reload re-check trigger (BT-2899): ambient alias cache
+%%% (register_aliases, get_aliases)
+%%% ---------------------------------------------------------------
+
+alias_cache_test_() ->
+    {setup, fun start_compiler/0, fun stop_compiler/1, [
+        {"register → alias visible in state", fun register_aliases_visible/0},
+        {"redefinition overwrites by name", fun register_aliases_redefinition_overwrites/0},
+        {"two sessions' aliases merge, neither wipes the other",
+            fun register_aliases_concurrent_sessions_merge/0},
+        {"clear_classes → alias cache emptied too", fun clear_classes_empties_aliases/0},
+        {"register_aliases when server down → no crash", fun register_aliases_when_down/0}
+    ]}.
+
+register_aliases_visible() ->
+    beamtalk_compiler_server:clear_classes(),
+    ok = beamtalk_compiler_server:register_aliases([<<"type Direction = #north | #south">>]),
+    ?assertEqual(
+        [<<"type Direction = #north | #south">>], beamtalk_compiler_server:get_aliases()
+    ).
+
+register_aliases_redefinition_overwrites() ->
+    beamtalk_compiler_server:clear_classes(),
+    ok = beamtalk_compiler_server:register_aliases([<<"type Direction = #north | #south">>]),
+    ok = beamtalk_compiler_server:register_aliases([
+        <<"type Direction = #north | #south | #east | #west">>
+    ]),
+    ?assertEqual(
+        [<<"type Direction = #north | #south | #east | #west">>],
+        beamtalk_compiler_server:get_aliases()
+    ).
+
+%% ADR 0108 adversarial review finding: `beamtalk_compiler_server` is a
+%% single node-global process shared by every concurrent REPL session
+%% (`beamtalk_session_sup`). Session A registering its own alias table must
+%% not wipe session B's — the ambient cache merges by alias name rather
+%% than replacing wholesale (see the `aliases` field's doc).
+register_aliases_concurrent_sessions_merge() ->
+    beamtalk_compiler_server:clear_classes(),
+    %% Session A's own current table (just `Foo`).
+    ok = beamtalk_compiler_server:register_aliases([<<"type Foo = Integer">>]),
+    %% Session B's own, entirely disjoint table (just `Bar`) — must merge
+    %% in alongside Foo, not replace it.
+    ok = beamtalk_compiler_server:register_aliases([<<"type Bar = String">>]),
+    Aliases = lists:sort(beamtalk_compiler_server:get_aliases()),
+    ?assertEqual(
+        lists:sort([<<"type Foo = Integer">>, <<"type Bar = String">>]),
+        Aliases
+    ).
+
+clear_classes_empties_aliases() ->
+    ok = beamtalk_compiler_server:register_aliases([<<"type Baz = Symbol">>]),
+    ok = beamtalk_compiler_server:clear_classes(),
+    ?assertEqual([], beamtalk_compiler_server:get_aliases()).
+
+register_aliases_when_down() ->
+    application:stop(beamtalk_compiler),
+    ?assertEqual(ok, beamtalk_compiler_server:register_aliases([<<"type Down = Integer">>])),
+    application:start(beamtalk_compiler).
+
+%%% ---------------------------------------------------------------
 %%% gen_server edge cases (via running server)
 %%% ---------------------------------------------------------------
 

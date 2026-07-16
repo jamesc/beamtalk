@@ -307,9 +307,12 @@ Register (or redefine) a session-local type alias.
 BT-2902: called by `beamtalk_repl_eval:handle_type_alias_definition/3`
 after the compiler port validates a `type Name = ...` declaration.
 Redeclaring an existing name overwrites its entry — ADR 0108 Semantics
-treats a live REPL redefinition as legal (re-checking annotation sites that
-referenced the old binding is BT-2899's separate hot-reload concern, out of
-scope here).
+treats a live REPL redefinition as legal. `handle_type_alias_definition/3`
+follows this call with `beamtalk_compiler_server:register_aliases/1` (keeps
+the compiler port's ambient alias cache in sync) and
+`beamtalk_repl_loader:spawn_alias_change_recheck/1` (ADR 0108 hot-reload
+re-check trigger, BT-2899) — re-checking annotation sites that referenced
+the old binding, once out of scope here, is now that trigger's job.
 """.
 -spec put_alias(binary(), alias_entry(), state()) -> state().
 put_alias(Name, Entry, #state{alias_table = AliasTable} = State) ->

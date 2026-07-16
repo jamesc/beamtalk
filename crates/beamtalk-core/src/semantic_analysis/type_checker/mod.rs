@@ -413,6 +413,20 @@ pub struct TypeChecker {
     /// this compile" and every `Simple` name resolves as an ordinary
     /// nominal class, matching pre-ADR-0108 behaviour.
     pub(super) alias_registry: Option<AliasRegistry>,
+    /// Every alias name touched while resolving an annotation during this
+    /// check (ADR 0108 hot-reload re-check trigger, BT-2899).
+    ///
+    /// Populated by every production call site that resolves a
+    /// [`super::type_resolver::resolve_type_annotation`]-shaped annotation
+    /// through [`super::type_resolver::resolve_type_annotation_with_alias_deps`]
+    /// instead — see that function's doc for why its returned dependency set
+    /// already spans the full transitive expansion walk (`type B = A | #z`
+    /// records both `B` and `A`). Flat and unkeyed by site: this compile's
+    /// candidate-class re-check granularity is the *whole class* (mirroring
+    /// every other ADR 0105 trigger's "re-check unit is the caller's whole
+    /// class" — `beamtalk_recheck.erl`'s moduledoc), so a per-site index adds
+    /// no value the flat set doesn't already provide for that purpose.
+    pub(super) referenced_aliases: std::collections::HashSet<EcoString>,
     /// Native type registry for FFI call inference (ADR 0075).
     ///
     /// When set, enables return type inference and keyword mismatch warnings
@@ -437,6 +451,7 @@ impl TypeChecker {
             current_package: None,
             protocol_registry: None,
             alias_registry: None,
+            referenced_aliases: std::collections::HashSet::new(),
             native_type_registry: None,
             typed_class_context: None,
         }
@@ -455,6 +470,7 @@ impl TypeChecker {
             current_package: Some(EcoString::from(package)),
             protocol_registry: None,
             alias_registry: None,
+            referenced_aliases: std::collections::HashSet::new(),
             native_type_registry: None,
             typed_class_context: None,
         }
@@ -515,6 +531,15 @@ impl TypeChecker {
     /// Takes ownership of the method return types map, leaving an empty map.
     pub fn take_method_return_types(&mut self) -> HashMap<MethodReturnKey, InferredType> {
         std::mem::take(&mut self.method_return_types)
+    }
+
+    /// Takes ownership of the alias names referenced during this check (ADR
+    /// 0108 hot-reload re-check trigger, BT-2899), leaving an empty set — see
+    /// the `referenced_aliases` field's own doc for what "referenced" means
+    /// here (the full transitive expansion walk, not just outermost written
+    /// names).
+    pub fn take_referenced_aliases(&mut self) -> std::collections::HashSet<EcoString> {
+        std::mem::take(&mut self.referenced_aliases)
     }
 
     /// Checks types in a module using both the class hierarchy and protocol registry.
