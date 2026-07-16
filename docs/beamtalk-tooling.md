@@ -9,7 +9,7 @@ Tooling is part of the language, not an afterthought. Beamtalk is designed to be
 beamtalk new mylib          # Create new library project
 beamtalk new myapp --app    # Create new application project (supervisor + Main)
 beamtalk build              # Compile to BEAM
-beamtalk run                # Compile and start
+beamtalk run                # Compile and start (status to stderr, program output to stdout)
 beamtalk check              # Check for errors without compiling
 
 # Dependencies (see Package Management guide)
@@ -60,6 +60,8 @@ Every generated project includes a `Justfile` with these targets:
 | `release` | *(script)* | Tag a release from `beamtalk.toml` version |
 | `publish` | `git push origin --tags` | Push release tags |
 | `run` | `beamtalk run` | Run the application (**`--app` only**) |
+
+**`beamtalk run` output routing:** Status and progress lines (`Building...`, `Running ClassName>>selector...`, `Connecting to workspace...`) are written to **stderr**. Stdout carries only the dispatched program's own output, keeping it clean for piped/programmatic consumers (`beamtalk run MyApp run | head`).
 
 ## Build System
 
