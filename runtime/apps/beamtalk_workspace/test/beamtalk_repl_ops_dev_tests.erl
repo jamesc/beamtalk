@@ -1202,7 +1202,17 @@ dev_runtime_test_() ->
             {"list-classes user filter includes user class",
                 fun list_classes_user_filter_includes/0},
             {"single-line doc surfaces verbatim in list-classes",
-                fun list_classes_single_line_doc/0}
+                fun list_classes_single_line_doc/0},
+            {"type-annotation position (space before ::) offers class names",
+                fun type_annotation_completion_class_name_spaced/0},
+            {"type-annotation position (no space before ::) offers class names",
+                fun type_annotation_completion_class_name_attached/0},
+            {"type-annotation position offers live alias names alongside classes",
+                fun type_annotation_completion_alias_name/0},
+            {"type-annotation position with empty prefix offers all candidates",
+                fun type_annotation_completion_empty_prefix/0},
+            {"single-colon keyword-selector prefix is not annotation position",
+                fun single_colon_not_annotation_position/0}
         ]
     end}.
 
@@ -1623,6 +1633,51 @@ context_completion_expression_unresolvable() ->
     Result = beamtalk_repl_ops_dev:get_context_completions(<<"WidgetDev render xy">>),
     ?assertEqual([], Result).
 
+type_annotation_completion_class_name_spaced() ->
+    %% "policy :: Widg" (space before `::`) — parse_receiver_and_prefix returns
+    %% {expression, <<"policy ::">>, <<"Widg">>}; ends_with_double_colon detects
+    %% annotation position and class_name_completions offers WidgetDev, matching
+    %% the static LSP path's class-name-in-annotation-position behaviour (BT-2918).
+    Result = beamtalk_repl_ops_dev:get_context_completions(<<"policy :: Widg">>),
+    ?assert(lists:member(<<"WidgetDev">>, Result)),
+    %% Instance/class methods must NOT leak into annotation-position completions.
+    ?assertEqual(false, lists:member(<<"create">>, Result)).
+
+type_annotation_completion_class_name_attached() ->
+    %% "policy ::Widg" (no space before the prefix) — parse_receiver_and_prefix
+    %% returns {<<"policy">>, <<"::Widg">>}; type_annotation_prefix/1 strips the
+    %% leading "::" via its {Receiver, <<"::", Rest/binary>>} clause.
+    Result = beamtalk_repl_ops_dev:get_context_completions(<<"policy ::Widg">>),
+    ?assert(lists:member(<<"WidgetDev">>, Result)).
+
+type_annotation_completion_alias_name() ->
+    %% AliasNames threaded via get_context_completions/3 are offered in
+    %% annotation position alongside class names — the live-REPL counterpart to
+    %% completion_provider.rs's add_alias_name_completions (BT-2901).
+    AliasNames = [<<"RestartStrategy">>, <<"OtherAlias">>],
+    Result = beamtalk_repl_ops_dev:get_context_completions(
+        <<"policy :: Restart">>, #{}, AliasNames
+    ),
+    ?assertEqual([<<"RestartStrategy">>], Result).
+
+type_annotation_completion_empty_prefix() ->
+    %% "policy :: " (nothing typed yet) — empty prefix matches every class and
+    %% every live alias name, not [] (unlike get_completions/1's <<>> short-circuit).
+    AliasNames = [<<"RestartStrategy">>],
+    Result = beamtalk_repl_ops_dev:get_context_completions(<<"policy :: ">>, #{}, AliasNames),
+    ?assert(lists:member(<<"WidgetDev">>, Result)),
+    ?assert(lists:member(<<"RestartStrategy">>, Result)).
+
+single_colon_not_annotation_position() ->
+    %% "policy at:" — a single-colon keyword-selector-in-progress prefix must
+    %% NOT be mistaken for annotation position; type_annotation_prefix/1 only
+    %% fires on a literal double colon. Falls through to ordinary
+    %% receiver-method completion, so the alias name must not appear.
+    Result = beamtalk_repl_ops_dev:get_context_completions(
+        <<"policy at:">>, #{}, [<<"RestartStrategy">>]
+    ),
+    ?assertEqual(false, lists:member(<<"RestartStrategy">>, Result)).
+
 list_class_methods_qualified_name() ->
     %% Package-qualified name "test@WidgetDev" resolves to the WidgetDev class
     %% (its module atom bt@test@widget_dev exists), exercising the qualified
@@ -1719,6 +1774,11 @@ get_session_bindings_dead_pid_returns_empty_test() ->
     %% A non-session pid (self) makes beamtalk_repl_shell:get_bindings throw,
     %% which the helper catches, returning an empty map.
     ?assertEqual(#{}, beamtalk_repl_ops_dev:get_session_bindings(self())).
+
+get_session_alias_names_dead_pid_returns_empty_test() ->
+    %% A non-session pid (self) makes beamtalk_repl_shell:get_alias_table throw,
+    %% which the helper catches, returning [] (BT-2918).
+    ?assertEqual([], beamtalk_repl_ops_dev:get_session_alias_names(self())).
 
 handle_test_all_returns_response_test() ->
     %% test-all runs the (possibly empty) TestCase suite. With no TestCase

@@ -33,6 +33,7 @@ bindings while sharing access to actors and loaded modules.
     eval_trace/2,
     interrupt/1,
     get_bindings/1,
+    get_alias_table/1,
     get_session_id/1,
     get_session_id/2,
     get_session_meta/1,
@@ -157,6 +158,17 @@ interrupt(SessionPid) ->
 -spec get_bindings(pid()) -> {ok, map()}.
 get_bindings(SessionPid) ->
     gen_server:call(SessionPid, get_bindings).
+
+-doc """
+Get this session's live type alias table (ADR 0108 Phase 8, BT-2902).
+
+Used by `beamtalk_repl_ops_dev`'s `complete` op (BT-2918) to offer type
+alias names as candidates in type-annotation position, the live-REPL
+counterpart to the static LSP path's `add_alias_name_completions`.
+""".
+-spec get_alias_table(pid()) -> {ok, #{binary() => beamtalk_repl_state:alias_entry()}}.
+get_alias_table(SessionPid) ->
+    gen_server:call(SessionPid, get_alias_table).
 
 -doc """
 Get the protocol session id this shell was started with (BT-2368, ADR 0081
@@ -366,6 +378,9 @@ handle_call({enqueue_mutation, Mutation}, _From, {SessionId, State, Worker}) ->
 handle_call(get_bindings, _From, {SessionId, State, Worker}) ->
     Bindings = beamtalk_repl_state:get_bindings(State),
     {reply, {ok, Bindings}, {SessionId, State, Worker}};
+handle_call(get_alias_table, _From, {SessionId, State, Worker}) ->
+    AliasTable = beamtalk_repl_state:get_alias_table(State),
+    {reply, {ok, AliasTable}, {SessionId, State, Worker}};
 handle_call(get_session_id, _From, {SessionId, State, Worker}) ->
     %% BT-2368 (ADR 0081 Phase 7): answered in any worker state so
     %% liveSessions/0 enumeration never blocks on a mid-eval shell.

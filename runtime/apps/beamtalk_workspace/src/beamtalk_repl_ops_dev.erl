@@ -19,6 +19,7 @@ Extracted from beamtalk_repl_server (BT-705).
     get_completions/1,
     get_context_completions/1,
     get_context_completions/2,
+    get_context_completions/3,
     parse_receiver_and_prefix/1,
     tokenise_send_chain/1,
     tokenise_binary_chain/1,
@@ -39,6 +40,7 @@ Extracted from beamtalk_repl_server (BT-705).
 -ifdef(TEST).
 -export([
     get_session_bindings/1,
+    get_session_alias_names/1,
     validate_selector_if_present/4,
     %% BT-2572: white-box test of the diagnostics `mode` normalisation that
     %% mirrors the Elixir facade at the Erlang op boundary.
@@ -108,7 +110,11 @@ handle_term(<<"complete">>, Params, Msg, SessionPid) ->
                 WorkspaceBindings = get_workspace_bindings(),
                 %% Session bindings take priority over workspace globals (e.g. Transcript)
                 Bindings = maps:merge(WorkspaceBindings, SessionBindings),
-                get_context_completions(Code, Bindings);
+                %% BT-2918: this session's live type alias names (cross-turn carried-over
+                %% + current-turn `type Name = ...` declarations), offered alongside
+                %% class/protocol names in type-annotation position.
+                AliasNames = get_session_alias_names(BindingPid),
+                get_context_completions(Code, Bindings, AliasNames);
             false ->
                 get_completions(Code)
         end,
@@ -820,6 +826,36 @@ get_completions(<<>>) ->
     [];
 get_completions(Prefix) when is_binary(Prefix) ->
     PrefixStr = binary_to_list(Prefix),
+    class_name_completions(Prefix) ++
+        [
+            atom_to_binary(B, utf8)
+         || B <-
+                try
+                    beamtalk_workspace_config:binding_names()
+                catch
+                    _:_ -> []
+                end,
+            binary:match(atom_to_binary(B, utf8), Prefix) =:= {0, byte_size(Prefix)}
+        ] ++
+        [
+            Kw
+         || Kw <- builtin_keywords(),
+            binary:match(Kw, Prefix) =:= {0, byte_size(Prefix)},
+            PrefixStr =/= ""
+        ].
+
+-doc """
+Live class/protocol name candidates matching `Prefix` (a raw prefix match,
+`<<>>` matches every class — unlike `get_completions/1`, which special-cases
+`<<>>` to `[]` for the no-receiver top-level case).
+
+Factored out of `get_completions/1` so `type_annotation_completions/2`
+(BT-2918) can offer the same class/protocol candidates it already offered
+before aliases were considered — filtering out cross-package `internal`
+classes (ADR 0071 Phase 5) exactly as `get_completions/1` does.
+""".
+-spec class_name_completions(binary()) -> [binary()].
+class_name_completions(Prefix) ->
     ClassPids =
         try
             beamtalk_runtime_api:all_classes()
@@ -844,62 +880,116 @@ get_completions(Prefix) when is_binary(Prefix) ->
         end,
         ClassPids
     ),
-    [Name || Name <- ClassNames, binary:match(Name, Prefix) =:= {0, byte_size(Prefix)}] ++
-        [
-            atom_to_binary(B, utf8)
-         || B <-
-                try
-                    beamtalk_workspace_config:binding_names()
-                catch
-                    _:_ -> []
-                end,
-            binary:match(atom_to_binary(B, utf8), Prefix) =:= {0, byte_size(Prefix)}
-        ] ++
-        [
-            Kw
-         || Kw <- builtin_keywords(),
-            binary:match(Kw, Prefix) =:= {0, byte_size(Prefix)},
-            PrefixStr =/= ""
-        ].
+    [Name || Name <- ClassNames, prefix_match(Name, Prefix)].
+
+-doc "Prefix match that treats `<<>>` as matching everything (unlike binary:match/2, which rejects an empty pattern).".
+-spec prefix_match(binary(), binary()) -> boolean().
+prefix_match(_Name, <<>>) ->
+    true;
+prefix_match(Name, Prefix) ->
+    binary:match(Name, Prefix) =:= {0, byte_size(Prefix)}.
 
 -doc """
 Context-aware completion: parses the line to find a receiver and returns
 matching method selectors (BT-783).  Falls back to get_completions/1 when
-no receiver is detected.  Wrapper with no binding context.
+no receiver is detected.  Wrapper with no binding context or live alias names.
 """.
 -spec get_context_completions(binary()) -> [binary()].
 get_context_completions(Line) ->
-    get_context_completions(Line, #{}).
+    get_context_completions(Line, #{}, []).
 
--doc "Context-aware completion with session bindings for variable lookup.".
+-doc "Context-aware completion with session bindings for variable lookup. Wrapper with no live alias names.".
 -spec get_context_completions(binary(), map()) -> [binary()].
-get_context_completions(<<>>, _Bindings) ->
+get_context_completions(Line, Bindings) ->
+    get_context_completions(Line, Bindings, []).
+
+-doc """
+Context-aware completion with session bindings and this session's live type
+alias names (BT-2918).
+
+In type-annotation position (immediately after `::`) this offers class/
+protocol names plus `AliasNames` — the live-REPL counterpart to the static
+LSP path's `add_alias_name_completions` (`completion_provider.rs`, BT-2901).
+`AliasNames` is the session's carried-over + current-turn `type Name = ...`
+declarations (ADR 0108 Phase 8, BT-2898/BT-2902), threaded in by the
+`complete` op handler via `get_session_alias_names/1`. Everywhere else this
+behaves exactly like `get_context_completions/2`.
+""".
+-spec get_context_completions(binary(), map(), [binary()]) -> [binary()].
+get_context_completions(<<>>, _Bindings, _AliasNames) ->
     [];
-get_context_completions(Line, Bindings) when is_binary(Line) ->
-    case parse_receiver_and_prefix(Line) of
-        {undefined, Prefix} ->
-            %% No receiver — use standard prefix completion
-            get_completions(Prefix);
-        {expression, ReceiverExpr, Prefix} ->
-            %% Multi-token receiver expression — resolve via chain type inference (BT-1006)
-            case resolve_chain_type(ReceiverExpr, Bindings) of
-                {ok, ClassName, class} -> complete_class_methods(ClassName, Prefix);
-                {ok, ClassName, instance} -> complete_instance_methods(ClassName, Prefix);
-                undefined -> []
-            end;
-        {Receiver, <<>>} ->
-            %% Empty prefix with receiver (e.g., "Integer ") — return all methods
-            MethodSelectors = get_methods_for_receiver(Receiver, Bindings),
-            lists:usort([atom_to_binary(S, utf8) || S <- MethodSelectors]);
-        {Receiver, Prefix} ->
-            %% Receiver with prefix — look up methods filtered by prefix
-            MethodSelectors = get_methods_for_receiver(Receiver, Bindings),
-            lists:usort([
-                atom_to_binary(S, utf8)
-             || S <- MethodSelectors,
-                binary:match(atom_to_binary(S, utf8), Prefix) =:= {0, byte_size(Prefix)}
-            ])
+get_context_completions(Line, Bindings, AliasNames) when is_binary(Line) ->
+    Parsed = parse_receiver_and_prefix(Line),
+    case type_annotation_prefix(Parsed) of
+        {true, TypePrefix} ->
+            type_annotation_completions(TypePrefix, AliasNames);
+        false ->
+            case Parsed of
+                {undefined, Prefix} ->
+                    %% No receiver — use standard prefix completion
+                    get_completions(Prefix);
+                {expression, ReceiverExpr, Prefix} ->
+                    %% Multi-token receiver expression — resolve via chain type inference (BT-1006)
+                    case resolve_chain_type(ReceiverExpr, Bindings) of
+                        {ok, ClassName, class} -> complete_class_methods(ClassName, Prefix);
+                        {ok, ClassName, instance} -> complete_instance_methods(ClassName, Prefix);
+                        undefined -> []
+                    end;
+                {Receiver, <<>>} ->
+                    %% Empty prefix with receiver (e.g., "Integer ") — return all methods
+                    MethodSelectors = get_methods_for_receiver(Receiver, Bindings),
+                    lists:usort([atom_to_binary(S, utf8) || S <- MethodSelectors]);
+                {Receiver, Prefix} ->
+                    %% Receiver with prefix — look up methods filtered by prefix
+                    MethodSelectors = get_methods_for_receiver(Receiver, Bindings),
+                    lists:usort([
+                        atom_to_binary(S, utf8)
+                     || S <- MethodSelectors,
+                        binary:match(atom_to_binary(S, utf8), Prefix) =:= {0, byte_size(Prefix)}
+                    ])
+            end
     end.
+
+-doc """
+Detect type-annotation position (immediately after `::`) from a
+`parse_receiver_and_prefix/1` result and extract the partial type name typed
+so far (BT-2918).
+
+`::` is built from identifier chars (`is_identifier_char/1` treats `:` as one,
+so keyword selectors like `ifTrue:` complete as a unit) so it surfaces in two
+shapes depending on whether a space follows it: `"policy :: R"` parses as
+`{expression, <<"policy ::">>, <<"R">>}` (space after `::`), while
+`"policy ::R"` parses as `{<<"policy">>, <<"::R">>}` (no space). Both are
+annotation position; a single-colon keyword-selector prefix (e.g. `"foo:"`)
+is not, since it lacks the second colon.
+""".
+-spec type_annotation_prefix({binary() | undefined, binary()} | {expression, binary(), binary()}) ->
+    {true, binary()} | false.
+type_annotation_prefix({expression, ReceiverExpr, Prefix}) ->
+    case ends_with_double_colon(ReceiverExpr) of
+        true -> {true, Prefix};
+        false -> false
+    end;
+type_annotation_prefix({Receiver, <<"::", Rest/binary>>}) when is_binary(Receiver) ->
+    {true, Rest};
+type_annotation_prefix(_) ->
+    false.
+
+-spec ends_with_double_colon(binary()) -> boolean().
+ends_with_double_colon(Bin) ->
+    byte_size(Bin) >= 2 andalso binary:part(Bin, byte_size(Bin) - 2, 2) =:= <<"::">>.
+
+-doc """
+Type-annotation-position completions (BT-2918): class/protocol names (the
+same live registry `class_name_completions/1` already offers) plus this
+session's live type alias names, both filtered by the partial type name
+typed so far. Deduplicated and sorted via `lists:usort/1` — a class and an
+alias could share a name transiently across a live redefinition.
+""".
+-spec type_annotation_completions(binary(), [binary()]) -> [binary()].
+type_annotation_completions(Prefix, AliasNames) ->
+    AliasCompletions = [Name || Name <- AliasNames, prefix_match(Name, Prefix)],
+    lists:usort(class_name_completions(Prefix) ++ AliasCompletions).
 
 -doc """
 Compute parse-only diagnostics for an editor buffer (BT-2556).
@@ -1669,6 +1759,20 @@ get_session_bindings(SessionPid) ->
         Bindings
     catch
         _:_ -> #{}
+    end.
+
+-doc """
+Get this session's live type alias names (ADR 0108 Phase 8, BT-2902), for
+type-annotation-position completion (BT-2918). Mirrors get_session_bindings/1:
+returns [] if the session is unavailable.
+""".
+-spec get_session_alias_names(pid()) -> [binary()].
+get_session_alias_names(SessionPid) ->
+    try
+        {ok, AliasTable} = beamtalk_repl_shell:get_alias_table(SessionPid),
+        maps:keys(AliasTable)
+    catch
+        _:_ -> []
     end.
 
 -doc """
