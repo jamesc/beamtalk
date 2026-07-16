@@ -488,7 +488,7 @@
         "subclassing",
         "supervision"
       ],
-      "source": "typed Supervisor subclass: ExduraSupervisor\n  class strategy -> #oneForOne | #oneForAll | #restForOne => #restForOne\n  class children -> List(SupervisionSpec) =>\n    storeSpec := EventStore supervisionSpec withRestart: #permanent\n    poolSpec := ActivityWorkerPool supervisionSpec withRestart: #permanent\n    engineSpec := WorkflowEngine supervisionSpec withRestart: #permanent\n    #(storeSpec, poolSpec, engineSpec)\n\n  // Re-runs after every restart to rebuild cached pids.\n  class initialize: sup :: Supervisor -> Nil =>\n    store := (sup which: EventStore) unwrap\n    pool := (sup which: ActivityWorkerPool) unwrap\n    engine := (sup which: WorkflowEngine) unwrap\n    engine initWithStore: store pool: pool\n    nil",
+      "source": "typed Supervisor subclass: ExduraSupervisor\n  class strategy -> SupervisionStrategy => #restForOne\n  class children -> List(SupervisionSpec) =>\n    storeSpec := EventStore supervisionSpec withRestart: #permanent\n    poolSpec := ActivityWorkerPool supervisionSpec withRestart: #permanent\n    engineSpec := WorkflowEngine supervisionSpec withRestart: #permanent\n    #(storeSpec, poolSpec, engineSpec)\n\n  // Re-runs after every restart to rebuild cached pids.\n  class initialize: sup :: Supervisor -> Nil =>\n    store := (sup which: EventStore) unwrap\n    pool := (sup which: ActivityWorkerPool) unwrap\n    engine := (sup which: WorkflowEngine) unwrap\n    engine initWithStore: store pool: pool\n    nil",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -510,7 +510,7 @@
         "subclassing",
         "supervision"
       ],
-      "source": "typed Supervisor subclass: ExduraSupervisor\n  class strategy -> #oneForOne | #oneForAll | #restForOne => #oneForOne\n  class children -> List(SupervisionSpec) => #(\n    EventStore supervisionSpec withName: #eventStore withRestart: #permanent,\n    ActivityWorkerPool supervisionSpec withName: #workerPool withRestart: #permanent,\n    WorkflowEngine supervisionSpec withName: #workflowEngine withRestart: #permanent\n  )\n  // No initialize: hook — WorkflowEngine looks up its dependencies by name.",
+      "source": "typed Supervisor subclass: ExduraSupervisor\n  class strategy -> SupervisionStrategy => #oneForOne\n  class children -> List(SupervisionSpec) => #(\n    EventStore supervisionSpec withName: #eventStore withRestart: #permanent,\n    ActivityWorkerPool supervisionSpec withName: #workerPool withRestart: #permanent,\n    WorkflowEngine supervisionSpec withName: #workflowEngine withRestart: #permanent\n  )\n  // No initialize: hook — WorkflowEngine looks up its dependencies by name.",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {

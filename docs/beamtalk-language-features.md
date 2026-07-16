@@ -2748,7 +2748,7 @@ The pre-ADR pattern uses a supervisor-local lookup (`which:`) and an `initialize
 
 ```beamtalk
 typed Supervisor subclass: ExduraSupervisor
-  class strategy -> #oneForOne | #oneForAll | #restForOne => #restForOne
+  class strategy -> SupervisionStrategy => #restForOne
   class children -> List(SupervisionSpec) =>
     storeSpec := EventStore supervisionSpec withRestart: #permanent
     poolSpec := ActivityWorkerPool supervisionSpec withRestart: #permanent
@@ -2770,7 +2770,7 @@ Naming each child eliminates the `initialize:` hook, and the supervisor strategy
 
 ```beamtalk
 typed Supervisor subclass: ExduraSupervisor
-  class strategy -> #oneForOne | #oneForAll | #restForOne => #oneForOne
+  class strategy -> SupervisionStrategy => #oneForOne
   class children -> List(SupervisionSpec) => #(
     EventStore supervisionSpec withName: #eventStore withRestart: #permanent,
     ActivityWorkerPool supervisionSpec withName: #workerPool withRestart: #permanent,

@@ -2242,6 +2242,7 @@ impl TypeChecker {
     }
 
     /// Check state default values match declared types at class definition time.
+    #[allow(clippy::too_many_lines)] // ADR 0108 (BT-2895) added alias-aware resolution of the declared type
     pub(super) fn check_state_defaults(
         &mut self,
         class: &crate::ast::ClassDefinition,
@@ -2261,7 +2262,25 @@ impl TypeChecker {
             let Some(ref default_value) = decl.default_value else {
                 continue;
             };
-            let declared_type = type_annotation.type_name();
+            // ADR 0108 (BT-2895): resolve the declared type through the alias
+            // table before comparing against the default value's inferred
+            // type — mirroring `check_method_return_type`'s existing
+            // alias-aware resolution — so `field: restart :: RestartStrategy
+            // = #temporary` checks the default against the alias's
+            // expansion, not its opaque unresolved name. A plain nominal
+            // name (including a generic type-parameter name like `T`, which
+            // never resolves via `subst`/the alias table since this call
+            // site passes an empty `SubstitutionMap`) round-trips unchanged,
+            // so the `type_param_names` check below is unaffected.
+            let (resolved_declared, alias_deps) =
+                super::type_resolver::resolve_type_annotation_with_alias_deps(
+                    type_annotation,
+                    &super::type_resolver::SubstitutionMap::new(),
+                    None,
+                    self.alias_registry.as_ref(),
+                );
+            self.referenced_aliases.extend(alias_deps);
+            let declared_type = Self::inferred_type_to_string(&resolved_declared);
             if type_param_names.contains(&declared_type.as_str()) {
                 continue;
             }
