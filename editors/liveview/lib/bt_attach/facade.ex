@@ -100,6 +100,12 @@ defmodule BtAttach.Facade do
     # no user code), so both are `:read`, safe for the Observer role.
     browse_native_modules: :read,
     browse_native_module_source: :read,
+    # BT-2903 (ADR 0108 Phase 8): the "Type Aliases" System Browser category.
+    # Aliases erase at compile time (no BEAM module, no live process), so this
+    # is pure `.app`-env metadata enumeration (BT-2903, `app_file.rs`) — no
+    # user code, `:read`, safe for the Observer role, same guarantee as
+    # `browse_classes`/`browse_native_modules`.
+    browse_type_aliases: :read,
     # BT-2670: edit → compile → reload → write-back for a project-owned native
     # (`.erl`) module. It compiles the edited buffer, hot-loads the module, and
     # writes the source to disk — mutating both the live image and the working
@@ -304,6 +310,11 @@ defmodule BtAttach.Facade do
   # BT-2648: enumerate a loaded package's hand-written native Erlang modules
   # (no params) — the System Browser's native-modules section data source.
   defp invoke(:browse_native_modules, _params, _ctx), do: client().browse_native_modules()
+
+  # BT-2903 (ADR 0108 Phase 8): enumerate every loaded package's declared
+  # `type` aliases (no params) — the System Browser's "Type Aliases" section
+  # data source.
+  defp invoke(:browse_type_aliases, _params, _ctx), do: client().browse_type_aliases()
 
   # BT-2648: the read-only native pane keyed by a standalone native `module`
   # (no backing class) — the module surfaced by `browse_native_modules`.

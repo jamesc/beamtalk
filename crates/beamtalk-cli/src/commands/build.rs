@@ -985,6 +985,7 @@ fn generate_package_outputs(
         &hierarchy.class_module_index,
         &pkg.name,
     );
+    let alias_metadata = build_alias_metadata(outputs.source_files);
 
     // BT-1191: Generate OTP application callback when [application] supervisor is set.
     let app_callback_module =
@@ -1037,6 +1038,7 @@ fn generate_package_outputs(
         outputs.native_module_names,
         outputs.bt_dep_names,
         outputs.hex_dep_names,
+        &alias_metadata,
     )?;
     info!(name = %pkg.name, "Generated .app file");
 
@@ -1815,6 +1817,48 @@ pub(crate) fn build_class_metadata(
             })
         })
         .collect()
+}
+
+/// Build `.app`-file type-alias metadata for a package (ADR 0108 Phase 8,
+/// BT-2903).
+///
+/// Independent of the incremental Pass 1 class-index cache
+/// (`build_class_module_index`/`build_cache.rs`): that cache exists to skip
+/// re-parsing unchanged files for `ClassInfo` extraction, but persisting
+/// alias metadata across incremental runs would mean extending its on-disk
+/// cache schema for a small, cheap-to-reparse surface (a package's `type`
+/// declarations are typically a handful of lines total). This always
+/// re-parses every file in `source_files` fresh, so `browse-type-aliases`
+/// (`beamtalk_repl_ops_browse.erl`) sees a complete, correct alias list on
+/// every build — including an incremental build that skipped Pass 1 for
+/// files whose classes didn't change.
+///
+/// A file that fails to read or has parse errors contributes no aliases
+/// (best-effort, matching `build_class_module_index`'s handling of unreadable
+/// files) rather than failing the whole build — alias metadata is a browse-op
+/// convenience, not required for compilation to succeed.
+pub(crate) fn build_alias_metadata(source_files: &[Utf8PathBuf]) -> Vec<app_file::AliasMetadata> {
+    let mut result = Vec::new();
+    for file in source_files {
+        let Ok(source) = fs::read_to_string(file) else {
+            continue;
+        };
+        let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
+        let (module, _diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+        for alias_def in &module.type_aliases {
+            result.push(app_file::AliasMetadata {
+                name: alias_def.name.name.to_string(),
+                expansion: beamtalk_core::unparse::unparse_type_annotation_display(
+                    &alias_def.annotation,
+                ),
+                doc: alias_def.doc_comment.clone(),
+                source_file: file.to_string(),
+                internal: alias_def.is_internal,
+            });
+        }
+    }
+    result.sort_by(|a, b| a.name.cmp(&b.name));
+    result
 }
 
 /// Collect `ClassInfo` from multiple sources into a single unified vector.
@@ -2831,6 +2875,63 @@ mod tests {
         assert!(content.contains("{description, \"Test app\"}"));
         assert!(content.contains("{vsn, \"0.1.0\"}"));
         assert!(content.contains("'bt@my_app@counter'"));
+    }
+
+    #[test]
+    fn test_build_alias_metadata_extracts_declared_aliases() {
+        let temp = TempDir::new().unwrap();
+        let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let src_path = project_path.join("src");
+        fs::create_dir_all(&src_path).unwrap();
+        let alias_file = src_path.join("restart_strategy.bt");
+        write_test_file(
+            &alias_file,
+            "/// Restart strategy for a supervised child.\n\
+             type RestartStrategy = #temporary | #transient | #permanent\n\n\
+             internal type ParserState = Integer | String\n",
+        );
+
+        let result = build_alias_metadata(&[alias_file]);
+
+        assert_eq!(result.len(), 2, "expected two aliases, got: {result:?}");
+        let public = result
+            .iter()
+            .find(|a| a.name == "RestartStrategy")
+            .expect("RestartStrategy alias missing");
+        assert_eq!(public.expansion, "#temporary | #transient | #permanent");
+        assert_eq!(
+            public.doc.as_deref(),
+            Some("Restart strategy for a supervised child.")
+        );
+        assert!(!public.internal);
+
+        let internal = result
+            .iter()
+            .find(|a| a.name == "ParserState")
+            .expect("ParserState alias missing");
+        assert!(internal.internal);
+        assert_eq!(internal.doc, None);
+    }
+
+    #[test]
+    fn test_build_alias_metadata_skips_unreadable_file() {
+        let nonexistent = Utf8PathBuf::from("/nonexistent/no_such_file.bt");
+        let result = build_alias_metadata(&[nonexistent]);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_build_alias_metadata_sorted_by_name() {
+        let temp = TempDir::new().unwrap();
+        let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let src_path = project_path.join("src");
+        fs::create_dir_all(&src_path).unwrap();
+        let alias_file = src_path.join("aliases.bt");
+        write_test_file(&alias_file, "type Zebra = Integer\ntype Alpha = Integer\n");
+
+        let result = build_alias_metadata(&[alias_file]);
+        let names: Vec<&str> = result.iter().map(|a| a.name.as_str()).collect();
+        assert_eq!(names, vec!["Alpha", "Zebra"]);
     }
 
     #[test]
