@@ -146,8 +146,16 @@ parse_args(_) ->
 
 %% ── Core file processing ────────────────────────────────────────────────
 
-%% Read a .core file, extract spec attributes, construct abstract forms,
-%% and compile to BEAM with debug_info.
+%% Read a .core file, extract spec (and any companion type) attributes,
+%% construct abstract forms, and compile to BEAM with debug_info.
+%%
+%% BT-2909: a `-spec` may reference a named `user_type` declared in the same
+%% module (ADR 0108 type aliases) — e.g. `{user_type, 0, restart_strategy,
+%% []}`. The synthetic module built here must declare that `-type` too, or
+%% `erl_lint` correctly rejects it as undefined; `extract_type_term` pulls
+%% the module's own `'type' = [...]` attribute(s) (the same shape
+%% `generate_alias_type_attrs`/`generate_type_alias` emit) alongside the
+%% specs, exactly like `extract_spec_term` already does for `'spec' = [...]`.
 process_core_file(CoreFile, BeamDir) ->
     case file:read_file(CoreFile) of
         {ok, Bin} ->
@@ -156,30 +164,37 @@ process_core_file(CoreFile, BeamDir) ->
                 {ok, ModName} ->
                     case extract_spec_term(Content) of
                         {ok, SpecEntries} when length(SpecEntries) > 0 ->
-                            Forms = build_abstract_forms(ModName, SpecEntries),
-                            case
-                                compile:forms(Forms, [
-                                    debug_info,
-                                    {outdir, BeamDir},
-                                    return_errors
-                                ])
-                            of
-                                {ok, ModName, BeamBin} ->
-                                    BeamFile = filename:join(
-                                        BeamDir,
-                                        atom_to_list(ModName) ++ ".beam"
+                            case extract_type_term(Content) of
+                                {ok, TypeEntries} ->
+                                    Forms = build_abstract_forms(
+                                        ModName, SpecEntries, TypeEntries
                                     ),
-                                    ok = file:write_file(BeamFile, BeamBin),
-                                    {ok, length(SpecEntries)};
-                                {ok, ModName, BeamBin, _Warnings} ->
-                                    BeamFile = filename:join(
-                                        BeamDir,
-                                        atom_to_list(ModName) ++ ".beam"
-                                    ),
-                                    ok = file:write_file(BeamFile, BeamBin),
-                                    {ok, length(SpecEntries)};
-                                {error, Errors, _} ->
-                                    {error, {compile, Errors}}
+                                    case
+                                        compile:forms(Forms, [
+                                            debug_info,
+                                            {outdir, BeamDir},
+                                            return_errors
+                                        ])
+                                    of
+                                        {ok, ModName, BeamBin} ->
+                                            BeamFile = filename:join(
+                                                BeamDir,
+                                                atom_to_list(ModName) ++ ".beam"
+                                            ),
+                                            ok = file:write_file(BeamFile, BeamBin),
+                                            {ok, length(SpecEntries)};
+                                        {ok, ModName, BeamBin, _Warnings} ->
+                                            BeamFile = filename:join(
+                                                BeamDir,
+                                                atom_to_list(ModName) ++ ".beam"
+                                            ),
+                                            ok = file:write_file(BeamFile, BeamBin),
+                                            {ok, length(SpecEntries)};
+                                        {error, Errors, _} ->
+                                            {error, {compile, Errors}}
+                                    end;
+                                {error, Reason} ->
+                                    {error, {type_parse, Reason}}
                             end;
                         {ok, []} ->
                             {ok, 0};
@@ -206,35 +221,47 @@ extract_module_name(Content) ->
         nomatch -> error
     end.
 
-%% Extract the spec term from the Core Erlang source.
+%% Extract the spec term(s) from the Core Erlang source.
 %% The spec attribute looks like:
 %%   'spec' = [{{'fun_name', Arity}, [TypeInfo]}]
 %%
 %% We extract the full Erlang term between 'spec' = and the closing ]].
 extract_spec_term(Content) ->
-    %% Core Erlang emits one 'spec' = [...] per annotated method.
-    %% Each looks like:
-    %%   'spec' =\n        [{{'fun_name', Arity}, [TypeInfo]}],
-    %%
-    %% We find ALL 'spec' = positions and extract the balanced [...] value
-    %% using bracket counting (regex can't handle nested brackets).
+    extract_attr_term(Content, "'spec'").
+
+%% Extract the named `-type` attribute term(s) from the Core Erlang source
+%% (ADR 0108 type aliases, BT-2909). Each looks like:
+%%   'type' = [{alias_name, TypeInfo, []}]
+%%
+%% Same shape/extraction as `extract_spec_term`, just a different attribute
+%% key — `generate_alias_type_attrs`/`generate_type_alias` (spec_codegen.rs)
+%% emit one `'type' = [...]` per alias (or per Value class's own `-type
+%% t()`), mirroring how `format_spec_attributes` emits one `'spec' = [...]`
+%% per annotated method.
+extract_type_term(Content) ->
+    extract_attr_term(Content, "'type'").
+
+%% Shared extraction: find ALL `AttrKey = [...]` positions and extract each
+%% balanced `[...]` value using bracket counting (regex can't handle nested
+%% brackets), parsing it as a list of Erlang terms.
+extract_attr_term(Content, AttrKey) ->
     case
         re:run(
             Content,
-            "'spec'\\s*=\\s*",
+            AttrKey ++ "\\s*=\\s*",
             [global, {capture, first, index}]
         )
     of
         {match, Matches} ->
-            extract_all_specs(Content, Matches, []);
+            extract_all_terms(Content, Matches, []);
         nomatch ->
             {ok, []}
     end.
 
-extract_all_specs(_Content, [], Acc) ->
+extract_all_terms(_Content, [], Acc) ->
     {ok, lists:reverse(Acc)};
-extract_all_specs(Content, [[{Start, Len}] | Rest], Acc) ->
-    %% Skip past 'spec' = to the opening [
+extract_all_terms(Content, [[{Start, Len}] | Rest], Acc) ->
+    %% Skip past AttrKey = to the opening [
     ValueStart = Start + Len,
     Tail = string:substr(Content, ValueStart + 1),
     %% Skip whitespace to find the opening [
@@ -242,30 +269,30 @@ extract_all_specs(Content, [[{Start, Len}] | Rest], Acc) ->
     case TailTrimmed of
         [$[ | _] ->
             case extract_balanced_brackets(TailTrimmed) of
-                {ok, SpecStr} ->
-                    case erl_scan:string(SpecStr ++ ".") of
+                {ok, TermStr} ->
+                    case erl_scan:string(TermStr ++ ".") of
                         {ok, Tokens, _} ->
                             case erl_parse:parse_term(Tokens) of
                                 {ok, [Entry]} ->
-                                    extract_all_specs(Content, Rest, [Entry | Acc]);
+                                    extract_all_terms(Content, Rest, [Entry | Acc]);
                                 {ok, Entries} when is_list(Entries) ->
-                                    extract_all_specs(
+                                    extract_all_terms(
                                         Content,
                                         Rest,
                                         lists:reverse(Entries) ++ Acc
                                     );
                                 {error, Reason} ->
-                                    {error, {parse_term, Reason, SpecStr}}
+                                    {error, {parse_term, Reason, TermStr}}
                             end;
                         {error, Reason, _} ->
-                            {error, {scan, Reason, SpecStr}}
+                            {error, {scan, Reason, TermStr}}
                     end;
                 {error, Reason} ->
                     {error, {brackets, Reason}}
             end;
         _ ->
             %% No opening bracket found, skip
-            extract_all_specs(Content, Rest, Acc)
+            extract_all_terms(Content, Rest, Acc)
     end.
 
 %% Extract a balanced bracket expression starting from an opening [.
@@ -297,10 +324,14 @@ extract_balanced([C | Rest], Depth, Acc, InAtom) ->
 %% The forms include:
 %%   - module attribute
 %%   - export attribute (all spec'd functions)
+%%   - type attributes (BT-2909: named `-type` declarations from the same
+%%     module, so a spec's `user_type` reference to a local ADR-0108 alias
+%%     — or a Value class's own `-type t()`, BT-1156 — resolves instead of
+%%     `erl_lint` rejecting it as undefined)
 %%   - spec attributes (from extracted Core Erlang specs)
 %%   - function stubs (each calls erlang:nif_error/1 to avoid return-type
 %%     mismatches — Dialyzer infers no_return() which is the bottom type)
-build_abstract_forms(ModName, SpecEntries) ->
+build_abstract_forms(ModName, SpecEntries, TypeEntries) ->
     Line = erl_anno:new(1),
 
     %% Extract {FunName, Arity} pairs
@@ -311,6 +342,18 @@ build_abstract_forms(ModName, SpecEntries) ->
 
     %% Export attribute
     ExportAttr = {attribute, Line, export, FunArities},
+
+    %% Type attributes — one per extracted `'type' = [{Name, TypeForm, Vars}]`
+    %% entry, in the exact shape Core Erlang / `-type` abstract forms share:
+    %% `{attribute, Line, type, {Name, TypeForm, Vars}}`. Beamtalk aliases are
+    %% never parametric (ADR 0108), so `Vars` is always `[]`, matching what
+    %% `generate_alias_type_attr`/`generate_type_alias` already emit.
+    TypeAttrs = lists:map(
+        fun({TypeName, TypeForm, Vars}) ->
+            {attribute, Line, type, {TypeName, TypeForm, Vars}}
+        end,
+        TypeEntries
+    ),
 
     %% Spec attributes — use the actual type info from the Core Erlang
     SpecAttrs = lists:map(
@@ -341,7 +384,7 @@ build_abstract_forms(ModName, SpecEntries) ->
     %% Eof
     Eof = {eof, Line},
 
-    [ModAttr, ExportAttr] ++ SpecAttrs ++ FunDecls ++ [Eof].
+    [ModAttr, ExportAttr] ++ TypeAttrs ++ SpecAttrs ++ FunDecls ++ [Eof].
 
 %% ── Dialyzer ────────────────────────────────────────────────────────────
 
