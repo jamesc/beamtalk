@@ -559,8 +559,8 @@ impl SimpleLanguageService {
     /// pattern class name) that does **not** resolve to any known class,
     /// protocol, or alias (BT-2919).
     ///
-    /// This is the counterpart to [`Self::alias_name_at`] for the case that
-    /// issue misses: `alias_name_at` (and the `has_class`/`has_alias` routing
+    /// This is the counterpart to [`Self::alias_name_at`] for the gap BT-2919
+    /// identified: `alias_name_at` (and the `has_class`/`has_alias` routing
     /// gate in [`Self::find_references`]) can only recognize a name that's
     /// *already* registered in the project index — but if the name's own
     /// declaring file hasn't been indexed yet (preload hasn't reached it, or
