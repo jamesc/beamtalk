@@ -3,7 +3,11 @@
 
 // E2E tests for `type Name = ...` declarations typed directly at the REPL,
 // `:help <Alias>`, and cross-turn alias persistence within a session
-// (ADR 0108 Phase 8, BT-2902).
+// (ADR 0108 Phase 8, BT-2902), plus (final section below) the alias
+// hot-reload re-check trigger verified end-to-end from a live REPL session
+// (ADR 0108 Phase 10, BT-2905 — the epic's required final E2E validation
+// phase; per CLAUDE.md, "EUnit and BUnit alone are insufficient for
+// user-facing features").
 //
 // REPL display-value decision (flagged for maintainer sign-off — see the
 // PR description and CLAUDE.md's REPL-output rule): a `type` declaration
@@ -18,6 +22,14 @@
 // a `///` comment followed by its declaration as a single multi-line REPL
 // input the way real multi-line class bodies are typed (a `///`-prefixed
 // line is indistinguishable here from a plain in-file comment line).
+//
+// Hover on an alias name/reference (BT-2905's other REPL-protocol-untestable
+// leaf — there is no `textDocument/hover`-equivalent op in this harness) is
+// covered end-to-end against the same query layer the LSP server's
+// `textDocument/hover` handler calls: `hover_on_alias_declaration_name_shows_expansion`
+// and `hover_resolves_alias_through_project_wide_registry` in
+// crates/beamtalk-core/src/queries/hover_provider.rs and
+// crates/beamtalk-core/src/language_service/mod.rs respectively (BT-2901).
 
 // ===========================================================================
 // Declaring a type alias directly at the REPL echoes its name.
@@ -80,3 +92,58 @@ e :: Direction := #up. e matchExhaustive: [#north -> 0; #south -> 1; #east -> 2;
 
 :help Direction
 // => type Direction = #north | #south | #east | #west | #up | #down__Declared in: REPL
+
+// ===========================================================================
+// Alias hot-reload re-check trigger (BT-2899), verified end-to-end (BT-2905):
+// live-redefining an alias must invalidate a `matchExhaustive:` proof a
+// *compiled class method* holds against the alias's OLD member set — the
+// ADR 0108 headline scenario, and the gap flagged immediately above
+// ("Re-checking sites... is BT-2899's separate hot-reload concern").
+//
+// Unlike the ad-hoc `missing :: Direction := ...` top-level expressions
+// above (freshly re-resolved every REPL turn, never indexed into
+// `beamtalk_alias_xref`), the re-check trigger is keyed off alias-name ->
+// annotation-site edges that only a real class COMPILE populates — and,
+// per `beamtalk_repl_compiler.erl`, only the FILE-compile path
+// (`compile_file_core/4`, reached via `:load`) and the `>>` method-patch
+// path register those edges; a class typed directly at the REPL
+// (`compile_class_definition_result/2`) does not. So the dependent class
+// below is loaded from a fixture file, not typed inline.
+//
+// The re-check itself runs asynchronously on
+// `beamtalk_workspace_shape_recheck_worker` and publishes into
+// `beamtalk_workspace_findings_store` — NOT `Workspace recheckImage`,
+// whose whole-image sweep deliberately drops error-severity diagnostics
+// (`beamtalk_recheck.erl`'s `relevant_image_diagnostic/1`), so a genuinely
+// non-exhaustive `matchExhaustive:` would never surface there. We poll the
+// findings store directly via the Erlang FFI escape, mirroring the
+// whileTrue:/Timer sleep: poll idiom `announcements.btscript` uses to
+// await another asynchronous completion.
+// ===========================================================================
+
+type HotReloadColor = #red | #green | #blue
+// => HotReloadColor
+
+:load tests/repl-protocol/fixtures/hot_reload_alias_switch.bt
+// => Loaded: HotReloadColorSwitch
+
+// Sanity: no stale-alias finding yet — the compiled method's
+// matchExhaustive: proof is still sound against the alias's current
+// (exhaustive) three-member set.
+((Erlang beamtalk_workspace_findings_store) for_owner: "HotReloadColorSwitch") isEmpty
+// => true
+
+// Redefine the alias to add a member: `labelFor:`'s matchExhaustive:
+// (still only covering red/green/blue) is now stale — newly non-exhaustive.
+type HotReloadColor = #red | #green | #blue | #alpha
+// => HotReloadColor
+
+// Poll the findings store until the async re-check worker has posted a
+// finding for the dependent class (capped retries, ~2s).
+_hrPollCount := 0. [((Erlang beamtalk_workspace_findings_store) for_owner: "HotReloadColorSwitch") isEmpty and: [_hrPollCount < 100]] whileTrue: [Timer sleep: 20. _hrPollCount := _hrPollCount + 1]. ((Erlang beamtalk_workspace_findings_store) for_owner: "HotReloadColorSwitch") isEmpty
+// => false
+
+// The finding is classified as an alias-change re-check and names the
+// exhaustiveness gap — proof the proof re-fired as newly non-exhaustive.
+((Erlang beamtalk_workspace_findings_store) for_owner: "HotReloadColorSwitch") anySatisfy: [:f | ((Erlang maps) get: #message with: f) includesSubstring: "exhaustive"]
+// => true

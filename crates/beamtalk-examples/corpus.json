@@ -30525,6 +30525,24 @@
       "explanation": "Hot reload counter - version 2 with modified increment (adds 10) and new field 'step'"
     },
     {
+      "id": "tests-repl-protocol-fixtures-hot-reload-alias-switch",
+      "title": "HotReloadColorSwitch",
+      "category": "repl-protocol-fixtures",
+      "tags": [
+        "HotReloadColorSwitch",
+        "Object",
+        "extends",
+        "hot_reload_alias_switch",
+        "inherit",
+        "inheritance",
+        "labelFor:",
+        "object",
+        "subclassing"
+      ],
+      "source": "// Fixture for the BT-2905 alias hot-reload re-check E2E test\n// (tests/repl-protocol/cases/type_alias_repl.btscript).\n//\n// `labelFor:`'s `matchExhaustive:` is sound against `HotReloadColor`'s\n// three-member expansion at load time (the alias is declared in the REPL\n// session, not in this file — `:: HotReloadColor` resolves against\n// `beamtalk_compiler_server`'s ambient alias cache, kept in sync with the\n// session's alias table). Loading this file (not typing the class directly\n// at the REPL) is required so the compile goes through\n// `beamtalk_repl_compiler:compile_file_core/4`, the path that registers\n// alias-name -> annotation-site edges into `beamtalk_alias_xref` — a class\n// definition typed directly at the REPL does not.\n\nObject subclass: HotReloadColorSwitch\n\n  labelFor: c :: HotReloadColor -> Integer =>\n    c matchExhaustive: [\n      #red -> 1;\n      #green -> 2;\n      #blue -> 3\n    ]",
+      "explanation": "Fixture for the BT-2905 alias hot-reload re-check E2E test (tests/repl-protocol/cases/type_alias_repl.btscript).  `labelFor:`'s `matchExhaustive:` is sound against `HotReloadColor`'s three-member expansion at load time (the alias is declared in the REPL session, not in this file — `:: HotReloadColor` resolves against `beamtalk_compiler_server`'s ambient alias cache, kept in sync with the session's alias table). Loading this file (not typing the class directly at the REPL) is required so the compile goes through `beamtalk_repl_compiler:compile_file_core/4`, the path that registers alias-name -> annotation-site edges into `beamtalk_alias_xref` — a class definition typed directly at the REPL does not."
+    },
+    {
       "id": "tests-repl-protocol-fixtures-incremental-project-src-adder",
       "title": "Adder",
       "category": "repl-protocol-fixtures",
