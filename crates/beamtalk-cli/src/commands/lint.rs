@@ -123,32 +123,49 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
     // spurious `Unresolved class` diagnostics.
     let package_root = find_package_root(&source_path);
 
-    // BT-2920: Resolve the package name so E0401/E0402 visibility checks fire
-    // in lint the same way they do in `beamtalk build` — both are gated on
-    // `current_package: Some(_)` (see `check_class_visibility`). Resolved
-    // before extraction so cross-file `ClassInfo` can be package-stamped too
-    // (see `parse_and_extract_class_infos`'s `stamp_package_on_infos` call).
-    let current_package = package_root.as_deref().and_then(|root| {
-        super::manifest::find_manifest_full(root)
-            .ok()
-            .flatten()
-            .map(|m| m.package.name)
-    });
+    // BT-2920 (review S1): parse beamtalk.toml exactly once, deriving both
+    // `current_package` (E0401/E0402 gating, see `check_class_visibility`)
+    // and `has_package_dependencies` from the same read. Previously these
+    // were two independent re-parses with inconsistent error handling — a
+    // malformed manifest silently disabled visibility checks (`.ok()`) while
+    // only `has_package_dependencies` warned on the same parse failure.
+    // `package_root` (when `Some`) is only ever produced by `find_package_root`
+    // finding a `beamtalk.toml`, so the manifest is known to exist here; the
+    // only outcome left to distinguish is "parses" vs "malformed".
+    let (current_package, has_package_dependencies) = match package_root.as_deref() {
+        Some(root) => match super::manifest::find_manifest_full(root) {
+            Ok(Some(m)) => {
+                let has_deps = !m.dependencies.is_empty();
+                (Some(m.package.name), has_deps)
+            }
+            Ok(None) => (None, false),
+            Err(e) => {
+                warn!(
+                    error = %e,
+                    "Failed to parse beamtalk.toml for lint; E0401/E0402 visibility \
+                     checks disabled and dependencies conservatively assumed present"
+                );
+                (None, true)
+            }
+        },
+        None => (None, false),
+    };
 
+    // Resolved before extraction so cross-file `ClassInfo` can be
+    // package-stamped too (see `parse_and_extract_class_infos`'s
+    // `stamp_package_on_infos` call).
     let (mut all_class_infos, extension_index, parsed_files) = parse_and_extract_class_infos(
         &source_files,
         package_root.as_deref(),
         current_package.as_deref(),
     )?;
 
-    // Resolve dependency class metadata so lint sees the same class hierarchy
+    // Merge dependency class metadata so lint sees the same class hierarchy
     // as build. Without this, @expect annotations that suppress real cross-package
     // diagnostics would be reported as stale.
-    let has_package_dependencies = if let Some(ref project_root) = package_root {
-        resolve_dep_class_infos(project_root, &mut all_class_infos)
-    } else {
-        false
-    };
+    if let Some(ref project_root) = package_root {
+        merge_dependency_class_infos(project_root, &mut all_class_infos);
+    }
 
     // BT-2134 / BT-2851: Populate the FFI type registry via the same
     // `extract_type_specs` that `beamtalk build` calls, instead of only
@@ -529,31 +546,17 @@ pub(crate) fn find_package_root(start: &Utf8Path) -> Option<Utf8PathBuf> {
 ///
 /// Best-effort: if dependency resolution fails (e.g. network error for a git
 /// dep), lint continues without dep classes rather than failing entirely.
-/// Returns whether the package *declares* dependencies (BT-2794), read from
-/// the manifest rather than the resolution outcome so that a transient
-/// resolution failure (network, git) cannot flip diagnostic behaviour
-/// between runs. Conservatively true when the manifest cannot be parsed.
-fn resolve_dep_class_infos(
+///
+/// BT-2920 (review S1): `has_package_dependencies` (BT-2794) used to be
+/// computed here from its own re-parse of `beamtalk.toml`, independently of
+/// `run_lint`'s `current_package` resolution — two reads of the same file
+/// with inconsistent error handling. `run_lint` now parses the manifest once
+/// and derives both from that single read; this function's only remaining
+/// job is the dependency-class side effect on `all_class_infos`.
+fn merge_dependency_class_infos(
     project_root: &Utf8Path,
     all_class_infos: &mut Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
-) -> bool {
-    let manifest_path = project_root.join("beamtalk.toml");
-    if !manifest_path.exists() {
-        return false;
-    }
-
-    let has_package_dependencies = match super::manifest::parse_manifest_full(&manifest_path) {
-        Ok(manifest) => !manifest.dependencies.is_empty(),
-        Err(e) => {
-            warn!(
-                error = %e,
-                "Failed to parse beamtalk.toml for lint; \
-                 conservatively assuming dependencies are declared"
-            );
-            true
-        }
-    };
-
+) {
     let options = beamtalk_core::CompilerOptions::default();
     match super::deps::ensure_deps_resolved(project_root, &options) {
         Ok(resolved_deps) => {
@@ -569,8 +572,6 @@ fn resolve_dep_class_infos(
             );
         }
     }
-
-    has_package_dependencies
 }
 
 /// Output format for lint diagnostics.

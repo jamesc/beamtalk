@@ -71,8 +71,8 @@ use tracing::warn;
 /// any network I/O.
 ///
 /// Returns `(has_package_dependencies, class_infos)`:
-/// - `has_package_dependencies` mirrors `beamtalk lint`'s
-///   `resolve_dep_class_infos` flag (BT-2794): read from the manifest's
+/// - `has_package_dependencies` mirrors `beamtalk lint`'s `run_lint`-computed
+///   flag (BT-2794): read from the manifest's
 ///   `[dependencies]` table regardless of whether any individual dependency
 ///   could actually be resolved on disk, so a dependency that hasn't been
 ///   fetched yet doesn't flip diagnostic behaviour between runs.
