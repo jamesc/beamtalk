@@ -77,6 +77,7 @@ or `{error, Diagnostics}' on failure, where each diagnostic is a map with
     | {ok, class_definition, map()}
     | {ok, method_definition, map()}
     | {ok, protocol_definition, map()}
+    | {ok, type_alias_definition, map()}
     | {error, [map()]}.
 compile_expression(Port, Source, ModuleName, KnownVars) ->
     compile_expression(Port, Source, ModuleName, KnownVars, #{}).
@@ -87,6 +88,9 @@ Compile a REPL expression with optional compilation options.
 Options:
   class_superclass_index => #{binary() => binary()} — cross-file superclass info
   class_module_index => #{binary() => binary()} — cross-directory module name mapping
+  known_type_aliases => [binary()] — ADR 0108 Phase 8 (BT-2902): reparseable
+    `type Name = <expansion>` lines for aliases declared in earlier turns of
+    this REPL session, so `::` annotations in the current turn resolve them
 
 When provided, these indexes are forwarded to the compiler port so that
 inline class definitions correctly resolve inherited types and module names
@@ -97,6 +101,7 @@ from already-loaded files.
     | {ok, class_definition, map()}
     | {ok, method_definition, map()}
     | {ok, protocol_definition, map()}
+    | {ok, type_alias_definition, map()}
     | {error, [map()]}.
 compile_expression(Port, Source, ModuleName, KnownVars, Options) ->
     SuperclassIndex = maps:get(class_superclass_index, Options, #{}),
@@ -130,10 +135,17 @@ compile_expression(Port, Source, ModuleName, KnownVars, Options) ->
     %% BT-1670: Forward module_name override for inline class definitions
     %% so package-mode produces consistent module names across all paths.
     ModuleNameOverride = maps:get(module_name, Options, undefined),
-    Request =
+    Request4 =
         case ModuleNameOverride of
             undefined -> Request3;
             _ -> Request3#{module_name => ModuleNameOverride}
+        end,
+    %% ADR 0108 Phase 8 (BT-2902): forward earlier-turn alias declarations.
+    KnownTypeAliases = maps:get(known_type_aliases, Options, []),
+    Request =
+        case KnownTypeAliases of
+            [] -> Request4;
+            _ -> Request4#{known_type_aliases => KnownTypeAliases}
         end,
     RequestBin = term_to_binary(Request),
     try port_command(Port, RequestBin) of
@@ -953,12 +965,14 @@ close(Port) ->
 Handle ETF response from the compiler port.
 BT-571: Extended to handle class_definition and method_definition responses.
 BT-1235: Diagnostics in error responses are maps with `message', `line', and optional `hint'.
+BT-2902: Extended to handle type_alias_definition responses (ADR 0108 Phase 8).
 """.
 -spec handle_response(map()) ->
     {ok, binary(), [binary()]}
     | {ok, class_definition, map()}
     | {ok, method_definition, map()}
     | {ok, protocol_definition, map()}
+    | {ok, type_alias_definition, map()}
     | {error, [map()]}.
 handle_response(
     #{
@@ -1028,6 +1042,25 @@ handle_response(#{
         core_erlang => PrettyCore,
         module_name => ModuleName,
         protocols => Protocols,
+        warnings => Warnings
+    }};
+%% ADR 0108 Phase 8 (BT-2902): type alias definition response — no
+%% core_erlang, since an alias erases entirely at resolution time and has no
+%% runtime representation to compile (ADR 0108 Semantics).
+handle_response(#{
+    status := ok,
+    kind := type_alias_definition,
+    alias_name := AliasName,
+    expansion := Expansion,
+    doc_comment := DocComment,
+    warnings := Warnings
+}) ->
+    %% `DocComment` decodes as the atom `undefined` (Rust's `None`) or a
+    %% binary (Rust's `Some(text)`) — passed through as-is.
+    {ok, type_alias_definition, #{
+        alias_name => AliasName,
+        expansion => Expansion,
+        doc_comment => DocComment,
         warnings => Warnings
     }};
 handle_response(#{status := ok, core_erlang := CoreErlang, warnings := Warnings}) ->
