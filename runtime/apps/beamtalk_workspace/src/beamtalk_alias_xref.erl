@@ -138,7 +138,8 @@ dependents_of(AliasNameBin) when is_binary(AliasNameBin) ->
     try
         gen_server:call(?MODULE, {dependents_of, AliasNameBin})
     catch
-        exit:{noproc, _} -> []
+        exit:{noproc, _} -> [];
+        exit:{timeout, _} -> []
     end.
 
 -doc "Clear every recorded edge (tests; a future `Workspace changes revert:`).".
