@@ -36,6 +36,7 @@ use tracing::warn;
 /// project so that cross-file type/DNU diagnostics match what `build` emits.
 /// Without this, `@expect type` / `@expect all` annotations that suppress real
 /// diagnostics during build would be reported as stale by lint.
+#[allow(clippy::too_many_arguments)] // BT-2920 added `current_package`; each param is load-bearing context
 fn collect_diagnostics(
     module: &beamtalk_core::ast::Module,
     parse_diags: Vec<beamtalk_core::source_analysis::Diagnostic>,
@@ -46,6 +47,7 @@ fn collect_diagnostics(
     knowledge_scope: beamtalk_core::semantic_analysis::KnowledgeScope,
     cross_file_extensions: &beamtalk_core::compilation::extension_index::ExtensionIndex,
     has_package_dependencies: bool,
+    current_package: Option<&str>,
 ) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
     // Collect parser-level lint diagnostics (e.g. unnecessary `.` — BT-948)
     // plus AST-level lint passes.
@@ -70,9 +72,13 @@ fn collect_diagnostics(
     // FFI call falls back to `Dynamic(UntypedFfi)` and lint emits a
     // "Dynamic in typed class" warning that build does not — leaving the user
     // with no `@expect` configuration that satisfies both passes.
+    // BT-2920: Set current_package so E0401/E0402 visibility checks fire in
+    // `beamtalk lint`, matching `beamtalk build` — both gate on
+    // `current_package: Some(_)` (see `check_class_visibility`).
     let options = beamtalk_core::CompilerOptions {
         knowledge_scope,
         has_package_dependencies,
+        current_package: current_package.map(str::to_string),
         ..Default::default()
     };
     let analysis_result = beamtalk_core::semantic_analysis::analyse_with_natives_and_extensions(
@@ -100,6 +106,7 @@ fn collect_diagnostics(
 /// Run lint passes on the given path (file or directory).
 ///
 /// Prints each lint diagnostic and returns an error if any are found.
+#[allow(clippy::too_many_lines)] // BT-2920 added current_package resolution; orchestration function
 pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
     let source_path = Utf8PathBuf::from(path);
     let (source_files, erl_files) = collect_lint_files(&source_path, path)?;
@@ -115,17 +122,50 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
     // visible. Otherwise a test file that references a `src/` class produces
     // spurious `Unresolved class` diagnostics.
     let package_root = find_package_root(&source_path);
-    let (mut all_class_infos, extension_index, parsed_files) =
-        parse_and_extract_class_infos(&source_files, package_root.as_deref())?;
 
-    // Resolve dependency class metadata so lint sees the same class hierarchy
+    // BT-2920 (review S1): parse beamtalk.toml exactly once, deriving both
+    // `current_package` (E0401/E0402 gating, see `check_class_visibility`)
+    // and `has_package_dependencies` from the same read. Previously these
+    // were two independent re-parses with inconsistent error handling — a
+    // malformed manifest silently disabled visibility checks (`.ok()`) while
+    // only `has_package_dependencies` warned on the same parse failure.
+    // `package_root` (when `Some`) is only ever produced by `find_package_root`
+    // finding a `beamtalk.toml`, so the manifest is known to exist here; the
+    // only outcome left to distinguish is "parses" vs "malformed".
+    let (current_package, has_package_dependencies) = match package_root.as_deref() {
+        Some(root) => match super::manifest::find_manifest_full(root) {
+            Ok(Some(m)) => {
+                let has_deps = !m.dependencies.is_empty();
+                (Some(m.package.name), has_deps)
+            }
+            Ok(None) => (None, false),
+            Err(e) => {
+                warn!(
+                    error = %e,
+                    "Failed to parse beamtalk.toml for lint; E0401/E0402 visibility \
+                     checks disabled and dependencies conservatively assumed present"
+                );
+                (None, true)
+            }
+        },
+        None => (None, false),
+    };
+
+    // Resolved before extraction so cross-file `ClassInfo` can be
+    // package-stamped too (see `parse_and_extract_class_infos`'s
+    // `stamp_package_on_infos` call).
+    let (mut all_class_infos, extension_index, parsed_files) = parse_and_extract_class_infos(
+        &source_files,
+        package_root.as_deref(),
+        current_package.as_deref(),
+    )?;
+
+    // Merge dependency class metadata so lint sees the same class hierarchy
     // as build. Without this, @expect annotations that suppress real cross-package
     // diagnostics would be reported as stale.
-    let has_package_dependencies = if let Some(ref project_root) = package_root {
-        resolve_dep_class_infos(project_root, &mut all_class_infos)
-    } else {
-        false
-    };
+    if let Some(ref project_root) = package_root {
+        merge_dependency_class_infos(project_root, &mut all_class_infos);
+    }
 
     // BT-2134 / BT-2851: Populate the FFI type registry via the same
     // `extract_type_specs` that `beamtalk build` calls, instead of only
@@ -173,6 +213,7 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
             knowledge_scope,
             &extension_index,
             has_package_dependencies,
+            current_package.as_deref(),
         );
 
         for diag in &lint_diags {
@@ -419,6 +460,7 @@ type ParsedLintFile = (
 fn parse_and_extract_class_infos(
     source_files: &[Utf8PathBuf],
     package_root: Option<&Utf8Path>,
+    current_package: Option<&str>,
 ) -> Result<(
     Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
     beamtalk_core::compilation::extension_index::ExtensionIndex,
@@ -461,6 +503,15 @@ fn parse_and_extract_class_infos(
                 info.surface_incomplete = true;
             }
         }
+        // BT-2920: Stamp the package per-file, same as build's Pass 1 — see
+        // `stamp_package_on_infos`'s doc comment for why this can't wait
+        // until each file's own analysis pass.
+        if let Some(pkg) = current_package {
+            beamtalk_core::semantic_analysis::ClassHierarchy::stamp_package_on_infos(
+                &mut class_infos,
+                pkg,
+            );
+        }
         all_class_infos.extend(class_infos);
 
         // BT-2795: Collect standalone extensions package-wide so cross-file
@@ -495,31 +546,17 @@ pub(crate) fn find_package_root(start: &Utf8Path) -> Option<Utf8PathBuf> {
 ///
 /// Best-effort: if dependency resolution fails (e.g. network error for a git
 /// dep), lint continues without dep classes rather than failing entirely.
-/// Returns whether the package *declares* dependencies (BT-2794), read from
-/// the manifest rather than the resolution outcome so that a transient
-/// resolution failure (network, git) cannot flip diagnostic behaviour
-/// between runs. Conservatively true when the manifest cannot be parsed.
-fn resolve_dep_class_infos(
+///
+/// BT-2920 (review S1): `has_package_dependencies` (BT-2794) used to be
+/// computed here from its own re-parse of `beamtalk.toml`, independently of
+/// `run_lint`'s `current_package` resolution — two reads of the same file
+/// with inconsistent error handling. `run_lint` now parses the manifest once
+/// and derives both from that single read; this function's only remaining
+/// job is the dependency-class side effect on `all_class_infos`.
+fn merge_dependency_class_infos(
     project_root: &Utf8Path,
     all_class_infos: &mut Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
-) -> bool {
-    let manifest_path = project_root.join("beamtalk.toml");
-    if !manifest_path.exists() {
-        return false;
-    }
-
-    let has_package_dependencies = match super::manifest::parse_manifest_full(&manifest_path) {
-        Ok(manifest) => !manifest.dependencies.is_empty(),
-        Err(e) => {
-            warn!(
-                error = %e,
-                "Failed to parse beamtalk.toml for lint; \
-                 conservatively assuming dependencies are declared"
-            );
-            true
-        }
-    };
-
+) {
     let options = beamtalk_core::CompilerOptions::default();
     match super::deps::ensure_deps_resolved(project_root, &options) {
         Ok(resolved_deps) => {
@@ -535,8 +572,6 @@ fn resolve_dep_class_infos(
             );
         }
     }
-
-    has_package_dependencies
 }
 
 /// Output format for lint diagnostics.
@@ -612,6 +647,7 @@ fn collect_lint_diagnostics(source: &str) -> Vec<beamtalk_core::source_analysis:
         beamtalk_core::semantic_analysis::KnowledgeScope::default(),
         &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
         false,
+        None,
     )
 }
 
@@ -705,6 +741,7 @@ mod tests {
             beamtalk_core::semantic_analysis::KnowledgeScope::default(),
             &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
             false,
+            None,
         );
         let stale = diags.iter().any(|d| d.message.contains("stale @expect"));
         assert!(
@@ -904,6 +941,7 @@ mod tests {
             beamtalk_core::semantic_analysis::KnowledgeScope::default(),
             &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
             false,
+            None,
         );
 
         let unresolved: Vec<_> = diags
@@ -1010,6 +1048,7 @@ mod tests {
             beamtalk_core::semantic_analysis::KnowledgeScope::default(),
             &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
             false,
+            None,
         );
 
         let has_untyped_ffi = diags.iter().any(|d| d.message.contains("untyped FFI"));
@@ -1057,6 +1096,7 @@ mod tests {
             beamtalk_core::semantic_analysis::KnowledgeScope::default(),
             &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
             false,
+            None,
         );
 
         let untyped_ffi: Vec<_> = diags
@@ -1118,6 +1158,7 @@ mod tests {
             beamtalk_core::semantic_analysis::KnowledgeScope::default(),
             &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
             false,
+            None,
         );
         let stale = diags.iter().any(|d| d.message.contains("stale @expect"));
         assert!(

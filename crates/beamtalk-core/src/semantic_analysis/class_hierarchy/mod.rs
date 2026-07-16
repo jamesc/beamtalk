@@ -456,6 +456,27 @@ impl ClassHierarchy {
             .map(ClassInfo::from_class_definition)
             .collect()
     }
+    /// Set the `package` field on every entry in `class_infos` that doesn't
+    /// already have one (ADR 0071, BT-1700 / BT-2920).
+    ///
+    /// [`Self::extract_class_infos`] builds `ClassInfo` purely from a single
+    /// file's AST, with `package: None` — it has no project-wide context. A
+    /// project's Pass 1 (`beamtalk build`'s cross-file class index, `beamtalk
+    /// lint`'s package walk) collects these across every source file *before*
+    /// injecting them into any file's `ClassHierarchy`, so [`Self::stamp_package`]
+    /// (which stamps a live hierarchy's own AST-derived classes) never reaches
+    /// them. Without this, `check_class_visibility`/`check_alias_leaked_visibility`
+    /// (E0401/E0402) silently treat a same-package class defined in a *sibling*
+    /// file as package-less — same as a builtin or REPL class — and never flag
+    /// it as a leak.
+    pub fn stamp_package_on_infos(class_infos: &mut [ClassInfo], package: &str) {
+        let pkg: EcoString = EcoString::from(package);
+        for info in class_infos {
+            if info.package.is_none() && !Self::is_builtin_class(&info.name) {
+                info.package = Some(pkg.clone());
+            }
+        }
+    }
     /// Filter `all_class_infos` to exclude classes defined in `module`,
     /// returning only cross-file class metadata suitable for injection into
     /// semantic analysis.

@@ -2441,6 +2441,62 @@ fn stamp_package_does_not_overwrite_existing_package() {
     );
 }
 #[test]
+fn stamp_package_on_infos_sets_package_on_non_builtin_classes() {
+    // BT-2920: `stamp_package_on_infos` is `stamp_package`'s counterpart for
+    // Pass 1's cross-file `ClassInfo` extraction (build's class index,
+    // lint's package walk) — a plain `Vec<ClassInfo>` collected before any
+    // `ClassHierarchy` exists, so `stamp_package` itself can't reach it.
+    let source = "Actor subclass: TokenBuffer\n  data => nil\n";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let mut infos = ClassHierarchy::extract_class_infos(&module);
+    assert_eq!(
+        infos[0].package, None,
+        "freshly extracted infos start unpackaged"
+    );
+
+    ClassHierarchy::stamp_package_on_infos(&mut infos, "json");
+
+    assert_eq!(
+        infos[0].package.as_deref(),
+        Some("json"),
+        "stamp_package_on_infos should set package on AST-derived infos"
+    );
+}
+#[test]
+fn stamp_package_on_infos_does_not_overwrite_existing_package() {
+    let mut infos = vec![ClassInfo {
+        surface_incomplete: false,
+        name: EcoString::from("RemoteClass"),
+        superclass: Some(EcoString::from("Object")),
+        is_sealed: false,
+        is_abstract: false,
+        is_typed: false,
+        is_internal: false,
+        package: Some(EcoString::from("other_pkg")),
+        is_value: false,
+        is_native: false,
+        handle_scope: None,
+        state: vec![],
+        state_types: HashMap::new(),
+        state_has_default: HashMap::new(),
+        methods: vec![],
+        class_methods: vec![],
+        class_variables: vec![],
+        type_params: vec![],
+        type_param_bounds: vec![],
+        superclass_type_args: vec![],
+    }];
+
+    ClassHierarchy::stamp_package_on_infos(&mut infos, "myapp");
+
+    assert_eq!(
+        infos[0].package.as_deref(),
+        Some("other_pkg"),
+        "stamp_package_on_infos should not overwrite an already-set package"
+    );
+}
+#[test]
 fn add_from_beam_meta_preserves_is_internal_and_package() {
     let mut h = ClassHierarchy::with_builtins();
     let info = ClassInfo {
