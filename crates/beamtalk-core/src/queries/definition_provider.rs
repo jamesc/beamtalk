@@ -107,7 +107,14 @@ pub fn find_class_or_protocol_declaration<'a>(
     files: impl IntoIterator<Item = (&'a Utf8PathBuf, &'a Module)>,
 ) -> Option<Location> {
     if !project_index.hierarchy().has_class(name) {
-        return None;
+        // ADR 0108 Phase 8 (BT-2901): `name` isn't a class or protocol
+        // (BT-1933 registers protocols as synthetic class entries, so
+        // `has_class` already covers both) — try the alias namespace next.
+        // Type aliases are never registered into `ClassHierarchy` (they're
+        // a peer namespace, collision-checked against it instead — see
+        // `alias_registry.rs`'s module doc), so they need their own lookup
+        // rather than falling out of the check above.
+        return find_alias_declaration(name, project_index, files);
     }
 
     let mut protocol_match: Option<Location> = None;
@@ -133,6 +140,36 @@ pub fn find_class_or_protocol_declaration<'a>(
     // consistent with class-only lookup (stdlib classes with no open source
     // file already return None).
     protocol_match.filter(|_| project_index.hierarchy().is_protocol_class(name))
+}
+
+/// Resolve the declaration site of a type alias `name` (ADR 0108 Phase 8,
+/// BT-2901) — the alias-namespace counterpart to the class/protocol lookup
+/// in [`find_class_or_protocol_declaration`], which calls this as its
+/// fallback when `name` isn't known to the [`ClassHierarchy`].
+///
+/// Gated on [`ProjectIndex::alias_registry`] rather than a hierarchy check
+/// (aliases are never registered there), then walks indexed files for the
+/// matching `TypeAliasDefinition`'s name span. Returns `None` when the name
+/// isn't a known alias, or when it is but no indexed file's source is open
+/// (consistent with the class/protocol lookup's stdlib-without-source
+/// behaviour).
+#[must_use]
+fn find_alias_declaration<'a>(
+    name: &str,
+    project_index: &ProjectIndex,
+    files: impl IntoIterator<Item = (&'a Utf8PathBuf, &'a Module)>,
+) -> Option<Location> {
+    if !project_index.alias_registry().has_alias(name) {
+        return None;
+    }
+    for (file_path, module) in files {
+        for alias in &module.type_aliases {
+            if alias.name.name.as_str() == name {
+                return Some(Location::new(file_path.clone(), alias.name.span));
+            }
+        }
+    }
+    None
 }
 
 /// Find the definition of a method selector, searching across all indexed files.
@@ -1496,6 +1533,81 @@ mod tests {
         let loc = loc.expect("name collision should still resolve");
         assert_eq!(loc.file, file_class, "real class should win over protocol");
         assert_eq!(loc.span, module_class.classes[0].name.span);
+    }
+
+    // ---- ADR 0108 Phase 8 (BT-2901): goto-definition for type aliases ----
+
+    /// Registers `module`'s type aliases into `index` for `file` — mirrors
+    /// `hierarchy_with_protocols`'s role for the class/protocol tests above.
+    fn index_with_aliases(index: &mut ProjectIndex, file: Utf8PathBuf, module: &Module) {
+        let infos = crate::semantic_analysis::AliasRegistry::extract_alias_infos(module);
+        index.update_file_aliases(file, infos);
+    }
+
+    #[test]
+    fn goto_definition_alias_same_file() {
+        let file = Utf8PathBuf::from("aliases.bt");
+        let module = parse_source("type RestartStrategy = #temporary | #transient | #permanent\n");
+        let mut index = ProjectIndex::new();
+        index.update_file(file.clone(), &hierarchy_with_protocols(&module));
+        index_with_aliases(&mut index, file.clone(), &module);
+
+        let loc = find_definition_cross_file(
+            "RestartStrategy",
+            &file,
+            &module,
+            &index,
+            [(&file, &module)],
+        );
+        let loc = loc.expect("goto-def should resolve to the alias declaration");
+        assert_eq!(loc.file, file);
+        assert_eq!(loc.span, module.type_aliases[0].name.span);
+    }
+
+    #[test]
+    fn goto_definition_alias_cross_file() {
+        let file_a = Utf8PathBuf::from("RestartStrategy.bt");
+        let module_a =
+            parse_source("type RestartStrategy = #temporary | #transient | #permanent\n");
+
+        let file_b = Utf8PathBuf::from("Supervisor.bt");
+        let module_b = parse_source(
+            "Object subclass: Supervisor\n  restart: policy :: RestartStrategy => policy\n",
+        );
+
+        let mut index = ProjectIndex::new();
+        index.update_file(file_a.clone(), &hierarchy_with_protocols(&module_a));
+        index_with_aliases(&mut index, file_a.clone(), &module_a);
+        index.update_file(file_b.clone(), &hierarchy_with_protocols(&module_b));
+
+        let loc = find_definition_cross_file(
+            "RestartStrategy",
+            &file_b,
+            &module_b,
+            &index,
+            [(&file_a, &module_a), (&file_b, &module_b)],
+        );
+        let loc = loc.expect("alias defined in file_a should be found from file_b");
+        assert_eq!(loc.file, file_a);
+        assert_eq!(loc.span, module_a.type_aliases[0].name.span);
+    }
+
+    #[test]
+    fn goto_definition_unknown_alias_name_returns_none() {
+        let file = Utf8PathBuf::from("aliases.bt");
+        let module = parse_source("type RestartStrategy = #temporary | #transient | #permanent\n");
+        let mut index = ProjectIndex::new();
+        index.update_file(file.clone(), &hierarchy_with_protocols(&module));
+        index_with_aliases(&mut index, file.clone(), &module);
+
+        let loc = find_definition_cross_file(
+            "TotallyUnknownName",
+            &file,
+            &module,
+            &index,
+            [(&file, &module)],
+        );
+        assert!(loc.is_none());
     }
 
     #[test]

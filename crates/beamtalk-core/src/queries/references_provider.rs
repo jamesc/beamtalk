@@ -32,7 +32,8 @@
 
 use crate::ast::{
     ClassDefinition, Expression, MethodDefinition, Module, ParameterDefinition, Pattern,
-    ProtocolDefinition, ProtocolMethodSignature, StateDeclaration, TypeAnnotation, TypeParamDecl,
+    ProtocolDefinition, ProtocolMethodSignature, StateDeclaration, TypeAliasDefinition,
+    TypeAnnotation, TypeParamDecl,
 };
 use crate::language_service::Location;
 use crate::source_analysis::Span;
@@ -68,6 +69,16 @@ pub fn find_class_references<'a>(
         // Protocol definitions: name, `extending:` target, and type-parameter bounds.
         for protocol in &module.protocols {
             collect_protocol_definition_refs(protocol, class_name, file_path, &mut results);
+        }
+
+        // Type alias definitions: declaration name and any reference to
+        // `class_name` inside the RHS annotation — e.g. `type B = A | #z`
+        // referencing alias `A`, or an alias RHS referencing a real class
+        // (ADR 0108 Phase 8, BT-2901). `class_name` here may itself be a
+        // class, protocol, or alias name; `collect_type_annotation_refs` is
+        // shape-generic and doesn't care which.
+        for alias in &module.type_aliases {
+            collect_alias_definition_refs(alias, class_name, file_path, &mut results);
         }
 
         // Standalone method definitions: class name references and signature
@@ -166,6 +177,22 @@ fn collect_protocol_definition_refs(
     {
         collect_protocol_method_signature_refs(sig, name, file_path, results);
     }
+}
+
+/// Emit alias-definition references (declaration name, and any reference to
+/// `name` inside the RHS annotation) — the alias-namespace counterpart to
+/// [`collect_class_definition_refs`] / [`collect_protocol_definition_refs`]
+/// (ADR 0108 Phase 8, BT-2901).
+fn collect_alias_definition_refs(
+    alias: &TypeAliasDefinition,
+    name: &str,
+    file_path: &Utf8PathBuf,
+    results: &mut Vec<Location>,
+) {
+    if alias.name.name == name {
+        results.push(Location::new(file_path.clone(), alias.name.span));
+    }
+    collect_type_annotation_refs(&alias.annotation, name, file_path, results);
 }
 
 /// Emit protocol-bound references for a list of generic type parameters.
@@ -623,6 +650,16 @@ pub fn find_class_declarations<'a>(
         for protocol in &module.protocols {
             if protocol.name.name == class_name {
                 results.push(Location::new(file_path.clone(), protocol.name.span));
+            }
+        }
+        // ADR 0108 Phase 8 (BT-2901): a type-alias declaration name is also
+        // a valid target here — `SimpleLanguageService::alias_name_at` uses
+        // this function (via `find_class_declarations`) to find an alias's
+        // own declaration site so the LSP `references` handler can exclude
+        // it from an `include_declaration = false` response.
+        for alias in &module.type_aliases {
+            if alias.name.name == class_name {
+                results.push(Location::new(file_path.clone(), alias.name.span));
             }
         }
     }
@@ -1214,5 +1251,94 @@ mod tests {
         let module = parse_source("Protocol define: Printable\n  printOn: aStream");
         let decls = find_class_declarations("Printable", [(&file, &module)]);
         assert_eq!(decls.len(), 1, "expected 1 protocol declaration");
+    }
+
+    // ---- ADR 0108 Phase 8 (BT-2901): find-references for type aliases ----
+
+    #[test]
+    fn find_references_alias_definition_name() {
+        let file = Utf8PathBuf::from("aliases.bt");
+        let module = parse_source("type RestartStrategy = #temporary | #transient | #permanent\n");
+
+        let refs = find_class_references("RestartStrategy", [(&file, &module)]);
+        assert_eq!(refs.len(), 1, "definition site should be reported once");
+        assert_eq!(refs[0].span, module.type_aliases[0].name.span);
+    }
+
+    #[test]
+    fn find_references_alias_in_annotation_site() {
+        let file = Utf8PathBuf::from("supervisor.bt");
+        let module = parse_source(
+            "type RestartStrategy = #temporary | #transient | #permanent\n\n\
+             Object subclass: Supervisor\n  restart: policy :: RestartStrategy => policy\n",
+        );
+
+        let refs = find_class_references("RestartStrategy", [(&file, &module)]);
+        // Expect: declaration name + the `policy :: RestartStrategy` parameter
+        // annotation.
+        assert_eq!(refs.len(), 2, "expected 2 refs, got {refs:?}");
+        assert!(
+            refs.iter()
+                .any(|r| r.span == module.type_aliases[0].name.span)
+        );
+        let param_type_span = module.classes[0].methods[0].parameters[0]
+            .type_annotation
+            .as_ref()
+            .unwrap()
+            .span();
+        assert!(
+            refs.iter().any(|r| r.span == param_type_span),
+            "expected the parameter annotation site, got {refs:?}"
+        );
+    }
+
+    #[test]
+    fn find_references_alias_referenced_inside_another_alias_rhs() {
+        // `type B = A | #z` referencing alias `A` — the transitive-edge case
+        // ADR 0108 calls out for the hot-reload trigger (BT-2899) and that
+        // find-references must also see (a redefinition of `A` alone must
+        // still be discoverable as affecting `B`'s declaration site).
+        let file = Utf8PathBuf::from("aliases.bt");
+        let module = parse_source("type A = Integer | Symbol\ntype B = A | #z\n");
+
+        let refs = find_class_references("A", [(&file, &module)]);
+        assert_eq!(refs.len(), 2, "expected 2 refs, got {refs:?}");
+        assert!(
+            refs.iter()
+                .any(|r| r.span == module.type_aliases[0].name.span)
+        );
+    }
+
+    #[test]
+    fn find_references_alias_cross_file() {
+        let file_a = Utf8PathBuf::from("RestartStrategy.bt");
+        let module_a =
+            parse_source("type RestartStrategy = #temporary | #transient | #permanent\n");
+
+        let file_b = Utf8PathBuf::from("Supervisor.bt");
+        let module_b = parse_source(
+            "Object subclass: Supervisor\n  restart: policy :: RestartStrategy => policy\n",
+        );
+
+        let refs = find_class_references(
+            "RestartStrategy",
+            [(&file_a, &module_a), (&file_b, &module_b)],
+        );
+        assert_eq!(
+            refs.len(),
+            2,
+            "expected 2 refs across both files, got {refs:?}"
+        );
+        assert!(refs.iter().any(|r| r.file == file_a));
+        assert!(refs.iter().any(|r| r.file == file_b));
+    }
+
+    #[test]
+    fn find_class_declarations_includes_alias_definitions() {
+        let file = Utf8PathBuf::from("aliases.bt");
+        let module = parse_source("type RestartStrategy = #temporary | #transient | #permanent\n");
+        let decls = find_class_declarations("RestartStrategy", [(&file, &module)]);
+        assert_eq!(decls.len(), 1, "expected 1 alias declaration");
+        assert_eq!(decls[0].span, module.type_aliases[0].name.span);
     }
 }

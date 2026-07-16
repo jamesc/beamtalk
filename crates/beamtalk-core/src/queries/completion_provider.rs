@@ -32,7 +32,7 @@ use crate::queries::erlang_modules;
 use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
 use crate::semantic_analysis::type_checker::TypeMap;
 use crate::semantic_analysis::type_checker::native_type_registry::NativeTypeRegistry;
-use crate::semantic_analysis::{ClassHierarchy, InferredType};
+use crate::semantic_analysis::{AliasRegistry, ClassHierarchy, InferredType};
 use crate::source_analysis::Span;
 use ecow::EcoString;
 use std::collections::HashSet;
@@ -131,6 +131,37 @@ pub fn compute_completions(
     current_package: Option<&str>,
     native_types: Option<&NativeTypeRegistry>,
 ) -> Vec<Completion> {
+    compute_completions_with_aliases(
+        module,
+        source,
+        position,
+        hierarchy,
+        current_package,
+        native_types,
+        None,
+    )
+}
+
+/// Like [`compute_completions`], additionally offering type alias names
+/// alongside class/protocol names in type-annotation position when a
+/// project-wide `AliasRegistry` is available (ADR 0108 Phase 8, BT-2901).
+///
+/// A separate function — rather than adding the parameter to
+/// [`compute_completions`] directly — keeps that function's signature
+/// source-compatible with every existing caller and test; mirrors
+/// [`crate::queries::enrich_hierarchy_with_inferred_returns_and_aliases`]'s
+/// identical "`_with_aliases`" wrapper shape, added for the same reason.
+/// `alias_registry = None` behaves identically to [`compute_completions`].
+#[must_use]
+pub fn compute_completions_with_aliases(
+    module: &Module,
+    source: &str,
+    position: Position,
+    hierarchy: &ClassHierarchy,
+    current_package: Option<&str>,
+    native_types: Option<&NativeTypeRegistry>,
+    alias_registry: Option<&AliasRegistry>,
+) -> Vec<Completion> {
     // Validate position is within bounds
     let offset = match position.to_byte_offset(source) {
         Some(o) => o.get(),
@@ -183,6 +214,12 @@ pub fn compute_completions(
     add_identifier_completions(module, offset, &mut completions);
     // Add class names as completions (filtering internal classes from other packages)
     add_class_name_completions(module, hierarchy, current_package, &mut completions);
+    // Add type alias names as completions (ADR 0108 Phase 8, BT-2901) — a
+    // separate loop since aliases are never registered into `hierarchy`
+    // (see `add_alias_name_completions`'s doc).
+    if let Some(alias_registry) = alias_registry {
+        add_alias_name_completions(module, alias_registry, current_package, &mut completions);
+    }
     // Add message completions from class hierarchy (context-aware, type-filtered)
     add_hierarchy_completions(
         module,
@@ -629,6 +666,87 @@ fn add_class_name_completions(
         }
     }
 }
+/// Adds type alias names as completions (module-local `type` declarations
+/// plus any project-wide aliases in `alias_registry`) — the alias-namespace
+/// counterpart to [`add_class_name_completions`] (ADR 0108 Phase 8,
+/// BT-2901).
+///
+/// Aliases are never registered into [`ClassHierarchy`] (they're checked
+/// bidirectionally against it instead — see `alias_registry.rs`'s module
+/// doc), so they need this separate loop rather than folding into the
+/// existing hierarchy walk. Mirrors `add_class_name_completions`'s
+/// same-file-first, then-registry dedup shape — including filtering
+/// cross-package `internal` entries out of the *project-wide* loop only
+/// (same-file aliases are always same-package by definition, so
+/// `module.type_aliases` never needs the check, exactly like
+/// `add_class_name_completions`'s `module.classes` loop above).
+fn add_alias_name_completions(
+    module: &Module,
+    alias_registry: &AliasRegistry,
+    current_package: Option<&str>,
+    completions: &mut Vec<Completion>,
+) {
+    let mut seen = HashSet::new();
+    // Same-file aliases first (richer documentation: doc comment available).
+    for alias in &module.type_aliases {
+        let name = &alias.name.name;
+        if seen.insert(name.clone()) {
+            let mut doc = format!(
+                "type alias: {name} = {}",
+                crate::queries::hover_provider::type_annotation_label(&alias.annotation)
+            );
+            if let Some(doc_comment) = alias
+                .doc_comment
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                let _ = write!(doc, "\n\n{doc_comment}");
+            }
+            completions.push(
+                Completion::new(name.as_str(), CompletionKind::Class).with_documentation(doc),
+            );
+        }
+    }
+    // Project-wide aliases (cross-file, from `AliasRegistry`).
+    for (name, info) in alias_registry.aliases() {
+        if is_cross_package_internal_alias(info, current_package) {
+            continue;
+        }
+        if seen.insert(name.clone()) {
+            let doc = format!(
+                "type alias: {name} = {}",
+                crate::queries::hover_provider::type_annotation_label(&info.annotation)
+            );
+            completions.push(
+                Completion::new(name.as_str(), CompletionKind::Class).with_documentation(doc),
+            );
+        }
+    }
+}
+
+/// Returns `true` if the alias is internal and belongs to a different
+/// package than `current_package` (ADR 0071/0108) — the alias-namespace
+/// counterpart to [`is_cross_package_internal_class`], with identical
+/// semantics (an unknown package on either side is never treated as a
+/// collision, matching `AliasRegistry::add_pre_loaded`'s own conservative
+/// seeding-boundary rule).
+fn is_cross_package_internal_alias(
+    info: &crate::semantic_analysis::AliasInfo,
+    current_package: Option<&str>,
+) -> bool {
+    if !info.is_internal {
+        return false;
+    }
+    let Some(alias_pkg) = info.package.as_deref() else {
+        return false;
+    };
+    let Some(cur_pkg) = current_package else {
+        return false;
+    };
+    alias_pkg != cur_pkg
+}
+
 /// Recursively collects identifiers from an expression.
 fn collect_identifiers_from_expr(expr: &Expression, identifiers: &mut HashSet<EcoString>) {
     match expr {
@@ -2671,6 +2789,156 @@ mod tests {
         assert!(
             completions.iter().any(|c| c.label == "Integer"),
             "Expected 'Integer' class-name completion after '::' in pattern position"
+        );
+    }
+
+    // ---- ADR 0108 Phase 8 (BT-2901): type alias completions ----
+
+    fn alias_registry_for(module: &Module, hierarchy: &ClassHierarchy) -> AliasRegistry {
+        let protocol_registry =
+            crate::semantic_analysis::protocol_registry::ProtocolRegistry::new();
+        let mut registry = AliasRegistry::new();
+        let diags = registry.register_module(module, hierarchy, &protocol_registry);
+        assert!(diags.is_empty(), "unexpected alias diagnostics: {diags:?}");
+        registry
+    }
+
+    #[test]
+    fn completions_include_same_file_alias_name() {
+        let source = "type RestartStrategy = #temporary | #transient | #permanent\n\n\
+                       Object subclass: Supervisor\n  restart: policy :: \n";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let alias_registry = alias_registry_for(&module, &hierarchy);
+
+        let completions = compute_completions_with_aliases(
+            &module,
+            source,
+            Position::new(3, 20),
+            &hierarchy,
+            None,
+            None,
+            Some(&alias_registry),
+        );
+
+        assert!(
+            completions
+                .iter()
+                .any(|c| c.label == "RestartStrategy" && c.kind == CompletionKind::Class),
+            "Expected alias name 'RestartStrategy' in type-annotation-position completions, \
+             got: {:?}",
+            completions.iter().map(|c| &c.label).collect::<Vec<_>>()
+        );
+        // Class/protocol names must still be offered alongside aliases.
+        assert!(
+            completions.iter().any(|c| c.label == "Integer"),
+            "Expected builtin class 'Integer' alongside the alias completion"
+        );
+    }
+
+    #[test]
+    fn completions_without_alias_registry_omit_alias_name() {
+        // `alias_registry = None` (the default `compute_completions` shape)
+        // must not offer alias names — matches pre-BT-2901 behaviour for
+        // every caller that hasn't threaded a registry through yet.
+        let source = "type RestartStrategy = #temporary | #transient | #permanent\n\n\
+                       Object subclass: Supervisor\n  restart: policy :: \n";
+        let completions = completions_at(source, Position::new(3, 20));
+        assert!(
+            !completions.iter().any(|c| c.label == "RestartStrategy"),
+            "Alias name should not appear without an alias registry"
+        );
+    }
+
+    #[test]
+    fn completions_include_project_wide_alias_from_registry() {
+        // A cross-file alias (present in `alias_registry` but not in
+        // `module.type_aliases`) must also be offered — the project-wide
+        // half of `add_alias_name_completions`.
+        let other_source = "type JsonKey = #a | #b\n";
+        let other_tokens = lex_with_eof(other_source);
+        let (other_module, _) = parse(other_tokens);
+        let other_hierarchy = ClassHierarchy::build(&other_module).0.unwrap();
+        let alias_registry = alias_registry_for(&other_module, &other_hierarchy);
+
+        let source = "Object subclass: Supervisor\n  restart: policy :: \n";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let completions = compute_completions_with_aliases(
+            &module,
+            source,
+            Position::new(1, 20),
+            &hierarchy,
+            None,
+            None,
+            Some(&alias_registry),
+        );
+
+        assert!(
+            completions.iter().any(|c| c.label == "JsonKey"),
+            "Expected cross-file alias name 'JsonKey' from the project-wide registry, got: {:?}",
+            completions.iter().map(|c| &c.label).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn completions_exclude_cross_package_internal_alias() {
+        // ADR 0071/0108: an `internal type` declared in a different package
+        // must not leak into completions across the package boundary — the
+        // alias-namespace counterpart to `add_class_name_completions`'s
+        // existing `is_cross_package_internal_class` filter.
+        use crate::semantic_analysis::AliasInfo;
+        use crate::source_analysis::Span;
+
+        let mut alias_registry = AliasRegistry::new();
+        alias_registry.register_test_alias(AliasInfo {
+            name: "SecretKey".into(),
+            annotation: crate::ast::TypeAnnotation::Simple(crate::ast::Identifier {
+                name: "String".into(),
+                span: Span::new(0, 1),
+            }),
+            is_internal: true,
+            package: Some("other_pkg".into()),
+            span: Span::new(0, 1),
+        });
+        alias_registry.register_test_alias(AliasInfo {
+            name: "LocalKey".into(),
+            annotation: crate::ast::TypeAnnotation::Simple(crate::ast::Identifier {
+                name: "String".into(),
+                span: Span::new(0, 1),
+            }),
+            is_internal: true,
+            package: Some("my_pkg".into()),
+            span: Span::new(0, 1),
+        });
+
+        let source = "Object subclass: Supervisor\n  restart: policy :: \n";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let completions = compute_completions_with_aliases(
+            &module,
+            source,
+            Position::new(1, 20),
+            &hierarchy,
+            Some("my_pkg"),
+            None,
+            Some(&alias_registry),
+        );
+
+        assert!(
+            !completions.iter().any(|c| c.label == "SecretKey"),
+            "Cross-package internal alias must not leak into completions, got: {:?}",
+            completions.iter().map(|c| &c.label).collect::<Vec<_>>()
+        );
+        assert!(
+            completions.iter().any(|c| c.label == "LocalKey"),
+            "Same-package internal alias should still be offered, got: {:?}",
+            completions.iter().map(|c| &c.label).collect::<Vec<_>>()
         );
     }
 }

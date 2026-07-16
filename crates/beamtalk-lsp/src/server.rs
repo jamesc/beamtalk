@@ -1959,7 +1959,7 @@ impl LanguageServer for Backend {
         // Compute everything that depends on `svc` up front so the lock is
         // released before any async runtime call (delegate_nav_query awaits
         // a runtime round-trip when the flag is on).
-        let (pos, runtime_query) = {
+        let (pos, runtime_query, alias_incomplete_warning) = {
             let svc = self.service.lock().expect("service lock poisoned");
             let Some(source) = svc.file_source(&path) else {
                 return Ok(None);
@@ -1970,8 +1970,30 @@ impl LanguageServer for Backend {
             } else {
                 None
             };
-            (pos, runtime_query)
+            // ADR 0108 Phase 8 (BT-2901): find-references coverage for a
+            // type alias is explicitly scoped to files compiled into the
+            // current build graph — an uncompiled or never-opened file
+            // contributes no reference edges until it's compiled. When
+            // workspace preload hasn't finished (`!is_project_complete()`),
+            // a short or empty result must not silently read as exhaustive:
+            // a caller trusting it could delete an alias a not-yet-compiled
+            // file still uses. Surface that via `window/showMessage` below
+            // rather than staying silent.
+            let alias_incomplete_warning =
+                !svc.is_project_complete() && svc.alias_name_at(&path, pos).is_some();
+            (pos, runtime_query, alias_incomplete_warning)
         };
+
+        if alias_incomplete_warning {
+            self.client
+                .show_message(
+                    MessageType::WARNING,
+                    "Find-references for this type alias may be incomplete: not all workspace \
+                     files have been compiled yet, so references in uncompiled files aren't \
+                     included in this result.",
+                )
+                .await;
+        }
 
         let backend_self = self;
         let path_for_ast = path.clone();
@@ -4224,7 +4246,17 @@ fn ast_declarations_for_cursor(
     position: BtPosition,
 ) -> Vec<BtLocation> {
     let Some(query) = svc.references_query_at(file, position) else {
-        return Vec::new();
+        // ADR 0108 Phase 8 (BT-2901): `references_query_at` is always
+        // `None` for a type-alias name (see its doc — aliases have no
+        // runtime representation for `NavQuery::ReferencesTo` to target),
+        // so the usual match below never sees one. Check the alias
+        // namespace directly so `include_declaration = false` still
+        // excludes the alias's own declaration site from a cold-file
+        // `references` response.
+        return svc
+            .alias_name_at(file, position)
+            .map(|name| svc.find_class_declarations(name.as_str()))
+            .unwrap_or_default();
     };
     match query {
         NavQuery::SendersOf(selector) | NavQuery::ImplementorsOf(selector) => {
@@ -6374,6 +6406,137 @@ mod tests {
         assert!(
             file_uris.contains(&bar_uri),
             "expected Bar definition, got {file_uris:?}"
+        );
+    }
+
+    // ---- ADR 0108 Phase 8 (BT-2901): type alias find-references ----
+
+    /// Shared fixture: a `type RestartStrategy = ...` declaration on line 0,
+    /// used as a parameter type annotation on line 3.
+    const ALIAS_REFERENCES_SOURCE: &str = "type RestartStrategy = #temporary | #transient | #permanent\n\nObject subclass: Supervisor\n  restart: policy :: RestartStrategy =>\n    policy\n";
+
+    #[tokio::test]
+    async fn references_on_type_alias_enumerates_declaration_and_annotation_site() {
+        // Cursor on the alias name at its own declaration (line 0, inside
+        // "RestartStrategy"). Find-references must enumerate both the
+        // declaration site and the parameter-annotation use site on line 3
+        // (ADR 0108: "find-references enumerates annotation sites").
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+        let path =
+            Utf8PathBuf::from_path_buf(unique_temp_dir("bt-2901-alias-refs").with_extension("bt"))
+                .expect("temp path is UTF-8");
+        let uri = open_test_file(backend, &path, ALIAS_REFERENCES_SOURCE);
+
+        let result = backend
+            .references(references_params(uri, 0, 10, true))
+            .await
+            .expect("rpc ok")
+            .expect("some locations");
+
+        let lines: HashSet<u32> = result.iter().map(|l| l.range.start.line).collect();
+        assert!(
+            lines.contains(&0),
+            "expected the alias declaration site (line 0), got {lines:?}"
+        );
+        assert!(
+            lines.contains(&3),
+            "expected the parameter-annotation use site (line 3), got {lines:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn references_on_type_alias_excludes_declaration_when_not_requested() {
+        // Same cursor, `includeDeclaration = false`: only the annotation use
+        // site should remain.
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+        let path = Utf8PathBuf::from_path_buf(
+            unique_temp_dir("bt-2901-alias-refs-no-decl").with_extension("bt"),
+        )
+        .expect("temp path is UTF-8");
+        let uri = open_test_file(backend, &path, ALIAS_REFERENCES_SOURCE);
+
+        let result = backend
+            .references(references_params(uri, 0, 10, false))
+            .await
+            .expect("rpc ok")
+            .expect("some locations");
+
+        let lines: HashSet<u32> = result.iter().map(|l| l.range.start.line).collect();
+        assert!(
+            !lines.contains(&0),
+            "declaration site (line 0) must be excluded when includeDeclaration = false, \
+             got {lines:?}"
+        );
+        assert!(
+            lines.contains(&3),
+            "annotation use site (line 3) must remain, got {lines:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn references_on_type_alias_warns_when_workspace_preload_incomplete() {
+        // ADR 0108: find-references coverage for a type alias is scoped to
+        // files compiled into the current build graph. `SimpleLanguageService`
+        // defaults to `project_complete = false` (no workspace preload has
+        // run in this test), so the handler must surface a
+        // `window/showMessage` warning rather than let the returned list
+        // silently read as exhaustive.
+        use futures_util::StreamExt;
+
+        let (service, mut socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+        let path = Utf8PathBuf::from_path_buf(
+            unique_temp_dir("bt-2901-alias-incomplete").with_extension("bt"),
+        )
+        .expect("temp path is UTF-8");
+        let uri = open_test_file(backend, &path, ALIAS_REFERENCES_SOURCE);
+
+        backend
+            .references(references_params(uri, 0, 10, true))
+            .await
+            .expect("rpc ok");
+
+        let notification = socket
+            .next()
+            .await
+            .expect("expected a window/showMessage notification");
+        assert_eq!(notification.method(), "window/showMessage");
+    }
+
+    #[tokio::test]
+    async fn references_on_type_alias_is_silent_when_workspace_preload_complete() {
+        // Same fixture, but with `project_complete = true` (as the LSP
+        // server sets after a full-coverage workspace preload, BT-2796) —
+        // find-references coverage is now known-exhaustive, so no warning
+        // should fire.
+        use futures_util::{FutureExt, StreamExt};
+
+        let (service, mut socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+        let path = Utf8PathBuf::from_path_buf(
+            unique_temp_dir("bt-2901-alias-complete").with_extension("bt"),
+        )
+        .expect("temp path is UTF-8");
+        let uri = open_test_file(backend, &path, ALIAS_REFERENCES_SOURCE);
+        {
+            let mut svc = backend.service.lock().expect("service lock");
+            svc.set_project_complete(true);
+        }
+
+        backend
+            .references(references_params(uri, 0, 10, true))
+            .await
+            .expect("rpc ok");
+
+        // No notification should have been queued — polling once must not
+        // yield a `window/showMessage`. `now_or_never` avoids blocking
+        // forever waiting on a notification that (correctly) never comes.
+        let pending = socket.next().now_or_never().flatten();
+        assert!(
+            pending.is_none(),
+            "expected no notification when the project is complete, got {pending:?}"
         );
     }
 
