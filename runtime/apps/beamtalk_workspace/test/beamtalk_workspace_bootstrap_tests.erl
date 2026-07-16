@@ -801,11 +801,34 @@ store_bootstrap_class_source_missing_file_test_() ->
 %% temp file is activated; file:read_file succeeds and the source text is
 %% stored in workspace_meta via set_class_source.
 store_bootstrap_class_source_success_test_() ->
-    {setup, fun() -> ensure_runtime() end,
+    {setup,
+        fun() ->
+            ensure_runtime(),
+            %% get_class_source/1 degrades silently to `undefined` unless
+            %% beamtalk_workspace_meta is actually running — it is started by
+            %% the beamtalk_workspace app supervision tree, not
+            %% beamtalk_runtime, so start it explicitly here (mirrors
+            %% beamtalk_repl_loader_precheck_tests.erl's fixture).
+            case whereis(beamtalk_workspace_meta) of
+                undefined ->
+                    {ok, _} = beamtalk_workspace_meta:start_link(#{
+                        workspace_id => <<"bootstrap_src_test_ws">>,
+                        project_path => undefined,
+                        created_at => erlang:system_time(second),
+                        repl => false
+                    });
+                _ ->
+                    ok
+            end
+        end,
         fun(_) ->
             cleanup_test_source_class('BT_SrcPresent'),
             code:purge('bt@BT_SrcPresent'),
-            code:delete('bt@BT_SrcPresent')
+            code:delete('bt@BT_SrcPresent'),
+            case whereis(beamtalk_workspace_meta) of
+                undefined -> ok;
+                MetaPid -> gen_server:stop(MetaPid)
+            end
         end,
         fun(_) ->
             [
@@ -827,7 +850,13 @@ store_bootstrap_class_source_success_test_() ->
                         ok = beamtalk_workspace_bootstrap:activate_project_modules(
                             list_to_binary(ProjDir)
                         ),
-                        ?assertNotEqual(undefined, beamtalk_class_registry:whereis_class(ClassName))
+                        ?assertNotEqual(
+                            undefined, beamtalk_class_registry:whereis_class(ClassName)
+                        ),
+                        ?assertEqual(
+                            "Object subclass: BT_SrcPresent.\n",
+                            beamtalk_workspace_meta:get_class_source(<<"BT_SrcPresent">>)
+                        )
                     after
                         remove_temp_project_dir(ProjDir),
                         code:del_path(EbinDir),
