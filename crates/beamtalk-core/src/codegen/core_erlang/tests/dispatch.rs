@@ -361,6 +361,7 @@ fn test_bt897_subdirectory_module_name_consistency() {
 
     let module = Module {
         classes: vec![class],
+        type_aliases: Vec::new(),
         expressions: vec![],
         method_definitions: vec![],
         protocols: Vec::new(),
@@ -1241,6 +1242,7 @@ fn test_standalone_class_reference_uses_dynamic_module_name() {
     };
 
     let module = Module {
+        type_aliases: Vec::new(),
         expressions: vec![bare(expr)],
         classes: vec![],
         method_definitions: Vec::new(),
@@ -1291,6 +1293,7 @@ fn test_standalone_class_reference_validates_undefined_classes() {
     };
 
     let module = Module {
+        type_aliases: Vec::new(),
         expressions: vec![bare(expr)],
         classes: vec![],
         method_definitions: Vec::new(),
@@ -2791,6 +2794,224 @@ fn test_self_call_as_last_expression_threads_state() {
     );
 }
 
+#[test]
+fn test_self_call_error_branch_handles_both_error_shapes() {
+    // BT-2816: A self-send's error branch must handle TWO distinct shapes
+    // returned by safe_dispatch/dispatch, not just one:
+    //
+    // 1. A caught exception: safe_dispatch/3's try/catch packs it as the
+    //    3-tuple {'error', {Type, Reason, Stacktrace}, State} — must be
+    //    destructured and routed through beamtalk_exception_handler:reraise/4
+    //    (with a selector/class breadcrumb — see BT-2822's
+    //    test_self_call_error_branch_threads_selector_class_breadcrumb below)
+    //    (passing the whole triple straight to beamtalk_error:raise/1 crashes
+    //    with function_clause, since raise/1 only accepts a raw
+    //    #beamtalk_error{} record — the original BT-2816 bug).
+    // 2. A plain returned error: dispatch/4's DNU fallback (and other
+    //    non-exception error paths) *return* {'error', Error, State} where
+    //    Error is a bare #beamtalk_error{} record — never reaching
+    //    safe_dispatch's try/catch at all. This shape must still fall through
+    //    to a `call 'beamtalk_error':'raise'(Error)` clause, mirroring the
+    //    two-clause pattern already used at the handle_cast/handle_info
+    //    boundary (gen_server/callbacks.rs) — dropping this fallback clause
+    //    would crash a self-send that resolves to DNU with case_clause.
+    let src = concat!(
+        "Actor subclass: Srv\n",
+        "  state: value = 0\n\n",
+        "  setup =>\n",
+        "    self.value := 42\n\n",
+        "  doWork =>\n",
+        "    self setup\n",
+        "    self.value\n",
+    );
+    let code = codegen_source(src);
+
+    // Clause 1: destructured triple routed through reraise/4 (with a
+    // selector/class breadcrumb, since BT-2822).
+    assert!(
+        code.contains("call 'beamtalk_exception_handler':'reraise'("),
+        "Self-dispatch error branch must destructure the caught-exception \
+         triple via beamtalk_exception_handler:reraise/4. Got:\n{code}"
+    );
+    // Clause 2: fallback for a plain #beamtalk_error{} returned (not caught).
+    assert!(
+        code.contains("call 'beamtalk_error':'raise'("),
+        "Self-dispatch error branch must keep the plain-error fallback clause \
+         (e.g. DNU returns from dispatch/4 that never reach safe_dispatch's \
+         try/catch). Got:\n{code}"
+    );
+    // The buggy pre-fix form (raising the whole triple directly) must be gone.
+    assert!(
+        !code.contains("call 'beamtalk_error':'raise'(SelfError"),
+        "Self-dispatch must not pass the raw {{Type, Reason, Stacktrace}} \
+         triple straight to beamtalk_error:raise/1. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_self_call_error_branch_threads_selector_class_breadcrumb() {
+    // BT-2822 (BT-2816 follow-up): the caught-exception clause of a
+    // self-dispatch error branch must call reraise/4 with a
+    // #{selector => ..., class => ...} breadcrumb — mirroring
+    // beamtalk_actor:sync_send_remote/3's cross-actor Context construction —
+    // so a raw Erlang error escaping a forwarded self-send gets the same
+    // `ClassName>>selector: ...` location prefix as the cross-actor case.
+    //
+    // BT-2833: `class` is now resolved via a runtime `lookup_class/1` call
+    // on `self()` — not a compile-time literal atom baked in from
+    // `class_name()` — so a self-send inside a method a subclass inherits
+    // without overriding still reports the actor's actual runtime class,
+    // not the compile-time defining class. Since the fix makes the
+    // breadcrumb codegen entirely class-name-agnostic (it never emits a
+    // literal atom for 'class' at all, regardless of which class is being
+    // compiled), a single compile of one class is sufficient to prove the
+    // mechanism.
+    //
+    // A BUnit e2e test (subclass instance invoking a purely-inherited,
+    // non-overridden self-dispatch method that raises) was attempted but is
+    // currently blocked by a separate, pre-existing bug: the runtime
+    // hierarchy-walk fallback (`generate_hierarchy_walk` in
+    // `gen_server/dispatch.rs`) discards the real error returned by
+    // `beamtalk_dispatch:super/5` whenever an inherited method raises,
+    // fabricating a bogus `does_not_understand` instead — masking this
+    // fix's effect for any selector not matched locally. Tracked in BT-2842.
+    let src = concat!(
+        "Actor subclass: Srv\n",
+        "  state: value = 0\n\n",
+        "  setup =>\n",
+        "    self.value := 42\n\n",
+        "  doWork =>\n",
+        "    self setup\n",
+        "    self.value\n",
+    );
+    let code = codegen_source(src);
+
+    // reraise/4 (four args: Type, Reason, Stacktrace, Context) is used, not
+    // the context-free reraise/3. The 4th arg is a breadcrumb map whose
+    // 'selector' is a literal atom (known at compile time) and whose 'class'
+    // is a variable bound just above from a runtime lookup_class/1 call —
+    // the exact fresh-var numbering is an implementation detail. Note the
+    // capture group is `\w+` (no quotes) — this would fail to match a
+    // literal quoted atom like 'Srv', so a successful match here already
+    // proves 'class' is a variable, not a compile-time literal.
+    let reraise_with_breadcrumb = regex::Regex::new(
+        r"call 'beamtalk_exception_handler':'reraise'\(\w+, \w+, \w+, ~\{'selector' => 'setup', 'class' => (\w+)\}~\)",
+    )
+    .unwrap();
+    let captures = reraise_with_breadcrumb.captures(&code).unwrap_or_else(|| {
+        panic!(
+            "Self-dispatch error branch must call reraise/4 with a \
+             #{{selector => 'setup', class => <runtime-lookup var>}} \
+             breadcrumb map. Got:\n{code}"
+        )
+    });
+    let class_var = &captures[1];
+
+    // The 'class' value must come from a runtime lookup, not a literal
+    // 'Srv' atom — BT-2833 fixes the inheritance mismatch by resolving the
+    // actor's actual runtime class via beamtalk_actor:lookup_class/1.
+    let lookup_binding = regex::Regex::new(&format!(
+        r"let {class_var} = call 'beamtalk_actor':'lookup_class'\(call 'erlang':'self'\(\)\) in"
+    ))
+    .unwrap();
+    assert!(
+        lookup_binding.is_match(&code),
+        "Breadcrumb 'class' variable {class_var} must be bound from a \
+         runtime beamtalk_actor:lookup_class(self()) call. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_self_call_error_branch_sealed_direct_call_breadcrumb() {
+    // BT-2833: generate_direct_sealed_call (a sealed class self-sending one
+    // of its own sealed methods, in *closed* expression position — e.g. as
+    // the receiver of another message) had no breadcrumb coverage at all.
+    // A self-send nested inside a binary op forces codegen through the
+    // closed generate_self_dispatch -> generate_sealed_self_dispatch ->
+    // generate_direct_sealed_call path (the most optimized sealed-method
+    // call, bypassing safe_dispatch/dispatch entirely) rather than the
+    // top-level-statement generate_self_dispatch_open path already covered
+    // by test_self_call_error_branch_threads_selector_class_breadcrumb.
+    let src = concat!(
+        "sealed Actor subclass: Srv\n",
+        "  state: value = 0\n\n",
+        "  setup => 42\n\n",
+        "  doWork =>\n",
+        "    self setup + 1\n",
+    );
+    let code = codegen_source(src);
+
+    // Confirm this actually reached the direct __sealed_setup standalone
+    // function call — otherwise the test wouldn't be exercising
+    // generate_direct_sealed_call at all.
+    assert!(
+        code.contains("'__sealed_setup'"),
+        "Test setup must exercise generate_direct_sealed_call (direct \
+         __sealed_setup call), not a different self-dispatch path. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'beamtalk_actor':'lookup_class'(call 'erlang':'self'())"),
+        "generate_direct_sealed_call's error branch must resolve the \
+         breadcrumb 'class' via a runtime lookup_class(self()) call. Got:\n{code}"
+    );
+    let reraise_with_breadcrumb = regex::Regex::new(
+        r"call 'beamtalk_exception_handler':'reraise'\(\w+, \w+, \w+, ~\{'selector' => 'setup', 'class' => \w+\}~\)",
+    )
+    .unwrap();
+    assert!(
+        reraise_with_breadcrumb.is_match(&code),
+        "generate_direct_sealed_call must thread the selector/class \
+         breadcrumb into reraise/4. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_self_call_error_branch_tier2_self_send_breadcrumb() {
+    // BT-2833: generate_tier2_self_send_open (a self-send passing a
+    // stateful block argument — one that captures and mutates an outer
+    // local, e.g. a user-defined HOM invocation like
+    // `self eachItem: [:x | count := count + x]`) had no breadcrumb
+    // coverage at all. Mirrors the real-world pattern verified in
+    // stdlib/test/fixtures/hom_composability_actor.bt's
+    // testMutatingBlockInCustomLoop.
+    let src = concat!(
+        "Actor subclass: Srv\n",
+        "  state: value = 0\n\n",
+        "  eachItem: aBlock =>\n",
+        "    last := nil\n",
+        "    #(1, 2, 3) do: [:each | last := aBlock value: each]\n",
+        "    last\n\n",
+        "  doWork =>\n",
+        "    count := 0\n",
+        "    self eachItem: [:x | count := count + x]\n",
+        "    count\n",
+    );
+    let code = codegen_source(src);
+
+    // Sanity: the Tier 2 stateful-block plumbing (StateAcc threading) is
+    // present, proving this test exercises generate_tier2_self_send_open
+    // and not a plain self-dispatch path.
+    assert!(
+        code.contains("StateAcc"),
+        "Test setup must exercise the Tier 2 stateful self-send path \
+         (generate_tier2_self_send_open). Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'beamtalk_actor':'lookup_class'(call 'erlang':'self'())"),
+        "generate_tier2_self_send_open's error branch must resolve the \
+         breadcrumb 'class' via a runtime lookup_class(self()) call. Got:\n{code}"
+    );
+    let reraise_with_breadcrumb = regex::Regex::new(
+        r"call 'beamtalk_exception_handler':'reraise'\(\w+, \w+, \w+, ~\{'selector' => 'eachItem:', 'class' => \w+\}~\)",
+    )
+    .unwrap();
+    assert!(
+        reraise_with_breadcrumb.is_match(&code),
+        "generate_tier2_self_send_open must thread the selector/class \
+         breadcrumb into reraise/4. Got:\n{code}"
+    );
+}
+
 // --- ADR 0070 Phase 2: Package-qualified class reference codegen tests ---
 
 #[test]
@@ -2808,6 +3029,7 @@ fn test_qualified_class_reference_standalone() {
     };
 
     let module = Module {
+        type_aliases: Vec::new(),
         expressions: vec![bare(expr)],
         classes: vec![],
         method_definitions: Vec::new(),

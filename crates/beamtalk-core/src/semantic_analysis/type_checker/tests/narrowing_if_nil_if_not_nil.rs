@@ -12,100 +12,6 @@ use super::common::*;
 // inferred both branches as `Block(..., R)` with narrowed params — this test
 // family locks in that the outer send's return type is the branch union.
 
-/// Assert the module's `type_map` contains a Union whose members' class names
-/// match `expected` (order-insensitive). Returns the matching type on success.
-fn find_union_in_type_map<'a>(
-    type_map: &'a crate::semantic_analysis::type_checker::TypeMap,
-    expected: &[&str],
-) -> Option<&'a InferredType> {
-    type_map.iter().find_map(|(_, ty)| {
-        if let InferredType::Union { members, .. } = ty {
-            let names: std::collections::BTreeSet<String> = members
-                .iter()
-                .filter_map(|m| m.as_known().map(std::string::ToString::to_string))
-                .collect();
-            let want: std::collections::BTreeSet<String> =
-                expected.iter().map(|s| (*s).to_string()).collect();
-            if names == want {
-                return Some(ty);
-            }
-        }
-        None
-    })
-}
-
-/// Walk the module AST to find the first `MessageSend` whose selector name
-/// matches `selector_name`, then look up its inferred type in `type_map`.
-/// Used by BT-2047 tests to assert the exact type of the `ifNil:ifNotNil:`
-/// expression — checking diagnostics alone isn't enough because
-/// `check_return_type` bails on `Union` / `Dynamic` inferred bodies.
-///
-/// Re-expressed under BT-2063 on top of the shared
-/// [`crate::ast::visitor::Visitor`] trait so that variant coverage is
-/// exhaustive (`ArrayLiteral`, `ListLiteral`, `Match`, etc. are all
-/// searched). Unlike the default opaque-block visitor, this walker
-/// overrides `visit_block` to descend: the test needs to find sends
-/// anywhere in the AST, including inside nested block bodies.
-fn find_send_inferred_ty<'a>(
-    module: &'a crate::ast::Module,
-    type_map: &'a crate::semantic_analysis::type_checker::TypeMap,
-    selector_name: &'a str,
-) -> Option<&'a InferredType> {
-    use crate::ast::visitor::{Visitor, walk_block, walk_expr};
-    use crate::ast::{Expression, MessageSelector};
-
-    struct Finder<'a> {
-        type_map: &'a crate::semantic_analysis::type_checker::TypeMap,
-        selector_name: &'a str,
-        found: Option<&'a InferredType>,
-    }
-    impl<'a> Visitor<'a> for Finder<'a> {
-        fn visit_expr(&mut self, e: &'a Expression) {
-            if self.found.is_some() {
-                return;
-            }
-            if let Expression::MessageSend { selector, span, .. } = e {
-                let this_sel = match selector {
-                    MessageSelector::Unary(s) | MessageSelector::Binary(s) => s.to_string(),
-                    MessageSelector::Keyword(parts) => {
-                        parts.iter().map(|p| p.keyword.as_str()).collect::<String>()
-                    }
-                };
-                if this_sel == self.selector_name {
-                    // Match: capture the outermost send's type. Intentionally
-                    // do NOT descend into receiver/arguments — tests want the
-                    // outermost `ifNil:ifNotNil:` send, not a matching send
-                    // buried inside its arguments.
-                    self.found = self.type_map.get(*span);
-                    return;
-                }
-            }
-            walk_expr(self, e);
-        }
-        fn visit_block(&mut self, block: &'a crate::ast::Block) {
-            // Opt-in descent: tests want to see into nested blocks.
-            walk_block(self, block);
-        }
-    }
-
-    let mut finder = Finder {
-        type_map,
-        selector_name,
-        found: None,
-    };
-    for class in &module.classes {
-        for method in &class.methods {
-            for stmt in &method.body {
-                finder.visit_expr(&stmt.expression);
-                if finder.found.is_some() {
-                    return finder.found;
-                }
-            }
-        }
-    }
-    finder.found
-}
-
 /// Minimal repro from the BT-2047 issue: `self.snapshot ifNil: [42] ifNotNil:
 /// [:snap | "got one"]` should type as `Integer | String`, not Dynamic.
 #[test]
@@ -291,5 +197,348 @@ typed Object subclass: Repro
         matches!(send_ty, InferredType::Known { class_name, .. } if class_name.as_str() == "String"),
         "diverging `ifNil: [^42]` with distinct `ifNotNil:` type should project to \
          Known(\"String\"), not `Integer | String`; got: {send_ty:?}",
+    );
+}
+
+// ── BT-2824: solo `ifNil:` / `ifNotNil:` branch-union return types ──
+//
+// Solo `recv ifNil: [block]` / `recv ifNotNil: [:v | block]` on a `T | Nil`
+// receiver previously fell through to the generic union-send dispatch, which
+// has no way to read the block's actual return type from a bare `Block`
+// stdlib signature — the whole expression collapsed to `Dynamic`. These
+// tests lock in that solo sends now infer `T | R` / `R | Nil` the same way
+// the two-arm combinators already do (BT-2047).
+
+/// Regression test from the BT-2824 issue: a `typed` method with a declared
+/// concrete return type (`-> String`) whose body is `x ifNil: ["default"]`
+/// on a `String | Nil` field should type-check with the inferred type as
+/// `String`, not `Dynamic`.
+#[test]
+fn bt2824_solo_if_nil_dedups_to_field_type() {
+    let source = r#"
+typed Object subclass: Repro
+  field: name :: String | Nil = nil
+
+  go -> String =>
+    ^self.name ifNil: [""]
+"#;
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    let send_ty = find_send_inferred_ty(&module, checker.type_map(), "ifNil:")
+        .expect("no ifNil: send found in type_map");
+    assert!(
+        matches!(send_ty, InferredType::Known { class_name, .. } if class_name.as_str() == "String"),
+        "`x ifNil: [\"\"]` on a `String | Nil` field should dedup to Known(\"String\"), \
+         not Dynamic; got: {send_ty:?}",
+    );
+    assert!(
+        checker
+            .diagnostics()
+            .iter()
+            .all(|d| d.severity != crate::source_analysis::Severity::Warning),
+        "expected no warnings, got: {:?}",
+        checker.diagnostics()
+    );
+}
+
+/// Distinct branch types: `Integer | Nil` field's `ifNil: ["none"]` should
+/// infer as `Integer | String` (T | R), not `Dynamic`.
+#[test]
+fn bt2824_solo_if_nil_returns_branch_union() {
+    let source = r#"
+typed Object subclass: Repro
+  field: count :: Integer | Nil = nil
+
+  go =>
+    self.count ifNil: ["none"]
+"#;
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    assert!(
+        find_union_in_type_map(checker.type_map(), &["Integer", "String"]).is_some(),
+        "expected `Integer | String` in type_map; got entries: {:?}",
+        checker
+            .type_map()
+            .iter()
+            .map(|(_, ty)| ty.display_name())
+            .collect::<Vec<_>>()
+    );
+}
+
+/// Solo `ifNotNil:` on a `T | Nil` receiver infers `R | Nil` — the block's
+/// return type (executed on the non-nil branch, with `v` narrowed to `T`)
+/// unioned with `Nil` (the branch where `ifNotNil:` returns `self`).
+#[test]
+fn bt2824_solo_if_not_nil_returns_branch_union() {
+    let source = r"
+typed Object subclass: Repro
+  field: name :: String | Nil = nil
+
+  go =>
+    self.name ifNotNil: [:n | n size]
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    assert!(
+        find_union_in_type_map(checker.type_map(), &["Integer", "UndefinedObject"]).is_some(),
+        "expected `Integer | Nil` in type_map; got entries: {:?}",
+        checker
+            .type_map()
+            .iter()
+            .map(|(_, ty)| ty.display_name())
+            .collect::<Vec<_>>()
+    );
+}
+
+/// A non-nullable receiver's solo `ifNotNil:` must NOT gain a spurious `Nil`
+/// member — the nil branch is impossible, so the bypass should not fire and
+/// the pre-existing (unrelated to this bug) dispatch path is used instead.
+#[test]
+fn bt2824_solo_if_not_nil_on_non_nullable_receiver_unaffected() {
+    let source = r#"
+typed Object subclass: Repro
+  field: name :: String = ""
+
+  go =>
+    self.name ifNotNil: [:n | n size]
+"#;
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    assert!(
+        find_union_in_type_map(checker.type_map(), &["Integer", "UndefinedObject"]).is_none(),
+        "a non-nullable `String` receiver must not gain a spurious `Nil` member \
+         from solo `ifNotNil:`; got entries: {:?}",
+        checker
+            .type_map()
+            .iter()
+            .map(|(_, ty)| ty.display_name())
+            .collect::<Vec<_>>()
+    );
+}
+
+/// A non-nullable receiver's solo `ifNil:` must NOT gain a spurious extra
+/// member either — dual of the `ifNotNil:` case above, exercised separately
+/// because `ifNil:`'s self-branch goes through `non_nil_type` (a different
+/// code path than `ifNotNil:`'s hardcoded `Nil` self-branch).
+#[test]
+fn bt2824_solo_if_nil_on_non_nullable_receiver_unaffected() {
+    let source = r#"
+typed Object subclass: Repro
+  field: count :: Integer = 0
+
+  go =>
+    self.count ifNil: ["none"]
+"#;
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    assert!(
+        find_union_in_type_map(checker.type_map(), &["Integer", "String"]).is_none(),
+        "a non-nullable `Integer` receiver must not gain a spurious `String` member \
+         from solo `ifNil:`; got entries: {:?}",
+        checker
+            .type_map()
+            .iter()
+            .map(|(_, ty)| ty.display_name())
+            .collect::<Vec<_>>()
+    );
+}
+
+/// A receiver union with more than two members (`String | Integer | Nil`)
+/// still infers correctly: `ifNil:` widens by the block's return type on top
+/// of the full non-nil remainder, not just a single member.
+#[test]
+fn bt2824_solo_if_nil_on_three_member_union() {
+    let source = r"
+typed Object subclass: Repro
+  field: value :: String | Integer | Nil = nil
+
+  go =>
+    self.value ifNil: [true]
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    assert!(
+        find_union_in_type_map(checker.type_map(), &["String", "Integer", "Boolean"]).is_some(),
+        "expected `String | Integer | Boolean` in type_map; got entries: {:?}",
+        checker
+            .type_map()
+            .iter()
+            .map(|(_, ty)| ty.display_name())
+            .collect::<Vec<_>>()
+    );
+}
+
+/// A non-local return (`^`) inside the solo `ifNil:` block exits the method
+/// before the block's value is observed — the diverging branch contributes
+/// `Never` (skipped by `union_of`), so the expression types as just the
+/// non-nil branch, not `T | Integer`.
+#[test]
+fn bt2824_solo_if_nil_diverging_block_contributes_only_self_branch() {
+    let source = r#"
+typed Object subclass: Repro
+  field: name :: String | Nil = nil
+
+  go -> String =>
+    ^self.name ifNil: [^"early"]
+"#;
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    let send_ty = find_send_inferred_ty(&module, checker.type_map(), "ifNil:")
+        .expect("no ifNil: send found in type_map");
+    assert!(
+        matches!(send_ty, InferredType::Known { class_name, .. } if class_name.as_str() == "String"),
+        "diverging `ifNil: [^\"early\"]` branch should project to Never — \
+         expression should be Known(\"String\"), got: {send_ty:?}",
+    );
+}
+
+/// Same divergence check for solo `ifNotNil:`: `^` inside the not-nil block
+/// contributes `Never`, so the expression types as just the nil self-branch.
+#[test]
+fn bt2824_solo_if_not_nil_diverging_block_contributes_only_self_branch() {
+    let source = r"
+typed Object subclass: Repro
+  field: name :: String | Nil = nil
+
+  go -> Nil =>
+    ^self.name ifNotNil: [:n | ^n size]
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    let send_ty = find_send_inferred_ty(&module, checker.type_map(), "ifNotNil:")
+        .expect("no ifNotNil: send found in type_map");
+    assert!(
+        matches!(send_ty, InferredType::Known { class_name, .. } if class_name.as_str() == "UndefinedObject"),
+        "diverging `ifNotNil: [:n | ^...]` branch should project to Never — \
+         expression should be Known(\"UndefinedObject\") (Nil), got: {send_ty:?}",
+    );
+}
+
+/// A non-block argument (e.g. a `Dynamic`-typed variable holding a block)
+/// isn't a well-formed `Block(...)` type, so `if_nil_solo_union_ret_ty` bails
+/// out and the send falls back to the pre-existing generic dispatch — it
+/// must not panic or otherwise mishandle the non-literal argument.
+#[test]
+fn bt2824_solo_if_nil_with_non_block_argument_does_not_panic() {
+    let source = r"
+typed Object subclass: Repro
+  field: name :: String | Nil = nil
+
+  go: aBlock =>
+    self.name ifNil: aBlock
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    // No panic is the primary assertion; also sanity-check a type was recorded.
+    assert!(
+        find_send_inferred_ty(&module, checker.type_map(), "ifNil:").is_some(),
+        "expected an inferred type to be recorded for the `ifNil:` send"
+    );
+}
+
+/// A literal-`nil` receiver (`Known("UndefinedObject")`, not a `Union`) is
+/// out of scope for `if_nil_solo_union_ret_ty` — the guard bails since the
+/// receiver isn't a `Union`, and the send falls back to the pre-existing
+/// generic dispatch path (`infer_args_with_block_context`). That path infers
+/// `Known("String")` correctly here: since the receiver is `Known` (not a
+/// `Union`), it resolves `UndefinedObject>>ifNil:`'s `Block(R) -> R` param
+/// signature and substitutes `R` from the block's actual argument type — the
+/// BT-2824 fix (which targets the `T | Nil` union case) doesn't touch or
+/// regress this already-correct path.
+#[test]
+fn bt2824_literal_nil_receiver_if_nil_falls_back_to_generic_dispatch() {
+    let source = r#"
+typed Object subclass: Repro
+  go =>
+    nil ifNil: ["a"]
+"#;
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
+        .0
+        .unwrap();
+
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+
+    let send_ty = find_send_inferred_ty(&module, checker.type_map(), "ifNil:")
+        .expect("no ifNil: send found in type_map");
+    assert!(
+        matches!(send_ty, InferredType::Known { class_name, .. } if class_name.as_str() == "String"),
+        "literal-nil receiver `ifNil:` falls back to the generic dispatch path, \
+         which correctly substitutes the method-local `R` generic from the \
+         block's type — expected Known(\"String\"), got: {send_ty:?}",
     );
 }

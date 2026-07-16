@@ -12,7 +12,8 @@ use crate::ast::{
     ClassDefinition, ClassModifiers, CommentAttachment, DeclaredKeyword, ExpectCategory,
     Expression, ExpressionStatement, Identifier, KeywordPart, MessageSelector, MethodDefinition,
     MethodKind, MethodModifiers, ParameterDefinition, ProtocolDefinition, ProtocolMethodSignature,
-    StandaloneMethodDefinition, StateDeclaration, TypeAnnotation, TypeParamDecl,
+    StandaloneMethodDefinition, StateDeclaration, TypeAliasDefinition, TypeAnnotation,
+    TypeParamDecl,
 };
 use crate::source_analysis::{Span, TokenKind};
 use ecow::EcoString;
@@ -51,6 +52,43 @@ fn is_comma_opt(kind: Option<&TokenKind>) -> bool {
 /// annotations are subtypes of `Symbol` (ADR 0068).
 fn is_type_name_token(kind: Option<&TokenKind>) -> bool {
     matches!(kind, Some(TokenKind::Identifier(_) | TokenKind::Symbol(_)))
+}
+
+/// BT-1856 / BT-2829: a consumed declaration-level `@expect category`,
+/// bundled with the doc comment and plain leading comments that sat in its
+/// own leading trivia (see [`Parser::parse_pending_declaration_expect`]).
+/// `Default` (all `None`/empty) means no `@expect` was present.
+#[derive(Default)]
+struct PendingDeclarationExpect {
+    expect: Option<(ExpectCategory, Option<EcoString>, Span)>,
+    doc_comment: Option<String>,
+    comments: CommentAttachment,
+}
+
+impl PendingDeclarationExpect {
+    /// Applies this pending `@expect`/doc comment/leading comments onto the
+    /// declaration that follows it in source. `expect` always overwrites (a
+    /// declaration can't already carry one — nothing sets it before this
+    /// call); `doc_comment`/`comments` only fill in if the declaration's own
+    /// token had none of its own (BT-2829: both were left dangling on the
+    /// `@expect` token's leading trivia otherwise — see
+    /// `Parser::parse_pending_declaration_expect`).
+    fn apply_to(
+        self,
+        expect: &mut Option<(ExpectCategory, Option<EcoString>, Span)>,
+        doc_comment: &mut Option<String>,
+        comments: &mut CommentAttachment,
+    ) {
+        if self.expect.is_some() {
+            *expect = self.expect;
+        }
+        if doc_comment.is_none() {
+            *doc_comment = self.doc_comment;
+        }
+        if comments.is_empty() {
+            *comments = self.comments;
+        }
+    }
 }
 
 impl Parser {
@@ -354,6 +392,40 @@ impl Parser {
         }
     }
 
+    /// BT-1856: If the current token is a declaration-level `@expect
+    /// category`, consume it (and its own doc comment / leading `//`
+    /// comments) for the caller to attach to whichever state/method
+    /// declaration follows. Returns `PendingDeclarationExpect::default()`
+    /// (all `None`/empty) when the current token isn't `@expect`.
+    ///
+    /// BT-2829: both a `/// ...` doc comment and any leading `//`/`/* */`
+    /// comments written above a declaration-level `@expect` sit in the
+    /// `@expect` token's own leading trivia, not the following
+    /// declaration's — `collect_doc_comment()` and
+    /// `collect_comment_attachment()` only ever look at the *current* token.
+    /// Collect both here, while `@expect` is still current, so neither is
+    /// left dangling — the doc comment would otherwise surface as a spurious
+    /// "doc comment not attached" warning, and the plain comments would
+    /// silently vanish (no such warning exists for them).
+    fn parse_pending_declaration_expect(&mut self) -> PendingDeclarationExpect {
+        if !matches!(self.current_kind(), TokenKind::AtExpect) {
+            return PendingDeclarationExpect::default();
+        }
+        // Doc comment first, then plain comments — same order
+        // `parse_method_definition`/`parse_state_declaration` use, so a doc
+        // comment that successfully attaches here is not *also* re-added as
+        // a fallback plain comment by `collect_comment_attachment`'s own
+        // `unattached_doc_comment_indices` check.
+        let doc_comment = self.collect_doc_comment();
+        let comments = self.collect_comment_attachment();
+        let expect = Some(self.parse_declaration_expect());
+        PendingDeclarationExpect {
+            expect,
+            doc_comment,
+            comments,
+        }
+    }
+
     /// Parses the body of a class (state declarations and methods).
     ///
     /// State declarations start with `state:`.
@@ -382,32 +454,31 @@ impl Parser {
         while !self.is_at_end()
             && !self.is_at_class_definition()
             && !self.is_at_protocol_definition()
+            && !self.is_at_type_alias_definition()
             && !self.is_at_standalone_method_definition()
         {
-            // BT-1856: Check for `@expect category` before a declaration.
-            // Consume it and attach to the next state/method declaration.
-            let pending_expect = if matches!(self.current_kind(), TokenKind::AtExpect) {
-                Some(self.parse_declaration_expect())
-            } else {
-                None
-            };
+            let pending = self.parse_pending_declaration_expect();
 
             // Check for state/field declaration: `state: fieldName ...` or `field: fieldName ...`
             if matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:" || k == "field:")
             {
                 if let Some(mut state_decl) = self.parse_state_declaration() {
-                    if let Some(expect) = pending_expect {
-                        state_decl.expect = Some(expect);
-                    }
+                    pending.apply_to(
+                        &mut state_decl.expect,
+                        &mut state_decl.doc_comment,
+                        &mut state_decl.comments,
+                    );
                     state.push(state_decl);
                 }
             }
             // Check for class variable declaration: `classState: varName ...`
             else if matches!(self.current_kind(), TokenKind::Keyword(k) if k == "classState:") {
                 if let Some(mut classvar_decl) = self.parse_classvar_declaration() {
-                    if let Some(expect) = pending_expect {
-                        classvar_decl.expect = Some(expect);
-                    }
+                    pending.apply_to(
+                        &mut classvar_decl.expect,
+                        &mut classvar_decl.doc_comment,
+                        &mut classvar_decl.comments,
+                    );
                     class_variables.push(classvar_decl);
                 }
             }
@@ -438,9 +509,11 @@ impl Parser {
                     found
                 };
                 if let Some(mut method) = self.parse_method_definition() {
-                    if let Some(expect) = pending_expect {
-                        method.expect = Some(expect);
-                    }
+                    pending.apply_to(
+                        &mut method.expect,
+                        &mut method.doc_comment,
+                        &mut method.comments,
+                    );
                     if is_class_method {
                         // `parse_method_definition` also records the `class ` modifier,
                         // but set it here too so every `class_methods` entry carries the
@@ -468,7 +541,7 @@ impl Parser {
                 }
             } else {
                 // BT-1856: @expect before an invalid position (e.g., end of class body)
-                if let Some((_, _, span)) = pending_expect {
+                if let Some((_, _, span)) = pending.expect {
                     self.diagnostics.push(Diagnostic::error(
                         "@expect in a class body must precede a state/field or method declaration",
                         span,
@@ -486,6 +559,38 @@ impl Parser {
         self.in_class_body = was_in_class_body;
 
         (state, methods, class_methods, class_variables)
+    }
+
+    /// BT-2829: checks whether the current token is a declaration-level
+    /// `@expect` — one sitting at the same class-member boundary
+    /// (indentation <= 2, *inside* a class body) a fresh method/state
+    /// declaration would.
+    ///
+    /// `parse_method_body`'s statement loop must stop here exactly like it
+    /// stops at `is_at_method_definition()`: otherwise a declaration-level
+    /// `@expect` gets swallowed as a trailing statement of the *previous*
+    /// method's body, `parse_class_body`'s own `pending_expect` capture
+    /// (which only triggers when `AtExpect` is the *current* token at the
+    /// top of its loop) never sees it, and the directive's target
+    /// method/state-declaration keeps `expect: None` — the suppression
+    /// silently fails and the swallowed directive itself gets reported stale.
+    /// Statement-level `@expect` inside a body (e.g. as the first statement
+    /// of a method) sits deeper than col 2 and is unaffected.
+    ///
+    /// Unlike `is_at_method_definition()`, this is gated on `in_class_body`
+    /// alone (no `!self.in_class_body` fallback): declaration-level `@expect`
+    /// is only ever captured by `parse_class_body`'s `pending_expect` loop,
+    /// so outside a class body — e.g. a Tonel-style standalone `Class >>
+    /// selector => body` method, which has no such capture — an `@expect`
+    /// can only ever be the ordinary statement-level directive, never a
+    /// boundary, regardless of indentation.
+    pub(super) fn is_at_declaration_level_expect(&self) -> bool {
+        self.in_class_body
+            && self
+                .current_token()
+                .indentation_after_newline()
+                .is_none_or(|col| col <= 2)
+            && matches!(self.current_kind(), TokenKind::AtExpect)
     }
 
     /// Checks if the current position is at the start of a method definition.
@@ -1447,6 +1552,46 @@ impl Parser {
         }
     }
 
+    /// Checks whether the current position starts a new class/protocol/
+    /// type-alias/method/standalone-method declaration, or a `state:`/
+    /// `field:`/`classState:` keyword — the set of tokens that always end a
+    /// method body no matter how the body was left (a trailing period, a
+    /// cast `!`, or error recovery). Factored out of `parse_method_body`
+    /// because the same six-way check is needed at three separate exit
+    /// points there.
+    fn is_at_member_boundary(&self) -> bool {
+        self.is_at_end()
+            || self.is_at_class_definition()
+            || self.is_at_protocol_definition()
+            || self.is_at_type_alias_boundary()
+            || self.is_at_method_definition()
+            || self.is_at_standalone_method_definition()
+            || matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:" || k == "field:" || k == "classState:")
+    }
+
+    /// `is_at_type_alias_definition()`, gated by the same indentation guard
+    /// `is_at_method_definition()` uses in `parse_method_body` (BT-1294).
+    ///
+    /// Without this guard, an in-body expression like `type Port = 8080`
+    /// (`type` used as an ordinary variable, sent the unary message `Port`,
+    /// compared with `=`) token-matches the type-alias pattern and would
+    /// falsely truncate the method body — violating the ADR's promise that
+    /// `type` "remains a legal identifier everywhere else."
+    fn is_at_type_alias_boundary(&self) -> bool {
+        // When `in_class_body` is false (standalone method bodies only — protocol
+        // bodies use the unwrapped `is_at_type_alias_definition()` directly),
+        // the `!self.in_class_body` arm short-circuits the `||`, skipping the
+        // indentation check. This is safe because `= expr` is not a valid
+        // Beamtalk binary expression, so the `type Uppercase =` pattern cannot
+        // appear as a legitimate statement start outside declaration position.
+        (!self.in_class_body
+            || self
+                .current_token()
+                .indentation_after_newline()
+                .is_none_or(|col| col <= 2))
+            && self.is_at_type_alias_definition()
+    }
+
     /// Parses a method body (expressions until the next method or end of class).
     ///
     /// Statements are separated by periods or newlines (BT-360).
@@ -1470,6 +1615,7 @@ impl Parser {
         while !self.is_at_end()
             && !self.is_at_class_definition()
             && !self.is_at_protocol_definition()
+            && !self.is_at_type_alias_boundary()
             && !(
                 // Only test is_at_method_definition when the token could plausibly
                 // be a class member (indentation <= 2). Deeper tokens are continuation
@@ -1481,6 +1627,10 @@ impl Parser {
                         .is_none_or(|col| col <= 2))
                     && self.is_at_method_definition()
             )
+            // BT-2829: a declaration-level `@expect` must end the body of the
+            // *previous* method, just like a fresh method/state declaration
+            // does — see `is_at_declaration_level_expect`'s doc comment.
+            && !self.is_at_declaration_level_expect()
             && !self.is_at_standalone_method_definition()
             && !matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:" || k == "field:" || k == "classState:")
             && !(self.in_class_body && self.current_token().indentation_after_newline() == Some(0))
@@ -1515,13 +1665,7 @@ impl Parser {
                 self.synchronize();
                 // BT-368: After synchronization, check if we can continue parsing
                 // If synchronize stopped at a method/class/state boundary, break
-                if self.is_at_end()
-                    || self.is_at_class_definition()
-                    || self.is_at_protocol_definition()
-                    || self.is_at_method_definition()
-                    || self.is_at_standalone_method_definition()
-                    || matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:" || k == "field:" || k == "classState:")
-                {
+                if self.is_at_member_boundary() {
                     break;
                 }
                 // Otherwise, synchronize stopped at a newline or period, so continue parsing
@@ -1532,13 +1676,7 @@ impl Parser {
             if self.match_token(&TokenKind::Period) {
                 // Explicit period — check if next token starts a new method/state/class
                 let period_span = self.tokens[self.current - 1].span();
-                if self.is_at_end()
-                    || self.is_at_class_definition()
-                    || self.is_at_protocol_definition()
-                    || self.is_at_method_definition()
-                    || self.is_at_standalone_method_definition()
-                    || matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:" || k == "field:" || k == "classState:")
-                {
+                if self.is_at_member_boundary() {
                     // Trailing period at end of method — not needed (BT-948)
                     self.diagnostics.push(
                         Diagnostic::lint("unnecessary trailing `.` at end of method", period_span)
@@ -1568,13 +1706,7 @@ impl Parser {
                     None => {}
                 }
                 // Check if next token starts a new method/state/class (same as period)
-                if self.is_at_end()
-                    || self.is_at_class_definition()
-                    || self.is_at_protocol_definition()
-                    || self.is_at_method_definition()
-                    || self.is_at_standalone_method_definition()
-                    || matches!(self.current_kind(), TokenKind::Keyword(k) if k == "state:" || k == "field:" || k == "classState:")
-                {
+                if self.is_at_member_boundary() {
                     break;
                 }
             } else if !self.is_at_end() && self.current_token().has_leading_newline() {
@@ -1672,6 +1804,86 @@ impl Parser {
             package,
             is_class_method,
             method,
+            span,
+        }
+    }
+
+    // ========================================================================
+    // Type Alias Definition Parsing (ADR 0108, Phase 1)
+    // ========================================================================
+
+    /// Parses a type alias definition: `type Name = <TypeAnnotation>`, or
+    /// `internal type Name = <TypeAnnotation>` (ADR 0071, ADR 0108 Phase 5).
+    ///
+    /// Syntax:
+    /// ```text
+    /// /// How a supervised child restarts after exit.
+    /// type RestartStrategy = #temporary | #transient | #permanent
+    ///
+    /// internal type ParserState = Integer | String
+    /// ```
+    ///
+    /// Only called after [`Self::is_at_type_alias_definition`] has confirmed the
+    /// `(internal)? type <UppercaseName> =` shape, so the optional `internal`
+    /// modifier, `type` keyword, the name, and the `=` are guaranteed present
+    /// here; only the right-hand-side annotation can still be malformed
+    /// (reported by `parse_type_annotation`/`parse_single_type_annotation`
+    /// themselves).
+    ///
+    /// Single-letter names (`type T = ...`) are a declaration error: ADR 0068
+    /// reserves every bare single uppercase letter in type position for
+    /// implicit method-local type parameters, so alias names and type-param
+    /// names must stay disjoint. The error is non-fatal — parsing continues so
+    /// the rest of the declaration (and any following declarations) still get
+    /// checked.
+    pub(super) fn parse_type_alias_definition(&mut self) -> TypeAliasDefinition {
+        let start = self.current_token().span();
+        let doc_comment = self.collect_doc_comment();
+        let comments = self.collect_comment_attachment();
+
+        let is_internal =
+            matches!(self.current_kind(), TokenKind::Identifier(name) if name == "internal");
+        if is_internal {
+            self.advance(); // consume `internal`
+        }
+
+        self.advance(); // consume `type`
+
+        let name = self.parse_identifier("Expected type alias name after 'type'");
+
+        // ADR 0108 Semantics: single-letter names are reserved for ADR 0068's
+        // implicit method-local type parameters (`is_generic_type_param`).
+        if name.name.chars().count() == 1 {
+            self.diagnostics.push(Diagnostic::error(
+                "single-letter type names are reserved for type parameters; \
+                 choose a longer name (e.g. `type OptionalInt = Integer | Nil`)",
+                name.span,
+            ));
+        }
+
+        if !matches!(self.current_kind(), TokenKind::BinarySelector(op) if op == "=") {
+            self.error("Expected '=' after type alias name in 'type' declaration");
+            let span = start.merge(name.span);
+            return TypeAliasDefinition {
+                name,
+                annotation: TypeAnnotation::Simple(Identifier::new("Error", span)),
+                is_internal,
+                comments,
+                doc_comment,
+                span,
+            };
+        }
+        self.advance(); // consume `=`
+
+        let annotation = self.parse_type_annotation();
+        let span = start.merge(annotation.span());
+
+        TypeAliasDefinition {
+            name,
+            annotation,
+            is_internal,
+            comments,
+            doc_comment,
             span,
         }
     }
@@ -1789,6 +2001,7 @@ impl Parser {
         while !self.is_at_end()
             && !self.is_at_protocol_definition()
             && !self.is_at_class_definition()
+            && !self.is_at_type_alias_definition()
             && !self.is_at_standalone_method_definition()
         {
             // BT-1618: Collect doc comment *before* checking for `class` prefix,

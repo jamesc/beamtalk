@@ -1169,6 +1169,17 @@ body.col-resizing .cockpit { transition: none; }
 .diff-toggle:hover { color: var(--ink); }
 .bt-changes-table .diff-row > td { padding-top: 0; }
 
+/* Reload Checks section (ADR 0105 Phase 1, BT-2779) — shares the Changes tab
+   with the ChangeLog table above it; a top margin separates the two. */
+.reload-findings-heading {
+  margin: 18px 0 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
 /* test-runner pane (BT-2557) */
 .test-pane { padding: var(--panel-pad); gap: 10px; }
 .test-toolbar { display: flex; align-items: center; gap: 8px; flex: none; }

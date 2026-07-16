@@ -8,7 +8,12 @@ pub mod attach;
 pub mod beam_environment;
 pub mod build;
 pub(crate) mod build_cache;
-pub mod build_layout;
+// BT-2823: `build_layout` moved to the `beamtalk_cli` lib crate so
+// `beamtalk-mcp` can share it for offline dependency-class resolution.
+// Re-exported here so existing `crate::commands::build_layout` /
+// `super::build_layout` references throughout this module tree keep working
+// unchanged.
+pub use beamtalk_cli::build_layout;
 pub(crate) mod build_stamp;
 pub mod build_stdlib;
 pub mod clean;
@@ -24,7 +29,9 @@ pub mod fmt;
 pub mod generate;
 pub mod lint;
 pub mod logs;
-pub mod manifest;
+// BT-2823: `manifest` moved to the `beamtalk_cli` lib crate for the same
+// reason as `build_layout` above.
+pub use beamtalk_cli::manifest;
 pub mod new;
 pub mod protocol;
 pub mod repl;

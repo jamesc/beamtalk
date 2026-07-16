@@ -16,6 +16,7 @@ fn add_processor_class(hierarchy: &mut ClassHierarchy) {
     use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
 
     let info = ClassInfo {
+        surface_incomplete: false,
         name: eco_string("Processor"),
         superclass: Some(eco_string("Value")),
         is_sealed: true,

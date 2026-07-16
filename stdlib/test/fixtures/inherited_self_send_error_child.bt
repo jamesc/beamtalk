@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2842: subclass that inherits both `triggerBadArithDirect` and
+// `triggerBadArithForwarded` from InheritedSelfSendErrorBase without
+// overriding either. Neither selector is matched locally by Child's own
+// dispatch/4 case statement, so resolving them requires
+// `beamtalk_dispatch:super/5`'s hierarchy walk — the code path that
+// previously masked the raw badarith as a bogus does_not_understand.
+
+InheritedSelfSendErrorBase subclass: InheritedSelfSendErrorChild
+
+  marker => #child

@@ -81,6 +81,7 @@ pub(crate) fn make_value_subclass_point() -> Module {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: Vec::new(),
         span: Span::new(0, 0),
         file_leading_comments: vec![],

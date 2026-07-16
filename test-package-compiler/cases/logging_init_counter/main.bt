@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test: Actor subclass with an intermediate parent AND its own initialize method.
+// Module name "logging_init_counter" matches class LoggingInitCounter.
+// has_parent_init=true (Counter is not Actor/Object) and has_initialize=true,
+// exercising the init_initialize_guarded_doc path inside the parent-init merge
+// case in gen_server/callbacks.rs generate_init_function — a combination not
+// covered by logging_counter (no initialize) or initializing_counter (direct
+// Actor subclass, no intermediate parent).
+
+Counter subclass: LoggingInitCounter
+  state: logCount = 0
+
+  initialize =>
+    self.logCount := 0
+
+  increment =>
+    self.logCount := self.logCount + 1
+    super increment
+
+  getLogCount => self.logCount

@@ -29,6 +29,9 @@ beamtalk_workspace_sup
   ├─ beamtalk_actor_sup           % Supervises user actors
   │   -- REPL mode only (repl=true) below this line --
   ├─ beamtalk_workspace_signature_store % Signature-generation store (ADR 0105, BT-2777)
+  ├─ beamtalk_workspace_shape_store % Shape-generation store (ADR 0105, BT-2780)
+  ├─ beamtalk_workspace_shape_recheck_worker % Serialised shape re-check queue (ADR 0105, BT-2780)
+  ├─ beamtalk_workspace_findings_store % Reload-induced findings store (ADR 0105, BT-2779)
   ├─ beamtalk_session_sup         % Supervises session shell processes (before repl_server)
   ├─ beamtalk_repl_server         % TCP server (session-per-connection)
   └─ beamtalk_idle_monitor        % Tracks activity, self-terminates if idle
@@ -229,6 +232,54 @@ repl_child_specs(true, TcpPort, WorkspaceId, BindAddr, AutoCleanup, MaxIdleSecon
             shutdown => 5000,
             type => worker,
             modules => [beamtalk_workspace_signature_store]
+        },
+
+        %% Shape-generation store (ADR 0105 Phase 2, BT-2780).
+        %% Per-class previous-generation `state:`/`field:` slot sets, captured
+        %% around a full class-body reload so a diff survives the module
+        %% replacement (companion to the signature store above, for shape
+        %% rather than per-method signature changes). Same REPL-mode-only
+        %% rationale as the signature store.
+        #{
+            id => beamtalk_workspace_shape_store,
+            start => {beamtalk_workspace_shape_store, start_link, []},
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [beamtalk_workspace_shape_store]
+        },
+
+        %% Shape re-check worker (ADR 0105 Phase 2, BT-2780).
+        %% Serialises `beamtalk_repl_loader:activate_module/3`'s shape
+        %% re-check behind a single gen_server mailbox so a burst of
+        %% class-body reloads can't flood `beamtalk_compiler_server` (ADR
+        %% 0022) with unbounded concurrent recheck traffic — see that
+        %% worker's moduledoc. Started right after the shape store it reads
+        %% from (via `beamtalk_repl_loader:maybe_trigger_shape_recheck/1`).
+        #{
+            id => beamtalk_workspace_shape_recheck_worker,
+            start => {beamtalk_workspace_shape_recheck_worker, start_link, []},
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [beamtalk_workspace_shape_recheck_worker]
+        },
+
+        %% Reload-induced findings store (ADR 0105 Phase 1, BT-2779).
+        %% Live, session-only findings keyed by caller class, published to
+        %% every surface (LSP / REPL / workspace UI) via the
+        %% `'ReloadCheckCompleted'` system announcement
+        %% (`beamtalk_repl_loader:maybe_trigger_recheck/4`). Downstream of the
+        %% signature and shape stores (a re-check needs a classified diff
+        %% first), so it starts right after them — before any REPL connection
+        %% could trigger an install.
+        #{
+            id => beamtalk_workspace_findings_store,
+            start => {beamtalk_workspace_findings_store, start_link, []},
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [beamtalk_workspace_findings_store]
         },
 
         %% Session supervisor (one child per REPL connection).

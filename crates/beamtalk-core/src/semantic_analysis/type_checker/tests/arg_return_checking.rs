@@ -767,3 +767,127 @@ fn test_all_type_warnings_are_severity_warning() {
         );
     }
 }
+
+// ---- BT-2845: cascade continuation messages (2nd+) run argument-type checking ----
+//
+// Prior to this fix, `Expression::Cascade`'s `for msg in messages` loop
+// inferred argument types purely for block-param propagation
+// (`infer_args_with_block_context`) but never fed the result into
+// `check_argument_types` — so a mistyped argument on the *second or later*
+// cascaded message went completely unchecked, unlike writing the same sends
+// as separate statements. These tests use the exact repro shape from the
+// issue: a `typed Value` class with two Integer-parameter methods sent in a
+// cascade from a class method.
+
+/// (a) A second cascade message with an incompatible `Known` (concrete)
+/// argument type must warn — mirrors the issue's exact repro.
+#[test]
+fn test_cascade_second_message_known_arg_mismatch_warns() {
+    let source = "\
+typed Value subclass: Thing
+  probeCascadeA: x :: Integer -> Thing => self
+  probeCascadeB: x :: Integer -> Integer => x + 1
+
+  class probeCascadeRun -> Nil =>
+    c := self new
+    c probeCascadeA: 1; probeCascadeB: \"wrong-type\"
+    nil
+";
+    let module = parse_source(source);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let diags = run_with_expect(&module, &hierarchy);
+    let arg_warnings: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("expects Integer"))
+        .collect();
+    assert_eq!(
+        arg_warnings.len(),
+        1,
+        "second cascade message `probeCascadeB: \"wrong-type\"` should warn about the String argument, got: {diags:#?}"
+    );
+}
+
+/// (b) A second cascade message with an incompatible `Union`-typed argument
+/// (no member compatible with the declared parameter type) must warn too —
+/// the gap wasn't conditioned on `Union` vs `Known`, every argument type was
+/// unchecked for continuation messages.
+#[test]
+fn test_cascade_second_message_union_arg_mismatch_warns() {
+    let source = "\
+typed Value subclass: Thing
+  probeCascadeA: x :: Integer -> Thing => self
+  probeCascadeB: x :: Integer -> Integer => x + 1
+
+  class probeCascadeRun: y :: String | Symbol -> Nil =>
+    c := self new
+    c probeCascadeA: 1; probeCascadeB: y
+    nil
+";
+    let module = parse_source(source);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let diags = run_with_expect(&module, &hierarchy);
+    let arg_warnings: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("expects Integer"))
+        .collect();
+    assert_eq!(
+        arg_warnings.len(),
+        1,
+        "second cascade message `probeCascadeB: y` (y :: String | Symbol) should warn — no union member is Integer, got: {diags:#?}"
+    );
+}
+
+/// (c) A fully-valid multi-message cascade — every message's arguments
+/// already match their declared parameter types — must stay diagnostic-free.
+/// No regression: adding the check must not fire false positives on correct code.
+#[test]
+fn test_cascade_all_messages_valid_no_warning() {
+    let source = "\
+typed Value subclass: Thing
+  probeCascadeA: x :: Integer -> Thing => self
+  probeCascadeB: x :: Integer -> Integer => x + 1
+
+  class probeCascadeRun -> Nil =>
+    c := self new
+    c probeCascadeA: 1; probeCascadeB: 2
+    nil
+";
+    let module = parse_source(source);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let diags = run_with_expect(&module, &hierarchy);
+    assert!(
+        diags.is_empty(),
+        "a fully-valid cascade should produce no diagnostics, got: {diags:#?}"
+    );
+}
+
+/// (d) Block-parameter propagation into cascaded messages (the reason
+/// `infer_args_with_block_context` exists, BT-2158) must keep working once
+/// `check_argument_types` also runs on those messages — the new check must
+/// not regress typed block params into "Dynamic" false warnings. Exercises
+/// the instance-side cascade path (`self.nums sort: [...]; yourself`) as a
+/// second BT-2845-focused example alongside the pre-existing BT-2158
+/// class-side coverage in `dynamic_and_blocks.rs`.
+#[test]
+fn test_cascade_block_param_propagation_still_works_with_arg_check() {
+    let source = "typed Object subclass: T\n  field: nums :: List(Integer)\n  m -> List(Integer) =>\n    self.nums\n      sort: [:a :b | a < b];\n      yourself";
+    let module = parse_source(source);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let diags = run_with_expect(&module, &hierarchy);
+    let dynamic_warnings: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("expression inferred as Dynamic"))
+        .collect();
+    assert!(
+        dynamic_warnings.is_empty(),
+        "block params in a cascaded `sort:` should still be typed from List(Integer), got: {dynamic_warnings:?}"
+    );
+    let arg_warnings: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("expects"))
+        .collect();
+    assert!(
+        arg_warnings.is_empty(),
+        "correctly-typed cascaded block arg should not warn, got: {arg_warnings:?}"
+    );
+}

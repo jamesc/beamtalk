@@ -1,7 +1,22 @@
 # ADR 0100: Open-World Diagnostic Policy for Unresolved Selectors and Classes
 
 ## Status
-Proposed (2026-06-27)
+Accepted (2026-07-10; proposed 2026-06-27)
+
+**Implementation status (2026-07-12):** all three rules are implemented.
+Rule 1 and Rule 3 landed via BT-2793. Rule 2 landed via BT-2796 (WS2:
+`KnowledgeScope` completeness contract + parse-error guard), BT-2795 (WS1:
+project-wide extension visibility), and BT-2794 (pre-WS3 dependency guard) —
+see the Rule 2 section for how "removal" of the cross-file-parent
+suppression was realised. WS3 (cross-package extension metadata, ADR 0070
+amendment) remains future work; until it lands, packages that declare
+dependencies get no unresolved-selector hints in project-complete builds
+(the Rule 1 third downgrade, implemented as the BT-2794 guard). BT-2800
+closed a surface-parity gap BT-2793 left behind: the LSP now applies the
+Rule 3 `[diagnostics]` table too, not just `beamtalk build` (see the
+Escalation implementation note below). BT-2839 closed the same gap for a
+third surface, the REPL — `beamtalk build`, the LSP, and the REPL now all
+agree on Rule 3 severity.
 
 ## Context
 
@@ -83,6 +98,17 @@ Concretely, three rules:
 
 ### Rule 1 — Knowledge gates severity (the "completeness ladder")
 
+**Implemented (BT-2793):** the classifier lives in
+`crates/beamtalk-core/src/semantic_analysis/receiver_knowledge.rs`
+(`ReceiverKnowledge` / `classify_receiver`), consulted from the four sites
+that previously re-derived the decision independently:
+`type_checker/validation.rs::check_class_side_send` and
+`check_instance_selector`, and `protocol_registry.rs::check_conformance_to_protocol`
+and `check_class_side_conformance`. This was a pure refactor of *where* the
+decision lives — behaviour was unchanged at the time; Rule 2 (below)
+subsequently made the `has_cross_file_parent` check fire only where
+knowledge is genuinely incomplete.
+
 Diagnose an unresolved selector only as severely as the checker's certainty
 warrants. Absence of evidence is not evidence of absence in an open world.
 
@@ -130,6 +156,35 @@ Because severity hinges entirely on this classification, the
 
 ### Rule 2 — Completeness improves accuracy, it does not raise severity
 
+**Implemented (BT-2796 + BT-2795 + BT-2794).** How "removing the
+suppression" was realised, per the design note
+(`docs/plans/2026-07-10-bt-2795-bt-2796-project-scoped-knowledge.md`):
+suppression was replaced by *resolution*, not by deleting the check. WS2
+(BT-2796) introduced the `KnowledgeScope` completeness contract
+(`ModuleOnly` / `ProjectComplete`, claimed only by orchestrators that walk
+the whole project) plus a per-receiver parse-error guard
+(`surface_incomplete`). WS1 (BT-2795) made project-wide extensions visible
+on every surface (CLI build Pass 1, lint's package walk, the LSP
+`ProjectIndex`). With intra-project parents and extensions injected,
+`has_cross_file_parent` no longer fires in project-complete builds except
+for genuinely-unresolved parents — where staying `Open` is the correct
+conservative answer (the class already carries an `UnresolvedClass`
+warning). `ModuleOnly` contexts (REPL, isolated single files,
+budget-exhausted LSP preloads) keep the pre-Rule-2 behaviour automatically.
+BT-2794 added the pre-WS3 dependency guard from the sequencing bullet below:
+a package that declares dependencies has **no** `ClosedComplete` receivers
+until WS3, because a dependency can extend any class — including `Object`,
+which every receiver's chain reaches. (This supersedes the design note's
+tentative "package-local classes are dependency-extension-free" refinement:
+it is false for *inherited* extensions on shared roots.) Note the guard's
+full blast radius: `classify_receiver` gates all four consumer sites, so a
+dependency-declaring package also skips **protocol-conformance** warnings
+and the class-side dispatch checks pre-WS3 — a dependency extension could
+supply the missing required method, so non-conformance is no longer
+provable. Deliberate and test-covered
+(`test_dependency_guard_suppresses_conformance_warning`); full checking
+returns with WS3.
+
 When project-scoped compilation (BT-2251 WS1/WS2) gives the checker complete
 intra-project knowledge, it **replaces the incompleteness workarounds with real
 resolution** — but the *default severity is unchanged*. Specifically:
@@ -167,6 +222,20 @@ landed." A feature flag gates the removal until the corresponding workstream is
 verified, so a partially-landed epic never regresses diagnostics.
 
 ### Rule 3 — Escalation is opt-in and per-category
+
+**Implemented (BT-2793):** the `[diagnostics]` table in `beamtalk.toml`,
+parsed in `crates/beamtalk-cli/src/commands/manifest.rs`
+(`DiagnosticsTable` / `DiagnosticSeverityOverride`) and applied in
+`crates/beamtalk-cli/src/beam_compiler.rs`
+(`apply_diagnostics_table`, ahead of the `--warnings-as-errors` promotion
+pass — precedence steps 2 and 3 below). `apply_diagnostics_table` enforces a
+**severity floor**: it never touches a diagnostic that already carries
+`Severity::Error` (e.g. `ActorNew`, `Inheritance`, `EmptyBody` — hard
+structural errors, not Rule 1 completeness-ladder output), so the table can
+only move the soft diagnostics this rule is about, never silence a
+guaranteed compile error. See the
+[Package Management guide](../beamtalk-packages.md) (`[diagnostics]` Section)
+for the user-facing schema, the severity floor, and examples.
 
 Promotion of soft diagnostics to build-failing `Error`s is never the default. It
 is requested explicitly:
@@ -285,6 +354,11 @@ escalation (Rule 3). What we reject: Gleam's closed-world fatality as a default.
 - **Tooling developer (LSP/MCP):** a stable `(severity, category)` contract per
   diagnostic, with `Dnu` clearly separated, makes it trivial to render hints
   distinctly from errors and to offer "create method" / "did you mean" actions.
+  The Rule 3 `[diagnostics]` table (below) is honoured identically by
+  `beamtalk build`, the LSP (BT-2800), and the REPL (BT-2839) — a category
+  escalated to `Error` shows as an editor error and a REPL error, not a
+  quiet hint, so the build, the IDE, and the REPL never disagree about a
+  diagnostic's severity.
 
 ### Discoverability
 
@@ -412,18 +486,54 @@ it rather than inventing it.
 
 This ADR is policy; the code changes ride the BT-2251 workstreams.
 
-- **Semantic analysis** (`crates/beamtalk-core/src/semantic_analysis/type_checker/`):
-  centralise the severity decision behind the completeness ladder (Rule 1) so
-  `validation.rs` / `inference.rs` consult one place rather than scattered
-  `Diagnostic::hint` / `::warning` calls. Introduce an explicit
-  "receiver knowledge" notion (`Dynamic` / `Open` / `ClosedComplete`) that the
-  send-checker switches on.
+- **Semantic analysis** (`crates/beamtalk-core/src/semantic_analysis/`):
+  **done (BT-2793).** The severity decision is centralised behind the
+  completeness ladder (Rule 1) in `receiver_knowledge.rs` — an explicit
+  "receiver knowledge" notion (`Dynamic` / `Open` / `ClosedComplete`,
+  `classify_receiver`) that `type_checker/validation.rs` and
+  `protocol_registry.rs` consult instead of each re-deriving the
+  suppression/severity decision. This was a pure refactor of *where* the
+  decision lives — `has_cross_file_parent` still forces `Open`, so behaviour
+  is unchanged pending Rule 2.
 - **Remove the cross-file-parent suppression** when project-wide hierarchy (WS2)
   and project-wide extension registration (WS1) are in place — resolution
-  replaces suppression (Rule 2).
-- **Escalation** (`crates/beamtalk-cli/src/beam_compiler.rs`): no change to
-  `--warnings-as-errors` now; the `beamtalk.toml` per-category table (Rule 3) is a
-  separate, later issue.
+  replaces suppression (Rule 2). **Done** (BT-2796, BT-2795, BT-2794); see the
+  Rule 2 section for the realised mechanism (`KnowledgeScope`, per-receiver
+  parse-error guard, pre-WS3 dependency guard).
+- **Escalation** (`crates/beamtalk-core/src/compilation/diagnostics_policy.rs`):
+  **done (BT-2793, moved to `beamtalk-core` and wired into the LSP by
+  BT-2800, extended to the REPL by BT-2839).** The `beamtalk.toml`
+  `[diagnostics]` per-category table (Rule 3) is implemented;
+  `--warnings-as-errors` itself is unchanged (still promotes
+  `Warning`/`Hint` to `Error`, excluding the gradual-migration categories
+  unless the table explicitly overrides one of them). BT-2793 first landed
+  the table and its application (`apply_diagnostics_table`) in
+  `crates/beamtalk-cli/src/beam_compiler.rs` — `beamtalk build`-only. BT-2800
+  closed the resulting surface-parity gap (the LSP silently ignored the
+  table) by moving the table type, parser, and `apply_diagnostics_table` into
+  `beamtalk-core`'s `compilation::diagnostics_policy` module and applying it
+  inside the shared `compute_project_diagnostics` pipeline
+  (`crates/beamtalk-core/src/queries/diagnostic_provider.rs`) that both the
+  CLI and the LSP (`SimpleLanguageService::diagnostics`,
+  `crates/beamtalk-core/src/language_service/mod.rs`) already called — so the
+  two surfaces cannot drift again by construction. The LSP
+  (`crates/beamtalk-lsp/src/server.rs`, `Backend::load_diagnostics_table`)
+  loads and parses each workspace root's `beamtalk.toml` once at startup.
+  BT-2839 found a **third** surface with the same pre-existing gap: the
+  REPL's diagnostics entry point
+  (`compute_diagnostics_with_known_vars_and_classes`, called from
+  `crates/beamtalk-compiler-port/src/main.rs`'s
+  `compile_expression`/`compile`/`diagnostics` request handlers) is a
+  separate function from `compute_project_diagnostics` that never called
+  `apply_diagnostics_table`. Unlike the LSP, the compiler-port has no
+  persistent per-connection service object to cache a loaded table on — it
+  is a stateless-per-request OTP port process — so BT-2839 instead caches
+  the table process-wide (`OnceLock`), loaded on first use from
+  `beamtalk.toml` in the port process's working directory, which is the
+  project root for the whole REPL session (the parent BEAM node pins its
+  cwd there at spawn, and the port inherits it). This mirrors the LSP's
+  load-once-at-startup semantics without requiring any new
+  Erlang↔Rust wire-protocol field.
 - **No runtime/codegen changes.**
 - **Coordination with ADR 0101 (`native:` for stateless Objects):** the
   receiver-knowledge scan must count `self delegate` `native:` methods as
@@ -454,7 +564,12 @@ transitions warrant care:
 
 ## References
 - Related issues: BT-2251 (epic: project-scoped compilation & type-checking;
-  WS5 is this policy), BT-2250, BT-2228
+  WS5 is this policy), BT-2250, BT-2228; BT-2793 (Rule 1 + Rule 3,
+  implemented), BT-2794 (Rule 2, blocked on BT-2795/BT-2796); BT-2800 (Rule 3
+  LSP surface-parity fix — the `[diagnostics]` table moved to `beamtalk-core`
+  and is now applied by the LSP, not just `beamtalk build`); BT-2839 (Rule 3
+  REPL surface-parity fix — the same table, found missing on a third surface
+  during BT-2800's review, is now applied by the REPL's compiler-port too)
 - Related ADRs: ADR 0024 (static-first, live-augmented tooling), ADR 0066 (open
   class extension methods), ADR 0077 (type coverage visibility / `@expect`),
   ADR 0070 (package namespaces & dependencies — cross-package interface)

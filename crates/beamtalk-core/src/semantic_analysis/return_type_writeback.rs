@@ -24,7 +24,9 @@
 
 use crate::ast::{Identifier, Module, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
-use crate::semantic_analysis::type_checker::{InferredType, infer_method_return_types};
+use crate::semantic_analysis::type_checker::{
+    InferredType, NativeTypeRegistry, infer_method_return_types,
+};
 use crate::source_analysis::Span;
 use ecow::EcoString;
 
@@ -77,8 +79,16 @@ fn writeback_annotation(ty: &InferredType, span: Span) -> Option<TypeAnnotation>
 ///
 /// * `module` - Mutable AST module to update in place.
 /// * `hierarchy` - Class hierarchy used for type inference.
-pub fn apply_return_type_writeback(module: &mut Module, hierarchy: &ClassHierarchy) {
-    let inferred = infer_method_return_types(module, hierarchy);
+/// * `native_type_registry` - BT-2887: optional FFI type registry (ADR 0075)
+///   so methods whose body type is inferred purely via an FFI call (e.g.
+///   `foo => Erlang lists reverse: x`) get their return type written back too.
+///   `None` preserves the previous registry-blind behaviour.
+pub fn apply_return_type_writeback(
+    module: &mut Module,
+    hierarchy: &ClassHierarchy,
+    native_type_registry: Option<&NativeTypeRegistry>,
+) {
+    let inferred = infer_method_return_types(module, hierarchy, native_type_registry);
 
     for class in &mut module.classes {
         for method in &mut class.methods {
@@ -158,7 +168,7 @@ mod tests {
         let src = "Object subclass: Foo\n  bar => 42";
         let mut module = parse_module(src);
         let hierarchy = build_hierarchy(&module);
-        apply_return_type_writeback(&mut module, &hierarchy);
+        apply_return_type_writeback(&mut module, &hierarchy, None);
         let return_type = &module.classes[0].methods[0].return_type;
         assert!(
             return_type.is_some(),
@@ -176,7 +186,7 @@ mod tests {
             original.is_some(),
             "Method should already have an explicit annotation"
         );
-        apply_return_type_writeback(&mut module, &hierarchy);
+        apply_return_type_writeback(&mut module, &hierarchy, None);
         assert_eq!(
             module.classes[0].methods[0].return_type, original,
             "Writeback should not overwrite an explicit type annotation"
@@ -189,11 +199,58 @@ mod tests {
         let src = "Object subclass: Foo\n  bar: x => x doSomething";
         let mut module = parse_module(src);
         let hierarchy = build_hierarchy(&module);
-        apply_return_type_writeback(&mut module, &hierarchy);
+        apply_return_type_writeback(&mut module, &hierarchy, None);
         let return_type = &module.classes[0].methods[0].return_type;
         assert!(
             return_type.is_none(),
             "Dynamic method should not get writeback, got: {return_type:?}"
+        );
+    }
+
+    #[test]
+    fn writeback_with_native_registry_sets_return_type_for_ffi_only_method() {
+        // BT-2887: a method whose body return type is inferred purely via an
+        // FFI call only writes back when a NativeTypeRegistry is supplied.
+        use crate::semantic_analysis::type_checker::TypeProvenance;
+        use crate::semantic_analysis::type_checker::native_type_registry::{
+            FunctionSignature, ParamType,
+        };
+
+        let src = "Object subclass: Foo\n  bar: x => Erlang lists reverse: x";
+        let mut module = parse_module(src);
+        let hierarchy = build_hierarchy(&module);
+
+        let mut registry = NativeTypeRegistry::new();
+        registry.register_module(
+            "lists",
+            vec![FunctionSignature {
+                name: "reverse".to_string(),
+                arity: 1,
+                params: vec![ParamType {
+                    keyword: Some(EcoString::from("list")),
+                    type_: InferredType::known("List"),
+                }],
+                return_type: InferredType::known("List"),
+                provenance: TypeProvenance::Extracted,
+                line: None,
+            }],
+        );
+
+        apply_return_type_writeback(&mut module, &hierarchy, Some(&registry));
+        let return_type = module.classes[0].methods[0].return_type.clone();
+        assert!(
+            return_type.is_some(),
+            "FFI-inferred return type should be written back when registry is provided, got None"
+        );
+
+        // Registry-blind default (None) preserves the previous behaviour.
+        let mut module_without_registry = parse_module(src);
+        apply_return_type_writeback(&mut module_without_registry, &hierarchy, None);
+        assert!(
+            module_without_registry.classes[0].methods[0]
+                .return_type
+                .is_none(),
+            "Without a registry, FFI-only inference should stay registry-blind"
         );
     }
 }

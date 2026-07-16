@@ -9,6 +9,9 @@
         {repl_port, 9000},
         % 1 hour in milliseconds
         {idle_timeout, 3600000},
-        {workspace_cleanup_enabled, true}
+        {workspace_cleanup_enabled, true},
+        % ADR 0105 Phase 1 (BT-2778): max distinct caller classes re-checked
+        % per reload before the rest are reported as "N more not checked".
+        {recheck_caller_cap, 20}
     ]}
 ]}.

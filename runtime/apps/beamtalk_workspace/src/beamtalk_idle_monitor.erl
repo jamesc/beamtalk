@@ -79,7 +79,7 @@ mark_activity() ->
 %%% gen_server callbacks
 
 init(Config) ->
-    logger:set_process_metadata(#{domain => [beamtalk, runtime]}),
+    beamtalk_logging_config:set_domain(runtime),
     Enabled = maps:get(enabled, Config, true),
     MaxIdleSeconds = maps:get(max_idle_seconds, Config, 3600 * 4),
 

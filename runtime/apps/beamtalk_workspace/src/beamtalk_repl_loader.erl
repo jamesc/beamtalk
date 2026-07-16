@@ -24,6 +24,7 @@ Extracted from beamtalk_repl_eval (BT-863).
     remove_method/3,
     activate_module/2,
     activate_module/3,
+    activate_module/4,
     register_classes/2,
     trigger_hot_reload/2,
     reload_class_file/1,
@@ -32,7 +33,14 @@ Extracted from beamtalk_repl_eval (BT-863).
     to_snake_case/1,
     verify_class_present/3,
     compute_package_module_name/1,
-    new_class/2
+    new_class/2,
+    %% ADR 0105 Phase 2 (BT-2780): called cross-module by
+    %% beamtalk_workspace_shape_recheck_worker — see activate_module/3's doc.
+    maybe_trigger_shape_recheck/1,
+    %% BT-2856 / ADR 0107 Phase A: same cross-module reason as
+    %% maybe_trigger_shape_recheck/1 above — see activate_module/3's doc.
+    maybe_trigger_leaf_change_recheck/1,
+    precheck_method/4
 ]).
 
 %% Exported for testing (only in test builds)
@@ -61,7 +69,13 @@ Extracted from beamtalk_repl_eval (BT-863).
     %% ADR 0082 Phase 1 (BT-2285): pure validation helpers for new_class/2.
     declared_class_name/1,
     validate_new_class/3,
-    validate_target_path/1
+    validate_target_path/1,
+    %% ADR 0105 Phase 1 (BT-2779): the reload-check publish/clear hook.
+    maybe_trigger_recheck/4,
+    %% BT-2856 / ADR 0107 Phase A: leaf-change detection/publish helpers.
+    superclasses_losing_leaf_status/1,
+    was_leaf_class/1,
+    publish_leaf_change_recheck_outcome/2
 ]).
 -endif.
 
@@ -172,9 +186,19 @@ Returns:
     | {error, term(), beamtalk_repl_state:state()}.
 load_class_module(ClassInfo, Expression, State) ->
     #{binary := Binary, module_name := ClassModName, classes := Classes} = ClassInfo,
-    case code:load_binary(ClassModName, "", Binary) of
-        {module, ClassModName} ->
-            activate_module(ClassModName, Classes),
+    %% ADR 0105 Phase 2 (BT-2780): seed the shape-generation store from the
+    %% about-to-be-replaced module's CURRENT __beamtalk_meta/0 before this
+    %% class-body reload installs — see
+    %% beamtalk_workspace_shape_store's moduledoc "Two-phase capture" for why
+    %% this must run before code:load_binary, not after.
+    prime_shape_capture(Classes),
+    %% BT-2856 / ADR 0107 Phase A, BT-2873 hardening: load_class_binary/4
+    %% bakes the "superclasses_losing_leaf_status/1 before code:load_binary/3"
+    %% ordering requirement into one call — see its own doc and
+    %% activate_module/4's doc for why.
+    case load_class_binary(ClassModName, "", Binary, Classes) of
+        {ok, NewlyNonLeafSuperclasses} ->
+            activate_module(ClassModName, Classes, undefined, NewlyNonLeafSuperclasses),
             NewState1 = maybe_add_loaded_module(ClassModName, State),
             {ClassName, NewState2} = store_class_sources(
                 Classes, ClassModName, Expression, NewState1
@@ -211,6 +235,41 @@ reload_method_definition(MethodInfo, Warnings, Expression, State) ->
     end.
 
 -doc """
+BT-2873 (ADR 0107 Phase A caller-discipline hardening, BT-2856 adversarial
+review finding #3): load a class-defining module's compiled `Binary` and
+compute `superclasses_losing_leaf_status/1` against `Classes` in the one
+required order, as a single call.
+
+Every generated class module's `on_load` hook (`register_class/0`,
+BT-1610) runs **synchronously inside** `code:load_binary/3` and registers
+any new subclass link before that call returns — so
+`superclasses_losing_leaf_status/1` MUST run against `Classes` *before*
+`code:load_binary/3`, never after (`activate_module/4`'s doc has the full
+mechanism). Every one of today's four class-defining call sites
+(`load_class_module/3`, `load_compiled_module/6`,
+`reload_compile_and_load/4`, `new_class_install/7`) already followed this
+exact two-step sequence by convention alone, with nothing enforcing it —
+this collapses the two steps into one call so a future call site (or a
+refactor of an existing one) cannot obtain a `{module, ModuleName}` result
+without `superclasses_losing_leaf_status/1` having already run first: there
+is no way to call this function and skip that step, unlike calling
+`code:load_binary/3` directly ever again would allow.
+
+Returns `{ok, NewlyNonLeafSuperclasses}` — feed straight into
+`activate_module/4`'s fourth argument — on a successful load, or
+`{error, Reason}` (the load itself failed; nothing installed, nothing to
+re-check) otherwise.
+""".
+-spec load_class_binary(atom(), string(), binary(), [map()]) ->
+    {ok, [binary()]} | {error, term()}.
+load_class_binary(ModuleName, LoadPath, Binary, Classes) ->
+    NewlyNonLeafSuperclasses = superclasses_losing_leaf_status(Classes),
+    case code:load_binary(ModuleName, LoadPath, Binary) of
+        {module, ModuleName} -> {ok, NewlyNonLeafSuperclasses};
+        {error, Reason} -> {error, Reason}
+    end.
+
+-doc """
 Activate a loaded module: register classes, trigger hot reload,
 and update workspace metadata.
 """.
@@ -222,13 +281,97 @@ activate_module(ModuleName, Classes) ->
 Activate a loaded module with an optional source path for workspace metadata.
 Passing SourcePath ensures the source file is recorded in workspace_meta so that
 new VS Code sessions (which have an empty session tracker) can still navigate to source.
+
+ADR 0105 Phase 2 (BT-2780): `spawn_shape_recheck/1` fires last, after
+`register_classes/2` has installed the new `register_class/0` (which is what
+refreshes the compiler port's ambient class-hierarchy cache — see
+`beamtalk_recheck:trigger_shape/2`'s moduledoc) — so a shape-change re-check
+always sees the *new* shape when it recompiles a candidate dependent. Runs
+for every `activate_module/3` call, not just the three class-body-reload
+paths that call `prime_shape_capture/1` first: for the others (a method
+patch, a method removal, a brand-new class, a protocol) the shape store was
+never primed for these classes, so `beamtalk_workspace_shape_store:capture/1`
+self-seeds and always classifies `no_op` — see its moduledoc.
+
+**Asynchronous *and serialised*, unlike the method-signature path's
+`maybe_trigger_recheck/4`** (called synchronously from
+`load_recompiled_method/8`/`remove_method/3`, which only fire on an
+explicit `>>` patch/removal — comparatively rare during bulk loading).
+`activate_module/3` is the common path for *every* class-body install
+(`:load`, inline `subclass:` redefinition, a file reload), so it runs on
+every ordinary class load, not just explicit patches — and `spawnWith:`
+(always in `trigger_shape/2`'s dependent-selector set, ADR 0105 §Mechanism
+step 2 / this ADR's Alternatives) is close to the worst-case common
+selector, used by every Actor subclass in the image. Running the recheck
+synchronously here measurably regressed a heavy sequential-reload scenario
+(discovered via the `repl_protocol` e2e suite, BT-2780 review) — dozens of
+shape-changing reloads in one session each paying the per-reload
+caller-cap's up-to-20 compiler round trips, serialised in front of every
+subsequent REPL response, enough to trip a client-side timeout.
+
+Off the response path is not enough on its own, though: a bare `spawn/1`
+per reload would let an unbounded number of these checks run *concurrently*,
+each independently hammering the single, already-serialising
+`beamtalk_compiler_server` (ADR 0022) that also carries the still-synchronous
+method-signature recheck and ordinary editor/LSP diagnostic requests — that
+just relocates the latency risk from "this reload's own response" onto
+"an unrelated concurrent request sharing the same compiler port" (found in
+adversarial review). `spawn_shape_recheck/1` therefore hands off to
+`beamtalk_workspace_shape_recheck_worker:enqueue/1`, a single dedicated
+`gen_server` (started under `beamtalk_workspace_sup`) whose mailbox
+processes one shape re-check at a time — bounding in-flight compiler-port
+contention from this path to 1, same order of magnitude as the synchronous
+method-signature path's own footprint, while still returning immediately to
+the caller. The re-check and its publish
+(`beamtalk_workspace_findings_store` + the `'ReloadCheckCompleted'`
+announcement) still happen, just off the install's response path and queued
+behind any earlier reload's check — every consumer already treats that
+announcement as an asynchronous push (the LSP/REPL/workspace-UI listeners
+all already `receive`/subscribe rather than read a synchronous return
+value), so this is not a behaviour change for any surface, only a latency
+and contention fix for the trigger.
+
+**BT-2856 / ADR 0107 Phase A:** this 3-arity form always passes `[]` for the
+leaf-change detection `activate_module/4` (below) accepts — see that
+function's doc for why the detection has to happen in the *caller*, before
+`code:load_binary/3`, not here.
 """.
 -spec activate_module(atom(), [map()], string() | undefined) -> ok.
 activate_module(ModuleName, Classes, SourcePath) ->
+    activate_module(ModuleName, Classes, SourcePath, []).
+
+-doc """
+BT-2856 / ADR 0107 Phase A: same as `activate_module/3`, plus
+`NewlyNonLeafSuperclasses` — the result of
+`superclasses_losing_leaf_status/1`, which the **caller** must have computed
+against `Classes` *before* its own `code:load_binary/3` call (not passed as
+`Classes` here and computed internally): every generated class module
+carries `'on_load' = [{register_class, 0}]` (BT-1610/`actor_codegen.rs`),
+and `code:load_binary/3` runs a module's `on_load` function **synchronously,
+before returning** — so by the time *any* `activate_module/*` arity could
+inspect the hierarchy, the calling `register_class/0` (registering the new
+subclass link) has already run, even though `activate_module/3`'s own
+`register_classes/2` call (a redundant, harmless second invocation of the
+same idempotent `register_class/0`) has not. This is exactly why
+`prime_shape_capture/1` (ADR 0105 Phase 2's shape-generation seed) already
+has to run before `code:load_binary/3` too — same ordering hazard, same
+fix shape. Only call sites that can introduce a genuinely new class
+definition (`load_class_module/3`, `load_compiled_module/6`,
+`reload_compile_and_load/4`, `new_class_install/7`) bother computing this;
+protocol loads (superclass always `"Object"`, never newly-non-leaf) and
+method-only patches (`load_recompiled_method/8` — never changes a class's
+declared superclass) pass `[]` via the `activate_module/2,3` arities
+instead, which is correct, not a gap: neither path can ever produce a
+transition this mechanism needs to catch.
+""".
+-spec activate_module(atom(), [map()], string() | undefined, [binary()]) -> ok.
+activate_module(ModuleName, Classes, SourcePath, NewlyNonLeafSuperclasses) ->
     register_classes(Classes, ModuleName),
     trigger_hot_reload(ModuleName, Classes),
     beamtalk_workspace_meta:register_module(ModuleName, SourcePath),
-    beamtalk_workspace_meta:update_activity().
+    beamtalk_workspace_meta:update_activity(),
+    spawn_shape_recheck(Classes),
+    spawn_leaf_change_recheck(NewlyNonLeafSuperclasses).
 
 -doc "Register loaded classes by calling the module's register_class/0 function.".
 -spec register_classes([map()], atom()) -> ok.
@@ -336,9 +479,12 @@ load_compiled_module(Binary, ClassNames, ModuleName, Source, SourcePath, State) 
             undefined -> "";
             _ -> SourcePath
         end,
-    case code:load_binary(ModuleName, LoadPath, Binary) of
-        {module, ModuleName} ->
-            activate_module(ModuleName, ClassNames, SourcePath),
+    %% ADR 0105 Phase 2 (BT-2780): see load_class_module/3's identical comment.
+    prime_shape_capture(ClassNames),
+    %% BT-2856 / ADR 0107 Phase A, BT-2873 hardening: see load_class_binary/4's doc.
+    case load_class_binary(ModuleName, LoadPath, Binary, ClassNames) of
+        {ok, NewlyNonLeafSuperclasses} ->
+            activate_module(ModuleName, ClassNames, SourcePath, NewlyNonLeafSuperclasses),
             NewState1 = maybe_add_loaded_module(ModuleName, State),
             NewState2 = track_module_source(ModuleName, SourcePath, NewState1),
             store_file_class_sources(ClassNames, Source, NewState2),
@@ -573,9 +719,20 @@ reload_compile_and_load(Source, Path, ModuleNameOverride, ExpectedClassName) ->
         {ok, Binary, ClassNames, ModuleName} ->
             case verify_class_present(ExpectedClassName, ClassNames, Path) of
                 ok ->
-                    case code:load_binary(ModuleName, Path, Binary) of
-                        {module, ModuleName} ->
-                            activate_module(ModuleName, ClassNames, Path),
+                    %% ADR 0105 Phase 2 (BT-2780): see load_class_module/3's
+                    %% identical comment. Covers both callers of this helper:
+                    %% reload_class_file_impl/2 (file reload after an
+                    %% on-disk edit) and remove_method/3's "reload the class
+                    %% WITHOUT the removed method" — the latter never changes
+                    %% `state:`/`field:` slots, so priming it is harmless
+                    %% (the subsequent capture/1 always diffs an unchanged
+                    %% shape to itself, `no_op`).
+                    prime_shape_capture(ClassNames),
+                    %% BT-2856 / ADR 0107 Phase A, BT-2873 hardening: see
+                    %% load_class_binary/4's doc.
+                    case load_class_binary(ModuleName, Path, Binary, ClassNames) of
+                        {ok, NewlyNonLeafSuperclasses} ->
+                            activate_module(ModuleName, ClassNames, Path, NewlyNonLeafSuperclasses),
                             {ok, ClassNames};
                         {error, Reason} ->
                             {error, {load_error, Reason}}
@@ -830,6 +987,111 @@ install_method_with_source(
     end.
 
 -doc """
+Pre-save advisory (ADR 0105 Phase 3, BT-2782): compile a pending method edit
+and report would-be-stale dependents **without installing** — the read-only
+sibling of `install_method_with_source/10`. Backs `Behaviour>>precheckCompile:
+source:', the editor/LSP's "check before save" hook (the ADR's Phase 3
+steelman accommodation: the post-reload image check stays the authority;
+this is a non-blocking early warning against the *pending* edit).
+
+Shares `install_method_with_source/10`'s compile step
+(`beamtalk_repl_compiler:compile_method_reload/3`) up to the point that
+function would call `load_recompiled_method/8` — this function stops there
+and never calls `code:load_binary/3`, never emits a ChangeLog entry, and
+never touches `beamtalk_workspace_signature_store`'s recorded generation
+(`previous/3` is a **read-only** peek, unlike the real install's `capture/4`,
+which would consume a generation slot for an edit that never happened).
+
+Diffs the pending signature against `beamtalk_workspace_signature_store:
+previous/3` (the same baseline a real install would capture against) via the
+same `beamtalk_signature_diff:diff/2` classification `capture/4` uses; a
+`no_op` diff (nothing type-relevant changed, or no baseline to compare
+against) short-circuits to an empty report — there is nothing pending worth
+dependent-checking. Otherwise delegates to `beamtalk_recheck:trigger_pending/5`.
+
+Returns `{ok, beamtalk_recheck:result()}` on a successful compile (`result()`
+is empty for a `no_op` diff) or `{error, Reason}` on a compile failure — the
+same failure shape `install_method_with_source/10` returns, since the
+compile step is identical.
+""".
+-spec precheck_method(binary(), binary(), binary(), boolean()) ->
+    {ok, beamtalk_recheck:result()} | {error, term()}.
+precheck_method(ClassNameBin, SelectorBin, MethodSource, IsClassMethod) ->
+    case beamtalk_workspace_meta:get_class_source(ClassNameBin) of
+        undefined ->
+            ErrorMsg =
+                <<"Class source not available for ", ClassNameBin/binary,
+                    " (source not recorded or workspace metadata unavailable)">>,
+            {error, {compile_error, ErrorMsg}};
+        ClassSource ->
+            precheck_method_with_source(
+                ClassNameBin, SelectorBin, MethodSource, ClassSource, IsClassMethod
+            )
+    end.
+
+-spec precheck_method_with_source(binary(), binary(), binary(), string(), boolean()) ->
+    {ok, beamtalk_recheck:result()} | {error, term()}.
+precheck_method_with_source(ClassNameBin, SelectorBin, MethodSource, ClassSource, IsClassMethod) ->
+    ClassSourceBin = unicode:characters_to_binary(ClassSource),
+    MethodSourceBin = unicode:characters_to_binary(MethodSource),
+    {ModuleNameOverride, SourcePath} = patch_module_target(ClassNameBin),
+    SuperclassIndex = beamtalk_repl_compiler:build_class_superclass_index(),
+    ModuleIndex = beamtalk_repl_compiler:build_class_module_index(),
+    Options = #{
+        class_name => ClassNameBin,
+        is_class_method => IsClassMethod,
+        workspace_mode => true,
+        module_name => ModuleNameOverride,
+        source_path => source_path_binary(SourcePath),
+        class_superclass_index => SuperclassIndex,
+        class_module_index => ModuleIndex
+    },
+    case beamtalk_repl_compiler:compile_method_reload(ClassSourceBin, MethodSourceBin, Options) of
+        {ok, #{selector := Selector}} when Selector =/= SelectorBin ->
+            ErrorMsg =
+                <<"Method selector mismatch: asked to precheck '", SelectorBin/binary,
+                    "' but the source defines '", Selector/binary, "'">>,
+            {error, {compile_error, ErrorMsg}};
+        {ok, Result} ->
+            #{
+                selector := Selector,
+                is_class_method := ActualIsClassMethod
+            } = Result,
+            ReturnType = maps:get(return_type, Result, <<"Dynamic">>),
+            ParamTypes = maps:get(param_types, Result, []),
+            Side = patch_side(ActualIsClassMethod),
+            PendingSignature = #{return_type => ReturnType, param_types => ParamTypes},
+            Prev = beamtalk_workspace_signature_store:previous(ClassNameBin, Selector, Side),
+            case beamtalk_signature_diff:diff(Prev, PendingSignature) of
+                no_op ->
+                    {ok, no_pending_change_result()};
+                Classification ->
+                    {ok,
+                        beamtalk_recheck:trigger_pending(
+                            ClassNameBin, Selector, Side, Classification, PendingSignature
+                        )}
+            end;
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+%% Mirrors `beamtalk_recheck`'s internal `empty_result/0` shape (not exported
+%% — this is the "nothing pending is worth checking" case, distinct from that
+%% module's "the check ran and found nothing").
+-spec no_pending_change_result() -> beamtalk_recheck:result().
+no_pending_change_result() ->
+    #{
+        findings => [],
+        checked => 0,
+        total_candidates => 0,
+        not_checked => 0,
+        cap_note => undefined,
+        checked_owners => [],
+        not_checked_owners => [],
+        not_verified_owners => []
+    }.
+
+-doc """
 Remove a live method from a class by recompiling the class without it (BT-2663,
 BT-2665). Backs the *add* revert case: when a freshly-added method (instance or
 class side) is reverted, its pre-patch state was "absent", so the revert deletes
@@ -875,6 +1137,21 @@ remove_method(ClassNameBin, Selector, Side) ->
                     NewSourceBin = splice_out_span(ClassSourceBin, Span),
                     case reload_class_without_method(ClassNameBin, NewSourceBin) of
                         {ok, _} = Ok ->
+                            %% ADR 0105 Phase 1 (BT-2778): the removal is
+                            %% live — re-check known dependents (mirrors the
+                            %% install success path in load_recompiled_method/8,
+                            %% including that function's ordering-invariant
+                            %% comment: reload_class_without_method above ran
+                            %% through reload_compile_and_load's synchronous
+                            %% activate_module/3 call before returning here, so
+                            %% the compiler port's ambient class cache already
+                            %% reflects this removal by the time
+                            %% maybe_trigger_recheck's diagnostics/3 call reaches
+                            %% it — same invariant, same fragility if that
+                            %% registration path ever becomes async).
+                            maybe_trigger_recheck(
+                                ClassNameBin, SelectorBin, Side, RemovalCapture
+                            ),
                             Ok;
                         {error, _} = Error ->
                             rollback_signature_generation(
@@ -890,15 +1167,15 @@ remove_method(ClassNameBin, Selector, Side) ->
 %% Record a method removal into the signature-generation store (ADR 0105 Phase
 %% 1, BT-2777). Best-effort and self-swallowing, mirroring
 %% capture_signature_generation/1 — a store failure must never block the
-%% removal itself. Returns the same {captured, Prev} | not_captured outcome so
+%% removal itself. Returns the same capture_outcome() so
 %% the caller can roll back on a subsequent recompile failure.
 -spec capture_signature_removal(binary(), binary(), instance | class) -> capture_outcome().
 capture_signature_removal(ClassNameBin, SelectorBin, Side) ->
     try
-        {Prev, _Classification} = beamtalk_workspace_signature_store:capture(
+        {Prev, Classification} = beamtalk_workspace_signature_store:capture(
             ClassNameBin, SelectorBin, Side, removed
         ),
-        {captured, Prev}
+        {captured, Prev, Classification}
     catch
         Class:Reason:Stack ->
             ?LOG_WARNING(
@@ -1038,6 +1315,30 @@ load_recompiled_method(
             %% reconciliation. Ephemeral patches are not autoflushed because
             %% only durable+flushable entries are written by `flush/0'.
             maybe_autoflush(maps:get(intent, MethodInfo, durable)),
+            %% (5) ADR 0105 Phase 1 (BT-2778): re-check known dependents of a
+            %% signature_change/removal now that the new generation is live.
+            %% Best-effort, never affects this reply's *content* — see the
+            %% function doc — but it IS synchronous here, so it does delay
+            %% this reply by the re-check's wall time (bounded by the caller
+            %% cap; ~18.5ms/candidate warm per the Phase 0 spike, so normally
+            %% sub-second even at the default cap of 20). Moving this off the
+            %% install's critical path is BT-2779's concern once findings
+            %% have somewhere to go (publish/clearing across surfaces).
+            %%
+            %% Ordering invariant this relies on: beamtalk_recheck's re-check
+            %% needs the compiler port's ambient class cache
+            %% (beamtalk_compiler_server's `classes` map) to already reflect
+            %% THIS class's new signature. activate_module/2 above is
+            %% synchronous — it runs the freshly-loaded module's
+            %% register_class/0, which (via beamtalk_object_class:start/2,
+            %% ADR 0050 Phase 4) casts the new metadata to
+            %% beamtalk_compiler_server *before* activate_module returns here
+            %% — so by the time maybe_trigger_recheck's diagnostics/3 call
+            %% reaches that same gen_server, the cast is already enqueued
+            %% ahead of it. This holds because activate_module blocks on
+            %% class registration; it would break if that registration ever
+            %% became async relative to this call site.
+            maybe_trigger_recheck(ClassNameBin, SelectorBin, Side, CaptureOutcome),
             Result = <<ClassNameBin/binary, ">>", SelectorBin/binary>>,
             {ok, Result, <<>>, AllWarnings, State};
         {error, LoadReason} ->
@@ -1148,9 +1449,10 @@ new_class_validate_and_install(Source, TargetPath, AbsPath, Binary, ClassNames, 
     string(), string(), string(), binary(), [map()], atom(), binary()
 ) -> {ok, [#beamtalk_object{}]} | {error, #beamtalk_error{}}.
 new_class_install(Source, TargetPath, AbsPath, Binary, ClassNames, ModuleName, DeclaredName) ->
-    case code:load_binary(ModuleName, AbsPath, Binary) of
-        {module, ModuleName} ->
-            activate_module(ModuleName, ClassNames, AbsPath),
+    %% BT-2856 / ADR 0107 Phase A, BT-2873 hardening: see load_class_binary/4's doc.
+    case load_class_binary(ModuleName, AbsPath, Binary, ClassNames) of
+        {ok, NewlyNonLeafSuperclasses} ->
+            activate_module(ModuleName, ClassNames, AbsPath, NewlyNonLeafSuperclasses),
             %% Record class source so subsequent `>>` / compile:source: patches
             %% against the new class resolve their span (mirrors the file-load path).
             lists:foreach(
@@ -1532,12 +1834,16 @@ do_emit_change_entry(MethodInfo) ->
     ok.
 
 %% The outcome of a best-effort signature-store capture (ADR 0105 Phase 1,
-%% BT-2777): `{captured, Prev}` when the store call succeeded (`Prev` is
-%% whatever it reported as the pre-capture generation — feed this straight
-%% back to rollback_signature_generation/4 on a subsequent install failure),
-%% or `not_captured` when the capture itself failed (nothing to roll back).
+%% BT-2777): `{captured, Prev, Classification}` when the store call succeeded
+%% (`Prev` is whatever it reported as the pre-capture generation — feed this
+%% straight back to rollback_signature_generation/4 on a subsequent install
+%% failure; `Classification` is `beamtalk_signature_diff:classification/0`,
+%% consumed by BT-2778's re-check trigger below), or `not_captured` when the
+%% capture itself failed (nothing to roll back, nothing to re-check).
 -type capture_outcome() ::
-    {captured, beamtalk_workspace_signature_store:maybe_signature()} | not_captured.
+    {captured, beamtalk_workspace_signature_store:maybe_signature(),
+        beamtalk_signature_diff:classification()}
+    | not_captured.
 
 %% Capture the freshly-compiled signature into the signature-generation store
 %% (ADR 0105 Phase 1, BT-2777). Called from load_recompiled_method/8 *before*
@@ -1574,10 +1880,10 @@ do_capture_signature_generation(MethodInfo) ->
         return_type => maps:get(return_type, MethodInfo, <<"Dynamic">>),
         param_types => maps:get(param_types, MethodInfo, [])
     },
-    {Prev, _Classification} = beamtalk_workspace_signature_store:capture(
+    {Prev, Classification} = beamtalk_workspace_signature_store:capture(
         ClassNameBin, SelectorBin, Side, NewSignature
     ),
-    {captured, Prev}.
+    {captured, Prev, Classification}.
 
 %% Undo a capture_signature_generation/1 (or capture_signature_removal/3) call
 %% whose install/removal subsequently failed (ADR 0105 Phase 1, BT-2777).
@@ -1587,7 +1893,7 @@ do_capture_signature_generation(MethodInfo) ->
 -spec rollback_signature_generation(binary(), binary(), instance | class, capture_outcome()) -> ok.
 rollback_signature_generation(_ClassNameBin, _SelectorBin, _Side, not_captured) ->
     ok;
-rollback_signature_generation(ClassNameBin, SelectorBin, Side, {captured, Prev}) ->
+rollback_signature_generation(ClassNameBin, SelectorBin, Side, {captured, Prev, _Classification}) ->
     try
         _ = beamtalk_workspace_signature_store:rollback(ClassNameBin, SelectorBin, Side, Prev),
         ok
@@ -1606,6 +1912,734 @@ rollback_signature_generation(ClassNameBin, SelectorBin, Side, {captured, Prev})
             ),
             ok
     end.
+
+%% Fire the re-check orchestration (ADR 0105 Phase 1, BT-2778) for a
+%% successfully-installed patch/removal, then publish the outcome (ADR 0105
+%% Phase 1, BT-2779): update `beamtalk_workspace_findings_store` and, when
+%% there is something for a live surface (LSP / REPL / workspace UI) to act
+%% on, broadcast a `'ReloadCheckCompleted'` system announcement.
+%%
+%% `ClassNameBin`'s source just changed (install or removal — a
+%% `Workspace changes revert:` re-install routes through this exact same
+%% path, `do_revert/2` -> `install_revert_patch/4` / `revert_removal/3` ->
+%% `load_recompiled_method/8` / `remove_method/3`), so any reload-induced
+%% findings previously recorded with `ClassNameBin` as the *caller* reference
+%% byte offsets into source that no longer exists — they are cleared
+%% unconditionally, before deciding whether a dependent re-check is even
+%% warranted (`beamtalk_workspace_findings_store`'s moduledoc "Clearing-by-
+%% replacement" section explains why this single hook covers the ADR's
+%% explicit revert bullet with no bespoke revert-specific code, and also
+%% closes the same gap for a plain hand-edit that fixes what a reload broke).
+%%
+%% Accepted tradeoff (flagged on BT-2777's review, recorded on BT-2778):
+%% `Classification` is only as correct as the signature-generation store's
+%% chain. Two concurrent sessions patching the same `{Class, Selector, Side}`
+%% key can race `capture/4`/`rollback/4` such that a losing session's
+%% rollback overwrites the store with a generation that is no longer the
+%% actually-live one (`beamtalk_workspace_signature_store:rollback/4` does an
+%% unconditional put, not a conditional "restore only if I'm still current"
+%% write) — the *next* capture then diffs against the wrong baseline and this
+%% function can fire on a false `signature_change`/`no_op`. Not fixed here:
+%% the store is BT-2777's merged surface, and a full fix (per-key conditional
+%% rollback) is out of this issue's scope. Advisory-only mitigates the
+%% blast radius (a wrong finding is noise, not a build/runtime failure).
+-spec maybe_trigger_recheck(binary(), binary(), instance | class, capture_outcome()) -> ok.
+maybe_trigger_recheck(ClassNameBin, SelectorBin, Side, CaptureOutcome) ->
+    PrevOwnFindings = findings_store_clear_owner(ClassNameBin),
+    {Classification, DependentResult} = maybe_run_recheck(
+        ClassNameBin, SelectorBin, Side, CaptureOutcome
+    ),
+    publish_recheck_outcome(
+        ClassNameBin, SelectorBin, Classification, PrevOwnFindings, DependentResult
+    ).
+
+%% Best-effort wrapper around `beamtalk_workspace_findings_store:clear_owner/1`
+%% (ADR 0105 Phase 1, BT-2779) — the store is REPL-mode-only (see
+%% `beamtalk_workspace_sup`'s `repl_child_specs/6`), so it is legitimately
+%% absent under `beamtalk_repl_loader:install_method/9`'s non-REPL callers
+%% (e.g. `beamtalk_repl_loader_tests.erl`'s unit fixtures, and — per the same
+%% reasoning `capture_signature_generation/1` already documents — a run-mode
+%% precompiled artifact never reaches this hook at all). Degrades to "nothing
+%% was cleared" on any failure rather than crashing the install/removal that
+%% called `maybe_trigger_recheck/4` — the ADR's "advisory, never blocking"
+%% guarantee applies to publishing exactly as it does to the re-check itself.
+-spec findings_store_clear_owner(binary()) -> [beamtalk_recheck:finding()].
+findings_store_clear_owner(OwnerBin) ->
+    try
+        beamtalk_workspace_findings_store:clear_owner(OwnerBin)
+    catch
+        Class:Reason:Stack ->
+            ?LOG_WARNING(
+                "Reload-findings store unavailable (clear skipped)",
+                #{
+                    error_class => Class,
+                    reason => Reason,
+                    stack => Stack,
+                    owner => OwnerBin,
+                    domain => [
+                        beamtalk, runtime
+                    ]
+                }
+            ),
+            []
+    end.
+
+%% Best-effort wrapper around
+%% `beamtalk_workspace_findings_store:put_owner_origin/3` — see
+%% `findings_store_clear_owner/1`'s doc for why the store may legitimately be
+%% absent, and why a failure here must degrade rather than crash.
+%%
+%% `ChangedClassBin` scopes the replacement to *this* changed class's
+%% contribution to `OwnerBin`'s findings (ADR 0105 §Mechanism step 4,
+%% `beamtalk_workspace_findings_store`'s moduledoc) — a caller broken by two
+%% independently-reloading classes keeps both findings; only the one that
+%% actually just got re-checked is replaced.
+-spec findings_store_put_owner_origin(binary(), binary(), [beamtalk_recheck:finding()]) -> ok.
+findings_store_put_owner_origin(OwnerBin, ChangedClassBin, Findings) ->
+    try
+        _ = beamtalk_workspace_findings_store:put_owner_origin(OwnerBin, ChangedClassBin, Findings),
+        ok
+    catch
+        Class:Reason:Stack ->
+            ?LOG_WARNING(
+                "Reload-findings store unavailable (publish skipped)",
+                #{
+                    error_class => Class,
+                    reason => Reason,
+                    stack => Stack,
+                    owner => OwnerBin,
+                    changed_class => ChangedClassBin,
+                    domain => [
+                        beamtalk, runtime
+                    ]
+                }
+            ),
+            ok
+    end.
+
+%% Runs `beamtalk_recheck:trigger/4` only when `CaptureOutcome` warrants it
+%% (`{captured, _, signature_change | removal}`) — `no_op`/`not_captured`
+%% skip it, since there is nothing to diff dependents against. When it does
+%% run, replaces every checked owner's stored findings **for this changed
+%% class** via `beamtalk_workspace_findings_store:put_owner_origin/3` — this
+%% is the clearing-by-replacement rule applied per `{caller, changed class}`
+%% origin (not per caller alone — see the store's moduledoc for why a caller
+%% broken by two independently-reloading classes needs both origins kept
+%% separate), including a clean re-check (`put_owner_origin(Owner,
+%% ClassNameBin, [])`) and a self-referential caller (already cleared in full
+%% by `clear_owner/1` above, since that call is un-scoped; a fresh
+%% empty-or-not set here re-adds only this origin's contribution).
+%%
+%% Returns `{Classification, Result}` when a re-check ran, or `{self_edit,
+%% undefined}` when it did not — `self_edit` stands in for "this install had
+%% no dependents worth diffing", so `publish_recheck_outcome/5` always has a
+%% classification to log/announce with even when the only newsworthy thing
+%% that happened is `ClassNameBin`'s own stale findings being cleared.
+-spec maybe_run_recheck(binary(), binary(), instance | class, capture_outcome()) ->
+    {self_edit | beamtalk_recheck:classification(), beamtalk_recheck:result() | undefined}.
+maybe_run_recheck(_ClassNameBin, _SelectorBin, _Side, not_captured) ->
+    {self_edit, undefined};
+maybe_run_recheck(_ClassNameBin, _SelectorBin, _Side, {captured, _Prev, no_op}) ->
+    {self_edit, undefined};
+maybe_run_recheck(ClassNameBin, SelectorBin, Side, {captured, _Prev, Classification}) ->
+    Result = beamtalk_recheck:trigger(ClassNameBin, SelectorBin, Side, Classification),
+    #{
+        checked_owners := CheckedOwners,
+        findings := Findings,
+        not_verified_owners := NotVerifiedOwners
+    } = Result,
+    lists:foreach(
+        fun(OwnerBin) ->
+            OwnerFindings = [F || F <- Findings, maps:get(owner, F) =:= OwnerBin],
+            findings_store_put_owner_origin(OwnerBin, ClassNameBin, OwnerFindings)
+        end,
+        CheckedOwners
+    ),
+    mark_unverified_findings_stale(ClassNameBin, NotVerifiedOwners),
+    {Classification, Result}.
+
+%% BT-2802/BT-2828: a candidate whose diagnostics round-trip never completed
+%% this reload (`NotVerifiedOwners` — `beamtalk_recheck:result()`'s
+%% `not_verified_owners`, covering the caller-cap-dropped candidates AND any
+%% `Kept` candidate that came back `skipped` (no live source recorded) or
+%% `failed` (compile/compiler-port error)) never went through
+%% `put_owner_origin/3` above, so any finding it already carries *for this
+%% changed class* is left exactly as a previous, possibly-now-stale reload
+%% wrote it — nothing here re-verified whether the caller's problem still
+%% holds. Rather than let that finding keep asserting itself as current
+%% forever (the BT-2802 bug, and its BT-2828 skipped/failed-outcome sibling)
+%% or silently drop it (could hide a real, still-live problem), overwrite its
+%% `note` in place, still through `put_owner_origin/3`'s ordinary replace
+%% semantics, to say so. A candidate with no existing finding for this origin
+%% has nothing to mark — most unverified candidates, every reload — so this
+%% is a no-op for them (`findings_store_get_origin/2` returns `[]`).
+-spec mark_unverified_findings_stale(binary(), [binary()]) -> ok.
+mark_unverified_findings_stale(ClassNameBin, NotVerifiedOwners) ->
+    lists:foreach(
+        fun(OwnerBin) ->
+            case findings_store_get_origin(OwnerBin, ClassNameBin) of
+                [] ->
+                    ok;
+                Existing ->
+                    Stale = [mark_stale_finding(ClassNameBin, F) || F <- Existing],
+                    findings_store_put_owner_origin(OwnerBin, ClassNameBin, Stale)
+            end
+        end,
+        NotVerifiedOwners
+    ),
+    ok.
+
+%% Best-effort wrapper around `beamtalk_workspace_findings_store:get_origin/2`
+%% — mirrors `findings_store_clear_owner/1`'s "store may legitimately be
+%% absent, degrade rather than crash" reasoning.
+-spec findings_store_get_origin(binary(), binary()) -> [beamtalk_recheck:finding()].
+findings_store_get_origin(OwnerBin, ChangedClassBin) ->
+    try
+        beamtalk_workspace_findings_store:get_origin(OwnerBin, ChangedClassBin)
+    catch
+        Class:Reason:Stack ->
+            ?LOG_WARNING(
+                "Reload-findings store unavailable (staleness check skipped)",
+                #{
+                    error_class => Class,
+                    reason => Reason,
+                    stack => Stack,
+                    owner => OwnerBin,
+                    changed_class => ChangedClassBin,
+                    domain => [
+                        beamtalk, runtime
+                    ]
+                }
+            ),
+            []
+    end.
+
+%% The marker substring `stale_note/2` looks for to avoid re-wrapping a note
+%% that is already marked — a candidate parked outside the cap (or
+%% repeatedly skipped/failed, BT-2828) for many consecutive reloads must not
+%% accumulate one "not re-checked" suffix per reload.
+-define(RECHECK_STALE_MARKER, <<"not re-checked against the latest reload">>).
+
+%% Overwrite `Finding`'s `note` to flag it as not re-verified this reload,
+%% unless it is already so marked (idempotent across consecutive
+%% not-verified reloads — see `?RECHECK_STALE_MARKER`).
+-spec mark_stale_finding(binary(), beamtalk_recheck:finding()) -> beamtalk_recheck:finding().
+mark_stale_finding(ClassNameBin, Finding = #{note := Note}) when is_binary(Note) ->
+    case binary:match(Note, ?RECHECK_STALE_MARKER) of
+        nomatch -> Finding#{note => stale_note(ClassNameBin, Note)};
+        _ -> Finding
+    end;
+mark_stale_finding(ClassNameBin, Finding) ->
+    Finding#{note => stale_note(ClassNameBin, undefined)}.
+
+%% BT-2828: the reason a candidate went unverified is deliberately not named
+%% here (caller-cap limit vs. no live source vs. a compiler-port failure) —
+%% `mark_unverified_findings_stale/2` is fed one merged
+%% `not_verified_owners` set with no per-owner reason attached, and inventing
+%% one back out would either guess or need threading three more outcome
+%% tags through `beamtalk_recheck:result()` for a note string alone. "May be
+%% stale" is accurate and reason-agnostic for all three causes.
+-spec stale_note(binary(), binary() | undefined) -> binary().
+stale_note(ClassNameBin, undefined) ->
+    <<"not re-checked against the latest reload of ", ClassNameBin/binary, " — may be stale">>;
+stale_note(ClassNameBin, PrevNote) ->
+    <<PrevNote/binary, " — not re-checked against the latest reload of ", ClassNameBin/binary,
+        " — may be stale">>.
+
+%% Log + broadcast the outcome of one `maybe_trigger_recheck/4` call — but
+%% only when a live surface has something to act on: either a dependent
+%% re-check ran against at least one owner (`DependentResult`'s
+%% `checked_owners` non-empty), or clearing `ClassNameBin`'s own findings
+%% above (`PrevOwnFindings`) actually removed something a surface might
+%% still be showing. A no-op edit with no prior findings and no known
+%% dependents announces nothing — the common case, and not worth a push
+%% frame on every keystroke-save.
+-spec publish_recheck_outcome(
+    binary(),
+    binary(),
+    self_edit | beamtalk_recheck:classification(),
+    [beamtalk_recheck:finding()],
+    beamtalk_recheck:result() | undefined
+) -> ok.
+publish_recheck_outcome(
+    ClassNameBin, SelectorBin, Classification, PrevOwnFindings, DependentResult
+) ->
+    {DependentCheckedOwners, Findings, Checked, NotChecked, CapNote} =
+        case DependentResult of
+            undefined ->
+                {[], [], 0, 0, undefined};
+            #{
+                checked_owners := CO,
+                findings := F,
+                checked := C,
+                not_checked := NC,
+                cap_note := CN
+            } ->
+                {CO, F, C, NC, CN}
+        end,
+    TouchedOwners = lists:usort(
+        DependentCheckedOwners ++
+            case PrevOwnFindings of
+                [] -> [];
+                _ -> [ClassNameBin]
+            end
+    ),
+    case TouchedOwners of
+        [] ->
+            ok;
+        _ ->
+            case Findings of
+                [] ->
+                    ok;
+                _ ->
+                    ?LOG_INFO(
+                        "Reload re-check produced findings",
+                        #{
+                            class => ClassNameBin,
+                            selector => SelectorBin,
+                            classification => Classification,
+                            callers_checked => Checked,
+                            callers_not_checked => NotChecked,
+                            finding_count => length(Findings),
+                            domain => [beamtalk, runtime]
+                        }
+                    )
+            end,
+            beamtalk_announcements:system_announce('ReloadCheckCompleted', #{
+                changedClass => ClassNameBin,
+                changedSelector => SelectorBin,
+                classification => Classification,
+                checked => Checked,
+                notChecked => NotChecked,
+                capNote => CapNote,
+                checkedOwners => TouchedOwners,
+                findings => Findings
+            }),
+            ok
+    end.
+
+%%====================================================================
+%% Shape-change re-check (ADR 0105 Phase 2, BT-2780)
+%%====================================================================
+
+-doc """
+Seed the shape-generation store from each class's *currently-loaded* module
+(before this class-body reload's `code:load_binary` replaces it) — the
+`prime/1` half of `beamtalk_workspace_shape_store`'s two-phase capture. Call
+sites: `load_class_module/3`, `load_compiled_module/6`,
+`reload_compile_and_load/4` — every path that installs a full class body
+(as opposed to a single-method patch or removal, neither of which can
+change `state:`/`field:` slots). Best-effort and self-swallowing, mirroring
+`capture_signature_generation/1`: priming is diagnostic plumbing for a later
+re-check, never a gate on the install itself.
+""".
+-spec prime_shape_capture([map()]) -> ok.
+prime_shape_capture(Classes) ->
+    lists:foreach(
+        fun(#{name := Name}) ->
+            try
+                ok = beamtalk_workspace_shape_store:prime(normalize_class_source_key(Name))
+            catch
+                Class:Reason:Stack ->
+                    ?LOG_WARNING(
+                        "Failed to prime shape-generation store (install proceeding)",
+                        #{
+                            error_class => Class,
+                            reason => Reason,
+                            stack => Stack,
+                            class => Name,
+                            domain => [beamtalk, runtime]
+                        }
+                    )
+            end
+        end,
+        Classes
+    ),
+    ok.
+
+-doc """
+Hand `Classes` off to `beamtalk_workspace_shape_recheck_worker` and return
+immediately — see `activate_module/3`'s doc ("Asynchronous *and
+serialised*...") for why this must neither run on the install's response
+path nor run unbounded-concurrently. The worker's mailbox is the queue: a
+`cast` here never blocks the caller, and the worker processes one reload's
+recheck at a time, so this call site never needs to know about ordering or
+backpressure.
+""".
+-spec spawn_shape_recheck([map()]) -> ok.
+spawn_shape_recheck(Classes) ->
+    beamtalk_workspace_shape_recheck_worker:enqueue(Classes).
+
+-doc """
+Capture each class's post-install shape and, on a genuine `shape_change`,
+run the shape re-check orchestration (`beamtalk_recheck:trigger_shape/2`)
+and publish its findings. Reached in production only via
+`beamtalk_workspace_shape_recheck_worker`'s single-worker queue (`enqueue/1`
+-> `spawn_shape_recheck/1`, off the install's response path and serialised
+against every other pending shape re-check — see `activate_module/3`'s doc,
+"Asynchronous *and serialised*"), which is also why this is exported outside
+the `-ifdef(TEST)` block: the worker lives in a different module. See
+`activate_module/3`'s doc for why an un-primed class (a method patch, a new
+class, a protocol) is a harmless `no_op` here.
+""".
+-spec maybe_trigger_shape_recheck([map()]) -> ok.
+maybe_trigger_shape_recheck(Classes) ->
+    lists:foreach(fun maybe_trigger_shape_recheck_for_class/1, Classes),
+    ok.
+
+-spec maybe_trigger_shape_recheck_for_class(map()) -> ok.
+maybe_trigger_shape_recheck_for_class(#{name := Name}) ->
+    ClassNameBin = normalize_class_source_key(Name),
+    try
+        {_Prev, {Classification, FieldChanges}} =
+            beamtalk_workspace_shape_store:capture(ClassNameBin),
+        case Classification of
+            no_op ->
+                ok;
+            shape_change ->
+                Result = beamtalk_recheck:trigger_shape(ClassNameBin, FieldChanges),
+                publish_shape_recheck_outcome(ClassNameBin, FieldChanges, Result)
+        end
+    catch
+        Class:Reason:Stack ->
+            ?LOG_WARNING(
+                "Shape re-check trigger failed (reload unaffected)",
+                #{
+                    error_class => Class,
+                    reason => Reason,
+                    stack => Stack,
+                    class => ClassNameBin,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            ok
+    end.
+
+-doc """
+Publish a shape re-check's outcome — mirrors `maybe_run_recheck/4`'s
+per-owner `put_owner_origin/3` replacement and `publish_recheck_outcome/5`'s
+`'ReloadCheckCompleted'` broadcast, reusing the exact same findings-store and
+announcement schema so every existing surface (LSP / REPL / workspace UI)
+renders a shape-change finding without new wiring. `changedSelector` has no
+single selector to report for a shape change, so it carries
+`shape_change_summary/1`'s comma-joined list of affected slot names instead
+— still meaningful in the generic "`{changed_class}`>>`{changed_selector}`"
+templates every surface already uses.
+
+The announce fires whenever `CheckedOwners` is non-empty, **not** only when
+`Findings` is — an empty `Findings` with non-empty `CheckedOwners` is exactly
+the "reload-fixes-reload" clearing signal `publish_recheck_outcome/5` already
+relies on: `put_owner_origin/3` above already cleared each checked owner's
+stale shape-change findings from the store, and every surface needs the
+announcement itself to know to drop what it was showing, not just a quiet
+store write nobody hears about. Matching `publish_recheck_outcome/5`'s
+structure exactly (found in review, BT-2780): the `?LOG_INFO` is gated on
+`Findings` (nothing worth logging about a clean re-check), the announce is
+gated on `CheckedOwners` alone.
+""".
+-spec publish_shape_recheck_outcome(
+    binary(), [beamtalk_shape_diff:field_change()], beamtalk_recheck:result()
+) ->
+    ok.
+publish_shape_recheck_outcome(ClassNameBin, FieldChanges, Result) ->
+    #{
+        checked_owners := CheckedOwners,
+        findings := Findings,
+        checked := Checked,
+        not_checked := NotChecked,
+        cap_note := CapNote,
+        not_verified_owners := NotVerifiedOwners
+    } = Result,
+    lists:foreach(
+        fun(OwnerBin) ->
+            OwnerFindings = [F || F <- Findings, maps:get(owner, F) =:= OwnerBin],
+            findings_store_put_owner_origin(OwnerBin, ClassNameBin, OwnerFindings)
+        end,
+        CheckedOwners
+    ),
+    %% BT-2802/BT-2828: same not-verified staleness marking as
+    %% `maybe_run_recheck/4` (see `mark_unverified_findings_stale/2`'s doc) —
+    %% a shape change's candidates go through the same `apply_cap/2` limit
+    %% and the same `recheck_owner_for_shape/4` skipped/failed outcomes.
+    mark_unverified_findings_stale(ClassNameBin, NotVerifiedOwners),
+    case CheckedOwners of
+        [] ->
+            ok;
+        _ ->
+            case Findings of
+                [] ->
+                    ok;
+                _ ->
+                    ?LOG_INFO(
+                        "Shape reload re-check produced findings",
+                        #{
+                            class => ClassNameBin,
+                            field_changes => FieldChanges,
+                            callers_checked => Checked,
+                            callers_not_checked => NotChecked,
+                            finding_count => length(Findings),
+                            domain => [beamtalk, runtime]
+                        }
+                    )
+            end,
+            beamtalk_announcements:system_announce('ReloadCheckCompleted', #{
+                changedClass => ClassNameBin,
+                changedSelector => shape_change_summary(FieldChanges),
+                classification => shape_change,
+                checked => Checked,
+                notChecked => NotChecked,
+                capNote => CapNote,
+                checkedOwners => CheckedOwners,
+                findings => Findings
+            }),
+            ok
+    end.
+
+%% ── BT-2856 / ADR 0107 Phase A: leaf-change re-check ────────────────────
+
+-doc """
+Which superclass names declared by `Classes` are, at this exact moment,
+leaf classes with zero direct subclasses, and are therefore about to lose
+that status once `Classes` installs.
+
+**Must be called before the caller's own `code:load_binary/3`, not just
+before `register_classes/2`** — see `activate_module/4`'s doc for why the
+naive "before `register_classes/2`, inside `activate_module`" placement
+this function first shipped with was still too late (`code:load_binary/3`'s
+synchronous `on_load` hook already registers the new subclass link before
+`activate_module/*` is ever reached).
+
+A `matchExhaustive:`/`Type`-pattern site elsewhere in the image may have a
+compile-time proof that depended on exactly this class being leaf (ADR 0107
+Phase A's "has subclasses" compile-error restriction,
+`match_validators:validate_type_pattern_class` on the Rust side) — once
+this registration completes, that proof is stale.
+`beamtalk_recheck:trigger_leaf_change/1` (run via
+`maybe_trigger_leaf_change_recheck/1`, below) is the re-check half that
+re-surfaces it instead of leaving it to crash at runtime with an opaque
+`case_clause` error.
+
+A re-registration of an *already-existing* subclass (a method-only reload,
+unchanged superclass) is correctly excluded by this function's own
+ordering requirement: that superclass was already non-leaf the first time
+this same class registered, so `direct_subclasses/1` already finds it
+non-empty on every later reload and this never re-fires for it.
+
+`Classes` entries' `superclass` value is a `string()` on the
+`compile_file_core/3` path but already a `binary()` on others (e.g. the
+`load_class_module/3` path this same function is called from) —
+`unicode:characters_to_binary/1` (not `list_to_binary/1`, which badargs on
+an already-binary input) normalises either shape.
+
+**Never raises: any internal failure degrades to `[]` (advisory, never
+blocking — ADR 0105's own rule).** This is called on every single
+new-class-defining load, immediately before `code:load_binary/3`
+(`activate_module/4`'s doc) — unlike every other call site in this
+mechanism (`recheck_owner_for_leaf_change/3`, `was_leaf_class/1`'s own
+`binary_to_existing_atom/2` guard), a failure here sits directly in the
+class-install hot path with no surrounding `try/catch` at any of its
+call sites, so this function must be defensive on its own, the same way
+`prime_shape_capture/1` wraps each class's store-priming individually
+rather than trusting its own caller to catch anything.
+""".
+-spec superclasses_losing_leaf_status([map()]) -> [binary()].
+superclasses_losing_leaf_status(Classes) ->
+    try
+        SuperclassNames = lists:usort([
+            unicode:characters_to_binary(Super)
+         || #{superclass := Super} <- Classes, Super =/= undefined
+        ]),
+        lists:filter(fun was_leaf_class/1, SuperclassNames)
+    catch
+        Class:Reason:Stack ->
+            ?LOG_WARNING(
+                "Leaf-change detection failed (install proceeding)",
+                #{
+                    error_class => Class,
+                    reason => Reason,
+                    stack => Stack,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            []
+    end.
+
+-doc """
+Was `SuperclassBin` a leaf class (zero direct subclasses) at the moment
+this is called? A superclass name that is not even an interned atom yet was
+never loaded as a class this session, so nothing could depend on it being
+leaf either — `false`, not a crash, matching every other
+`binary_to_existing_atom/2` safety check in this module (BT-2856 adds no
+new atom-table-exhaustion surface: superclass names here are always
+already-loaded class names or the `badarg` catch below fires instead of
+minting a fresh atom from reload-derived text).
+""".
+-spec was_leaf_class(binary()) -> boolean().
+was_leaf_class(SuperclassBin) ->
+    try binary_to_existing_atom(SuperclassBin, utf8) of
+        SuperclassAtom ->
+            beamtalk_class_registry:direct_subclasses(SuperclassAtom) =:= []
+    catch
+        error:badarg -> false
+    end.
+
+-doc """
+Hand `NewlyNonLeafSuperclasses` off to the shape-recheck worker's queue and
+return immediately — reuses `beamtalk_workspace_shape_recheck_worker`'s
+existing single-worker serialisation (see `spawn_shape_recheck/1`'s doc for
+why an unbounded-concurrent or response-path-synchronous trigger is unsafe
+here too: `trigger_leaf_change/1` is a whole-image compiler-port sweep, at
+least as expensive as a shape re-check). A no-op when the list is empty —
+the overwhelmingly common case, since most reloads add no new class at all,
+and most that do target an already-non-leaf superclass.
+""".
+-spec spawn_leaf_change_recheck([binary()]) -> ok.
+spawn_leaf_change_recheck([]) ->
+    ok;
+spawn_leaf_change_recheck(NewlyNonLeafSuperclasses) ->
+    beamtalk_workspace_shape_recheck_worker:enqueue_leaf_change(NewlyNonLeafSuperclasses).
+
+-doc """
+Run the leaf-change re-check for `Superclasses` — the *whole* list one
+reload event produced — and publish each superclass's own findings.
+Reached in production only via `beamtalk_workspace_shape_recheck_worker`'s
+queue (mirrors `maybe_trigger_shape_recheck/1` exactly — see its doc — which
+is also why this is exported outside the `-ifdef(TEST)` block, same reason:
+the worker lives in a different module).
+
+**BT-2873:** `beamtalk_recheck:trigger_leaf_change/1` runs **one** shared
+whole-image sweep covering every superclass in `Superclasses` (never raises
+— see its own doc), instead of one independent sweep per superclass
+(`spawn_leaf_change_recheck/1`'s doc explains why paying for N sweeps when
+N superclasses transition in the same reload was wasteful: every sweep
+would recompile the identical candidate set against the identical,
+already-updated hierarchy). Publishing still happens once per superclass
+(`publish_leaf_change_recheck_outcome/2` filters the shared result's
+findings down to just the ones attributed to its own superclass), preserving
+the existing one-`'ReloadCheckCompleted'`-announcement-per-superclass
+contract every consumer already relies on — each publish call is
+independently try/catch-wrapped so a failure publishing one superclass's
+outcome cannot prevent another's from being published.
+""".
+-spec maybe_trigger_leaf_change_recheck([binary()]) -> ok.
+maybe_trigger_leaf_change_recheck([]) ->
+    ok;
+maybe_trigger_leaf_change_recheck(Superclasses) ->
+    Result = beamtalk_recheck:trigger_leaf_change(Superclasses),
+    lists:foreach(
+        fun(SuperclassBin) -> publish_leaf_change_recheck_outcome_safe(SuperclassBin, Result) end,
+        Superclasses
+    ),
+    ok.
+
+-spec publish_leaf_change_recheck_outcome_safe(binary(), beamtalk_recheck:result()) -> ok.
+publish_leaf_change_recheck_outcome_safe(SuperclassBin, Result) ->
+    try
+        publish_leaf_change_recheck_outcome(SuperclassBin, Result)
+    catch
+        Class:Reason:Stack ->
+            ?LOG_WARNING(
+                "Leaf-change re-check publish failed (reload unaffected)",
+                #{
+                    error_class => Class,
+                    reason => Reason,
+                    stack => Stack,
+                    superclass => SuperclassBin,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            ok
+    end.
+
+-doc """
+Publish a leaf-change re-check's outcome for `SuperclassBin` — mirrors
+`publish_shape_recheck_outcome/3`'s store-write/announce shape, reusing the
+exact same findings-store and `'ReloadCheckCompleted'` announcement schema
+so every existing surface renders a leaf-change finding without new wiring.
+`changedSelector` carries `SuperclassBin` itself (there is no single call
+site selector this is "about" — same reasoning `finding()`'s doc already
+gives for `shape_change`).
+
+**BT-2873:** `Result` may be a *shared* outcome covering several
+superclasses at once (`maybe_trigger_leaf_change_recheck/1`'s batched
+sweep) — `Findings` is filtered down to just the ones whose own
+`changed_class` is `SuperclassBin` before anything else runs, so a finding
+attributed to a sibling superclass in the same batch never leaks into this
+superclass's findings-store origin or announcement. `CheckedOwners`/
+`Checked`/`NotChecked`/`CapNote` are **not** filtered — they describe the
+one shared diagnostics sweep itself (identical for every superclass in the
+batch, since it is literally the same round trip), matching exactly what an
+unbatched single-superclass sweep would have reported for this superclass
+alone.
+
+Unlike `publish_shape_recheck_outcome/3`, the announce is gated on
+`Findings` being non-empty alone, not on `CheckedOwners` alone: a superclass
+cannot *regain* leaf status through this path (there is no "reload fixes
+reload" case symmetrical to a method/shape edit — losing leaf status is
+monotonic short of `removeFromSystem`, a distinct, out-of-scope operation
+this trigger is never reached from), so there is no clearing-only outcome
+worth announcing on its own. The findings-store write itself still runs
+for every checked owner unconditionally, so a stale prior finding is always
+replaced per ADR 0105's "replacement, not just agreement" rule even when
+this reload's re-check comes back clean.
+""".
+-spec publish_leaf_change_recheck_outcome(binary(), beamtalk_recheck:result()) -> ok.
+publish_leaf_change_recheck_outcome(SuperclassBin, Result) ->
+    #{
+        checked_owners := CheckedOwners,
+        findings := AllFindings,
+        checked := Checked,
+        not_checked := NotChecked,
+        cap_note := CapNote,
+        not_verified_owners := NotVerifiedOwners
+    } = Result,
+    Findings = [F || F <- AllFindings, maps:get(changed_class, F) =:= SuperclassBin],
+    lists:foreach(
+        fun(OwnerBin) ->
+            OwnerFindings = [F || F <- Findings, maps:get(owner, F) =:= OwnerBin],
+            findings_store_put_owner_origin(OwnerBin, SuperclassBin, OwnerFindings)
+        end,
+        CheckedOwners
+    ),
+    mark_unverified_findings_stale(SuperclassBin, NotVerifiedOwners),
+    case Findings of
+        [] ->
+            ok;
+        _ ->
+            ?LOG_INFO(
+                "Leaf-change reload re-check produced findings",
+                #{
+                    superclass => SuperclassBin,
+                    callers_checked => Checked,
+                    callers_not_checked => NotChecked,
+                    finding_count => length(Findings),
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            beamtalk_announcements:system_announce('ReloadCheckCompleted', #{
+                changedClass => SuperclassBin,
+                changedSelector => SuperclassBin,
+                classification => leaf_change,
+                checked => Checked,
+                notChecked => NotChecked,
+                capNote => CapNote,
+                checkedOwners => CheckedOwners,
+                findings => Findings
+            }),
+            ok
+    end.
+
+-doc """
+A comma-joined, de-duplicated list of every changed slot's name, e.g.
+`<<"count, name">>` for a reload that both retyped `count` and removed
+`name` — the closest a shape change has to `signature_change`/`removal`'s
+single changed selector, for surfaces that render `changedSelector` as
+free text.
+""".
+-spec shape_change_summary([beamtalk_shape_diff:field_change()]) -> binary().
+shape_change_summary(FieldChanges) ->
+    Names = lists:usort([beamtalk_shape_diff:field_name(FC) || FC <- FieldChanges]),
+    iolist_to_binary(lists:join(<<", ">>, Names)).
 
 -spec patch_side(boolean()) -> instance | class.
 patch_side(true) -> class;

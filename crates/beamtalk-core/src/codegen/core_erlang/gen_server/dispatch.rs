@@ -505,6 +505,15 @@ impl CoreErlangGenerator {
     }
 
     /// Generates the hierarchy walk via `beamtalk_dispatch:super`, falling back to DNU.
+    ///
+    /// BT-2842: `beamtalk_dispatch:super/5` returns `{error, #beamtalk_error{}}`
+    /// for two semantically different situations — the selector genuinely
+    /// isn't found anywhere in the hierarchy (`kind = does_not_understand`),
+    /// or the selector *was* found and invoked but the method itself raised a
+    /// real error (any other kind), already wrapped by
+    /// `beamtalk_exception_handler:ensure_wrapped/4`. Only the former should
+    /// fall through to the fabricated DNU fallback; the latter must
+    /// propagate via `beamtalk_error:raise/1` instead of being discarded.
     fn generate_hierarchy_walk(&self, class_name: &str) -> Document<'static> {
         let dnu_fallback = self.generate_dnu_fallback(class_name);
 
@@ -524,8 +533,37 @@ impl CoreErlangGenerator {
                         docvec![line(), "{'reply', InheritedResult, InheritedState}",]
                     ),
                     line(),
-                    "<{'error', _DispatchError}> when 'true' ->",
-                    nest(INDENT, docvec![line(), dnu_fallback,]),
+                    "<{'error', DispatchError}> when 'true' ->",
+                    nest(
+                        INDENT,
+                        docvec![
+                            line(),
+                            "%% BT-2842: only mask genuine \"not found\" as DNU; a real",
+                            line(),
+                            "%% error raised by an inherited method must propagate.",
+                            line(),
+                            "case call 'beamtalk_error':'is_does_not_understand'(DispatchError) of",
+                            nest(
+                                INDENT,
+                                docvec![
+                                    line(),
+                                    "<'true'> when 'true' ->",
+                                    nest(INDENT, docvec![line(), dnu_fallback,]),
+                                    line(),
+                                    "<'false'> when 'true' ->",
+                                    nest(
+                                        INDENT,
+                                        docvec![
+                                            line(),
+                                            "call 'beamtalk_error':'raise'(DispatchError)",
+                                        ]
+                                    ),
+                                ]
+                            ),
+                            line(),
+                            "end",
+                        ]
+                    ),
                 ]
             ),
             line(),

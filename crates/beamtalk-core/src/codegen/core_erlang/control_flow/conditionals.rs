@@ -640,8 +640,82 @@ impl CoreErlangGenerator {
                         docs.push(Document::Vec(doc_parts));
                     }
                 }
+                BodyExprKind::Tier2ValueCall => {
+                    // BT-2797 (PR #2899 review fix): a bare (non-assigned)
+                    // `self.field value(:...)` statement inside a
+                    // conditional branch. `generate_tier2_value_call_doc`
+                    // always returns a `{Result, NewState}` tuple for a
+                    // `self.field` receiver in Actor context — unpack it and
+                    // thread the state forward, mirroring the
+                    // `ControlFlowWithMutations` arm above and the top-level
+                    // `Tier2ValueCall` handling in `gen_server/methods.rs`.
+                    if is_last {
+                        let tuple_var = self.fresh_temp_var("T2Tuple");
+                        let result_var = self.fresh_temp_var("BranchResult");
+                        let expr_doc = self.generate_tier2_value_call_doc(expr)?;
+                        let next_state = self.next_state_var();
+                        docs.push(docvec![
+                            "let ",
+                            leaf::var(tuple_var.clone()),
+                            " = ",
+                            expr_doc,
+                            " in let ",
+                            leaf::var(result_var.clone()),
+                            " = call 'erlang':'element'(1, ",
+                            leaf::var(tuple_var.clone()),
+                            ") in let ",
+                            leaf::var(next_state),
+                            " = call 'erlang':'element'(2, ",
+                            leaf::var(tuple_var),
+                            ") in ",
+                        ]);
+                        last_result = Some(result_var);
+                    } else {
+                        let tuple_var = self.fresh_temp_var("T2Tuple");
+                        let discard_var = self.fresh_temp_var("T2Discard");
+                        let expr_doc = self.generate_tier2_value_call_doc(expr)?;
+                        let next_state = self.next_state_var();
+                        let mut doc_parts: Vec<Document<'static>> = vec![docvec![
+                            "let ",
+                            leaf::var(tuple_var.clone()),
+                            " = ",
+                            expr_doc,
+                            " in let ",
+                            leaf::var(discard_var),
+                            " = call 'erlang':'element'(1, ",
+                            leaf::var(tuple_var.clone()),
+                            ")\n in let ",
+                            leaf::var(next_state.clone()),
+                            " = call 'erlang':'element'(2, ",
+                            leaf::var(tuple_var),
+                            ") in ",
+                        ]];
+
+                        // BT-1213: rebind captured local-var mutations from
+                        // NewState so a later read in this branch sees the
+                        // mutated value (mirrors the top-level Tier2ValueCall
+                        // handling in gen_server/methods.rs).
+                        if let Some(mutations) = self.get_inline_block_captured_mutations(expr) {
+                            for var in &mutations {
+                                let core_var = self
+                                    .lookup_var(var)
+                                    .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
+                                doc_parts.push(docvec![
+                                    "let ",
+                                    leaf::var(core_var),
+                                    " = call 'maps':'get'(",
+                                    leaf::atom(Self::local_state_key(var)),
+                                    ", ",
+                                    leaf::var(next_state.clone()),
+                                    ") in ",
+                                ]);
+                            }
+                        }
+                        docs.push(Document::Vec(doc_parts));
+                    }
+                }
                 // All other kinds (EarlyReturn, SuperSend, ErrorSend,
-                // Tier2ValueCall, Tier2SelfSend, DispatchingSelfSend, Pure) are treated
+                // Tier2SelfSend, DispatchingSelfSend, Pure) are treated
                 // as pure expressions in the conditional branch context.
                 _ => {
                     if is_last {
@@ -687,6 +761,38 @@ impl CoreErlangGenerator {
 #[cfg(test)]
 mod tests {
     use crate::codegen::core_erlang::tests::codegen;
+
+    #[test]
+    fn test_bt2797_bare_tier2_value_call_in_conditional_branch_unpacks_tuple() {
+        // BT-2797 (PR #2899 review fix): a bare (non-assigned) `self.field
+        // value:` statement inside an `ifTrue:` branch that *also* contains an
+        // explicit field assignment (so `block_analysis` detects the branch
+        // needs state threading and routes it through
+        // `generate_conditional_branch_inline`). Before the fix, the
+        // catch-all `_ =>` arm called `expression_doc` directly on the
+        // Tier2ValueCall statement, discarding the `{Result, NewState}`
+        // tuple's second element — silently dropping the field mutation
+        // performed inside the stored block. Structural check only (see
+        // stdlib/test/tier2_subexpr_and_conditional_block_test.bt for the
+        // runtime end-to-end check).
+        let src = "Actor subclass: Ctr\n  state: total = 0\n  state: calls = 0\n  state: onTick = nil\n\n  setup => self.onTick := [:x | self.total := self.total + x]\n\n  tickIfPositive: x =>\n    x > 0 ifTrue: [self.calls := self.calls + 1. self.onTick value: x].\n    self.total\n";
+        let code = codegen(src);
+        assert!(
+            regex::Regex::new(r"let _T2Tuple\w* = .*is_function.*in let _BranchResult\w* = call 'erlang':'element'\(1, _T2Tuple")
+                .unwrap()
+                .is_match(&code),
+            "the bare Tier2ValueCall statement inside the ifTrue: branch must \
+             unpack the returned {{Result, NewState}} tuple via element/1 and \
+             thread element/2 forward as the branch's new state. Got: {code}"
+        );
+        assert!(
+            regex::Regex::new(r"let StateAcc\w* = call 'erlang':'element'\(2, _T2Tuple")
+                .unwrap()
+                .is_match(&code),
+            "the branch's new state must be threaded forward from the \
+             Tier2ValueCall's tuple. Got: {code}"
+        );
+    }
 
     #[test]
     fn test_if_true_mutation_bypasses_runtime_dispatch() {

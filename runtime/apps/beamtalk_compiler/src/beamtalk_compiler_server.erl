@@ -29,9 +29,11 @@ to avoid temp files on disk (BT-48).
     compile_method/3,
     diagnostics/1,
     diagnostics/2,
+    diagnostics/3,
     version/0,
     compile_core_erlang/1,
     register_class/2,
+    get_classes/0,
     resolve_completion_type/1,
     find_senders_in_source/2,
     find_all_sends_in_source/1,
@@ -52,8 +54,8 @@ to avoid temp files on disk (BT-48).
     handle_compile_response/1,
     handle_diagnostics_response/1,
     handle_version_response/1,
-    get_classes/0,
-    clear_classes/0
+    clear_classes/0,
+    inject_diagnostics_failure/1
 ]).
 -endif.
 
@@ -62,7 +64,13 @@ to avoid temp files on disk (BT-48).
     %% ADR 0050 Phase 3: Accumulated class metadata cache.
     %% Maps class name atom → __beamtalk_meta/0 map.
     %% Populated via register_class/2 casts and crash recovery on init.
-    classes = #{} :: #{atom() => map()}
+    classes = #{} :: #{atom() => map()},
+    %% BT-2832 (test-only): when set (via inject_diagnostics_failure/1, only
+    %% exported in TEST builds), the *next* diagnostics/3 call fails with this
+    %% reason instead of reaching the real compiler port, then self-clears.
+    %% Always `undefined` in production — nothing outside TEST builds can set
+    %% it. See inject_diagnostics_failure/1's doc for why this exists.
+    diagnostics_fault = undefined :: undefined | binary()
 }).
 
 %%% Public API
@@ -88,6 +96,7 @@ or `{error, Diagnostics}' on failure, where each diagnostic is a map with
     | {ok, class_definition, map()}
     | {ok, method_definition, map()}
     | {ok, protocol_definition, map()}
+    | {ok, type_alias_definition, map()}
     | {error, [map()]}.
 compile_expression(Source, ModuleName, KnownVars) ->
     compile_expression(Source, ModuleName, KnownVars, #{}).
@@ -103,6 +112,7 @@ Options:
     | {ok, class_definition, map()}
     | {ok, method_definition, map()}
     | {ok, protocol_definition, map()}
+    | {ok, type_alias_definition, map()}
     | {error, [map()]}.
 compile_expression(Source, ModuleName, KnownVars, Options) ->
     gen_server:call(
@@ -158,11 +168,36 @@ compile_method(ClassSource, MethodSource, Options) ->
 diagnostics(Source) ->
     diagnostics(Source, <<"expression">>).
 
--doc "Get diagnostics for source code under a parse `Mode' (no code generation).".
+-doc """
+Get diagnostics for source code under a parse `Mode' (no code generation).
+Equivalent to `diagnostics/3' with `#{}' — no ambient class-hierarchy
+awareness (see `diagnostics/3').
+""".
 -spec diagnostics(binary(), binary()) ->
     {ok, [map()]} | {error, [binary()]}.
 diagnostics(Source, Mode) ->
-    gen_server:call(?MODULE, {diagnostics, Source, Mode}, 30000).
+    diagnostics(Source, Mode, #{}).
+
+-doc """
+Get diagnostics for source code under a parse `Mode', with options.
+
+Options:
+  class_hierarchy => boolean() — when `true' (ADR 0105 Phase 1, BT-2778),
+  threads the ambient class cache (the same `register_class' accumulation
+  `compile_expression'/`compile_method' already get, ADR 0050 Phase 4) into
+  the request, so a receiver resolving to an already-loaded class is checked
+  against that class's *current* interface. Defaults to `false' —
+  deliberately opt-in, not the default for `diagnostics/1,2', because this
+  command also backs the LiveView cockpit's keystroke-driven editor
+  diagnostics (BT-2556, `beamtalk_repl_ops_dev:diagnostics_for/2'), and
+  changing what fires on every keystroke for every existing caller is a
+  bigger behavioural change than this option's one new caller (BT-2778's
+  re-check orchestration) needs.
+""".
+-spec diagnostics(binary(), binary(), map()) ->
+    {ok, [map()]} | {error, [binary()]}.
+diagnostics(Source, Mode, Options) ->
+    gen_server:call(?MODULE, {diagnostics, Source, Mode, Options}, 30000).
 
 -doc "Get compiler version.".
 -spec version() -> {ok, binary()} | {error, term()}.
@@ -170,11 +205,6 @@ version() ->
     gen_server:call(?MODULE, version, 5000).
 
 -ifdef(TEST).
--doc "Return the current class cache map (test use only).".
--spec get_classes() -> #{atom() => map()}.
-get_classes() ->
-    gen_server:call(?MODULE, get_classes, 5000).
-
 -doc """
 Clear all cached class metadata (test use only).
 
@@ -184,6 +214,28 @@ clean class cache. Synchronous so the next compile sees an empty cache.
 -spec clear_classes() -> ok.
 clear_classes() ->
     gen_server:call(?MODULE, clear_classes, 5000).
+
+-doc """
+Force the *next* `diagnostics/3' call to fail with `{error, [#{message =>
+Reason}]}' instead of reaching the real compiler port (BT-2832, test use
+only).
+
+`beamtalk_recheck:recheck_owner/5' (and `recheck_owner_for_shape/4')'s
+`{failed, []}' outcome fires only on a genuine port-level failure — the
+compiler port's `handle_diagnostics' always replies `status => ok', even for
+source with parse/type errors (those come back as ordinary diagnostics in the
+list, never a port-level `{error, _}'). That makes `failed' unreachable via
+source content alone, and this codebase has no mocking library — so this is
+a deterministic, self-clearing substitute: it flips a flag `handle_call/3'
+checks on the *next* `{diagnostics, ...}' request only (any `Mode'/`Options'),
+after which the flag resets to `undefined' and every following call reaches
+the real port again. Never touches the port itself, so unrelated requests
+(`compile_expression', `compile', ...) — and any diagnostics call after the
+one consumed — are unaffected.
+""".
+-spec inject_diagnostics_failure(binary()) -> ok.
+inject_diagnostics_failure(Reason) ->
+    gen_server:call(?MODULE, {inject_diagnostics_failure, Reason}, 5000).
 -endif.
 
 -doc """
@@ -418,6 +470,25 @@ register_class(ClassName, MetaMap) ->
     ok.
 
 -doc """
+Return the current ambient class cache map (`register_class/2`'s
+accumulator).
+
+Production caller: `beamtalk_recheck:trigger_pending/5` (ADR 0105 Phase 3,
+BT-2782) reads this to snapshot a class's current ambient meta before
+temporarily splicing a pending signature into it. Also used directly by
+tests. Returns an empty map (not an error) if the server is not running,
+mirroring `register_class/2`'s degrade-silently contract.
+""".
+-spec get_classes() -> #{atom() => map()}.
+get_classes() ->
+    try
+        gen_server:call(?MODULE, get_classes, 5000)
+    catch
+        exit:{noproc, _} -> #{};
+        exit:{timeout, _} -> #{}
+    end.
+
+-doc """
 Compile Core Erlang source to BEAM bytecode in memory.
 
 Two input shapes are accepted:
@@ -529,8 +600,27 @@ handle_call({resolve_completion_type, Expression}, _From, State) ->
         State#state.port, Expression, State#state.classes
     ),
     {reply, Result, State};
-handle_call({diagnostics, Source, Mode}, _From, State) ->
-    Result = do_diagnostics(State#state.port, Source, Mode),
+handle_call(
+    {diagnostics, _Source, _Mode, _Options}, _From, #state{diagnostics_fault = Fault} = State
+) when
+    Fault =/= undefined
+->
+    %% BT-2832 (test-only fault injection, see inject_diagnostics_failure/1):
+    %% consumed by exactly this one request — the real port is never touched,
+    %% and the flag clears itself so every following diagnostics call (this
+    %% one included, on retry) reaches the real port again.
+    {reply, {error, [#{message => Fault}]}, State#state{diagnostics_fault = undefined}};
+handle_call({diagnostics, Source, Mode, Options}, _From, State) ->
+    %% ADR 0105 Phase 1 (BT-2778): only thread the ambient class cache when
+    %% explicitly requested (see diagnostics/3's moduledoc) — the default
+    %% stays class-context-free so the keystroke-driven cockpit editor path
+    %% (BT-2556) is unaffected by this option's addition.
+    Classes =
+        case maps:get(class_hierarchy, Options, false) of
+            true -> State#state.classes;
+            false -> #{}
+        end,
+    Result = do_diagnostics(State#state.port, Source, Mode, Classes),
     {reply, Result, State};
 handle_call({find_senders_in_source, Source, Selector}, _From, State) ->
     Result = beamtalk_compiler_port:find_senders_in_source(
@@ -582,6 +672,8 @@ handle_call(version, _From, State) ->
     {reply, Result, State};
 handle_call(clear_classes, _From, State) ->
     {reply, ok, State#state{classes = #{}}};
+handle_call({inject_diagnostics_failure, Reason}, _From, State) ->
+    {reply, ok, State#state{diagnostics_fault = Reason}};
 handle_call(get_classes, _From, State) ->
     {reply, State#state.classes, State};
 handle_call(_Request, _From, State) ->
@@ -868,9 +960,11 @@ do_compile_method(Port, ClassSource, MethodSource, Options) ->
 
 %% Send a diagnostics request via the port. `Mode' selects the parse grammar
 %% (BT-2569): `<<"expression">>' (default, top-level script) or `<<"method">>'
-%% (bare method body — the System Browser method editor).
-do_diagnostics(Port, Source, Mode) ->
-    Request = #{command => diagnostics, source => Source, mode => Mode},
+%% (bare method body — the System Browser method editor). `Classes' is the
+%% ambient class cache (ADR 0105 Phase 1, BT-2778) — ignored by the port in
+%% `"method"' mode, which stays class-context-free by design.
+do_diagnostics(Port, Source, Mode, Classes) ->
+    Request = #{command => diagnostics, source => Source, mode => Mode, class_hierarchy => Classes},
     case send_port_request(Port, Request, 30000) of
         {ok, Response} ->
             handle_diagnostics_response(Response);

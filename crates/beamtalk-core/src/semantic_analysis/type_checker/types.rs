@@ -8,7 +8,7 @@
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::source_analysis::Span;
-use ecow::EcoString;
+use ecow::{EcoString, eco_format};
 
 use super::well_known::WellKnownClass;
 
@@ -33,6 +33,19 @@ pub enum DynamicReason {
     /// Distinguished from `UntypedFfi` because the spec EXISTS — the function
     /// simply has a broad return type.  Not actionable in typed classes.
     DynamicSpec,
+    /// The type annotation literally is the `Dynamic` keyword (BT-2865) —
+    /// e.g. `Result(Dynamic, Error)`'s first type-arg, or a field/param
+    /// explicitly declared `:: Dynamic`.
+    ///
+    /// Distinguished from every other reason (all of which mean "we don't
+    /// have enough information to give a concrete type") because this one
+    /// means the *opposite*: the author explicitly promised the value can be
+    /// anything. `merge_method_local_binding` treats this as authoritative —
+    /// it must survive being unified with any other binding, including a
+    /// concrete one from a sibling argument position — where every other
+    /// `DynamicReason` instead loses to a concrete binding observed
+    /// elsewhere (BT-2039).
+    ExplicitDynamic,
     /// Fallback — no specific reason available.
     Unknown,
 }
@@ -49,6 +62,7 @@ impl DynamicReason {
             Self::AmbiguousControlFlow => Some("ambiguous control flow"),
             Self::UntypedFfi => Some("untyped FFI"),
             Self::DynamicSpec => Some("FFI spec is Dynamic"),
+            Self::ExplicitDynamic => Some("explicitly declared Dynamic"),
             Self::Unknown => None,
         }
     }
@@ -58,7 +72,11 @@ impl DynamicReason {
 /// and determines how far inference should propagate.
 ///
 /// **References:** ADR 0068 Challenge 3
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// Not `Copy` (BT-2897 added an `EcoString` payload to [`Aliased`](Self::Aliased))
+/// — call sites that previously relied on an implicit copy now need an
+/// explicit `.clone()`. Cloning is cheap (`EcoString` is reference-counted).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeProvenance {
     /// User wrote `:: Type` at this location.
     Declared(Span),
@@ -72,6 +90,56 @@ pub enum TypeProvenance {
     /// build time. The span is always `Span::default()` (no source location in
     /// the Beamtalk codebase) — diagnostics show "from <module>.beam -spec".
     Extracted,
+    /// The type is the eager expansion of a named alias reference (ADR 0108,
+    /// BT-2897) — attached *only* at the exact point of expansion in
+    /// [`resolve_type_annotation`](super::resolve_type_annotation), so the
+    /// tagged value is by construction structurally identical to alias
+    /// `name`'s expansion (the ADR's "display through normalisation, scoped
+    /// honestly" rule).
+    ///
+    /// `span` is the annotation *reference* site (where `name` was written),
+    /// not the alias's own `type Name = ...` declaration. **Not currently
+    /// consumed by anything** (only `name` drives display) and **not
+    /// reliable across repeated references within one annotation**:
+    /// `resolve_type_annotation`'s per-call `memo` is keyed by alias name
+    /// alone, so a second reference to the same alias in one annotation
+    /// (`A | A`, `Result(A, A)`) reuses the *first* reference's cached,
+    /// already-tagged value — including its `span` — rather than expanding
+    /// fresh. A future consumer (e.g. find-references, BT-2901) needing a
+    /// precise per-site span will need to record it at the `memo.get` hit
+    /// path too, not just at first expansion.
+    ///
+    /// This tag does **not** survive [`InferredType::difference`],
+    /// [`InferredType::intersect`], or [`InferredType::union_of`] — those
+    /// normalising operators construct fresh provenance for their result, so
+    /// a narrowing residual (e.g. the false branch of `policy =:= #temporary`)
+    /// renders the structural type only, never a stale `(from RestartStrategy)`
+    /// breadcrumb. `union_of`'s "best provenance" inheritance heuristic
+    /// deliberately excludes this variant (see its doc) so a freshly-built,
+    /// differently-shaped union can never silently inherit a member's alias
+    /// identity either.
+    Aliased { name: EcoString, span: Span },
+}
+
+impl TypeProvenance {
+    /// Degrades [`TypeProvenance::Aliased`] to a spanless [`TypeProvenance::Inferred`];
+    /// a no-op for every other variant.
+    ///
+    /// Callers that construct a `Negation` (via [`InferredType::make_negation`])
+    /// from a provenance captured off an *existing* negation — same-base
+    /// flattening in [`InferredType::difference`], and [`InferredType::absorb_negations`]'s
+    /// "first negation wins" carry-over — must call this first. The captured
+    /// provenance describes the *input* negation, but the widened `excluded`
+    /// set makes the *result* structurally different from whatever alias the
+    /// input happened to be tagged with, so carrying the tag forward
+    /// unchanged would violate `Aliased`'s own documented invariant (this tag
+    /// does not survive `difference`).
+    fn strip_alias(self) -> Self {
+        match self {
+            Self::Aliased { .. } => Self::Inferred(Span::default()),
+            other => other,
+        }
+    }
 }
 
 /// Controls how [`InferredType`] renders class names when converted to a
@@ -167,25 +235,36 @@ pub enum InferredType {
     /// It is a subtype of every type (bottom of the lattice).
     Never,
     /// A negation type `base \ excluded` — the values of `base` that are *not*
-    /// values of `excluded` (ADR 0102 §1).
+    /// values of `excluded` (ADR 0102 §1, §5).
     ///
     /// Produced by [`difference`](InferredType::difference) when a proper
     /// subtype is subtracted that cannot be expressed by dropping a union
-    /// member — canonically `Symbol \ #foo` (all symbols except `#foo`).
+    /// member. Two flavours, distinguished by what `excluded` holds:
+    /// - **Singleton-excluded** — canonically `Symbol \ #foo` (all symbols
+    ///   except `#foo`); `base` is always exactly `Symbol` (see
+    ///   [`is_symbol_base`](Self::is_symbol_base)).
+    /// - **Nominal-excluded** (ADR 0102 §5, BT-2744) — e.g. `Object \ Number`;
+    ///   `base` is any nominal class and `excluded` a single strict nominal
+    ///   subclass of it (generalising `excluded` to a union of classes is out
+    ///   of scope — see §5's scope note).
     ///
-    /// **Normal form.** `excluded` is always a singleton (`Known("#foo")`) or a
-    /// normalised union of singletons — never another `Negation` and never a
-    /// `Union` containing a `Negation`. Nested negation is flattened at
-    /// construction (`(Symbol \ #a) \ #b = Symbol \ (#a | #b)`), so a
+    /// **Normal form.** For the singleton-excluded flavour, `excluded` is
+    /// always a singleton (`Known("#foo")`) or a normalised union of
+    /// singletons; for the nominal-excluded flavour it is a single nominal
+    /// class name. Either way it is never another `Negation` and never a
+    /// `Union` containing a `Negation`. Nested singleton negation is flattened
+    /// at construction (`(Symbol \ #a) \ #b = Symbol \ (#a | #b)`), so a
     /// `Negation` never appears inside its own `excluded` or `base`.
     ///
     /// **Equality** is order-independent in `excluded` (it delegates to the
     /// order-independent `Union` equality), so `Symbol \ (#a | #b)` equals
     /// `Symbol \ (#b | #a)`.
     Negation {
-        /// The type being narrowed (canonically `Symbol`).
+        /// The type being narrowed (`Symbol` for the singleton-excluded
+        /// flavour; any nominal class for the nominal-excluded flavour).
         base: Box<InferredType>,
-        /// The removed values — a singleton or a normalised union of singletons.
+        /// The removed values — a singleton, a normalised union of
+        /// singletons, or (nominal-excluded flavour) a single nominal class.
         excluded: Box<InferredType>,
         /// Where this negation came from.
         provenance: TypeProvenance,
@@ -377,8 +456,104 @@ impl InferredType {
             | Self::Union { provenance, .. }
             | Self::Meta { provenance, .. }
             | Self::Negation { provenance, .. }
-            | Self::Intersection { provenance, .. } => Some(*provenance),
+            | Self::Intersection { provenance, .. } => Some(provenance.clone()),
             Self::Dynamic(_) | Self::Never => None,
+        }
+    }
+
+    /// Returns the alias display name if this type's top-level provenance is
+    /// [`TypeProvenance::Aliased`] (ADR 0108, BT-2897) — i.e. this exact value
+    /// is the eager expansion of a named alias reference, structurally
+    /// identical to that alias's declared expansion by construction (see
+    /// `Aliased`'s doc).
+    ///
+    /// Scoped to `type_checker` (not merely `pub(crate)`): the "structurally
+    /// identical" guarantee only holds because [`tag_alias_expansion`]'s only
+    /// caller is `type_resolver.rs`'s own alias-expansion point — a caller
+    /// outside this module has no way to uphold that invariant.
+    ///
+    /// [`tag_alias_expansion`]: Self::tag_alias_expansion
+    #[must_use]
+    pub(in crate::semantic_analysis::type_checker) fn alias_display_name(
+        &self,
+    ) -> Option<&EcoString> {
+        match self.provenance() {
+            Some(TypeProvenance::Aliased { .. }) => match self {
+                Self::Known {
+                    provenance: TypeProvenance::Aliased { name, .. },
+                    ..
+                }
+                | Self::Union {
+                    provenance: TypeProvenance::Aliased { name, .. },
+                    ..
+                }
+                | Self::Meta {
+                    provenance: TypeProvenance::Aliased { name, .. },
+                    ..
+                }
+                | Self::Negation {
+                    provenance: TypeProvenance::Aliased { name, .. },
+                    ..
+                }
+                | Self::Intersection {
+                    provenance: TypeProvenance::Aliased { name, .. },
+                    ..
+                } => Some(name),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Rewrites this type's top-level provenance to
+    /// [`TypeProvenance::Aliased`] (ADR 0108, BT-2897) — the single
+    /// construction path for that provenance variant, called exactly once,
+    /// at the point [`resolve_type_annotation`](super::resolve_type_annotation)
+    /// finishes eagerly expanding a `Simple` annotation that names a
+    /// registered alias. A no-op for [`Dynamic`](Self::Dynamic) and
+    /// [`Never`](Self::Never), which carry no provenance slot.
+    ///
+    /// Callers **must** only call this with `self` already equal to the
+    /// exact expansion `name` resolves to — the display layer trusts the tag
+    /// unconditionally (see `alias_display_name`'s doc), so tagging an
+    /// unrelated value would silently produce a false `Name (…)` diagnostic.
+    /// Kept out of `pub(crate)` for this reason: `type_resolver.rs` is the
+    /// only call site able to uphold the invariant.
+    #[must_use]
+    pub(in crate::semantic_analysis::type_checker) fn tag_alias_expansion(
+        self,
+        name: EcoString,
+        span: Span,
+    ) -> Self {
+        let aliased = TypeProvenance::Aliased { name, span };
+        match self {
+            Self::Known {
+                class_name,
+                type_args,
+                ..
+            } => Self::Known {
+                class_name,
+                type_args,
+                provenance: aliased,
+            },
+            Self::Union { members, .. } => Self::Union {
+                members,
+                provenance: aliased,
+            },
+            Self::Meta { class_name, .. } => Self::Meta {
+                class_name,
+                provenance: aliased,
+            },
+            Self::Negation { base, excluded, .. } => Self::Negation {
+                base,
+                excluded,
+                provenance: aliased,
+            },
+            Self::Intersection { members, .. } => Self::Intersection {
+                members,
+                provenance: aliased,
+            },
+            other @ (Self::Dynamic(_) | Self::Never) => other,
         }
     }
 
@@ -460,10 +635,24 @@ impl InferredType {
     /// [`display_name`](Self::display_name) for internal bookkeeping where the
     /// canonical name is required (e.g., `is_assignable_to` lookups).
     ///
-    /// **References:** BT-2066
+    /// **BT-2897 / ADR 0108:** when this type's top-level provenance is
+    /// [`TypeProvenance::Aliased`], the rendered string is prefixed with the
+    /// alias name — `RestartStrategy (#temporary | #transient | #permanent)`
+    /// rather than just the bare expansion — because this value *is* (by
+    /// construction, see `Aliased`'s doc) structurally identical to that
+    /// alias's declared expansion. Narrowing residuals and freshly-built
+    /// unions never carry this tag (see `Aliased` and `union_of`'s docs), so
+    /// they render the plain structural form with no alias breadcrumb, which
+    /// is the ADR's intentional v1 scoping, not a gap.
+    ///
+    /// **References:** BT-2066, ADR 0108 (BT-2897)
     #[must_use]
     pub fn display_for_diagnostic(&self) -> Option<EcoString> {
-        Some(self.display_with_options(DisplayOptions::SOURCE_FRIENDLY))
+        let structural = self.display_with_options(DisplayOptions::SOURCE_FRIENDLY);
+        if let Some(alias_name) = self.alias_display_name() {
+            return Some(eco_format!("{alias_name} ({structural})"));
+        }
+        Some(structural)
     }
 
     fn display_with_options(&self, opts: DisplayOptions) -> EcoString {
@@ -559,6 +748,26 @@ impl InferredType {
     ///
     /// Provenance is derived from the first input that carries a non-default
     /// provenance (Declared or Substituted win over Inferred).
+    ///
+    /// **BT-2897:** a member's [`TypeProvenance::Aliased`] tag never wins this
+    /// selection (see [`provenance_wins_union_default`](Self::provenance_wins_union_default)) —
+    /// a freshly-built union is a *different* type from any one member's
+    /// alias expansion, so it must never silently claim that member's alias
+    /// identity as its own display name. `best_provenance` itself is
+    /// therefore never `Aliased`, which is also why the single-member
+    /// collapse case below (which checks the *member's own* provenance, not
+    /// `best_provenance`) needs no corresponding change: `Aliased` already
+    /// fails its `matches!(.., Inferred(_))` guard today, so an aliased
+    /// singleton member is already never overwritten.
+    ///
+    /// **Pre-existing, order-dependent edge case (not new to BT-2897):**
+    /// when two *structurally-equal* members disagree only in provenance
+    /// (e.g. `union_of([Port_aliased, Integer_plain])` where `type Port =
+    /// Integer`), dedup (`flat.contains`, which is provenance-blind) keeps
+    /// whichever operand was pushed first and drops the other — so the
+    /// surviving member's display depends on input order. This already held
+    /// for `Declared` vs. `Inferred` before this change; `Aliased` inherits
+    /// the same characteristic rather than introducing a new one.
     pub(crate) fn union_of(members: &[Self]) -> Self {
         let mut flat: Vec<InferredType> = Vec::new();
         let mut best_provenance = TypeProvenance::Inferred(Span::default());
@@ -573,9 +782,9 @@ impl InferredType {
                 // own (unlike `Negation`, which `union_of` actively simplifies).
                 | Self::Intersection { provenance, .. } => {
                     if matches!(best_provenance, TypeProvenance::Inferred(_))
-                        && !matches!(provenance, TypeProvenance::Inferred(_))
+                        && Self::provenance_wins_union_default(provenance)
                     {
-                        best_provenance = *provenance;
+                        best_provenance = provenance.clone();
                     }
                     if !flat.contains(m) {
                         flat.push(m.clone());
@@ -586,16 +795,16 @@ impl InferredType {
                     provenance,
                 } => {
                     if matches!(best_provenance, TypeProvenance::Inferred(_))
-                        && !matches!(provenance, TypeProvenance::Inferred(_))
+                        && Self::provenance_wins_union_default(provenance)
                     {
-                        best_provenance = *provenance;
+                        best_provenance = provenance.clone();
                     }
                     for inner_m in inner {
                         if let Self::Known { provenance: p, .. } = inner_m {
                             if matches!(best_provenance, TypeProvenance::Inferred(_))
-                                && !matches!(p, TypeProvenance::Inferred(_))
+                                && Self::provenance_wins_union_default(p)
                             {
-                                best_provenance = *p;
+                                best_provenance = p.clone();
                             }
                         }
                         if !flat.contains(inner_m) {
@@ -641,16 +850,41 @@ impl InferredType {
         }
     }
 
+    /// Whether a member's provenance is eligible to become a freshly-built
+    /// union's own "best provenance" (see [`union_of`](Self::union_of)).
+    ///
+    /// `Inferred` never wins (it's the no-information default). `Aliased`
+    /// (BT-2897, ADR 0108) never wins either, even though it's informative —
+    /// letting it win would mean a union like `A | Integer` (where alias `A`
+    /// resolves to some `InferredType` tagged `Aliased("A", _)`) could
+    /// silently render as `A (...)`, even though `A | Integer` is not
+    /// structurally identical to `A`'s own expansion. Only a member's alias
+    /// tag on *itself* is ever display-accurate; a container built from it is
+    /// a different type and must never inherit that identity.
+    fn provenance_wins_union_default(p: &TypeProvenance) -> bool {
+        !matches!(
+            p,
+            TypeProvenance::Inferred(_) | TypeProvenance::Aliased { .. }
+        )
+    }
+
     /// Returns `true` if `name` is a symbol singleton (`#foo`) — a subtype of
     /// `Symbol` in the type checker's singleton convention.
     fn is_symbol_singleton(name: &str) -> bool {
         name.starts_with('#')
     }
 
-    /// Returns `true` if `ty` is the base of a well-formed [`Negation`] — i.e.
-    /// `Known("Symbol")`. `Symbol` is the sole supertype of singletons the type
-    /// checker models, so it is the only base for which singleton subtraction
-    /// and absorption are sound.
+    /// Returns `true` if `ty` is the base of a well-formed **singleton-excluded**
+    /// [`Negation`] — i.e. `Known("Symbol")`. `Symbol` is the sole supertype of
+    /// singletons the type checker models, so it is the only base for which
+    /// singleton subtraction and absorption are sound.
+    ///
+    /// Distinct from the **nominal-excluded** `Negation` flavour (ADR 0102 §5,
+    /// BT-2744, e.g. `Object \ Number`), whose base is any nominal class — see
+    /// the nominal-class arm of [`difference`](Self::difference). The two
+    /// flavours are distinguished structurally by whether `excluded` is a
+    /// singleton/union-of-singletons or a nominal class name; this predicate
+    /// only ever needs to ask "is this the Symbol-singleton flavour".
     ///
     /// [`Negation`]: InferredType::Negation
     fn is_symbol_base(ty: &Self) -> bool {
@@ -671,10 +905,15 @@ impl InferredType {
     /// hierarchy this is exactly [`is_symbol_base`](Self::is_symbol_base) —
     /// the previous, conservative behaviour.
     ///
-    /// Note this deliberately does **not** widen [`Negation`]
-    /// well-formedness: `is_symbol_base` (exactly `Symbol`) remains the only
-    /// valid `Negation` base, so `difference(ProtoObject, #foo)` stays a
-    /// no-op rather than fabricating a `ProtoObject \ #foo` complement.
+    /// Note this deliberately does **not** widen the *singleton-excluded*
+    /// [`Negation`] well-formedness: `is_symbol_base` (exactly `Symbol`)
+    /// remains the only valid base for subtracting a *singleton*, so
+    /// `difference(ProtoObject, #foo)` stays a no-op rather than fabricating a
+    /// `ProtoObject \ #foo` complement — `ProtoObject` is not itself a
+    /// hierarchy entry above which singleton subtraction was specified. This
+    /// is unrelated to the *nominal-excluded* flavour (ADR 0102 §5, BT-2744),
+    /// which admits any nominal class as `base` when the excluded value is
+    /// itself a nominal class, not a singleton.
     ///
     /// [`Negation`]: InferredType::Negation
     fn admits_symbol_singletons(ty: &Self, hierarchy: Option<&ClassHierarchy>) -> bool {
@@ -793,7 +1032,13 @@ impl InferredType {
                     excluded,
                     provenance,
                 } if Self::is_symbol_base(&base) => {
-                    neg_provenance.get_or_insert(provenance);
+                    // The merged negation's `excluded` set is the union of
+                    // every absorbed negation's own set, so it's structurally
+                    // different from whichever single input this provenance
+                    // was captured from — strip a stale `Aliased` tag for the
+                    // same reason `difference`'s same-base flattening arm
+                    // does (see `TypeProvenance::strip_alias`'s doc).
+                    neg_provenance.get_or_insert(provenance.strip_alias());
                     neg_excludeds.push(*excluded);
                 }
                 Self::Known { ref class_name, .. } if class_name == "Symbol" => {
@@ -818,7 +1063,7 @@ impl InferredType {
             for e in &neg_excludeds[1..] {
                 // Structural singleton merge only — no hierarchy or protocol
                 // registry needed (and neither is threaded through `union_of`).
-                merged = Self::intersect(&merged, e, provenance, None, None);
+                merged = Self::intersect(&merged, e, provenance.clone(), None, None);
             }
             // Add back any excluded singleton that also appears bare (absorption).
             let remaining: Vec<Self> = if matches!(merged, Self::Never) {
@@ -913,8 +1158,6 @@ impl InferredType {
     /// - Generics compare exactly, including `type_args`.
     ///
     /// The result is re-normalised through [`union_of`](Self::union_of).
-    // Consumed by the narrowing rules landing later in ADR 0102's epic (BT-2738).
-    #[allow(dead_code)]
     pub(crate) fn intersect(
         a: &Self,
         b: &Self,
@@ -937,20 +1180,24 @@ impl InferredType {
             // default (the `(Known, Negation)` case fires in Phase 2's `\`
             // syntax; missing it silently loses narrowing).
             (Self::Negation { base, excluded, .. }, _) => Self::difference(
-                &Self::intersect(base, b, provenance, hierarchy, protocol_registry),
+                &Self::intersect(base, b, provenance.clone(), hierarchy, protocol_registry),
                 excluded,
                 provenance,
+                hierarchy,
             ),
             (_, Self::Negation { base, excluded, .. }) => Self::difference(
-                &Self::intersect(a, base, provenance, hierarchy, protocol_registry),
+                &Self::intersect(a, base, provenance.clone(), hierarchy, protocol_registry),
                 excluded,
                 provenance,
+                hierarchy,
             ),
             // LHS-union distribution.
             (Self::Union { members, .. }, _) => {
                 let parts: Vec<Self> = members
                     .iter()
-                    .map(|m| Self::intersect(m, b, provenance, hierarchy, protocol_registry))
+                    .map(|m| {
+                        Self::intersect(m, b, provenance.clone(), hierarchy, protocol_registry)
+                    })
                     .collect();
                 Self::union_of(&parts)
             }
@@ -958,7 +1205,9 @@ impl InferredType {
             (_, Self::Union { members, .. }) => {
                 let parts: Vec<Self> = members
                     .iter()
-                    .map(|m| Self::intersect(a, m, provenance, hierarchy, protocol_registry))
+                    .map(|m| {
+                        Self::intersect(a, m, provenance.clone(), hierarchy, protocol_registry)
+                    })
                     .collect();
                 Self::union_of(&parts)
             }
@@ -980,7 +1229,8 @@ impl InferredType {
                 // reducing to `Never` (`Integer ∩ String = Never`), violating
                 // the stored-intersection invariant.
                 for m in members {
-                    let pair = Self::intersect(m, b, provenance, hierarchy, protocol_registry);
+                    let pair =
+                        Self::intersect(m, b, provenance.clone(), hierarchy, protocol_registry);
                     if matches!(pair, Self::Never) {
                         return Self::Never;
                     }
@@ -991,7 +1241,8 @@ impl InferredType {
             }
             (_, Self::Intersection { members, .. }) => {
                 for m in members {
-                    let pair = Self::intersect(a, m, provenance, hierarchy, protocol_registry);
+                    let pair =
+                        Self::intersect(a, m, provenance.clone(), hierarchy, protocol_registry);
                     if matches!(pair, Self::Never) {
                         return Self::Never;
                     }
@@ -1118,7 +1369,7 @@ impl InferredType {
         sub == sup || hierarchy.superclass_chain(sub).iter().any(|c| c == sup)
     }
 
-    /// Normalising **difference** `A \ B` (ADR 0102 §1).
+    /// Normalising **difference** `A \ B` (ADR 0102 §1, §5).
     ///
     /// Rules:
     /// - Boundary: `difference(Never, P) = Never`; `difference(T, Never) = T`.
@@ -1135,11 +1386,24 @@ impl InferredType {
     /// - **Same-base flattening:** `difference(Negation{Symbol, E}, #bar) =
     ///   Negation{Symbol, union_of(E, #bar)}` — nested negation never escapes
     ///   normal form.
+    /// - **Nominal-class base case** (ADR 0102 §5, BT-2744, `hierarchy = Some`):
+    ///   for two distinct-named, non-singleton nominal classes, `difference(A,
+    ///   B)` ⇒ `Negation{A, B}` when `B` is a strict subclass of `A` (the
+    ///   class-hierarchy analogue of `Symbol \ #foo`); ⇒ `Never` when `A <: B`
+    ///   (every instance of `A` is also a `B`); ⇒ `A` unchanged when
+    ///   hierarchy-unrelated (nothing to remove). Without a hierarchy, or when
+    ///   either operand is a singleton (never a hierarchy entry — that is the
+    ///   dedicated `Symbol \ #foo` arm above), falls through to the structural
+    ///   default. `excluded` stays a single class (never a union of classes —
+    ///   out of scope per ADR 0102 §5 scope note).
     /// - `Meta` and `Dynamic` are opaque to `Negation`.
     /// - Generics compare exactly, including `type_args`.
-    // Consumed by the narrowing rules landing later in ADR 0102's epic (BT-2738).
-    #[allow(dead_code)]
-    pub(crate) fn difference(a: &Self, b: &Self, provenance: TypeProvenance) -> Self {
+    pub(crate) fn difference(
+        a: &Self,
+        b: &Self,
+        provenance: TypeProvenance,
+        hierarchy: Option<&ClassHierarchy>,
+    ) -> Self {
         match (a, b) {
             // `T \ Dynamic = T` and `T \ Never = T` (subtracting these removes
             // nothing), plus `Dynamic \ P = Dynamic` — here `a` *is* `Dynamic`,
@@ -1149,14 +1413,14 @@ impl InferredType {
             // Boundary: `Never \ P = Never`.
             (Self::Never, _) => Self::Never,
             // RHS-union fold: subtract each removed member in turn.
-            (_, Self::Union { members, .. }) => members
-                .iter()
-                .fold(a.clone(), |acc, m| Self::difference(&acc, m, provenance)),
+            (_, Self::Union { members, .. }) => members.iter().fold(a.clone(), |acc, m| {
+                Self::difference(&acc, m, provenance.clone(), hierarchy)
+            }),
             // LHS-union distribution: `(A | B) \ P = (A \ P) | (B \ P)`.
             (Self::Union { members, .. }, _) => {
                 let parts: Vec<Self> = members
                     .iter()
-                    .map(|m| Self::difference(m, b, provenance))
+                    .map(|m| Self::difference(m, b, provenance.clone(), hierarchy))
                     .collect();
                 Self::union_of(&parts)
             }
@@ -1174,7 +1438,7 @@ impl InferredType {
                 Self::make_negation(
                     (**base).clone(),
                     Self::union_of(&[(**excluded).clone(), b.clone()]),
-                    *neg_prov,
+                    neg_prov.clone().strip_alias(),
                 )
             }
             // `Symbol \ #foo = Negation{Symbol, #foo}`.
@@ -1188,8 +1452,34 @@ impl InferredType {
             }
             // `T \ T = Never` (exact structural equality, generics included).
             _ if a == b => Self::Never,
-            // Nothing structurally removable — no-op (nominal-class differences
-            // like `Object \ Number` are out of scope; `Meta`/`Dynamic` are
+            // Nominal-class base case (ADR 0102 §5, BT-2744): with a hierarchy,
+            // two distinct-named, non-singleton nominal classes relate via
+            // subtyping — a proper subclass subtraction is irreducible
+            // (`Negation{A, B}`), a supertype/self subtraction removes
+            // everything (`Never`, though `A == B` is already caught above),
+            // and hierarchy-unrelated classes are disjoint (no-op). Singletons
+            // are never hierarchy entries, so they are explicitly excluded —
+            // they are handled by the dedicated `Symbol \ #foo` arm above.
+            (Self::Known { class_name: an, .. }, Self::Known { class_name: bn, .. })
+                if an != bn
+                    && !Self::is_symbol_singleton(an)
+                    && !Self::is_symbol_singleton(bn)
+                    && hierarchy.is_some() =>
+            {
+                let h = hierarchy.unwrap_or_else(|| unreachable!("checked by guard above"));
+                if Self::is_nominal_subtype(h, bn, an) {
+                    // `B <: A` (proper, since `an != bn`).
+                    Self::make_negation(a.clone(), b.clone(), provenance)
+                } else if Self::is_nominal_subtype(h, an, bn) {
+                    // `A <: B` — every instance of `A` is also a `B`.
+                    Self::Never
+                } else {
+                    // Hierarchy-unrelated — disjoint, nothing to remove.
+                    a.clone()
+                }
+            }
+            // Nothing structurally removable — no-op (no hierarchy supplied,
+            // or hierarchy-unrelated nominal classes; `Meta`/`Dynamic` are
             // opaque to `Negation`).
             _ => a.clone(),
         }
@@ -1322,6 +1612,167 @@ mod display_tests {
             InferredType::class_name_for_diagnostic("Result(Integer, UndefinedObject)"),
             "Result(Integer, Nil)"
         );
+    }
+
+    // ── BT-2897 / ADR 0108: alias display-name provenance ──────────────────
+
+    #[test]
+    fn tag_alias_expansion_prefixes_display_for_diagnostic() {
+        let expansion = InferredType::simple_union(&["#temporary", "#transient", "#permanent"]);
+        let tagged = expansion.tag_alias_expansion("RestartStrategy".into(), Span::new(0, 1));
+        assert_eq!(
+            tagged.display_for_diagnostic().unwrap(),
+            "RestartStrategy (#temporary | #transient | #permanent)"
+        );
+    }
+
+    #[test]
+    fn tag_alias_expansion_is_provenance_only_equality_unaffected() {
+        // Structural `PartialEq` ignores provenance (module doc) — tagging
+        // an alias name must not change what a type is equal to.
+        let expansion = InferredType::known("Integer");
+        let tagged = expansion
+            .clone()
+            .tag_alias_expansion("Port".into(), Span::new(0, 1));
+        assert_eq!(expansion, tagged);
+    }
+
+    #[test]
+    fn tag_alias_expansion_is_noop_for_dynamic_and_never() {
+        let dynamic = InferredType::Dynamic(DynamicReason::Unknown);
+        assert_eq!(
+            dynamic
+                .clone()
+                .tag_alias_expansion("X".into(), Span::new(0, 1)),
+            dynamic
+        );
+        assert_eq!(
+            InferredType::Never.tag_alias_expansion("X".into(), Span::new(0, 1)),
+            InferredType::Never
+        );
+    }
+
+    #[test]
+    fn tag_alias_expansion_prefixes_meta_negation_and_intersection() {
+        // Adversarial review (BT-2897): the hover/diagnostic tests only
+        // exercised `Union`/`Known` end-to-end. This pins the other three
+        // provenance-bearing variants `tag_alias_expansion` also supports —
+        // an alias RHS can legally be any `TypeAnnotation` (ADR 0108
+        // Semantics), including ones that resolve to `Meta`, `Negation`
+        // (`Symbol \ #foo`), or `Intersection` (`P1 & P2`).
+        let meta =
+            InferredType::meta("List").tag_alias_expansion("ListClass".into(), Span::new(0, 1));
+        assert_eq!(
+            meta.display_for_diagnostic().unwrap(),
+            "ListClass (List class)"
+        );
+
+        let negation = InferredType::Negation {
+            base: Box::new(InferredType::known("Symbol")),
+            excluded: Box::new(InferredType::known("#internal")),
+            provenance: TypeProvenance::Inferred(Span::default()),
+        }
+        .tag_alias_expansion("PublicTag".into(), Span::new(0, 1));
+        assert_eq!(
+            negation.display_for_diagnostic().unwrap(),
+            "PublicTag (Symbol \\ #internal)"
+        );
+
+        let intersection = InferredType::Intersection {
+            members: vec![
+                InferredType::known("Printable"),
+                InferredType::known("Comparable"),
+            ],
+            provenance: TypeProvenance::Inferred(Span::default()),
+        }
+        .tag_alias_expansion("Sortable".into(), Span::new(0, 1));
+        assert_eq!(
+            intersection.display_for_diagnostic().unwrap(),
+            "Sortable (Printable & Comparable)"
+        );
+    }
+
+    #[test]
+    fn alias_display_name_absent_without_tagging() {
+        let ty = InferredType::simple_union(&["temporary", "transient"]);
+        assert_eq!(ty.alias_display_name(), None);
+        assert_eq!(
+            ty.display_for_diagnostic().unwrap(),
+            "temporary | transient"
+        );
+    }
+
+    #[test]
+    fn union_of_never_inherits_a_members_alias_tag() {
+        // BT-2897: `A | Integer` (a *fresh* union built from an alias-tagged
+        // member `A` and an unrelated `Integer`) must render structurally —
+        // it is not the same type as `A`'s own expansion, so it must never
+        // silently claim `A`'s alias identity as its own display name (see
+        // `union_of`'s `provenance_wins_union_default` doc).
+        let aliased_member =
+            InferredType::known("String").tag_alias_expansion("MyAlias".into(), Span::new(0, 1));
+        let built = InferredType::union_of(&[aliased_member, InferredType::known("Integer")]);
+        assert_eq!(built.alias_display_name(), None);
+        let rendered = built.display_for_diagnostic().unwrap();
+        assert!(
+            !rendered.contains("MyAlias"),
+            "freshly-built union must not inherit a member's alias name, got: {rendered}"
+        );
+        assert_eq!(rendered, "String | Integer");
+    }
+
+    #[test]
+    fn difference_strips_alias_tag_from_the_residual() {
+        // Narrowing residual must render structurally, never the alias name
+        // (ADR 0108 Decision — "Display through normalisation, scoped
+        // honestly"). Mirrors the hover-level pin in
+        // `queries::hover_provider`'s test module.
+        let aliased = InferredType::simple_union(&["#temporary", "#transient", "#permanent"])
+            .tag_alias_expansion("RestartStrategy".into(), Span::new(0, 1));
+        let residual = InferredType::difference(
+            &aliased,
+            &InferredType::known("#temporary"),
+            TypeProvenance::Inferred(Span::default()),
+            None,
+        );
+        assert_eq!(residual.alias_display_name(), None);
+        let rendered = residual.display_for_diagnostic().unwrap();
+        assert!(
+            !rendered.contains("RestartStrategy"),
+            "difference residual must not carry the alias name, got: {rendered}"
+        );
+        assert_eq!(rendered, "#transient | #permanent");
+    }
+
+    #[test]
+    fn difference_strips_alias_tag_from_the_residual_negation_arm() {
+        // Same as `difference_strips_alias_tag_from_the_residual`, but for
+        // the same-base-flattening Negation arm rather than the Union arm —
+        // regression test for a review finding on BT-2897: `type PublicTag =
+        // Symbol \ #internal`, then narrowing further (`Symbol \ #internal \
+        // #other`) produced a residual that still displayed as `"PublicTag
+        // (...)"` even though it's structurally different from the alias's
+        // own definition.
+        let base_negation = InferredType::difference(
+            &InferredType::known("Symbol"),
+            &InferredType::known("#internal"),
+            TypeProvenance::Inferred(Span::default()),
+            None,
+        );
+        let aliased = base_negation.tag_alias_expansion("PublicTag".into(), Span::new(0, 1));
+        let residual = InferredType::difference(
+            &aliased,
+            &InferredType::known("#other"),
+            TypeProvenance::Inferred(Span::default()),
+            None,
+        );
+        assert_eq!(residual.alias_display_name(), None);
+        let rendered = residual.display_for_diagnostic().unwrap();
+        assert!(
+            !rendered.contains("PublicTag"),
+            "negation-arm difference residual must not carry the alias name, got: {rendered}"
+        );
+        assert_eq!(rendered, "Symbol \\ (#internal | #other)");
     }
 
     #[test]

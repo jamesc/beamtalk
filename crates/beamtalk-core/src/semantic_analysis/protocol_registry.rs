@@ -22,6 +22,7 @@
 
 use crate::ast::{Module, ProtocolDefinition, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
+use crate::semantic_analysis::receiver_knowledge;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
 use std::collections::HashMap;
@@ -451,19 +452,12 @@ impl ProtocolRegistry {
         protocol: &ProtocolInfo,
         hierarchy: &ClassHierarchy,
     ) -> Result<(), Vec<EcoString>> {
-        // Tier 3: DNU bypass — classes overriding doesNotUnderstand: conform to all protocols
-        if hierarchy.has_instance_dnu_override(class_name) {
-            return Ok(());
-        }
-
-        // If the class isn't known to the hierarchy, we can't verify — assume ok
-        if !hierarchy.has_class(class_name) {
-            return Ok(());
-        }
-
-        // Cross-file inheritance: if the parent class is not in the hierarchy,
-        // we can't know the full method set — assume conformance
-        if hierarchy.has_cross_file_parent(class_name) {
+        // ADR 0100 Rule 1 (BT-2793): an unknown, DNU-overridden, or
+        // cross-file-parent receiver conforms by default — the checker
+        // cannot prove non-conformance from an incomplete method surface
+        // (Tier 3 DNU bypass folded into the classifier's `Open` state).
+        if !receiver_knowledge::classify_receiver(class_name, hierarchy, false).is_closed_complete()
+        {
             return Ok(());
         }
 
@@ -538,20 +532,11 @@ impl ProtocolRegistry {
             return Ok(());
         };
 
-        // Tier 3: DNU bypass — a class overriding `doesNotUnderstand:args:`
-        // on the class side accepts any class-side message.
-        if hierarchy.has_class_dnu_override(class_name) {
-            return Ok(());
-        }
-
-        // If the class isn't known to the hierarchy, we can't verify — assume ok
-        if !hierarchy.has_class(class_name) {
-            return Ok(());
-        }
-
-        // Cross-file inheritance: if the parent class is not in the hierarchy,
-        // we can't know the full class-side method set — assume conformance
-        if hierarchy.has_cross_file_parent(class_name) {
+        // ADR 0100 Rule 1 (BT-2793): an unknown, class-side-DNU-overridden,
+        // or cross-file-parent receiver conforms by default (Tier 3 DNU
+        // bypass folded into the classifier's `Open` state).
+        if !receiver_knowledge::classify_receiver(class_name, hierarchy, true).is_closed_complete()
+        {
             return Ok(());
         }
 
@@ -1118,6 +1103,7 @@ mod tests {
 
         let mut hierarchy = ClassHierarchy::with_builtins();
         let gadget = ClassInfo {
+            surface_incomplete: false,
             name: "Gadget".into(),
             superclass: Some("Object".into()),
             is_sealed: false,
@@ -1194,6 +1180,7 @@ mod tests {
             use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
             let mut h = ClassHierarchy::with_builtins();
             h.add_from_beam_meta(vec![ClassInfo {
+                surface_incomplete: false,
                 name: "Gadget".into(),
                 superclass: Some("Object".into()),
                 is_sealed: false,
@@ -1468,6 +1455,7 @@ mod tests {
         hierarchy.classes_mut().insert(
             "Printable".into(),
             crate::semantic_analysis::class_hierarchy::ClassInfo {
+                surface_incomplete: false,
                 name: "Printable".into(),
                 superclass: Some("Protocol".into()),
                 is_sealed: true,
@@ -1535,6 +1523,7 @@ mod tests {
         hierarchy.classes_mut().insert(
             "Tickable".into(),
             crate::semantic_analysis::class_hierarchy::ClassInfo {
+                surface_incomplete: false,
                 name: "Tickable".into(),
                 superclass: Some("Protocol".into()),
                 is_sealed: true,

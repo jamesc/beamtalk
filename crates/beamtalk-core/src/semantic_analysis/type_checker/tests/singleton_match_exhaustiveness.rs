@@ -260,6 +260,7 @@ fn negation_scrutinee_is_silent() {
         &InferredType::known("Symbol"),
         &InferredType::known("#foo"),
         TypeProvenance::Inferred(Span::default()),
+        None,
     );
     assert!(
         matches!(negation, InferredType::Negation { .. }),

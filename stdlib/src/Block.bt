@@ -56,7 +56,7 @@ sealed typed Object subclass: Block
   /// ```beamtalk
   /// x := 0. [x < 3] whileTrue: [x := x + 1]
   /// ```
-  whileTrue: bodyBlock :: Block -> Nil => @intrinsic whileTrue
+  whileTrue: bodyBlock :: Block(R) -> Nil => @intrinsic whileTrue
 
   /// Repeatedly evaluate `bodyBlock` while the receiver evaluates to false.
   ///
@@ -64,7 +64,7 @@ sealed typed Object subclass: Block
   /// ```beamtalk
   /// x := 0. [x >= 3] whileFalse: [x := x + 1]
   /// ```
-  whileFalse: bodyBlock :: Block -> Nil => @intrinsic whileFalse
+  whileFalse: bodyBlock :: Block(R) -> Nil => @intrinsic whileFalse
 
   /// Evaluate the block repeatedly forever (until an exception is raised).
   ///
@@ -80,7 +80,7 @@ sealed typed Object subclass: Block
   /// ```beamtalk
   /// [1 / 0] on: Error do: [:e | e message]
   /// ```
-  on: exClass :: Object do: handler :: Block => @intrinsic onDo
+  on: exClass :: Object do: handler :: Block(Object, Object) => @intrinsic onDo
 
   /// Evaluate the block, then always evaluate `cleanupBlock` (even on exception).
   ///
@@ -88,7 +88,7 @@ sealed typed Object subclass: Block
   /// ```beamtalk
   /// [File readAll: "data.txt"] ensure: [Transcript show: "done"]
   /// ```
-  ensure: cleanupBlock :: Block => @intrinsic ensure
+  ensure: cleanupBlock :: Block(R) => @intrinsic ensure
 
   /// Return the number of arguments the block expects.
   ///
@@ -105,4 +105,5 @@ sealed typed Object subclass: Block
   /// ```beamtalk
   /// [:x :y | x + y] valueWithArguments: #(3, 4)   // => 7
   /// ```
-  valueWithArguments: args :: List -> Object => @primitive
+  valueWithArguments: args :: List -> Object =>
+    @intrinsic blockValueWithArguments

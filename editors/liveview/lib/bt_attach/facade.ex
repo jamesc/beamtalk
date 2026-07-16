@@ -139,6 +139,17 @@ defmodule BtAttach.Facade do
     # reload after a git revert) pushes a refresh. A subscription runs no user
     # code, so it is `:read`, safe for the Observer role.
     subscribe_classes: :read,
+    # ADR 0105 Phase 1 (BT-2779): reload-induced findings. `reload_findings`
+    # reads the current live snapshot (`beamtalk_workspace_findings_store:all/0`)
+    # — pure reflection, no user code — so it is `:read`, safe for the
+    # Observer role, scoped exactly like `changes`. `subscribe_reload_check`
+    # registers the LiveView pid on the `reload_check` push stream so a
+    # `ReloadCheckCompleted` announcement (a re-check ran, or a caller's
+    # stale findings were cleared) pushes a refresh, mirroring
+    # `subscribe_classes`. A subscription runs no user code, so it is
+    # `:read` too.
+    reload_findings: :read,
+    subscribe_reload_check: :read,
     # ADR 0095 §5 / BT-2489 (Cockpit Phase 3): the live-Inspector tracking ops.
     # `subscribe_object`/`unsubscribe_object` arm a per-actor state-change push;
     # `pid_stats` reads live process metrics. All read-only — they trigger no
@@ -234,6 +245,12 @@ defmodule BtAttach.Facade do
   defp invoke(:inspect, %{term: term}, _ctx), do: client().inspect_value(term)
   defp invoke(:bindings, %{session_pid: pid}, _ctx), do: client().list_bindings(pid)
   defp invoke(:changes, _params, _ctx), do: client().change_history()
+
+  # ADR 0105 Phase 1 (BT-2779): current live snapshot of reload-induced
+  # findings — the workspace/cockpit UI's initial-load / manual-refresh
+  # counterpart to the `reload_check` push stream (`subscribe_reload_check`
+  # below), same relationship `changes` has to `subscribe_classes`.
+  defp invoke(:reload_findings, _params, _ctx), do: client().reload_findings()
 
   # ADR 0092: the supervision-tree snapshot. `processes` is the default-scope
   # Read view (runtime plumbing filtered); `processes_system` is the privileged
@@ -462,6 +479,13 @@ defmodule BtAttach.Facade do
   # revert) pushes a refresh trigger to the cockpit. Read capability (a
   # subscription registration runs no user code), like the other subscribe ops.
   defp invoke(:subscribe_classes, %{pid: pid}, _ctx), do: client().subscribe_classes(pid)
+
+  # ADR 0105 Phase 1 (BT-2779): the reload-induced-findings push stream.
+  # Registers the LiveView pid on the `reload_check` stream so a
+  # `ReloadCheckCompleted` announcement pushes a refresh, mirroring
+  # `subscribe_classes` exactly.
+  defp invoke(:subscribe_reload_check, %{pid: pid}, _ctx),
+    do: client().subscribe_reload_check(pid)
 
   # BT-2598: reload a `.bt` file from disk into the live image after a
   # content-mutating git op (revert), so image == disk (BT-2585). `path` is the

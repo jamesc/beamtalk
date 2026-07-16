@@ -29,7 +29,7 @@ sealed Boolean subclass: True
   /// ```beamtalk
   /// true ifTrue: ["yes"]       // => "yes"
   /// ```
-  ifTrue: trueBlock :: Block => trueBlock value
+  ifTrue: trueBlock :: Block(R) -> R => trueBlock value
 
   /// If false, evaluate `falseBlock`. Returns self (true) since condition is true.
   ///
@@ -37,7 +37,7 @@ sealed Boolean subclass: True
   /// ```beamtalk
   /// true ifFalse: ["no"]       // => true
   /// ```
-  ifFalse: _falseBlock :: Block -> True => self
+  ifFalse: _falseBlock :: Block(R) -> True => self
 
   /// Logical NOT. Returns false.
   ///

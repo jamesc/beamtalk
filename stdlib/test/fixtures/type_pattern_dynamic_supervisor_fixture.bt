@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2870: TypePatternDynamicSupervisorFixture — a leaf
+// `DynamicSupervisor subclass:` with no subclasses anywhere in the test
+// corpus, used to verify `x :: TypePatternDynamicSupervisorFixture`
+// type-pattern codegen against a real dynamic-supervisor reference. Manages
+// TypePatternActorFixture children (stdlib/test/fixtures/type_pattern_actor_fixture.bt,
+// BT-2855) purely to satisfy `class childClass` — no child is ever started.
+
+DynamicSupervisor(TypePatternActorFixture) subclass: TypePatternDynamicSupervisorFixture
+
+  class childClass => TypePatternActorFixture

@@ -130,9 +130,11 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0101](0101-unified-erlang-interop-native-objects.md) | Unified Erlang Interop — `native:` for Stateless Objects, Wrap-by-Default FFI, Clean `@primitive`/`@intrinsic`/`native:` Split | Accepted | 2026-06-28 |
 | [0102](0102-set-theoretic-type-operators.md) | Set-Theoretic Type Operators (Intersection and Negation) for Narrowing and Atom Exhaustiveness | Implemented (Phases 1, 2, 4, 5; Phase 1b deferred) | 2026-07-06 |
 | [0103](0103-sendability-typing-from-class-kinds.md) | Sendability Typing from Class Kinds | Proposed | 2026-07-05 |
-| [0104](0104-typed-actor-protocols.md) | Typed Actor Protocols — the Class Interface Is the Protocol | Proposed | 2026-07-05 |
-| [0105](0105-live-image-recheck-on-reload.md) | Live Image Re-Checking on Hot Reload | Proposed | 2026-07-05 |
+| [0104](0104-typed-actor-protocols.md) | Typed Actor Protocols — the Class Interface Is the Protocol | Accepted | 2026-07-07 |
+| [0105](0105-live-image-recheck-on-reload.md) | Live Image Re-Checking on Hot Reload | Accepted | 2026-07-11 |
 | [0106](0106-opt-in-match-exhaustiveness-assertion.md) | Opt-In Asserted `match:` Exhaustiveness (`matchExhaustive:`) | Implemented | 2026-07-07 |
+| [0107](0107-nil-and-type-patterns-in-match.md) | Nil and Type Patterns in `match:` | Accepted | 2026-07-12 |
+| [0108](0108-named-union-type-aliases.md) | Named Union Type Aliases (`type` Declarations) | Accepted | 2026-07-15 |
 
 > ADR 0086 was originally numbered 0069 (a collision with *Actor Observability and Tracing*) and was renumbered on 2026-05-25.
 

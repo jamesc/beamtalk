@@ -1082,3 +1082,167 @@ fn parse_method_rejects_trailing_tokens() {
         "trailing second method should be an error"
     );
 }
+
+// ========================================================================
+// BT-2829: declaration-level `@expect` after a preceding method
+// ========================================================================
+
+#[test]
+fn declaration_level_expect_after_prior_method_attaches_to_next_method() {
+    // Regression test for a parser bug found while implementing BT-2829:
+    // `parse_method_body`'s statement loop didn't stop at a leading `@expect`
+    // (col <= 2, the same boundary a fresh method/state declaration sits at),
+    // so it swallowed the directive as a trailing statement of the *preceding*
+    // method's body instead of leaving it for `parse_class_body` to attach to
+    // the *following* method via `pending_expect`.
+    let module = parse_ok(
+        "typed Object subclass: Foo\n\
+         \x20\x20first => 1\n\
+         \x20\x20@expect type\n\
+         \x20\x20second -> String => 2",
+    );
+    assert_eq!(module.classes.len(), 1);
+    let class = &module.classes[0];
+    assert_eq!(class.methods.len(), 2);
+
+    let first = &class.methods[0];
+    assert_eq!(first.selector.name(), "first");
+    assert!(
+        first.expect.is_none(),
+        "the `@expect` must not attach to the preceding method"
+    );
+    assert!(
+        !first
+            .body
+            .iter()
+            .any(|stmt| matches!(stmt.expression, Expression::ExpectDirective { .. })),
+        "the `@expect` must not be swallowed into the preceding method's body, got body: {:?}",
+        first.body
+    );
+
+    let second = &class.methods[1];
+    assert_eq!(second.selector.name(), "second");
+    assert!(
+        second.expect.is_some(),
+        "the `@expect` must attach to the following method declaration"
+    );
+}
+
+#[test]
+fn standalone_method_statement_level_expect_inside_body_still_works() {
+    // Regression guard for `is_at_declaration_level_expect`'s boundary check:
+    // for a Tonel-style standalone method (`Class >> selector => body`),
+    // `in_class_body` is false while its body is parsed, so the boundary's
+    // `!self.in_class_body` branch is unconditionally true regardless of
+    // indentation. It must not treat every `@expect` inside a standalone
+    // method's body as a boundary — module-level `@expect` before a method
+    // is not a supported declaration-level directive at all (only
+    // `parse_class_body` captures `pending_expect`), so nothing should ever
+    // stop the body early here.
+    let module = parse_ok(
+        "Counter >> doIt =>\n\
+         \x20\x20@expect type\n\
+         \x20\x20self bar",
+    );
+    assert_eq!(module.method_definitions.len(), 1);
+    let method_def = &module.method_definitions[0];
+    assert_eq!(
+        method_def.method.body.len(),
+        2,
+        "expected @expect + `self bar` in the same body: {:?}",
+        method_def.method.body
+    );
+    assert!(matches!(
+        method_def.method.body[0].expression,
+        Expression::ExpectDirective { .. }
+    ));
+}
+
+#[test]
+fn declaration_level_expect_does_not_strand_preceding_doc_comment() {
+    // Companion regression to the swallowing bug above: a `/// ...` doc
+    // comment written directly above a declaration-level `@expect` sits in
+    // the `@expect` token's own leading trivia, not the following method's —
+    // `collect_doc_comment()` only ever inspects the *current* token. Before
+    // threading the doc comment through `pending_doc_comment`, this doc
+    // comment was stranded: `parse_method_definition`'s own
+    // `collect_doc_comment()` call (now on the method's own first token, past
+    // `@expect`) found nothing, so the doc comment was never removed from
+    // `unattached_doc_comment_indices` and the post-parse sweep reported it
+    // as a "doc comment not attached" warning — even though it visually sits
+    // right above a real method declaration.
+    let module = parse_ok(
+        "typed Object subclass: Foo\n\
+         \x20\x20/// Docs for second.\n\
+         \x20\x20@expect type\n\
+         \x20\x20second -> String => \"x\"",
+    );
+    assert_eq!(module.classes.len(), 1);
+    let class = &module.classes[0];
+    assert_eq!(class.methods.len(), 1);
+    let second = &class.methods[0];
+    assert_eq!(second.selector.name(), "second");
+    assert_eq!(
+        second.doc_comment.as_deref(),
+        Some("Docs for second."),
+        "the doc comment above `@expect` must attach to the method it precedes"
+    );
+}
+
+#[test]
+fn declaration_level_expect_does_not_strand_preceding_plain_comment() {
+    // Companion to the doc-comment regression above, for plain `//` comments:
+    // unlike doc comments, plain leading comments have no
+    // `unattached_doc_comment_indices`-style tracking or "not attached"
+    // warning, so a comment stranded on the `@expect` token's own leading
+    // trivia doesn't just misattach — it silently vanishes from the AST
+    // entirely (and so from `unparse` output) with no diagnostic at all.
+    let module = parse_ok(
+        "typed Object subclass: Foo\n\
+         \x20\x20// A plain banner comment.\n\
+         \x20\x20@expect type\n\
+         \x20\x20second -> String => \"x\"",
+    );
+    assert_eq!(module.classes.len(), 1);
+    let class = &module.classes[0];
+    assert_eq!(class.methods.len(), 1);
+    let second = &class.methods[0];
+    assert_eq!(second.selector.name(), "second");
+    assert_eq!(
+        second.comments.leading.len(),
+        1,
+        "the plain comment above `@expect` must attach to the method it precedes, not vanish: {:?}",
+        second.comments
+    );
+    assert_eq!(
+        second.comments.leading[0].content.as_str(),
+        "A plain banner comment."
+    );
+}
+
+#[test]
+fn statement_level_expect_inside_body_still_works() {
+    // Companion case: `@expect` as the first statement *inside* a method body
+    // (deeper than col 2) must keep working exactly as before — it is not a
+    // declaration-level directive and must not be treated as a class-body
+    // boundary.
+    let module = parse_ok(
+        "typed Object subclass: Foo\n\
+         \x20\x20doIt =>\n\
+         \x20\x20\x20\x20@expect type\n\
+         \x20\x20\x20\x20self bar",
+    );
+    assert_eq!(module.classes.len(), 1);
+    let class = &module.classes[0];
+    assert_eq!(class.methods.len(), 1);
+    let method = &class.methods[0];
+    assert!(
+        method.expect.is_none(),
+        "statement-level @expect must not be captured as a declaration-level directive"
+    );
+    assert_eq!(method.body.len(), 2, "expected @expect + `self bar`");
+    assert!(matches!(
+        method.body[0].expression,
+        Expression::ExpectDirective { .. }
+    ));
+}

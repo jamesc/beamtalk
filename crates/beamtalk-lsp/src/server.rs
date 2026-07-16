@@ -16,7 +16,9 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::runtime::{ClassChangedEvent, FlushEvent, RuntimeClient, RuntimeError};
+use crate::runtime::{
+    ClassChangedEvent, FlushEvent, ReloadCheckEvent, ReloadFinding, RuntimeClient, RuntimeError,
+};
 
 use beamtalk_core::language_service::{
     CallHierarchyTarget, CompletionKind, DocumentSymbolKind, LanguageService,
@@ -65,6 +67,15 @@ pub(crate) const CMD_FLUSH_CLASS: &str = "beamtalk.flush.class";
 pub(crate) const CMD_FLUSH_FILE: &str = "beamtalk.flush.file";
 pub(crate) const CMD_FLUSH_KIND: &str = "beamtalk.flush.kind";
 pub(crate) const CMD_SAVE_CLASS: &str = "beamtalk.saveClass";
+/// ADR 0105 Phase 3 (BT-2782): the editor's "check before save" pre-save
+/// advisory hook — compiles a pending method edit and reports would-be-stale
+/// dependents without installing it. Non-blocking; the caller decides
+/// whether/when to follow up with the real save (`compile:source:` via
+/// whichever surface the editor uses for that).
+pub(crate) const CMD_PRECHECK_METHOD: &str = "beamtalk.precheckMethod";
+/// ADR 0105 Phase 3 (BT-2782): the explicit whole-image re-check
+/// (`Workspace recheckImage` / REPL `:recheck image`).
+pub(crate) const CMD_RECHECK_IMAGE: &str = "beamtalk.recheckImage";
 
 /// All commands surfaced via `executeCommand`. Wired into
 /// `ServerCapabilities::execute_command_provider` and used by the LSP→runtime
@@ -75,6 +86,8 @@ pub(crate) const BEAMTALK_LSP_COMMANDS: &[&str] = &[
     CMD_FLUSH_FILE,
     CMD_FLUSH_KIND,
     CMD_SAVE_CLASS,
+    CMD_PRECHECK_METHOD,
+    CMD_RECHECK_IMAGE,
 ];
 
 #[derive(Clone)]
@@ -83,10 +96,37 @@ struct PreloadConfig {
     stdlib_dirs: Vec<PathBuf>,
 }
 
+/// Live reload-induced diagnostics (ADR 0105 Phase 1, BT-2779), double-keyed
+/// by document URI and then by `(owner class name, changed class name)`.
+/// Both levels of keying are load-bearing, not cosmetic:
+///
+/// * **Owner**: Beamtalk supports multiple classes defined in one `.bt` file
+///   (e.g. `Behaviour.bt`, `WorkspaceInterface.bt`), so two different caller
+///   classes' reload-induced diagnostics can legitimately share a URI. A
+///   flat `HashMap<Url, Vec<Diagnostic>>` would have one owner's `put`/clear
+///   silently clobber a sibling owner's diagnostics in the same file.
+/// * **Changed class**: a single caller can be broken by two *independently
+///   reloading* classes (`Dashboard` calls both `Counter>>getCount` and
+///   `Widget>>size`; each can go stale and get fixed on its own schedule).
+///   Keying only by owner would have a later reload's `insert`/`remove`
+///   clobber an earlier, still-valid finding from a *different* changed
+///   class — mirrors `beamtalk_workspace_findings_store`'s `origin_key()`
+///   (`{Owner, ChangedClass}`) server-side.
+type ReloadDiagnosticsByUriAndOrigin =
+    HashMap<Url, HashMap<(String, String), Vec<tower_lsp::lsp_types::Diagnostic>>>;
+
 #[derive(Default)]
 struct PreloadedFiles {
     user_files: Vec<(PathBuf, String)>,
     stdlib_files: Vec<(PathBuf, String)>,
+    /// Whether the preload file budget (`PRELOAD_MAX_FILES`) was exhausted
+    /// mid-walk (BT-2796). When true, workspace coverage may be partial and
+    /// the language service must NOT claim `KnowledgeScope::ProjectComplete`.
+    budget_exhausted: bool,
+    /// Whether any workspace root has fetched package dependencies
+    /// (`_build/deps/*/src` present, BT-2794). Pre-WS3, dependency extension
+    /// contributions are invisible, so diagnostics must stay conservative.
+    deps_present: bool,
 }
 
 /// Params for the `beamtalk-lsp/fetchContent` custom request.
@@ -107,8 +147,15 @@ pub struct FetchContentResult {
 pub struct Backend {
     /// LSP client handle for sending notifications and responses.
     client: Client,
-    /// The underlying language service, protected by a mutex for concurrent access.
-    service: Mutex<SimpleLanguageService>,
+    /// The underlying language service, protected by a mutex for concurrent
+    /// access. `Arc`-wrapped (ADR 0105 Phase 1, BT-2779) so the detached
+    /// reload-check listener task (spawned once, outlives any single
+    /// request handler's `&self` borrow) can recompute *static* diagnostics
+    /// and merge them with reload-induced ones when it republishes — the
+    /// same reason [`Self::versions`] and [`Self::nav_cache`] are
+    /// `Arc`-wrapped. `self.service.lock()` is unaffected: `Arc<Mutex<T>>`
+    /// derefs to `Mutex<T>`.
+    service: Arc<Mutex<SimpleLanguageService>>,
     /// Last known LSP document version by file path.
     versions: Arc<Mutex<HashMap<Utf8PathBuf, i32>>>,
     /// Paths of documents that have received `didChange` notifications since
@@ -158,6 +205,19 @@ pub struct Backend {
     /// without keeping the `Backend` itself alive (the listener is aborted
     /// on `Drop` via `class_changed_listener`'s `JoinHandle`).
     nav_cache: Arc<std::sync::Mutex<NavCache>>,
+    /// ADR 0105 Phase 1 (BT-2779): handle to the reload-check-event listener
+    /// task that consumes `ReloadCheckEvent`s and publishes/clears
+    /// reload-induced diagnostics.
+    reload_check_listener: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// ADR 0105 Phase 1 (BT-2779): currently-live reload-induced diagnostics,
+    /// keyed by document URI and then by owner class name (see
+    /// [`ReloadDiagnosticsByUriAndOrigin`] for why the owner keying matters).
+    /// Populated/replaced wholesale per owner by [`reload_check_listener`]
+    /// (clearing-by-replacement — an owner with no current findings has its
+    /// entry removed, not left stale), and merged into every
+    /// [`Backend::publish_diagnostics`] call so a subsequent
+    /// `didChange`-triggered republish doesn't silently drop them.
+    reload_diagnostics: Arc<std::sync::Mutex<ReloadDiagnosticsByUriAndOrigin>>,
 }
 
 /// Coarse cache for runtime-attached navigation results (BT-2239).
@@ -196,12 +256,74 @@ impl NavCache {
     }
 }
 
+/// Collects dependency/native `.beam` ebin directories under `root`'s
+/// `_build/` tree, for `beamtalk_core::ffi_type_specs::extract_type_specs`.
+///
+/// Duplicates the directory-scanning logic of `beamtalk-cli`'s
+/// `native_type_specs::collect_dependency_ebin_dirs` (itself already a
+/// deliberate BT-2858 duplicate of the CLI binary's `commands::deps`/
+/// `commands::build` versions) rather than sharing it, so `beamtalk-lsp`
+/// doesn't need a `beamtalk-lsp -> beamtalk-cli` dependency (forbidden —
+/// see `docs/development/architecture-principles.md`). Each side is a
+/// handful of `read_dir` calls over the same `_build/` layout convention
+/// this function's caller (`load_type_cache`) already assumes for
+/// `_build/type_cache/`, so duplication carries little drift risk — unlike
+/// the FFI-spec-extraction logic itself, which is *not* duplicated
+/// (`beamtalk-core`'s `ffi_type_specs` is its single source of truth).
+fn collect_dependency_ebin_dirs(root: &Utf8PathBuf) -> Vec<Utf8PathBuf> {
+    let mut dirs = Vec::new();
+    let build_root = root.join("_build");
+
+    // Path dependencies: `_build/deps/*/ebin/`.
+    if let Ok(entries) = std::fs::read_dir(build_root.join("deps")) {
+        for entry in entries.flatten() {
+            let ebin = entry.path().join("ebin");
+            if ebin.is_dir() {
+                if let Ok(utf8) = Utf8PathBuf::from_path_buf(ebin) {
+                    dirs.push(utf8);
+                }
+            }
+        }
+    }
+
+    // The project's own native/ code, compiled to `_build/dev/native/ebin/`.
+    let native_ebin = build_root.join("dev").join("native").join("ebin");
+    if native_ebin.is_dir() {
+        dirs.push(native_ebin);
+    }
+
+    // rebar3 hex/git deps: `_build/dev/native/default/lib/*/ebin/`.
+    let lib_dir = build_root
+        .join("dev")
+        .join("native")
+        .join("default")
+        .join("lib");
+    if let Ok(entries) = std::fs::read_dir(&lib_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let ebin = path.join("ebin");
+            if ebin.is_dir() {
+                if let Ok(utf8) = Utf8PathBuf::from_path_buf(ebin) {
+                    dirs.push(utf8);
+                }
+            }
+        }
+    }
+
+    dirs.sort();
+    dirs.dedup();
+    dirs
+}
+
 impl Backend {
     /// Creates a new `Backend` with the given LSP client handle.
     pub fn new(client: Client) -> Self {
         Self {
             client,
-            service: Mutex::new(SimpleLanguageService::new()),
+            service: Arc::new(Mutex::new(SimpleLanguageService::new())),
             versions: Arc::new(Mutex::new(HashMap::new())),
             dirty_files: Mutex::new(HashSet::new()),
             diagnostic_generation: Mutex::new(HashMap::new()),
@@ -214,6 +336,8 @@ impl Backend {
             class_changed_listener: tokio::sync::Mutex::new(None),
             delegate_to_runtime: std::sync::atomic::AtomicBool::new(false),
             nav_cache: Arc::new(std::sync::Mutex::new(NavCache::default())),
+            reload_check_listener: tokio::sync::Mutex::new(None),
+            reload_diagnostics: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
     }
 
@@ -668,42 +792,38 @@ impl Backend {
         }
     }
 
-    /// Loads the type cache from `_build/type_cache/` in workspace roots.
+    /// Loads Erlang FFI type specs for each workspace root, live-extracting
+    /// from OTP/dependency `.beam` files when `_build/type_cache/` is
+    /// missing or stale rather than only reading whatever it happens to
+    /// hold.
     ///
-    /// ADR 0075 Phase 1: Reads cached spec protocol lines and populates the
-    /// `NativeTypeRegistry` in the language service. This provides typed
-    /// completions for Erlang FFI calls (e.g., `reverse: list :: List -> List`).
+    /// ADR 0075 Phase 1 / BT-2859: Calls `beamtalk_core::ffi_type_specs::
+    /// extract_type_specs` — the same single source of truth `beamtalk
+    /// build`/`beamtalk lint` and the MCP `lint`/`diagnostic_summary` tools
+    /// (BT-2858) use — instead of hand-parsing whatever JSON cache entries
+    /// happen to be on disk. Before this, a workspace opened before any
+    /// `beamtalk build` had run (or after `beamtalk clean`) got an
+    /// empty `NativeTypeRegistry` for the rest of the session: no FFI
+    /// argument-type diagnostics, and any `@expect type` suppressing one
+    /// shown as stale. Runs on a blocking task since it may spawn a
+    /// `beamtalk_build_worker` BEAM node on a cold/stale cache.
     async fn load_type_cache(&self, roots: &[PathBuf]) {
-        use beamtalk_core::semantic_analysis::type_checker::{
-            NativeTypeRegistry, parse_specs_line,
-        };
+        use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
 
         let roots_owned: Vec<PathBuf> = roots.to_vec();
         let registry = tokio::task::spawn_blocking(move || {
             let mut registry = NativeTypeRegistry::new();
             for root in &roots_owned {
-                let cache_dir = root.join("_build").join("type_cache");
-                if !cache_dir.is_dir() {
-                    continue;
-                }
-                let Ok(entries) = std::fs::read_dir(&cache_dir) else {
+                let Ok(root) = Utf8PathBuf::from_path_buf(root.clone()) else {
                     continue;
                 };
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.extension().and_then(|e| e.to_str()) != Some("json") {
-                        continue;
-                    }
-                    let Ok(content) = std::fs::read_to_string(&path) else {
-                        continue;
-                    };
-                    // Extract specs_line from the JSON cache entry.
-                    // Format: {"beam_mtime_secs":N,"specs_line":"..."}
-                    if let Some(line) = extract_specs_line_from_cache(&content) {
-                        if !line.is_empty() {
-                            parse_specs_line(&line, &mut registry);
-                        }
-                    }
+                let cache_dir = root.join("_build").join("type_cache");
+                let dependency_ebin_dirs = collect_dependency_ebin_dirs(&root);
+                if let Some(root_registry) = beamtalk_core::ffi_type_specs::extract_type_specs(
+                    &cache_dir,
+                    &dependency_ebin_dirs,
+                ) {
+                    registry.merge(root_registry);
                 }
             }
             registry
@@ -720,6 +840,87 @@ impl Backend {
             let mut svc = self.service.lock().expect("service lock poisoned");
             svc.set_native_types(registry);
         }
+    }
+
+    /// Loads each workspace root's `beamtalk.toml` `[diagnostics]`
+    /// severity-override table (ADR 0100 Rule 3, BT-2800) and installs it in
+    /// the language service so `beamtalk build` and the LSP agree on
+    /// diagnostic severity.
+    ///
+    /// Before this, the LSP's diagnostics path never consulted the table at
+    /// all — a package with `dnu = "error"` failed `beamtalk build` while the
+    /// editor kept showing the same site as a soft `Hint`. Parsing lives in
+    /// `beamtalk-core` (`beamtalk_core::compilation::diagnostics_policy`),
+    /// not `beamtalk-cli`, specifically so the LSP can read `beamtalk.toml`
+    /// without a `beamtalk-lsp -> beamtalk-cli` dependency (forbidden — see
+    /// `docs/development/architecture-principles.md`).
+    ///
+    /// Lenient by design: a root with no `beamtalk.toml`, or one that fails
+    /// to parse, contributes an empty table for that root (Rule 1 defaults)
+    /// rather than blocking diagnostics entirely — a malformed manifest
+    /// already fails loudly at `beamtalk build` time, and the LSP must keep
+    /// publishing diagnostics for open files regardless. Parse failures are
+    /// logged so the mismatch is discoverable. A multi-root workspace merges
+    /// every root's table into one (later roots win on category collisions);
+    /// like `set_has_package_dependencies`, this is a whole-session
+    /// simplification, not a per-file lookup.
+    ///
+    /// Loaded once at startup (mirrors [`Self::load_type_cache`]) —
+    /// `beamtalk.toml` edits made while the server is running require an LSP
+    /// restart to take effect.
+    async fn load_diagnostics_table(&self, roots: &[PathBuf]) {
+        use beamtalk_core::compilation::diagnostics_policy::parse_diagnostics_table_from_manifest_toml;
+
+        let roots_owned: Vec<PathBuf> = roots.to_vec();
+        let table = tokio::task::spawn_blocking(move || {
+            let mut merged = beamtalk_core::compilation::DiagnosticsTable::new();
+            for root in &roots_owned {
+                let manifest_path = root.join("beamtalk.toml");
+                let Ok(content) = std::fs::read_to_string(&manifest_path) else {
+                    continue;
+                };
+                match parse_diagnostics_table_from_manifest_toml(&content) {
+                    Ok(root_table) => {
+                        for (category, severity) in root_table {
+                            if let Some(previous) = merged.get(&category) {
+                                if *previous != severity {
+                                    tracing::warn!(
+                                        root = %root.display(),
+                                        category = ?category,
+                                        previous = ?previous,
+                                        new = ?severity,
+                                        "[diagnostics] category set differently by multiple \
+                                         workspace roots; this root's value wins for the \
+                                         whole session"
+                                    );
+                                }
+                            }
+                            merged.insert(category, severity);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            path = %manifest_path.display(),
+                            error = %e,
+                            "failed to parse [diagnostics] table in beamtalk.toml; \
+                             using Rule 1 defaults for this root"
+                        );
+                    }
+                }
+            }
+            merged
+        })
+        .await
+        .unwrap_or_default();
+
+        if !table.is_empty() {
+            debug!(
+                "Loaded {} [diagnostics] severity override(s) from beamtalk.toml",
+                table.len()
+            );
+        }
+        let mut svc = self.service.lock().expect("service lock poisoned");
+        svc.set_diagnostics_overrides(table);
     }
 
     async fn preload_workspace_source_files(&self, config: PreloadConfig) {
@@ -744,12 +945,32 @@ impl Backend {
         }
 
         let mut svc = self.service.lock().expect("service lock poisoned");
+        let budget_exhausted = loaded.budget_exhausted;
+        let deps_present = loaded.deps_present;
         for (path, content) in loaded.user_files.into_iter().chain(loaded.stdlib_files) {
             let Ok(utf8_path) = Utf8PathBuf::from_path_buf(path) else {
                 continue;
             };
             svc.update_file(utf8_path, content);
         }
+        // BT-2796: With every workspace source file indexed, the ProjectIndex
+        // is project-complete and diagnostics may say so (ADR 0100 Rule 2
+        // sequencing guard). A budget-exhausted preload has partial coverage
+        // and must keep the conservative ModuleOnly default.
+        //
+        // "Complete" here means the conventional source layout (`src/`,
+        // `test/`, fetched dep sources, stdlib) was fully walked. Files
+        // outside those directories are not preloaded and are only indexed
+        // when opened — same coverage the ProjectIndex has always had for
+        // classes. Scope claims must stay tied to this walk; do not claim
+        // completeness from any weaker signal.
+        svc.set_project_complete(!budget_exhausted);
+        // BT-2794 (pre-WS3): fetched deps mean dependency extensions may
+        // exist that the checker cannot see. (Declared-but-unfetched deps are
+        // invisible here — the LSP deliberately avoids parsing beamtalk.toml —
+        // but such a workspace cannot resolve dep classes at all, so hint
+        // noise is the lesser concern.)
+        svc.set_has_package_dependencies(deps_present);
     }
 
     /// Handles the `beamtalk-lsp/fetchContent` custom request.
@@ -962,7 +1183,13 @@ impl Backend {
         // attach the real cache to it.
         let (class_changed_tx, class_changed_rx) =
             tokio::sync::mpsc::unbounded_channel::<ClassChangedEvent>();
-        let client = RuntimeClient::connect(&project_root, flush_tx, class_changed_tx).await?;
+        // ADR 0105 Phase 1 (BT-2779): reload-induced re-check outcomes, so
+        // the LSP can publish/clear diagnostics on the affected callers.
+        let (reload_check_tx, reload_check_rx) =
+            tokio::sync::mpsc::unbounded_channel::<ReloadCheckEvent>();
+        let client =
+            RuntimeClient::connect(&project_root, flush_tx, class_changed_tx, reload_check_tx)
+                .await?;
 
         // Re-check the cache under the lock before installing. If a parallel
         // call beat us to it, drop our freshly-connected client (its
@@ -1015,6 +1242,8 @@ impl Backend {
             class_changed_rx,
         ));
 
+        let reload_check_handle = self.spawn_reload_check_listener(client.clone(), reload_check_rx);
+
         {
             let mut runtime_guard = self.runtime.lock().await;
             *runtime_guard = Some(client.clone());
@@ -1034,31 +1263,135 @@ impl Backend {
             }
             *guard = Some(class_changed_handle);
         }
+        {
+            let mut guard = self.reload_check_listener.lock().await;
+            if let Some(prev) = guard.take() {
+                prev.abort();
+            }
+            *guard = Some(reload_check_handle);
+        }
+
+        // BT-2801 (ADR 0105 surface-parity gap): seed `reload_diagnostics`
+        // with any findings that already existed in
+        // `beamtalk_workspace_findings_store` before this attach — the
+        // `reload_check_handle` listener above only ever delivers *new*
+        // outcomes, so without this a fresh LSP session (or one reconnecting
+        // after a crash) would show nothing for a caller until the next
+        // reload happens to touch it again. Best-effort; see
+        // `seed_reload_diagnostics`'s doc for the accepted narrow race with
+        // a concurrently-arriving push. Re-reads `workspace_roots` (rather
+        // than reusing `listener_roots`, moved into `flush_event_listener`
+        // above) — same pattern as `spawn_reload_check_listener`'s own
+        // fresh clone.
+        let seed_roots = {
+            let roots = self
+                .workspace_roots
+                .lock()
+                .expect("workspace_roots lock poisoned");
+            roots.clone()
+        };
+        seed_reload_diagnostics(
+            &self.client,
+            &client,
+            &seed_roots,
+            &self.service,
+            &self.reload_diagnostics,
+        )
+        .await;
 
         Ok(client)
     }
 
-    async fn publish_diagnostics(&self, uri: &Url) {
-        // Stdlib virtual documents have no user-facing diagnostics.
-        if uri.scheme() == "beamtalk-stdlib" {
-            return;
-        }
-        let Some(path) = uri_to_path(uri) else {
-            return;
+    /// Spawn the reload-check listener task (ADR 0105 Phase 1, BT-2779).
+    /// Extracted out of `ensure_runtime_attached` purely to keep that
+    /// function under the lint's line-count limit — needs a `RuntimeClient`
+    /// clone (to resolve owner class -> URI via `nav-symbols`) plus `Arc`
+    /// clones of `service` and `reload_diagnostics` so it can
+    /// merge-and-republish, mirroring the flush listener's pattern of
+    /// holding only the specific pieces it needs rather than a `Backend`
+    /// back-reference.
+    fn spawn_reload_check_listener(
+        &self,
+        runtime_client: RuntimeClient,
+        reload_check_rx: tokio::sync::mpsc::UnboundedReceiver<ReloadCheckEvent>,
+    ) -> tokio::task::JoinHandle<()> {
+        let roots = {
+            let roots = self
+                .workspace_roots
+                .lock()
+                .expect("workspace_roots lock poisoned");
+            roots.clone()
         };
-        let diagnostics = {
-            let svc = self.service.lock().expect("service lock poisoned");
-            let source = svc.file_source(&path);
-            svc.diagnostics(&path)
-                .into_iter()
-                .map(|d| to_lsp_diagnostic(&d, source.as_deref()))
-                .collect()
-        };
-        let version = self.file_version_for_uri(uri);
-        self.client
-            .publish_diagnostics(uri.clone(), diagnostics, version)
-            .await;
+        tokio::spawn(reload_check_listener(
+            self.client.clone(),
+            runtime_client,
+            roots,
+            Arc::clone(&self.service),
+            Arc::clone(&self.reload_diagnostics),
+            reload_check_rx,
+        ))
     }
+
+    async fn publish_diagnostics(&self, uri: &Url) {
+        let version = self.file_version_for_uri(uri);
+        publish_diagnostics_impl(
+            &self.client,
+            &self.service,
+            &self.reload_diagnostics,
+            uri,
+            version,
+        )
+        .await;
+    }
+}
+
+/// Recompute static diagnostics for `uri`, merge in any live reload-induced
+/// diagnostics (ADR 0105 Phase 1, BT-2779), and publish the combined set.
+///
+/// A free function (not a `&self` method) so both [`Backend::publish_diagnostics`]
+/// and the detached `reload_check_listener` task — which only holds `Arc`
+/// clones of the pieces it needs, not a `Backend` reference, since it
+/// outlives any single request handler's borrow — can share one
+/// implementation. LSP's `publishDiagnostics` fully replaces what the editor
+/// shows for a URI (no incremental-append notification), so every call,
+/// whether triggered by a normal edit/save or by a reload-check push, must
+/// include both sources or one silently clobbers the other.
+async fn publish_diagnostics_impl(
+    client: &Client,
+    service: &Mutex<SimpleLanguageService>,
+    reload_diagnostics: &std::sync::Mutex<ReloadDiagnosticsByUriAndOrigin>,
+    uri: &Url,
+    version: Option<i32>,
+) {
+    // Stdlib virtual documents have no user-facing diagnostics.
+    if uri.scheme() == "beamtalk-stdlib" {
+        return;
+    }
+    let Some(path) = uri_to_path(uri) else {
+        return;
+    };
+    let mut diagnostics: Vec<tower_lsp::lsp_types::Diagnostic> = {
+        let svc = service.lock().expect("service lock poisoned");
+        let source = svc.file_source(&path);
+        svc.diagnostics(&path)
+            .into_iter()
+            .map(|d| to_lsp_diagnostic(&d, source.as_deref()))
+            .collect()
+    };
+    {
+        let reload = reload_diagnostics
+            .lock()
+            .expect("reload_diagnostics lock poisoned");
+        // Flatten every owner's diagnostics for this URI — a file can
+        // define more than one class (see `ReloadDiagnosticsByUriAndOrigin`'s
+        // doc), each with its own independently clearing entry.
+        if let Some(by_owner) = reload.get(uri) {
+            diagnostics.extend(by_owner.values().flatten().cloned());
+        }
+    }
+    client
+        .publish_diagnostics(uri.clone(), diagnostics, version)
+        .await;
 }
 
 #[tower_lsp::async_trait]
@@ -1187,6 +1520,9 @@ impl LanguageServer for Backend {
             self.preload_workspace_source_files(config.clone()).await;
             // ADR 0075: Load type cache from _build/type_cache/ for typed completions.
             self.load_type_cache(&config.roots).await;
+            // ADR 0100 Rule 3 / BT-2800: load beamtalk.toml's [diagnostics]
+            // severity-override table so the LSP agrees with `beamtalk build`.
+            self.load_diagnostics_table(&config.roots).await;
 
             // BT-2027: Re-publish diagnostics for every open file after preload
             // completes. If a file was opened via `did_open` before preload
@@ -2558,6 +2894,403 @@ async fn class_changed_listener(
     tracing::debug!("class_changed_listener: channel closed, exiting");
 }
 
+/// ADR 0105 Phase 1 (BT-2779): consume `ReloadCheckEvent`s from the runtime
+/// listener and publish/clear reload-induced diagnostics on the affected
+/// caller classes' documents.
+///
+/// For every owner in the event's `checked_owners` (the clearing-by-
+/// replacement set — see [`ReloadCheckEvent`]'s doc), this:
+/// 1. Resolves the owner class name to a document URI via `nav-symbols`
+///    (one round-trip per event, not per owner — `nav-symbols` already
+///    returns every user class).
+/// 2. Builds LSP diagnostics from the event's findings restricted to that
+///    owner (`reload_finding_to_lsp_diagnostics`), one per call site so a
+///    finding with several sends in the same method surfaces at each line.
+/// 3. Replaces (never merges) that `(owner, changed_class)` origin's entry
+///    within that URI's bucket in `reload_diagnostics` — an origin with no
+///    current findings gets its entry removed, which is exactly how a
+///    clean re-check clears a stale diagnostic, without touching a
+///    *different* class's entry that happens to share the same file, NOR a
+///    *different changed class*'s still-valid findings for the *same*
+///    owner (`ReloadDiagnosticsByUriAndOrigin`) — a caller broken by two
+///    independently-reloading classes must not have one reload's
+///    replacement silently discard the other's still-valid finding.
+/// 4. Republishes the merged (static + every origin's reload) diagnostic
+///    set for that URI.
+///
+/// An owner with no resolvable source file (a REPL-only / dynamically
+/// defined class, or one `nav-symbols` doesn't know about) is skipped — the
+/// LSP has nothing to attach a `publishDiagnostics` notification to.
+/// Silent: this is a normal, expected case (surface-parity is preserved by
+/// the REPL notice and workspace UI, which don't need a `.bt` file to
+/// attribute a finding to).
+async fn reload_check_listener(
+    client: Client,
+    runtime: RuntimeClient,
+    workspace_roots: Vec<PathBuf>,
+    service: Arc<Mutex<SimpleLanguageService>>,
+    reload_diagnostics: Arc<std::sync::Mutex<ReloadDiagnosticsByUriAndOrigin>>,
+    mut reload_check_rx: tokio::sync::mpsc::UnboundedReceiver<ReloadCheckEvent>,
+) {
+    while let Some(event) = reload_check_rx.recv().await {
+        if event.checked_owners.is_empty() {
+            continue;
+        }
+        // Echo the summary line every other surface shows (REPL notice,
+        // workspace UI header — "N callers re-checked, M stale") to the LSP
+        // client's output channel. Squiggles alone don't carry the
+        // clean-recheck count, and `window/logMessage` is the LSP's own
+        // best-effort notice channel (not a `publishDiagnostics` — this
+        // never affects the diagnostic set).
+        let cap_suffix = event
+            .cap_note
+            .as_deref()
+            .map(|n| format!(" ({n})"))
+            .unwrap_or_default();
+        client
+            .log_message(
+                MessageType::INFO,
+                format!(
+                    "reload check: {}>>{} {}; {} checked, {} not checked{cap_suffix}",
+                    event.changed_class,
+                    event.changed_selector,
+                    event.classification,
+                    event.checked,
+                    event.not_checked
+                ),
+            )
+            .await;
+        let classes = match runtime.nav_symbols(Some("user")).await {
+            Ok(classes) => classes,
+            Err(e) => {
+                tracing::warn!(error = %e, "reload_check_listener: nav_symbols failed");
+                continue;
+            }
+        };
+        for owner in &event.checked_owners {
+            let Some(class) = classes.iter().find(|c| c.name.as_str() == owner.as_str()) else {
+                tracing::debug!(
+                    owner,
+                    "reload_check_listener: owner has no known source file, skipping"
+                );
+                continue;
+            };
+            let Some(uri) = resolve_class_uri(class, &workspace_roots) else {
+                tracing::debug!(owner, "reload_check_listener: could not resolve class URI");
+                continue;
+            };
+            let diagnostics: Vec<tower_lsp::lsp_types::Diagnostic> = event
+                .findings
+                .iter()
+                .filter(|f| &f.owner == owner)
+                .flat_map(reload_finding_to_lsp_diagnostics)
+                .collect();
+            {
+                let mut guard = reload_diagnostics
+                    .lock()
+                    .expect("reload_diagnostics lock poisoned");
+                // `owner == changed_class` means this owner's OWN source
+                // just changed — the server unconditionally full-wipes it
+                // (`beamtalk_workspace_findings_store:clear_owner/1`) before
+                // any scoped replace, so every origin bucket for this owner
+                // is stale, not just the one keyed to `changed_class`. Every
+                // *other* owner only had its `(owner, changed_class)` origin
+                // scoped-replaced server-side (`put_owner_origin/3`), so a
+                // different changed class's still-valid finding for the
+                // same owner must survive.
+                if owner == &event.changed_class {
+                    if let Some(by_origin) = guard.get_mut(&uri) {
+                        by_origin.retain(|(o, _cc), _| o != owner);
+                        if by_origin.is_empty() {
+                            guard.remove(&uri);
+                        }
+                    }
+                    if !diagnostics.is_empty() {
+                        guard
+                            .entry(uri.clone())
+                            .or_default()
+                            .insert((owner.clone(), event.changed_class.clone()), diagnostics);
+                    }
+                } else {
+                    let origin_key = (owner.clone(), event.changed_class.clone());
+                    if diagnostics.is_empty() {
+                        // An empty `diagnostics` list is ambiguous: it means
+                        // either a genuinely clean re-check (no finding at
+                        // all for this owner — safe to clear), or a finding
+                        // that exists but is siteless (no xref call-site
+                        // line to anchor a `Diagnostic` to). Only the first
+                        // case should clear the origin; conflating the two
+                        // would silently drop a real finding whenever it
+                        // happens to have no placeable site.
+                        let has_finding_for_owner =
+                            event.findings.iter().any(|f| &f.owner == owner);
+                        if has_finding_for_owner {
+                            tracing::warn!(
+                                owner,
+                                changed_class = %event.changed_class,
+                                "reload_check_listener: finding present but produced no \
+                                 placeable diagnostics (siteless); leaving prior diagnostics \
+                                 for this origin untouched"
+                            );
+                        } else if let Some(by_origin) = guard.get_mut(&uri) {
+                            by_origin.remove(&origin_key);
+                            if by_origin.is_empty() {
+                                guard.remove(&uri);
+                            }
+                        }
+                    } else {
+                        guard
+                            .entry(uri.clone())
+                            .or_default()
+                            .insert(origin_key, diagnostics);
+                    }
+                }
+            }
+            // No tracked document version for a URI the editor may not even
+            // have open — `publishDiagnostics`' `version` field is optional
+            // per the LSP spec, so omitting it is correct here (unlike the
+            // flush listener, which only touches already-open buffers).
+            publish_diagnostics_impl(&client, &service, &reload_diagnostics, &uri, None).await;
+        }
+    }
+    tracing::debug!("reload_check_listener: channel closed, exiting");
+}
+
+/// Seed `reload_diagnostics` with any reload-induced findings that already
+/// existed in `beamtalk_workspace_findings_store` before this client
+/// attached (BT-2801, ADR 0105 surface-parity gap) — the `reload_check`
+/// push channel [`reload_check_listener`] consumes only ever delivers *new*
+/// outcomes, so a fresh LSP process attaching for the first time (e.g. the
+/// editor just started, or restarted the language server after a crash)
+/// would otherwise show nothing for a caller until the next reload happens
+/// to touch it again.
+///
+/// Called once from [`Backend::ensure_runtime_attached`], after the push
+/// listener is spawned but before the runtime client is handed back to
+/// callers, so the first [`Backend::publish_diagnostics`] for any
+/// already-open document picks the snapshot up through the normal merge
+/// path (`publish_diagnostics_impl`). Findings are grouped by `(owner,
+/// changed_class)` — the same origin key `reload_diagnostics` uses — so each
+/// independent contribution to an owner's diagnostics stays an
+/// independently-clearing entry once live pushes start arriving, exactly
+/// mirroring [`reload_check_listener`]'s per-origin bucketing.
+///
+/// A document already open when the seed completes would otherwise have to
+/// wait for an unrelated edit to surface its pre-existing findings, so any
+/// URI touched by the seed is republished immediately.
+///
+/// Best-effort: a transport failure here only means the LSP starts cold —
+/// exactly the behaviour before this feature existed — so it must not fail
+/// the attach itself, only log and return.
+///
+/// **Additive-only, and only correct because it runs at most once per
+/// `Backend`:** this never *clears* `reload_diagnostics`, it only inserts.
+/// That is sound today because `ensure_runtime_attached` caches `self.runtime`
+/// forever once set (nothing ever resets it back to `None`), so this
+/// function's single call site only ever runs against an empty
+/// `reload_diagnostics` map — there is no live LSP *process* reconnect path
+/// today, only a fresh process attaching once. If a same-process reconnect
+/// path is ever added, this must change to clear stale entries for origins
+/// no longer in the fresh snapshot (not a blanket clear — a concurrent
+/// `reload_check` push landing first, see the race note below, must not be
+/// wiped) rather than staying purely additive, or a finding cleared while
+/// disconnected could remain stuck forever. Two concurrent
+/// `ensure_runtime_attached` callers *can* both pass the attach-cache's
+/// `None` check and both reach this function (the existing "loser client"
+/// race), but that is harmless here: both compute the same snapshot and the
+/// inserts are idempotent over the same keys.
+///
+/// **Known narrow race, accepted:** the `reload-findings` RPC and the
+/// `reload_check` push listener are two independent round-trips against the
+/// same live store, so a real reload that clears an origin can have its
+/// `ReloadCheckCompleted` push processed by [`reload_check_listener`]
+/// *before* this function's own (slightly earlier) snapshot finishes being
+/// written — in which case this seed re-inserts the origin the push had
+/// already correctly cleared. This mirrors the "loser client" race
+/// [`Backend::ensure_runtime_attached`] already documents and accepts for
+/// the same reason: it needs a reload to land in the exact window between
+/// attach and seed completion. It is not as fully self-healing as it may
+/// first look: a re-inserted *clearing* finding only disappears the next
+/// time `changed_class` (not just any reload touching `owner`) is reloaded
+/// again — which may not happen again in the session — so the practical
+/// effect is a stale squiggle that behaves exactly like the pre-BT-2801
+/// baseline (nothing seeded) for that one origin, not a regression beyond
+/// it. A fully race-free version would need the findings store to expose a
+/// generation/version the client could compare against, which is out of
+/// scope here.
+async fn seed_reload_diagnostics(
+    client: &Client,
+    runtime_client: &RuntimeClient,
+    workspace_roots: &[PathBuf],
+    service: &Mutex<SimpleLanguageService>,
+    reload_diagnostics: &std::sync::Mutex<ReloadDiagnosticsByUriAndOrigin>,
+) {
+    // Awaited inline in the attach path (not `tokio::spawn`ed) so that by the
+    // time `ensure_runtime_attached` returns, any already-open document has
+    // already been republished with the seeded findings — a spawned version
+    // would race the caller's own next `publish_diagnostics` call for no
+    // real benefit, since first-attach latency here is bounded by two RPC
+    // round-trips (`reload-findings` + `nav-symbols`) against a workspace
+    // already proven reachable by the connect this immediately follows.
+    let findings = match runtime_client.reload_findings().await {
+        Ok(findings) => findings,
+        Err(e) => {
+            tracing::warn!(error = %e, "seed_reload_diagnostics: reload-findings failed");
+            return;
+        }
+    };
+    if findings.is_empty() {
+        return;
+    }
+    let classes = match runtime_client.nav_symbols(Some("user")).await {
+        Ok(classes) => classes,
+        Err(e) => {
+            tracing::warn!(error = %e, "seed_reload_diagnostics: nav_symbols failed");
+            return;
+        }
+    };
+    let by_origin = group_findings_by_origin(findings);
+    let mut touched_uris: HashSet<Url> = HashSet::new();
+    for ((owner, changed_class), owner_findings) in by_origin {
+        let Some(class) = classes.iter().find(|c| c.name.as_str() == owner.as_str()) else {
+            tracing::debug!(
+                owner,
+                "seed_reload_diagnostics: owner has no known source file, skipping"
+            );
+            continue;
+        };
+        let Some(uri) = resolve_class_uri(class, workspace_roots) else {
+            tracing::debug!(
+                owner,
+                "seed_reload_diagnostics: could not resolve class URI"
+            );
+            continue;
+        };
+        let diagnostics: Vec<tower_lsp::lsp_types::Diagnostic> = owner_findings
+            .iter()
+            .flat_map(reload_finding_to_lsp_diagnostics)
+            .collect();
+        if diagnostics.is_empty() {
+            continue;
+        }
+        {
+            let mut guard = reload_diagnostics
+                .lock()
+                .expect("reload_diagnostics lock poisoned");
+            guard
+                .entry(uri.clone())
+                .or_default()
+                .insert((owner, changed_class), diagnostics);
+        }
+        touched_uris.insert(uri);
+    }
+    for uri in touched_uris {
+        publish_diagnostics_impl(client, service, reload_diagnostics, &uri, None).await;
+    }
+}
+
+/// Group a flat findings snapshot by `(owner, changed_class)` — the same
+/// origin key [`ReloadDiagnosticsByUriAndOrigin`] uses — so
+/// [`seed_reload_diagnostics`] can seed each independent contribution to an
+/// owner's diagnostics as its own independently-clearing entry, exactly
+/// mirroring [`reload_check_listener`]'s per-origin bucketing. Pulled out as
+/// a pure function (no I/O) so this grouping — the one piece of genuinely
+/// new logic `seed_reload_diagnostics` adds beyond what
+/// [`reload_check_listener`] already does per-event — is unit-testable
+/// without a live `RuntimeClient`.
+fn group_findings_by_origin(
+    findings: Vec<ReloadFinding>,
+) -> HashMap<(String, String), Vec<ReloadFinding>> {
+    let mut by_origin: HashMap<(String, String), Vec<ReloadFinding>> = HashMap::new();
+    for finding in findings {
+        by_origin
+            .entry((finding.owner.clone(), finding.changed_class.clone()))
+            .or_default()
+            .push(finding);
+    }
+    by_origin
+}
+
+/// Resolve a `NavSymbolClass`'s `source_file` to a document `Url`, the same
+/// way [`runtime_class_to_document_symbol`] does — reusing
+/// `nav_site_to_location` for the workspace-root canonicalisation via a
+/// synthetic single-site `NavSite`.
+fn resolve_class_uri(class: &NavSymbolClass, workspace_roots: &[PathBuf]) -> Option<Url> {
+    let source_file = class.source_file.as_deref()?;
+    if source_file.is_empty() {
+        return None;
+    }
+    let resolved = nav_site_to_location(
+        &NavSite {
+            class: class.name.clone(),
+            class_side: false,
+            method: class.name.clone(),
+            line: class.line.unwrap_or(1),
+            source_file: Some(source_file.to_string()),
+        },
+        workspace_roots,
+    )?;
+    path_to_uri(&resolved.file)
+}
+
+/// Build one LSP `Diagnostic` per call site in a reload-induced finding
+/// (ADR 0105 Phase 1, BT-2779). Uses the site's xref-recorded line number —
+/// not the finding's `start`/`end` byte-offset span, since those are
+/// offsets into the *live combined class source* the compiler re-checked
+/// against, and there is no existing machinery to map that back onto an
+/// on-disk position the way `nav_site_to_location`/`line_to_position`
+/// already do for a line number (see `ReloadFinding::start`'s doc).
+fn reload_finding_to_lsp_diagnostics(
+    finding: &ReloadFinding,
+) -> Vec<tower_lsp::lsp_types::Diagnostic> {
+    let severity = match finding.severity.as_str() {
+        "error" => DiagnosticSeverity::ERROR,
+        "warning" => DiagnosticSeverity::WARNING,
+        _ => DiagnosticSeverity::HINT,
+    };
+    // `reload check (<classification> of <ChangedClass>>><selector>): …`
+    // attributes the finding the same way the REPL notice / ADR demo do
+    // (`format_reload_check_notice` in `beamtalk-cli`), so a squiggle's
+    // hover text answers "why is this here" without cross-referencing
+    // another surface.
+    let mut message = format!(
+        "reload check ({} of {}>>{}): {}",
+        finding.classification, finding.changed_class, finding.selector, finding.message
+    );
+    if let Some(note) = &finding.note {
+        message.push_str("\n  = ");
+        message.push_str(note);
+    }
+    let code = finding
+        .category
+        .clone()
+        .map(tower_lsp::lsp_types::NumberOrString::String);
+    finding
+        .sites
+        .iter()
+        .map(|site| {
+            let row = site.line.saturating_sub(1);
+            // Highlight the whole line: `character: u32::MAX` is the LSP
+            // convention for "end of line" (the flush listener's
+            // `workspace/applyEdit` uses the same trick for "end of file")
+            // — clients clamp to the line's actual length. Byte-precise
+            // spans aren't available here (see the doc comment above).
+            let range = Range {
+                start: Position::new(row, 0),
+                end: Position::new(row, u32::MAX),
+            };
+            tower_lsp::lsp_types::Diagnostic {
+                range,
+                severity: Some(severity),
+                code: code.clone(),
+                source: Some("beamtalk (reload)".into()),
+                message: format!("{message} (in {})", site.method),
+                ..Default::default()
+            }
+        })
+        .collect()
+}
+
 /// ADR 0082 Phase 3 (BT-2289): consume `FlushEvent`s from the runtime
 /// listener and emit `workspace/applyEdit` per flushed file.
 ///
@@ -2761,6 +3494,34 @@ pub(crate) fn build_command_expression(
                 escape_string_literal(&path)
             ))
         }
+        CMD_PRECHECK_METHOD => {
+            let class = expect_string_arg(arguments, 0, "class")?;
+            validate_class_name(&class)?;
+            let selector = expect_string_arg(arguments, 1, "selector")?;
+            // Accepted with or without a leading '#', mirroring MCP's
+            // `precheck_method` tool so both surfaces agree on input shape.
+            let selector = selector.strip_prefix('#').unwrap_or(&selector);
+            validate_selector(selector)?;
+            let source = expect_string_arg(arguments, 2, "source")?;
+            if source.is_empty() {
+                return Err(format!("{CMD_PRECHECK_METHOD}: 'source' must not be empty"));
+            }
+            // Mirrors `CMD_SAVE_CLASS`'s / `save_method_expr`'s shape:
+            // `ClassName precheckCompile: #selector source: "body"`.
+            Ok(format!(
+                "{class} precheckCompile: #{selector} source: \"{}\"",
+                escape_string_literal(&source)
+            ))
+        }
+        CMD_RECHECK_IMAGE => {
+            if !arguments.is_empty() {
+                return Err(format!(
+                    "{CMD_RECHECK_IMAGE}: expected no arguments, got {}",
+                    arguments.len()
+                ));
+            }
+            Ok("Workspace recheckImage".to_string())
+        }
         _ => Err(format!("unknown LSP command: {command}")),
     }
 }
@@ -2823,6 +3584,42 @@ fn validate_class_name(name: &str) -> std::result::Result<(), String> {
     Err(format!(
         "class name '{name}' contains invalid character '{c}' (allowed: letters, digits, underscore)"
     ))
+}
+
+/// Validate a Beamtalk selector (unary, keyword, or binary) before splicing
+/// it unescaped into a `#selector` literal in a built expression (ADR 0105
+/// Phase 3, BT-2782's `CMD_PRECHECK_METHOD`) — mirrors `beamtalk-mcp`'s
+/// `validate_selector` (there is no shared crate for this; both surfaces
+/// need the same shape check before string-building an expression).
+fn validate_selector(sel: &str) -> std::result::Result<(), String> {
+    fn is_binary_selector_char(c: char) -> bool {
+        matches!(
+            c,
+            '+' | '-' | '*' | '/' | '<' | '>' | '=' | '~' | '%' | '&' | '?' | ',' | '\\'
+        )
+    }
+
+    if sel.is_empty() {
+        return Err("selector must not be empty".to_string());
+    }
+
+    let first = sel.chars().next().expect("checked non-empty above");
+    if is_binary_selector_char(first) {
+        return if sel.chars().all(is_binary_selector_char) {
+            Ok(())
+        } else {
+            Err(format!("invalid binary selector: '{sel}'"))
+        };
+    }
+
+    if sel
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == ':')
+    {
+        return Ok(());
+    }
+
+    Err(format!("invalid selector: '{sel}'"))
 }
 
 fn workspace_roots(params: &InitializeParams) -> Vec<PathBuf> {
@@ -3005,8 +3802,10 @@ fn collect_preload_files(config: PreloadConfig) -> PreloadedFiles {
         }
     }
 
+    let mut deps_present = false;
     for root in &roots {
         for dep_src in dependency_src_dirs(root) {
+            deps_present = true;
             if remaining_budget == 0 {
                 break;
             }
@@ -3068,6 +3867,8 @@ fn collect_preload_files(config: PreloadConfig) -> PreloadedFiles {
     PreloadedFiles {
         user_files,
         stdlib_files,
+        budget_exhausted: remaining_budget == 0,
+        deps_present,
     }
 }
 
@@ -3899,43 +4700,6 @@ fn position_to_offset(pos: tower_lsp::lsp_types::Position, source: &str) -> usiz
     source.len()
 }
 
-/// Extracts the `specs_line` value from a type cache JSON entry.
-///
-/// The cache format is `{"beam_mtime_secs":N,"specs_line":"..."}`.
-/// This is a simple key-value extraction — we don't need a full JSON parser.
-fn extract_specs_line_from_cache(json: &str) -> Option<String> {
-    // Look for "specs_line":" and extract until the closing unescaped "
-    let key = "\"specs_line\":\"";
-    let start = json.find(key)? + key.len();
-    let remaining = &json[start..];
-
-    // Find the end of the JSON string value, handling escaped quotes
-    let mut result = String::new();
-    let mut chars = remaining.chars();
-    loop {
-        match chars.next()? {
-            '\\' => {
-                // Handle escape sequences
-                match chars.next()? {
-                    '"' => result.push('"'),
-                    '\\' => result.push('\\'),
-                    'n' => result.push('\n'),
-                    'r' => result.push('\r'),
-                    't' => result.push('\t'),
-                    other => {
-                        result.push('\\');
-                        result.push(other);
-                    }
-                }
-            }
-            '"' => break, // End of string value
-            c => result.push(c),
-        }
-    }
-
-    Some(result)
-}
-
 /// Converts a beamtalk `Diagnostic` to an LSP `Diagnostic`.
 fn to_lsp_diagnostic(
     diag: &beamtalk_core::language_service::Diagnostic,
@@ -4192,6 +4956,69 @@ mod tests {
         assert_eq!(uri.path(), "/Collection.bt");
     }
 
+    // -----------------------------------------------------------------------
+    // load_type_cache / collect_dependency_ebin_dirs (BT-2859)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn collect_dependency_ebin_dirs_empty_project() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let dirs = collect_dependency_ebin_dirs(&root);
+        assert!(dirs.is_empty(), "fresh project has no dependency ebin dirs");
+    }
+
+    #[test]
+    fn collect_dependency_ebin_dirs_finds_path_dep_ebin() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let dep_ebin = root.join("_build").join("deps").join("json").join("ebin");
+        std::fs::create_dir_all(&dep_ebin).unwrap();
+
+        let dirs = collect_dependency_ebin_dirs(&root);
+        assert!(
+            dirs.contains(&dep_ebin),
+            "should find the path dependency's ebin dir: {dirs:?}"
+        );
+    }
+
+    /// BT-2859: `load_type_cache` extracts live from OTP `.beam` files for a
+    /// workspace root with no prior `beamtalk build` — analogous to
+    /// `beamtalk-cli`'s `lint_extracts_type_specs_live_on_cold_cache_bt_2851`
+    /// and `beamtalk-mcp`'s `build_native_type_registry_extracts_live_on_cold_cache`
+    /// (BT-2858). Before this fix, the LSP only read `_build/type_cache/`
+    /// JSON files directly, so a workspace opened before any build got an
+    /// empty registry for the rest of the session.
+    #[tokio::test]
+    async fn load_type_cache_extracts_live_on_cold_cache() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = temp.path().to_path_buf();
+        // No `_build/` directory exists yet — the cold-cache case.
+        assert!(!root.join("_build").exists());
+
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+        backend.load_type_cache(std::slice::from_ref(&root)).await;
+
+        let svc = backend.service.lock().expect("service lock poisoned");
+        let Some(registry) = svc.native_types() else {
+            eprintln!(
+                "skipping load_type_cache_extracts_live_on_cold_cache: \
+                 no OTP .beam files discovered in this environment"
+            );
+            return;
+        };
+        assert!(
+            registry.lookup("lists", "reverse", 1).is_some(),
+            "live extraction with no prior build must still find lists:reverse/1"
+        );
+        // The extractor writes the same cache a `beamtalk build`/`beamtalk
+        // lint` run would.
+        assert!(root.join("_build").join("type_cache").exists());
+    }
+
     #[tokio::test]
     async fn fetch_content_returns_error_for_unsupported_scheme() {
         let (service, _socket) = tower_lsp::LspService::new(Backend::new);
@@ -4352,6 +5179,138 @@ mod tests {
             .await
             .expect("should return content");
         assert_eq!(result.content, content);
+    }
+
+    // ---- BT-2800: LSP applies beamtalk.toml [diagnostics] table ----
+
+    #[tokio::test]
+    async fn load_diagnostics_table_promotes_dnu_hint_to_error() {
+        // ADR 0100 Rule 3 surface-parity regression: a package that sets
+        // `dnu = "error"` in beamtalk.toml must see the LSP report the same
+        // Error severity `beamtalk build` would, not the Rule 1 default Hint.
+        use beamtalk_core::source_analysis::DiagnosticCategory;
+
+        let temp = unique_temp_dir("beamtalk_lsp_diagnostics_table");
+        fs::create_dir_all(&temp).expect("create project root");
+        fs::write(
+            temp.join("beamtalk.toml"),
+            "[package]\nname = \"t\"\nversion = \"0.1.0\"\n\n[diagnostics]\ndnu = \"error\"\n",
+        )
+        .expect("write beamtalk.toml");
+
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+        backend
+            .load_diagnostics_table(std::slice::from_ref(&temp))
+            .await;
+
+        let source_path = Utf8PathBuf::from_path_buf(temp.join("dnu.bt")).unwrap();
+        {
+            let mut svc = backend.service.lock().expect("service lock poisoned");
+            svc.update_file(source_path.clone(), "\"hello\" frobnicate".to_string());
+        }
+
+        let diags = {
+            let svc = backend.service.lock().expect("service lock poisoned");
+            svc.diagnostics(&source_path)
+        };
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.category == Some(DiagnosticCategory::Dnu)
+                    && d.severity == Severity::Error),
+            "dnu = \"error\" in beamtalk.toml must promote the LSP's Dnu hint to \
+             Error, matching `beamtalk build`: {diags:?}"
+        );
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[tokio::test]
+    async fn load_diagnostics_table_absent_manifest_is_noop() {
+        // No beamtalk.toml at all (or no [diagnostics] section) must leave
+        // Rule 1 defaults untouched — a Dnu hint stays a Hint.
+        use beamtalk_core::source_analysis::DiagnosticCategory;
+
+        let temp = unique_temp_dir("beamtalk_lsp_diagnostics_table_absent");
+        fs::create_dir_all(&temp).expect("create project root");
+
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+        backend
+            .load_diagnostics_table(std::slice::from_ref(&temp))
+            .await;
+
+        let source_path = Utf8PathBuf::from_path_buf(temp.join("dnu.bt")).unwrap();
+        {
+            let mut svc = backend.service.lock().expect("service lock poisoned");
+            svc.update_file(source_path.clone(), "\"hello\" frobnicate".to_string());
+        }
+
+        let diags = {
+            let svc = backend.service.lock().expect("service lock poisoned");
+            svc.diagnostics(&source_path)
+        };
+        assert!(
+            diags.iter().any(
+                |d| d.category == Some(DiagnosticCategory::Dnu) && d.severity == Severity::Hint
+            ),
+            "absent beamtalk.toml must preserve the Rule 1 default Hint severity: {diags:?}"
+        );
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[tokio::test]
+    async fn load_diagnostics_table_multi_root_collision_later_root_wins() {
+        // BT-2800 review follow-up: when two workspace roots set the same
+        // [diagnostics] category to different severities, the collision is
+        // now logged (see load_diagnostics_table's per-key merge loop), but
+        // the resulting behavior is unchanged — the later root's value wins
+        // for the whole session, matching set_has_package_dependencies.
+        use beamtalk_core::source_analysis::DiagnosticCategory;
+
+        let temp = unique_temp_dir("beamtalk_lsp_diagnostics_table_collision");
+        let root_a = temp.join("a");
+        let root_b = temp.join("b");
+        fs::create_dir_all(&root_a).expect("create root a");
+        fs::create_dir_all(&root_b).expect("create root b");
+        fs::write(
+            root_a.join("beamtalk.toml"),
+            "[package]\nname = \"a\"\nversion = \"0.1.0\"\n\n[diagnostics]\ndnu = \"hint\"\n",
+        )
+        .expect("write root a manifest");
+        fs::write(
+            root_b.join("beamtalk.toml"),
+            "[package]\nname = \"b\"\nversion = \"0.1.0\"\n\n[diagnostics]\ndnu = \"error\"\n",
+        )
+        .expect("write root b manifest");
+
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+        backend
+            .load_diagnostics_table(&[root_a.clone(), root_b.clone()])
+            .await;
+
+        let source_path = Utf8PathBuf::from_path_buf(root_b.join("dnu.bt")).unwrap();
+        {
+            let mut svc = backend.service.lock().expect("service lock poisoned");
+            svc.update_file(source_path.clone(), "\"hello\" frobnicate".to_string());
+        }
+
+        let diags = {
+            let svc = backend.service.lock().expect("service lock poisoned");
+            svc.diagnostics(&source_path)
+        };
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.category == Some(DiagnosticCategory::Dnu)
+                    && d.severity == Severity::Error),
+            "the later root (b, dnu = error) must win the whole-session merge: {diags:?}"
+        );
+
+        let _ = fs::remove_dir_all(&temp);
     }
 
     #[test]
@@ -4763,41 +5722,6 @@ mod tests {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // Type cache JSON parsing (ADR 0075)
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn extract_specs_line_from_cache_basic() {
-        let json = r#"{"beam_mtime_secs":12345,"specs_line":"beamtalk-specs-module:lists:[#{arity => 1}]"}"#;
-        let result = extract_specs_line_from_cache(json);
-        assert_eq!(
-            result.as_deref(),
-            Some("beamtalk-specs-module:lists:[#{arity => 1}]")
-        );
-    }
-
-    #[test]
-    fn extract_specs_line_from_cache_empty() {
-        let json = r#"{"beam_mtime_secs":100,"specs_line":""}"#;
-        let result = extract_specs_line_from_cache(json);
-        assert_eq!(result.as_deref(), Some(""));
-    }
-
-    #[test]
-    fn extract_specs_line_from_cache_with_escaped_quotes() {
-        let json = r#"{"beam_mtime_secs":100,"specs_line":"name => <<\"reverse\">>"}"#;
-        let result = extract_specs_line_from_cache(json);
-        assert_eq!(result.as_deref(), Some(r#"name => <<"reverse">>"#));
-    }
-
-    #[test]
-    fn extract_specs_line_from_cache_missing_key() {
-        let json = r#"{"beam_mtime_secs":100}"#;
-        let result = extract_specs_line_from_cache(json);
-        assert!(result.is_none());
-    }
-
     // ----------------------------------------------------------------------
     // ADR 0082 Phase 3 (BT-2289): executeCommand expression builder + helpers
     // ----------------------------------------------------------------------
@@ -4940,6 +5864,97 @@ mod tests {
     }
 
     #[test]
+    fn build_precheck_method_emits_precheck_compile_source_expression() {
+        let expr = build_command_expression(
+            CMD_PRECHECK_METHOD,
+            &[
+                serde_json::json!("Counter"),
+                serde_json::json!("getCount"),
+                serde_json::json!("getCount => \"nope\""),
+            ],
+        )
+        .expect("ok");
+        assert_eq!(
+            expr,
+            "Counter precheckCompile: #getCount source: \"getCount => \\\"nope\\\"\""
+        );
+    }
+
+    #[test]
+    fn build_precheck_method_accepts_leading_hash_selector() {
+        // Mirrors MCP's `precheck_method`: selectors are accepted with or
+        // without a leading '#'.
+        let expr = build_command_expression(
+            CMD_PRECHECK_METHOD,
+            &[
+                serde_json::json!("Counter"),
+                serde_json::json!("#getCount"),
+                serde_json::json!("getCount => \"nope\""),
+            ],
+        )
+        .expect("ok");
+        assert_eq!(
+            expr,
+            "Counter precheckCompile: #getCount source: \"getCount => \\\"nope\\\"\""
+        );
+    }
+
+    #[test]
+    fn build_precheck_method_rejects_bad_class_name() {
+        let err = build_command_expression(
+            CMD_PRECHECK_METHOD,
+            &[
+                serde_json::json!("not a class"),
+                serde_json::json!("getCount"),
+                serde_json::json!("getCount => 1"),
+            ],
+        )
+        .expect_err("err");
+        assert!(err.contains("class name"));
+    }
+
+    #[test]
+    fn build_precheck_method_rejects_bad_selector() {
+        let err = build_command_expression(
+            CMD_PRECHECK_METHOD,
+            &[
+                serde_json::json!("Counter"),
+                serde_json::json!("bad selector!"),
+                serde_json::json!("getCount => 1"),
+            ],
+        )
+        .expect_err("err");
+        assert!(err.contains("selector"));
+    }
+
+    #[test]
+    fn build_precheck_method_rejects_empty_source() {
+        let err = build_command_expression(
+            CMD_PRECHECK_METHOD,
+            &[
+                serde_json::json!("Counter"),
+                serde_json::json!("getCount"),
+                serde_json::json!(""),
+            ],
+        )
+        .expect_err("err");
+        assert!(err.contains("source"));
+    }
+
+    #[test]
+    fn build_recheck_image_emits_workspace_recheckimage_expression() {
+        let expr = build_command_expression(CMD_RECHECK_IMAGE, &[]).expect("ok");
+        assert_eq!(expr, "Workspace recheckImage");
+    }
+
+    #[test]
+    fn build_recheck_image_rejects_arguments() {
+        let err = build_command_expression(CMD_RECHECK_IMAGE, &[serde_json::json!("x")])
+            .expect_err("err");
+        assert!(err.contains("expected no arguments"));
+    }
+
+    #[test]
     fn build_unknown_command_returns_error() {
         let err = build_command_expression("not.a.real.command", &[]).expect_err("err");
         assert!(err.contains("unknown LSP command"));
@@ -4972,7 +5987,24 @@ mod tests {
         assert!(listed.contains(CMD_FLUSH_FILE));
         assert!(listed.contains(CMD_FLUSH_KIND));
         assert!(listed.contains(CMD_SAVE_CLASS));
-        assert_eq!(listed.len(), 5);
+        assert!(listed.contains(CMD_PRECHECK_METHOD));
+        assert!(listed.contains(CMD_RECHECK_IMAGE));
+        assert_eq!(listed.len(), 7);
+    }
+
+    #[test]
+    fn validate_selector_accepts_unary_keyword_and_binary() {
+        assert!(validate_selector("size").is_ok());
+        assert!(validate_selector("at:put:").is_ok());
+        assert!(validate_selector("+").is_ok());
+        assert!(validate_selector(">=").is_ok());
+    }
+
+    #[test]
+    fn validate_selector_rejects_bad_shapes() {
+        assert!(validate_selector("").is_err());
+        assert!(validate_selector("bad selector!").is_err());
+        assert!(validate_selector("+foo").is_err());
     }
 
     #[test]
@@ -5843,6 +6875,162 @@ mod tests {
         let r = zero_width_range_for_line(7);
         assert_eq!(r.start, Position::new(6, 0));
         assert_eq!(r.end, Position::new(6, 0));
+    }
+
+    // -----------------------------------------------------------------
+    // ADR 0105 Phase 1 (BT-2779): reload-induced diagnostics
+    // -----------------------------------------------------------------
+
+    fn sample_reload_finding() -> crate::runtime::ReloadFinding {
+        crate::runtime::ReloadFinding {
+            owner: "Dashboard".to_string(),
+            changed_class: "Counter".to_string(),
+            selector: "getCount".to_string(),
+            classification: "signature_change".to_string(),
+            severity: "warning".to_string(),
+            category: Some("Dnu".to_string()),
+            message: "String does not understand '+'".to_string(),
+            note: None,
+            sites: vec![crate::runtime::ReloadSite {
+                method: "refresh".to_string(),
+                line: 14,
+            }],
+            start: 0,
+            end: 5,
+        }
+    }
+
+    #[test]
+    fn reload_finding_to_lsp_diagnostics_one_per_site() {
+        let mut finding = sample_reload_finding();
+        finding.sites.push(crate::runtime::ReloadSite {
+            method: "render".to_string(),
+            line: 20,
+        });
+        let diags = reload_finding_to_lsp_diagnostics(&finding);
+        assert_eq!(diags.len(), 2);
+        assert_eq!(diags[0].range.start, Position::new(13, 0));
+        assert_eq!(diags[0].range.end, Position::new(13, u32::MAX));
+        assert_eq!(diags[1].range.start, Position::new(19, 0));
+        assert!(diags[0].message.contains("getCount"));
+        assert!(diags[0].message.contains("refresh"));
+        assert!(diags[1].message.contains("render"));
+    }
+
+    #[test]
+    fn reload_finding_to_lsp_diagnostics_maps_severity() {
+        let mut finding = sample_reload_finding();
+        finding.severity = "hint".to_string();
+        let diags = reload_finding_to_lsp_diagnostics(&finding);
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::HINT));
+
+        finding.severity = "warning".to_string();
+        let diags = reload_finding_to_lsp_diagnostics(&finding);
+        assert_eq!(diags[0].severity, Some(DiagnosticSeverity::WARNING));
+    }
+
+    #[test]
+    fn reload_finding_to_lsp_diagnostics_appends_note() {
+        let mut finding = sample_reload_finding();
+        finding.classification = "removal".to_string();
+        finding.note = Some("removed by the reload of Counter".to_string());
+        let diags = reload_finding_to_lsp_diagnostics(&finding);
+        assert!(
+            diags[0]
+                .message
+                .contains("removed by the reload of Counter")
+        );
+    }
+
+    #[test]
+    fn reload_finding_to_lsp_diagnostics_carries_category_as_code() {
+        let finding = sample_reload_finding();
+        let diags = reload_finding_to_lsp_diagnostics(&finding);
+        assert_eq!(
+            diags[0].code,
+            Some(tower_lsp::lsp_types::NumberOrString::String(
+                "Dnu".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn group_findings_by_origin_splits_same_owner_different_changed_class() {
+        // BT-2801: `seed_reload_diagnostics` must seed independently-clearing
+        // entries — two findings attributed to the same owner but from
+        // *different* reloaded classes are two distinct origins, not one
+        // merged bucket, exactly mirroring `reload_check_listener`'s
+        // per-origin bucketing (`ReloadDiagnosticsByUriAndOrigin`'s doc).
+        let mut from_counter = sample_reload_finding();
+        from_counter.owner = "Dashboard".to_string();
+        from_counter.changed_class = "Counter".to_string();
+        let mut from_widget = sample_reload_finding();
+        from_widget.owner = "Dashboard".to_string();
+        from_widget.changed_class = "Widget".to_string();
+
+        let by_origin = group_findings_by_origin(vec![from_counter.clone(), from_widget.clone()]);
+
+        assert_eq!(by_origin.len(), 2);
+        assert_eq!(
+            by_origin[&("Dashboard".to_string(), "Counter".to_string())],
+            vec![from_counter]
+        );
+        assert_eq!(
+            by_origin[&("Dashboard".to_string(), "Widget".to_string())],
+            vec![from_widget]
+        );
+    }
+
+    #[test]
+    fn group_findings_by_origin_merges_same_owner_and_changed_class() {
+        // Two findings sharing the exact same origin (e.g. two removed
+        // selectors on the same reloaded class) must land in one bucket, so
+        // `seed_reload_diagnostics` seeds one origin entry covering both —
+        // matching `reload_check_listener`'s per-event grouping, which never
+        // splits a single `(owner, changed_class)` origin across entries.
+        let mut first = sample_reload_finding();
+        first.selector = "getCount".to_string();
+        let mut second = sample_reload_finding();
+        second.selector = "reset".to_string();
+
+        let by_origin = group_findings_by_origin(vec![first.clone(), second.clone()]);
+
+        assert_eq!(by_origin.len(), 1);
+        let bucket = &by_origin[&("Dashboard".to_string(), "Counter".to_string())];
+        assert_eq!(bucket.len(), 2);
+        assert_eq!(bucket[0].selector, "getCount");
+        assert_eq!(bucket[1].selector, "reset");
+    }
+
+    #[test]
+    fn group_findings_by_origin_empty_input_returns_empty_map() {
+        assert!(group_findings_by_origin(vec![]).is_empty());
+    }
+
+    #[test]
+    fn resolve_class_uri_resolves_absolute_source_file() {
+        let temp = unique_temp_dir("bt-2779-resolve-class-uri");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        let file_path = temp.join("dashboard.bt");
+        fs::write(&file_path, "").expect("write file");
+
+        let class = NSClass::new(
+            "Dashboard",
+            Some(file_path.to_str().expect("utf8").to_string()),
+            Some(1),
+            vec![],
+        );
+        let uri = resolve_class_uri(&class, &[]).expect("resolved uri");
+        assert_eq!(uri.scheme(), "file");
+        assert!(uri.path().ends_with("dashboard.bt"));
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn resolve_class_uri_returns_none_without_source_file() {
+        let class = NSClass::new("Dashboard", None, None, vec![]);
+        assert!(resolve_class_uri(&class, &[]).is_none());
     }
 
     #[test]

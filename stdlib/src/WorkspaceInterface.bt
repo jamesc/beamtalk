@@ -263,6 +263,29 @@ sealed typed Object subclass: WorkspaceInterface
   flush: filter :: Object -> Object =>
     (Erlang beamtalk_workspace_interface_primitives) flush: filter
 
+  /// Whole-image re-check (ADR 0105 Phase 3): re-check every live class the
+  /// workspace has a recorded source for, not just the dependents of one
+  /// changed selector.
+  ///
+  /// The "complete but unbounded" path ADR 0105 keeps out of the automatic
+  /// post-reload check — that check only re-checks the xref-filtered
+  /// dependents of whichever selector just changed, capped per reload; this
+  /// is an explicit, on-demand sweep of the whole image with no cap. Also
+  /// available as the REPL `:recheck image` alias.
+  ///
+  /// Returns a Dictionary:
+  ///   - `checked` (Integer) — classes a re-check round-trip completed for
+  ///   - `stale` (Integer) — distinct classes with at least one finding
+  ///   - `findings` (List of Dictionary) — each with `owner`, `severity`,
+  ///     `category`, `message`, `start`, `end`
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace recheckImage          // => _ (checked/stale summary)
+  /// ```
+  recheckImage -> Object =>
+    (Erlang beamtalk_workspace_interface_primitives) recheckImage
+
   /// Run all loaded test classes and return a TestResult.
   ///
   /// ## Examples

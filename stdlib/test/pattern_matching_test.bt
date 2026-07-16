@@ -322,6 +322,24 @@ TestCase subclass: PatternMatchingTest
       ])
       equals: "neg one"
 
+  testConstructorPatternNilBinding =>
+    // BT-2884: `nil` in binding position tests the wrapped value is nil,
+    // rather than binding a variable named `nil` that matches unconditionally
+    self
+      assert: ((Result ok: nil) match: [
+        Result ok: nil -> "explicit nil";
+        Result ok: _ -> "other";
+        Result error: _ -> "err"
+      ])
+      equals: "explicit nil"
+    self
+      assert: ((Result ok: 1) match: [
+        Result ok: nil -> "explicit nil";
+        Result ok: _ -> "other";
+        Result error: _ -> "err"
+      ])
+      equals: "other"
+
   testStringKeyDictPattern =>
     // BT-1295: String keys in dict patterns — capture variable
     d := #{"event" => "click", "x" => 5}

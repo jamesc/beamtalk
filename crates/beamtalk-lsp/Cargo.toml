@@ -36,6 +36,7 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "rt", "macros"] }
+tempfile = "3.14"
 
 [lints]
 workspace = true

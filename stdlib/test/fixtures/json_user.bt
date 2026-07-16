@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for BT-2818: Value subclass implementing the `asJson` hook.
+// `Json generate:` dispatches to `asJson` for custom objects, letting the
+// class own its wire representation (here: snake_case keys).
+
+Value subclass: JsonUser
+  field: fullName = ""
+  field: age = 0
+
+  asJson => #{"full_name" => self.fullName, "age" => self.age}

@@ -1254,6 +1254,44 @@ impl CoreErlangGenerator {
                         &dispatch_var,
                     );
                 }
+            } else if !matches!(kind, BodyKind::Letrec) && self.is_tier2_value_call(expr) {
+                // BT-2813: a bare (non-assigned) Tier 2 `value(:...)` statement
+                // (field-stored or local-var-stored block) inside a foldl-based
+                // loop body (do:/collect:/select:/etc). Before this fix, such a
+                // statement fell through to `emit_non_assign_expr`, which treats
+                // it as an ordinary expression and emits a Tier-1-only apply —
+                // crashing with badarity for a genuinely Tier 2 (state-threading)
+                // stored block. `generate_tier2_value_call_doc` always returns a
+                // {Result, NewState} tuple — unpack it and thread the state
+                // forward, mirroring the already-working `Tier2ValueCall`
+                // handling in conditionals.rs and gen_server/methods.rs.
+                //
+                // Excluded for Letrec (whileTrue:/timesRepeat:) loop bodies:
+                // out of scope for BT-2813, whose repro and matrix coverage are
+                // do:/collect:/nested-do: only.
+                has_mutations = true;
+                let tuple_var = self.fresh_temp_var("T2LoopTuple");
+                let expr_doc = self.generate_tier2_value_call_doc(expr)?;
+                let new_state = self.next_state_var();
+                docs.push(docvec![
+                    "let ",
+                    leaf::var(tuple_var.clone()),
+                    " = ",
+                    expr_doc,
+                    " in let ",
+                    leaf::var(new_state),
+                    " = call 'erlang':'element'(2, ",
+                    leaf::var(tuple_var.clone()),
+                    ") in ",
+                ]);
+                if is_last {
+                    self.emit_tier2_value_call_last_expr(
+                        &mut docs,
+                        kind,
+                        pred_var.as_ref(),
+                        &tuple_var,
+                    );
+                }
             } else if Self::is_local_var_assignment(expr) {
                 if let Some(doc) =
                     self.try_generate_block_local_plain_let(expr, is_last, &plan.threaded_locals)?
@@ -1908,6 +1946,79 @@ impl CoreErlangGenerator {
                     leaf::var(ar.clone()),
                     " = call 'erlang':'element'(1, ",
                     leaf::var(dispatch_var.to_string()),
+                    ") in {",
+                    leaf::var(ar),
+                    ", ",
+                    leaf::var(fs),
+                    "}",
+                ]);
+            }
+            BodyKind::FoldlSort => {
+                unreachable!("FoldlSort does not use generate_threaded_loop_body");
+            }
+        }
+    }
+
+    /// BT-2813: emits the `is_last`-position tail for a bare Tier 2 `value(:...)`
+    /// loop-body statement, per `BodyKind`. `tuple_var` holds the full
+    /// `{Result, NewState}` tuple returned by `generate_tier2_value_call_doc`;
+    /// `self.current_state_var()` already reflects `NewState` (bound by the
+    /// caller before this is invoked). Mirrors `emit_self_send_last_expr`.
+    fn emit_tier2_value_call_last_expr(
+        &mut self,
+        docs: &mut Vec<Document<'static>>,
+        kind: &BodyKind,
+        pred_var: Option<&String>,
+        tuple_var: &str,
+    ) {
+        match kind {
+            BodyKind::Letrec => {
+                unreachable!("Letrec excluded by guard at the call site");
+            }
+            BodyKind::FoldlDo => {
+                docs.push(leaf::var(self.current_state_var()));
+            }
+            BodyKind::FoldlCollect => {
+                let fs = self.current_state_var();
+                let ir = self.fresh_temp_var("T2LoopVal");
+                docs.push(docvec![
+                    "let ",
+                    leaf::var(ir.clone()),
+                    " = call 'erlang':'element'(1, ",
+                    leaf::var(tuple_var.to_string()),
+                    ") in {[",
+                    leaf::var(ir),
+                    " | AccList], ",
+                    leaf::var(fs),
+                    "}",
+                ]);
+            }
+            BodyKind::FoldlFilter { .. }
+            | BodyKind::FoldlBoolPredicate { .. }
+            | BodyKind::FoldlDetect { .. }
+            | BodyKind::FoldlCount
+            | BodyKind::FoldlTakeWhile { .. }
+            | BodyKind::FoldlDropWhile { .. }
+            | BodyKind::FoldlPartition { .. }
+            | BodyKind::FoldlGroupBy { .. } => {
+                if let Some(pv) = pred_var {
+                    docs.push(docvec![
+                        "let ",
+                        leaf::var(pv.clone()),
+                        " = call 'erlang':'element'(1, ",
+                        leaf::var(tuple_var.to_string()),
+                        ") in ",
+                    ]);
+                }
+            }
+            BodyKind::FoldlInject => {
+                let fs = self.current_state_var();
+                let ar = self.fresh_temp_var("T2LoopVal");
+                docs.push(docvec![
+                    "let ",
+                    leaf::var(ar.clone()),
+                    " = call 'erlang':'element'(1, ",
+                    leaf::var(tuple_var.to_string()),
                     ") in {",
                     leaf::var(ar),
                     ", ",
@@ -2985,7 +3096,7 @@ impl CoreErlangGenerator {
                 if self.is_tier2_value_call(value) {
                     let t2_tuple = self.fresh_temp_var("T2");
                     let t2_state = self.fresh_temp_var("T2St");
-                    let value_code = self.expression_doc(value)?;
+                    let value_code = self.generate_tier2_value_call_doc(value)?;
 
                     let _ = self.next_state_var();
                     let new_state = if self.in_loop_body {

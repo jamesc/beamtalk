@@ -1,9 +1,9 @@
 # ADR 0102: Set-Theoretic Type Operators (Intersection and Negation) for Narrowing and Atom Exhaustiveness
 
 ## Status
-Implemented (Phases 1, 2, 4, 5, 2026-07-06) — Phase 1b (BT-2744, nominal-class
-difference + the `class`/`isKindOf:` false branch) deliberately deferred as
-needs-spec; not part of this implementation.
+Implemented (Phases 1, 2, 4, 5, 2026-07-06; Phase 1b, BT-2744, nominal-class
+difference + the `class`/`isKindOf:` false branch, 2026-07-10 — design
+specified and implemented, see §5).
 
 ## Implementation Tracking
 
@@ -15,15 +15,16 @@ needs-spec; not part of this implementation.
 | 1 | [BT-2739](https://linear.app/beamtalk/issue/BT-2739) | intersect/difference operators + `Negation` variant | M | – |
 | 2 | [BT-2740](https://linear.app/beamtalk/issue/BT-2740) | Unify `singleton_eq`/`is_nil` narrowing; delete `union_without` | M | BT-2739 |
 | 2 | [BT-2741](https://linear.app/beamtalk/issue/BT-2741) | `class_eq`/`is_kind_of` true branch + `Never`-receiver policy | S | BT-2739 |
-| 1b | [BT-2744](https://linear.app/beamtalk/issue/BT-2744) | Nominal-class difference + class false branch (needs-spec) | M | BT-2741 |
+| 1b | [BT-2744](https://linear.app/beamtalk/issue/BT-2744) | Nominal-class difference + class false branch | M | BT-2741 |
 | 4 | [BT-2742](https://linear.app/beamtalk/issue/BT-2742) | `\` difference annotation syntax | M | BT-2739 |
 | 4 | [BT-2743](https://linear.app/beamtalk/issue/BT-2743) | `&` intersection syntax + stored `Intersection` variant | M | BT-2739 |
 | 5 | [BT-2745](https://linear.app/beamtalk/issue/BT-2745) | Advisory singleton-union `match:` exhaustiveness | M | BT-2740 |
 | 6 | [BT-2746](https://linear.app/beamtalk/issue/BT-2746) | E2E + docs + status flip | S | BT-2742, BT-2743, BT-2745 |
 
-**Status:** Implemented — Phases 1, 2, 4, 5, and 6 (this issue) landed.
-Phase 1b (BT-2744) remains deferred pending its own design work on nominal-class
-difference semantics; it is not required for `\`/`&` surface syntax or the
+**Status:** Implemented — Phases 1, 2, 4, 5, 6, and 1b (BT-2744) have all
+landed. Phase 1b closes the `class_eq`/`is_kind_of` false branch via
+nominal-class difference (§5); it was sequenced separately because it is new
+semantics, not a port, and was not required for `\`/`&` surface syntax or the
 advisory `match:` exhaustiveness check, which only need atom-level
 (singleton) difference.
 
@@ -477,6 +478,101 @@ actually returns `#west`). Therefore:
   > unchanged by that follow-up. See
   > [ADR 0106](0106-opt-in-match-exhaustiveness-assertion.md).
 
+### 5. Phase 1b design note — nominal-class difference (2026-07-10, BT-2744)
+
+Answers the four open questions this ADR deferred in §1/§2 (Consequences:
+"nominal-class difference is left undefined") and in BT-2744's `needs-spec`.
+Design only — implementation is tracked by BT-2744.
+
+**Difference over the class hierarchy.** Layered onto the existing nominal
+base case (§1), using nominal subtyping `<:` (the `superclass_chain` walk):
+
+- `difference(A, B)` where `B` is a strict nominal subclass of `A` (`B <: A`,
+  `B != A`) ⇒ `Negation{ base: A, excluded: B }` — the class-hierarchy
+  analogue of `difference(Symbol, #foo) = Negation{Symbol, #foo}`.
+- `difference(A, B)` where `A <: B` (including `A == B`) ⇒ `Never` — every
+  instance of `A` is also an instance of `B`, nothing survives.
+- `difference(A, B)` where `A` and `B` are hierarchy-unrelated (the existing
+  disjoint case) ⇒ `A` unchanged — nothing to remove.
+
+This closes the `is_kind_of` false branch (§2 group 2): `false_type =
+difference(T, Bar)`. **`class_eq`'s false branch is deliberately excluded**
+(refinement found in implementation, see Amendment below) — `x class =:= C`
+tests *exact* runtime-class identity, and its negation ("not exactly `C`")
+does not exclude `C`'s subclasses the way `Negation`'s subtree-exclusion
+semantics (Q1) require; only `isKindOf:`'s negation ("not `C` and not any
+subclass of `C`") matches.
+
+**Q1 — Membership.** `Negation{ base: A, excluded: B }` admits exactly the
+classes `C` such that `C <: A` and `C` is not `<: B`. Membership is decided
+per-candidate-class via the hierarchy walk, never by enumerating `A`'s
+subclasses — open-world-safe by construction: a class introduced later by
+hot reload is admitted correctly the first time it's checked, the same
+posture as today's `isKindOf:` check.
+
+**Q2 — Display.** `<base> \ <excluded>`, e.g. `Object \ Number` — identical
+convention to the singleton case (`Symbol \ #foo`); no new rendering logic,
+`display_for_diagnostic`/hover already render `Negation{base, excluded}`
+generically once `excluded` can hold a class name.
+
+**Q3 — Method lookup / conformance.** Resolves through `base`. Every class
+admitted by `Negation{base, excluded}` is, by construction, a subclass of
+`base`, so the receiver's statically-known protocol is `base`'s — exclusion
+narrows *which* concrete classes can appear, never adds capability beyond
+what `base` declares. A `Negation{base, excluded}`-typed receiver is checked
+against `base`'s method surface, identically to a bare `base`-typed
+receiver. Mirrors the singleton-through-Symbol convention (a singleton
+checks against `Symbol`'s surface; a nominal negation checks against
+`base`'s).
+
+**Q4 — Interaction with ADR 0100.** Because lookup and conformance resolve
+through `base` (Q3), the open-world receiver-knowledge classification
+(`Dynamic`/`Open`/`ClosedComplete`, ADR 0100 Rule 1) for a
+`Negation{base, excluded}` receiver is inherited directly from classifying
+`base` — no separate classification rule needed. A DNU hint/warning derived
+from a nominal complement is exactly as safe as one derived from `base`
+directly, and is silenced under the same conditions (`base` is `Dynamic`,
+has a DNU override, carries unloaded cross-package extensions, etc.).
+
+**Scope note:** `excluded` for the nominal case is a single class (matching
+`class_eq`/`is_kind_of`'s one-class comparisons) — generalising `excluded`
+to a union of classes is not required to close the group 2 false branch and
+is left for a future issue if a producer needs it.
+
+> **Amendment (2026-07-10, BT-2744):** implemented. `difference` now takes
+> an `Option<&ClassHierarchy>` (mirroring `intersect`) and applies the three
+> rules above when a hierarchy is supplied and neither operand is a
+> singleton; `refine_class_narrowing` (`inference.rs`) now sets
+> `false_type = difference(current, C, Some(hierarchy))` for `isKindOf:`
+> only, closing the group 2 false branch for that idiom. Method lookup /
+> conformance (Q3/Q4) is implemented by resolving a `Negation`-typed receiver
+> through its `base` at the top of `infer_message_send_with_receiver_ty` (and
+> the `Cascade` dispatch path) before the rest of the existing `Known`-receiver
+> dispatch runs — a deliberate simplification that also widens a
+> `Self`-returning method's result back to `base` rather than re-wrapping the
+> exclusion (the ADR specifies lookup/conformance parity with `base`, not
+> flow-preservation of the exclusion through `Self`).
+>
+> **Correction (2026-07-10, BT-2744, found in adversarial review):** the
+> original design note above did not distinguish `class_eq` from
+> `is_kind_of` and specified `false_type = difference(T, Bar)` for *both*.
+> That is unsound for `class_eq`: `x class =:= C` false means "`x`'s class is
+> not exactly `C`", which does **not** rule out `x` being an instance of a
+> *subclass* of `C` — but `Negation{base, excluded}`'s membership rule (Q1)
+> always excludes `excluded`'s entire subtree. Concretely, `Character` is a
+> sealed `Integer` subclass; for `x :: Number` holding a `Character`, `x
+> class =:= Integer` is false (its class is `Character`) while `x isKindOf:
+> Integer` is true. Narrowing `class =:=`'s false branch to `Number \
+> Integer` would have wrongly excluded that live possibility and produced a
+> false "comparison can never be true" hint on a subsequent, satisfiable
+> `isKindOf: Integer` test. **Fixed:** `class_eq`'s false branch is left
+> unnarrowed (`None`), exactly as it was before this issue — only its
+> (already-shipped, BT-2741) true branch is affected by set-theoretic
+> narrowing. `NarrowingInfo` gained a `ClassTestInfo` carrying a
+> `ClassTestKind::{Exact, KindOf}` tag so `refine_class_narrowing` can
+> distinguish the two idioms, which previously shared the untyped
+> `class_test: Option<EcoString>` field with no way to tell them apart.
+
 ### REPL session
 
 ```
@@ -509,7 +605,7 @@ d =:= #west
 |---|---|---|
 | **Elixir (1.17+)** — gradual set-theoretic types (Castagna, Duboc, Valim) | Types *are* sets of values; closed under `or` / `and` / `not`. Atoms are singleton types (`:ok` is both value and type); `boolean() = true or false`; `nil`, `true`, `false` are atoms. `atom() and not (:foo or :bar)` expresses co-finite atom sets. `dynamic()` is a *range* of types kept "at the root", enabling gradual typing that still tracks structure. | **Adopt:** the three-operator algebra and singleton-as-set model — it is exactly what our `#foo`/`Symbol`/`union_without` code approximates. **Adapt:** we reuse ADR 0068's `&` for intersection and add `\` for difference as surface syntax (not Elixir's `and`/`not` keywords), with internal `intersect`/`difference` operators, without adopting the full semantic-subtyping decision procedure. **Leave (for now):** replacing `Dynamic(reason)` with a structural `dynamic()`; BDD emptiness checking. |
 | **CDuce / semantic subtyping** (the theory underneath Elixir) | Subtyping = set inclusion decided via emptiness of a Boolean combination of type constructors, implemented with BDDs. | The north-star. Rejected as the *implementation* today (XL, nominal-core mismatch); adopted as the *mental model* for our operators so a future upgrade is a deepening, not a rewrite. |
-| **TypeScript** | Discriminated unions + control-flow narrowing; literal (singleton) types; `Exclude<T, U>` at the *type-operator* level but **no first-class negation type** in values. | We go slightly further than TS values by making negation a real `InferredType`, which is what makes *atom* false-branch narrowing and exhaustiveness fall out (nominal-class false-branch difference is deferred — §2). |
+| **TypeScript** | Discriminated unions + control-flow narrowing; literal (singleton) types; `Exclude<T, U>` at the *type-operator* level but **no first-class negation type** in values. | We go slightly further than TS values by making negation a real `InferredType`, which is what makes both *atom* and *nominal-class* false-branch narrowing and exhaustiveness fall out (nominal-class difference: §5, BT-2744). |
 | **Gleam** (BEAM, Rust-implemented, our closest typed-BEAM peer) | Sound nominal HM; **no** union/intersection/negation, exhaustiveness via nominal custom types. | Confirms exhaustiveness is table-stakes on BEAM, but Gleam gets it from closed nominal sum types; we get it from the atom-union algebra, which fits Beamtalk's open, atom-rich style better. |
 | **Dialyzer** (success typing) | Post-compilation, optimistic; has union/negation internally but no IDE-time narrowing. | Reaffirms why we compute this at edit time, not after codegen (`type-system-design.md`). |
 | **Smalltalk (Pharo/Squeak)** | No static types; `#foo` is just a Symbol, no singleton *type*. | No prior art to preserve — this is purely additive tooling that does not touch message-passing semantics. |
@@ -646,9 +742,10 @@ needs full arrow/intersection-function typing. Documented as the destination in
   (the AST enum is already ad-hoc — `FalseOr`, `ClassOf`, `SelfType`); every
   exhaustive match over it and `type_resolver.rs` must be updated. This cost was
   easy to miss and is real.
-- **Nominal-class difference is left undefined** (`difference(Object, Number)`).
-  Closing the `class_eq`/`is_kind_of` *false* branch (§2 group 2) needs its
-  membership/display/hover semantics designed — deferred, not delivered here.
+- **Nominal-class difference** (`difference(Object, Number)`) was left
+  undefined by Phase 1 — its membership/display/hover semantics needed their
+  own design (§5), delivered by BT-2744, which closes the `class_eq`/
+  `is_kind_of` *false* branch (§2 group 2).
 - Normalisation (dedup, absorption, `Dynamic` asymmetry, `&`/`\`/`|`
   interaction) is fiddly and needs property tests. Termination must be argued
   (finite atom/class basis; no recursive blow-up).
@@ -687,10 +784,11 @@ needs full arrow/intersection-function typing. Documented as the destination in
    `Never`-receiver send policy** (silent-as-unreachable vs. hint). Leave their
    false branch, `is_result`, and `responds_to` (group 3) untouched.
 
-**Phase 1b — nominal-class difference (prerequisite for the class false-branch) — ~M (new semantics, design-heavy):**
+**Phase 1b — nominal-class difference (prerequisite for the class false-branch) — ~M (new semantics, design-heavy) — done (BT-2744, 2026-07-10):**
 5. Define `difference` over the class hierarchy (membership, display, hover for
    `Negation` of a nominal base). Only then close the `class_eq`/`is_kind_of`
    *false* branch. Sequenced separately because it is new semantics, not a port.
+   Implemented per §5's design note.
 
 **Phase 2 — surface syntax + advisory exhaustiveness — ~M (parser + validator):**
 6. Implement ADR 0068's `&` (spec-only today) generalised to any-type

@@ -46,6 +46,12 @@ module loading to beamtalk_repl_loader (BT-863).
 %% dependency on beamtalk_workspace.
 -export([compile_method/4, compile_method/6, compile_method/7]).
 
+%% ADR 0105 Phase 3 (BT-2782) — stateless pre-save advisory precheck backing
+%% `Behaviour precheckCompile:source:'. Called via erlang:apply from
+%% beamtalk_behaviour_intrinsics for the same compile-time-dependency reason
+%% as compile_method/4,6,7.
+-export([precheck_method/4]).
+
 %% ADR 0082 revert completeness (BT-2663/BT-2665) — remove a live method (the
 %% *add* revert case) and remove a live class (new-class revert, BT-2664).
 -export([remove_method/3, remove_class/1]).
@@ -69,6 +75,9 @@ module loading to beamtalk_repl_loader (BT-863).
     handle_class_definition/7,
     handle_method_definition/4,
     handle_protocol_definition/3,
+    handle_type_alias_definition/3,
+    maybe_help_for_alias/2,
+    format_alias_help/2,
     wrap_load_err/3,
     normalize_method_source/2,
     resolve_entry/2,
@@ -101,6 +110,19 @@ do_eval(Expression, State) ->
 -doc "Evaluate with optional streaming subscriber (BT-696).".
 -spec do_eval(string(), beamtalk_repl_state:state(), pid() | undefined) -> eval_result().
 do_eval(Expression, State, Subscriber) ->
+    %% ADR 0108 Phase 8 (BT-2902): `:help <Alias>` short-circuits before
+    %% compilation — see maybe_help_for_alias/2 for why the ordinary
+    %% `Beamtalk help: X` eval path cannot see session-local aliases.
+    case maybe_help_for_alias(Expression, State) of
+        {ok, HelpText} ->
+            {ok, HelpText, <<>>, [], State};
+        not_found ->
+            do_eval_expression(Expression, State, Subscriber)
+    end.
+
+-spec do_eval_expression(string(), beamtalk_repl_state:state(), pid() | undefined) ->
+    eval_result().
+do_eval_expression(Expression, State, Subscriber) ->
     Counter = beamtalk_repl_state:get_eval_counter(State),
     % elp:fixme W0023 intentional atom creation
     ModuleName = list_to_atom("beamtalk_repl_eval_" ++ integer_to_list(Counter)),
@@ -115,7 +137,15 @@ do_eval(Expression, State, Subscriber) ->
 
     RegistryPid = beamtalk_repl_state:get_actor_registry(State),
 
-    case beamtalk_repl_compiler:compile_expression(Expression, ModuleName, Bindings) of
+    %% ADR 0108 Phase 8 (BT-2902): forward this session's earlier-turn
+    %% alias declarations so `::` annotations in Expression resolve them.
+    KnownTypeAliasSources = beamtalk_repl_state:known_type_alias_sources(State),
+
+    case
+        beamtalk_repl_compiler:compile_expression(
+            Expression, ModuleName, Bindings, KnownTypeAliasSources
+        )
+    of
         %% BT-571: Inline class definition
         {ok, class_definition, ClassInfo, Warnings} ->
             handle_class_definition(
@@ -127,6 +157,9 @@ do_eval(Expression, State, Subscriber) ->
         %% BT-1612: Protocol definition
         {ok, protocol_definition, ProtocolInfo, Warnings} ->
             handle_protocol_definition(ProtocolInfo, Warnings, NewState);
+        %% ADR 0108 Phase 8 (BT-2902): type alias definition
+        {ok, type_alias_definition, AliasInfo, Warnings} ->
+            handle_type_alias_definition(AliasInfo, Warnings, NewState);
         {ok, Binary, _ResultExpr, Warnings} ->
             case code:load_binary(ModuleName, "", Binary) of
                 {module, ModuleName} ->
@@ -145,6 +178,77 @@ do_eval(Expression, State, Subscriber) ->
         {error, Reason} ->
             wrap_compile_err(Reason, NewState)
     end.
+
+-doc """
+Intercept `:help <Alias>` before compilation (ADR 0108 Phase 8, BT-2902).
+
+`:help <Name>` is client-side sugar (`crates/beamtalk-cli/src/commands/repl/mod.rs`'s
+`handle_help_topic`) for evaluating `Beamtalk help: <Name>`, ordinarily routed
+through `beamtalk_interface:handle_help/1` — which only resolves *global*
+`beamtalk_class_registry` entries. A REPL-session-declared type alias has no
+live BEAM class or process to register there (aliases erase entirely at
+resolution time — ADR 0108 Semantics), so that path can never see one.
+Intercepting here, where `State` (and therefore the session's `alias_table`)
+is directly available, answers a bare `Beamtalk help: <Name>` naming a known
+alias without reaching the compiler/eval pipeline at all. Anything else — a
+class/protocol name, or the `selector:`/`class` forms `:help` also builds —
+does not match the exact-bare-identifier pattern and falls through to the
+ordinary eval path unchanged.
+""".
+-spec maybe_help_for_alias(string(), beamtalk_repl_state:state()) -> {ok, binary()} | not_found.
+maybe_help_for_alias(Expression, State) ->
+    case
+        re:run(Expression, "^Beamtalk help: ([A-Za-z][A-Za-z0-9_]*)$", [
+            {capture, all_but_first, binary}
+        ])
+    of
+        {match, [Name]} ->
+            case maps:find(Name, beamtalk_repl_state:get_alias_table(State)) of
+                {ok, Entry} -> {ok, format_alias_help(Name, Entry)};
+                error -> not_found
+            end;
+        _ ->
+            not_found
+    end.
+
+-doc """
+Render `:help <Alias>` output (ADR 0108 Phase 8, BT-2902).
+
+`type Name = <expansion>`, then — only when a doc comment is present — a
+blank line and the indented doc text, then a blank line and
+`Declared in: REPL`. A session-declared alias has no source file, so `REPL`
+is this issue's chosen convention (flagged in the PR description for
+maintainer sign-off per CLAUDE.md's REPL-output rule, alongside the
+`type` declaration's own echo-value decision).
+""".
+-spec format_alias_help(binary(), beamtalk_repl_state:alias_entry()) -> binary().
+format_alias_help(Name, #{expansion := Expansion, doc_comment := DocComment}) ->
+    Header = <<"type ", Name/binary, " = ", Expansion/binary>>,
+    CommentBlock =
+        case DocComment of
+            undefined -> <<>>;
+            Doc -> <<"\n\n  ", Doc/binary>>
+        end,
+    <<Header/binary, CommentBlock/binary, "\n\nDeclared in: REPL">>.
+
+-doc "Handle a `type Name = ...` declaration (ADR 0108 Phase 8, BT-2902).".
+-spec handle_type_alias_definition(map(), [binary()], beamtalk_repl_state:state()) ->
+    eval_result().
+handle_type_alias_definition(AliasInfo, Warnings, State) ->
+    #{alias_name := Name, expansion := Expansion, doc_comment := DocComment} = AliasInfo,
+    Entry = #{expansion => Expansion, doc_comment => DocComment},
+    NewState = beamtalk_repl_state:put_alias(Name, Entry, State),
+    %% REPL display-value decision (flagged in the PR description for
+    %% maintainer sign-off per CLAUDE.md's REPL-output rule): echo the
+    %% declared name as a plain binary, mirroring the class-declaration
+    %% convention (`Actor subclass: Counter` displays `Counter`) rather
+    %% than the protocol-declaration convention (`Protocol Foo defined`) —
+    %% a `type` declaration introduces a *name*, closer in spirit to a
+    %% class name than to a side-effecting "defined" announcement. Unlike
+    %% a class name, this never needs to become an atom (no BEAM module to
+    %% load under it), so the binary is used directly — `term_to_json`
+    %% (`beamtalk_repl_json.erl`) renders atoms and binaries identically.
+    {ok, Name, <<>>, Warnings, NewState}.
 
 -doc """
 Dispatch a class entry method (`ClassName selector [argv]`) in this connected
@@ -544,6 +648,8 @@ eval_with_self(Self, Source) ->
             eval_not_an_expression_error();
         {ok, protocol_definition, _Info, _Warnings} ->
             eval_not_an_expression_error();
+        {ok, type_alias_definition, _Info, _Warnings} ->
+            eval_not_an_expression_error();
         {ok, Binary, _ResultExpr, _Warnings} ->
             run_self_eval_module(ModuleName, Binary, Bindings);
         {error, Reason} ->
@@ -714,6 +820,36 @@ compile_method(ClassNameBin, Selector, Source, Intent, Author, AuthorKind, Side)
             {error, stdlib_method_read_only_error(ClassNameBin, SelectorBin)};
         none ->
             do_compile_method(ClassNameBin, SelectorBin, Source, Intent, Author, AuthorKind, Side)
+    end.
+
+-doc """
+Pre-save advisory precheck (ADR 0105 Phase 3, BT-2782): compile a pending
+method edit and report would-be-stale dependents without installing.
+
+Backs `Behaviour precheckCompile:source:'. `Selector`/`Source` mirror
+`compile_method/6`'s arguments (`Source` is the method body String, with the
+same bare-body-vs-full-definition normalization); there is no `Intent` /
+`Author` / `AuthorKind` because nothing is recorded to the ChangeLog — a
+precheck is read-only. `Side` selects instance vs. class-side, matching
+`compile_method/7`.
+
+Refuses stdlib classes (their methods are read-only in the workspace) the
+same way `compile_method/6,7` does. Returns `{ok, beamtalk_recheck:result()}`
+or `{error, Reason}`.
+""".
+-spec precheck_method(binary(), atom() | binary(), binary(), instance | class) ->
+    {ok, beamtalk_recheck:result()} | {error, term()}.
+precheck_method(ClassNameBin, Selector, Source, Side) ->
+    SelectorBin = beamtalk_repl_protocol:to_binary(Selector),
+    case stdlib_class_module(ClassNameBin) of
+        {ok, _Module} ->
+            {error, stdlib_method_read_only_error(ClassNameBin, SelectorBin)};
+        none ->
+            MethodSource = normalize_method_source(SelectorBin, Source),
+            IsClassMethod = (Side =:= class),
+            beamtalk_repl_loader:precheck_method(
+                ClassNameBin, SelectorBin, MethodSource, IsClassMethod
+            )
     end.
 
 -doc """

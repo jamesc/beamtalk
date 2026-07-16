@@ -424,13 +424,15 @@ impl CoreErlangGenerator {
         exports: Document<'static>,
     ) -> Document<'static> {
         // BT-586: Generate spec attributes from type annotations
-        let spec_attrs = spec_codegen::generate_class_specs(class, true);
+        // BT-2900: `None` — see actor_codegen.rs's identical comment; alias
+        // registry plumbing into codegen call sites is a follow-up.
+        let spec_attrs = spec_codegen::generate_class_specs(class, true, None);
         let spec_suffix: Document<'static> = spec_codegen::format_spec_attributes(&spec_attrs)
             .map_or(Document::Nil, |s| docvec![",\n     ", s]);
 
         // BT-1156: Generate -type t() alias for Value classes with state: declarations.
         let class_name_for_type = self.class_name();
-        let type_alias_opt = spec_codegen::generate_type_alias(class, &class_name_for_type);
+        let type_alias_opt = spec_codegen::generate_type_alias(class, &class_name_for_type, None);
         let export_type_suffix: Document<'static> = if type_alias_opt.is_some() {
             Document::Str(",\n     'export_type' = [{'t', 0}]")
         } else {
@@ -3951,6 +3953,7 @@ mod tests {
             classes: vec![class],
             method_definitions: Vec::new(),
             protocols: Vec::new(),
+            type_aliases: Vec::new(),
             expressions: Vec::new(),
             span: s(),
             file_leading_comments: vec![],

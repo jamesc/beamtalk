@@ -1065,6 +1065,7 @@ fn test_class_registration_generation() {
     };
 
     let module = Module {
+        type_aliases: Vec::new(),
         expressions: vec![],
         classes: vec![class],
         method_definitions: Vec::new(),
@@ -1313,6 +1314,7 @@ fn test_multiple_classes_registration() {
     }
 
     let module = Module {
+        type_aliases: Vec::new(),
         expressions: vec![],
         classes: vec![
             make_actor_class("Counter", 7, "value", 5, 20),
@@ -1452,6 +1454,7 @@ fn test_multi_class_early_error_short_circuits() {
     // ValidB is fine; ShadowA would be the one shadowing stdlib.
     // The fix must ensure that if _Reg0 is {error, ...}, we never reach _Reg1.
     let module = Module {
+        type_aliases: Vec::new(),
         expressions: vec![],
         classes: vec![make_class("ShadowA", 7, 20), make_class("ValidB", 6, 30)],
         method_definitions: Vec::new(),
@@ -1531,6 +1534,7 @@ fn test_three_class_short_circuit_nesting() {
     }
 
     let module = Module {
+        type_aliases: Vec::new(),
         expressions: vec![],
         classes: vec![make_class("A", 1), make_class("B", 1), make_class("C", 1)],
         method_definitions: Vec::new(),
@@ -1683,6 +1687,7 @@ fn test_is_actor_class_direct_actor_subclass() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: Span::new(0, 0),
         file_leading_comments: vec![],
@@ -1722,6 +1727,7 @@ fn test_is_actor_class_object_subclass_is_value_type() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: Span::new(0, 0),
         file_leading_comments: vec![],
@@ -1786,6 +1792,7 @@ fn test_is_actor_class_multi_level_inheritance() {
         classes: vec![counter, logging_counter.clone()],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: Span::new(0, 0),
         file_leading_comments: vec![],
@@ -1800,6 +1807,7 @@ fn test_is_actor_class_multi_level_inheritance() {
         classes: vec![logging_counter],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: Span::new(0, 0),
         file_leading_comments: vec![],
@@ -1848,6 +1856,7 @@ fn test_is_actor_class_unknown_superclass_defaults_to_actor() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: Span::new(0, 0),
         file_leading_comments: vec![],
@@ -1888,6 +1897,7 @@ fn test_is_actor_class_collection_subclass_is_value_type() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: Span::new(0, 0),
         file_leading_comments: vec![],
@@ -1932,6 +1942,7 @@ fn test_is_actor_class_integer_subclass_is_value_type() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: Span::new(0, 0),
         file_leading_comments: vec![],
@@ -1975,6 +1986,7 @@ fn test_is_actor_class_root_class_is_value_type() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: Span::new(0, 0),
         file_leading_comments: vec![],
@@ -2012,6 +2024,7 @@ fn test_generate_with_bindings_compiles_value_type() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: Vec::new(),
         span: Span::new(0, 0),
         file_leading_comments: vec![],
@@ -2245,6 +2258,72 @@ fn test_value_subclass_has_method_includes_auto_methods() {
     );
 }
 
+/// BT-2734: Extracts the body between a `<key> => ~{` marker and its closing
+/// `}~`. Map entry values are Core Erlang binary literals (`#{...}#`), which
+/// never contain the `}~` map terminator, so the first `}~` after the marker is
+/// the map close.
+fn map_body<'a>(code: &'a str, key: &str) -> &'a str {
+    let start = code
+        .find(key)
+        .unwrap_or_else(|| panic!("no `{key}` in:\n{code}"));
+    let after = &code[start + key.len()..];
+    let end = after
+        .find("}~")
+        .unwrap_or_else(|| panic!("no map close after `{key}`"));
+    &after[..end]
+}
+
+#[test]
+fn test_value_subclass_synthetic_accessor_metadata_injected() {
+    // BT-2734: auto-generated getters / setters / keyword constructor gain
+    // `__signature__` + `__doc__` entries in the builder-state selector maps, so
+    // every reflective surface can resolve their docs uniformly.
+    let module = make_value_subclass_point();
+    let code = generate_module(&module, CodegenOptions::new("bt@point")).unwrap();
+
+    let sigs = map_body(&code, "'methodSignatures' => ~{");
+    assert!(
+        sigs.contains("'x' =>") && sigs.contains("'y' =>"),
+        "instance signatures should carry synthetic getters. Got:\n{sigs}"
+    );
+    assert!(
+        sigs.contains("'withX:' =>") && sigs.contains("'withY:' =>"),
+        "instance signatures should carry synthetic setters. Got:\n{sigs}"
+    );
+
+    let docs = map_body(&code, "'methodDocs' => ~{");
+    assert!(
+        docs.contains("'x' =>") && docs.contains("'withX:' =>"),
+        "instance docs should carry synthetic accessor docs. Got:\n{docs}"
+    );
+
+    let class_sigs = map_body(&code, "'classMethodSignatures' => ~{");
+    assert!(
+        class_sigs.contains("'x:y:' =>"),
+        "class-side signatures should carry the keyword constructor. Got:\n{class_sigs}"
+    );
+    let class_docs = map_body(&code, "'classMethodDocs' => ~{");
+    assert!(
+        class_docs.contains("'x:y:' =>"),
+        "class-side docs should carry the keyword constructor doc. Got:\n{class_docs}"
+    );
+}
+
+#[test]
+fn test_value_subclass_synthetic_accessor_metadata_gated_to_value_kind() {
+    // BT-2734: only `Value subclass:` classes get synthetic accessor metadata.
+    // An `Object subclass:` with the same slot must not synthesize `withX:`.
+    let mut module = make_value_subclass_point();
+    module.classes[0].class_kind = ClassKind::Object;
+    module.classes[0].superclass = Some(Identifier::new("Object", Span::new(0, 0)));
+    let code = generate_module(&module, CodegenOptions::new("bt@widget")).unwrap();
+    let sigs = map_body(&code, "'methodSignatures' => ~{");
+    assert!(
+        !sigs.contains("'withX:' =>"),
+        "object subclass should not synthesize accessor signatures. Got:\n{sigs}"
+    );
+}
+
 #[test]
 fn test_object_subclass_no_auto_getters() {
     // BT-923: `Object subclass:` (ClassKind::Object) must NOT generate auto-getters.
@@ -2283,6 +2362,7 @@ fn test_object_subclass_no_auto_getters() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: Vec::new(),
         span: Span::new(0, 0),
         file_leading_comments: vec![],
@@ -2357,6 +2437,7 @@ fn test_value_subclass_user_defined_overrides_auto() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: Vec::new(),
         span: Span::new(0, 0),
         file_leading_comments: vec![],
@@ -2401,6 +2482,7 @@ fn test_value_subclass_no_slots_no_keyword_constructor() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: Vec::new(),
         span: Span::new(0, 0),
         file_leading_comments: vec![],
@@ -2504,6 +2586,7 @@ fn test_value_subclass_class_method_slot_send_routes_to_constructor() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: Vec::new(),
         span: Span::new(0, 0),
         file_leading_comments: vec![],
@@ -2771,6 +2854,7 @@ fn generate_module_with_pre_class_hierarchy_does_not_panic() {
     let (module, _) = crate::source_analysis::parse(tokens);
 
     let pre_class = ClassInfo {
+        surface_incomplete: false,
         name: ecow::EcoString::from("Helper"),
         superclass: Some(ecow::EcoString::from("Object")),
         is_sealed: false,
@@ -2815,6 +2899,7 @@ fn price_band_class_info_with_lo_type(
         state_types.insert(ecow::EcoString::from("lo"), ecow::EcoString::from(ty));
     }
     ClassInfo {
+        surface_incomplete: false,
         name: ecow::EcoString::from("PriceBand"),
         superclass: Some(ecow::EcoString::from("Object")),
         is_sealed: false,
@@ -2978,6 +3063,7 @@ fn test_value_subclass_typed_fields_emit_type_alias() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: Vec::new(),
         span: Span::new(0, 0),
         file_leading_comments: vec![],
@@ -3307,6 +3393,7 @@ fn test_bt1213_block_value_with_captured_mutation_actor() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: Vec::new(),
         span: Span::new(0, 0),
         file_leading_comments: vec![],
@@ -3400,6 +3487,7 @@ fn make_native_actor_module() -> Module {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: Vec::new(),
         span: Span::new(0, 0),
         file_leading_comments: vec![],
@@ -3739,6 +3827,7 @@ fn make_native_actor_with_class_methods() -> Module {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: Vec::new(),
         span: Span::new(0, 0),
         file_leading_comments: vec![],
@@ -3971,6 +4060,7 @@ fn protocol_only_module_generates_register_class() {
             doc_comment: None,
             span: Span::new(0, 0),
         }],
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: Span::new(0, 0),
         file_leading_comments: vec![],
@@ -4582,6 +4672,7 @@ fn make_actor_typed_no_default(field_name: &str, ty: TypeAnnotation) -> Module {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: Vec::new(),
         span: s,
         file_leading_comments: vec![],
@@ -4978,5 +5069,64 @@ fn test_bt_2720_native_object_class_delegate_omits_self() {
     assert!(
         !code.contains("'native_call'('beamtalk_stream', 'from', [ClassSelf"),
         "class-side native_call must omit ClassSelf from the arg list. Got:\n{code}"
+    );
+}
+
+/// BT-nightly: When an Actor subclass has BOTH an intermediate parent (`has_parent_init=true`)
+/// AND its own `initialize` method (`has_initialize=true`), `init/1` must call the parent's
+/// init, merge state, and then use the `__skip_initialize__` guard to defer initialize
+/// dispatch to `handle_continue` — not call it inline.
+#[test]
+fn test_actor_with_parent_init_and_initialize_defers_to_handle_continue() {
+    let src = concat!(
+        "Counter subclass: LoggingInitCounter\n",
+        "  state: logCount = 0\n\n",
+        "  initialize =>\n",
+        "    self.logCount := 0\n\n",
+        "  increment =>\n",
+        "    self.logCount := self.logCount + 1\n",
+        "    super increment\n\n",
+        "  getLogCount => self.logCount\n",
+    );
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let code = generate_module(&module, CodegenOptions::new("logging_init_counter"))
+        .expect("codegen should succeed");
+
+    // init/1 must delegate to the parent module's init/1.
+    assert!(
+        code.contains("'bt@counter':'init'("),
+        "init/1 must call parent bt@counter:init/1. Got:\n{code}"
+    );
+
+    // Parent state must be merged with child fields.
+    assert!(
+        code.contains("ParentState"),
+        "init/1 must bind parent state as ParentState. Got:\n{code}"
+    );
+    assert!(
+        code.contains("FinalState"),
+        "init/1 must produce FinalState. Got:\n{code}"
+    );
+
+    // Because initialize is defined, init/1 must use the __skip_initialize__ guard
+    // and defer to handle_continue — NOT call initialize inline.
+    assert!(
+        code.contains("'__skip_initialize__'"),
+        "init/1 must guard initialize dispatch with __skip_initialize__. Got:\n{code}"
+    );
+    assert!(
+        code.contains("{'continue', 'initialize'}"),
+        "init/1 must return {{continue, initialize}} to defer initialize. Got:\n{code}"
+    );
+
+    // handle_continue must exist and dispatch initialize.
+    assert!(
+        code.contains("'handle_continue'/2"),
+        "Module must export handle_continue/2. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'safe_dispatch'('initialize'"),
+        "handle_continue must dispatch initialize via safe_dispatch. Got:\n{code}"
     );
 }

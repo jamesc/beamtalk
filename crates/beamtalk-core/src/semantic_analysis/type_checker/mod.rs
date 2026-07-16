@@ -19,6 +19,7 @@
 //! - `docs/ADR/0025-gradual-typing-and-protocols.md` — Phase 1
 
 use crate::ast::Module;
+use crate::semantic_analysis::alias_registry::AliasRegistry;
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::source_analysis::{Diagnostic, Span};
@@ -268,9 +269,23 @@ impl CoverageReport {
 ///
 /// This is the main entry point for LSP providers that need type information
 /// at specific positions (hover, completions).
+///
+/// BT-2867: `native_type_registry` (ADR 0075), when `Some`, lets `(Erlang m)
+/// f:` calls resolve to their typed return instead of `Dynamic(UntypedFfi)`,
+/// and lets everything downstream of such a call (e.g. `x := (Erlang m) f:.
+/// x bar`) see `x`'s real type too — not just the FFI call site itself.
+/// `None` preserves the previous behaviour for callers with no registry
+/// available (e.g. a bare parse with no build/package context).
 #[must_use]
-pub fn infer_types(module: &Module, hierarchy: &ClassHierarchy) -> TypeMap {
+pub fn infer_types(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    native_type_registry: Option<&NativeTypeRegistry>,
+) -> TypeMap {
     let mut checker = TypeChecker::new();
+    if let Some(registry) = native_type_registry {
+        checker.set_native_type_registry(registry.clone());
+    }
     checker.check_module(module, hierarchy);
     checker.take_type_map()
 }
@@ -294,12 +309,17 @@ pub type MethodReturnKey = (EcoString, EcoString, bool);
 /// BT-2022: The map now stores [`InferredType`] instead of bare `EcoString` so
 /// that generic type arguments (e.g., `List(String)`) are preserved through
 /// the inference cache and available to callers for full type comparison.
+/// BT-2867: see [`infer_types`]'s doc comment for `native_type_registry`.
 #[must_use]
 pub fn infer_method_return_types(
     module: &Module,
     hierarchy: &ClassHierarchy,
+    native_type_registry: Option<&NativeTypeRegistry>,
 ) -> HashMap<MethodReturnKey, InferredType> {
     let mut checker = TypeChecker::new();
+    if let Some(registry) = native_type_registry {
+        checker.set_native_type_registry(registry.clone());
+    }
     checker.check_module(module, hierarchy);
     checker.take_method_return_types()
 }
@@ -311,12 +331,45 @@ pub fn infer_method_return_types(
 /// [`TypeMap`] (for hover/completion position types) and method return types
 /// (for hierarchy enrichment). Using this avoids the double-pass previously
 /// required by calling [`infer_method_return_types`] followed by [`infer_types`].
+/// BT-2867: see [`infer_types`]'s doc comment for `native_type_registry`.
 #[must_use]
 pub fn infer_types_and_returns(
     module: &Module,
     hierarchy: &ClassHierarchy,
+    native_type_registry: Option<&NativeTypeRegistry>,
 ) -> (TypeMap, HashMap<MethodReturnKey, InferredType>) {
     let mut checker = TypeChecker::new();
+    if let Some(registry) = native_type_registry {
+        checker.set_native_type_registry(registry.clone());
+    }
+    checker.check_module(module, hierarchy);
+    (checker.take_type_map(), checker.take_method_return_types())
+}
+
+/// [`infer_types_and_returns`], additionally threading a type alias registry
+/// (ADR 0108, BT-2897) so a `Simple` annotation naming a registered alias
+/// (e.g. `policy :: RestartStrategy`) resolves to its structural expansion —
+/// tagged with the alias's display name (see [`TypeProvenance::Aliased`]) —
+/// instead of an unresolved nominal class.
+///
+/// Used by [`crate::queries::hover_provider`] so hover on an alias-typed
+/// binding shows `RestartStrategy (#temporary | #transient | #permanent)`
+/// rather than either the bare expansion or an "unresolved class" mis-read.
+/// `alias_registry = None` is identical to [`infer_types_and_returns`].
+#[must_use]
+pub fn infer_types_and_returns_with_aliases(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    native_type_registry: Option<&NativeTypeRegistry>,
+    alias_registry: Option<&AliasRegistry>,
+) -> (TypeMap, HashMap<MethodReturnKey, InferredType>) {
+    let mut checker = TypeChecker::new();
+    if let Some(registry) = native_type_registry {
+        checker.set_native_type_registry(registry.clone());
+    }
+    if let Some(aliases) = alias_registry {
+        checker.set_alias_registry(aliases.clone());
+    }
     checker.check_module(module, hierarchy);
     (checker.take_type_map(), checker.take_method_return_types())
 }
@@ -350,6 +403,16 @@ pub struct TypeChecker {
     /// requires the tested selector. Set by `check_module_with_protocols`
     /// before running the main type checking pass.
     pub(super) protocol_registry: Option<ProtocolRegistry>,
+    /// Type alias registry (ADR 0108 Phase 2, BT-2895).
+    ///
+    /// When set, [`super::type_resolver::resolve_type_annotation`] expands a
+    /// `Simple` annotation naming a registered alias to its declared
+    /// expansion (resolution order: `subst` → alias table → nominal class).
+    /// Set by [`Self::check_module_with_protocols_and_aliases`] before
+    /// running the main type checking pass; `None` means "no aliases in
+    /// this compile" and every `Simple` name resolves as an ordinary
+    /// nominal class, matching pre-ADR-0108 behaviour.
+    pub(super) alias_registry: Option<AliasRegistry>,
     /// Native type registry for FFI call inference (ADR 0075).
     ///
     /// When set, enables return type inference and keyword mismatch warnings
@@ -373,6 +436,7 @@ impl TypeChecker {
             method_return_types: HashMap::new(),
             current_package: None,
             protocol_registry: None,
+            alias_registry: None,
             native_type_registry: None,
             typed_class_context: None,
         }
@@ -390,6 +454,7 @@ impl TypeChecker {
             method_return_types: HashMap::new(),
             current_package: Some(EcoString::from(package)),
             protocol_registry: None,
+            alias_registry: None,
             native_type_registry: None,
             typed_class_context: None,
         }
@@ -401,6 +466,22 @@ impl TypeChecker {
     /// and parameter types in the registry instead of defaulting to `Dynamic`.
     pub fn set_native_type_registry(&mut self, registry: impl Into<Arc<NativeTypeRegistry>>) {
         self.native_type_registry = Some(registry.into());
+    }
+
+    /// Sets the type alias registry (ADR 0108, BT-2897) for the *base*
+    /// [`Self::check_module`] pass — a lighter-weight alternative to
+    /// [`Self::check_module_with_protocols_and_aliases`] for callers (e.g.
+    /// hover) that only need alias-aware `resolve_type_annotation` (so
+    /// `policy :: RestartStrategy` resolves and displays correctly) and not
+    /// the additional protocol-conformance passes (2b/2d/2f) the full
+    /// wrapper also runs.
+    ///
+    /// `check_module` itself already reads `self.alias_registry` at every
+    /// `resolve_type_annotation` call site (see that field's doc), so
+    /// setting it here before calling `check_module` directly is sufficient
+    /// — no separate "aliases-only" entry point is needed.
+    pub fn set_alias_registry(&mut self, registry: AliasRegistry) {
+        self.alias_registry = Some(registry);
     }
 
     /// Returns all diagnostics collected during type checking.
@@ -442,6 +523,10 @@ impl TypeChecker {
     /// are present. It delegates to `check_module` for the main type checking pass
     /// and then performs protocol conformance checking on type annotations.
     ///
+    /// Thin wrapper around [`Self::check_module_with_protocols_and_aliases`]
+    /// with an empty [`AliasRegistry`] — callers that don't have (or don't
+    /// need) alias resolution keep working unchanged.
+    ///
     /// **References:** ADR 0068 Phase 2b
     pub fn check_module_with_protocols(
         &mut self,
@@ -449,15 +534,47 @@ impl TypeChecker {
         hierarchy: &ClassHierarchy,
         protocol_registry: &ProtocolRegistry,
     ) {
+        self.check_module_with_protocols_and_aliases(
+            module,
+            hierarchy,
+            protocol_registry,
+            &AliasRegistry::new(),
+        );
+    }
+
+    /// [`Self::check_module_with_protocols`], additionally threading a type
+    /// alias registry (ADR 0108 Phase 2, BT-2895) so annotations referencing
+    /// a `type Name = ...` declaration resolve to their structural expansion
+    /// everywhere `resolve_type_annotation` is consulted during the main
+    /// type-checking pass (parameter types, return types, typed local
+    /// assignments).
+    ///
+    /// **References:** ADR 0068 Phase 2b, ADR 0108 Phase 2
+    pub fn check_module_with_protocols_and_aliases(
+        &mut self,
+        module: &Module,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: &ProtocolRegistry,
+        alias_registry: &AliasRegistry,
+    ) {
         // Store protocol registry for respondsTo: narrowing (BT-1833).
         // This allows detect_narrowing to refine Dynamic → protocol type.
         self.protocol_registry = Some(protocol_registry.clone());
+        // ADR 0108 / BT-2895: store the alias table for the duration of this
+        // whole method (unlike `protocol_registry`, which the Phase 2b/2d/2f
+        // passes below take as a direct parameter and so don't need it on
+        // `self`) — `check_type_param_bounds_in_module` reads
+        // `self.alias_registry` to resolve alias-named generic type
+        // arguments (e.g. `Logger(Small)` where `type Small = Integer`)
+        // before checking them against a declared bound.
+        self.alias_registry = Some(alias_registry.clone());
 
         // Run the standard type checking pass first
         self.check_module(module, hierarchy);
 
-        // Clear the registry after the main pass (it's borrowed by the caller
-        // for the remaining protocol-specific passes below).
+        // Clear the protocol registry after the main pass — it's borrowed by
+        // the caller for the remaining protocol-specific passes below via
+        // the `protocol_registry` parameter directly, not `self`.
         self.protocol_registry = None;
 
         // Phase 2b: Protocol conformance checking on type annotations.
@@ -468,7 +585,8 @@ impl TypeChecker {
         // Phase 2d: Type parameter bounds checking (ADR 0068).
         // When a type annotation uses a generic class with bounded type params
         // (e.g., `Logger(Integer)` where Logger has `T :: Printable`), check
-        // that the concrete type args conform to their bounds.
+        // that the concrete type args conform to their bounds. Still consults
+        // `self.alias_registry` (ADR 0108) — cleared below, after this call.
         self.check_type_param_bounds_in_module(module, hierarchy, protocol_registry);
 
         // Phase 2f: Generic variance checking (ADR 0068).
@@ -476,6 +594,10 @@ impl TypeChecker {
         // and the argument is the same generic class with different type args
         // (e.g., `Array(Integer)`), check covariance for sealed Value classes.
         self.check_generic_variance_in_module(module, hierarchy, protocol_registry);
+
+        // ADR 0108 / BT-2895: clear the alias table now that every phase
+        // that consults it has run.
+        self.alias_registry = None;
     }
 }
 

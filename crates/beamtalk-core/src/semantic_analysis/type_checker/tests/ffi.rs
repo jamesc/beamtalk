@@ -503,6 +503,47 @@ fn test_ffi_argument_dynamic_param_no_warning() {
 }
 
 #[test]
+fn test_ffi_argument_string_list_union_param_no_warning() {
+    // BT-2817: Erlang os putenv: "MY_VAR" value: "my_value"
+    // `os:putenv/2` params are Erlang `string()`-typed, which the FFI spec
+    // reader maps to `String | List` (not `List` only) — a Beamtalk String
+    // argument must type-check without a warning.
+    //
+    // Registers the module via `parse_specs_line` with the exact wire format
+    // `beamtalk_spec_reader.erl` emits (`type => <<"String | List">>`), so
+    // this exercises the real `map_type_name` string-parsing path rather than
+    // constructing `InferredType` directly — the parsing step is itself part
+    // of the contract being regression-tested (BT-2817 code review).
+    let mut reg = NativeTypeRegistry::new();
+    let line = "beamtalk-specs-module:os:[#{arity => 2,name => <<\"putenv\">>,\
+        params => [#{name => <<\"varname\">>,type => <<\"String | List\">>},\
+        #{name => <<\"value\">>,type => <<\"String | List\">>}],\
+        return_type => <<\"True\">>}]";
+    let result = parse_specs_line(line, &mut reg);
+    assert_eq!(result, Some("os".to_string()));
+
+    let module = make_module(vec![msg_send(
+        erlang_module_recv("os"),
+        keyword_selector(&["putenv:", "value:"]),
+        vec![str_lit("MY_VAR"), str_lit("my_value")],
+    )]);
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.set_native_type_registry(reg);
+    checker.check_module(&module, &hierarchy);
+
+    let type_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("expects"))
+        .collect();
+    assert!(
+        type_warnings.is_empty(),
+        "String argument should type-check against a String | List union param. Got: {type_warnings:?}"
+    );
+}
+
+#[test]
 fn test_ffi_dynamic_module_name_falls_back() {
     // Erlang (someVar) reverse: xs → Dynamic (no static module name)
     // This is a keyword send on Erlang class, which goes through normal DNU-suppressed path
@@ -811,6 +852,204 @@ fn test_erlang_module_proxy_equality_uses_normal_dispatch() {
     assert!(
         ffi_diags.is_empty(),
         "`proxy == other` should not trigger FFI lookup. Got: {ffi_diags:?}"
+    );
+}
+
+// ---- BT-2846: Union arm for check_ffi_argument_types ----
+
+/// Helper: a `FunctionSignature` for a single-param FFI function `mod:fun/1`
+/// whose declared parameter type is `param_type`.
+fn single_param_sig(param_type: InferredType) -> FunctionSignature {
+    FunctionSignature {
+        name: "fun".to_string(),
+        arity: 1,
+        params: vec![ParamType {
+            keyword: Some(ecow::EcoString::from("arg")),
+            type_: param_type,
+        }],
+        return_type: InferredType::Dynamic(DynamicReason::DynamicSpec),
+        provenance: TypeProvenance::Extracted,
+        line: None,
+    }
+}
+
+#[test]
+fn ffi_union_arg_incompatible_member_warns() {
+    // `String | Integer` passed to a param declared `String` — the `Integer`
+    // member is incompatible, so a diagnostic must fire.
+    let sig = single_param_sig(InferredType::known("String"));
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.check_ffi_argument_types(
+        "mymod",
+        "fun",
+        &sig,
+        &[InferredType::simple_union(&["String", "Integer"])],
+        span(),
+        &hierarchy,
+    );
+    assert_eq!(
+        checker.diagnostics().len(),
+        1,
+        "Union with an incompatible member should emit a diagnostic. Got: {:?}",
+        checker.diagnostics()
+    );
+    assert!(checker.diagnostics()[0].message.contains("expects String"));
+}
+
+#[test]
+fn ffi_union_arg_all_members_compatible_no_warning() {
+    // `String | String` (degenerate but valid) — every member matches the
+    // declared `String` param, so no diagnostic should fire.
+    let sig = single_param_sig(InferredType::known("String"));
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.check_ffi_argument_types(
+        "mymod",
+        "fun",
+        &sig,
+        &[InferredType::simple_union(&["String", "String"])],
+        span(),
+        &hierarchy,
+    );
+    assert!(
+        checker.diagnostics().is_empty(),
+        "All union members compatible with declared param — no diagnostic expected, got: {:?}",
+        checker.diagnostics()
+    );
+}
+
+#[test]
+fn ffi_union_arg_object_param_accepts_any_member() {
+    // A param declared `Object` accepts any union of concrete classes —
+    // mirrors the existing Known/Known Object shortcut.
+    let sig = single_param_sig(InferredType::known("Object"));
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.check_ffi_argument_types(
+        "mymod",
+        "fun",
+        &sig,
+        &[InferredType::simple_union(&["String", "Integer"])],
+        span(),
+        &hierarchy,
+    );
+    assert!(
+        checker.diagnostics().is_empty(),
+        "Object param should accept any union member. Got: {:?}",
+        checker.diagnostics()
+    );
+}
+
+#[test]
+fn ffi_union_arg_singleton_symbol_members_compatible_with_symbol_param() {
+    // BT-2846 regression: an FFI param declared `Symbol` (e.g. Erlang spec
+    // `atom()`) must accept a call-site union of singleton symbols like
+    // `#emergency | #alert | ...` (typed:: annotations on Beamtalk-side
+    // wrapper methods, e.g. BeamtalkInterface>>logLevel:). Singletons are
+    // subtypes of Symbol (mirrors `is_type_compatible`'s `#foo` handling),
+    // so this must NOT warn.
+    let sig = single_param_sig(InferredType::known("Symbol"));
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.check_ffi_argument_types(
+        "mymod",
+        "fun",
+        &sig,
+        &[InferredType::simple_union(&[
+            "#emergency",
+            "#alert",
+            "#critical",
+            "#error",
+            "#warning",
+            "#notice",
+            "#info",
+            "#debug",
+        ])],
+        span(),
+        &hierarchy,
+    );
+    assert!(
+        checker.diagnostics().is_empty(),
+        "Singleton symbol union members should be compatible with a Symbol param. Got: {:?}",
+        checker.diagnostics()
+    );
+}
+
+#[test]
+fn ffi_dynamic_arg_unchanged_no_warning() {
+    // A `Dynamic` argument continues to short-circuit — same as before this
+    // ticket's Union arm was added.
+    let sig = single_param_sig(InferredType::known("String"));
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.check_ffi_argument_types(
+        "mymod",
+        "fun",
+        &sig,
+        &[InferredType::Dynamic(DynamicReason::Unknown)],
+        span(),
+        &hierarchy,
+    );
+    assert!(
+        checker.diagnostics().is_empty(),
+        "Dynamic argument should still be skipped. Got: {:?}",
+        checker.diagnostics()
+    );
+}
+
+#[test]
+fn ffi_known_known_call_unchanged_no_regression() {
+    // A plain `Known`/`Known` compatible call stays silent (no regression
+    // from restructuring the Dynamic/Known/Union match).
+    let sig = single_param_sig(InferredType::known("String"));
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.check_ffi_argument_types(
+        "mymod",
+        "fun",
+        &sig,
+        &[InferredType::known("String")],
+        span(),
+        &hierarchy,
+    );
+    assert!(
+        checker.diagnostics().is_empty(),
+        "Known/Known compatible call should stay silent. Got: {:?}",
+        checker.diagnostics()
+    );
+}
+
+/// BT-2867: the free `infer_types` function (used by `type-coverage` and the
+/// LSP query providers) must accept and thread a `NativeTypeRegistry` — not
+/// just `TypeChecker` when driven directly, which every other test in this
+/// file exercises. Before the fix, `infer_types` unconditionally built a
+/// registry-less `TypeChecker`, so a well-specced FFI call's return type
+/// resolved correctly at the call site (via `beamtalk build`/`lint`'s
+/// separate registry-threaded path) but everything built from it — like
+/// `y size` here — stayed `Dynamic(UntypedFfi)` under `infer_types`.
+#[test]
+fn infer_types_free_fn_threads_registry_to_downstream_expression() {
+    let src = "typed Object subclass: Nav\n  \
+        run =>\n    \
+          y := (Erlang lists) reverse: #(1, 2, 3)\n    \
+          y size";
+    let module = parse_source(src);
+    let hierarchy = ClassHierarchy::with_builtins();
+
+    let downstream_span = module.classes[0].methods[0]
+        .body
+        .last()
+        .unwrap()
+        .expression
+        .span();
+
+    let type_map = infer_types(&module, &hierarchy, Some(&lists_registry()));
+    let downstream_type = type_map.get(downstream_span);
+    assert!(
+        !matches!(downstream_type, None | Some(InferredType::Dynamic(_))),
+        "expression downstream of a specced FFI call should infer a \
+         concrete type via the free `infer_types` function, got {downstream_type:?}"
     );
 }
 

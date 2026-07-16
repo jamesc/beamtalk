@@ -7,7 +7,7 @@ use super::*;
 use crate::ast::{
     Block, BlockParameter, ClassDefinition, ClassKind, CommentAttachment, DeclaredKeyword,
     Expression, ExpressionStatement, Identifier, Literal, MatchArm, MessageSelector,
-    MethodDefinition, Pattern, StateDeclaration, StringSegment,
+    MethodDefinition, Pattern, StateDeclaration, StringSegment, TypeAnnotation,
 };
 use crate::source_analysis::{Severity, Span};
 
@@ -786,6 +786,7 @@ fn test_self_available_in_method_bodies() {
         classes: vec![class_def],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         file_leading_comments: vec![],
         file_trailing_comments: Vec::new(),
@@ -897,6 +898,59 @@ fn test_field_assignment_in_passed_block_no_error() {
     assert!(
         !has_field_error,
         "Should not have field-in-passed-block error (BT-1140), got: {:?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn test_field_assignment_in_field_stored_block_no_error() {
+    // BT-2797: self.onTick := [:x | self.sum := 0] must NOT emit the
+    // stored-closure field error, unlike a *local* var (see
+    // test_field_assignment_in_stored_block_emits_error above, which is
+    // unaffected — this test is specifically about `self.field := [block]`).
+    // Every `self.field value(:...)` call site now runtime-discriminates
+    // Tier 1 vs Tier 2, so a block stored into a field is unconditionally
+    // safe regardless of which method later invokes it.
+    let field_assignment = Expression::Assignment {
+        target: Box::new(Expression::FieldAccess {
+            receiver: Box::new(Expression::Identifier(Identifier::new("self", test_span()))),
+            field: Identifier::new("sum", test_span()),
+            span: test_span(),
+        }),
+        value: Box::new(Expression::Literal(Literal::Integer(0), test_span())),
+        type_annotation: None,
+        span: test_span(),
+    };
+
+    let block = Expression::Block(crate::ast::Block {
+        parameters: vec![crate::ast::BlockParameter::new("x", test_span())],
+        body: vec![bare(field_assignment)],
+        span: test_span(),
+    });
+
+    // self.onTick := [:x | self.sum := 0] — block stored into a field.
+    let assignment = Expression::Assignment {
+        target: Box::new(Expression::FieldAccess {
+            receiver: Box::new(Expression::Identifier(Identifier::new("self", test_span()))),
+            field: Identifier::new("onTick", test_span()),
+            span: test_span(),
+        }),
+        value: Box::new(block),
+        type_annotation: None,
+        span: test_span(),
+    };
+
+    let module = Module::new(vec![bare(assignment)], test_span());
+    let result = analyse(&module);
+
+    let has_field_error = result
+        .diagnostics
+        .iter()
+        .any(|d| d.message.contains("cannot assign to field 'sum'"));
+    assert!(
+        !has_field_error,
+        "Should not have field-in-stored-block error for a block stored into \
+         a field (BT-2797), got: {:?}",
         result.diagnostics
     );
 }
@@ -1196,6 +1250,7 @@ fn test_analyse_hierarchy_includes_user_classes() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: test_span(),
         file_leading_comments: vec![],
@@ -1251,6 +1306,7 @@ fn test_analyse_reports_sealed_class_diagnostic() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: test_span(),
         file_leading_comments: vec![],
@@ -1558,6 +1614,7 @@ fn test_abstract_class_instantiation_error() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![bare(spawn_expr)],
         span: test_span(),
         file_leading_comments: vec![],
@@ -1661,6 +1718,7 @@ fn test_self_inside_method_no_error() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: test_span(),
         file_leading_comments: vec![],
@@ -1748,6 +1806,7 @@ fn test_unused_variable_in_method_warns() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: test_span(),
         file_leading_comments: vec![],
@@ -1818,6 +1877,7 @@ fn test_used_variable_no_warning() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: test_span(),
         file_leading_comments: vec![],
@@ -1881,6 +1941,7 @@ fn test_underscore_prefixed_variable_no_warning() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: test_span(),
         file_leading_comments: vec![],
@@ -1946,6 +2007,7 @@ fn test_unused_parameter_emits_warning() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: test_span(),
         file_leading_comments: vec![],
@@ -2013,6 +2075,7 @@ fn test_unused_parameter_underscore_suppresses_warning() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: test_span(),
         file_leading_comments: vec![],
@@ -2081,6 +2144,7 @@ fn test_used_parameter_no_warning() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: test_span(),
         file_leading_comments: vec![],
@@ -2152,6 +2216,7 @@ fn test_unused_parameter_primitive_body_no_warning() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: test_span(),
         file_leading_comments: vec![],
@@ -2225,6 +2290,7 @@ fn test_unused_parameter_intrinsic_body_no_warning() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: test_span(),
         file_leading_comments: vec![],
@@ -2296,6 +2362,7 @@ fn test_unused_variable_in_class_method_warns() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: test_span(),
         file_leading_comments: vec![],
@@ -2362,6 +2429,7 @@ fn test_block_parameter_no_unused_warning() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: test_span(),
         file_leading_comments: vec![],
@@ -2430,6 +2498,7 @@ fn test_pattern_variable_no_unused_warning() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: test_span(),
         file_leading_comments: vec![],
@@ -2501,6 +2570,7 @@ fn test_unused_variable_in_nested_block_warns() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: test_span(),
         file_leading_comments: vec![],
@@ -2580,6 +2650,7 @@ fn test_variable_used_via_closure_no_warning() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: test_span(),
         file_leading_comments: vec![],
@@ -2656,6 +2727,7 @@ fn test_dead_code_after_return_in_method() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: test_span(),
         file_leading_comments: vec![],
@@ -2719,6 +2791,7 @@ fn test_no_dead_code_without_return() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: test_span(),
         file_leading_comments: vec![],
@@ -2790,6 +2863,7 @@ fn test_dead_code_in_block() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: test_span(),
         file_leading_comments: vec![],
@@ -2851,6 +2925,7 @@ fn test_return_at_end_no_warning() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: test_span(),
         file_leading_comments: vec![],
@@ -2938,6 +3013,7 @@ fn test_super_inside_method_no_error() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: test_span(),
         file_leading_comments: vec![],
@@ -3042,6 +3118,7 @@ fn test_block_param_shadows_outer_variable() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: test_span(),
         file_leading_comments: vec![],
@@ -3123,6 +3200,7 @@ fn test_underscore_prefixed_no_shadow_warning() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: test_span(),
         file_leading_comments: vec![],
@@ -3202,6 +3280,7 @@ fn test_no_shadow_warning_different_names() {
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![],
         span: test_span(),
         file_leading_comments: vec![],
@@ -3394,6 +3473,7 @@ fn test_abstract_instantiation_in_class_method() {
         classes: vec![shape],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: Vec::new(),
         span: test_span(),
         file_leading_comments: vec![],
@@ -3433,6 +3513,7 @@ fn test_abstract_instantiation_in_string_interpolation() {
         classes: vec![shape],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: vec![bare(interp)],
         span: test_span(),
         file_leading_comments: vec![],
@@ -3487,6 +3568,7 @@ fn test_abstract_instantiation_in_standalone_method() {
         classes: vec![shape],
         method_definitions: vec![standalone],
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: Vec::new(),
         span: test_span(),
         file_leading_comments: vec![],
@@ -3575,6 +3657,7 @@ fn test_actor_new_error_in_standalone_method() {
         classes: vec![counter],
         method_definitions: vec![standalone],
         protocols: Vec::new(),
+        type_aliases: Vec::new(),
         expressions: Vec::new(),
         span: test_span(),
         file_leading_comments: vec![],
@@ -3664,6 +3747,7 @@ fn analyse_with_known_vars_and_classes_injects_user_class_into_hierarchy() {
     use crate::semantic_analysis::class_hierarchy::ClassInfo;
 
     let pre_class = ClassInfo {
+        surface_incomplete: false,
         name: EcoString::from("UserClass"),
         superclass: Some(EcoString::from("Object")),
         is_sealed: false,
@@ -4077,6 +4161,7 @@ fn workspace_binding_shadowing_class_emits_warning() {
 
     // Pre-load a class "Workspace" so the hierarchy knows about it.
     let pre_class = ClassInfo {
+        surface_incomplete: false,
         name: EcoString::from("Workspace"),
         superclass: Some(EcoString::from("Object")),
         is_sealed: false,
@@ -4137,6 +4222,7 @@ fn workspace_binding_not_in_hierarchy_no_shadow_warning() {
     // meaning the shadow check doesn't run at all. To test the no-match
     // path, we need at least one pre-loaded class.
     let dummy_class = ClassInfo {
+        surface_incomplete: false,
         name: EcoString::from("DummyClass"),
         superclass: Some(EcoString::from("Object")),
         is_sealed: false,
@@ -4194,6 +4280,7 @@ fn fixture_sourced_protocol_name_is_not_unresolved() {
     // true and the unresolved-class validator actually runs. Without this
     // sentinel, the check is suppressed and the test would pass vacuously.
     let dummy_class = ClassInfo {
+        surface_incomplete: false,
         name: EcoString::from("DummyClass"),
         superclass: Some(EcoString::from("Object")),
         is_sealed: false,
@@ -4232,6 +4319,7 @@ fn fixture_sourced_protocol_name_is_not_unresolved() {
         vec![dummy_class],
         vec![fixture_protocol],
         None,
+        &crate::compilation::extension_index::ExtensionIndex::new(),
     );
 
     let unresolved: Vec<_> = result
@@ -4243,6 +4331,164 @@ fn fixture_sourced_protocol_name_is_not_unresolved() {
     assert!(
         unresolved.is_empty(),
         "Fixture-sourced protocol name should not trigger unresolved-class warnings, got: {unresolved:?}"
+    );
+}
+
+// BT-2898 (ADR 0108 Phase 5): pre-loaded aliases must be seeded into the
+// alias registry the same way pre-loaded protocols are (BT-2006), with
+// current-module definitions winning and cross-package `internal` entries
+// excluded at the seeding boundary.
+#[test]
+fn pre_loaded_alias_is_seeded_and_current_module_wins() {
+    use crate::semantic_analysis::alias_registry::AliasInfo;
+
+    // Current module declares its own `Id` alias — this must win over the
+    // pre-loaded (cross-file) `Id` of the same name.
+    let src = "type Id = String";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _parse_diags) = crate::source_analysis::parse(tokens);
+
+    let cross_file_alias = AliasInfo {
+        name: EcoString::from("Timeout"),
+        annotation: TypeAnnotation::Simple(Identifier {
+            name: EcoString::from("Integer"),
+            span: Span::default(),
+        }),
+        is_internal: false,
+        package: Some(EcoString::from("app")),
+        span: Span::default(),
+    };
+    let shadowed_alias = AliasInfo {
+        name: EcoString::from("Id"),
+        annotation: TypeAnnotation::Simple(Identifier {
+            name: EcoString::from("Integer"),
+            span: Span::default(),
+        }),
+        is_internal: false,
+        package: Some(EcoString::from("app")),
+        span: Span::default(),
+    };
+    // Internal alias declared in a *different* package — must be excluded.
+    let foreign_internal_alias = AliasInfo {
+        name: EcoString::from("ParserState"),
+        annotation: TypeAnnotation::Simple(Identifier {
+            name: EcoString::from("Integer"),
+            span: Span::default(),
+        }),
+        is_internal: true,
+        package: Some(EcoString::from("other_pkg")),
+        span: Span::default(),
+    };
+
+    let options = crate::CompilerOptions {
+        current_package: Some("app".to_string()),
+        ..Default::default()
+    };
+    let result = analyse_with_natives_and_protocols_and_aliases(
+        &module,
+        &options,
+        vec![],
+        vec![],
+        vec![cross_file_alias, shadowed_alias, foreign_internal_alias],
+        None,
+        &crate::compilation::extension_index::ExtensionIndex::new(),
+    );
+
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .all(|d| d.severity != Severity::Error),
+        "unexpected errors: {:?}",
+        result.diagnostics
+    );
+
+    // Cross-file alias is visible.
+    assert!(result.alias_registry.has_alias("Timeout"));
+    // Current-module's own definition wins over the same-named pre-loaded one.
+    assert_eq!(
+        result
+            .alias_registry
+            .get("Id")
+            .unwrap()
+            .annotation
+            .type_name()
+            .as_str(),
+        "String",
+        "current-module alias definition must win"
+    );
+    // A different-package internal alias is never seeded — seeding-boundary exclusion.
+    assert!(
+        !result.alias_registry.has_alias("ParserState"),
+        "a different-package internal pre-loaded alias must never be visible in the consumer's table"
+    );
+}
+
+// BT-2898: an `internal` alias from the *same* package (e.g. another file in
+// a same-package multi-file compilation) must still be seeded — ADR 0108
+// scopes `internal` to the whole declaring package, not just the declaring
+// file, so this is not the seeding-boundary exclusion case above.
+#[test]
+fn pre_loaded_internal_alias_from_same_package_is_still_seeded() {
+    use crate::semantic_analysis::alias_registry::AliasInfo;
+
+    let module = Module::new(vec![], Span::default());
+
+    let same_package_internal_alias = AliasInfo {
+        name: EcoString::from("ParserState"),
+        annotation: TypeAnnotation::Simple(Identifier {
+            name: EcoString::from("Integer"),
+            span: Span::default(),
+        }),
+        is_internal: true,
+        package: Some(EcoString::from("json")),
+        span: Span::default(),
+    };
+
+    let options = crate::CompilerOptions {
+        current_package: Some("json".to_string()),
+        ..Default::default()
+    };
+    let result = analyse_with_natives_and_protocols_and_aliases(
+        &module,
+        &options,
+        vec![],
+        vec![],
+        vec![same_package_internal_alias],
+        None,
+        &crate::compilation::extension_index::ExtensionIndex::new(),
+    );
+
+    assert!(
+        result.alias_registry.has_alias("ParserState"),
+        "a same-package internal alias from another file must remain visible"
+    );
+}
+
+// BT-2898: end-to-end wiring check — the E0402 alias-leak checks (Phase 8)
+// must fire through the full `analyse_with_options` pipeline, not just when
+// the validator functions are called directly in `visibility_validators.rs`.
+#[test]
+fn analyse_full_pipeline_reports_internal_alias_leaked_in_public_signature() {
+    let src = "internal type ParserState = Integer\n\n\
+               Object subclass: Parser\n  tokenize: input :: String -> ParserState => nil";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _parse_diags) = crate::source_analysis::parse(tokens);
+
+    let options = crate::CompilerOptions {
+        current_package: Some("json".to_string()),
+        ..Default::default()
+    };
+    let result = analyse_with_options(&module, &options);
+
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.severity == Severity::Error
+                && d.message.contains("Internal type alias 'ParserState'")),
+        "expected the full pipeline to report the leaked internal alias, got: {:?}",
+        result.diagnostics
     );
 }
 
@@ -4327,4 +4573,163 @@ Value subclass: UnusedUntypedSmall
             "Expected no unused warnings for source:\n{source}\ngot: {unused:?}"
         );
     }
+}
+
+// ── BT-2796: KnowledgeScope plumbing ─────────────────────────────────────────
+
+#[test]
+fn analyse_stamps_default_knowledge_scope() {
+    let tokens = crate::source_analysis::lex_with_eof("Object subclass: ScopeDefault\n  m => 1\n");
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = analyse(&module);
+    assert_eq!(
+        result.class_hierarchy.knowledge_scope(),
+        KnowledgeScope::ModuleOnly,
+        "analysis without a project orchestrator must keep the conservative default"
+    );
+}
+
+#[test]
+fn analyse_with_options_stamps_project_complete_scope() {
+    let tokens = crate::source_analysis::lex_with_eof("Object subclass: ScopeFull\n  m => 1\n");
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let options = crate::CompilerOptions {
+        knowledge_scope: KnowledgeScope::ProjectComplete,
+        ..Default::default()
+    };
+    let result = analyse_with_options(&module, &options);
+    assert_eq!(
+        result.class_hierarchy.knowledge_scope(),
+        KnowledgeScope::ProjectComplete,
+        "the orchestrator's completeness claim must reach the hierarchy"
+    );
+}
+
+// ── BT-2795: project-wide cross-file extension visibility ────────────────────
+
+#[test]
+fn cross_file_extension_resolves_instead_of_dnu_hint() {
+    use crate::compilation::extension_index::ExtensionIndex;
+
+    // Another file defines `String >> shoutLouder`.
+    let ext_tokens = crate::source_analysis::lex_with_eof("String >> shoutLouder => self\n");
+    let (ext_module, _) = crate::source_analysis::parse(ext_tokens);
+    let mut cross_file_extensions = ExtensionIndex::new();
+    cross_file_extensions.add_module(&ext_module, std::path::Path::new("other.bt"));
+
+    // The current file sends it to a String receiver.
+    let source = "Object subclass: UseShout\n  class demo =>\n    \"abc\" shoutLouder\n";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, _) = crate::source_analysis::parse(tokens);
+
+    // Without the index: false Dnu hint (today's behaviour).
+    let result = analyse(&module);
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("shoutLouder")),
+        "without cross-file extensions the send must produce a Dnu hint"
+    );
+
+    // With the index: the extension resolves, the hint disappears.
+    let options = crate::CompilerOptions::default();
+    let result = analyse_with_natives_and_extensions(
+        &module,
+        &options,
+        vec![],
+        None,
+        &cross_file_extensions,
+    );
+    let dnu: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.message.contains("shoutLouder"))
+        .collect();
+    assert!(
+        dnu.is_empty(),
+        "cross-file extension should resolve instead of hinting, got: {dnu:?}"
+    );
+}
+
+#[test]
+fn genuinely_unresolved_selector_still_hints_with_extensions_registered() {
+    use crate::compilation::extension_index::ExtensionIndex;
+
+    let ext_tokens = crate::source_analysis::lex_with_eof("String >> shoutLouder => self\n");
+    let (ext_module, _) = crate::source_analysis::parse(ext_tokens);
+    let mut cross_file_extensions = ExtensionIndex::new();
+    cross_file_extensions.add_module(&ext_module, std::path::Path::new("other.bt"));
+
+    // A genuine typo on a closed receiver still hints (ADR 0100 Rule 2:
+    // improved resolution removes false positives, not true ones).
+    let source = "Object subclass: UseTypo\n  class demo =>\n    \"abc\" reverssed\n";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let options = crate::CompilerOptions::default();
+    let result = analyse_with_natives_and_extensions(
+        &module,
+        &options,
+        vec![],
+        None,
+        &cross_file_extensions,
+    );
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("reverssed")),
+        "a genuine typo must still produce a Dnu hint"
+    );
+}
+
+// ── BT-2794: ADR 0100 Rule 2 end-to-end ──────────────────────────────────────
+
+#[test]
+fn typo_hints_in_project_complete_dependency_free_package() {
+    // Rule 2: knowing more makes the Hint trustworthy, not fatal — a genuine
+    // typo on a closed receiver still hints in a project-complete,
+    // dependency-free build.
+    let source = "Object subclass: TypoDemo\n  class demo =>\n    \"abc\" reverssed\n";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let options = crate::CompilerOptions {
+        knowledge_scope: KnowledgeScope::ProjectComplete,
+        has_package_dependencies: false,
+        ..Default::default()
+    };
+    let result = analyse_with_options(&module, &options);
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("reverssed")),
+        "typo must still hint in a dependency-free project-complete build"
+    );
+}
+
+#[test]
+fn dependency_package_suppresses_unresolved_selector_hints_pre_ws3() {
+    // BT-2794 pre-WS3 guard: with dependencies declared, a dependency could
+    // extend any class, so unresolved-selector hints are withheld until WS3
+    // loads cross-package extension metadata (ADR 0100 Rule 1, third
+    // downgrade; hints go down, not up).
+    let source = "Object subclass: DepDemo\n  class demo =>\n    \"abc\" reverssed\n";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let options = crate::CompilerOptions {
+        knowledge_scope: KnowledgeScope::ProjectComplete,
+        has_package_dependencies: true,
+        ..Default::default()
+    };
+    let result = analyse_with_options(&module, &options);
+    let dnu: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.message.contains("reverssed"))
+        .collect();
+    assert!(
+        dnu.is_empty(),
+        "with dependencies present, unresolved-selector hints are withheld pre-WS3, got: {dnu:?}"
+    );
 }

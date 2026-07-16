@@ -714,10 +714,24 @@ fn handle_repl_command(line: &str, client: &mut ReplClient) -> CommandResult {
             eval_and_display(client, "Workspace changes dirtyMethods");
             return CommandResult::Handled;
         }
+        _ if line == ":recheck image" || line == ":recheck" => {
+            handle_recheck(line, client);
+            return CommandResult::Handled;
+        }
         _ => {}
     }
 
     CommandResult::NotACommand
+}
+
+/// Handle `:recheck image` (REPL alias for `Workspace recheckImage`, ADR 0105
+/// Phase 3, BT-2782) and the bare `:recheck` usage hint.
+fn handle_recheck(line: &str, client: &mut ReplClient) {
+    if line == ":recheck image" {
+        eval_and_display(client, "Workspace recheckImage");
+    } else {
+        eprintln!("Usage: :recheck image");
+    }
 }
 
 /// Handle `:help <topic>` -- look up docs for a class or method.
@@ -1777,14 +1791,15 @@ mod tests {
     }
 
     /// Helper mirroring `handle_repl_command`'s bare-alias dispatch table.
-    /// Keep this in sync with the `":flush" | ":changes" | ":dirty"` arms in
-    /// `handle_repl_command` — the tests below pin the translation contract so
-    /// drift in the dispatch table fails CI.
+    /// Keep this in sync with the `":flush" | ":changes" | ":dirty" |
+    /// ":recheck image"` arms in `handle_repl_command` — the tests below pin
+    /// the translation contract so drift in the dispatch table fails CI.
     fn bare_alias_expr(line: &str) -> Option<&'static str> {
         match line {
             ":flush" => Some("Workspace flush"),
             ":changes" => Some("Workspace changes"),
             ":dirty" => Some("Workspace changes dirtyMethods"),
+            ":recheck image" => Some("Workspace recheckImage"),
             _ => None,
         }
     }
@@ -1804,6 +1819,14 @@ mod tests {
         assert_eq!(
             bare_alias_expr(":dirty"),
             Some("Workspace changes dirtyMethods")
+        );
+    }
+
+    #[test]
+    fn recheck_image_translates_to_workspace_recheck_image() {
+        assert_eq!(
+            bare_alias_expr(":recheck image"),
+            Some("Workspace recheckImage")
         );
     }
 

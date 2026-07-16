@@ -7,8 +7,23 @@
 //!
 //! Parses `beamtalk.toml` manifests that define a package's identity and metadata.
 //! See ADR 0026 for the package definition and manifest format.
+//!
+//! BT-2823: This module lives in the `beamtalk_cli` **library** crate (not
+//! the `beamtalk` binary) so `beamtalk-mcp` can depend on it too. The
+//! `beamtalk` binary's `crate::commands::manifest` is a `pub use
+//! beamtalk_cli::manifest;` re-export (see `commands/mod.rs`) that keeps
+//! existing `crate::commands::manifest`/`super::manifest` call sites
+//! throughout `commands/` compiling unchanged. Every item this module
+//! exposes to those call sites must therefore be `pub`, not `pub(crate)` —
+//! `pub(crate)` here would scope to the *library* crate only and become
+//! invisible to the binary crate, producing a confusing "private item"
+//! error far from this file.
 
-use beamtalk_core::compilation::{DependencyMap, DependencySource, DependencySpec, GitReference};
+use beamtalk_core::compilation::{
+    DependencyMap, DependencySource, DependencySpec, GitReference, parse_diagnostics_table,
+};
+#[cfg(test)]
+use beamtalk_core::source_analysis::DiagnosticCategory;
 use camino::Utf8Path;
 use miette::{Context, IntoDiagnostic, Result};
 use serde::Deserialize;
@@ -52,6 +67,12 @@ pub struct Manifest {
     /// The optional `[native]` section containing `dependencies` for hex packages.
     #[serde(default)]
     native: Option<NativeSection>,
+    /// The optional `[diagnostics]` section — per-category severity overrides
+    /// (ADR 0100 Rule 3). Stored as raw TOML for lazy parsing.
+    ///
+    /// Use [`parse_manifest_full`] to get a validated [`DiagnosticsTable`].
+    #[serde(default)]
+    diagnostics: Option<toml::Value>,
 }
 
 /// The `[native]` section of `beamtalk.toml`.
@@ -423,6 +444,22 @@ fn parse_native_dependencies(native: Option<&NativeSection>) -> Result<NativeDep
     Ok(result)
 }
 
+// ADR 0100 Rule 3 (BT-2793) / BT-2800: `DiagnosticSeverityOverride` and
+// `DiagnosticsTable` — plus the `[diagnostics]`-table parser
+// (`parse_diagnostics_table`) — moved to `beamtalk-core`
+// (`beamtalk_core::compilation::diagnostics_policy`) so that `beamtalk-lsp`
+// can apply the same table `beamtalk build` does without depending on
+// `beamtalk-cli` (dependencies flow downward only — see
+// `docs/development/architecture-principles.md`). Re-exported here so
+// existing `crate::commands::manifest::{DiagnosticsTable,
+// DiagnosticSeverityOverride}` references throughout this crate keep working
+// unchanged. `DiagnosticSeverityOverride` is referenced from test code in
+// both this lib crate and the `beamtalk` bin crate's own `#[cfg(test)]`
+// modules (e.g. `beam_compiler.rs`); the bin crate depends on this lib built
+// *without* `cfg(test)`, so the re-export must be unconditional.
+pub use beamtalk_core::compilation::DiagnosticSeverityOverride;
+pub use beamtalk_core::compilation::DiagnosticsTable;
+
 /// Return a human-readable TOML type name for error messages.
 fn value_type_name(value: &toml::Value) -> &'static str {
     match value {
@@ -463,12 +500,20 @@ pub struct ParsedManifest {
     /// `[native.dependencies]` is absent).
     #[allow(dead_code)] // Used by tests; will be used for rebar.config generation
     pub native_dependencies: NativeDependencyMap,
+    /// The parsed and validated `[diagnostics]` severity overrides (ADR 0100
+    /// Rule 3; empty if the section is absent).
+    pub diagnostics: DiagnosticsTable,
 }
 
 /// Parse a `beamtalk.toml` manifest file.
 ///
 /// Returns the parsed manifest, or an error if the file cannot be read or
 /// contains invalid TOML / missing required fields.
+///
+/// # Errors
+///
+/// Returns an error if the file cannot be read, contains invalid TOML, is
+/// missing required `[package]` fields, or has an invalid package name.
 pub fn parse_manifest(path: &Utf8Path) -> Result<PackageManifest> {
     let manifest = parse_manifest_raw(path)?;
 
@@ -484,6 +529,12 @@ pub fn parse_manifest(path: &Utf8Path) -> Result<PackageManifest> {
 /// Returns the fully parsed manifest with validated package metadata and
 /// dependency specifications. Returns an error if the file cannot be read,
 /// contains invalid TOML, or has malformed dependency entries.
+///
+/// # Errors
+///
+/// Returns an error if the file cannot be read, contains invalid TOML, has
+/// an invalid package name, or has a malformed `[dependencies]`,
+/// `[native.dependencies]`, or `[diagnostics]` section.
 pub fn parse_manifest_full(path: &Utf8Path) -> Result<ParsedManifest> {
     let manifest = parse_manifest_raw(path)?;
 
@@ -497,11 +548,15 @@ pub fn parse_manifest_full(path: &Utf8Path) -> Result<ParsedManifest> {
     let native_dependencies = parse_native_dependencies(manifest.native.as_ref())
         .wrap_err_with(|| format!("Failed to parse [native.dependencies] in '{path}'"))?;
 
+    let diagnostics = parse_diagnostics_table(manifest.diagnostics.as_ref())
+        .wrap_err_with(|| format!("Failed to parse [diagnostics] in '{path}'"))?;
+
     Ok(ParsedManifest {
         package: manifest.package,
         application: manifest.application,
         dependencies,
         native_dependencies,
+        diagnostics,
     })
 }
 
@@ -509,6 +564,11 @@ pub fn parse_manifest_full(path: &Utf8Path) -> Result<ParsedManifest> {
 ///
 /// Returns `None` if no manifest file exists. Returns an error if the file
 /// exists but is malformed.
+///
+/// # Errors
+///
+/// Returns an error if the manifest path cannot be stat'd, or the file
+/// exists but is malformed (see [`parse_manifest`]).
 pub fn find_manifest(project_root: &Utf8Path) -> Result<Option<PackageManifest>> {
     let manifest_path = project_root.join("beamtalk.toml");
     if manifest_path
@@ -527,6 +587,11 @@ pub fn find_manifest(project_root: &Utf8Path) -> Result<Option<PackageManifest>>
 ///
 /// Returns `None` if no manifest file exists. Returns an error if the file
 /// exists but is malformed.
+///
+/// # Errors
+///
+/// Returns an error if the manifest path cannot be stat'd, or the file
+/// exists but is malformed (see [`parse_manifest_full`]).
 pub fn find_manifest_full(project_root: &Utf8Path) -> Result<Option<ParsedManifest>> {
     let manifest_path = project_root.join("beamtalk.toml");
     if manifest_path
@@ -544,6 +609,12 @@ pub fn find_manifest_full(project_root: &Utf8Path) -> Result<Option<ParsedManife
 ///
 /// Returns `None` if no manifest file exists or no `[application]` section is present.
 /// Returns an error if the file exists but is malformed.
+///
+/// # Errors
+///
+/// Returns an error if the manifest path cannot be stat'd, or the file
+/// exists but is malformed (invalid TOML, missing required fields, or an
+/// invalid package name).
 pub fn find_application_config(project_root: &Utf8Path) -> Result<Option<ApplicationConfig>> {
     let manifest_path = project_root.join("beamtalk.toml");
     if !manifest_path
@@ -647,6 +718,15 @@ impl fmt::Display for PackageNameError {
 /// - 1–64 characters
 /// - Not a reserved Beamtalk name
 /// - Not an Erlang standard application name
+///
+/// # Errors
+///
+/// Returns a [`PackageNameError`] describing which rule `name` violates.
+///
+/// # Panics
+///
+/// Never panics: the internal `.unwrap()` on the first character is only
+/// reached after the preceding empty-name check has already returned.
 pub fn validate_package_name(name: &str) -> Result<(), PackageNameError> {
     if name.is_empty() {
         return Err(PackageNameError::Empty);
@@ -2070,5 +2150,188 @@ utils = { path = "../utils" }
                 "error for '{constraint}' should contain '{expected_msg}', got: {err}"
             );
         }
+    }
+
+    // --- BT-2793: ADR 0100 Rule 3 `[diagnostics]` table tests ---
+
+    #[test]
+    fn test_parse_no_diagnostics_section() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+"#,
+        );
+
+        let manifest = parse_manifest_full(&path.join("beamtalk.toml")).unwrap();
+        assert!(
+            manifest.diagnostics.is_empty(),
+            "absent [diagnostics] must preserve today's Rule 1 defaults (empty table)"
+        );
+    }
+
+    #[test]
+    fn test_parse_empty_diagnostics_section() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[diagnostics]
+"#,
+        );
+
+        let manifest = parse_manifest_full(&path.join("beamtalk.toml")).unwrap();
+        assert!(manifest.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn test_parse_diagnostics_table_all_categories() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[diagnostics]
+dnu = "hint"
+type = "hint"
+unused = "warn"
+empty-body = "error"
+lint = "off"
+dead-assignment = "warn"
+extension-conflict = "error"
+deprecation = "warn"
+actor-new = "error"
+visibility = "error"
+unresolved-class = "warn"
+unresolved-ffi = "warn"
+arity-mismatch = "warn"
+shadowed-class = "warn"
+type-annotation = "hint"
+inheritance = "error"
+sendability = "hint"
+"#,
+        );
+
+        let manifest = parse_manifest_full(&path.join("beamtalk.toml")).unwrap();
+        assert_eq!(manifest.diagnostics.len(), 17);
+        assert_eq!(
+            manifest.diagnostics[&DiagnosticCategory::Dnu],
+            DiagnosticSeverityOverride::Hint
+        );
+        assert_eq!(
+            manifest.diagnostics[&DiagnosticCategory::UnresolvedClass],
+            DiagnosticSeverityOverride::Warn
+        );
+        assert_eq!(
+            manifest.diagnostics[&DiagnosticCategory::Lint],
+            DiagnosticSeverityOverride::Off
+        );
+        assert_eq!(
+            manifest.diagnostics[&DiagnosticCategory::Inheritance],
+            DiagnosticSeverityOverride::Error
+        );
+    }
+
+    #[test]
+    fn test_reject_diagnostics_unknown_category() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[diagnostics]
+not-a-category = "warn"
+"#,
+        );
+
+        let result = parse_manifest_full(&path.join("beamtalk.toml"));
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("unknown category"),
+            "should mention unknown category: {err}"
+        );
+    }
+
+    #[test]
+    fn test_reject_diagnostics_invalid_severity() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[diagnostics]
+dnu = "critical"
+"#,
+        );
+
+        let result = parse_manifest_full(&path.join("beamtalk.toml"));
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("invalid diagnostic severity"),
+            "should mention invalid severity: {err}"
+        );
+    }
+
+    #[test]
+    fn test_reject_diagnostics_non_string_value() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[diagnostics]
+dnu = 42
+"#,
+        );
+
+        let result = parse_manifest_full(&path.join("beamtalk.toml"));
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("severity string"),
+            "should mention expected string type: {err}"
+        );
+    }
+
+    #[test]
+    fn test_diagnostics_table_does_not_affect_other_sections() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[diagnostics]
+dnu = "error"
+"#,
+        );
+
+        let manifest = parse_manifest_full(&path.join("beamtalk.toml")).unwrap();
+        assert!(manifest.dependencies.is_empty());
+        assert!(manifest.native_dependencies.is_empty());
+        assert_eq!(manifest.diagnostics.len(), 1);
     }
 }

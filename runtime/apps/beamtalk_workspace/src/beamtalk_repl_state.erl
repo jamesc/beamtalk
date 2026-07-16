@@ -37,10 +37,14 @@ for manipulating state during REPL sessions.
     %% during active eval).
     get_pending_mutations/1,
     add_pending_mutation/2,
-    clear_pending_mutations/1
+    clear_pending_mutations/1,
+    %% ADR 0108 Phase 8 (BT-2902): session-local type alias table.
+    get_alias_table/1,
+    put_alias/3,
+    known_type_alias_sources/1
 ]).
 
--export_type([state/0, mutation/0]).
+-export_type([state/0, mutation/0, alias_entry/0]).
 
 -record(state, {
     listen_socket :: gen_tcp:socket() | undefined,
@@ -75,13 +79,39 @@ for manipulating state during REPL sessions.
     %% worker holds a state snapshot whose writeback would clobber a direct edit.
     %% Drained in the eval-exit clauses (apply_pending_mutations/2) in enqueue
     %% order — preserves insertion order (newest appended at the tail).
-    pending_mutations :: [mutation()]
+    pending_mutations :: [mutation()],
+    %% ADR 0108 Phase 8 (BT-2902): type aliases declared directly at this
+    %% session's REPL prompt (`type Name = ...`). Aliases erase entirely at
+    %% resolution time (ADR 0108 Semantics) — there is no loaded BEAM module
+    %% or process to recover them from on a later turn the way classes are
+    %% recovered via `beamtalk_runtime_api`/`beamtalk_class_registry`, so
+    %% this table is session state's own source of truth, not a cache.
+    %% Keyed by alias name; `known_type_alias_sources/1` derives the list
+    %% resent as the `known_type_aliases` request field on every subsequent
+    %% turn (`beamtalk_repl_compiler:compile_expression/4`'s
+    %% `KnownTypeAliasSources` argument).
+    alias_table :: #{binary() => alias_entry()}
 }).
 
 -type mutation() ::
     {put, atom(), term()}
     | {remove, atom(), undefined}
     | {clear, undefined, undefined}.
+
+-doc """
+A session-local type alias entry (ADR 0108 Phase 8, BT-2902).
+
+`expansion` is the alias's unparsed `TypeAnnotation` display form (e.g.
+`<<"#north | #south | #east | #west">>`), exactly as returned by the
+compiler port's `type_alias_definition` response — both what `:help`
+renders and what round-trips through `known_type_alias_sources/1` as a
+reparseable `type Name = <expansion>` line. `doc_comment` is `undefined`
+when the declaration had no `///` doc comment.
+""".
+-type alias_entry() :: #{
+    expansion := binary(),
+    doc_comment := binary() | undefined
+}.
 
 -opaque state() :: #state{}.
 
@@ -116,7 +146,8 @@ new(ListenSocket, Port, Options) ->
         actor_registry = undefined,
         module_tracker = beamtalk_repl_modules:new(),
         pending_module_removals = [],
-        pending_mutations = []
+        pending_mutations = [],
+        alias_table = #{}
     }.
 
 -doc "Get current variable bindings.".
@@ -257,3 +288,46 @@ an eval-exit path, so the shell returns to idle with an empty queue.
 -spec clear_pending_mutations(state()) -> state().
 clear_pending_mutations(State) ->
     State#state{pending_mutations = []}.
+
+-doc """
+Get the session's type alias table (ADR 0108 Phase 8, BT-2902).
+
+Keyed by alias name (binary). Consulted by the `:help <Alias>` interception
+in `beamtalk_repl_eval:do_eval/3` — see that module for why `:help` cannot
+reach this table via the ordinary `Beamtalk help: X` eval path (aliases have
+no live BEAM class/process for `beamtalk_class_registry` to resolve).
+""".
+-spec get_alias_table(state()) -> #{binary() => alias_entry()}.
+get_alias_table(#state{alias_table = AliasTable}) ->
+    AliasTable.
+
+-doc """
+Register (or redefine) a session-local type alias.
+
+BT-2902: called by `beamtalk_repl_eval:handle_type_alias_definition/3`
+after the compiler port validates a `type Name = ...` declaration.
+Redeclaring an existing name overwrites its entry — ADR 0108 Semantics
+treats a live REPL redefinition as legal (re-checking annotation sites that
+referenced the old binding is BT-2899's separate hot-reload concern, out of
+scope here).
+""".
+-spec put_alias(binary(), alias_entry(), state()) -> state().
+put_alias(Name, Entry, #state{alias_table = AliasTable} = State) ->
+    State#state{alias_table = AliasTable#{Name => Entry}}.
+
+-doc """
+Derive the `known_type_aliases` compiler-port request field: one
+reparseable `type Name = <expansion>` line per session-local alias (ADR
+0108 Phase 8, BT-2902).
+
+Deliberately omits the doc comment — round-tripping it is unnecessary
+(`known_type_aliases` only feeds `resolve_type_annotation`'s structural
+lookup, never `:help`, which reads `alias_table` directly) and would risk a
+multi-line doc comment corrupting the single-line reparse.
+""".
+-spec known_type_alias_sources(state()) -> [binary()].
+known_type_alias_sources(#state{alias_table = AliasTable}) ->
+    [
+        <<"type ", Name/binary, " = ", (maps:get(expansion, Entry))/binary>>
+     || {Name, Entry} <- maps:to_list(AliasTable)
+    ].

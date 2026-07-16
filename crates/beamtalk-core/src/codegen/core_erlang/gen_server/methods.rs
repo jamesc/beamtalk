@@ -13,12 +13,12 @@ use super::super::document::{Document, INDENT, join, leaf, line, nest};
 use super::super::selector_mangler::safe_class_method_fn_name;
 use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{
-    Block, ClassDefinition, ClassKind, Expression, Identifier, Literal, MapPair, MessageSelector,
-    MethodDefinition, MethodKind, Module, ParameterDefinition, StateDeclaration, TypeAnnotation,
-    TypeParamDecl, WellKnownSelector,
+    Block, CascadeMessage, ClassDefinition, ClassKind, Expression, Identifier, Literal, MapPair,
+    MessageSelector, MethodDefinition, MethodKind, Module, ParameterDefinition, StateDeclaration,
+    TypeAnnotation, TypeParamDecl, WellKnownSelector,
 };
 use crate::docvec;
-use crate::unparse::unparse_method_display_signature;
+use crate::unparse::{unparse_method_display_signature, unparse_type_annotation_display};
 
 /// ADR 0098 Phase 3: producing-toolchain identity baked into a module's
 /// `__beamtalk_meta/0` map so a *loaded* module is self-describing — consumers
@@ -36,6 +36,36 @@ pub(crate) struct MetaProvenance<'a> {
     pub beamtalk_version: Option<&'a str>,
     /// The producing compound OTP version (`<release>-<erts>`).
     pub otp_release: Option<&'a str>,
+}
+
+/// BT-2734: Compiler-derived `__signature__` / `__doc__` selector-map entries
+/// for a value class's auto-generated accessors, split by dispatch side.
+///
+/// Each `Vec` holds ready-to-embed `'selector' => <binary>` fragments (built by
+/// [`CoreErlangGenerator::synthetic_selector_map_entry`]). Instance-side entries
+/// feed the `methodSignatures` / `methodDocs` maps; class-side entries feed the
+/// `classMethodSignatures` / `classMethodDocs` maps (the keyword constructor).
+#[derive(Default)]
+struct SyntheticAccessorMetadata {
+    instance_sigs: Vec<Document<'static>>,
+    instance_docs: Vec<Document<'static>>,
+    class_sigs: Vec<Document<'static>>,
+    class_docs: Vec<Document<'static>>,
+}
+
+/// BT-2734: one compiler-derived accessor's readable metadata:
+/// `(selector, signature, doc)`. The pure, unit-testable intermediate produced
+/// by [`CoreErlangGenerator::synthetic_value_accessor_entries`] before it is
+/// rendered into Core Erlang `'selector' => <binary>` map fragments.
+type SyntheticAccessorEntry = (String, String, String);
+
+/// BT-2734: a value class's synthetic-accessor metadata, split by dispatch side.
+/// `instance` holds slot getters and `with*:` setters; `class` holds the keyword
+/// constructor.
+#[derive(Default)]
+struct SyntheticAccessorEntries {
+    instance: Vec<SyntheticAccessorEntry>,
+    class: Vec<SyntheticAccessorEntry>,
 }
 
 /// Collects the class names referenced by a type annotation into `out`
@@ -119,6 +149,11 @@ pub(in crate::codegen::core_erlang) enum BodyExprKind {
     DestructureAssignmentControlFlow,
     /// `var := expr` where the RHS is a Tier 2 `value:` call.
     LocalAssignTier2,
+    /// `var := [block]` where the block literal itself needs Tier 2 (captured-local
+    /// or field mutations) — BT-2797. Unlike `LocalAssignTier2` (RHS *invokes* a
+    /// Tier 2 block), here the RHS *is* the block literal being stored for later
+    /// invocation (e.g. `blk := [:x | self.total := self.total + x]`).
+    LocalAssignTier2Block,
     /// `var := expr` where the RHS is control flow with field mutations.
     LocalAssignControlFlow,
     /// `var := self method` — local assignment where RHS is a dispatching self-send.
@@ -233,6 +268,13 @@ impl CoreErlangGenerator {
 
         // BT-851: Populate tier2_block_params for this method from pre-scanned info
         self.tier2_block_params.clear();
+        // BT-2797: Reset the same-method local-var tracking. The real
+        // (re-)population happens inside generate_body_exprs_with_reply via
+        // prescan_tier2_local_vars — this clear here is belt-and-suspenders
+        // for the case where a caller inspects the field between the clear
+        // and the body being generated.
+        self.tier2_local_vars.clear();
+        self.tier2_local_var_captured_mutations.clear();
         let selector_name_for_t2 = selector_name.to_string();
         if let Some(positions) = self.tier2_method_info.get(&selector_name_for_t2).cloned() {
             for pos in &positions {
@@ -367,6 +409,300 @@ impl CoreErlangGenerator {
 
     // ── BT-1422: Unified method body state-threading ──────────────────
 
+    /// BT-2797: Pre-scans a method/block body for `var := [block]` assignments
+    /// where the block itself needs Tier 2 (captured-local or field mutations),
+    /// and populates `self.tier2_local_vars` with the ones that are *provably
+    /// safe* to promote — i.e. every later reference to `var` in this same body
+    /// is the receiver of a `value`/`value:`/`value:value:`/`value:value:value:`
+    /// send, never a bare read (return, argument, reassignment, ...).
+    ///
+    /// Only considers `var := [block]` assignments that are themselves *flat
+    /// top-level statements* of `body` — one that's nested inside e.g. an
+    /// `ifTrue:`/`do:` block argument isn't a candidate here. Such a nested
+    /// assignment still falls through to the existing
+    /// `generate_block`/`validate_stored_closure` compile-time diagnostic,
+    /// which is conservative but correct.
+    ///
+    /// **Safety invariant**: `scan_var_uses` marks *any* reference to `var`
+    /// found inside a nested `Block` literal as unsafe, even a `value:` send
+    /// that would otherwise qualify as safe. A nested block literal compiles
+    /// through a completely separate path
+    /// (`generate_block_body_slice`/`BlockExprKind` in `expressions.rs`, not
+    /// `generate_body_exprs_with_reply`/`BodyExprKind` here) that has no
+    /// Tier2-tuple-unpacking logic and never resets `tier2_local_vars` for
+    /// its own body — so a "safe-looking" `value:` call on a promoted var
+    /// found inside a nested block either leaks an unpacked
+    /// `{Result, NewState}` tuple as the inner block's return value (a Tier 1
+    /// inner block, which never resets `tier2_local_vars`) or calls a
+    /// 2-arity Tier 2 fun with only 1 argument (a Tier 2 inner block, which
+    /// resets `tier2_local_vars` for its own body and never re-adds `var`
+    /// since it isn't assigned there) — `badarity` at runtime either way.
+    /// Only a direct top-level method-body `var value:` statement is
+    /// provably safe.
+    ///
+    /// This runs as a full pre-scan (like `tier2_block_params`'s class-level
+    /// scan) rather than incrementally during codegen, specifically so that a
+    /// block which *escapes* this method unsafely (returned, stored elsewhere,
+    /// passed as an argument) is never promoted — it must keep hitting the
+    /// `generate_block`/`validate_stored_closure` compile-time diagnostic,
+    /// since no known call site would thread state through it correctly.
+    fn prescan_tier2_local_vars(&mut self, body: &[&Expression]) {
+        for (i, expr) in body.iter().enumerate() {
+            let Expression::Assignment { target, value, .. } = expr else {
+                continue;
+            };
+            let (Expression::Identifier(id), Expression::Block(block)) =
+                (target.as_ref(), value.as_ref())
+            else {
+                continue;
+            };
+            let captured_mutations = Self::captured_mutations_for_block(block);
+            let needs_tier2 = !captured_mutations.is_empty()
+                || (self.context == CodeGenContext::Actor
+                    && !block_analysis::analyze_block(block).field_writes.is_empty());
+            if !needs_tier2 {
+                continue;
+            }
+            let var_name = id.name.as_str();
+            let (has_unsafe, has_safe) = body[i + 1..]
+                .iter()
+                .map(|stmt| Self::scan_var_uses(stmt, var_name))
+                .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2));
+            // Require at least one safe use, not just the absence of unsafe
+            // ones — otherwise a variable that's never referenced again (e.g.
+            // `var := [block]` as the method's last statement, so the block
+            // value implicitly escapes as the return value) would vacuously
+            // pass "no unsafe use found" and be wrongly promoted.
+            if has_safe && !has_unsafe {
+                self.tier2_local_vars.insert(var_name.to_string());
+                // BT-2815: record which outer locals this var's block captures
+                // and mutates, so a later `value(:...)` call site — which only
+                // has the variable name, not the block AST — can still rebind
+                // them after the call (mirroring the inline-block-literal case).
+                if !captured_mutations.is_empty() {
+                    self.tier2_local_var_captured_mutations
+                        .insert(var_name.to_string(), captured_mutations);
+                }
+            }
+        }
+    }
+
+    /// BT-2808: Normalizes a `Cascade` into its true underlying receiver and the
+    /// full ordered list of messages sent to it.
+    ///
+    /// The parser (`parse_cascade`) folds the cascade's *first* message into
+    /// `Cascade.receiver` as a whole `MessageSend` — e.g. for `blk value: x;
+    /// value: y`, `receiver` is `MessageSend(blk, value:, [x])` and `messages`
+    /// holds only the remaining `value: y`. Every safety/codegen decision needs
+    /// the TRUE receiver (`blk`) and ALL messages sent to it (both `value: x`
+    /// and `value: y`), so this mirrors the same normalization
+    /// `generate_cascade` (expressions.rs) already performs for ordinary
+    /// (non-Tier-2) cascade codegen.
+    fn normalize_cascade<'a>(
+        receiver: &'a Expression,
+        messages: &'a [CascadeMessage],
+    ) -> (&'a Expression, Vec<(&'a MessageSelector, &'a [Expression])>) {
+        if let Expression::MessageSend {
+            receiver: inner,
+            selector: first_selector,
+            arguments: first_arguments,
+            ..
+        } = receiver
+        {
+            let mut all: Vec<(&MessageSelector, &[Expression])> =
+                Vec::with_capacity(messages.len() + 1);
+            all.push((first_selector, first_arguments.as_slice()));
+            for msg in messages {
+                all.push((&msg.selector, msg.arguments.as_slice()));
+            }
+            (inner.as_ref(), all)
+        } else {
+            let all: Vec<(&MessageSelector, &[Expression])> = messages
+                .iter()
+                .map(|msg| (&msg.selector, msg.arguments.as_slice()))
+                .collect();
+            (receiver, all)
+        }
+    }
+
+    /// BT-2797/BT-2808: Returns true if `selector` is a `value`/`value:`/
+    /// `value:value:`/`value:value:value:` send — the "safe" family that lets a
+    /// Tier 2 block value be invoked without escaping to a call site that
+    /// doesn't know to thread state through it.
+    fn is_safe_value_family_selector(selector: &MessageSelector) -> bool {
+        matches!(
+            selector.well_known(),
+            Some(
+                WellKnownSelector::Value
+                    | WellKnownSelector::ValueColon
+                    | WellKnownSelector::ValueValue
+                    | WellKnownSelector::ValueValueValue
+            )
+        )
+    }
+
+    /// BT-2797: Scans `expr` for references to `var_name`, returning
+    /// `(has_unsafe_use, has_safe_use)`.
+    ///
+    /// A *safe* use is the receiver of a `value`/`value:`/`value:value:`/
+    /// `value:value:value:` send. Any other reference — a bare return, an
+    /// argument to another call, a reassignment, ... — is *unsafe*, since it
+    /// would let a Tier 2 block value escape to a call site that doesn't know
+    /// to thread state through it. A variable that's *never* referenced at
+    /// all yields `(false, false)`, which the caller must treat as unsafe
+    /// (not "no unsafe use found") — see `prescan_tier2_local_vars`.
+    ///
+    /// Deliberately conservative: exhaustively matches every `Expression`
+    /// variant so a use hidden inside e.g. a map literal or string
+    /// interpolation is never silently missed. A shadowing block parameter
+    /// with the same name is *not* special-cased — that only makes this
+    /// over-conservative (a missed promotion), never unsafe.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "exhaustive match over every Expression variant, kept as one function for locality with its single caller"
+    )]
+    fn scan_var_uses(expr: &Expression, var_name: &str) -> (bool, bool) {
+        match expr {
+            Expression::Identifier(id) => (id.name == var_name, false),
+            Expression::Literal(..)
+            | Expression::ClassReference { .. }
+            | Expression::Super(_)
+            | Expression::Primitive { .. }
+            | Expression::ExpectDirective { .. }
+            | Expression::Error { .. } => (false, false),
+            Expression::Spread { name, .. } => (name.name == var_name, false),
+            Expression::FieldAccess { receiver, .. } => Self::scan_var_uses(receiver, var_name),
+            Expression::MessageSend {
+                receiver,
+                selector,
+                arguments,
+                ..
+            } => {
+                let is_safe_value_send = matches!(
+                    receiver.as_ref(),
+                    Expression::Identifier(id) if id.name == var_name
+                ) && Self::is_safe_value_family_selector(selector);
+                let (mut unsafe_, mut safe) = if is_safe_value_send {
+                    (false, true)
+                } else {
+                    Self::scan_var_uses(receiver, var_name)
+                };
+                for arg in arguments {
+                    let (u, s) = Self::scan_var_uses(arg, var_name);
+                    unsafe_ |= u;
+                    safe |= s;
+                }
+                (unsafe_, safe)
+            }
+            Expression::Block(block) => {
+                // Any reference to var_name inside a nested block literal is
+                // unsafe — see the safety invariant note on
+                // prescan_tier2_local_vars above (a nested block compiles
+                // through a completely different path with no Tier2-tuple
+                // unpacking and no tier2_local_vars reset of its own).
+                let (any_unsafe, any_safe) = block
+                    .body
+                    .iter()
+                    .map(|stmt| Self::scan_var_uses(&stmt.expression, var_name))
+                    .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2));
+                (any_unsafe || any_safe, false)
+            }
+            Expression::Assignment { target, value, .. } => {
+                let (u1, s1) = Self::scan_var_uses(target, var_name);
+                let (u2, s2) = Self::scan_var_uses(value, var_name);
+                (u1 || u2, s1 || s2)
+            }
+            Expression::DestructureAssignment { value, .. } | Expression::Return { value, .. } => {
+                Self::scan_var_uses(value, var_name)
+            }
+            Expression::Cascade {
+                receiver, messages, ..
+            } => {
+                // BT-2808: when the cascade's true underlying receiver (see
+                // `normalize_cascade`) *is* var_name itself (e.g. `blk value: x;
+                // value: y`), the generic recursive scan would hit the plain
+                // `Identifier` arm and unconditionally report it unsafe. Mirror the
+                // `MessageSend` arm's `is_safe_value_send` check instead: if EVERY
+                // message sent to that receiver (including the one folded into
+                // `receiver` by the parser) is itself a safe
+                // `value`/`value:`/`value:value:`/`value:value:value:` send, the
+                // whole cascade is as safe as a single safe value send would be.
+                let (underlying_receiver, all_messages) =
+                    Self::normalize_cascade(receiver, messages);
+                let receiver_is_var = matches!(
+                    underlying_receiver,
+                    Expression::Identifier(id) if id.name == var_name
+                );
+                let all_messages_safe_value_sends = receiver_is_var
+                    && !all_messages.is_empty()
+                    && all_messages
+                        .iter()
+                        .all(|(sel, _)| Self::is_safe_value_family_selector(sel));
+                let (mut unsafe_, mut safe) = if all_messages_safe_value_sends {
+                    (false, true)
+                } else {
+                    Self::scan_var_uses(underlying_receiver, var_name)
+                };
+                for (_, args) in &all_messages {
+                    for arg in *args {
+                        let (u, s) = Self::scan_var_uses(arg, var_name);
+                        unsafe_ |= u;
+                        safe |= s;
+                    }
+                }
+                (unsafe_, safe)
+            }
+            Expression::Parenthesized { expression, .. } => {
+                Self::scan_var_uses(expression, var_name)
+            }
+            Expression::Match { value, arms, .. } => {
+                let (mut unsafe_, mut safe) = Self::scan_var_uses(value, var_name);
+                for arm in arms {
+                    if let Some(guard) = &arm.guard {
+                        let (u, s) = Self::scan_var_uses(guard, var_name);
+                        unsafe_ |= u;
+                        safe |= s;
+                    }
+                    let (u, s) = Self::scan_var_uses(&arm.body, var_name);
+                    unsafe_ |= u;
+                    safe |= s;
+                }
+                (unsafe_, safe)
+            }
+            Expression::MapLiteral { pairs, .. } => pairs
+                .iter()
+                .map(|pair| {
+                    let (u1, s1) = Self::scan_var_uses(&pair.key, var_name);
+                    let (u2, s2) = Self::scan_var_uses(&pair.value, var_name);
+                    (u1 || u2, s1 || s2)
+                })
+                .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2)),
+            Expression::ListLiteral { elements, tail, .. } => {
+                let (mut unsafe_, mut safe) = elements
+                    .iter()
+                    .map(|e| Self::scan_var_uses(e, var_name))
+                    .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2));
+                if let Some(t) = tail {
+                    let (u, s) = Self::scan_var_uses(t, var_name);
+                    unsafe_ |= u;
+                    safe |= s;
+                }
+                (unsafe_, safe)
+            }
+            Expression::ArrayLiteral { elements, .. } => elements
+                .iter()
+                .map(|e| Self::scan_var_uses(e, var_name))
+                .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2)),
+            Expression::StringInterpolation { segments, .. } => segments
+                .iter()
+                .map(|seg| match seg {
+                    crate::ast::StringSegment::Interpolation(e) => Self::scan_var_uses(e, var_name),
+                    crate::ast::StringSegment::Literal(_) => (false, false),
+                })
+                .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2)),
+        }
+    }
+
     /// Classify a body expression for state-threading dispatch.
     ///
     /// The order of checks matters: more specific patterns (e.g. field assignment)
@@ -402,7 +738,27 @@ impl CoreErlangGenerator {
 
         // var := expr — sub-classify by RHS
         if Self::is_local_var_assignment(expr) {
-            if let Expression::Assignment { value, .. } = expr {
+            if let Expression::Assignment { target, value, .. } = expr {
+                // BT-2797: var := [block] where the block itself needs Tier 2 —
+                // stored for invocation later in this method (`blk value: x`),
+                // not invoked here. Must be classified before is_tier2_value_call
+                // (which detects the opposite shape: RHS *invoking* a Tier 2 block).
+                //
+                // Only takes this path if `tier2_local_vars` already proved (via
+                // `prescan_tier2_local_vars`, run before classification starts) that
+                // every later use of this variable in the method is a safe
+                // `value`/`value:`/etc. call. Otherwise the block may escape (be
+                // returned, passed elsewhere, reassigned) with no call site that
+                // knows to thread state through it — fall through to the plain
+                // `generate_block` path, which raises the compile-time
+                // `FieldAssignmentInUnsupportedBlock` diagnostic for that case.
+                if let (Expression::Identifier(id), Expression::Block(_)) =
+                    (target.as_ref(), value.as_ref())
+                {
+                    if self.tier2_local_vars.contains(id.name.as_str()) {
+                        return BodyExprKind::LocalAssignTier2Block;
+                    }
+                }
                 if self.is_tier2_value_call(value) {
                     return BodyExprKind::LocalAssignTier2;
                 }
@@ -479,6 +835,15 @@ impl CoreErlangGenerator {
             return Ok(docvec!["{'reply', Self, ", leaf::var(state), "}"]);
         }
 
+        // BT-2797: (Re-)populate tier2_local_vars for *this* body before
+        // classification reads it. Cleared here (not just in
+        // generate_method_dispatch) because generate_legacy_method_clause
+        // (top-level `name := [block]` workspace methods) calls into this
+        // function without clearing it first.
+        self.tier2_local_vars.clear();
+        self.tier2_local_var_captured_mutations.clear();
+        self.prescan_tier2_local_vars(body);
+
         // Phase 1: classify every expression upfront.  Classification is
         // stateless w.r.t. codegen state (state_version, variable bindings),
         // so pre-computing is safe and separates "what" from "how".
@@ -519,7 +884,7 @@ impl CoreErlangGenerator {
                             ]);
                         }
                         BodyExprKind::Tier2ValueCall => {
-                            let expr_str = self.expression_doc(value)?;
+                            let expr_str = self.generate_tier2_value_call_doc(value)?;
                             docs.push(self.emit_tuple_unpack_reply("T2Tuple", expr_str));
                         }
                         BodyExprKind::DispatchingSelfSend => {
@@ -617,7 +982,7 @@ impl CoreErlangGenerator {
                             if let Expression::FieldAccess { field, .. } = target.as_ref() {
                                 let val_var = self.fresh_temp_var("Val");
                                 let current_state = self.current_state_var();
-                                let value_str = self.expression_doc(value)?;
+                                let value_str = self.generate_field_assignment_value_doc(value)?;
                                 let new_state = self.next_state_var();
                                 docs.push(docvec![
                                     "let ",
@@ -841,7 +1206,7 @@ impl CoreErlangGenerator {
                                 .lookup_var(var_name)
                                 .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
                             let tuple_var = self.fresh_temp_var("T2Tuple");
-                            let value_str = self.expression_doc(value)?;
+                            let value_str = self.generate_tier2_value_call_doc(value)?;
                             self.bind_var(var_name, &core_var);
                             let new_state = self.next_state_var();
                             docs.push(docvec![
@@ -916,6 +1281,38 @@ impl CoreErlangGenerator {
                         self.emit_pure_reply(&mut docs);
                     }
                 }
+                // BT-2797: var := [block needing Tier 2], where prescan_tier2_local_vars
+                // already proved every later use of `var` in this body is a safe
+                // `value`/`value:`/etc. call. Generate the block via
+                // generate_block_stateful directly (bypassing generate_block's
+                // "unsupported block" rejection, which is only needed when the
+                // compiler can't prove the later invocation site is safe).
+                BodyExprKind::LocalAssignTier2Block => {
+                    if let Expression::Assignment { target, value, .. } = expr {
+                        if let (Expression::Identifier(id), Expression::Block(block)) =
+                            (target.as_ref(), value.as_ref())
+                        {
+                            let var_name = &id.name;
+                            let core_var = self
+                                .lookup_var(var_name)
+                                .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+                            let captured_mutations = Self::captured_mutations_for_block(block);
+                            let value_str =
+                                self.generate_block_stateful(block, &captured_mutations)?;
+                            self.bind_var(var_name, &core_var);
+                            docs.push(docvec![
+                                "let ",
+                                leaf::var(core_var),
+                                " = ",
+                                value_str,
+                                " in ",
+                            ]);
+                        }
+                    }
+                    if is_last {
+                        self.emit_pure_reply(&mut docs);
+                    }
+                }
                 BodyExprKind::LocalAssignPure => {
                     if let Expression::Assignment { target, value, .. } = expr {
                         if let Expression::Identifier(id) = target.as_ref() {
@@ -977,12 +1374,12 @@ impl CoreErlangGenerator {
                 }
                 BodyExprKind::Tier2ValueCall => {
                     if is_last {
-                        let expr_str = self.expression_doc(expr)?;
+                        let expr_str = self.generate_tier2_value_call_doc(expr)?;
                         docs.push(self.emit_tuple_unpack_reply("T2Tuple", expr_str));
                     } else {
                         let tuple_var = self.fresh_temp_var("T2Tuple");
                         let discard_var = self.fresh_temp_var("T2Discard");
-                        let expr_str = self.expression_doc(expr)?;
+                        let expr_str = self.generate_tier2_value_call_doc(expr)?;
                         let new_state = self.next_state_var();
                         let mut doc_parts: Vec<Document<'static>> = vec![docvec![
                             "let ",
@@ -1001,7 +1398,7 @@ impl CoreErlangGenerator {
                         ]];
 
                         // BT-1213: Extract captured local mutations from NewState
-                        if let Some(mutations) = Self::get_inline_block_captured_mutations(expr) {
+                        if let Some(mutations) = self.get_inline_block_captured_mutations(expr) {
                             for var in &mutations {
                                 let core_var = self
                                     .lookup_var(var)
@@ -1402,6 +1799,39 @@ impl CoreErlangGenerator {
                     m.doc_comment.as_ref().map(|doc| leaf::binary_lit(doc))
                 });
 
+            // BT-2734: Value-type auto-accessors (slot getters, `with*:` copy-
+            // setters, keyword constructor) are emitted by value_type_codegen with
+            // no AST `MethodDefinition`, so the selector maps above have no entry
+            // for them and their runtime `__doc__` / `__signature__` would be nil.
+            // Inject compiler-derived doc + signature entries so every reflective
+            // surface (System Browser read-only pane, `Beamtalk help:`, MCP docs)
+            // shows them uniformly — reusing the BT-2714 resolver, no new read path.
+            // A no-op for non-`Value` classes and value classes with no auto-
+            // accessors (returns empty entry lists).
+            let synth = Self::build_synthetic_value_accessor_metadata(class);
+            let method_sigs_doc = Self::extend_selector_map_doc(
+                method_sigs_doc,
+                instance_methods.is_empty(),
+                synth.instance_sigs,
+            );
+            let method_docs_doc = Self::extend_selector_map_doc(
+                method_docs_doc,
+                !instance_methods.iter().any(|m| m.doc_comment.is_some()),
+                synth.instance_docs,
+            );
+            let class_method_sigs_doc = Self::extend_selector_map_doc(
+                class_method_sigs_doc,
+                class_methods_primary.is_empty(),
+                synth.class_sigs,
+            );
+            let class_method_docs_doc = Self::extend_selector_map_doc(
+                class_method_docs_doc,
+                !class_methods_primary
+                    .iter()
+                    .any(|m| m.doc_comment.is_some()),
+                synth.class_docs,
+            );
+
             // BT-877: Detect non-constructible classes at compile time.
             // Emit `isConstructible = false` for: abstract classes, actors, and
             // classes with `new => self error: "..."`. For all others, omit the key
@@ -1553,6 +1983,166 @@ impl CoreErlangGenerator {
             }
         }
         Document::Vec(parts)
+    }
+
+    /// BT-2734: Appends pre-built `'selector' => value` entries to an existing
+    /// selector-map body document, inserting `, ` separators so the combined
+    /// interior remains a valid comma-separated `~{ ... }~` map body.
+    ///
+    /// `base_is_empty` tells the caller's own builder result — not a re-derived
+    /// count — whether `base` renders any entries, so the first appended entry
+    /// knows whether it needs a leading separator. Returns `base` unchanged when
+    /// there are no extras.
+    fn extend_selector_map_doc(
+        base: Document<'static>,
+        base_is_empty: bool,
+        extra: Vec<Document<'static>>,
+    ) -> Document<'static> {
+        if extra.is_empty() {
+            return base;
+        }
+        let mut parts: Vec<Document<'static>> = vec![base];
+        for (i, entry) in extra.into_iter().enumerate() {
+            if !base_is_empty || i > 0 {
+                parts.push(Document::Str(", "));
+            }
+            parts.push(entry);
+        }
+        Document::Vec(parts)
+    }
+
+    /// BT-2734: Builds a single `'selector' => <binary>` selector-map entry for a
+    /// compiler-derived signature or doc string. The value is a human-readable
+    /// data string (not a Core Erlang structural fragment), so it is wrapped once
+    /// in a `binary_lit` typed leaf — mirroring how the AST-driven maps embed
+    /// `unparse_method_display_signature` / `doc_comment` strings.
+    fn synthetic_selector_map_entry(selector: &str, value: &str) -> Document<'static> {
+        docvec![
+            leaf::atom(selector.to_string()),
+            " => ",
+            leaf::binary_lit(value),
+        ]
+    }
+
+    /// BT-2734: Builds the four Core Erlang selector-map entry lists for a value
+    /// class's auto-generated accessors, ready to inject into the
+    /// `methodSignatures` / `methodDocs` (instance) and
+    /// `classMethodSignatures` / `classMethodDocs` (class-side) maps.
+    ///
+    /// Value-type slot getters, `with*:` copy-setters, and the keyword constructor
+    /// are emitted by `value_type_codegen` with no AST `MethodDefinition`, so they
+    /// never reach those maps and their runtime `__doc__` / `__signature__` would
+    /// be `nil`. Wrapping [`Self::synthetic_value_accessor_entries`], this renders
+    /// each `(selector, signature, doc)` triple into `'selector' => <binary>`
+    /// entries so the synthetics carry the same self-describing metadata every
+    /// reflective surface reads (reusing the BT-2714 resolver — no new read path).
+    fn build_synthetic_value_accessor_metadata(
+        class: &ClassDefinition,
+    ) -> SyntheticAccessorMetadata {
+        let raw = Self::synthetic_value_accessor_entries(class);
+        let mut md = SyntheticAccessorMetadata::default();
+        for (selector, sig, doc) in &raw.instance {
+            md.instance_sigs
+                .push(Self::synthetic_selector_map_entry(selector, sig));
+            md.instance_docs
+                .push(Self::synthetic_selector_map_entry(selector, doc));
+        }
+        for (selector, sig, doc) in &raw.class {
+            md.class_sigs
+                .push(Self::synthetic_selector_map_entry(selector, sig));
+            md.class_docs
+                .push(Self::synthetic_selector_map_entry(selector, doc));
+        }
+        md
+    }
+
+    /// BT-2734: Computes the readable `(selector, signature, doc)` triples for a
+    /// value class's compiler-generated accessors — the pure, unit-testable core
+    /// of [`Self::build_synthetic_value_accessor_metadata`].
+    ///
+    /// The auto-accessor set and slot types come from the same sources
+    /// [`Self::build_synthetic_accessor_xref_entries`] uses:
+    /// [`compute_auto_slot_methods`] (which slots the user has *not* overridden)
+    /// and each slot's `StateDeclaration` type annotation. `instance` holds the
+    /// getters and `with*:` setters; `class` holds the keyword constructor.
+    /// Returns all-empty for non-`Value` classes and for value classes with no
+    /// auto-generated accessors.
+    fn synthetic_value_accessor_entries(class: &ClassDefinition) -> SyntheticAccessorEntries {
+        use super::super::value_type_codegen::{AutoSlotMethods, compute_auto_slot_methods};
+
+        let mut entries = SyntheticAccessorEntries::default();
+        let Some(auto) = compute_auto_slot_methods(class) else {
+            return entries;
+        };
+        let class_name = class.name.name.as_str();
+
+        // Getters: `field -> <SlotType>`. The return type is the slot's declared
+        // type (falling back to `Object` for an untyped slot).
+        for field in &auto.getters {
+            let Some(slot) = class.state.iter().find(|s| s.name.name.as_str() == field) else {
+                continue;
+            };
+            let slot_type = Self::synthetic_slot_type_display(slot);
+            entries.instance.push((
+                field.clone(),
+                format!("{field} -> {slot_type}"),
+                format!("Compiler-derived accessor. Returns the value of slot `{field}`."),
+            ));
+        }
+
+        // Setters: `withField: aValue -> <ClassName>` (returns a copy).
+        for field in &auto.setters {
+            if !class.state.iter().any(|s| s.name.name.as_str() == field) {
+                continue;
+            }
+            let with_sel = AutoSlotMethods::with_star_selector(field);
+            entries.instance.push((
+                with_sel.clone(),
+                format!("{with_sel} aValue -> {class_name}"),
+                format!(
+                    "Compiler-derived copy-setter. Returns a copy with slot `{field}` replaced."
+                ),
+            ));
+        }
+
+        // Keyword constructor (class-side): `slot0: slot0 slot1: slot1 -> <ClassName>`.
+        // The selector's keyword parts are the slot names in declaration order, so
+        // the same names serve as the display parameter names.
+        if let Some(kw_sel) = auto.keyword_constructor {
+            let sig_parts: Vec<String> = class
+                .state
+                .iter()
+                .map(|s| {
+                    let n = s.name.name.as_str();
+                    format!("{n}: {n}")
+                })
+                .collect();
+            // BT-1408: the map *key* must be the same atom the runtime dispatch and
+            // `__beamtalk_meta/0` entry use (`safe_class_method_selector` — hashed
+            // once "class_" + selector would exceed Erlang's 255-char atom limit),
+            // so a many-field Value class's keyword constructor doesn't blow the
+            // atom limit here even though it already gets hashed for dispatch.
+            // The signature/doc *text* keeps the full readable selector — it is a
+            // binary literal, not an atom, so it carries no length limit.
+            let safe_kw_sel = super::super::selector_mangler::safe_class_method_selector(&kw_sel);
+            entries.class.push((
+                safe_kw_sel,
+                format!("{} -> {class_name}", sig_parts.join(" ")),
+                format!(
+                    "Compiler-derived keyword constructor. Returns a new {class_name} from the given slot values."
+                ),
+            ));
+        }
+
+        entries
+    }
+
+    /// BT-2734: Display form of a slot's declared type for a synthetic accessor
+    /// signature, falling back to `Object` when the slot carries no annotation.
+    fn synthetic_slot_type_display(slot: &StateDeclaration) -> String {
+        slot.type_annotation
+            .as_ref()
+            .map_or_else(|| "Object".to_string(), unparse_type_annotation_display)
     }
 
     /// ADR 0087 Phase 2 (BT-2298): Builds the `method_xref` list document baked
@@ -3040,24 +3630,51 @@ impl CoreErlangGenerator {
             receiver, selector, ..
         } = expr
         {
-            let is_value_selector = match selector {
-                crate::ast::MessageSelector::Unary(name) => name == "value",
+            let (is_positional_value_selector, is_value_with_arguments) = match selector {
+                crate::ast::MessageSelector::Unary(name) => (name == "value", false),
                 crate::ast::MessageSelector::Keyword(parts) => {
                     let selector_name: String = parts.iter().map(|p| p.keyword.as_str()).collect();
-                    matches!(
-                        selector_name.as_str(),
-                        "value:" | "value:value:" | "value:value:value:"
+                    (
+                        matches!(
+                            selector_name.as_str(),
+                            "value:" | "value:value:" | "value:value:value:"
+                        ),
+                        selector_name == "valueWithArguments:",
                     )
                 }
-                crate::ast::MessageSelector::Binary(_) => false,
+                crate::ast::MessageSelector::Binary(_) => (false, false),
             };
-            if is_value_selector {
+            if is_positional_value_selector || is_value_with_arguments {
                 // BT-851: Tier 2 block parameter (variable holding a stateful block)
+                // BT-2797: or a local variable this method itself assigned a Tier 2
+                // block literal to earlier in its own body (tier2_local_vars).
                 if let Expression::Identifier(id) = receiver.as_ref() {
-                    if self.tier2_block_params.contains(id.name.as_str()) {
+                    if self.tier2_block_params.contains(id.name.as_str())
+                        || self.tier2_local_vars.contains(id.name.as_str())
+                    {
                         return true;
                     }
                 }
+                // BT-2797: `self.field value(:...)` — the field may hold a Tier 2
+                // block assigned from a different method than this call site, so
+                // it needs the runtime is_function/2 discrimination generated by
+                // generate_block_value_call_runtime_discriminated, which always
+                // returns a {Result, NewState} tuple that this call site must
+                // unpack (same as the statically-known-Tier-2 cases above).
+                // BT-2803: `valueWithArguments:` gets the same treatment via
+                // generate_block_value_with_arguments_call_runtime_discriminated.
+                if self.context == super::super::CodeGenContext::Actor
+                    && Self::is_self_field_access(receiver)
+                {
+                    return true;
+                }
+            }
+            // BT-2803: literal-block-with-mutations receivers stay scoped to the
+            // positional value/value:/... selectors — generate_block_value_inline_with_mutations
+            // binds `arguments` directly to the block's own parameters, which
+            // doesn't hold for valueWithArguments: (a single runtime list, not
+            // per-parameter positional args). Not a motivating shape for BT-2803.
+            if is_positional_value_selector {
                 // BT-1213: Inline block literal with captured mutations
                 // (e.g. [errors := errors add: #foo] value)
                 // Only in Actor/REPL context — ValueType inlines as plain value (no tuple).
@@ -3077,12 +3694,284 @@ impl CoreErlangGenerator {
                 }
             }
         }
+        // BT-2808: `blk value: x; value: y` — a cascade where every message
+        // (including the one the parser folds into `receiver` — see
+        // `normalize_cascade`) is itself a safe value-family send on a receiver
+        // that (by the same rules as the single-send case above) may hold a
+        // Tier 2 block. Each message needs the same tuple-unpacking treatment
+        // as a single Tier2ValueCall, sequenced through
+        // `generate_tier2_cascade_doc`.
+        if let Expression::Cascade {
+            receiver, messages, ..
+        } = expr
+        {
+            let (underlying_receiver, all_messages) = Self::normalize_cascade(receiver, messages);
+            let all_safe_value_sends = !all_messages.is_empty()
+                && all_messages
+                    .iter()
+                    .all(|(sel, _)| Self::is_safe_value_family_selector(sel));
+            if all_safe_value_sends {
+                if let Expression::Identifier(id) = underlying_receiver {
+                    if self.tier2_block_params.contains(id.name.as_str())
+                        || self.tier2_local_vars.contains(id.name.as_str())
+                    {
+                        return true;
+                    }
+                }
+                if self.context == super::super::CodeGenContext::Actor
+                    && Self::is_self_field_access(underlying_receiver)
+                {
+                    return true;
+                }
+            }
+        }
         false
     }
 
-    // BT-1213: Delegates to the shared implementation in expressions.rs.
-    fn get_inline_block_captured_mutations(expr: &Expression) -> Option<Vec<String>> {
+    /// BT-2880: `true` when a `match:` needs actor state threading — i.e. it
+    /// runs in Actor context and at least one arm's body either is a Tier 2
+    /// value-call (most commonly a state-mutating `[...] value` block) or is
+    /// itself a nested control-flow-with-mutations construct (`ifTrue:`/
+    /// `ifFalse:`/a nested `match:`/etc. with no `[...] value` wrapper, e.g.
+    /// `nil -> flag ifTrue: [self.x := 1]`). `generate_match` checks this once
+    /// per `match:` and, when true, compiles every arm's body to a uniform
+    /// `{Value, State}` shape so the whole expression can be unwrapped by the
+    /// same machinery as `ifTrue:`/`ifFalse:` mutations
+    /// (`control_flow_has_mutations`'s `Expression::Match` branch above — this
+    /// function is mutually recursive with it, which is what lets a nested
+    /// `match:` arm body be detected too).
+    pub(in crate::codegen::core_erlang) fn match_needs_mutation_threading(
+        &self,
+        arms: &[crate::ast::MatchArm],
+    ) -> bool {
+        self.context == super::super::CodeGenContext::Actor
+            && arms.iter().any(|arm| {
+                self.is_tier2_value_call(&arm.body) || self.control_flow_has_mutations(&arm.body)
+            })
+    }
+
+    /// BT-1213/BT-2815: Returns captured mutation variable names for a Tier 2
+    /// value-call statement (`expr` already classified/proven
+    /// `BodyExprKind::Tier2ValueCall` by `is_tier2_value_call`) whose receiver
+    /// mutates outer locals, so the caller can rebind them after the call.
+    ///
+    /// Handles both:
+    /// - An inline block literal receiver (`[block] value`/`value:`/... —
+    ///   the original BT-1213 scope), via `captured_mutations_for_block` on
+    ///   the literal directly.
+    /// - BT-2815: a NAMED `tier2_local_vars` identifier receiver (`blk value:
+    ///   x`) whose block literal was assigned earlier in the same method —
+    ///   the call site only has the identifier, not the block AST, so this
+    ///   looks up the mutations `prescan_tier2_local_vars` already recorded
+    ///   for that variable name in `tier2_local_var_captured_mutations`.
+    ///
+    /// Also handles a `Cascade` expression (`blk value: x; value: x`) by
+    /// normalizing to its true underlying receiver first — the same
+    /// receiver-shape checks then apply.
+    //
+    // BT-2797 (PR #2899 review fix): widened from private to
+    // `pub(in crate::codegen::core_erlang)` so `control_flow/conditionals.rs`
+    // can rebind captured local-var mutations for a bare `Tier2ValueCall`
+    // statement inside a conditional branch, mirroring this file's own
+    // `Tier2ValueCall` handling.
+    pub(in crate::codegen::core_erlang) fn get_inline_block_captured_mutations(
+        &self,
+        expr: &Expression,
+    ) -> Option<Vec<String>> {
+        let receiver = match expr {
+            Expression::MessageSend { receiver, .. } => receiver.as_ref(),
+            Expression::Cascade {
+                receiver, messages, ..
+            } => Self::normalize_cascade(receiver, messages).0,
+            _ => return None,
+        };
+        if let Expression::Identifier(id) = receiver {
+            if let Some(mutations) = self
+                .tier2_local_var_captured_mutations
+                .get(id.name.as_str())
+            {
+                return Some(mutations.clone());
+            }
+        }
         Self::inline_block_captured_mutations(expr)
+    }
+
+    /// BT-2797 (PR #2899 review fix): generates the `Document` for an
+    /// expression already classified as `BodyExprKind::Tier2ValueCall` or the
+    /// RHS of `BodyExprKind::LocalAssignTier2` — i.e. a `value`/`value:`/etc.
+    /// send that `is_tier2_value_call` proved needs Tier 2 tuple-unpacking
+    /// treatment.
+    ///
+    /// When the receiver is a `self.field` access, this calls
+    /// `generate_block_value_call_runtime_discriminated` directly instead of
+    /// going through the generic `expression_doc` dispatch. That function is
+    /// deliberately NOT reachable from `expression_doc` (see the matching
+    /// comment on it and in `intrinsics.rs`'s `try_generate_block_value_unary`/
+    /// `try_generate_block_value_keyword`): every call site of *this* helper
+    /// unpacks the `{Result, NewState}` tuple it returns, but an arbitrary
+    /// sub-expression reached via plain `expression_doc` would not, silently
+    /// handing the raw tuple to code expecting a plain value.
+    ///
+    /// For every other `Tier2ValueCall` shape (a `tier2_block_params`/
+    /// `tier2_local_vars` identifier receiver, or an inline literal block with
+    /// captured/field mutations), falls through to `expression_doc`, which
+    /// already handles those correctly.
+    ///
+    /// Also called from `control_flow/mod.rs`'s
+    /// `generate_local_var_assignment_in_loop` (the `is_tier2_value_call`
+    /// branch there — BT-912) for the same reason: it unpacks a
+    /// `{Result, NewState}` tuple, so it must reach the same
+    /// runtime-discriminated codegen for a `self.field` receiver.
+    ///
+    /// BT-2803: `valueWithArguments:` has no compile-time-known-Tier-2
+    /// "stateful" fast path the way `value`/`value:` do
+    /// (`generate_block_value_call_stateful`) — `is_tier2_value_call` only
+    /// ever proves a `valueWithArguments:` send needs Tier 2 handling at
+    /// all, never which arity branch statically applies, so every match
+    /// (`self.field`, `tier2_block_params`, `tier2_local_vars`) routes
+    /// through the same runtime-discriminated codegen here, unconditionally
+    /// — unlike the positional selectors' `self.field`-only special case
+    /// below.
+    pub(in crate::codegen::core_erlang) fn generate_tier2_value_call_doc(
+        &mut self,
+        expr: &Expression,
+    ) -> Result<Document<'static>> {
+        if let Expression::MessageSend {
+            receiver,
+            selector,
+            arguments,
+            ..
+        } = expr
+        {
+            if selector.name() == "valueWithArguments:" {
+                // The parser always gives a keyword message at least one
+                // argument, so `arguments` is never empty here — but fail
+                // loudly instead of silently falling through to the
+                // `self.field` positional-value: branch below, which would
+                // emit a malformed 0-arity value call for this selector.
+                let args_expr = arguments.first().ok_or_else(|| {
+                    CodeGenError::Internal(
+                        "valueWithArguments: with no argument expression".to_string(),
+                    )
+                })?;
+                return self.generate_block_value_with_arguments_call_runtime_discriminated(
+                    receiver, args_expr,
+                );
+            }
+            if self.context == CodeGenContext::Actor && Self::is_self_field_access(receiver) {
+                return self.generate_block_value_call_runtime_discriminated(
+                    receiver,
+                    arguments,
+                    &selector.name(),
+                );
+            }
+            // BT-2814: `tier2_local_vars`/`tier2_block_params` receivers must
+            // also bypass `expression_doc` below — since `try_generate_block_value_unary`/
+            // `try_generate_block_value_keyword` now intercept this same
+            // receiver shape from the generic sub-expression dispatch and
+            // (correctly, for THAT position) close the tuple down to just
+            // `Result`. Calling `generate_block_value_call_stateful` directly
+            // here, exactly like the `self.field` case above, keeps this
+            // TOP-LEVEL statement path getting the raw `{Result, NewState}`
+            // tuple its callers (`BodyExprKind::Tier2ValueCall` handling in
+            // this file, `conditionals.rs`, `control_flow/mod.rs`) unpack.
+            if let Expression::Identifier(id) = receiver.as_ref() {
+                if self.tier2_block_params.contains(id.name.as_str())
+                    || self.tier2_local_vars.contains(id.name.as_str())
+                {
+                    return self.generate_block_value_call_stateful(receiver, arguments);
+                }
+            }
+        }
+        // BT-2808: `blk value: x; value: y` — proved safe by `is_tier2_value_call`'s
+        // Cascade branch. Unlike the single-send case, `expression_doc` has no
+        // generic Tier 2 cascade handling to fall through to, so this must be
+        // generated directly regardless of receiver kind.
+        if let Expression::Cascade {
+            receiver, messages, ..
+        } = expr
+        {
+            let (underlying_receiver, all_messages) = Self::normalize_cascade(receiver, messages);
+            return self.generate_tier2_cascade_doc(underlying_receiver, &all_messages);
+        }
+        self.expression_doc(expr)
+    }
+
+    /// BT-2808: Generates a sequential Tier 2 tuple-unpacking cascade
+    /// (`blk value: x; value: y`), reached only for a `Cascade` expression that
+    /// `is_tier2_value_call` already proved is entirely safe `value`-family
+    /// sends on a receiver that may hold a Tier 2 block.
+    ///
+    /// The receiver is evaluated once per message rather than hoisted into a
+    /// single shared binding — harmless here since a `tier2_block_params`/
+    /// `tier2_local_vars`/`self.field` receiver is always a pure variable or
+    /// field read, never an expression with side effects. Each message is
+    /// generated with the *current* threaded state (via
+    /// `generate_block_value_call_stateful`/`generate_block_value_call_runtime_discriminated`,
+    /// both of which read `self.current_state_var()` internally), then its
+    /// returned `{Result, NewState}` tuple is unpacked and `NewState` becomes
+    /// the current state for the next message — mirroring the sequencing the
+    /// bare (non-cascade) `Tier2ValueCall`/`LocalAssignTier2` call sites already
+    /// use between statements.
+    ///
+    /// Matching ordinary (non-Tier-2) cascade semantics, the overall value is
+    /// the result of the LAST message. Returns a `{Result, NewState}` tuple
+    /// with that contract — callers unpack it exactly like a single
+    /// `Tier2ValueCall` (see `generate_tier2_value_call_doc`'s own callers).
+    fn generate_tier2_cascade_doc(
+        &mut self,
+        receiver: &Expression,
+        all_messages: &[(&MessageSelector, &[Expression])],
+    ) -> Result<Document<'static>> {
+        let use_runtime_discrimination =
+            self.context == CodeGenContext::Actor && Self::is_self_field_access(receiver);
+
+        let mut parts: Vec<Document<'static>> = Vec::with_capacity(all_messages.len() + 1);
+        let mut result_var: Option<String> = None;
+        let mut state_var: Option<String> = None;
+        for (selector, args) in all_messages {
+            let call_doc = if use_runtime_discrimination {
+                self.generate_block_value_call_runtime_discriminated(
+                    receiver,
+                    args,
+                    &selector.name(),
+                )?
+            } else {
+                self.generate_block_value_call_stateful(receiver, args)?
+            };
+            let tuple_var = self.fresh_temp_var("CascTuple");
+            let this_result = self.fresh_temp_var("CascResult");
+            let this_state = self.next_state_var();
+            parts.push(docvec![
+                "let ",
+                leaf::var(tuple_var.clone()),
+                " = ",
+                call_doc,
+                " in let ",
+                leaf::var(this_result.clone()),
+                " = call 'erlang':'element'(1, ",
+                leaf::var(tuple_var.clone()),
+                ") in let ",
+                leaf::var(this_state.clone()),
+                " = call 'erlang':'element'(2, ",
+                leaf::var(tuple_var),
+                ") in ",
+            ]);
+            result_var = Some(this_result);
+            state_var = Some(this_state);
+        }
+        // is_tier2_value_call requires a non-empty message list before ever
+        // routing here, so both are always populated by the loop above.
+        let result_var = result_var.expect("BT-2808: cascade must have at least one message");
+        let state_var = state_var.expect("BT-2808: cascade must have at least one message");
+        parts.push(docvec![
+            "{",
+            leaf::var(result_var),
+            ", ",
+            leaf::var(state_var),
+            "}"
+        ]);
+        Ok(Document::Vec(parts))
     }
 
     /// Checks if a control flow expression actually threads state through mutations.
@@ -3108,6 +3997,19 @@ impl CoreErlangGenerator {
         // classified as control flow with mutations (and thus unpacked + threaded)
         // rather than falling through to a plain pure local assignment.
         let expr = Self::peel_parens(expr);
+
+        // BT-2880: `match:` is a dedicated `Expression::Match` node, not a
+        // `MessageSend`, so it's otherwise invisible to this classifier — a
+        // `match:` arm body that is a state-mutating `[...] value` block would
+        // fall through to `BodyExprKind::Pure` and leak its raw `{Result,
+        // NewState}` tuple as the match's value. `generate_match` threads state
+        // through every arm (see `match_needs_mutation_threading`) whenever any
+        // arm needs it, so route it through the same tuple-unwrap machinery as
+        // `ifTrue:`/`ifFalse:`.
+        if let Expression::Match { arms, .. } = expr {
+            return self.match_needs_mutation_threading(arms);
+        }
+
         let Expression::MessageSend {
             receiver,
             arguments,
@@ -3860,8 +4762,8 @@ impl CoreErlangGenerator {
 mod tests {
     use super::{MetaProvenance, MetaTypeRepr, extract_package_from_module_name};
     use crate::ast::{
-        ClassDefinition, ClassKind, Expression, ExpressionStatement, Identifier, Literal,
-        MessageSelector, MethodDefinition, Module, TypeParamDecl,
+        ClassDefinition, ClassKind, Expression, ExpressionStatement, Identifier, KeywordPart,
+        Literal, MessageSelector, MethodDefinition, Module, ParameterDefinition, TypeParamDecl,
     };
     use crate::codegen::core_erlang::CoreErlangGenerator;
     use crate::source_analysis::Span;
@@ -3891,6 +4793,7 @@ mod tests {
             classes: vec![],
             method_definitions: Vec::new(),
             protocols: Vec::new(),
+            type_aliases: Vec::new(),
             expressions: Vec::new(),
             span: s(),
             file_leading_comments: vec![],
@@ -3911,6 +4814,7 @@ mod tests {
             classes: vec![make_actor_class("Counter")],
             method_definitions: Vec::new(),
             protocols: Vec::new(),
+            type_aliases: Vec::new(),
             expressions: Vec::new(),
             span: s(),
             file_leading_comments: vec![],
@@ -4129,6 +5033,7 @@ mod tests {
             classes: vec![class],
             method_definitions: Vec::new(),
             protocols: vec![],
+            type_aliases: Vec::new(),
             expressions: Vec::new(),
             span: s(),
             file_leading_comments: vec![],
@@ -4155,6 +5060,7 @@ mod tests {
             classes: vec![class],
             method_definitions: Vec::new(),
             protocols: vec![],
+            type_aliases: Vec::new(),
             expressions: Vec::new(),
             span: s(),
             file_leading_comments: vec![],
@@ -4263,6 +5169,7 @@ mod tests {
             classes: vec![class],
             method_definitions: Vec::new(),
             protocols: vec![],
+            type_aliases: Vec::new(),
             expressions: Vec::new(),
             span: s(),
             file_leading_comments: vec![],
@@ -4290,6 +5197,7 @@ mod tests {
             classes: vec![class],
             method_definitions: Vec::new(),
             protocols: vec![],
+            type_aliases: Vec::new(),
             expressions: Vec::new(),
             span: s(),
             file_leading_comments: vec![],
@@ -4317,6 +5225,7 @@ mod tests {
             classes: vec![class],
             method_definitions: Vec::new(),
             protocols: vec![],
+            type_aliases: Vec::new(),
             expressions: Vec::new(),
             span: s(),
             file_leading_comments: vec![],
@@ -4344,6 +5253,7 @@ mod tests {
             classes: vec![class],
             method_definitions: Vec::new(),
             protocols: vec![],
+            type_aliases: Vec::new(),
             expressions: Vec::new(),
             span: s(),
             file_leading_comments: vec![],
@@ -4372,6 +5282,7 @@ mod tests {
             classes: vec![class],
             method_definitions: Vec::new(),
             protocols: vec![],
+            type_aliases: Vec::new(),
             expressions: Vec::new(),
             span: s(),
             file_leading_comments: vec![],
@@ -4417,6 +5328,7 @@ mod tests {
             classes: vec![class],
             method_definitions: Vec::new(),
             protocols: vec![],
+            type_aliases: Vec::new(),
             expressions: Vec::new(),
             span: s(),
             file_leading_comments: vec![],
@@ -4445,6 +5357,7 @@ mod tests {
             classes: vec![class],
             method_definitions: Vec::new(),
             protocols: vec![],
+            type_aliases: Vec::new(),
             expressions: Vec::new(),
             span: s(),
             file_leading_comments: vec![],
@@ -4498,6 +5411,189 @@ mod tests {
         assert!(
             output.contains("'visibility' => 'internal'"),
             "internal method should have visibility 'internal'. Got: {output}"
+        );
+    }
+
+    // ── BT-2734: synthetic value-accessor doc / signature metadata ──
+
+    use crate::ast::{DeclaredKeyword, StateDeclaration};
+
+    fn slot(name: &str, ty: Option<&str>) -> StateDeclaration {
+        StateDeclaration {
+            name: Identifier::new(name, s()),
+            type_annotation: ty.map(|t| TypeAnnotation::Simple(Identifier::new(t, s()))),
+            default_value: None,
+            expect: None,
+            comments: crate::ast::CommentAttachment::default(),
+            doc_comment: None,
+            declared_keyword: DeclaredKeyword::default(),
+            span: s(),
+        }
+    }
+
+    fn value_class(name: &str, slots: Vec<StateDeclaration>) -> ClassDefinition {
+        ClassDefinition::new(
+            Identifier::new(name, s()),
+            Identifier::new("Value", s()),
+            slots,
+            vec![],
+            s(),
+        )
+    }
+
+    fn find_entry<'a>(
+        entries: &'a [super::SyntheticAccessorEntry],
+        selector: &str,
+    ) -> &'a super::SyntheticAccessorEntry {
+        entries
+            .iter()
+            .find(|(sel, _, _)| sel == selector)
+            .unwrap_or_else(|| panic!("no synthetic entry for {selector}"))
+    }
+
+    #[test]
+    fn test_synthetic_getter_signature_and_doc() {
+        let class = value_class("Point", vec![slot("x", Some("Integer"))]);
+        let entries = CoreErlangGenerator::synthetic_value_accessor_entries(&class);
+        let (_, sig, doc) = find_entry(&entries.instance, "x");
+        assert_eq!(sig, "x -> Integer");
+        assert_eq!(
+            doc,
+            "Compiler-derived accessor. Returns the value of slot `x`."
+        );
+    }
+
+    #[test]
+    fn test_synthetic_setter_signature_and_doc() {
+        let class = value_class("Point", vec![slot("x", Some("Integer"))]);
+        let entries = CoreErlangGenerator::synthetic_value_accessor_entries(&class);
+        let (_, sig, doc) = find_entry(&entries.instance, "withX:");
+        assert_eq!(sig, "withX: aValue -> Point");
+        assert_eq!(
+            doc,
+            "Compiler-derived copy-setter. Returns a copy with slot `x` replaced."
+        );
+    }
+
+    #[test]
+    fn test_synthetic_keyword_constructor_is_class_side() {
+        let class = value_class(
+            "Point",
+            vec![slot("x", Some("Integer")), slot("y", Some("Integer"))],
+        );
+        let entries = CoreErlangGenerator::synthetic_value_accessor_entries(&class);
+        assert_eq!(entries.class.len(), 1, "one keyword constructor entry");
+        let (sel, sig, doc) = &entries.class[0];
+        assert_eq!(sel, "x:y:");
+        assert_eq!(sig, "x: x y: y -> Point");
+        assert_eq!(
+            doc,
+            "Compiler-derived keyword constructor. Returns a new Point from the given slot values."
+        );
+    }
+
+    #[test]
+    fn test_synthetic_keyword_constructor_long_selector_is_hashed() {
+        // Regression guard alongside BT-1408's `value_many_fields.bt` fixture: a
+        // Value class with enough long field names that the raw keyword-
+        // constructor selector exceeds Erlang's 255-char atom limit must not
+        // surface that raw selector as a `classMethodSignatures`/
+        // `classMethodDocs` map *key* atom (it would blow the limit exactly like
+        // the dispatch function name did before BT-1408). The key must match
+        // `safe_class_method_selector`, the same hash the runtime meta entry and
+        // dispatch already use for this selector — the doc/signature *text* still
+        // carries the full readable field names since it is a binary, not atom.
+        let long_field = "a".repeat(60);
+        let field_names: Vec<String> = (0..5).map(|i| format!("{long_field}{i}")).collect();
+        let slots: Vec<StateDeclaration> = field_names
+            .iter()
+            .map(|n| slot(n, Some("Integer")))
+            .collect();
+        let class = value_class("Big", slots);
+        let entries = CoreErlangGenerator::synthetic_value_accessor_entries(&class);
+        assert_eq!(entries.class.len(), 1, "one keyword constructor entry");
+        let (sel, sig, _doc) = &entries.class[0];
+        assert!(
+            sel.len() <= 255,
+            "keyword constructor map key must stay within the atom limit, got {} bytes",
+            sel.len()
+        );
+        let raw_kw_sel = crate::synthetic_selectors::keyword_constructor_selector(
+            field_names.iter().map(String::as_str),
+        );
+        assert_eq!(
+            *sel,
+            crate::codegen::core_erlang::selector_mangler::safe_class_method_selector(&raw_kw_sel),
+            "map key must match the same hash the runtime meta entry/dispatch use"
+        );
+        // The signature text keeps the full readable field names (a binary, not
+        // an atom, so it carries no length limit).
+        assert!(sig.contains(&format!("{long_field}0")));
+    }
+
+    #[test]
+    fn test_synthetic_untyped_slot_falls_back_to_object() {
+        let class = value_class("Box", vec![slot("v", None)]);
+        let entries = CoreErlangGenerator::synthetic_value_accessor_entries(&class);
+        let (_, sig, _) = find_entry(&entries.instance, "v");
+        assert_eq!(sig, "v -> Object");
+    }
+
+    #[test]
+    fn test_synthetic_entries_empty_for_non_value_class() {
+        let class = make_actor_class("Counter");
+        let entries = CoreErlangGenerator::synthetic_value_accessor_entries(&class);
+        assert!(
+            entries.instance.is_empty() && entries.class.is_empty(),
+            "actor classes get no synthetic value accessors"
+        );
+    }
+
+    #[test]
+    fn test_synthetic_skips_user_overridden_getter() {
+        // A user-defined `x` getter shadows the auto getter, but the auto
+        // `withX:` copy-setter is still synthesized.
+        let mut class = value_class("Point", vec![slot("x", Some("Integer"))]);
+        class.methods.push(simple_unary_method("x"));
+        let entries = CoreErlangGenerator::synthetic_value_accessor_entries(&class);
+        assert!(
+            entries.instance.iter().all(|(sel, _, _)| sel != "x"),
+            "user-defined getter must not be re-synthesized"
+        );
+        assert!(
+            entries.instance.iter().any(|(sel, _, _)| sel == "withX:"),
+            "the copy-setter is still auto-generated"
+        );
+    }
+
+    #[test]
+    fn test_synthetic_skips_user_overridden_keyword_constructor() {
+        // A user-defined `x:y:` class-side method shadows the auto keyword
+        // constructor, so no synthetic class-side entry is injected.
+        let mut class = value_class(
+            "Point",
+            vec![slot("x", Some("Integer")), slot("y", Some("Integer"))],
+        );
+        class.class_methods.push({
+            let mut m = MethodDefinition::new(
+                MessageSelector::Keyword(vec![
+                    KeywordPart::new("x:", s()),
+                    KeywordPart::new("y:", s()),
+                ]),
+                vec![
+                    ParameterDefinition::new(Identifier::new("x", s())),
+                    ParameterDefinition::new(Identifier::new("y", s())),
+                ],
+                vec![bare(Expression::Literal(Literal::Integer(42), s()))],
+                s(),
+            );
+            m.is_class_method = true;
+            m
+        });
+        let entries = CoreErlangGenerator::synthetic_value_accessor_entries(&class);
+        assert!(
+            entries.class.is_empty(),
+            "user-defined keyword constructor must suppress the synthetic class-side entry"
         );
     }
 }

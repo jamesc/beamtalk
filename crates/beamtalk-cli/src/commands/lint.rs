@@ -43,6 +43,9 @@ fn collect_diagnostics(
     native_type_registry: Option<
         std::sync::Arc<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,
     >,
+    knowledge_scope: beamtalk_core::semantic_analysis::KnowledgeScope,
+    cross_file_extensions: &beamtalk_core::compilation::extension_index::ExtensionIndex,
+    has_package_dependencies: bool,
 ) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
     // Collect parser-level lint diagnostics (e.g. unnecessary `.` — BT-948)
     // plus AST-level lint passes.
@@ -67,11 +70,17 @@ fn collect_diagnostics(
     // FFI call falls back to `Dynamic(UntypedFfi)` and lint emits a
     // "Dynamic in typed class" warning that build does not — leaving the user
     // with no `@expect` configuration that satisfies both passes.
-    let analysis_result = beamtalk_core::semantic_analysis::analyse_with_natives(
+    let options = beamtalk_core::CompilerOptions {
+        knowledge_scope,
+        has_package_dependencies,
+        ..Default::default()
+    };
+    let analysis_result = beamtalk_core::semantic_analysis::analyse_with_natives_and_extensions(
         module,
-        &beamtalk_core::CompilerOptions::default(),
+        &options,
         cross_file_classes,
         native_type_registry,
+        cross_file_extensions,
     );
     lint_diags.extend(
         analysis_result
@@ -106,29 +115,48 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
     // visible. Otherwise a test file that references a `src/` class produces
     // spurious `Unresolved class` diagnostics.
     let package_root = find_package_root(&source_path);
-    let (mut all_class_infos, parsed_files) =
+    let (mut all_class_infos, extension_index, parsed_files) =
         parse_and_extract_class_infos(&source_files, package_root.as_deref())?;
 
     // Resolve dependency class metadata so lint sees the same class hierarchy
     // as build. Without this, @expect annotations that suppress real cross-package
     // diagnostics would be reported as stale.
-    if let Some(ref project_root) = package_root {
-        resolve_dep_class_infos(project_root, &mut all_class_infos);
-    }
+    let has_package_dependencies = if let Some(ref project_root) = package_root {
+        resolve_dep_class_infos(project_root, &mut all_class_infos)
+    } else {
+        false
+    };
 
-    // BT-2134: Load the FFI type registry from `_build/type_cache/` so lint
-    // sees Erlang FFI return types the same way build does. The cache is
-    // populated by `beamtalk build`; if it's missing, lint falls back to no
-    // registry (matching the previous behaviour for projects that have never
-    // been built).
+    // BT-2134 / BT-2851: Populate the FFI type registry via the same
+    // `extract_type_specs` that `beamtalk build` calls, instead of only
+    // reading whatever `_build/type_cache/` happens to hold. Reading a cache
+    // written by a *previous* build let lint's view of FFI types drift from
+    // build's live view — on a project that had never been built, lint's
+    // cache read silently returned `None` (skipping FFI arg-type checks
+    // build performs), and any `@expect type` written to suppress a real
+    // build-time FFI diagnostic was then flagged as stale by lint. Calling
+    // the shared extractor directly makes `beamtalk lint` and `beamtalk
+    // build`/`test` agree on the FFI type registry by construction: a fresh
+    // cache still short-circuits to zero `.beam` reads, and a cold/stale one
+    // extracts once and writes the same cache a subsequent build would.
     let native_type_registry = package_root.as_deref().and_then(|root| {
-        let cache_dir = root.join("_build").join("type_cache");
-        crate::beam_compiler::load_type_cache_registry(&cache_dir).map(std::sync::Arc::new)
+        let layout = crate::commands::build_layout::BuildLayout::new(root);
+        super::build::extract_type_specs(&layout, true, false).map(std::sync::Arc::new)
     });
 
     // Pass 2: Analyse each file with cross-file class context.
     let mut total_lint_count = 0usize;
     let mut all_diags: Vec<beamtalk_core::source_analysis::Diagnostic> = Vec::new();
+
+    // BT-2796: With a package root, Pass 1 walked the full package source set
+    // (BT-2027), so the injected knowledge is project-complete. Without one
+    // (a bare file outside any package), only the targeted files were parsed
+    // — keep the conservative `ModuleOnly` default.
+    let knowledge_scope = if package_root.is_some() {
+        beamtalk_core::semantic_analysis::KnowledgeScope::ProjectComplete
+    } else {
+        beamtalk_core::semantic_analysis::KnowledgeScope::ModuleOnly
+    };
 
     for (file, source, module, parse_diags) in parsed_files {
         let cross_file_classes =
@@ -142,6 +170,9 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
             parse_diags,
             cross_file_classes,
             native_type_registry.clone(),
+            knowledge_scope,
+            &extension_index,
+            has_package_dependencies,
         );
 
         for diag in &lint_diags {
@@ -390,6 +421,7 @@ fn parse_and_extract_class_infos(
     package_root: Option<&Utf8Path>,
 ) -> Result<(
     Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    beamtalk_core::compilation::extension_index::ExtensionIndex,
     Vec<ParsedLintFile>,
 )> {
     let extraction_files = match package_root {
@@ -406,6 +438,7 @@ fn parse_and_extract_class_infos(
         .map(|p| canonicalize_or_clone(p))
         .collect();
     let mut all_class_infos = Vec::new();
+    let mut extension_index = beamtalk_core::compilation::extension_index::ExtensionIndex::new();
     let mut parsed_files: Vec<ParsedLintFile> = Vec::new();
 
     for file in &extraction_files {
@@ -416,15 +449,31 @@ fn parse_and_extract_class_infos(
         let tokens = lex_with_eof(&source);
         let (module, parse_diags) = parse(tokens);
 
-        all_class_infos
-            .extend(beamtalk_core::semantic_analysis::ClassHierarchy::extract_class_infos(&module));
+        // BT-2796: A file with parse errors may have an under-recovered
+        // method surface — mark its classes so the receiver-knowledge
+        // classifier treats them (and their subclasses) as `Open` rather
+        // than emitting hints against a surface extraction never fully saw.
+        let has_parse_errors = parse_diags.iter().any(|d| d.severity == Severity::Error);
+        let mut class_infos =
+            beamtalk_core::semantic_analysis::ClassHierarchy::extract_class_infos(&module);
+        if has_parse_errors {
+            for info in &mut class_infos {
+                info.surface_incomplete = true;
+            }
+        }
+        all_class_infos.extend(class_infos);
+
+        // BT-2795: Collect standalone extensions package-wide so cross-file
+        // `ClassName >> selector` definitions resolve during lint the same
+        // way they do during build.
+        extension_index.add_module(&module, file.as_std_path());
 
         if source_file_set.contains(&canonicalize_or_clone(file)) {
             parsed_files.push((file.clone(), source, module, parse_diags));
         }
     }
 
-    Ok((all_class_infos, parsed_files))
+    Ok((all_class_infos, extension_index, parsed_files))
 }
 
 /// Walk ancestors from the given path to find the package root (containing `beamtalk.toml`).
@@ -446,13 +495,30 @@ pub(crate) fn find_package_root(start: &Utf8Path) -> Option<Utf8PathBuf> {
 ///
 /// Best-effort: if dependency resolution fails (e.g. network error for a git
 /// dep), lint continues without dep classes rather than failing entirely.
+/// Returns whether the package *declares* dependencies (BT-2794), read from
+/// the manifest rather than the resolution outcome so that a transient
+/// resolution failure (network, git) cannot flip diagnostic behaviour
+/// between runs. Conservatively true when the manifest cannot be parsed.
 fn resolve_dep_class_infos(
     project_root: &Utf8Path,
     all_class_infos: &mut Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
-) {
-    if !project_root.join("beamtalk.toml").exists() {
-        return;
+) -> bool {
+    let manifest_path = project_root.join("beamtalk.toml");
+    if !manifest_path.exists() {
+        return false;
     }
+
+    let has_package_dependencies = match super::manifest::parse_manifest_full(&manifest_path) {
+        Ok(manifest) => !manifest.dependencies.is_empty(),
+        Err(e) => {
+            warn!(
+                error = %e,
+                "Failed to parse beamtalk.toml for lint; \
+                 conservatively assuming dependencies are declared"
+            );
+            true
+        }
+    };
 
     let options = beamtalk_core::CompilerOptions::default();
     match super::deps::ensure_deps_resolved(project_root, &options) {
@@ -469,6 +535,8 @@ fn resolve_dep_class_infos(
             );
         }
     }
+
+    has_package_dependencies
 }
 
 /// Output format for lint diagnostics.
@@ -536,7 +604,15 @@ pub(crate) fn diagnostic_summary_to_json(
 fn collect_lint_diagnostics(source: &str) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
     let tokens = lex_with_eof(source);
     let (module, parse_diags) = parse(tokens);
-    collect_diagnostics(&module, parse_diags, vec![], None)
+    collect_diagnostics(
+        &module,
+        parse_diags,
+        vec![],
+        None,
+        beamtalk_core::semantic_analysis::KnowledgeScope::default(),
+        &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
+        false,
+    )
 }
 
 #[cfg(test)]
@@ -621,7 +697,15 @@ mod tests {
 ";
         let tokens = lex_with_eof(test_source);
         let (module, parse_diags) = parse(tokens);
-        let diags = collect_diagnostics(&module, parse_diags, cross_file_classes, None);
+        let diags = collect_diagnostics(
+            &module,
+            parse_diags,
+            cross_file_classes,
+            None,
+            beamtalk_core::semantic_analysis::KnowledgeScope::default(),
+            &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
+            false,
+        );
         let stale = diags.iter().any(|d| d.message.contains("stale @expect"));
         assert!(
             !stale,
@@ -812,7 +896,15 @@ mod tests {
                 &all_class_infos,
                 &module,
             );
-        let diags = collect_diagnostics(&module, parse_diags, cross_file_classes, None);
+        let diags = collect_diagnostics(
+            &module,
+            parse_diags,
+            cross_file_classes,
+            None,
+            beamtalk_core::semantic_analysis::KnowledgeScope::default(),
+            &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
+            false,
+        );
 
         let unresolved: Vec<_> = diags
             .iter()
@@ -910,7 +1002,15 @@ mod tests {
 "#;
         let tokens = lex_with_eof(source);
         let (module, parse_diags) = parse(tokens);
-        let diags = collect_diagnostics(&module, parse_diags, vec![], None);
+        let diags = collect_diagnostics(
+            &module,
+            parse_diags,
+            vec![],
+            None,
+            beamtalk_core::semantic_analysis::KnowledgeScope::default(),
+            &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
+            false,
+        );
 
         let has_untyped_ffi = diags.iter().any(|d| d.message.contains("untyped FFI"));
         assert!(
@@ -954,6 +1054,9 @@ mod tests {
             parse_diags,
             vec![],
             Some(std::sync::Arc::new(registry)),
+            beamtalk_core::semantic_analysis::KnowledgeScope::default(),
+            &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
+            false,
         );
 
         let untyped_ffi: Vec<_> = diags
@@ -963,6 +1066,64 @@ mod tests {
         assert!(
             untyped_ffi.is_empty(),
             "with registry, lint must not warn untyped FFI; got: {untyped_ffi:?}"
+        );
+    }
+
+    /// BT-2851: `run_lint` now populates its native-type registry via
+    /// `super::build::extract_type_specs` — the exact function `beamtalk
+    /// build` calls — instead of only reading `_build/type_cache/`. On a
+    /// project that has never been built (no cache directory at all), the
+    /// old cache-only read silently returned `None`, so lint skipped FFI
+    /// arg-type checks that build performs; an `@expect type` written for
+    /// the resulting build-time diagnostic was then reported as stale by
+    /// lint. Calling the shared extractor makes lint see the same registry
+    /// build would, with no prior build required — this test drives that
+    /// extractor exactly as `run_lint` does and confirms `@expect type` on
+    /// a genuine FFI arg-type mismatch is not stale.
+    #[test]
+    fn lint_extracts_type_specs_live_on_cold_cache_bt_2851() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = camino::Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let layout = crate::commands::build_layout::BuildLayout::new(&root);
+
+        // No `_build/` directory exists yet — the cold-cache case.
+        assert!(!layout.type_cache_dir().exists());
+
+        let Some(registry) = crate::commands::build::extract_type_specs(&layout, true, false)
+        else {
+            // OTP `.beam` discovery is environment-dependent (e.g. a sandbox
+            // with no OTP install on disk); skip rather than false-fail.
+            eprintln!(
+                "skipping lint_extracts_type_specs_live_on_cold_cache_bt_2851: \
+                 no OTP .beam files discovered in this environment"
+            );
+            return;
+        };
+        assert!(
+            registry.lookup("lists", "reverse", 1).is_some(),
+            "live extraction with no prior build must still find lists:reverse/1"
+        );
+        // The extractor writes the same cache a `beamtalk build` would, so a
+        // subsequent lint or build run reads it back instead of re-extracting.
+        assert!(layout.type_cache_dir().exists());
+
+        let source = "Object subclass: LintFfiColdCacheTest\n\n  @expect type\n  class badCall => Erlang lists reverse: 42\n";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let diags = collect_diagnostics(
+            &module,
+            parse_diags,
+            vec![],
+            Some(std::sync::Arc::new(registry)),
+            beamtalk_core::semantic_analysis::KnowledgeScope::default(),
+            &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
+            false,
+        );
+        let stale = diags.iter().any(|d| d.message.contains("stale @expect"));
+        assert!(
+            !stale,
+            "@expect type suppressing a genuine cold-cache FFI arg-type \
+             mismatch must not be reported as stale by lint, got: {diags:?}"
         );
     }
 
@@ -982,7 +1143,13 @@ mod tests {
         // Real cache entry — 16-hex hash matches `TypeCache::cache_path`.
         std::fs::write(
             cache_dir.join("gen_tcp_0123456789abcdef.json").as_std_path(),
-            r#"{"beam_mtime_secs":0,"beam_mtime_nanos":0,"specs_line":"beamtalk-specs-module:gen_tcp:[#{arity => 2,line => 1,name => <<\"connect\">>,params => [#{name => <<\"sockaddr\">>,type => <<\"Symbol\">>},#{name => <<\"port\">>,type => <<\"Integer\">>}],return_type => <<\"Result(Dynamic | Tuple, Symbol)\">>}]"}"#,
+            serde_json::json!({
+                "beam_mtime_secs": 0,
+                "beam_mtime_nanos": 0,
+                "mapping_stamp": crate::beam_compiler::current_spec_mapping_stamp(),
+                "specs_line": r#"beamtalk-specs-module:gen_tcp:[#{arity => 2,line => 1,name => <<"connect">>,params => [#{name => <<"sockaddr">>,type => <<"Symbol">>},#{name => <<"port">>,type => <<"Integer">>}],return_type => <<"Result(Dynamic | Tuple, Symbol)">>}]"#,
+            })
+            .to_string(),
         )
         .unwrap();
         // Foreign files that must be ignored: wrong extension, missing hash,
@@ -1042,7 +1209,13 @@ mod tests {
         let stale_path = cache_dir.join("gen_tcp_aaaaaaaaaaaaaaaa.json");
         std::fs::write(
             stale_path.as_std_path(),
-            r#"{"beam_mtime_secs":0,"beam_mtime_nanos":0,"specs_line":"beamtalk-specs-module:gen_tcp:[#{arity => 2,line => 1,name => <<\"connect\">>,params => [#{name => <<\"sockaddr\">>,type => <<\"Symbol\">>},#{name => <<\"port\">>,type => <<\"Integer\">>}],return_type => <<\"Symbol\">>}]"}"#,
+            serde_json::json!({
+                "beam_mtime_secs": 0,
+                "beam_mtime_nanos": 0,
+                "mapping_stamp": crate::beam_compiler::current_spec_mapping_stamp(),
+                "specs_line": r#"beamtalk-specs-module:gen_tcp:[#{arity => 2,line => 1,name => <<"connect">>,params => [#{name => <<"sockaddr">>,type => <<"Symbol">>},#{name => <<"port">>,type => <<"Integer">>}],return_type => <<"Symbol">>}]"#,
+            })
+            .to_string(),
         )
         .unwrap();
         // Force the stale entry's mtime backwards so the latest-mtime test
@@ -1060,7 +1233,13 @@ mod tests {
             cache_dir
                 .join("gen_tcp_bbbbbbbbbbbbbbbb.json")
                 .as_std_path(),
-            r#"{"beam_mtime_secs":1,"beam_mtime_nanos":0,"specs_line":"beamtalk-specs-module:gen_tcp:[#{arity => 2,line => 1,name => <<\"connect\">>,params => [#{name => <<\"sockaddr\">>,type => <<\"Symbol\">>},#{name => <<\"port\">>,type => <<\"Integer\">>}],return_type => <<\"Result(Dynamic | Tuple, Symbol)\">>}]"}"#,
+            serde_json::json!({
+                "beam_mtime_secs": 1,
+                "beam_mtime_nanos": 0,
+                "mapping_stamp": crate::beam_compiler::current_spec_mapping_stamp(),
+                "specs_line": r#"beamtalk-specs-module:gen_tcp:[#{arity => 2,line => 1,name => <<"connect">>,params => [#{name => <<"sockaddr">>,type => <<"Symbol">>},#{name => <<"port">>,type => <<"Integer">>}],return_type => <<"Result(Dynamic | Tuple, Symbol)">>}]"#,
+            })
+            .to_string(),
         )
         .unwrap();
 
@@ -1109,6 +1288,7 @@ mod tests {
             "beam_mtime_secs": stale_secs,
             "beam_mtime_nanos": 0,
             "beam_path": beam_path.to_str().unwrap(),
+            "mapping_stamp": crate::beam_compiler::current_spec_mapping_stamp(),
             "specs_line": r#"beamtalk-specs-module:gen_tcp:[#{arity => 2,line => 1,name => <<"connect">>,params => [#{name => <<"sockaddr">>,type => <<"Symbol">>},#{name => <<"port">>,type => <<"Integer">>}],return_type => <<"Symbol">>}]"#,
         })
         .to_string();
@@ -1144,6 +1324,7 @@ mod tests {
             "beam_mtime_secs": 1,
             "beam_mtime_nanos": 0,
             "beam_path": missing_beam.to_str().unwrap(),
+            "mapping_stamp": crate::beam_compiler::current_spec_mapping_stamp(),
             "specs_line": r#"beamtalk-specs-module:gen_tcp:[#{arity => 1,line => 1,name => <<"close">>,params => [#{name => <<"sock">>,type => <<"Object">>}],return_type => <<"Symbol">>}]"#,
         })
         .to_string();
@@ -1165,6 +1346,11 @@ mod tests {
     /// `beam_path`. Those must continue to load — pessimistically treated as
     /// fresh — so a `lint` immediately after upgrading does not blank out
     /// every FFI signature until the user re-runs `build`.
+    ///
+    /// This entry does carry a current `mapping_stamp` (BT-2852) so the test
+    /// isolates the `beam_path` leniency behaviour; see
+    /// `load_type_cache_registry_skips_entry_when_mapping_stamp_missing` for
+    /// the case where the stamp itself is absent.
     #[test]
     fn load_type_cache_registry_loads_legacy_entry_without_beam_path() {
         use crate::beam_compiler::load_type_cache_registry;
@@ -1176,7 +1362,13 @@ mod tests {
         // No `beam_path` field at all — what BT-2134 wrote.
         std::fs::write(
             cache_dir.join("gen_tcp_0123456789abcdef.json").as_std_path(),
-            r#"{"beam_mtime_secs":0,"beam_mtime_nanos":0,"specs_line":"beamtalk-specs-module:gen_tcp:[#{arity => 2,line => 1,name => <<\"connect\">>,params => [#{name => <<\"sockaddr\">>,type => <<\"Symbol\">>},#{name => <<\"port\">>,type => <<\"Integer\">>}],return_type => <<\"Result(Dynamic | Tuple, Symbol)\">>}]"}"#,
+            serde_json::json!({
+                "beam_mtime_secs": 0,
+                "beam_mtime_nanos": 0,
+                "mapping_stamp": crate::beam_compiler::current_spec_mapping_stamp(),
+                "specs_line": r#"beamtalk-specs-module:gen_tcp:[#{arity => 2,line => 1,name => <<"connect">>,params => [#{name => <<"sockaddr">>,type => <<"Symbol">>},#{name => <<"port">>,type => <<"Integer">>}],return_type => <<"Result(Dynamic | Tuple, Symbol)">>}]"#,
+            })
+            .to_string(),
         )
         .unwrap();
 
@@ -1184,6 +1376,63 @@ mod tests {
         assert!(
             registry.lookup("gen_tcp", "connect", 2).is_some(),
             "legacy entry without beam_path must be tolerated as fresh"
+        );
+    }
+
+    /// BT-2852: An entry written by a `beamtalk` build *before* this feature
+    /// shipped has no `mapping_stamp` field at all (the default, empty
+    /// string). It must be treated as a graceful cache miss — not a crash —
+    /// even though its `.beam` mtime and (absent) `beam_path` would otherwise
+    /// be accepted as fresh.
+    #[test]
+    fn load_type_cache_registry_skips_entry_when_mapping_stamp_missing() {
+        use crate::beam_compiler::load_type_cache_registry;
+
+        let temp = tempfile::TempDir::new().unwrap();
+        let cache_dir = camino::Utf8PathBuf::from_path_buf(temp.path().join("type_cache")).unwrap();
+        std::fs::create_dir_all(cache_dir.as_std_path()).unwrap();
+
+        // Pre-BT-2852 shape: no `mapping_stamp` field at all.
+        std::fs::write(
+            cache_dir.join("gen_tcp_0123456789abcdef.json").as_std_path(),
+            r#"{"beam_mtime_secs":0,"beam_mtime_nanos":0,"specs_line":"beamtalk-specs-module:gen_tcp:[#{arity => 2,line => 1,name => <<\"connect\">>,params => [#{name => <<\"sockaddr\">>,type => <<\"Symbol\">>},#{name => <<\"port\">>,type => <<\"Integer\">>}],return_type => <<\"Result(Dynamic | Tuple, Symbol)\">>}]"}"#,
+        )
+        .unwrap();
+
+        assert!(
+            load_type_cache_registry(&cache_dir).is_none(),
+            "an entry with no mapping_stamp field must be a graceful miss, not a crash"
+        );
+    }
+
+    /// BT-2852: An entry stamped by a *different* compiler build (a stale
+    /// `mapping_stamp`) must be skipped even though its `.beam` mtime still
+    /// matches — this is the regression scenario the issue describes: a warm
+    /// cache surviving a change to `beamtalk_spec_reader.erl`'s type-mapping
+    /// logic must not keep serving the old mapping forever.
+    #[test]
+    fn load_type_cache_registry_skips_entry_when_mapping_stamp_differs() {
+        use crate::beam_compiler::load_type_cache_registry;
+
+        let temp = tempfile::TempDir::new().unwrap();
+        let cache_dir = camino::Utf8PathBuf::from_path_buf(temp.path().join("type_cache")).unwrap();
+        std::fs::create_dir_all(cache_dir.as_std_path()).unwrap();
+
+        std::fs::write(
+            cache_dir.join("gen_tcp_0123456789abcdef.json").as_std_path(),
+            serde_json::json!({
+                "beam_mtime_secs": 0,
+                "beam_mtime_nanos": 0,
+                "mapping_stamp": "stale-mapping-stamp-from-an-older-compiler-build",
+                "specs_line": r#"beamtalk-specs-module:gen_tcp:[#{arity => 2,line => 1,name => <<"connect">>,params => [#{name => <<"sockaddr">>,type => <<"Symbol">>},#{name => <<"port">>,type => <<"Integer">>}],return_type => <<"Result(Dynamic | Tuple, Symbol)">>}]"#,
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        assert!(
+            load_type_cache_registry(&cache_dir).is_none(),
+            "an entry stamped by a different compiler build must be a cache miss"
         );
     }
 
@@ -1206,6 +1455,7 @@ mod tests {
             "beam_mtime_secs": dur.as_secs(),
             "beam_mtime_nanos": dur.subsec_nanos(),
             "beam_path": beam_path.to_str().unwrap(),
+            "mapping_stamp": crate::beam_compiler::current_spec_mapping_stamp(),
             "specs_line": r#"beamtalk-specs-module:gen_tcp:[#{arity => 2,line => 1,name => <<"connect">>,params => [#{name => <<"sockaddr">>,type => <<"Symbol">>},#{name => <<"port">>,type => <<"Integer">>}],return_type => <<"Result(Dynamic | Tuple, Symbol)">>}]"#,
         })
         .to_string();
@@ -1241,12 +1491,24 @@ mod tests {
             cache_dir
                 .join("gen_tcp_socket_1111111111111111.json")
                 .as_std_path(),
-            r#"{"beam_mtime_secs":0,"beam_mtime_nanos":0,"specs_line":"beamtalk-specs-module:gen_tcp_socket:[#{arity => 1,line => 1,name => <<\"close\">>,params => [#{name => <<\"sock\">>,type => <<\"Object\">>}],return_type => <<\"Symbol\">>}]"}"#,
+            serde_json::json!({
+                "beam_mtime_secs": 0,
+                "beam_mtime_nanos": 0,
+                "mapping_stamp": crate::beam_compiler::current_spec_mapping_stamp(),
+                "specs_line": r#"beamtalk-specs-module:gen_tcp_socket:[#{arity => 1,line => 1,name => <<"close">>,params => [#{name => <<"sock">>,type => <<"Object">>}],return_type => <<"Symbol">>}]"#,
+            })
+            .to_string(),
         )
         .unwrap();
         std::fs::write(
             cache_dir.join("gen_tcp_2222222222222222.json").as_std_path(),
-            r#"{"beam_mtime_secs":0,"beam_mtime_nanos":0,"specs_line":"beamtalk-specs-module:gen_tcp:[#{arity => 1,line => 1,name => <<\"close\">>,params => [#{name => <<\"sock\">>,type => <<\"Object\">>}],return_type => <<\"Symbol\">>}]"}"#,
+            serde_json::json!({
+                "beam_mtime_secs": 0,
+                "beam_mtime_nanos": 0,
+                "mapping_stamp": crate::beam_compiler::current_spec_mapping_stamp(),
+                "specs_line": r#"beamtalk-specs-module:gen_tcp:[#{arity => 1,line => 1,name => <<"close">>,params => [#{name => <<"sock">>,type => <<"Object">>}],return_type => <<"Symbol">>}]"#,
+            })
+            .to_string(),
         )
         .unwrap();
 

@@ -25,7 +25,7 @@ and can be queried by other components (e.g., idle monitor).
 -export([start_link/1, get_metadata/0, update_activity/0, get_last_activity/0]).
 -export([register_actor/1, unregister_actor/1, supervised_actors/0]).
 -export([register_module/1, register_module/2, unregister_module/1, loaded_modules/0]).
--export([set_class_source/2, get_class_source/1]).
+-export([set_class_source/2, get_class_source/1, all_class_sources/0]).
 %% BT-1685: File mtime tracking for incremental load-project.
 -export([set_file_mtime/2, get_file_mtimes/0, clear_file_mtimes/0, remove_file_mtime/1]).
 -export([get_package_name/0]).
@@ -260,6 +260,25 @@ get_class_source(ClassName) when is_binary(ClassName) ->
     end.
 
 -doc """
+Every currently-recorded `{ClassName, Source}` pair (ADR 0105 Phase 3,
+BT-2782) — the candidate set for `Workspace recheckImage`'s whole-image
+re-check (`beamtalk_recheck:trigger_image/0`), which needs every live class
+with a tracked source, not just one. Returns an empty map (not an error) if
+the server is not started, mirroring `get_class_source/1`'s degrade-silently
+contract.
+""".
+-spec all_class_sources() -> #{binary() => string()}.
+all_class_sources() ->
+    try
+        gen_server:call(?MODULE, all_class_sources)
+    catch
+        exit:{noproc, _} ->
+            #{};
+        exit:{timeout, _} ->
+            #{}
+    end.
+
+-doc """
 Store the mtime for a loaded .bt file (BT-1685).
 Called after each successful file load during load-project.
 """.
@@ -386,7 +405,7 @@ set_git_toplevel(ProjectPath, Toplevel) when is_binary(ProjectPath), is_binary(T
 %%% gen_server callbacks
 
 init(InitialMetadata) ->
-    logger:set_process_metadata(#{domain => [beamtalk, runtime]}),
+    beamtalk_logging_config:set_domain(runtime),
     WorkspaceId = maps:get(workspace_id, InitialMetadata),
     ProjectPath = maps:get(project_path, InitialMetadata, undefined),
     %% BT-775: Auto-detect package name from beamtalk.toml at project_path
@@ -484,6 +503,8 @@ handle_call(loaded_modules, _From, State) ->
 handle_call({get_class_source, ClassName}, _From, State) ->
     Result = maps:get(ClassName, State#state.class_sources, undefined),
     {reply, Result, State};
+handle_call(all_class_sources, _From, State) ->
+    {reply, State#state.class_sources, State};
 handle_call({set_class_source, ClassName, Source}, _From, State) ->
     Sources = State#state.class_sources,
     State2 = State#state{class_sources = Sources#{ClassName => Source}},

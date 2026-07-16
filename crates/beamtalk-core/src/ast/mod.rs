@@ -36,6 +36,7 @@
 //!     classes: Vec::new(),
 //!     method_definitions: Vec::new(),
 //!     protocols: Vec::new(),
+//!     type_aliases: Vec::new(),
 //!     expressions: vec![
 //!         ExpressionStatement::bare(Expression::Assignment {
 //!             target: Box::new(Expression::Identifier(Identifier {
@@ -126,6 +127,8 @@ pub struct Module {
     pub method_definitions: Vec<StandaloneMethodDefinition>,
     /// Protocol definitions (ADR 0068, Phase 2a).
     pub protocols: Vec<ProtocolDefinition>,
+    /// Type alias definitions (ADR 0108, Phase 1: `type Name = ...`).
+    pub type_aliases: Vec<TypeAliasDefinition>,
     /// Top-level expressions (scripts, REPL input).
     pub expressions: Vec<ExpressionStatement>,
     /// Source location spanning the entire module.
@@ -148,6 +151,7 @@ impl Module {
             classes: Vec::new(),
             method_definitions: Vec::new(),
             protocols: Vec::new(),
+            type_aliases: Vec::new(),
             expressions,
             span,
             file_leading_comments: Vec::new(),
@@ -162,6 +166,7 @@ impl Module {
             classes,
             method_definitions: Vec::new(),
             protocols: Vec::new(),
+            type_aliases: Vec::new(),
             expressions: Vec::new(),
             span,
             file_leading_comments: Vec::new(),
@@ -180,6 +185,7 @@ impl Module {
             classes: Vec::new(),
             method_definitions: Vec::new(),
             protocols: Vec::new(),
+            type_aliases: Vec::new(),
             expressions,
             span,
             file_leading_comments,

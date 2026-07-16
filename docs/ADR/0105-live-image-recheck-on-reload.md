@@ -1,7 +1,8 @@
 # ADR 0105: Live Image Re-Checking on Hot Reload
 
 ## Status
-Proposed (2026-07-05)
+Accepted (2026-07-11) — implemented via Epic BT-2775 (Phases 0–4,
+BT-2776…BT-2783).
 
 ## Implementation Tracking
 
@@ -19,9 +20,41 @@ Proposed (2026-07-05)
 | 3 | [BT-2782](https://linear.app/beamtalk/issue/BT-2782) | Pre-save advisory + `:recheck image` command | S | BT-2778 |
 | 4 | [BT-2783](https://linear.app/beamtalk/issue/BT-2783) | E2E killer-demo test + docs + status flip | S | BT-2779, BT-2780, BT-2782 |
 
-Deferred / recorded follow-ups: xref receiver-type-key extension (BT-2781 decides), transitive re-check refinement, proxy meta-dependent tracking, single-method check API. Enabling ADRs (all landed): 0087 (xref), 0082 (edit/save), 0100 (severity), 0022 (compiler port), 0104 (actor/`spawnWith:` checking).
+Deferred / recorded follow-ups: xref receiver-type-key extension (decided by
+BT-2781, filed as [BT-2798](https://linear.app/beamtalk/issue/BT-2798)),
+transitive re-check refinement, proxy meta-dependent tracking, single-method
+check API. Also filed during the epic: [BT-2801](https://linear.app/beamtalk/issue/BT-2801)
+(LSP/CLI show no reload-induced findings until the next reload — no initial
+snapshot, unlike the workspace/cockpit UI's `reload_findings` read op; from
+BT-2779), [BT-2802](https://linear.app/beamtalk/issue/BT-2802) (the per-reload
+caller cap can permanently strand a stale finding for an evicted caller that
+no later reload happens to re-check; from BT-2779), [BT-2805](https://linear.app/beamtalk/issue/BT-2805)
+(`retyped_fallback/1` misattributes a shape-recheck finding to the first
+retyped field, by list order, when a single reload retypes two or more
+fields; from BT-2780), and [BT-2806](https://linear.app/beamtalk/issue/BT-2806)
+(BT-2782's pre-save advisory: an untested compiler-port-exit degradation path
+in `recheck_image_class/2`, and a non-self-healing race where the precheck's
+ambient-cache restore can clobber a genuinely concurrent `register_class/2`
+commit). Enabling ADRs (all landed): 0087 (xref), 0082 (edit/save), 0100
+(severity), 0022 (compiler port), 0104 (actor/`spawnWith:` checking).
 
-**Status:** Planned
+**Status:** Implemented — all five phases (BT-2776…BT-2783) landed: the
+walking skeleton proving signature-capture-at-patch-time, selector-keyed
+dependent lookup, and batched compiler-port re-check (Phase 0); the
+per-selector signature-generation store, re-check orchestration, and
+cross-surface publish with clearing-by-replacement (Phase 1); `state:`/
+`field:` shape-change re-check integrated with ADR 0104's `spawnWith:`/
+accessor checking, plus fan-out benchmarks (Phase 2); the pre-save advisory
+and `:recheck image` command (Phase 3); and this issue's e2e killer-demo
+test, language-features documentation, and status flip (Phase 4). The
+fan-out benchmarks (BT-2781) decided *against* extending xref with a
+receiver-type key today — only 1 of 416 real stdlib selectors currently
+exceeds the caller cap, so the per-reload cap remains the interim guard —
+but a controlled benchmark showing the cap silently drops up to 90% of real
+findings once fan-out reaches 10x the cap made the extension worth tracking
+regardless of whether any selector hits that today: it is filed as
+[BT-2798](https://linear.app/beamtalk/issue/BT-2798), a proactive,
+non-blocking follow-up, not a wait-and-see one.
 
 ## Context
 
@@ -272,6 +305,20 @@ Would make dependent lookup precise instead of selector-wide (Mechanism step
 generation lifecycle for a cost that only matters if common-selector fan-out
 proves hot in practice. Recorded as the follow-up, with the per-reload caller
 cap as the interim guard.
+
+**Phase 2 benchmark decision (BT-2781, full data in
+`docs/development/benchmarks.md` "Reload re-check fan-out"):** today's real
+stdlib fan-out does not yet justify the extension — the worst measured
+selector (`delegate`) has 23 distinct caller classes, barely over the
+default cap of 20, and every other selector is comfortably under it. But a
+controlled fan-out benchmark against the real `beamtalk_recheck:trigger/4`
+orchestration confirmed the interim cap's known limitation is severe once
+fan-out does grow past it: at 10x the cap, the alphabetic (non-relevance-
+ranked) cap silently drops **90% of genuine stale-caller findings**. Per-
+check cost is flat regardless of fan-out size, so the extension would be
+both a latency and a completeness win once that threshold is crossed.
+**Decision: not implemented now, filed as a proactive (non-blocking)
+follow-up — [BT-2798](https://linear.app/beamtalk/issue/BT-2798).**
 
 ### Static-only (no runtime trigger)
 Let the LSP re-check open files on edit, ignore the live image. Rejected: the

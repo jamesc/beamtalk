@@ -160,7 +160,13 @@ fn define_pattern_vars_in_scope(pattern: &crate::ast::Pattern, scope: &mut LintS
                 define_pattern_vars_in_scope(binding, scope);
             }
         }
-        Pattern::Binary { .. } | Pattern::Wildcard(_) | Pattern::Literal(_, _) => {}
+        // Pattern::Type's binding is not wired into lint scope tracking yet
+        // (BT-2855 — bindings/scope land with narrowing and codegen).
+        Pattern::Binary { .. }
+        | Pattern::Wildcard(_)
+        | Pattern::Literal(_, _)
+        | Pattern::Nil(_)
+        | Pattern::Type { .. } => {}
     }
 }
 

@@ -120,7 +120,10 @@ pub fn generate_tower_bif(selector: &str, params: &[String]) -> Option<Document<
         // selector Symbol and a body String *as values* and share one
         // compile-and-install path; only the intent differs (`durable` vs
         // `ephemeral`), which the intrinsic encodes when it logs the ChangeEntry.
-        "classCompileSource" | "classTryCompileSource" => {
+        // ADR 0105 Phase 3 (BT-2782): the read-only pre-save advisory precheck
+        // shares the same (Self, selector, source) shape — nothing installs,
+        // but the intrinsic still needs the pending selector + body values.
+        "classCompileSource" | "classTryCompileSource" | "classPrecheckCompileSource" => {
             let sel = params.first()?;
             let source = params.get(1)?;
             Some(docvec![
@@ -361,6 +364,21 @@ mod tests {
             result,
             Some(
                 "call 'beamtalk_behaviour_intrinsics':'classTryCompileSource'(Self, Selector, Source)"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn test_class_precheck_compile_source() {
+        let result = doc_to_string(generate_tower_bif(
+            "classPrecheckCompileSource",
+            &["Selector".to_string(), "Source".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some(
+                "call 'beamtalk_behaviour_intrinsics':'classPrecheckCompileSource'(Self, Selector, Source)"
                     .to_string()
             )
         );

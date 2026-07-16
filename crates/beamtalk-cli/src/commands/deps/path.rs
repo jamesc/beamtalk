@@ -268,17 +268,20 @@ fn normalize_path(path: &Utf8Path) -> Utf8PathBuf {
             Utf8Component::CurDir => {
                 // Skip `.`
             }
-            Utf8Component::ParentDir => {
-                // Pop the last component if possible
-                if !components.is_empty() {
-                    let last = components.last().copied();
-                    if last != Some(Utf8Component::ParentDir) {
-                        components.pop();
-                        continue;
-                    }
+            Utf8Component::ParentDir => match components.last().copied() {
+                // Already at the filesystem root — an extra `..` is a no-op
+                // rather than something to pop or accumulate (BT-2836 review
+                // finding: popping `RootDir` here would turn `/foo/../..`
+                // into `.` instead of `/`).
+                Some(Utf8Component::RootDir) => {}
+                // Nothing to pop yet, or a run of leading `..`s in a
+                // relative path — accumulate.
+                None | Some(Utf8Component::ParentDir) => components.push(component),
+                // A real component precedes it — cancel the two out.
+                Some(_) => {
+                    components.pop();
                 }
-                components.push(component);
-            }
+            },
             _ => {
                 components.push(component);
             }
@@ -389,12 +392,17 @@ fn compile_dependency_with_context(
         None
     };
 
-    let (own_class_module_index, class_superclass_index, all_class_infos, cached_asts) =
-        crate::commands::build::build_class_module_index(
-            &source_files,
-            source_root.as_deref(),
-            dep_name,
-        )?;
+    let (
+        own_class_module_index,
+        class_superclass_index,
+        all_class_infos,
+        extension_index,
+        cached_asts,
+    ) = crate::commands::build::build_class_module_index(
+        &source_files,
+        source_root.as_deref(),
+        dep_name,
+    )?;
 
     // Build a compilation index that includes this dep's own classes plus
     // classes from already-compiled dependencies, so cross-dependency class
@@ -417,10 +425,26 @@ fn compile_dependency_with_context(
             class_superclass_index: class_superclass_index.clone(),
             pre_loaded_classes: all_class_infos.clone(),
             pre_loaded_protocols: Vec::new(),
+            // BT-2795: The dep's own project-wide extensions — its files see
+            // each other's extensions during its own compilation. (Exporting
+            // them to consumers is WS3 / the ADR 0070 amendment.)
+            extension_index: extension_index.clone(),
         },
         dep_registry: None, // No collision detection within dependency compilation
         strict_deps: false, // Dependencies use their own strict-deps setting, not root's
         native_type_registry: None, // Dependencies don't need FFI type checking
+        // ADR 0100 Rule 3 (BT-2793): neither the root package's nor the
+        // dependency's own `[diagnostics]` table is applied here — this path
+        // doesn't load either manifest's `[diagnostics]` section, so
+        // dependency compilation always sees an empty table (today's Rule 1
+        // defaults). Unlike `strict_deps` (a deliberate "use the dep's own
+        // setting, not root's" policy), this is a scoping gap, not a policy
+        // choice: a dependency author's own severity overrides (e.g.
+        // suppressing a known-noisy category) are silently ignored when that
+        // package is compiled as someone else's dependency. Low practical
+        // impact — dependency diagnostics are never surfaced to or promoted
+        // for the consuming build — but worth revisiting if that changes.
+        diagnostics_overrides: crate::commands::manifest::DiagnosticsTable::new(),
     };
 
     let (core_files, module_names) = compile_sources_to_core(
@@ -597,11 +621,12 @@ pub(crate) fn build_dep_class_index(
         None
     };
 
-    let (class_module_index, _, class_infos, _) = crate::commands::build::build_class_module_index(
-        &source_files,
-        source_root.as_deref(),
-        dep_name,
-    )?;
+    let (class_module_index, _, class_infos, _, _) =
+        crate::commands::build::build_class_module_index(
+            &source_files,
+            source_root.as_deref(),
+            dep_name,
+        )?;
 
     Ok((class_module_index, class_infos))
 }
@@ -632,6 +657,15 @@ mod tests {
     fn test_normalize_path_multiple_parents() {
         let path = Utf8PathBuf::from("/home/user/project/../../dep");
         assert_eq!(normalize_path(&path), Utf8PathBuf::from("/home/dep"));
+    }
+
+    #[test]
+    fn test_normalize_path_parent_at_root() {
+        // A `..` chain that consumes every real component and then hits
+        // root must not pop `RootDir` itself — `/foo/../..` is still `/`,
+        // not `.` (BT-2836 review finding).
+        let path = Utf8PathBuf::from("/foo/../..");
+        assert_eq!(normalize_path(&path), Utf8PathBuf::from("/"));
     }
 
     #[test]

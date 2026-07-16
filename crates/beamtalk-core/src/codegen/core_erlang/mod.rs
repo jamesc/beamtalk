@@ -184,11 +184,16 @@ pub enum CodeGenError {
     #[error("formatting error: {0}")]
     Format(#[from] fmt::Error),
 
-    /// Field assignment in a stored closure.
+    /// Field assignment in a block that can't thread state back — whether the block is
+    /// assigned to a variable, passed as an argument, or returned (BT-2792).
     #[error(
-        "Cannot assign to field '{field}' inside a stored closure at {location}.\n\n\
-             Field assignments require immediate execution context for state threading.\n\n\
-             Fix: Use control flow directly, or extract to a method:\n\
+        "Cannot assign to field '{field}' inside this block at {location}.\n\n\
+             Field assignments only thread state back to the actor when the block is used \
+             directly with a control-flow construct (ifTrue:/whileTrue:/do:/collect:/...), \
+             sent directly to self, or immediately invoked (`[...] value`, `[...] value: arg`, \
+             `[...] value:value:`, etc.) — not when it's stored in a variable, passed to a \
+             user-defined method, or returned as a value.\n\n\
+             Fix: Use the block directly at the call site, or extract the mutation into a method:\n\
              \x20 // Instead of:\n\
              \x20 myBlock := [:item | self.{field} := self.{field} + item].\n\
              \x20 items do: myBlock.\n\
@@ -200,7 +205,7 @@ pub enum CodeGenError {
              \x20 addTo{field_capitalized}: item => self.{field} := self.{field} + item.\n\
              \x20 items do: [:item | self addTo{field_capitalized}: item]."
     )]
-    FieldAssignmentInStoredClosure {
+    FieldAssignmentInUnsupportedBlock {
         /// The field being assigned.
         field: String,
         /// The capitalized field name for method suggestion.
@@ -350,6 +355,12 @@ pub struct CodegenOptions {
     /// ADR 0098 Phase 3: producing compound OTP version (`<release>-<erts>`) to
     /// bake into `__beamtalk_meta`. Set alongside `beamtalk_version`.
     otp_release: Option<String>,
+    /// BT-2887: optional FFI type registry (ADR 0075) threaded to the
+    /// return-type writeback pass so methods whose body type is inferred
+    /// purely via an FFI call (e.g. `foo => Erlang lists reverse: x`) get
+    /// `List` written back to `method_return_types` before codegen.
+    native_type_registry:
+        Option<std::sync::Arc<crate::semantic_analysis::type_checker::NativeTypeRegistry>>,
 }
 
 impl CodegenOptions {
@@ -368,6 +379,7 @@ impl CodegenOptions {
             codegen_diagnostics: None,
             beamtalk_version: None,
             otp_release: None,
+            native_type_registry: None,
         }
     }
 
@@ -469,6 +481,19 @@ impl CodegenOptions {
     #[must_use]
     pub fn with_stdlib_mode(mut self, enabled: bool) -> Self {
         self.stdlib_mode = enabled;
+        self
+    }
+
+    /// BT-2887: sets the native FFI type registry (ADR 0075) used by the
+    /// return-type writeback pass, from an optional value.
+    #[must_use]
+    pub fn with_native_type_registry(
+        mut self,
+        registry: Option<
+            std::sync::Arc<crate::semantic_analysis::type_checker::NativeTypeRegistry>,
+        >,
+    ) -> Self {
+        self.native_type_registry = registry;
         self
     }
 }
@@ -583,7 +608,11 @@ pub fn generate_module_with_warnings(
     // BT-1218: Also writeback supervisor_kind for Supervisor/DynamicSupervisor subclasses.
     // We clone to avoid mutating the caller's Module.
     let mut module_with_writeback = module.clone();
-    crate::semantic_analysis::apply_return_type_writeback(&mut module_with_writeback, &hierarchy);
+    crate::semantic_analysis::apply_return_type_writeback(
+        &mut module_with_writeback,
+        &hierarchy,
+        options.native_type_registry.as_deref(),
+    );
     crate::semantic_analysis::apply_supervisor_kind_writeback(
         &mut module_with_writeback,
         &hierarchy,
@@ -1238,6 +1267,30 @@ pub(crate) struct CoreErlangGenerator {
     /// on that parameter use the stateful Tier 2 protocol:
     /// `apply _Fun(Args..., State) → {Result, NewState}`.
     tier2_block_params: std::collections::HashSet<String>,
+    /// BT-2797: Local variables in the current method/block body known to hold
+    /// a Tier 2 block value — i.e. a `var := [block]` assignment where the
+    /// block literal has captured-local or field mutations, *and* every later
+    /// reference to `var` in the same body is a safe `value`/`value:`/etc.
+    /// call (proven by `prescan_tier2_local_vars`, which runs once at the top
+    /// of `generate_body_exprs_with_reply` before classification starts).
+    /// `value:` / `value:value:` calls on a variable in this set use the
+    /// stateful Tier 2 protocol: `apply _Fun(Args..., State) → {Result, NewState}`.
+    /// A block whose safety can't be proven (returned, passed elsewhere,
+    /// reassigned, ...) is deliberately left out — it keeps hitting the
+    /// `generate_block`/`validate_stored_closure` compile-time diagnostic
+    /// instead, since no known call site would thread state through it.
+    tier2_local_vars: std::collections::HashSet<String>,
+    /// BT-2815: For each name in `tier2_local_vars` whose assigned block's
+    /// only mutation is a captured outer local (not a field write), the
+    /// names of those captured locals — mirrors what `captured_mutations_for_block`
+    /// computes for an inline block literal, but keyed by variable name so a
+    /// later `value(:...)` call site (which only has an identifier, not the
+    /// block AST) can still find them. Populated alongside `tier2_local_vars`
+    /// in `prescan_tier2_local_vars`; consulted by
+    /// `get_inline_block_captured_mutations` to rebind the caller's own
+    /// variable after the call, the same way it already does for an inline
+    /// block literal receiver.
+    tier2_local_var_captured_mutations: std::collections::HashMap<String, Vec<String>>,
     /// BT-851: Pre-scanned Tier 2 block info for the current class.
     ///
     /// Maps method selector → list of parameter indices that receive Tier 2 blocks
@@ -1316,6 +1369,8 @@ impl CoreErlangGenerator {
             last_open_scope_result: None,
             source_path: None,
             tier2_block_params: std::collections::HashSet::new(),
+            tier2_local_vars: std::collections::HashSet::new(),
+            tier2_local_var_captured_mutations: std::collections::HashMap::new(),
             tier2_method_info: std::collections::HashMap::new(),
             codegen_warnings: Vec::new(),
             semantic_facts: crate::semantic_analysis::SemanticFacts::default(),
@@ -2691,8 +2746,11 @@ impl CoreErlangGenerator {
                 Ok(doc)
             }
             Expression::Assignment { target, value, .. } => {
-                // BT-852: Stored blocks with mutations are now supported via Tier 2.
-                // generate_block() handles stateful emission; no validation needed here.
+                // BT-2792: Tier 2 only ever supported captured-local mutations, not
+                // field writes — a stored block with `self.field :=` is rejected by
+                // generate_block()'s validate_stored_closure call, not silently
+                // accepted. No validation needed *here* only because that check
+                // already lives inside generate_block() itself.
 
                 // Check if this is a field assignment (self.field := value)
                 if let Expression::FieldAccess {
@@ -3188,26 +3246,60 @@ impl CoreErlangGenerator {
             .collect()
     }
 
-    /// Validates that a stored closure (block assigned to variable) doesn't contain mutations.
-    /// Returns an error for both field assignments and local mutations; the local-mutation
-    /// error is phrased as a warning in its message.
+    /// Validates a block's mutation analysis for shapes that can't correctly thread state:
+    /// field assignments, and (separately) captured-local mutations. Returns an error for
+    /// either; the local-mutation error is phrased as a warning in its message.
     ///
-    /// BT-852: This function is retained for unit tests. Production call sites have been
-    /// removed since stored closures with mutations are now supported via the Tier 2
-    /// stateful block protocol (ADR 0041).
-    #[allow(dead_code)]
-    fn validate_stored_closure(block: &Block, span_str: String) -> Result<()> {
-        use crate::codegen::core_erlang::block_analysis::analyze_block;
-
-        let analysis = analyze_block(block);
-
-        // ERROR: Field assignments in stored closures are not allowed
+    /// **Precondition for production callers:** only call this when
+    /// `analysis.field_writes` is non-empty. A valid Tier 2 block (captured-local
+    /// mutations, no field writes) passed here would incorrectly hit the
+    /// local-mutation branch and produce a spurious `LocalMutationInStoredClosure`
+    /// — that branch exists for this function's own unit tests, which construct
+    /// analyses field-write-empty on purpose to test it, not for callers on a path
+    /// where a genuine Tier 2 block could reach this function.
+    ///
+    /// BT-852 claimed production call sites could be removed because blocks with
+    /// mutations are supported via the Tier 2 stateful block protocol (ADR 0041).
+    /// BT-2792 found that's only true for *captured local* mutations
+    /// (`captured_mutations_for_block` in `expressions.rs`, which promotes to
+    /// `generate_block_stateful`) — Tier 2 promotion never triggers on `self.field :=`
+    /// writes. A block with field writes that reaches the generic "pure fun" fallback
+    /// in `generate_block` silently emits Core Erlang `erlc` rejects with "unbound
+    /// variable" (the block's own `fun` bumps the shared state-version counter, but
+    /// that binding is scoped inside the `fun` and never reaches the caller).
+    ///
+    /// Called from `generate_block` (with an already-computed analysis, so callers
+    /// that need more than this check don't re-walk the block's AST) to turn that into
+    /// a clear compile-time diagnostic instead. `generate_block` only calls this when
+    /// `field_writes` is non-empty (checked *before* the Tier 2 captured-local-mutation
+    /// promotion, so a block with both a field write and a local mutation errors here
+    /// instead of silently reaching Tier 2 for the local mutation alone), so the field
+    /// branch below always fires from that call site and the local-mutation branch is
+    /// unreachable from it — it's kept live (and directly unit-tested) since this
+    /// function checks a block's mutation shape in general, not just the field-write
+    /// case `generate_block` currently cares about. BT-2797 tracks lifting the
+    /// field-write restriction for stored/opaque blocks by generalizing Tier 2 the same
+    /// way; once that lands this function's field-write branch should shrink to
+    /// whatever shapes remain genuinely unsupported.
+    ///
+    /// `location` is a lazy thunk rather than a pre-formatted `String`, so formatting
+    /// only happens when an error is actually produced. From `generate_block`'s call
+    /// site this always errors (it's only called when `field_writes` is non-empty), but
+    /// `generate_block` still runs `analyze_block` and checks `field_writes` on every
+    /// block it compiles — the thunk keeps this function itself free of `span_to_line`/
+    /// `format!` cost for callers (present or future) that reach it on a path where an
+    /// `Ok(())` result is actually possible, e.g. this function's own unit tests.
+    fn validate_stored_closure(
+        analysis: &block_analysis::BlockMutationAnalysis,
+        location: impl FnOnce() -> String,
+    ) -> Result<()> {
+        // ERROR: Field assignments that can't thread state back are not allowed.
+        // Sort before picking one so the reported field is deterministic across
+        // builds/runs when a block writes more than one field.
         if !analysis.field_writes.is_empty() {
-            let field = analysis
-                .field_writes
-                .iter()
-                .next()
-                .expect("field_writes is non-empty");
+            let mut fields: Vec<&String> = analysis.field_writes.iter().collect();
+            fields.sort_unstable();
+            let field = fields[0];
             let field_capitalized = {
                 let mut chars = field.chars();
                 chars
@@ -3216,10 +3308,10 @@ impl CoreErlangGenerator {
                     .unwrap_or_default()
                     + chars.as_str()
             };
-            return Err(CodeGenError::FieldAssignmentInStoredClosure {
+            return Err(CodeGenError::FieldAssignmentInUnsupportedBlock {
                 field: field.clone(),
                 field_capitalized,
-                location: span_str,
+                location: location(),
             });
         }
 
@@ -3229,14 +3321,17 @@ impl CoreErlangGenerator {
         // BT-665: Only flag mutations of captured variables, not new local definitions.
         // A "captured mutation" is a write to a variable that was read before being
         // locally defined (i.e., it captures from outer scope).
-        if let Some(variable) = analysis
-            .local_writes
-            .intersection(&analysis.captured_reads)
-            .next()
-        {
+        if let Some(variable) = {
+            let mut vars: Vec<&String> = analysis
+                .local_writes
+                .intersection(&analysis.captured_reads)
+                .collect();
+            vars.sort_unstable();
+            vars.into_iter().next()
+        } {
             return Err(CodeGenError::LocalMutationInStoredClosure {
                 variable: variable.clone(),
-                location: span_str,
+                location: location(),
             });
         }
 
@@ -3309,6 +3404,66 @@ impl CoreErlangGenerator {
             }
         }
 
+        // BT-2803 (adversarial review): `blockValueWithArguments`'s compiled
+        // method body is real, not a placeholder — unlike `blockValue`/
+        // `blockValue1`/etc. (which truly are call-site-only, since a Tier 2
+        // block's extra state argument can only come from a calling method's
+        // live `State`/`StateAcc`), a plain `erlang:apply(Self, Args)` is
+        // correct for *any* receiver reached via generic runtime dispatch
+        // (`beamtalk_primitive:send/3`, `perform:withArguments:`, …) — a
+        // Tier 2 block can never correctly reach this path in the first
+        // place (see `is_tier2_value_call`'s scoping in
+        // `gen_server/methods.rs`), so there's no state to thread here.
+        // Restores the exact behaviour `valueWithArguments:`'s `@primitive`
+        // form had before being converted to a call-site-intercepted
+        // `@intrinsic`, fixing `send_block_valueWithArguments_test_` in
+        // `beamtalk_primitive_tests.erl`.
+        if !is_quoted && name == "blockValueWithArguments" {
+            let args_param = self
+                .current_method_params
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "_Args".to_string());
+            return Ok(docvec![
+                "call 'erlang':'apply'(Self, ",
+                leaf::var(args_param),
+                ")",
+            ]);
+        }
+
+        // BT-2812: `blockValue`/`blockValue1`/`blockValue2`/`blockValue3` — Block's
+        // `value`/`value:`/`value:value:`/`value:value:value:`. Same gap as
+        // `blockValueWithArguments` above, but these can't unconditionally
+        // `erlang:apply` (a Tier 2/stateful block needs a live `StateAcc` this
+        // generic dispatch site doesn't have — see ADR-0041). See
+        // `generate_block_value_structural_fallback` for the Tier 1/Tier 2
+        // discrimination.
+        //
+        // Adversarial review (BT-2812): this match is intentionally exhaustive
+        // over today's four `value*` arities, not pattern-derived from them. A
+        // hypothetical 5th arity (`blockValue4`) or a change to ADR-0041's
+        // `Args..., StateAcc` shape (extra state args, different position)
+        // would silently fall through to the unfixed placeholder below rather
+        // than fail to compile — there's no static check tying this arm list
+        // to `STRUCTURAL_INTRINSICS` or to the Block.bt method declarations.
+        if !is_quoted {
+            let block_value_info = match name {
+                "blockValue" => Some((0usize, "value")),
+                "blockValue1" => Some((1usize, "value:")),
+                "blockValue2" => Some((2usize, "value:value:")),
+                "blockValue3" => Some((3usize, "value:value:value:")),
+                _ => None,
+            };
+            if let Some((arity, real_selector)) = block_value_info {
+                return Ok(self.generate_block_value_structural_fallback(
+                    name,
+                    arity,
+                    real_selector,
+                    &class_name,
+                ));
+            }
+        }
+
         // BT-1763: Erlang interop DNU intrinsics — forward selector/args to
         // the handler module's dispatch/3 rather than passing the intrinsic name.
         // doesNotUnderstand:args: receives (Self, Selector, Args) and we need to
@@ -3373,6 +3528,26 @@ impl CoreErlangGenerator {
         if is_quoted {
             let params = self.current_method_params.clone();
             if let Some(code) = primitives::generate_primitive_bif(&class_name, name, &params) {
+                // BT-2888: `do:`/`collect:`/`select:`/`reject:`/`inject:into:` are
+                // real BIF-lowered bodies, already correct for a Tier 1 (pure)
+                // block via generic dispatch. Guard against a Tier 2 (stateful)
+                // block hitting a raw arity crash instead of a clear error — see
+                // `generate_stateful_block_guard`.
+                let stateful_guard_block_param = match name {
+                    "do:" | "collect:" | "select:" | "reject:" => params.first(),
+                    "inject:into:" => params.get(1),
+                    _ => None,
+                };
+                if let Some(block_param) = stateful_guard_block_param {
+                    let pure_arity = if name == "inject:into:" { 2 } else { 1 };
+                    return Ok(self.generate_stateful_block_guard(
+                        block_param,
+                        pure_arity,
+                        name,
+                        &class_name,
+                        code,
+                    ));
+                }
                 return Ok(code);
             }
 
@@ -3407,6 +3582,28 @@ impl CoreErlangGenerator {
         // This path is used for:
         // - Structural intrinsics (unquoted) — handled at call site, body is placeholder
         // - Selector-based primitives with no known BIF (unimplemented or complex)
+        //
+        // BT-2803 follow-up: for a structural intrinsic, this placeholder body is
+        // never a real implementation of the selector's semantics — it self-calls
+        // `<runtime_module>:dispatch(<intrinsic_name_atom>, Args, Self)`, passing
+        // the *intrinsic name* (e.g. `blockValue`), not the real selector. Any
+        // call path that reaches the compiled method body directly instead of
+        // through the call-site interception — e.g.
+        // `[42] perform: #value withArguments: #()` — resolves to this
+        // placeholder and raises `does_not_understand` for the intrinsic name.
+        //
+        // BT-2812: Block's `value`/`value:`/`value:value:`/`value:value:value:`/
+        // `valueWithArguments:` are now special-cased above and no longer hit this
+        // placeholder — those were the concrete repro. BT-2812's audit found the
+        // same root cause (wrong dispatch key) also applies, in principle, to
+        // every other structural intrinsic without a special case here — e.g.
+        // `whileTrue`/`whileFalse`/`repeat`/`onDo`/`ensure` (Block) and
+        // `listDo`/`listCollect`/`listSelect`/`listReject`/`listInjectInto`
+        // (List/Collection). Deliberately left unfixed by BT-2812: unlike the
+        // `value*` family (whose fix is "the receiver IS the fun to invoke, so
+        // `erlang:apply` it"), these need real loop/exception-handling semantics
+        // reimplemented generically over an arbitrary fun receiver/argument —
+        // a materially bigger, separately-scoped change. See BT-2888.
         let runtime_module = PrimitiveBindingTable::runtime_module_for_class(&class_name);
 
         // BT-938: Validate that the target dispatch module exists in the known stdlib

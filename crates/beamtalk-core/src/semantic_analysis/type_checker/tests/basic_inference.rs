@@ -737,7 +737,7 @@ fn test_stub_returns_no_diagnostics() {
 fn type_map_records_literal_types() {
     let module = make_module(vec![int_lit(42)]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let type_map = infer_types(&module, &hierarchy);
+    let type_map = infer_types(&module, &hierarchy, None);
 
     // The integer literal should be recorded as Integer
     let ty = type_map.get(module.expressions[0].expression.span());
@@ -754,7 +754,7 @@ fn type_map_records_variable_types_after_assignment() {
     // x := 42 → x should be Integer
     let module = make_module(vec![assign("x", int_lit(42)), var("x")]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let type_map = infer_types(&module, &hierarchy);
+    let type_map = infer_types(&module, &hierarchy, None);
 
     // The second expression (var "x") should be recorded as Integer
     let x_expr = &module.expressions[1];
@@ -774,7 +774,7 @@ fn type_map_records_variable_types_after_assignment() {
 fn infer_types_convenience_function() {
     let module = make_module(vec![str_lit("hello")]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let type_map = infer_types(&module, &hierarchy);
+    let type_map = infer_types(&module, &hierarchy, None);
     let ty = type_map.get(module.expressions[0].expression.span());
     assert_eq!(
         ty,

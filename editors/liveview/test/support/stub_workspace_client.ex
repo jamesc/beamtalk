@@ -77,6 +77,12 @@ defmodule BtAttachWeb.StubWorkspaceClient do
               # go-to-definition flow (single/multiple/none) can be driven. `%{}`
               # = no implementors (every selector resolves to an empty list).
               implementors: %{},
+              # ADR 0105 Phase 1 (BT-2779): seeded reload-induced findings
+              # (already in `BtAttach.Workspace.reload_findings/0`'s
+              # normalized shape) so a test can drive the workspace/cockpit
+              # UI panel without a real workspace node. `[]` = no findings
+              # (the default, matching a fresh session).
+              reload_findings: [],
               calls: []
   end
 
@@ -124,6 +130,11 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   # assert it is wired at mount; returns :ok (the real facade's success reply).
   def subscribe_classes(_pid), do: record({:subscribe_classes}) && :ok
   def unsubscribe_classes(_pid), do: :ok
+  # ADR 0105 Phase 1 (BT-2779): the reload-check push stream. Records the
+  # subscribe so a test can assert it is wired at mount, mirroring
+  # `subscribe_classes/1`.
+  def subscribe_reload_check(_pid), do: record({:subscribe_reload_check}) && :ok
+  def unsubscribe_reload_check(_pid), do: :ok
   def subscribe_object_changes(_term, _pid), do: :ok
   def unsubscribe_object_changes(_term, _pid), do: :ok
 
@@ -302,6 +313,18 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   def set_change_diff(class, selector, diff) when is_binary(diff) do
     update(:change_diffs, fn diffs -> Map.put(diffs || %{}, {class, selector}, diff) end)
   end
+
+  # ADR 0105 Phase 1 (BT-2779): current live snapshot of reload-induced
+  # findings, mirroring `change_history/0`'s `{:ok, list}` contract.
+  def reload_findings, do: {:ok, get(:reload_findings) || []}
+
+  @doc """
+  Test helper: seed the reload-findings panel with `findings` (already in
+  `BtAttach.Workspace.reload_findings/0`'s normalized shape — a list of
+  `%{owner:, changed_class:, selector:, classification:, severity:,
+  category:, message:, note:, sites: [%{method:, line:}]}` maps).
+  """
+  def put_reload_findings(findings) when is_list(findings), do: put(:reload_findings, findings)
 
   # BT-2590: the workspace `autoflush` flag, read at mount. Defaults to `false`
   # (matching the production default), so a per-method save in a test patches the

@@ -44,7 +44,11 @@ resolver_test_() ->
             {"resolve with metaclass receiver looks up class-side methods",
                 fun test_resolve_with_metaclass/0},
             {"resolve with metaclass receiver returns nil for missing class method",
-                fun test_resolve_with_metaclass_missing/0}
+                fun test_resolve_with_metaclass_missing/0},
+            {"resolve finds an inherited method at the MAX_HIERARCHY_DEPTH boundary",
+                fun test_resolve_at_depth_boundary_found/0},
+            {"resolve returns nil for a method one level beyond MAX_HIERARCHY_DEPTH",
+                fun test_resolve_beyond_depth_boundary_returns_nil/0}
         ]
     end}.
 
@@ -130,3 +134,73 @@ test_resolve_with_metaclass_missing() ->
         MetaObj, 'classSideSelectorThatDoesNotExistXyzzy'
     ),
     ?assertEqual(nil, Result).
+
+%%====================================================================
+%% BT-2786: MAX_HIERARCHY_DEPTH boundary tests
+%%
+%% resolve_with_hierarchy/2 checks the receiver's own class "for free"
+%% (outside the depth-counted walk), then walks up to ?MAX_HIERARCHY_DEPTH
+%% superclasses above it — mirroring beamtalk_class_dispatch's split. These
+%% tests pin that boundary: a chain of 22 classes (base + 21 superclasses)
+%% has an inherited method reachable at the 21st superclass; a 23-class
+%% chain's 22nd superclass is one level beyond the budget and must resolve
+%% to nil instead of silently truncating the walk.
+%%====================================================================
+
+%% Starts a chain of NumClasses classes (class 1 is the base/leaf, class N
+%% has superclass `none`) and installs a trivial compiled method named
+%% `Selector` only on the last class in the chain. Returns {BaseClassName, Pids}.
+start_superclass_chain(NumClasses, Selector) ->
+    % elp:fixme W0023 intentional atom creation
+    ClassNames = [
+        list_to_atom("ResolverDepthTestClass" ++ integer_to_list(I))
+     || I <- lists:seq(1, NumClasses)
+    ],
+    RevPids = lists:foldl(
+        fun(I, AccPids) ->
+            ClassName = lists:nth(I, ClassNames),
+            Super =
+                if
+                    I =:= NumClasses -> none;
+                    true -> lists:nth(I + 1, ClassNames)
+                end,
+            InstanceMethods =
+                case I of
+                    NumClasses ->
+                        #{Selector => #{arity => 0, block => fun() -> ok end}};
+                    _ ->
+                        #{}
+                end,
+            {ok, Pid} = beamtalk_object_class:start_link(ClassName, #{
+                superclass => Super,
+                instance_methods => InstanceMethods,
+                instance_variables => []
+            }),
+            [Pid | AccPids]
+        end,
+        [],
+        lists:seq(1, NumClasses)
+    ),
+    {hd(ClassNames), lists:reverse(RevPids)}.
+
+test_resolve_at_depth_boundary_found() ->
+    Selector = resolverDepthBoundaryMethod,
+    {BaseClassName, Pids} = start_superclass_chain(22, Selector),
+    try
+        BasePid = beamtalk_class_registry:whereis_class(BaseClassName),
+        Result = beamtalk_method_resolver:resolve(BasePid, Selector),
+        ?assertMatch(#{'__selector__' := Selector}, Result)
+    after
+        lists:foreach(fun gen_server:stop/1, Pids)
+    end.
+
+test_resolve_beyond_depth_boundary_returns_nil() ->
+    Selector = resolverBeyondDepthMethod,
+    {BaseClassName, Pids} = start_superclass_chain(23, Selector),
+    try
+        BasePid = beamtalk_class_registry:whereis_class(BaseClassName),
+        Result = beamtalk_method_resolver:resolve(BasePid, Selector),
+        ?assertEqual(nil, Result)
+    after
+        lists:foreach(fun gen_server:stop/1, Pids)
+    end.

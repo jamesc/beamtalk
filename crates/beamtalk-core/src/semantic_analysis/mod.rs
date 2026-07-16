@@ -19,6 +19,7 @@ use crate::source_analysis::{Diagnostic, Span};
 use ecow::EcoString;
 use std::collections::HashMap;
 
+pub mod alias_registry;
 mod block_analyzer;
 pub(crate) mod block_context;
 pub mod block_facts;
@@ -33,6 +34,7 @@ pub mod name_resolver;
 pub(crate) mod pattern_bindings;
 pub mod primitive_validator;
 pub mod protocol_registry;
+pub mod receiver_knowledge;
 pub mod return_type_writeback;
 pub(crate) mod scope;
 pub(crate) mod string_utils;
@@ -46,6 +48,7 @@ mod property_tests;
 #[cfg(test)]
 pub mod test_helpers;
 
+pub use alias_registry::{AliasInfo, AliasRegistry};
 pub use block_facts::BlockMutationAnalysis;
 pub use block_facts::analyze_block;
 pub use class_hierarchy::ClassHierarchy;
@@ -59,6 +62,7 @@ pub use facts::{DispatchKind, SemanticFacts, compute_semantic_facts};
 pub use name_resolver::NameResolver;
 pub use pattern_bindings::{extract_match_arm_bindings, extract_pattern_bindings};
 pub use protocol_registry::{ProtocolInfo, ProtocolRegistry};
+pub use receiver_knowledge::{KnowledgeScope, ReceiverKnowledge, classify_receiver};
 pub use return_type_writeback::apply_return_type_writeback;
 pub use scope::BindingKind;
 pub use supervisor_kind_writeback::apply_supervisor_kind_writeback;
@@ -93,6 +97,9 @@ pub struct AnalysisResult {
 
     /// Protocol registry (ADR 0068 Phase 2b).
     pub protocol_registry: ProtocolRegistry,
+
+    /// Type alias registry (ADR 0108 Phase 2, BT-2895).
+    pub alias_registry: AliasRegistry,
 }
 
 impl AnalysisResult {
@@ -104,6 +111,7 @@ impl AnalysisResult {
             block_info: HashMap::new(),
             class_hierarchy: ClassHierarchy::with_builtins(),
             protocol_registry: ProtocolRegistry::new(),
+            alias_registry: AliasRegistry::new(),
         }
     }
 }
@@ -185,6 +193,65 @@ pub enum MutationKind {
     Field { name: EcoString },
 }
 
+/// Bundles the knobs threaded through `analyse_full` (BT-2804).
+///
+/// Every public `analyse_*` entry point builds one of these and passes it to
+/// `analyse_full` instead of threading positional parameters through ~6
+/// wrappers. Each field's `Default` reproduces today's most conservative
+/// behaviour (empty cross-file knowledge, `ModuleOnly` scope, no package
+/// context) — so a new entry point that forgets to set a field degrades
+/// safely (quietly loses precision) rather than silently misbehaving.
+#[derive(Debug, Default)]
+pub struct AnalysisContext<'a> {
+    /// Pre-defined variables treated as already bound (REPL context).
+    pub known_vars: &'a [&'a str],
+    /// Permits built-in classes to subclass sealed classes (BT-791);
+    /// only set when compiling stdlib sources.
+    pub stdlib_mode: bool,
+    /// Suppresses the effect-free module-level expression lint
+    /// (bootstrap-test compilation).
+    pub skip_module_expression_lint: bool,
+    /// Cross-file class metadata injected into the class hierarchy before
+    /// type checking (BT-1523, ADR 0050 Phase 4).
+    pub pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
+    /// Protocol definitions extracted from other source files, e.g. `BUnit`
+    /// fixtures (BT-2006).
+    pub pre_loaded_protocols: Vec<protocol_registry::ProtocolInfo>,
+    /// Type alias definitions extracted from other source files or packages
+    /// (BT-2898, ADR 0108 Phase 5), *or* type aliases declared in earlier
+    /// turns of the same REPL session (ADR 0108 Phase 8, BT-2902) — both
+    /// uses funnel through the same field and the same
+    /// `AliasRegistry::add_pre_loaded` seeding call in `analyse_full`.
+    /// `internal` entries are excluded at the seeding boundary before this
+    /// ever reaches `AliasRegistry::add_pre_loaded` when compiling with a
+    /// package context; a REPL/script session (no `current_package`) has no
+    /// package boundary to enforce, so carried-over `internal` aliases stay
+    /// visible. Aliases erase to nothing at runtime, so (unlike
+    /// `pre_loaded_classes`) there is no live BEAM artifact to recover a
+    /// REPL session's prior declarations from — the REPL layer re-parses
+    /// each previously successfully-declared `type Name = ...` line
+    /// standalone every turn and passes the result here so
+    /// `resolve_type_annotation` sees names declared in prior turns.
+    pub pre_loaded_aliases: Vec<alias_registry::AliasInfo>,
+    /// Known package names for package-qualifier validation (ADR 0070
+    /// Phase 2). `None` skips the check entirely.
+    pub known_packages: Option<std::collections::HashSet<String>>,
+    /// The package the module being analysed belongs to (ADR 0071).
+    pub current_package: Option<&'a str>,
+    /// Native type registry for FFI call inference (ADR 0075).
+    pub native_type_registry: Option<std::sync::Arc<type_checker::NativeTypeRegistry>>,
+    /// How complete the injected cross-file class knowledge is (BT-2796,
+    /// ADR 0100 Rule 2). Defaults to the conservative `ModuleOnly`.
+    pub knowledge_scope: KnowledgeScope,
+    /// Project-wide standalone extension definitions (BT-2795, ADR 0066).
+    /// `None`/empty means only the current module's own extensions are
+    /// visible.
+    pub cross_file_extensions: Option<&'a crate::compilation::extension_index::ExtensionIndex>,
+    /// Whether the current package has dependencies whose extensions are
+    /// not visible here (BT-2794, ADR 0100 Rule 2).
+    pub has_package_dependencies: bool,
+}
+
 /// Perform semantic analysis on a module.
 ///
 /// This is the main entry point for semantic analysis. It orchestrates the
@@ -209,7 +276,7 @@ pub enum MutationKind {
 /// assert_eq!(result.diagnostics.len(), 0);
 /// ```
 pub fn analyse(module: &Module) -> AnalysisResult {
-    analyse_full(module, &[], false, false, vec![], None, None)
+    analyse_full(module, AnalysisContext::default())
 }
 
 /// Analyse a module with pre-defined variables (for REPL context).
@@ -223,7 +290,13 @@ pub fn analyse(module: &Module) -> AnalysisResult {
 /// services. Pre-defining known variables is essential for REPL contexts where
 /// users build up state incrementally across multiple evaluations.
 pub fn analyse_with_known_vars(module: &Module, known_vars: &[&str]) -> AnalysisResult {
-    analyse_full(module, known_vars, false, false, vec![], None, None)
+    analyse_full(
+        module,
+        AnalysisContext {
+            known_vars,
+            ..Default::default()
+        },
+    )
 }
 
 /// Analyse a module with compiler options controlling stdlib-specific behaviour.
@@ -233,12 +306,14 @@ pub fn analyse_with_known_vars(module: &Module, known_vars: &[&str]) -> Analysis
 pub fn analyse_with_options(module: &Module, options: &crate::CompilerOptions) -> AnalysisResult {
     analyse_full(
         module,
-        &[],
-        options.stdlib_mode,
-        options.skip_module_expression_lint,
-        vec![],
-        None,
-        options.current_package.as_deref(),
+        AnalysisContext {
+            stdlib_mode: options.stdlib_mode,
+            skip_module_expression_lint: options.skip_module_expression_lint,
+            current_package: options.current_package.as_deref(),
+            knowledge_scope: options.knowledge_scope,
+            has_package_dependencies: options.has_package_dependencies,
+            ..Default::default()
+        },
     )
 }
 
@@ -254,12 +329,15 @@ pub fn analyse_with_options_and_classes(
 ) -> AnalysisResult {
     analyse_full(
         module,
-        &[],
-        options.stdlib_mode,
-        options.skip_module_expression_lint,
-        pre_loaded_classes,
-        None,
-        options.current_package.as_deref(),
+        AnalysisContext {
+            stdlib_mode: options.stdlib_mode,
+            skip_module_expression_lint: options.skip_module_expression_lint,
+            pre_loaded_classes,
+            current_package: options.current_package.as_deref(),
+            knowledge_scope: options.knowledge_scope,
+            has_package_dependencies: options.has_package_dependencies,
+            ..Default::default()
+        },
     )
 }
 
@@ -275,16 +353,49 @@ pub fn analyse_with_natives(
     pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
     native_type_registry: Option<std::sync::Arc<type_checker::NativeTypeRegistry>>,
 ) -> AnalysisResult {
-    analyse_full_with_natives(
+    analyse_full(
         module,
-        &[],
-        options.stdlib_mode,
-        options.skip_module_expression_lint,
-        pre_loaded_classes,
-        vec![],
-        None,
-        options.current_package.as_deref(),
-        native_type_registry,
+        AnalysisContext {
+            stdlib_mode: options.stdlib_mode,
+            skip_module_expression_lint: options.skip_module_expression_lint,
+            pre_loaded_classes,
+            current_package: options.current_package.as_deref(),
+            native_type_registry,
+            knowledge_scope: options.knowledge_scope,
+            has_package_dependencies: options.has_package_dependencies,
+            ..Default::default()
+        },
+    )
+}
+
+/// Analyse a module with compiler options, pre-loaded classes, a native type
+/// registry, and project-wide cross-file extensions (BT-2795, ADR 0066).
+///
+/// `cross_file_extensions` carries standalone extension definitions
+/// (`ClassName >> selector => ...`) collected from the rest of the project,
+/// so a cross-file extension resolves instead of producing a false `Dnu`
+/// hint. It may safely include the current file's own entries — the current
+/// module's extensions are registered first and duplicates are skipped.
+pub fn analyse_with_natives_and_extensions(
+    module: &Module,
+    options: &crate::CompilerOptions,
+    pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
+    native_type_registry: Option<std::sync::Arc<type_checker::NativeTypeRegistry>>,
+    cross_file_extensions: &crate::compilation::extension_index::ExtensionIndex,
+) -> AnalysisResult {
+    analyse_full(
+        module,
+        AnalysisContext {
+            stdlib_mode: options.stdlib_mode,
+            skip_module_expression_lint: options.skip_module_expression_lint,
+            pre_loaded_classes,
+            current_package: options.current_package.as_deref(),
+            native_type_registry,
+            knowledge_scope: options.knowledge_scope,
+            cross_file_extensions: Some(cross_file_extensions),
+            has_package_dependencies: options.has_package_dependencies,
+            ..Default::default()
+        },
     )
 }
 
@@ -301,17 +412,57 @@ pub fn analyse_with_natives_and_protocols(
     pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
     pre_loaded_protocols: Vec<protocol_registry::ProtocolInfo>,
     native_type_registry: Option<std::sync::Arc<type_checker::NativeTypeRegistry>>,
+    cross_file_extensions: &crate::compilation::extension_index::ExtensionIndex,
 ) -> AnalysisResult {
-    analyse_full_with_natives(
+    analyse_full(
         module,
-        &[],
-        options.stdlib_mode,
-        options.skip_module_expression_lint,
-        pre_loaded_classes,
-        pre_loaded_protocols,
-        None,
-        options.current_package.as_deref(),
-        native_type_registry,
+        AnalysisContext {
+            stdlib_mode: options.stdlib_mode,
+            skip_module_expression_lint: options.skip_module_expression_lint,
+            pre_loaded_classes,
+            pre_loaded_protocols,
+            current_package: options.current_package.as_deref(),
+            native_type_registry,
+            knowledge_scope: options.knowledge_scope,
+            cross_file_extensions: Some(cross_file_extensions),
+            has_package_dependencies: options.has_package_dependencies,
+            ..Default::default()
+        },
+    )
+}
+
+/// Analyse a module with compiler options, pre-loaded classes, pre-loaded
+/// protocols, pre-loaded type aliases, and native type registry.
+///
+/// BT-2898: Mirrors `analyse_with_natives_and_protocols` but also accepts
+/// alias definitions extracted from other source files or packages (ADR 0108
+/// Phase 5) so the alias registry recognises fixture/dependency-only alias
+/// names when analysing a downstream module.
+#[allow(clippy::too_many_arguments)]
+pub fn analyse_with_natives_and_protocols_and_aliases(
+    module: &Module,
+    options: &crate::CompilerOptions,
+    pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
+    pre_loaded_protocols: Vec<protocol_registry::ProtocolInfo>,
+    pre_loaded_aliases: Vec<alias_registry::AliasInfo>,
+    native_type_registry: Option<std::sync::Arc<type_checker::NativeTypeRegistry>>,
+    cross_file_extensions: &crate::compilation::extension_index::ExtensionIndex,
+) -> AnalysisResult {
+    analyse_full(
+        module,
+        AnalysisContext {
+            stdlib_mode: options.stdlib_mode,
+            skip_module_expression_lint: options.skip_module_expression_lint,
+            pre_loaded_classes,
+            pre_loaded_protocols,
+            pre_loaded_aliases,
+            current_package: options.current_package.as_deref(),
+            native_type_registry,
+            knowledge_scope: options.knowledge_scope,
+            cross_file_extensions: Some(cross_file_extensions),
+            has_package_dependencies: options.has_package_dependencies,
+            ..Default::default()
+        },
     )
 }
 
@@ -327,12 +478,37 @@ pub fn analyse_with_known_vars_and_classes(
 ) -> AnalysisResult {
     analyse_full(
         module,
-        known_vars,
-        false,
-        false,
-        pre_loaded_classes,
-        None,
-        None,
+        AnalysisContext {
+            known_vars,
+            pre_loaded_classes,
+            ..Default::default()
+        },
+    )
+}
+
+/// Analyse a module with pre-defined variables, pre-loaded class entries,
+/// and pre-loaded type aliases from earlier REPL turns (ADR 0108 Phase 8,
+/// BT-2902).
+///
+/// Mirrors [`analyse_with_known_vars_and_classes`] — see its doc — with one
+/// addition: `pre_loaded_aliases` makes alias names declared in *earlier*
+/// turns of the same REPL session resolvable in the current turn's `::`
+/// annotations (`resolve_type_annotation`'s `subst → alias table → nominal
+/// class` order, ADR 0108 Semantics).
+pub fn analyse_with_known_vars_classes_and_aliases(
+    module: &Module,
+    known_vars: &[&str],
+    pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
+    pre_loaded_aliases: Vec<alias_registry::AliasInfo>,
+) -> AnalysisResult {
+    analyse_full(
+        module,
+        AnalysisContext {
+            known_vars,
+            pre_loaded_classes,
+            pre_loaded_aliases,
+            ..Default::default()
+        },
     )
 }
 
@@ -350,56 +526,40 @@ pub fn analyse_with_packages(
 ) -> AnalysisResult {
     analyse_full(
         module,
-        &[],
-        options.stdlib_mode,
-        options.skip_module_expression_lint,
-        pre_loaded_classes,
-        Some(known_packages),
-        options.current_package.as_deref(),
+        AnalysisContext {
+            stdlib_mode: options.stdlib_mode,
+            skip_module_expression_lint: options.skip_module_expression_lint,
+            pre_loaded_classes,
+            known_packages: Some(known_packages),
+            current_package: options.current_package.as_deref(),
+            knowledge_scope: options.knowledge_scope,
+            has_package_dependencies: options.has_package_dependencies,
+            ..Default::default()
+        },
     )
 }
 
-/// Internal: full analysis with all knobs.
+/// Internal: full analysis with all knobs, bundled into `ctx` (BT-2804).
+///
+/// ADR 0075: When `ctx.native_type_registry` is `Some`, FFI calls (`Erlang <module> <function>:`)
+/// get return type inference and keyword mismatch warnings from the registry.
 #[allow(clippy::too_many_lines)] // orchestration function — one call per analysis phase
-fn analyse_full(
-    module: &Module,
-    known_vars: &[&str],
-    stdlib_mode: bool,
-    skip_module_expression_lint: bool,
-    pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
-    known_packages: Option<std::collections::HashSet<String>>,
-    current_package: Option<&str>,
-) -> AnalysisResult {
-    analyse_full_with_natives(
-        module,
+fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult {
+    let AnalysisContext {
         known_vars,
         stdlib_mode,
         skip_module_expression_lint,
         pre_loaded_classes,
-        vec![],
+        pre_loaded_protocols,
+        pre_loaded_aliases,
         known_packages,
         current_package,
-        None,
-    )
-}
+        native_type_registry,
+        knowledge_scope,
+        cross_file_extensions,
+        has_package_dependencies,
+    } = ctx;
 
-/// Internal: full analysis with all knobs, including native type registry.
-///
-/// ADR 0075: When `native_type_registry` is `Some`, FFI calls (`Erlang <module> <function>:`)
-/// get return type inference and keyword mismatch warnings from the registry.
-#[allow(clippy::too_many_lines)] // orchestration function — one call per analysis phase
-#[allow(clippy::too_many_arguments)]
-fn analyse_full_with_natives(
-    module: &Module,
-    known_vars: &[&str],
-    stdlib_mode: bool,
-    skip_module_expression_lint: bool,
-    pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
-    pre_loaded_protocols: Vec<protocol_registry::ProtocolInfo>,
-    known_packages: Option<std::collections::HashSet<String>>,
-    current_package: Option<&str>,
-    native_type_registry: Option<std::sync::Arc<type_checker::NativeTypeRegistry>>,
-) -> AnalysisResult {
     let mut result = AnalysisResult::new();
 
     // Phase 0: Build Class Hierarchy (ADR 0006 Phase 1a)
@@ -408,6 +568,13 @@ fn analyse_full_with_natives(
     // build_with_options is infallible; propagate any diagnostics it produced
     result.class_hierarchy = hierarchy_result.expect("ClassHierarchy::build is infallible");
     result.diagnostics.extend(hierarchy_diags);
+
+    // BT-2796: Record how complete the injected cross-file knowledge is so
+    // the receiver-knowledge classifier can consult it (ADR 0100 Rule 2).
+    result.class_hierarchy.set_knowledge_scope(knowledge_scope);
+    result
+        .class_hierarchy
+        .set_dependency_extensions_unknown(has_package_dependencies);
 
     // ADR 0071 BT-1700: Stamp current package on AST-derived classes
     if let Some(pkg) = current_package {
@@ -458,6 +625,21 @@ fn analyse_full_with_natives(
         result.class_hierarchy.register_extensions(&ext_index);
     }
 
+    // BT-2795 (ADR 0066 / ADR 0100 Rule 2 WS1): Register project-wide
+    // cross-file extensions so a same-project `ClassName >> selector`
+    // defined in another file resolves instead of producing a false `Dnu`
+    // hint. Registered *after* the current module's own extensions —
+    // `register_extensions` skips selectors the class already defines, so
+    // the current file's definitions win and an index that includes the
+    // current file's own entries is harmless.
+    if let Some(cross_file_extensions) = cross_file_extensions {
+        if !cross_file_extensions.is_empty() {
+            result
+                .class_hierarchy
+                .register_extensions(cross_file_extensions);
+        }
+    }
+
     // Phase 0.5: Protocol Registration (ADR 0068 Phase 2b)
     // Register protocol definitions from the module into the protocol registry.
     // Must happen after the class hierarchy is fully built (for namespace collision
@@ -490,6 +672,58 @@ fn analyse_full_with_natives(
         result.diagnostics.extend(proto_diags);
     }
 
+    // Phase 0.6: Type Alias Registration (ADR 0108 Phase 2/5/8,
+    // BT-2895/BT-2898/BT-2902)
+    // Must happen after both the class hierarchy and protocol registry are
+    // fully built for the current module — aliases share the class/protocol
+    // namespace, and this ordering (classes → protocols → aliases) is what
+    // gives `AliasRegistry::register_module` bidirectional collision
+    // detection within a single batch compile (see its doc comment).
+    //
+    // BT-2898: Seed the registry with pre-loaded aliases (e.g. other files in
+    // the same package, or a dependency's exported aliases) *before*
+    // registering the current module's own aliases — mirrors the protocol
+    // seeding immediately above. Skip pre-loaded entries whose names also
+    // appear in the current module (current-module wins), and let
+    // `add_pre_loaded` itself apply the seeding-boundary exclusion for
+    // `internal` entries from a *different* package (ADR 0108 Semantics) —
+    // a same-package `internal` entry (e.g. another file in the same
+    // multi-file package) is still seeded, since ADR 0108 scopes `internal`
+    // aliases to the whole declaring *package*, not just the declaring file.
+    //
+    // ADR 0108 Phase 8 (BT-2902): the same field/call also carries aliases
+    // declared in earlier turns of the same REPL session — filtering out any
+    // name the current module/turn itself redeclares (current turn wins,
+    // same as above) keeps a live `type Foo = ...` redefinition from
+    // tripping `register_module`'s duplicate-name check (ADR 0108 Semantics:
+    // a live session can legally redefine an alias; re-checking dependents
+    // is BT-2899's separate hot-reload concern, out of scope here). A REPL
+    // session has no `current_package`, so the seeding-boundary exclusion
+    // above never filters a carried-over `internal` alias out.
+    if !pre_loaded_aliases.is_empty() {
+        let current_alias_names: std::collections::HashSet<&EcoString> =
+            module.type_aliases.iter().map(|a| &a.name.name).collect();
+        let cross_file_aliases: Vec<_> = pre_loaded_aliases
+            .into_iter()
+            .filter(|a| !current_alias_names.contains(&a.name))
+            .collect();
+        let collision_diags = result.alias_registry.add_pre_loaded(
+            cross_file_aliases,
+            &result.class_hierarchy,
+            &result.protocol_registry,
+            current_package,
+        );
+        result.diagnostics.extend(collision_diags);
+    }
+    if !module.type_aliases.is_empty() {
+        let alias_diags = result.alias_registry.register_module(
+            module,
+            &result.class_hierarchy,
+            &result.protocol_registry,
+        );
+        result.diagnostics.extend(alias_diags);
+    }
+
     // Phase 1: Name Resolution
     let mut name_resolver = NameResolver::new();
     name_resolver.define_known_vars(known_vars, module.span);
@@ -515,10 +749,11 @@ fn analyse_full_with_natives(
     if let Some(registry) = native_type_registry {
         type_checker.set_native_type_registry(registry);
     }
-    type_checker.check_module_with_protocols(
+    type_checker.check_module_with_protocols_and_aliases(
         module,
         &result.class_hierarchy,
         &result.protocol_registry,
+        &result.alias_registry,
     );
     result.diagnostics.extend(type_checker.take_diagnostics());
     let type_map = type_checker.take_type_map();
@@ -634,6 +869,14 @@ fn analyse_full_with_natives(
         &mut result.diagnostics,
     );
 
+    // BT-2830: Error on Value subclass slots that collide on the auto-generated
+    // `with*:` setter selector (case-insensitive first-letter collision).
+    validators::check_value_slot_case_collision(
+        module,
+        &result.class_hierarchy,
+        &mut result.diagnostics,
+    );
+
     // BT-1299: Error on non-exhaustive match: for sealed types (e.g. Result missing error: arm)
     validators::check_match_exhaustiveness(module, &mut result.diagnostics);
 
@@ -663,6 +906,33 @@ fn analyse_full_with_natives(
             &mut result.diagnostics,
         );
     }
+    // BT-2897 / ADR 0108: warn when a type annotation closely resembles a
+    // registered alias name but doesn't resolve to one. Gated on
+    // `has_cross_file_classes` for the same open-world reason as the
+    // unresolved-class check above: without cross-file metadata, a name
+    // that looks like a near-miss of a *local* alias might actually be a
+    // legitimate cross-file class we simply haven't loaded yet — flagging it
+    // would be a false positive, not a real typo.
+    if has_cross_file_classes {
+        validators::check_unresolved_type_aliases(
+            module,
+            &result.class_hierarchy,
+            &result.protocol_registry,
+            &result.alias_registry,
+            &mut result.diagnostics,
+        );
+    }
+    // BT-2854 / ADR 0107 Phase A: validate `Pattern::Type` class names in
+    // `match:` arms (unknown class, non-leaf class, `Character` exclusion).
+    // The unknown-class branch is internally gated on `has_cross_file_classes`,
+    // same open-world policy as `check_unresolved_classes` above; the
+    // leaf-class and `Character` checks run unconditionally.
+    validators::check_type_pattern_classes(
+        module,
+        &result.class_hierarchy,
+        has_cross_file_classes,
+        &mut result.diagnostics,
+    );
     // BT-1759: Warn when a workspace binding shadows a class name.
     // This check works against the full class hierarchy (including locally
     // defined classes), so it does not require cross-file metadata.
@@ -687,10 +957,11 @@ fn analyse_full_with_natives(
 
     // Phase 8: Visibility enforcement (ADR 0071)
     // E0401: cross-package internal class references (BT-1701)
-    // E0402: leaked visibility — internal class in public signature (BT-1701)
+    // E0402: leaked visibility — internal class/alias in public signature (BT-1701/BT-2898)
     validators::check_class_visibility(
         module,
         &result.class_hierarchy,
+        &result.alias_registry,
         current_package,
         &mut result.diagnostics,
     );
@@ -699,6 +970,16 @@ fn analyse_full_with_natives(
         module,
         &result.class_hierarchy,
         &result.protocol_registry,
+        current_package,
+        &mut result.diagnostics,
+    );
+    // E0402 (BT-2898, ADR 0108 Semantics): a public alias whose expansion
+    // transitively reaches an internal class/alias leaks it, even when the
+    // internal name never appears directly in any signature.
+    validators::check_alias_leaked_visibility(
+        module,
+        &result.class_hierarchy,
+        &result.alias_registry,
         current_package,
         &mut result.diagnostics,
     );

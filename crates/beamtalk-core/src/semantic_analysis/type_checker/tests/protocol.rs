@@ -358,6 +358,7 @@ fn setup_json_class_side_fixture(
     // protocol-typed. (NOT named "Json" — that's a *builtin*, which
     // `add_from_beam_meta` skips, silently substituting the stdlib class.)
     let json_info = ClassInfo {
+        surface_incomplete: false,
         name: "JsonEncoder".into(),
         superclass: Some("Object".into()),
         is_sealed: false,
@@ -440,6 +441,16 @@ fn make_json_generate_module(arg_name: &str, arg_type: &str, receiver_span: Span
 /// an unreached check. The companion negative test
 /// (`test_meta_receiver_class_method_protocol_param_non_conforming_warns`)
 /// proves the same path fires a warning when the argument does not conform.
+///
+/// BT-2784: also asserts there is no *nominal* "expects Printable, got
+/// Dictionary" mismatch. Before the fix, `check_argument_types`'s nominal
+/// class-hierarchy walk (`is_type_compatible`) had no protocol awareness: once
+/// `register_protocol_classes` (BT-1933) added `Printable` as a synthetic
+/// class entry, the "unknown type → compatible" escape hatch it relied on no
+/// longer applied, and Dictionary's ordinary superclass chain doesn't contain
+/// `Printable` — so a spurious nominal-mismatch diagnostic fired *alongside*
+/// the (correct) silent structural pass below. This is the false positive
+/// from PR #2862's "Pre-existing note".
 #[test]
 fn test_protocol_typed_param_no_false_positive_with_protocol_classes() {
     let (hierarchy, registry) = setup_json_class_side_fixture("Printable");
@@ -478,6 +489,23 @@ fn test_protocol_typed_param_no_false_positive_with_protocol_classes() {
         conformance_warnings.is_empty(),
         "Dictionary conforms to Printable (has asString) — no warning expected, got: {:?}",
         conformance_warnings
+            .iter()
+            .map(|d| &d.message)
+            .collect::<Vec<_>>()
+    );
+
+    // BT-2784: there should also be NO nominal "expects ..., got ..." mismatch
+    // — `check_argument_types`'s nominal walk must defer to the structural
+    // conformance check above for protocol-typed class-side params.
+    let nominal_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("expects") && d.message.contains("got"))
+        .collect();
+    assert!(
+        nominal_warnings.is_empty(),
+        "Dictionary structurally conforms to Printable — no nominal mismatch expected, got: {:?}",
+        nominal_warnings
             .iter()
             .map(|d| &d.message)
             .collect::<Vec<_>>()
@@ -526,6 +554,63 @@ fn test_meta_receiver_class_method_protocol_param_non_conforming_warns() {
             && conformance_warnings[0].message.contains("Serializable"),
         "Warning should mention Integer and Serializable, got: {}",
         conformance_warnings[0].message
+    );
+
+    // BT-2784: exactly one diagnostic total should mention Serializable — the
+    // structural "does not conform" warning above. A duplicate nominal
+    // "expects Serializable, got Integer" mismatch must NOT also fire.
+    let serializable_mentions: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("Serializable"))
+        .collect();
+    assert_eq!(
+        serializable_mentions.len(),
+        1,
+        "expected exactly one Serializable-related diagnostic (structural), not a duplicate nominal mismatch, got: {:?}",
+        serializable_mentions
+            .iter()
+            .map(|d| &d.message)
+            .collect::<Vec<_>>()
+    );
+}
+
+/// BT-2784: skipping the nominal walk for protocol-typed class-side params
+/// must NOT swallow ordinary nominal mismatches on *non-protocol* class-side
+/// params. `JsonEncoder generate:` here declares its param as the real class
+/// `Integer` (not a protocol) — passing a `String` must still produce the
+/// nominal "expects Integer, got String" warning, proving the BT-2784 fix
+/// (`hierarchy.is_protocol_class(..)` guard) is scoped to protocol-typed
+/// params only.
+#[test]
+fn test_class_side_non_protocol_param_nominal_mismatch_still_warns() {
+    let (hierarchy, registry) = setup_json_class_side_fixture("Integer");
+
+    let receiver_span = Span::new(10, 14);
+    let module = make_json_generate_module("s", "String", receiver_span);
+
+    let mut checker = TypeChecker::new();
+    checker.check_module_with_protocols(&module, &hierarchy, &registry);
+
+    let nominal_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("expects") && d.message.contains("got"))
+        .collect();
+    assert_eq!(
+        nominal_warnings.len(),
+        1,
+        "String does not nominally match Integer — expected exactly 1 nominal mismatch, got: {:?}",
+        nominal_warnings
+            .iter()
+            .map(|d| &d.message)
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        nominal_warnings[0].message.contains("Integer")
+            && nominal_warnings[0].message.contains("String"),
+        "Warning should mention Integer and String, got: {}",
+        nominal_warnings[0].message
     );
 }
 
@@ -704,6 +789,7 @@ fn setup_intersection_param_fixture() -> (
     hierarchy.register_protocol_classes(&proto_module);
 
     let zzyzx_info = ClassInfo {
+        surface_incomplete: false,
         name: "Zzyzx".into(),
         superclass: Some("Object".into()),
         is_sealed: false,
@@ -844,6 +930,7 @@ fn test_intersection_param_conforms_to_both_no_warning() {
     let (mut hierarchy, registry) = setup_intersection_param_fixture();
 
     let report_info = ClassInfo {
+        surface_incomplete: false,
         name: "Report".into(),
         superclass: Some("Object".into()),
         is_sealed: false,
@@ -959,6 +1046,7 @@ fn add_widget_class(hierarchy: &mut ClassHierarchy, class_side_selectors: &[&str
         .collect();
 
     let widget_info = ClassInfo {
+        surface_incomplete: false,
         name: "Widget".into(),
         superclass: Some("Object".into()),
         is_sealed: false,
@@ -1016,6 +1104,14 @@ fn make_widget_arg_module(selector: &str) -> Module {
 
 /// Positive: `Widget` has a class-side `serialize`, so the class object
 /// `Widget` conforms to `Serializable` — no warning for `zzyzx store: Widget`.
+///
+/// BT-2784: also asserts no nominal "expects Serializable, got Widget class"
+/// mismatch — the same nominal-walk false positive that affected the
+/// `Dictionary`/`Printable` class-side-param case also applies to
+/// `Meta`-typed (class-object) arguments, since `check_argument_types`'s
+/// `InferredType::Meta` arm shares the same protocol-unaware nominal
+/// comparison. The BT-2784 fix's `continue` guard runs before the
+/// `match arg_ty` split, so it covers this arm too.
 #[test]
 fn test_class_object_arg_conforms_via_class_side_method() {
     let (mut hierarchy, registry) = setup_intersection_param_fixture();
@@ -1034,6 +1130,20 @@ fn test_class_object_arg_conforms_via_class_side_method() {
         conformance_warnings.is_empty(),
         "Widget's class side has `serialize` — the class object conforms to Serializable, got: {:?}",
         conformance_warnings
+            .iter()
+            .map(|d| &d.message)
+            .collect::<Vec<_>>()
+    );
+
+    let nominal_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("expects") && d.message.contains("got"))
+        .collect();
+    assert!(
+        nominal_warnings.is_empty(),
+        "Widget class object conforms to Serializable — no nominal mismatch expected, got: {:?}",
+        nominal_warnings
             .iter()
             .map(|d| &d.message)
             .collect::<Vec<_>>()
@@ -1199,5 +1309,73 @@ fn test_split_intersection_type_string() {
     assert_eq!(
         TypeChecker::split_intersection_type_string("Collection(A & B)"),
         None
+    );
+}
+
+/// BT-2794 (pre-WS3 dependency guard): with dependencies declared and
+/// project-complete knowledge, the receiver-knowledge classifier keeps every
+/// receiver `Open`, which also suppresses protocol-conformance warnings —
+/// a dependency could extend the class with the missing required method, so
+/// non-conformance is no longer provable. This is the deliberate,
+/// open-world-conservative blast radius of the guard (ADR 0100 Rule 1,
+/// third downgrade); it reverts to full checking once WS3 loads
+/// cross-package extension metadata.
+#[test]
+fn test_dependency_guard_suppresses_conformance_warning() {
+    use crate::semantic_analysis::KnowledgeScope;
+
+    let (mut hierarchy, registry) = setup_json_class_side_fixture("Serializable");
+    hierarchy.set_knowledge_scope(KnowledgeScope::ProjectComplete);
+    hierarchy.set_dependency_extensions_unknown(true);
+
+    let receiver_span = Span::new(10, 14);
+    let module = make_json_generate_module("n", "Integer", receiver_span);
+
+    let mut checker = TypeChecker::new();
+    checker.check_module_with_protocols(&module, &hierarchy, &registry);
+
+    let conformance_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not conform"))
+        .collect();
+    assert!(
+        conformance_warnings.is_empty(),
+        "with dependencies declared (pre-WS3), conformance warnings are withheld, got: {:?}",
+        conformance_warnings
+            .iter()
+            .map(|d| &d.message)
+            .collect::<Vec<_>>()
+    );
+}
+
+/// Counterpart: the same fixture without the dependency guard still warns —
+/// proving the suppression above comes from the guard, not a fixture change.
+#[test]
+fn test_project_complete_without_deps_still_warns_conformance() {
+    use crate::semantic_analysis::KnowledgeScope;
+
+    let (mut hierarchy, registry) = setup_json_class_side_fixture("Serializable");
+    hierarchy.set_knowledge_scope(KnowledgeScope::ProjectComplete);
+
+    let receiver_span = Span::new(10, 14);
+    let module = make_json_generate_module("n", "Integer", receiver_span);
+
+    let mut checker = TypeChecker::new();
+    checker.check_module_with_protocols(&module, &hierarchy, &registry);
+
+    let conformance_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("does not conform"))
+        .collect();
+    assert_eq!(
+        conformance_warnings.len(),
+        1,
+        "dependency-free project-complete builds keep conformance warnings, got: {:?}",
+        conformance_warnings
+            .iter()
+            .map(|d| &d.message)
+            .collect::<Vec<_>>()
     );
 }

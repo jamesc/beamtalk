@@ -443,7 +443,12 @@ fn collect_pattern_class_refs(
                 collect_pattern_class_refs(&segment.value, class_name, file_path, results);
             }
         }
-        Pattern::Wildcard(_) | Pattern::Literal(_, _) | Pattern::Variable(_) => {}
+        Pattern::Type { class, .. } => {
+            if class.name == class_name {
+                results.push(Location::new(file_path.clone(), class.span));
+            }
+        }
+        Pattern::Wildcard(_) | Pattern::Literal(_, _) | Pattern::Variable(_) | Pattern::Nil(_) => {}
     }
 }
 

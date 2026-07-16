@@ -96,6 +96,12 @@ sealed typed Collection subclass: Binary
   /// ```
   size -> Integer => @primitive
 
+  // Left as bare `Block` (not `Block(Integer, Object)`): String subclasses
+  // Binary but overrides `do:` with grapheme-String elements, not bytes.
+  // Parameterizing here would make String's override param type
+  // (Block(String, Object)) incompatible with this one under the invariant
+  // override check (BT-2826).
+
   /// Iterate over each byte (Integer 0-255), evaluating `block` with each one.
   ///
   /// ## Examples

@@ -217,6 +217,27 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, force: bool) 
     info!("Starting build");
 
     let env = setup_build_environment(path)?;
+
+    // BT-2796: A package directory build walks every project source file
+    // (Pass 1) before any per-file analysis runs (Pass 2), so the injected
+    // cross-file knowledge is project-complete. Declare that to the
+    // receiver-knowledge classifier (ADR 0100 Rule 2 sequencing guard).
+    // A single-file build (`beamtalk build foo.bt`) sees only that file, and
+    // a manifest-less directory build skips Pass 1 entirely — both keep the
+    // conservative `ModuleOnly` default.
+    let mut options = options.clone();
+    if Utf8Path::new(path).is_dir() && env.full_manifest.is_some() {
+        options.knowledge_scope = beamtalk_core::semantic_analysis::KnowledgeScope::ProjectComplete;
+    }
+    // BT-2794 (pre-WS3 guard): dependency extension contributions are not
+    // loaded until WS3 (ADR 0070 amendment), so declaring dependencies means
+    // no receiver's method surface is provably complete.
+    options.has_package_dependencies = env
+        .full_manifest
+        .as_ref()
+        .is_some_and(|m| !m.dependencies.is_empty());
+    let options = &options;
+
     let dep_ctx = resolve_and_validate_dependencies(&env, options)?;
     let passes = execute_build_passes(&env, options, &dep_ctx, force)?;
 
@@ -357,6 +378,8 @@ struct ClassIndexResult {
     class_superclass_index: HashMap<String, String>,
     /// Unified collection of all `ClassInfo` from source and dependency classes.
     all_class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    /// Project-wide standalone extension index from Pass 1 (BT-2795).
+    extension_index: beamtalk_core::compilation::extension_index::ExtensionIndex,
     /// Dependency registry for cross-package collision detection.
     dep_registry: beamtalk_core::semantic_analysis::DependencyRegistry,
     /// Cached ASTs from incremental Pass 1, keyed by source file path.
@@ -392,6 +415,7 @@ fn build_class_index(
         mut class_module_index,
         class_superclass_index,
         source_class_infos,
+        extension_index,
         cached_asts,
         force_pass2,
     ) = if let Some(pkg) = pkg_manifest {
@@ -409,6 +433,7 @@ fn build_class_index(
             result.class_module_index,
             result.class_superclass_index,
             result.all_class_infos,
+            result.extension_index,
             result.cached_asts,
             result.manifest_invalidated,
         )
@@ -417,6 +442,7 @@ fn build_class_index(
             HashMap::new(),
             HashMap::new(),
             Vec::new(),
+            beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
             HashMap::new(),
             false,
         )
@@ -469,6 +495,7 @@ fn build_class_index(
         class_module_index,
         class_superclass_index,
         all_class_infos,
+        extension_index,
         dep_registry,
         cached_asts,
         force_pass2,
@@ -688,7 +715,12 @@ fn execute_build_passes(
     // native compilation so freshly compiled native modules are included.
     // Results are cached in _build/type_cache/ — incremental builds read zero
     // .beam files when the cache is fresh.
-    let native_type_registry = extract_type_specs(env, options).map(std::sync::Arc::new);
+    let native_type_registry = extract_type_specs(
+        &env.layout,
+        env.pkg_manifest().is_some(),
+        options.stdlib_mode,
+    )
+    .map(std::sync::Arc::new);
 
     let file_module_pairs = compute_file_module_pairs(env)?;
 
@@ -721,6 +753,13 @@ fn execute_build_passes(
         .full_manifest
         .as_ref()
         .is_some_and(|m| m.package.strict_deps);
+    // ADR 0100 Rule 3 (BT-2793): the package's `[diagnostics]` severity-override
+    // table, empty when there's no manifest or no `[diagnostics]` section.
+    let diagnostics_overrides = env
+        .full_manifest
+        .as_ref()
+        .map(|m| m.diagnostics.clone())
+        .unwrap_or_default();
 
     let registry_ref = if index.dep_registry.is_empty() {
         None
@@ -733,10 +772,12 @@ fn execute_build_passes(
             class_superclass_index: index.class_superclass_index.clone(),
             pre_loaded_classes: index.all_class_infos.clone(),
             pre_loaded_protocols: Vec::new(),
+            extension_index: index.extension_index.clone(),
         },
         dep_registry: registry_ref,
         strict_deps,
         native_type_registry,
+        diagnostics_overrides,
     };
     // BT-2014: Collect diagnostics from all compiled files for the summary.
     let mut all_build_diags: Vec<beamtalk_core::source_analysis::Diagnostic> = Vec::new();
@@ -869,113 +910,41 @@ fn post_process_package_artifacts(
 /// succeeds without type information. The LSP will still provide untyped
 /// completions in that case.
 ///
-/// Runs in package mode (when `beamtalk.toml` exists) and in `--stdlib-mode`
-/// (used by `dialyzer-specs` and the build-stdlib pipeline, which compile a
-/// directory of stdlib `.bt` files without a manifest). Single-file builds
-/// without either signal return `None`.
-fn extract_type_specs(
-    env: &BuildEnvironment,
-    options: &beamtalk_core::CompilerOptions,
+/// Runs in package mode (`has_manifest`) and in `--stdlib-mode` (used by
+/// `dialyzer-specs` and the build-stdlib pipeline, which compile a directory
+/// of stdlib `.bt` files without a manifest). Single-file builds without
+/// either signal return `None`.
+///
+/// BT-2851: This is the single source of truth for populating a
+/// [`NativeTypeRegistry`] from OTP/dependency `.beam` files. `beamtalk build`
+/// (via [`execute_build_passes`]) and `beamtalk lint` (via
+/// [`super::lint::run_lint`]) both call this function directly — rather than
+/// lint reading a possibly-absent/stale on-disk cache written by a *previous*
+/// build — so the two surfaces can never see different FFI type diagnostics
+/// for the same code. The tiered cache in `cache_dir` still makes repeat
+/// calls (from either surface) cheap: a fresh cache short-circuits to zero
+/// `.beam` reads; a cold/stale one pays the extraction cost once and writes
+/// the cache for the next caller, whichever surface that is.
+pub(crate) fn extract_type_specs(
+    layout: &BuildLayout,
+    has_manifest: bool,
+    stdlib_mode: bool,
 ) -> Option<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry> {
-    use crate::beam_compiler;
-    use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
-
     // No manifest: only continue when compiling the stdlib (which has its own
     // FFI surface in runtime/stdlib/workspace ebins). Otherwise nothing to do.
-    if env.pkg_manifest().is_none() {
-        return if options.stdlib_mode {
+    if !has_manifest {
+        return if stdlib_mode {
             super::build_stdlib::extract_stdlib_type_specs()
         } else {
             None
         };
     }
 
-    let cache_dir = env.layout.type_cache_dir();
-
-    // Discover OTP .beam files and the OTP version (for the shared cache key).
-    let otp = match beam_compiler::discover_otp_beam_files() {
-        Ok(discovery) => discovery,
-        Err(e) => {
-            debug!("Skipping OTP type spec extraction: {e}");
-            beam_compiler::OtpDiscovery::default()
-        }
-    };
-
-    // De-duplicate OTP beams by module name (file stem); first occurrence wins.
-    let mut seen_modules = std::collections::HashSet::new();
-    let mut otp_beams = otp.beam_files;
-    otp_beams.retain(|beam_file| match beam_file.file_stem() {
-        Some(stem) => seen_modules.insert(stem.to_owned()),
-        None => true,
-    });
-
-    // Discover dependency .beam files (path deps, native ebin, rebar3 hex deps).
-    let mut dep_ebin_dirs: Vec<_> = super::deps::collect_dep_ebin_paths(&env.layout);
-    let native_ebin = env.layout.native_ebin_dir();
-    if native_ebin.exists() {
-        dep_ebin_dirs.push(native_ebin);
-    }
-    dep_ebin_dirs.extend(collect_rebar3_ebin_paths(&env.layout));
-    dep_ebin_dirs.sort();
-    dep_ebin_dirs.dedup();
-
-    // De-duplicate dep beams, and drop any module already covered by OTP so the
-    // OTP-first precedence (and a single .beam per module) is preserved.
-    let mut dep_beams = beam_compiler::discover_dependency_beam_files(&dep_ebin_dirs);
-    dep_beams.retain(|beam_file| match beam_file.file_stem() {
-        Some(stem) => seen_modules.insert(stem.to_owned()),
-        None => true,
-    });
-
-    if otp_beams.is_empty() && dep_beams.is_empty() {
-        debug!("No .beam files found for type spec extraction");
-        return None;
-    }
-
-    // BT-2470: OTP specs go through the shared, version-keyed cache tier (which
-    // survives a wiped `_build/`); dependency/native specs stay project-local.
-    let shared_dir = otp
-        .version
-        .as_deref()
-        .and_then(beam_compiler::shared_otp_cache_dir);
-    if let Some(shared) = &shared_dir {
-        debug!(dir = %shared, "Using shared OTP type-spec cache");
-    }
-
-    let otp_registry = match beam_compiler::extract_beam_specs_tiered(
-        &otp_beams,
-        &cache_dir,
-        shared_dir.as_deref(),
-    ) {
-        Ok(registry) => registry,
-        Err(e) => {
-            debug!("OTP type spec extraction failed (non-fatal): {e}");
-            NativeTypeRegistry::new()
-        }
-    };
-
-    let dep_registry = match beam_compiler::extract_beam_specs(&dep_beams, &cache_dir) {
-        Ok(registry) => registry,
-        Err(e) => {
-            debug!("Dependency type spec extraction failed (non-fatal): {e}");
-            NativeTypeRegistry::new()
-        }
-    };
-
-    // Merge dependency specs into the OTP registry; OTP wins on any collision.
-    let mut registry = otp_registry;
-    registry.merge(dep_registry);
-
-    if registry.module_count() > 0 {
-        info!(
-            modules = registry.module_count(),
-            functions = registry.function_count(),
-            "Extracted Erlang FFI type specs"
-        );
-        Some(registry)
-    } else {
-        None
-    }
+    // BT-2858: the manifest-backed extraction path now lives in the
+    // `beamtalk_cli` lib crate (`native_type_specs`) so `beamtalk-mcp` can
+    // call the same single source of truth without reading a possibly-stale
+    // on-disk cache. This is a thin delegation, not a duplicate.
+    beamtalk_cli::native_type_specs::extract_project_type_specs(layout)
 }
 
 /// Collected build outputs needed for OTP application packaging.
@@ -1544,11 +1513,13 @@ pub(crate) fn build_class_module_index(
     HashMap<String, String>,
     HashMap<String, String>,
     Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    beamtalk_core::compilation::extension_index::ExtensionIndex,
     HashMap<Utf8PathBuf, CachedAst>,
 )> {
     let mut module_index = HashMap::new();
     let mut superclass_index = HashMap::new();
     let mut all_class_infos = Vec::new();
+    let mut extension_index = beamtalk_core::compilation::extension_index::ExtensionIndex::new();
     let mut cached_asts: HashMap<Utf8PathBuf, CachedAst> = HashMap::new();
 
     for file in source_files {
@@ -1577,9 +1548,31 @@ pub(crate) fn build_class_module_index(
         }
 
         // BT-1523: Extract full ClassInfo for cross-file hierarchy resolution.
-        let class_infos =
+        //
+        // BT-2796: A file with parse *errors* may have an under-recovered
+        // method surface (error recovery can drop method definitions), so its
+        // classes are marked `surface_incomplete`. The receiver-knowledge
+        // classifier downgrades receivers whose superclass chain contains a
+        // marked class to `Open`, preventing false unresolved-selector hints
+        // against a surface Pass 1 never fully saw.
+        let has_parse_errors = diagnostics
+            .iter()
+            .any(|d| d.severity == beamtalk_core::source_analysis::Severity::Error);
+        let mut class_infos =
             beamtalk_core::semantic_analysis::ClassHierarchy::extract_class_infos(&module);
+        if has_parse_errors {
+            for info in &mut class_infos {
+                info.surface_incomplete = true;
+            }
+        }
         all_class_infos.extend(class_infos);
+
+        // BT-2795: Collect standalone extension definitions
+        // (`ClassName >> selector => ...`) project-wide so Pass 2 can
+        // register them into every file's class hierarchy — a same-project
+        // cross-file extension then resolves instead of producing a false
+        // `Dnu` hint (ADR 0066 / ADR 0100 Rule 2 WS1).
+        extension_index.add_module(&module, file.as_std_path());
 
         for class in &module.classes {
             let class_name = class.name.name.to_string();
@@ -1614,7 +1607,13 @@ pub(crate) fn build_class_module_index(
         );
     }
 
-    Ok((module_index, superclass_index, all_class_infos, cached_asts))
+    Ok((
+        module_index,
+        superclass_index,
+        all_class_infos,
+        extension_index,
+        cached_asts,
+    ))
 }
 
 // ── BT-1730: Class module header generation ─────────────────────────────────
@@ -2841,7 +2840,8 @@ mod tests {
         let nonexistent = Utf8PathBuf::from("/nonexistent/no_such_file.bt");
         let result = build_class_module_index(&[nonexistent], None, "my_app");
         assert!(result.is_ok());
-        let (module_index, superclass_index, _class_infos, _cached_asts) = result.unwrap();
+        let (module_index, superclass_index, _class_infos, _extensions, _cached_asts) =
+            result.unwrap();
         assert!(module_index.is_empty());
         assert!(superclass_index.is_empty());
     }
@@ -2879,7 +2879,7 @@ mod tests {
         );
 
         let source_files = vec![observer_path.join("event_bus.bt")];
-        let (index, _superclass, _class_infos, _cached_asts) =
+        let (index, _superclass, _class_infos, _extensions, _cached_asts) =
             build_class_module_index(&source_files, Some(&src_path), "gang_of_four").unwrap();
 
         assert_eq!(
@@ -2919,8 +2919,13 @@ mod tests {
         fs::create_dir_all(&build_dir).unwrap();
 
         let source_files = vec![observer_path.join("event_bus.bt"), src_path.join("main.bt")];
-        let (class_module_index, class_superclass_index, all_class_infos, _cached_asts) =
-            build_class_module_index(&source_files, Some(&src_path), "gang_of_four").unwrap();
+        let (
+            class_module_index,
+            class_superclass_index,
+            all_class_infos,
+            _extensions,
+            _cached_asts,
+        ) = build_class_module_index(&source_files, Some(&src_path), "gang_of_four").unwrap();
 
         // Build the class index — EventBus should map to observer subdir module
         assert_eq!(
@@ -2942,7 +2947,7 @@ mod tests {
                     class_module_index: class_module_index.clone(),
                     class_superclass_index: class_superclass_index.clone(),
                     pre_loaded_classes: all_class_infos.clone(),
-                    pre_loaded_protocols: Vec::new(),
+                    ..ClassHierarchyContext::default()
                 },
                 ..CompileContext::default()
             },
@@ -2994,8 +2999,13 @@ mod tests {
             src_path.join("counter.bt"),
             src_path.join("inheriting_counter.bt"),
         ];
-        let (class_module_index, class_superclass_index, all_class_infos, _cached_asts) =
-            build_class_module_index(&source_files, Some(&src_path), "test_pkg").unwrap();
+        let (
+            class_module_index,
+            class_superclass_index,
+            all_class_infos,
+            _extensions,
+            _cached_asts,
+        ) = build_class_module_index(&source_files, Some(&src_path), "test_pkg").unwrap();
 
         // Verify ClassInfo extraction captured Counter's methods
         assert!(
@@ -3028,7 +3038,7 @@ mod tests {
                     class_module_index: class_module_index.clone(),
                     class_superclass_index: class_superclass_index.clone(),
                     pre_loaded_classes: all_class_infos.clone(),
-                    pre_loaded_protocols: Vec::new(),
+                    ..ClassHierarchyContext::default()
                 },
                 ..CompileContext::default()
             },
@@ -3978,7 +3988,7 @@ mod tests {
 
         // Use build_class_module_index to extract ClassInfo from source
         let source_files = vec![bt_file];
-        let (_module_index, _superclass_index, class_infos, _cached_asts) =
+        let (_module_index, _superclass_index, class_infos, _extensions, _cached_asts) =
             build_class_module_index(&source_files, Some(&src_dir), "my_pkg").unwrap();
 
         let result = generate_package_corpus(&corpus_dir, "my_pkg", &class_infos, &source_files);
@@ -4039,7 +4049,7 @@ mod tests {
         );
 
         let source_files = vec![bt_file];
-        let (_module_index, _superclass_index, class_infos, _cached_asts) =
+        let (_module_index, _superclass_index, class_infos, _extensions, _cached_asts) =
             build_class_module_index(&source_files, Some(&src_dir), "my_pkg").unwrap();
 
         // Verify the class was parsed as internal

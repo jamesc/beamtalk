@@ -213,10 +213,13 @@ impl CoreErlangGenerator {
             return Ok(None);
         }
         // BT-851: Check if receiver is a Tier 2 block parameter (zero-arg value)
+        // BT-2797: or a local var this method assigned a Tier 2 block literal to.
         if let Expression::Identifier(id) = receiver {
-            if self.tier2_block_params.contains(id.name.as_str()) {
-                let doc = self.generate_block_value_call_stateful(receiver, arguments)?;
-                return Ok(Some(doc));
+            if self.tier2_block_params.contains(id.name.as_str())
+                || self.tier2_local_vars.contains(id.name.as_str())
+            {
+                let tuple_doc = self.generate_block_value_call_stateful(receiver, arguments)?;
+                return Ok(Some(self.close_tier2_value_subexpr_doc(tuple_doc)));
             }
         }
         // BT-1213: Inline Tier 2 block literal with mutations.
@@ -233,6 +236,21 @@ impl CoreErlangGenerator {
                 let doc = self.generate_block_value_inline_with_mutations(block, &[])?;
                 return Ok(Some(doc));
             }
+        }
+        // BT-2814: `self.field value` in sub-expression position (e.g.
+        // `self log: (self.field value)`). `generate_block_value_call_runtime_discriminated`
+        // always returns a raw `{Result, NewState}` tuple; this function
+        // (reached via the generic `expression_doc` dispatch) is called from
+        // *any* expression position, where nothing else would unpack it — so
+        // unpack it here, discarding NewState. The block's own field/local
+        // mutation is NOT threaded forward to later statements in this
+        // position (same documented, pre-existing limitation noted in
+        // `close_tier2_value_subexpr_doc` — a bare Tier2ValueCall *statement*
+        // still gets full state threading via `BodyExprKind::Tier2ValueCall`).
+        if self.context == CodeGenContext::Actor && Self::is_self_field_access(receiver) {
+            let tuple_doc =
+                self.generate_block_value_call_runtime_discriminated(receiver, arguments, "value")?;
+            return Ok(Some(self.close_tier2_value_subexpr_doc(tuple_doc)));
         }
         let doc = if matches!(receiver, Expression::Block { .. }) {
             self.generate_block_value_call(receiver, &[])?
@@ -314,8 +332,68 @@ impl CoreErlangGenerator {
 
             "to:by:do:" if arguments.len() == 3 => self.try_generate_to_by_do(receiver, arguments),
 
+            // BT-2803: valueWithArguments: (call-site-intercepted @intrinsic,
+            // was previously a bare @primitive with no access to the calling
+            // method's state — see stdlib/src/Block.bt).
+            "valueWithArguments:" if arguments.len() == 1 => {
+                self.try_generate_block_value_with_arguments_keyword(receiver, &arguments[0])
+            }
+
             _ => Ok(None),
         }
+    }
+
+    /// Generates code for `valueWithArguments:` on a block receiver.
+    ///
+    /// BT-2803: mirrors `try_generate_block_value_keyword`'s generic
+    /// (non-Tier2) fallback path. Deliberately does NOT special-case
+    /// `tier2_block_params`/`tier2_local_vars`/`self.field` receivers here —
+    /// `generate_block_value_with_arguments_call_runtime_discriminated`
+    /// always returns a raw `{Result, NewState}` tuple, and this function is
+    /// reached from the generic, any-position `expression_doc` dispatch,
+    /// which has nothing to unpack it. Those shapes are intercepted before
+    /// reaching here by the top-level `Tier2ValueCall` classification in
+    /// `gen_server/methods.rs` (`is_tier2_value_call`/
+    /// `generate_tier2_value_call_doc`), the only place that unpacks the
+    /// tuple (same scoping as `try_generate_block_value_keyword`'s BT-2797
+    /// comment for `self.field value:`).
+    fn try_generate_block_value_with_arguments_keyword(
+        &mut self,
+        receiver: &Expression,
+        args_expr: &Expression,
+    ) -> Result<Option<Document<'static>>> {
+        // BT-2095: A bare class name as receiver is a class-method send, not
+        // block application — fall through (mirrors `value:`'s bypass).
+        if matches!(receiver, Expression::ClassReference { .. }) {
+            return Ok(None);
+        }
+        // BT-1260: Compile-time Erlang FFI receiver → fall through.
+        if Self::is_erlang_ffi_receiver(receiver) {
+            return Ok(None);
+        }
+        // Fast path: block literal receiver never needs the runtime
+        // is_function guard. Literal-block-with-mutations is out of scope
+        // (BT-2803) — valueWithArguments: on a literal block is an
+        // unmotivated shape; use value:/value:value:/... for those instead.
+        if matches!(receiver, Expression::Block(_)) {
+            let fun_var = self.fresh_temp_var("Fun");
+            let recv_code = self.expression_doc(receiver)?;
+            let args_code = self.expression_doc(args_expr)?;
+            let doc = docvec![
+                "let ",
+                leaf::var(fun_var.clone()),
+                " = ",
+                recv_code,
+                " in call 'erlang':'apply'(",
+                leaf::var(fun_var),
+                ", ",
+                args_code,
+                ")",
+            ];
+            return Ok(Some(doc));
+        }
+        let doc = self.generate_block_value_with_arguments_call(receiver, args_expr)?;
+        Ok(Some(doc))
     }
 
     /// Generates code for keyword `value:` variants on a block receiver.
@@ -326,10 +404,13 @@ impl CoreErlangGenerator {
         selector_name: &str,
     ) -> Result<Option<Document<'static>>> {
         // BT-851: Check if receiver is a Tier 2 block parameter
+        // BT-2797: or a local var this method assigned a Tier 2 block literal to.
         if let Expression::Identifier(id) = receiver {
-            if self.tier2_block_params.contains(id.name.as_str()) {
-                let doc = self.generate_block_value_call_stateful(receiver, arguments)?;
-                return Ok(Some(doc));
+            if self.tier2_block_params.contains(id.name.as_str())
+                || self.tier2_local_vars.contains(id.name.as_str())
+            {
+                let tuple_doc = self.generate_block_value_call_stateful(receiver, arguments)?;
+                return Ok(Some(self.close_tier2_value_subexpr_doc(tuple_doc)));
             }
         }
         // BT-1213: Inline Tier 2 block literal with mutations (keyword variant)
@@ -364,6 +445,17 @@ impl CoreErlangGenerator {
         // the actor-style `sync_send` path with no matching handle_call clause.
         if matches!(receiver, Expression::ClassReference { .. }) {
             return Ok(None);
+        }
+        // BT-2814: `self.field value: ...` in sub-expression position — see
+        // the matching comment (and `close_tier2_value_subexpr_doc`) in
+        // `try_generate_block_value_unary`.
+        if self.context == CodeGenContext::Actor && Self::is_self_field_access(receiver) {
+            let tuple_doc = self.generate_block_value_call_runtime_discriminated(
+                receiver,
+                arguments,
+                selector_name,
+            )?;
+            return Ok(Some(self.close_tier2_value_subexpr_doc(tuple_doc)));
         }
         // BT-1260: Unknown receiver → runtime is_function guard with fallback
         let doc = self.generate_value_keyword_guard(receiver, arguments, selector_name)?;
@@ -759,6 +851,68 @@ impl CoreErlangGenerator {
     /// end
     /// ```
     ///
+    /// BT-1942: Hoists a receiver operand that may open a class-method
+    /// self-send scope, binding it to a fresh `prefix`-named temp var.
+    /// Appends the necessary `let`-binding(s) to `parts` and sets
+    /// `any_open_scope` if this operand's evaluation opened a class-method
+    /// scope. Shared by `generate_value_keyword_guard` and
+    /// `generate_block_value_with_arguments_call` (BT-2803) — both hoist
+    /// their receiver the same way, before any argument hoisting.
+    fn hoist_open_scope_receiver(
+        &mut self,
+        receiver: &Expression,
+        prefix: &str,
+        parts: &mut Vec<Document<'static>>,
+        any_open_scope: &mut bool,
+    ) -> Result<String> {
+        let (preamble, mut docs) = self.capture_subexpr_sequence(&[receiver], prefix)?;
+        let code = docs.remove(0);
+        if !matches!(preamble, Document::Nil) {
+            *any_open_scope = true;
+            parts.push(preamble);
+        }
+        let var = self.fresh_temp_var(prefix);
+        parts.push(docvec!["let ", leaf::var(var.clone()), " = ", code, " in ",]);
+        Ok(var)
+    }
+
+    /// BT-1270/BT-1942: Hoists an argument-position operand, special-casing a
+    /// field-assignment argument (`self.field := x`) so its `StateN` binding
+    /// lands outside the let-chain rather than nested inside it. Appends the
+    /// necessary `let`-binding(s) to `parts` and sets `any_open_scope` if
+    /// this operand's evaluation opened a class-method scope. Shared by
+    /// `generate_value_keyword_guard` and
+    /// `generate_block_value_with_arguments_call` (BT-2803).
+    fn hoist_open_scope_argument(
+        &mut self,
+        arg: &Expression,
+        prefix: &str,
+        parts: &mut Vec<Document<'static>>,
+        any_open_scope: &mut bool,
+    ) -> Result<String> {
+        let var = self.fresh_temp_var(prefix);
+        if Self::is_field_assignment(arg) {
+            let (doc, val_var) = self.generate_field_assignment_open(arg)?;
+            parts.push(doc);
+            parts.push(docvec![
+                "let ",
+                leaf::var(var.clone()),
+                " = ",
+                leaf::var(val_var),
+                " in ",
+            ]);
+        } else {
+            let (preamble, mut docs) = self.capture_subexpr_sequence(&[arg], prefix)?;
+            let code = docs.remove(0);
+            if !matches!(preamble, Document::Nil) {
+                *any_open_scope = true;
+                parts.push(preamble);
+            }
+            parts.push(docvec!["let ", leaf::var(var.clone()), " = ", code, " in ",]);
+        }
+        Ok(var)
+    }
+
     /// This mirrors the runtime guard emitted for the unary `value` case (BT-335).
     fn generate_value_keyword_guard(
         &mut self,
@@ -774,53 +928,14 @@ impl CoreErlangGenerator {
         // Each sub-expression is bound sequentially, so per-sub-expression inline
         // hoisting preserves left-to-right evaluation order.
         let mut any_open_scope = false;
-        let (recv_preamble, mut recv_docs) =
-            self.capture_subexpr_sequence(&[receiver], "ValRecv")?;
-        let recv_doc = recv_docs.remove(0);
-        if !matches!(recv_preamble, Document::Nil) {
-            any_open_scope = true;
-            parts.push(recv_preamble);
-        }
-        let recv_var = self.fresh_temp_var("ValRecv");
-        parts.push(docvec![
-            "let ",
-            leaf::var(recv_var.clone()),
-            " = ",
-            recv_doc,
-            " in ",
-        ]);
+        let recv_var =
+            self.hoist_open_scope_receiver(receiver, "ValRecv", &mut parts, &mut any_open_scope)?;
 
         // BT-1270: Hoist field-assignment arguments before their _ValArgN bindings so
         // the StateN binding is in scope after the let-chain, not nested inside it.
         for arg in arguments {
-            let arg_var = self.fresh_temp_var("ValArg");
-            if Self::is_field_assignment(arg) {
-                let (doc, val_var) = self.generate_field_assignment_open(arg)?;
-                parts.push(doc);
-                parts.push(docvec![
-                    "let ",
-                    leaf::var(arg_var.clone()),
-                    " = ",
-                    leaf::var(val_var),
-                    " in ",
-                ]);
-            } else {
-                // BT-1942: Hoist open-scope arg (e.g. class method self-send).
-                let (arg_preamble, mut arg_docs) =
-                    self.capture_subexpr_sequence(&[arg], "ValArg")?;
-                let arg_code = arg_docs.remove(0);
-                if !matches!(arg_preamble, Document::Nil) {
-                    any_open_scope = true;
-                    parts.push(arg_preamble);
-                }
-                parts.push(docvec![
-                    "let ",
-                    leaf::var(arg_var.clone()),
-                    " = ",
-                    arg_code,
-                    " in ",
-                ]);
-            }
+            let arg_var =
+                self.hoist_open_scope_argument(arg, "ValArg", &mut parts, &mut any_open_scope)?;
             arg_vars.push(arg_var);
         }
 
@@ -864,6 +979,39 @@ impl CoreErlangGenerator {
         }
 
         Ok(Document::Vec(parts))
+    }
+
+    /// BT-2814: Closes a Tier 2 value call's raw `{Result, NewState}` tuple
+    /// doc for use in *sub-expression* position (e.g. `10 + (blk value: x)`,
+    /// `self log: (self.field value)`), where the caller has no place to
+    /// thread `NewState` forward — it can only use a single plain value.
+    /// Extracts and returns just `Result`, in a syntactically self-contained
+    /// (closed) expression: `let T2SubTupleN = <tuple_doc> in
+    /// call 'erlang':'element'(1, T2SubTupleN)`.
+    ///
+    /// This intentionally does NOT thread the block's field/captured-local
+    /// mutation forward to later statements — the same documented,
+    /// pre-existing limitation BT-2797 first called out for
+    /// `self.field value(:...)` in argument position, now also correctly
+    /// computing the right *value* instead of leaking the raw tuple into the
+    /// caller (which crashed with badarith/badarity — BT-2814). A Tier 2
+    /// value call used as a bare STATEMENT (not nested in another
+    /// expression) is unaffected: it's classified as
+    /// `BodyExprKind::Tier2ValueCall` and still gets full state threading via
+    /// `generate_tier2_value_call_doc` at the top-level method-body/
+    /// conditional-branch/loop-body sequencers — this fallback only applies
+    /// where a plain value, not a state-threading statement, is expected.
+    fn close_tier2_value_subexpr_doc(&mut self, tuple_doc: Document<'static>) -> Document<'static> {
+        let tuple_var = self.fresh_temp_var("T2SubTuple");
+        docvec![
+            "let ",
+            leaf::var(tuple_var.clone()),
+            " = ",
+            tuple_doc,
+            " in call 'erlang':'element'(1, ",
+            leaf::var(tuple_var),
+            ")",
+        ]
     }
 
     /// BT-851: Generates a Tier 2 stateful block value call (ADR 0041 Phase 0).
@@ -911,6 +1059,472 @@ impl CoreErlangGenerator {
             ")",
         ];
         Ok(doc)
+    }
+
+    /// BT-2797: Generates a runtime Tier 1/Tier 2 discriminated block value call.
+    ///
+    /// Used when the receiver's Tier-ness can't be determined statically — the
+    /// motivating case is a block stored in an instance field and invoked from
+    /// a *different* method than the one that assigned it, so no static
+    /// local/param tracking (`tier2_block_params` / `tier2_local_vars`, both
+    /// scoped to a single method) can see it. Generalizes the BT-909
+    /// `erlang:is_function/2` arity-discrimination pattern (used there for
+    /// Erlang FFI interop) to Beamtalk-level block value calls.
+    ///
+    /// Deliberately scoped to `self.field value(:...)` receivers only (see the
+    /// `is_tier2_value_call`/call-site callers) — not every opaque receiver —
+    /// to keep the blast radius contained to the one shape that genuinely
+    /// needs it, leaving the far more common "block passed as a Tier 1 method
+    /// parameter" call sites untouched.
+    ///
+    /// Always returns a raw `{Result, NewState}` tuple, same contract as
+    /// `generate_block_value_call_stateful`:
+    /// - Tier 1 (`is_function(Fun, N)`, N = arity of `arguments`): synthesizes
+    ///   `{ApplyResult, State}` — state is unchanged.
+    /// - Tier 2 (`is_function(Fun, N + 1)`): returns the block's own
+    ///   `{Result, NewState}` tuple directly (Tier 2 funs already return this
+    ///   shape — see `generate_block_stateful`).
+    /// - Non-function receiver: falls back to `beamtalk_primitive:send/3`
+    ///   (DNU-style dispatch, mirroring `generate_value_keyword_guard`'s
+    ///   fallback), wrapped as `{SendResult, State}`.
+    ///
+    /// Callers must unpack this tuple. `is_tier2_value_call` (extended for
+    /// BT-2797 to recognize `self.field` receivers) is what makes
+    /// `classify_body_expr` route the statement calling this function to
+    /// `BodyExprKind::Tier2ValueCall`/`LocalAssignTier2`.
+    ///
+    /// BT-2797 (PR #2899 review): called ONLY from
+    /// `gen_server/methods.rs`'s `generate_tier2_value_call_doc` — the single
+    /// place that actually unpacks this tuple. Deliberately not wired into
+    /// the generic `try_generate_block_value_unary`/`try_generate_block_value_keyword`
+    /// dispatch (reached via `expression_doc` from *any* expression
+    /// position): a `self.field value(:...)` in sub-expression position
+    /// (e.g. an argument to another call) has no tuple-unpacking caller, so
+    /// intercepting it there would silently hand the raw tuple to code
+    /// expecting a plain value — a regression for a Tier 1 (pure) block that
+    /// worked correctly before this function existed.
+    pub(in crate::codegen::core_erlang) fn generate_block_value_call_runtime_discriminated(
+        &mut self,
+        receiver: &Expression,
+        arguments: &[Expression],
+        selector_name: &str,
+    ) -> Result<Document<'static>> {
+        let fun_var = self.fresh_temp_var("Fun");
+        let recv_code = self.expression_doc(receiver)?;
+        let current_state = self.current_state_var();
+        let arity = arguments.len();
+
+        let mut parts: Vec<Document<'static>> = Vec::with_capacity(arguments.len() + 2);
+        parts.push(docvec![
+            "let ",
+            leaf::var(fun_var.clone()),
+            " = ",
+            recv_code,
+            " in ",
+        ]);
+        let mut arg_vars: Vec<String> = Vec::with_capacity(arguments.len());
+        for arg in arguments {
+            let arg_var = self.fresh_temp_var("Arg");
+            let arg_code = self.expression_doc(arg)?;
+            parts.push(docvec![
+                "let ",
+                leaf::var(arg_var.clone()),
+                " = ",
+                arg_code,
+                " in ",
+            ]);
+            arg_vars.push(arg_var);
+        }
+
+        let arg_var_docs: Vec<Document<'static>> =
+            arg_vars.iter().map(|v| leaf::var(v.clone())).collect();
+        let tier1_apply_args = join(arg_var_docs.clone(), &Document::Str(", "));
+        let mut tier2_arg_docs = arg_var_docs.clone();
+        tier2_arg_docs.push(leaf::var(current_state.clone()));
+        let tier2_apply_args = join(tier2_arg_docs, &Document::Str(", "));
+        let send_list = docvec!["[", join(arg_var_docs, &Document::Str(", ")), "]"];
+
+        let case_doc = docvec![
+            "case call 'erlang':'is_function'(",
+            leaf::var(fun_var.clone()),
+            ", ",
+            leaf::int_lit(i64::try_from(arity).unwrap_or(i64::MAX)),
+            ") of 'true' when 'true' -> {apply ",
+            leaf::var(fun_var.clone()),
+            " (",
+            tier1_apply_args,
+            "), ",
+            leaf::var(current_state.clone()),
+            "} 'false' when 'true' -> case call 'erlang':'is_function'(",
+            leaf::var(fun_var.clone()),
+            ", ",
+            leaf::int_lit(i64::try_from(arity + 1).unwrap_or(i64::MAX)),
+            ") of 'true' when 'true' -> apply ",
+            leaf::var(fun_var.clone()),
+            " (",
+            tier2_apply_args,
+            ") 'false' when 'true' -> {call 'beamtalk_primitive':'send'(",
+            leaf::var(fun_var),
+            ", ",
+            leaf::atom(selector_name.to_string()),
+            ", ",
+            send_list,
+            "), ",
+            leaf::var(current_state),
+            "} end end",
+        ];
+        parts.push(case_doc);
+
+        Ok(Document::Vec(parts))
+    }
+
+    /// BT-2812: Generates the fallback method body for `blockValue`/`blockValue1`/
+    /// `blockValue2`/`blockValue3` — Block's `value`/`value:`/`value:value:`/
+    /// `value:value:value:`. This body is reached only when something bypasses the
+    /// call-site interception these selectors normally get (e.g. `perform:`/
+    /// `perform:withArguments:`), the same gap `blockValueWithArguments`'s fallback
+    /// (`generate_primitive`, `mod.rs`) closed for real under BT-2803 — but unlike
+    /// that selector, these can't unconditionally `erlang:apply`: under ADR-0041's
+    /// universal state-threading protocol, a Tier 2 (stateful) block compiles to
+    /// `fun(Args..., StateAcc) -> {Result, NewStateAcc}`, and invoking it correctly
+    /// requires a live `StateAcc` that only a call-site-aware caller has (see this
+    /// file's `generate_block_value_call_runtime_discriminated`, which this mirrors
+    /// via the same `erlang:is_function/2` arity-discrimination idiom). Generic
+    /// dispatch has no such state, so:
+    /// - Tier 1 (`Self` is a plain fun of the expected arity): real `erlang:apply`
+    ///   fix — this is the common, pure-block case.
+    /// - Tier 2 (`Self` is a fun of arity+1): raises a clear `#beamtalk_error{}`
+    ///   (`stateful_block_dispatch`) instead of silently self-dispatching to the
+    ///   wrong intrinsic name via the placeholder path. Note: `erlang:is_function/2`
+    ///   can only compare arity — it can't distinguish a genuine Tier 2 block from
+    ///   a Tier 1 block simply called with the wrong argument count (both present
+    ///   as arity+1 relative to the selector's expected arity), so the error
+    ///   message/hint deliberately don't assert a specific cause.
+    /// - Neither (defensive; Block is `sealed` so `Self` is always a fun in
+    ///   practice): falls through to the original runtime-dispatch placeholder,
+    ///   unchanged from before this fix.
+    ///
+    /// Adversarial review (BT-2812): the arity ambiguity above cuts both ways.
+    /// A genuinely Tier 2 block whose *declared* arity is one less than the
+    /// selector's (e.g. a 0-arg stateful block `[count := count + 1]`, raw
+    /// arity 1, sent `#value:`) satisfies the Tier 1 `is_function(Self, N)`
+    /// check and gets `erlang:apply`'d with the caller's argument bound into
+    /// its `StateAcc` parameter instead of a map. This does *not* crash raw —
+    /// the block's internal `maps:get`/`maps:put` calls fail with `badarg`,
+    /// which an outer safety net already converts to a clean, catchable
+    /// `#beamtalk_error{kind = type_error}` — but the resulting message
+    /// ("expected a Dictionary...") doesn't explain the real cause the way
+    /// `stateful_block_dispatch` does. Precisely disambiguating would require
+    /// a try/catch around the Tier 1 `apply` that intercepts only internal
+    /// map-shape crashes and reraises everything else untouched (real
+    /// `#beamtalk_error{}`s and non-local-return throws must not be masked);
+    /// deferred as a separately-scoped follow-up rather than risking a rushed
+    /// version of that here. See BT-2892.
+    pub(in crate::codegen::core_erlang) fn generate_block_value_structural_fallback(
+        &mut self,
+        intrinsic_name: &str,
+        arity: usize,
+        real_selector: &str,
+        class_name: &str,
+    ) -> Document<'static> {
+        let self_var = if self.in_class_method() {
+            "ClassSelf"
+        } else {
+            "Self"
+        };
+        let params_doc = join(
+            self.current_method_params
+                .iter()
+                .map(|p| leaf::var(p.clone())),
+            &Document::Str(", "),
+        );
+
+        let error_base = self.fresh_temp_var("Err");
+        let error_sel = self.fresh_temp_var("Err");
+        let error_hint = self.fresh_temp_var("Err");
+        let hint = leaf::binary_lit(
+            "Wrong argument count, or the block captures mutable state and must be invoked directly instead of via perform:",
+        );
+        let stateful_branch = docvec![
+            "let ",
+            leaf::var(error_base.clone()),
+            " = call 'beamtalk_error':'new'('stateful_block_dispatch', ",
+            leaf::atom(class_name),
+            ") in let ",
+            leaf::var(error_sel.clone()),
+            " = call 'beamtalk_error':'with_selector'(",
+            leaf::var(error_base),
+            ", ",
+            leaf::atom(real_selector),
+            ") in let ",
+            leaf::var(error_hint.clone()),
+            " = call 'beamtalk_error':'with_hint'(",
+            leaf::var(error_sel),
+            ", ",
+            hint,
+            ") in call 'beamtalk_error':'raise'(",
+            leaf::var(error_hint),
+            ")",
+        ];
+
+        let runtime_module =
+            super::primitive_bindings::PrimitiveBindingTable::runtime_module_for_class(class_name);
+        let placeholder_branch = docvec![
+            "call ",
+            leaf::atom(runtime_module),
+            ":'dispatch'(",
+            leaf::atom(intrinsic_name),
+            ", [",
+            params_doc.clone(),
+            "], ",
+            Document::Str(self_var),
+            ")",
+        ];
+
+        docvec![
+            "case call 'erlang':'is_function'(",
+            Document::Str(self_var),
+            ", ",
+            leaf::int_lit(i64::try_from(arity).unwrap_or(i64::MAX)),
+            ") of <'true'> when 'true' -> call 'erlang':'apply'(",
+            Document::Str(self_var),
+            ", [",
+            params_doc,
+            "]) <'false'> when 'true' -> case call 'erlang':'is_function'(",
+            Document::Str(self_var),
+            ", ",
+            leaf::int_lit(i64::try_from(arity + 1).unwrap_or(i64::MAX)),
+            ") of <'true'> when 'true' -> ",
+            stateful_branch,
+            " <'false'> when 'true' -> ",
+            placeholder_branch,
+            " end end",
+        ]
+    }
+
+    /// BT-2888: Guards a List/Collection iteration primitive's block argument
+    /// (`do:`/`collect:`/`select:`/`reject:`/`inject:into:`) against being a
+    /// Tier 2 (stateful) block.
+    ///
+    /// Unlike Block's `value*` structural intrinsics (BT-2812), these
+    /// selectors' compiled method bodies are real, already-correct BIF
+    /// lowerings (`tier1_doc`, e.g. `lists:map/2`, `beamtalk_list:do/2`) — a
+    /// Tier 1 (pure) block reached via generic dispatch (`perform:`) already
+    /// works. But that BIF body applies the block with a plain N-arg
+    /// `erlang:apply`; a Tier 2 block compiles to an (N+1)-arg fun expecting a
+    /// live `StateAcc` (ADR-0041) that generic dispatch has no way to supply,
+    /// which today hits a raw Erlang arity crash (confirmed empirically)
+    /// instead of a clear diagnostic. This wraps the existing correct Tier 1
+    /// body with the same `stateful_block_dispatch` error BT-2812
+    /// established, rather than replacing a placeholder.
+    ///
+    /// Selector-keyed, not class-keyed: applies wherever a class declares one
+    /// of these exact selectors as a bare-inferred `@primitive` with a real
+    /// BIF lowering (confirmed to include List, Array, Binary, Dictionary,
+    /// Set, Tuple, Collection, and String's `collect:`/`select:`/`reject:`).
+    ///
+    /// Same arity-only ambiguity BT-2812 documented for `blockValue*`
+    /// (`generate_block_value_structural_fallback`): `erlang:is_function/2`
+    /// can't distinguish a genuinely stateful block from a *pure* block
+    /// simply called with one fewer argument than the selector expects (both
+    /// present as arity `pure_arity + 1`) — hence the hedged hint text rather
+    /// than asserting the block is stateful.
+    pub(in crate::codegen::core_erlang) fn generate_stateful_block_guard(
+        &mut self,
+        block_param: &str,
+        pure_arity: usize,
+        real_selector: &str,
+        class_name: &str,
+        tier1_doc: Document<'static>,
+    ) -> Document<'static> {
+        let error_base = self.fresh_temp_var("Err");
+        let error_sel = self.fresh_temp_var("Err");
+        let error_hint = self.fresh_temp_var("Err");
+        let hint = leaf::binary_lit(
+            "Wrong argument count, or the block captures mutable state and must be invoked directly instead of via perform:/dynamic dispatch",
+        );
+        let stateful_branch = docvec![
+            "let ",
+            leaf::var(error_base.clone()),
+            " = call 'beamtalk_error':'new'('stateful_block_dispatch', ",
+            leaf::atom(class_name),
+            ") in let ",
+            leaf::var(error_sel.clone()),
+            " = call 'beamtalk_error':'with_selector'(",
+            leaf::var(error_base),
+            ", ",
+            leaf::atom(real_selector),
+            ") in let ",
+            leaf::var(error_hint.clone()),
+            " = call 'beamtalk_error':'with_hint'(",
+            leaf::var(error_sel),
+            ", ",
+            hint,
+            ") in call 'beamtalk_error':'raise'(",
+            leaf::var(error_hint),
+            ")",
+        ];
+
+        docvec![
+            "case call 'erlang':'is_function'(",
+            leaf::var(block_param.to_string()),
+            ", ",
+            leaf::int_lit(i64::try_from(pure_arity + 1).unwrap_or(i64::MAX)),
+            ") of <'true'> when 'true' -> ",
+            stateful_branch,
+            " <'false'> when 'true' -> ",
+            tier1_doc,
+            " end",
+        ]
+    }
+
+    /// BT-2803: Generates a runtime `erlang:is_function/1` guard for
+    /// `valueWithArguments:` sends.
+    ///
+    /// Mirrors `generate_value_keyword_guard`, but the argument is a single
+    /// runtime list rather than N individually-hoisted arguments, so the
+    /// true branch uses `erlang:apply/2` (fun + arg-list) instead of a
+    /// positional `apply`.
+    ///
+    /// ```erlang
+    /// let _ValRecv = <recv> in
+    /// let _ValArgs = <args> in
+    /// case call 'erlang':'is_function'(_ValRecv) of
+    ///   'true' when 'true' -> call 'erlang':'apply'(_ValRecv, _ValArgs)
+    ///   'false' when 'true' -> call 'beamtalk_primitive':'send'(_ValRecv, 'valueWithArguments:', [_ValArgs])
+    /// end
+    /// ```
+    fn generate_block_value_with_arguments_call(
+        &mut self,
+        receiver: &Expression,
+        args_expr: &Expression,
+    ) -> Result<Document<'static>> {
+        let mut parts: Vec<Document<'static>> = Vec::with_capacity(4);
+        let mut any_open_scope = false;
+
+        let recv_var =
+            self.hoist_open_scope_receiver(receiver, "ValRecv", &mut parts, &mut any_open_scope)?;
+        let args_var =
+            self.hoist_open_scope_argument(args_expr, "ValArgs", &mut parts, &mut any_open_scope)?;
+
+        let case_doc = docvec![
+            "case call 'erlang':'is_function'(",
+            leaf::var(recv_var.clone()),
+            ") of 'true' when 'true' -> call 'erlang':'apply'(",
+            leaf::var(recv_var.clone()),
+            ", ",
+            leaf::var(args_var.clone()),
+            ") 'false' when 'true' -> call 'beamtalk_primitive':'send'(",
+            leaf::var(recv_var),
+            ", ",
+            leaf::atom("valueWithArguments:"),
+            ", [",
+            leaf::var(args_var),
+            "]) end",
+        ];
+
+        if any_open_scope {
+            let result_var = self.fresh_temp_var("ValRes");
+            parts.push(docvec![
+                "let ",
+                leaf::var(result_var.clone()),
+                " = ",
+                case_doc,
+                " in ",
+            ]);
+            self.last_open_scope_result = Some(result_var);
+        } else {
+            parts.push(case_doc);
+        }
+
+        Ok(Document::Vec(parts))
+    }
+
+    /// BT-2803: Generalizes `generate_block_value_call_runtime_discriminated`
+    /// to `valueWithArguments:`, whose argument count is a runtime list
+    /// length rather than a compile-time-known static arity.
+    ///
+    /// Same contract and scoping as
+    /// `generate_block_value_call_runtime_discriminated` — reached only from
+    /// `gen_server/methods.rs`'s `generate_tier2_value_call_doc` (the tuple
+    /// unpacker), never from generic `expression_doc` dispatch. Always
+    /// returns a raw `{Result, NewState}` tuple:
+    /// - Tier 1 (`is_function(Fun, length(Args))`): synthesizes
+    ///   `{erlang:apply(Fun, Args), State}` — state unchanged.
+    /// - Tier 2 (`is_function(Fun, length(Args) + 1)`): appends the calling
+    ///   method's live state as the trailing element of `Args` and returns
+    ///   the block's own `{Result, NewState}` tuple directly (Tier 2 funs
+    ///   already return this shape).
+    /// - Non-function receiver: falls back to `beamtalk_primitive:send/3`,
+    ///   wrapped as `{SendResult, State}`.
+    pub(in crate::codegen::core_erlang) fn generate_block_value_with_arguments_call_runtime_discriminated(
+        &mut self,
+        receiver: &Expression,
+        args_expr: &Expression,
+    ) -> Result<Document<'static>> {
+        let fun_var = self.fresh_temp_var("Fun");
+        let recv_code = self.expression_doc(receiver)?;
+        let args_var = self.fresh_temp_var("Args");
+        let args_code = self.expression_doc(args_expr)?;
+        let current_state = self.current_state_var();
+        let tier1_arity_var = self.fresh_temp_var("ArgsLen");
+        let tier2_arity_var = self.fresh_temp_var("ArgsLenPlusOne");
+
+        let preamble = docvec![
+            "let ",
+            leaf::var(fun_var.clone()),
+            " = ",
+            recv_code,
+            " in let ",
+            leaf::var(args_var.clone()),
+            " = ",
+            args_code,
+            " in let ",
+            leaf::var(tier1_arity_var.clone()),
+            " = call 'erlang':'length'(",
+            leaf::var(args_var.clone()),
+            ") in let ",
+            leaf::var(tier2_arity_var.clone()),
+            " = call 'erlang':'+'(",
+            leaf::var(tier1_arity_var.clone()),
+            ", ",
+            leaf::int_lit(1),
+            ") in ",
+        ];
+
+        let case_doc = docvec![
+            "case call 'erlang':'is_function'(",
+            leaf::var(fun_var.clone()),
+            ", ",
+            leaf::var(tier1_arity_var),
+            ") of 'true' when 'true' -> {call 'erlang':'apply'(",
+            leaf::var(fun_var.clone()),
+            ", ",
+            leaf::var(args_var.clone()),
+            "), ",
+            leaf::var(current_state.clone()),
+            "} 'false' when 'true' -> case call 'erlang':'is_function'(",
+            leaf::var(fun_var.clone()),
+            ", ",
+            leaf::var(tier2_arity_var),
+            ") of 'true' when 'true' -> call 'erlang':'apply'(",
+            leaf::var(fun_var.clone()),
+            ", call 'erlang':'++'(",
+            leaf::var(args_var.clone()),
+            ", [",
+            leaf::var(current_state.clone()),
+            "])) 'false' when 'true' -> {call 'beamtalk_primitive':'send'(",
+            leaf::var(fun_var),
+            ", ",
+            leaf::atom("valueWithArguments:"),
+            ", [",
+            leaf::var(args_var),
+            "]), ",
+            leaf::var(current_state),
+            "} end end",
+        ];
+
+        Ok(docvec![preamble, case_doc])
     }
 
     /// BT-1213: Generates inline code for `[block_with_mutations] value` (or `value:`).

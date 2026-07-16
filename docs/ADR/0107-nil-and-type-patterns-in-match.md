@@ -1,0 +1,661 @@
+# ADR 0107: Nil and Type Patterns in `match:`
+
+## Status
+Accepted (2026-07-12)
+
+## Implementation Tracking
+
+**Epic:** [BT-2853](https://linear.app/beamtalk/issue/BT-2853)
+**Issues:**
+
+| Phase | Issue | Title | Size | Blocked by |
+|---|---|---|---|---|
+| 1 | [BT-2854](https://linear.app/beamtalk/issue/BT-2854) | Foundation: `Pattern::Nil` + `Pattern::Type` AST/parser/leaf-gate | M | – |
+| 2 | [BT-2855](https://linear.app/beamtalk/issue/BT-2855) | `Pattern::Type`: bindings, narrowing, and codegen | L | BT-2854 |
+| 3 | [BT-2856](https://linear.app/beamtalk/issue/BT-2856) | Exhaustiveness + hot-reload re-check integration | M | BT-2855 |
+| 4 | [BT-2857](https://linear.app/beamtalk/issue/BT-2857) | Docs, LSP, and E2E validation | M | BT-2855, BT-2856 |
+
+**Status:** Planned
+
+## Context
+
+### Problem statement
+
+Beamtalk code that needs to branch on both the nilness and the runtime
+class/shape of a single value has no construct for it other than sequential
+guard clauses. Two real examples from a consuming application
+(`beamtalk-symphony`):
+
+```beamtalk
+workspaceRoot -> String =>
+  defaultRoot := File tempDirectory ++ "/symphony_workspaces"
+  raw := self nested: "workspace" key: "root" default: nil
+  raw isNil ifTrue: [^defaultRoot]
+  (raw isKindOf: String)
+    ifTrue: [
+      (raw startsWith: "$")
+        ifTrue: [
+          resolved := self resolveEnv: raw
+          resolved isNil ifFalse: [^self expandHome: resolved]
+          ^raw
+        ]
+      ^self expandHome: raw
+    ]
+  defaultRoot
+```
+
+```beamtalk
+renderForBody: body :: String items: coll :: Printable | Nil itemName: itemName :: String vars: vars :: Dictionary -> String =>
+  coll isNil ifTrue: [^""]
+  (coll isKindOf: List) ifFalse: [^""]
+  items :: List(Printable) := coll
+  items inject: "" into: [:acc :item | ...]
+```
+
+Both are guard-clause chains with early returns — functionally correct, but
+every case the value can take (nil, matching-shape, non-matching-shape) is
+implicit in a sequence of `ifTrue:`/`ifFalse:` branches rather than visible as
+a flat, exhaustively-checkable list.
+
+### Current state
+
+- `match:` (`Expression::Match`, `crates/beamtalk-core/src/ast/expression.rs`)
+  already supports `Wildcard`, `Literal`, `Variable`, `Tuple`, `Array`,
+  `List`, `Binary`, `Map`, and `Constructor` patterns
+  (`crates/beamtalk-core/src/ast/pattern.rs`). Parsing goes through
+  `parse_pattern`
+  (`crates/beamtalk-core/src/source_analysis/parser/expressions.rs:1388`).
+- `Constructor` is documented as matching "a sealed Value type," but the
+  codegen is hardcoded to exactly one class:
+  `sealed_constructor_fields` (`crates/beamtalk-core/src/codegen/core_erlang/expressions.rs:3038`)
+  only has arms for `("Result", "ok:")` / `("Result", "error:")`. Any other
+  class — including a user-defined `sealed Value subclass:` — fails with
+  "is not a known sealed type." The doc comment on the field-layout helper is
+  explicit about this being **Phase 1 scope**: "Only stdlib sealed types are
+  supported. User-defined sealed types require the Phase 2 `[pattern: ...]`
+  annotation (tracked separately)." That Phase 2 is a different, narrower
+  feature (destructuring a sealed *variant's* fields) than what this ADR
+  proposes (testing the runtime class/nilness of an arbitrary value); see
+  Prior Art / Alternatives for how the two relate.
+- There is no `Nil` pattern (`Literal` covers Integer/Float/String/Symbol/
+  Character/List — no nil), and no class/type-test pattern of any kind.
+- Type narrowing today is a fixed set of separate, per-idiom rules under
+  `crates/beamtalk-core/src/semantic_analysis/type_checker/narrowing/rules/`
+  (`is_nil.rs`, `is_kind_of.rs`, `class_eq.rs`, `is_result.rs`,
+  `responds_to.rs`, `singleton_eq.rs`) — each idiom (`isNil ifTrue:/ifFalse:`,
+  `isKindOf: ifTrue:/ifFalse:`, `class = ifTrue:/ifFalse:`, ...) is narrowed
+  independently; there is no single combined "narrow by nilness and class at
+  once" construct. ADR 0102 established the set-theoretic (`&`, `\`) narrowing
+  algebra this ADR's arm-binding narrowing reuses.
+- `match:` exhaustiveness is currently two independent, narrow checks: BT-1299
+  (`validators::match_validators::check_match_exhaustiveness`, sealed
+  constructor coverage — today only `Result`) and BT-2745/ADR 0102 §4
+  (closed `#symbol`-singleton unions, advisory `Warning`), escalatable via
+  `matchExhaustive:` (ADR 0106, `Error`-severity opt-in). Neither reaches a
+  `String | Nil`-shaped union.
+- **This is anticipated, not new scope.** ADR 0060 §9 ("Forward
+  Compatibility: Match Expression Integration") already states: *"If `match:`
+  gains class/structural patterns (planned separately), Result becomes
+  directly destructurable,"* with an example comment `// Future: class
+  pattern arms in match:`, and "No changes to ADR 0060's design are needed to
+  support this." This ADR is that "planned separately" work.
+
+### Constraints
+
+- **Non-goal, per `docs/beamtalk-principles.md`:** "Mandatory static typing —
+  Dynamic by default... Type mismatches are warnings, not errors —
+  interactive workflows are never blocked." Any new exhaustiveness checking
+  this feature enables must stay advisory-by-default, escalating to `Error`
+  only through the existing explicit `matchExhaustive:` opt-in (ADR 0106),
+  never on its own.
+- **Principle #6 ("Messages All The Way Down"):** "No special syntax for
+  'primitives' — even `+` is a message." `match:` is itself a keyword
+  message; new pattern grammar must read as an extension of that message's
+  arm syntax, not a `case`/`switch`-style special statement.
+- **Type erasure (ADR 0068, `docs/beamtalk-language-features.md`):** "All
+  generic type information is erased at runtime (zero cost)." A type pattern
+  can test a value's runtime class but cannot verify a generic parameter
+  (`items :: List(String)` can confirm "this is a `List`" at runtime, not
+  "every element is a `String`" — the element-type portion of the annotation
+  is a static-only declaration, same as any other generic annotation).
+- **`docs/beamtalk-syntax-rationale.md`'s evidence-based-expansion philosophy:**
+  the rejection of Erlang-style multi-clause method heads already treats
+  `match:` as the settled mechanism for data-shape dispatch ("discriminating
+  on argument structure is `match:` inside the body"), and reserves its own
+  specific "door left ajar" — pattern-parameter *method-head* sugar that
+  desugars to a `match:` body, a narrower and different feature than this
+  ADR's pattern-grammar extension — for something "to be earned with
+  evidence, not built speculatively." This ADR doesn't fall under that exact
+  door, but the same evidence-based standard applies: two concrete,
+  independent call sites (above) plus ADR 0060's pre-existing
+  forward-compatibility note are that evidence for *this* extension.
+- **Layering (`docs/development/architecture-principles.md`):** new `Pattern`
+  variants live in the parser/AST layer and are consumed downstream by
+  semantic analysis (narrowing, exhaustiveness) and codegen — `codegen` may
+  depend on `parse`'s AST types, never the reverse.
+- **Hot reload (ADR 0105) — the leaf-classification snapshot can go stale.**
+  Stdlib primitives (`String`, `Integer`, ...) are declared `sealed`
+  (`stdlib/src/String.bt:18`) and can never gain a subclass, hot-reload or
+  not — Phase A's leaf-check is permanently sound for them. But an ordinary
+  (non-`sealed`) user `Value` leaf class *can* gain a subclass via live
+  reload after a `match:` using `x :: ThatClass` already compiled. This does
+  not cause silently-wrong dispatch — Phase A's check is an exact
+  class-tag/BIF test, so a new subclass instance simply falls through to the
+  next arm or wildcard, exactly as a leaf-only pattern is documented to
+  behave. The real risk is narrower but sharper: a `matchExhaustive:` site
+  proved exhaustive at compile time (e.g. covering `nil` + that leaf class
+  with no wildcard) can have its proof invalidated by the same live reload,
+  producing a runtime `case_clause` crash in code that was compile-time
+  "proven" exhaustive.
+
+  **Resolved (BT-2856):** ADR 0105's existing re-check machinery does *not*
+  already extend to "this class gained a subclass" — it is a purely
+  selector-keyed (xref) or `state:`/`field:` shape-keyed dependency graph,
+  with no concept of "sites that tested this class for leafness." This gap
+  is now closed by new, dedicated plumbing rather than an extension of the
+  existing selector/shape trackers: `beamtalk_repl_loader:activate_module/4`
+  detects, immediately before each class-defining `code:load_binary/3` call,
+  whether any of the newly-installed classes' declared superclasses are
+  about to lose leaf status (`superclasses_losing_leaf_status/1`); when one
+  does, `beamtalk_recheck:trigger_leaf_change/1` re-checks every live
+  class's own recorded source against the now-updated hierarchy (there is no
+  selector to look dependents up by, so — unlike the method/shape
+  triggers — the candidate set is every live class, the same universe
+  `trigger_image/0`'s `:recheck image` command already sweeps) and publishes
+  any newly-introduced `Type`-category finding (the "has subclasses" compile
+  error, BT-2854, or a now-non-exhaustive `matchExhaustive:`, BT-2856)
+  through the same findings-store/`'ReloadCheckCompleted'` announcement
+  path BT-2779/BT-2780 established. This is the one place in ADR 0105's
+  re-check machinery that deliberately does *not* drop `error`-severity
+  diagnostics from its relevance filter (every other trigger does) — see
+  `beamtalk_recheck:trigger_leaf_change/1`'s doc for why dropping them here
+  would silently defeat the whole point of the trigger.
+
+## Decision
+
+Extend `match:` with two new pattern kinds, split into two phases so the
+low-risk, immediately-useful part ships without waiting on the harder part.
+
+### Phase A (this ADR): `nil` pattern + concrete-type patterns
+
+```beamtalk
+raw match: [
+  nil -> defaultRoot;
+  path :: String when: [path startsWith: "$"] ->
+    (self resolveEnv: path) ifNil: [path] ifNotNil: [:resolved | self expandHome: resolved];
+  path :: String -> self expandHome: path;
+  _ -> defaultRoot
+]
+```
+
+```beamtalk
+coll match: [
+  nil -> "";
+  items :: List -> (items inject: "" into: [:acc :item | ...]);
+  _ -> ""
+]
+```
+
+> **Not yet supported:** an earlier draft of this example wrote
+> `items :: List(Printable)`. Generic type arguments in a type pattern are
+> not supported — `class` in `Pattern::Type` is scoped to a bare identifier
+> (BT-2854's explicit acceptance criteria), and per ADR 0068 type erasure
+> there is no reified generic tag to check at runtime regardless, so
+> `List(Printable)` in pattern position produces a dedicated diagnostic
+> rather than silently checking only `List` (BT-2860). Callers needing to
+> verify element type can hand-verify inside the arm body (e.g. a `when:`
+> guard with `allSatisfy:`).
+
+- **`nil` pattern:** matches exactly what `isNil` already returns true for —
+  it delegates to the same single, canonical runtime nil representation the
+  `is_nil.rs` narrowing rule and every `ifNil:`/`ifNotNil:` send already rely
+  on today (this is why `raw isNil ifTrue: [...]` in the motivating examples
+  already works reliably against parsed YAML/JSON boundary data — nil has one
+  consistent runtime identity in Beamtalk already; `Pattern::Nil` introduces
+  no new notion of nil-ness, just a new position to test the existing one).
+  `nil` is a reserved identifier today, not a `Literal` variant; this adds
+  `Pattern::Nil(Span)` alongside the existing literal patterns. *On its own
+  merits:* `ifNil:ifNotNil:` already solves nil-vs-not dispatch well, so
+  `Pattern::Nil`'s value isn't solving a new problem — it's letting `nil`
+  sit as one flat arm alongside `Type` pattern arms in the same list.
+  Handling nil outside `match:` (`raw ifNil: [default] ifNotNil: [:v | v
+  match: [...]]`) reintroduces exactly the nested-dispatch shape this ADR
+  exists to eliminate; that nesting cost is why `nil` earns a place in the
+  arm list rather than staying purely a guard/message idiom. *Runtime
+  representation hazard:* `nil`, `true`/`false` (`Boolean`), and `Symbol`
+  values are all plain Erlang atoms with no further runtime tag distinguishing
+  them from each other — a naive `is_atom(X)` guard for `s :: Symbol` would
+  also match `nil` and both booleans. This must not be an arm-ordering
+  hazard (silently shadowing a later `nil ->`/`b :: Boolean` arm depending on
+  where `s :: Symbol` happens to sit): `Symbol`'s compiled guard excludes the
+  other atom values explicitly (`is_atom(X) andalso X =/= 'nil' andalso X
+  =/= 'true' andalso X =/= 'false'`), and `Boolean`'s guard is an exact
+  literal match on `'true'`/`'false'`, not a bare `is_atom`. This makes all
+  four atom-representation patterns (`nil`, `true`/`false`, `Symbol`)
+  mutually exclusive regardless of arm order.
+- **Type pattern (`binding :: ClassName`):** matches if the scrutinee's
+  runtime class is `ClassName`, binding the value (narrowed to `ClassName`
+  for the arm body) to `binding`. Reuses the `::` token already established
+  by ADR 0053 for parameter/state type annotations — this is not new
+  punctuation, it is the same annotation syntax in a new grammatical
+  position.
+- **Phase A scope is deliberately concrete/leaf types only**: stdlib
+  primitives (`String`, `Integer`, `Float`, `List`, `Dictionary`, `Boolean`,
+  `Symbol`) and exact tagged `Value`/sealed classes. `Character` is excluded
+  from Phase A even though it's an existing `Literal` pattern kind: it
+  compiles to a plain Erlang integer with no distinct runtime tag from
+  `Integer` (`expressions.rs:73`), so `x :: Character` cannot be
+  distinguished from `x :: Integer` at runtime — use `x :: Integer` instead.
+  `binding :: SomeClass` where `SomeClass` has subclasses is a **compile
+  error in Phase A**
+  ("`SomeClass` has subclasses; type patterns are not yet supported for
+  non-leaf classes — see ADR 0107 Phase B"), not silently-wrong behaviour.
+  This keeps Phase A's runtime semantics identical to an exact class-tag
+  check — never a mystery about whether subclass instances match. The
+  leaf-only restriction is also what keeps Phase A's exhaustiveness sound:
+  because a leaf class can have no members besides itself, a closed union
+  like `String | Nil` has a fixed, stable member count that a `nil` arm plus
+  a `s :: String` arm can genuinely exhaust — exhaustiveness here is over
+  closed *type-union membership*, not over "all current subclasses of a
+  class" (that open-world question is exactly what Phase B has to solve
+  differently, and exactly why its exhaustiveness story can't just reuse
+  Phase A's).
+
+### Phase B (explicitly out of scope here): subclass-polymorphic matching
+
+`binding :: Shape` where `Shape` has subclasses `Circle`/`Square` needs
+either compile-time subclass enumeration (using the class-hierarchy data
+already available in `semantic_analysis`) or a wrapped runtime dispatch call
+— genuinely new codegen/design work, not reuse of an existing mechanism (see
+Prior Art and Implementation). Deferred to a follow-up ADR once Phase A has
+shipped and there is evidence the leaf-type-only restriction is actually
+limiting real code. Concretely, Phase A does not preclude Phase B: the AST
+shape (`Pattern::Type { binding, class, .. }`) and syntax are identical;
+Phase B only widens which class names are legal in that position.
+**Flag for that future ADR:** subclass-based exhaustiveness is inherently
+open-world (adding a new subclass elsewhere in the codebase, or via hot
+reload, changes what "exhaustive" means for existing `matchExhaustive:`
+sites using that hierarchy) — this is a materially harder soundness problem
+than Phase A's closed-union exhaustiveness and needs its own explicit
+decision, not an assumed extension of Phase A's approach.
+
+### The `::` dual-semantics tension
+
+This ADR's `binding :: ClassName` pattern performs a **real runtime test** —
+it is how the arm is selected. This is a different runtime guarantee than
+`::` in a cast position (`x :: T := y`), which performs **no runtime check at
+all** — confirmed empirically this session: a field declared `String | Nil`
+concatenated via `++` with no guard compiled clean (zero diagnostics) and
+crashed at runtime with an opaque `invalid argument` badarg, because the
+`::`-annotated binding never inserted a runtime tag check anywhere in
+codegen (`spec_codegen.rs` only emits Erlang `-spec` attributes, tooling
+metadata, never enforced at runtime). Reusing `::` for both an unchecked
+static assertion (casts) and a checked runtime dispatch (patterns) is a
+readability win — same token, "this value has this type" in both places —
+but it does mean the *runtime guarantee* `::` carries depends on which
+grammatical position it appears in. Disclosing this wart is not the same as
+justifying it, so here is the justification, not just the disclosure:
+position-dependent operator meaning is not unique to this design (`*` in C
+means dereference, multiplication, or pointer-declaration depending on
+position — the discipline that makes it workable is that a reader always
+knows *which* position they're in from surrounding grammar, not from the
+symbol alone). A rejected alternative made this concrete:
+
+**Alternative: a distinct pattern-only token (`binding is ClassName`)**
+instead of reusing `::`. This would make the runtime-checked/unchecked split
+visually obvious without requiring positional reasoning at all — a real
+argument, and the honest reason it's not chosen: introducing a second token
+for "this value has this type" directly undercuts this ADR's own central
+claim (reusing established syntax, not inventing new punctuation) and
+Principle #6's minimal-new-syntax spirit. Trading a disclosed, precedented
+class of ambiguity (position-dependent operator meaning) for a new token
+is not obviously a better trade, and `::`'s existing ubiquity in every typed
+signature is exactly what makes the Newcomer steelman ("I'd guess it cold")
+hold — a fresh token would not have that property on day one.
+
+### Error examples
+
+```beamtalk
+" Unknown class name — reuses the existing unresolved-class diagnostic (ADR 0100) "
+raw match: [nil -> ""; x :: Sting -> x; _ -> ""]
+" ⛔ Error: unknown class `Sting` (did you mean `String`?) "
+
+" Phase A: non-leaf class in a type pattern "
+shape match: [s :: Shape -> s area; _ -> 0]
+" ⛔ Error: `Shape` has subclasses; type patterns are not yet supported for
+"    non-leaf classes (ADR 0107 Phase B). Match on the concrete subclasses
+"    instead, or use `isKindOf:` guard clauses. "
+
+" matchExhaustive: on a closed Known|Nil union, one arm missing (Error, ADR 0106) "
+raw :: String | Nil
+raw matchExhaustive: [s :: String -> s size]
+" ⛔ Error: non-exhaustive matchExhaustive: `Nil` is not handled
+"    (residual type: `Nil`) "
+
+" plain match:, same gap — advisory only (ADR 0102 §4 policy, unchanged) "
+raw match: [s :: String -> s size]
+" ⚠ Warning: non-exhaustive match: `Nil` is not handled
+"    (residual type: `Nil`) "
+```
+
+### REPL example
+
+```
+> nil match: [nil -> 0; s :: String -> s size; _ -> -1]
+0
+> "hi" match: [nil -> 0; s :: String -> s size; _ -> -1]
+2
+> 42 match: [nil -> 0; s :: String -> s size; _ -> -1]
+-1
+```
+
+## Prior Art
+
+| Language | Approach | What we take / leave |
+|---|---|---|
+| **Smalltalk (Pharo/Squeak/Newspeak)** | No first-class class-pattern matching; `caseOf:otherwise:` exists but is treated as anti-pattern. The idiom is `isKindOf:` guard chains — exactly Beamtalk today — or virtual dispatch (add a method). Message-passing purity historically argues dispatch should be polymorphic lookup, not a match. | **Take the caution, not the conclusion.** The purist objection assumes you own the class to add a method to. Beamtalk's motivating cases are boundary values (parsed YAML/JSON, external API responses) where you cannot add a method to `String`/`Nil`/`Dictionary` for app-specific dispatch — the objection doesn't apply there. Scoping Phase A to exactly that boundary use (not general polymorphic dispatch) is the compromise. |
+| **Gleam** | `case` matches variants of closed custom (sum) types, not an untyped value's class directly. Crossing a truly-dynamic boundary goes through `gleam/dynamic/decode` — decode/validate into a typed value first, then match exhaustively. | **Leave the "wrap first" purity** (that's `Constructor` pattern territory, already how `Result` works) but **take the boundary framing**: a type pattern here is the deliberately non-exhaustive-by-default escape hatch for values that haven't been wrapped yet, not a replacement for wrapping. A boundary-coercion API (`asStringOr:`-style, decode-then-default) is a real alternative for the *pure-fallback* case — and was, in fact, already applied this session to seven other call sites in the same file that motivated this ADR (`Config#coerceString:default:`, `#coerceStringOrNil:`, `#coerceStringList:default:`) — but it only replaces a default *value*, not branch-specific *logic*. Both of this ADR's two motivating call sites need different logic per case (env-var expansion vs. home-directory expansion vs. default; `List` iteration vs. empty), which a coercion combinator can't express — that's exactly why those two sites needed guard-clause chains instead of a coercion call, and exactly the gap this ADR closes. |
+| **Elixir/Erlang** (compile target) | `case x do b when is_binary(b) -> ...; nil -> ...; n when is_integer(n) -> ... end`. Type tests are guard-safe BIFs. Idiomatic, this is the direct lowering target. No exhaustiveness over type coverage (only over unmatched literals). | **Adopt directly as the codegen strategy** — Phase A's leaf-type patterns lower to exactly this shape. Confirms there is no "free" exhaustiveness to inherit from the runtime; Beamtalk's exhaustiveness (where it applies) has to come from the type checker's own closed-union tracking, same as BT-2745 already does for symbol unions. |
+| **Swift / Kotlin / Rust** | Swift: `case let s as String:` — explicit named binding. Kotlin: `is String -> x.length` — implicit smart-cast (flow narrowing, no new name); known to break on mutable/cross-module properties. Rust: matches enum variants, not runtime classes; exhaustive only because enums are closed. | **Take Swift's explicit-binding shape** (`path :: String`, a real new name) **over Kotlin's smart-cast** — a named binding sidesteps the mutability/stability traps smart-casting has in Kotlin, at the cost of one more identifier per arm. **Confirms the cross-cutting lesson**: exhaustiveness only comes from closed unions; an open class hierarchy (Phase B) must require a wildcard, never claim completeness. |
+
+## User Impact
+
+- **Newcomer:** `path :: String` reads exactly like the type annotations
+  already visible in every typed method signature and field declaration
+  (`field: x :: String`) — no new syntax to learn, only a new position for
+  syntax already seen. *Concern:* the Phase A "has subclasses" compile error
+  is a discoverable teaching moment once you already know Beamtalk has a
+  leaf-vs-hierarchy class distinction — but for someone hitting it before
+  they've internalized that model (e.g. matching on their own first
+  subclassed `Value`), the error may initially read as an arbitrary
+  restriction rather than a principled one, until the hint's pointer to
+  ADR 0107 Phase B is followed.
+- **Smalltalk developer:** the historical `isKindOf:`-chain-is-an-antipattern
+  concern is real and addressed by scope, not dismissed: Phase A targets
+  boundary/dynamic data, not a general alternative to polymorphic dispatch on
+  classes you own. `match:` is already a keyword message, so this is grammar
+  extension of an existing message, not new special-form syntax. *Concern:*
+  scoping doesn't fully dissolve the objection — see Steelman Analysis;
+  purists remain genuinely split rather than won over.
+- **Erlang/BEAM developer:** Phase A patterns lower to the exact idiom already
+  used in hand-written Elixir/Erlang (`case x do b when is_binary(b) -> ...
+  end`) — nothing about the generated Core Erlang is surprising or novel to
+  someone reading it in `observer`/`recon`. *Concern:* the two Phase A
+  codegen strategies (BIF-test for primitives, map-tag check for `Value`
+  classes) mean a `Type` pattern's generated shape isn't uniform — a
+  primitive arm and a sealed-class arm in the same `match:` compile to
+  visibly different `case` shapes, a minor surprise when reading generated
+  code across both kinds side by side.
+- **Production operator:** bounded new runtime surface — a guard-safe BIF
+  test or one map-key equality check per arm, the same class of dispatch
+  `isKindOf:` already performs today, not a new kind of runtime behaviour.
+  Phase B (subclass enumeration or dispatch) is deferred specifically because
+  it is *not* this bounded, and this session's own BT-2844 investigation
+  (narrow-Known-only-check bugs in the type checker's argument validation)
+  is fresh evidence that shipping the more general, less-tested version first
+  is a real risk, not a hypothetical one.
+- **Tooling/LSP author:** a real `Pattern` variant (vs. an opaque `when:`
+  guard) means completion, hover, and narrowing can reason about it
+  structurally, the same way they already do for `Constructor` patterns.
+  *Concern:* the discoverability story for Phase A's restriction depends
+  entirely on the "has subclasses" diagnostic carrying its specific hint text
+  through to the LSP surface — if it degrades to a generic type error in an
+  editor context, the teaching-moment framing above doesn't hold; this is an
+  implementation-quality risk to watch, not a design flaw.
+
+## Steelman Analysis
+
+### Chosen: `binding :: ClassName` type pattern + `nil` pattern, Phase A/B split
+- 🧑‍💻 **Newcomer:** "`x :: String` is the exact syntax I already see in every
+  typed method — I'd guess it cold, no docs needed."
+- 🎨 **Language designer:** "A real Pattern AST variant means exhaustiveness,
+  narrowing, and LSP completion all get to reason about this structurally,
+  same as `Constructor` patterns already do — and scoping to leaf types first
+  is exactly the 'earned with evidence, not built speculatively' discipline
+  the syntax-rationale doc already asks for."
+- ⚙️ **BEAM veteran:** "Lowers to the idiomatic Elixir shape 1:1 — nothing new
+  to reason about in generated code."
+
+### Rejected B: widen `when:` guards to allow arbitrary message sends (`isKindOf:`, `isNil`), no new Pattern variant
+```beamtalk
+raw match: [
+  x when: [x isNil] -> defaultRoot;
+  x when: [x isKindOf: String] -> self expandHome: x;
+  _ -> defaultRoot
+]
+```
+- 🎩 **Smalltalk purist:** "This is the *most* Smalltalk-pure option — not
+  even new syntax, just `isKindOf:`/`isNil` sent as ordinary messages inside
+  an existing guard block. Message-passing all the way down, zero new AST
+  surface."
+- **Why not chosen:** cheapest to build (only widening
+  `generate_guard_expression` to emit a nested-`case` instead of requiring a
+  native BEAM guard), but guards are opaque booleans to both the narrowing
+  system and the exhaustiveness checker — `x` never gets a narrowed static
+  type inside the arm without a separate manual cast, and this forecloses
+  ever getting real exhaustiveness for this shape. It solves the syntax
+  problem but not the two things (narrowing, exhaustiveness) that make a
+  first-class pattern worth having over what guard clauses already do today.
+
+### Rejected C: no new `match:` syntax — add exhaustiveness *lint tooling* for the existing guard-clause idiom
+- 🏭 **Production operator:** "Zero runtime change, by definition the safest
+  option — a lint that flags an incomplete `isNil`/`isKindOf:` chain over a
+  known closed `Union` gets the safety benefit without touching codegen at
+  all."
+- ⚙️ **BEAM veteran:** "This is the Gleam-blessed answer: wrap boundary data
+  into a proper closed type once, get exhaustiveness for free, rather than
+  inventing syntax to match on an untyped value's class directly."
+- **Why not chosen:** doesn't address the actual complaint that started this
+  (verbose, deeply-nested guard clauses) — it makes the existing idiom safer
+  without making it shorter or flatter. Real value as a *complement*, not
+  a substitute; not pursued as an alternative *to* Phase A, but worth
+  revisiting as an addition regardless of this ADR's outcome. (Pure status
+  quo — no lint, no new syntax — was also considered and is strictly
+  dominated by this option: C costs the same zero runtime/codegen changes
+  while adding a real safety net, so there is no case for status quo that
+  isn't already a case for C.)
+
+### Rejected D: full `isKindOf:`-semantics class pattern (subclass-polymorphic), single phase, no split
+- 🎩 **Smalltalk purist:** "If we're adding a type pattern at all, it should
+  have full `isKindOf:` semantics or none — a version that only works for
+  leaf classes is a worse violation of 'do one thing well' than not having
+  the feature."
+- **Why not chosen:** the "full generality" case is real, but three of five
+  cohorts pushed back hard once the actual cost was named. `isKindOf:`
+  compiles to ordinary recursive message dispatch today (`self class
+  includesBehaviour: aClass`, not a guard-safe BIF) — supporting it in a
+  pattern needs either compile-time subclass enumeration or a wrapped
+  runtime dispatch call, genuinely new infrastructure, not reuse of the
+  Array-pattern/Result-constructor-pattern codegen Phase A reuses. Shipping
+  that untested generality in v1 is precisely the "narrow check quietly
+  wrong on an untested shape" risk this session's BT-2844 investigation
+  spent real effort finding and fixing elsewhere in the type checker —
+  reintroducing the same risk class on day one, in a brand-new subsystem,
+  is not justified when Phase A already covers both motivating call sites.
+
+### Tension points
+Smalltalk purists are the one cohort not fully behind the chosen option —
+genuinely split between B (zero new syntax, purest message-passing) and C
+(truest to the historical anti-`isKindOf:`-dispatch tradition); neither loves
+a new `Pattern` variant as much as the newcomer/language-designer/BEAM-veteran
+cohorts do. Operators and BEAM veterans align firmly against D for the same
+reason: the bounded, already-proven-safe runtime surface of Phase A is a
+better trade than full generality shipped untested. No cohort's strongest
+argument for D beats their argument for the chosen option — it is the
+consensus-weakest alternative, specifically because of fresh, concrete
+evidence (this session's own bug hunt) about what "ship the general,
+untested version first" costs in this exact subsystem.
+
+## Alternatives Considered
+
+See Steelman Analysis above — guard-widening (B), lint-only (C), and
+single-phase full generality (D) were all considered and rejected in favour
+of the type-pattern-with-Phase-A/B-split, for the reasons given there. A
+distinct pattern-only token (`binding is ClassName`) instead of reusing `::`
+was also considered — see "The `::` dual-semantics tension" in the Decision
+section — and rejected in favour of reusing established syntax.
+
+## Consequences
+
+### Positive
+- Directly replaces both motivating call sites (`workspaceRoot`,
+  `renderForBody:`) with a flat, single-expression arm list instead of nested
+  guard clauses.
+- Fulfils ADR 0060 §9's forward-compatibility note — no changes needed to
+  ADR 0060's `Result` design; `Result ok:`/`Result error:` constructor
+  patterns compose unchanged alongside the new patterns in the same `match:`.
+- Reuses two existing runtime-check *strategies* verbatim for Phase A — the
+  Array pattern's nested-`case`-with-guard-BIF-test shape (primitives) and
+  the Result constructor pattern's tagged-map-key check (exact `Value`/sealed
+  classes) — no new runtime mechanism. The genuinely new piece is the
+  `generate_type_pattern` dispatch layer that picks the right strategy per
+  arm's class name and interleaves both shapes into one Core Erlang `case`
+  when a single `match:` mixes primitive and sealed-class arms; that
+  dispatch/interleaving is real, if small, new integration work, not "zero
+  new code."
+- Composes with `matchExhaustive:` (ADR 0106) for free: a closed
+  `Known | Nil` union becomes a case the existing advisory/asserted
+  machinery can reach, which it cannot today.
+- Phase A/B split means the higher-risk, higher-effort part (subclass
+  matching) is explicitly deferred rather than silently under-scoped —
+  matches this session's own recent lesson (BT-2844) about the cost of
+  shipping under-tested generality.
+
+### Negative
+- `::` now carries two different runtime guarantees depending on
+  grammatical position (checked in a pattern, unchecked in a cast) — a real
+  wart, called out explicitly above and in documentation rather than papered
+  over.
+- Two ways to express the same nil/type dispatch (guard-clause chains vs.
+  `match:` patterns) is one more idiom to teach; existing guard-clause code
+  is not required to migrate (purely additive), so both will coexist in the
+  codebase indefinitely.
+- Phase A's "has subclasses → compile error" restriction is a real limitation
+  a developer can hit in practice (e.g. wanting to match on an open class
+  hierarchy) before Phase B exists to lift it.
+
+### Neutral
+- No change to any existing `match:` behaviour — purely additive new pattern
+  kinds; every existing pattern (`Literal`, `Constructor`, etc.) is
+  unaffected.
+- Phase B is deliberately left undesigned here beyond noting the two
+  implementation strategies (compile-time enumeration vs. runtime dispatch)
+  — a follow-up ADR, not this one, picks between them once there's evidence
+  Phase A's leaf-type restriction is actually limiting real code.
+- This ADR bundles `nil` and `Type` patterns into one Phase A rather than
+  splitting them into separate ADRs. The real implementation-risk boundary is
+  leaf-vs-subclass-polymorphic (that's what Phase A/B already splits on), not
+  nil-vs-type — `Pattern::Nil` is trivial regardless of which document it's
+  specified in, and the Implementation section's build order already lands
+  it first as a standalone step; a separate ADR for it would add process
+  overhead without changing what actually carries risk.
+- If the syntax-rationale doc's separately-reserved "pattern-parameter
+  method-head sugar" (a different future feature, see Constraints) is ever
+  built and reuses `::` for a method head's pattern position, it will need
+  to reckon with the same position-dependent-semantics question this ADR
+  raises for casts vs. arms — flagged here for whoever writes that ADR, not
+  resolved by this one.
+
+## Implementation
+
+No new runtime/BEAM primitives are introduced — every codegen strategy below
+emits ordinary Erlang BIFs and map operations that already exist in generated
+code today. Recommended build order starts with the smaller, zero-ambiguity
+piece before the two-strategy `Type` pattern: land `Pattern::Nil` end-to-end
+first (parser → bindings → codegen, reusing the existing atom-literal path
+verbatim) as the "does the AST/pipeline wiring for a new pattern kind work"
+proof, then add `Pattern::Type` with its BIF-test/map-tag-check dispatch and
+the narrowing/exhaustiveness extensions on top of a wiring path already known
+to work.
+
+- **AST:** `crates/beamtalk-core/src/ast/pattern.rs` — add
+  `Pattern::Nil(Span)` and `Pattern::Type { binding: Identifier, class:
+  Identifier, span: Span }`.
+- **Parser:** `parse_pattern`
+  (`crates/beamtalk-core/src/source_analysis/parser/expressions.rs:1388`) —
+  recognise the reserved `nil` identifier as `Pattern::Nil`, and
+  `identifier :: ClassName` as `Pattern::Type` (reusing the existing `::`
+  tokenization from ADR 0053's parameter-annotation parsing).
+- **Semantic analysis (bindings/scope):**
+  `crates/beamtalk-core/src/semantic_analysis/pattern_bindings.rs` and
+  `analyser.rs`/`block_facts.rs` (the same files that already handle
+  `Constructor`'s keyword bindings) — extend to define `Pattern::Type`'s
+  `binding` in the arm's scope, narrowed to `class`. This scope includes the
+  arm's `when:` guard, not just its body — `path :: String when: [path
+  startsWith: "$"] -> ...` requires `path` (narrowed to `String`) to already
+  be bound and visible while the guard block itself is evaluated.
+- **Semantic analysis (narrowing):**
+  `crates/beamtalk-core/src/semantic_analysis/type_checker/narrowing/rules/`
+  — a new rule (or extension of `is_kind_of.rs`'s existing algebra) applies
+  the same `T \ ClassName` difference-type narrowing ADR 0102 already defines
+  for `isKindOf:` guard clauses, so code inside a `path :: String` arm sees
+  `path` statically as `String`, and subsequent arms see the scrutinee
+  narrowed by `\ String` (feeding exhaustiveness residual computation, next
+  bullet).
+- **Semantic analysis (exhaustiveness):**
+  `crates/beamtalk-core/src/semantic_analysis/validators/match_validators.rs`
+  and the BT-2745 residual/coverage machinery in
+  `type_checker/inference.rs` (`check_singleton_match_exhaustiveness` /
+  ADR 0106's `check_asserted_match_exhaustiveness`) — extend residual
+  computation to cover `Nil`/`Type`-pattern coverage over closed
+  `Known | Nil` (and small closed unions of concrete leaf classes), reusing
+  the existing advisory-`Warning`-vs-asserted-`Error` split verbatim; no new
+  severity policy needed.
+- **Codegen:**
+  `crates/beamtalk-core/src/codegen/core_erlang/expressions.rs` — `Nil`
+  pattern reuses the existing atom-literal codegen path
+  (`Document::Str("'nil'")`). `Type` pattern gets a new
+  `generate_type_pattern` dispatching on class name: stdlib primitives reuse
+  `generate_array_match_arm`'s (line 2350) nested-`case`-wrapping-a-guard-BIF-test
+  shape (the `is_map` check at line 2411 is its concrete instance) generalized
+  to a class-name → BIF table (`is_binary`,
+  `is_integer`, `is_float`, `is_list`, ...) — with two classes needing more
+  than a single-BIF guard: `Dictionary` is a bare Erlang map with **no**
+  `'$beamtalk_class'` key (`value_type_codegen.rs:630`), while every tagged
+  `Value`/sealed-class instance is *also* a map, but *with* one — so `x ::
+  Dictionary` cannot be a single `when` guard (`maps:get/3` is not a
+  guard-safe BIF; only `is_map/1`, `map_get/2`, and `is_map_key/2` are). It
+  emits the same nested-`case` shape the array arm already uses (line
+  2411-2418): an outer `case call 'erlang':'is_map'(X)`, and — only in the
+  `'true'` branch — an inner `case call 'maps':'get'('$beamtalk_class', X,
+  'undefined')` matching `'undefined'` for the Dictionary arm (`maps:get` in
+  *case-scrutinee* position, never inside a guard) and falling through to the
+  next arm on any other class tag; and `Symbol`'s guard excludes
+  `nil`/`true`/`false` as described above. Exact tagged
+  `Value`/sealed classes reuse `generate_constructor_pattern`'s
+  `'$beamtalk_class'` map-key check (~line 2761), generalized from
+  hardcoded `Result` to the pattern's `class` field. Non-leaf classes in
+  Phase A are rejected at this stage with the "has subclasses" compile error
+  (using the class-hierarchy data already available to semantic analysis to
+  detect this before codegen is reached).
+- **Tests:** parser round-trip (`parse_pattern`, unparse), narrowing tests
+  (new rule / `is_kind_of.rs` extension), exhaustiveness tests (advisory +
+  asserted, mirroring `asserted_match_exhaustiveness.rs`'s structure from
+  ADR 0106), codegen tests for both the BIF-test and map-tag-check paths,
+  plus BUnit runtime tests in `stdlib/test/`.
+- **Docs:** `docs/beamtalk-language-features.md` §Pattern Matching — add
+  `Nil` and `Type` to the supported-patterns table.
+- **LSP:** completion for `nil` as a pattern keyword and `::` as a pattern
+  position (`crates/beamtalk-core/src/queries/completion_provider.rs`), for
+  surface parity with existing pattern completions.
+
+## References
+- Related issues: none yet — this ADR precedes any implementation ticket;
+  `/plan-adr` creates the implementation Epic and issues once this is
+  Accepted.
+- Related ADRs: ADR 0053 (`::` type annotation syntax — the token this reuses
+  in a new position), ADR 0060 §9 (the forward-compatibility note this ADR
+  fulfils), ADR 0068 (parametric types / runtime type erasure — bounds what a
+  generic type-argument in a pattern can and can't verify), ADR 0100
+  (Open-World Diagnostic Policy — governs severity for the unknown-class and
+  non-leaf-class compile errors), ADR 0102 (set-theoretic narrowing algebra
+  this ADR's arm-binding narrowing reuses; §4's advisory exhaustiveness this
+  extends), ADR 0106 (`matchExhaustive:` — the assertion mechanism this ADR
+  composes with directly, unmodified), ADR 0105 (Live Image Re-Checking on
+  Hot Reload — governs the leaf-classification staleness question raised in
+  Constraints)
+- Documentation: `docs/beamtalk-language-features.md` §Pattern Matching,
+  §Control Flow Narrowing; `docs/beamtalk-syntax-rationale.md` §Rejected
+  Alternatives (the "door left ajar" note this ADR walks through);
+  `docs/beamtalk-principles.md` (Messages All The Way Down; Non-Goals —
+  mandatory static typing)

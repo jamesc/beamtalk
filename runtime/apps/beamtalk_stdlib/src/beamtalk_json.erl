@@ -23,6 +23,9 @@ Wraps the OTP `json` module (OTP 27+) with proper type mapping and structured er
 | true/false    | true/false   |
 | null          | nil          |
 
+Custom objects can opt into JSON generation by implementing an `asJson`
+instance method returning a JSON-representable value (BT-2818).
+
 ## Methods
 
 | Selector        | Description                              |
@@ -82,7 +85,8 @@ Generate a JSON string from a Beamtalk value.
 
 Dictionaries become JSON objects, Lists become arrays, Strings become
 JSON strings, Integer/Float become numbers, true/false become JSON
-booleans, nil becomes null.
+booleans, nil becomes null. Custom objects that implement `asJson`
+are converted via that hook (BT-2818).
 """.
 -spec 'generate:'(term()) -> binary().
 'generate:'(Value) ->
@@ -181,35 +185,119 @@ Prepare a Beamtalk value for JSON encoding.
 
 Beamtalk uses `nil` for null; json:encode expects `null`.
 Maps with `$beamtalk_class` tags are stripped of metadata.
+
+Custom objects (Value instances, actors, ...) that implement `asJson`
+are converted via that hook (BT-2818): the hook's return value is
+prepared recursively, so it may itself contain further `asJson` objects.
+Tagged maps whose class does not implement `asJson` keep the legacy
+behaviour of encoding their user fields directly as a JSON object.
 """.
 -spec prepare_for_encode(term()) -> term().
-prepare_for_encode(nil) ->
+prepare_for_encode(Value) ->
+    prepare_for_encode(Value, []).
+
+-doc """
+Same as `prepare_for_encode/1`, threading `Seen` — the receivers whose
+`asJson` hook is currently being resolved higher up this call chain.
+
+Only actors can produce a cycle (Value instances are immutable, so a
+Beamtalk value can never contain itself): actor A's `asJson` embedding
+actor B, whose `asJson` embeds A back, would otherwise recurse until the
+process runs out of stack. `Seen` is extended only at the point a hook is
+about to be invoked (`try_as_json_hook/2`), so plain Dictionary/List
+recursion is unaffected.
+""".
+-spec prepare_for_encode(term(), [term()]) -> term().
+prepare_for_encode(nil, _Seen) ->
     null;
-prepare_for_encode(Map) when is_map(Map) ->
-    %% Strip $beamtalk_class tag if present (e.g., from Dictionary)
-    Cleaned = maps:remove('$beamtalk_class', Map),
-    maps:map(fun(_K, V) -> prepare_for_encode(V) end, Cleaned);
-prepare_for_encode(List) when is_list(List) ->
-    [prepare_for_encode(E) || E <- List];
-prepare_for_encode(true) ->
+prepare_for_encode(Map, Seen) when is_map(Map) ->
+    case beamtalk_tagged_map:class_of(Map) of
+        undefined ->
+            encode_map_fields(Map, Seen);
+        'Dictionary' ->
+            encode_map_fields(Map, Seen);
+        _Class ->
+            case try_as_json_hook(Map, Seen) of
+                {ok, Prepared} -> Prepared;
+                no_hook -> encode_map_fields(Map, Seen)
+            end
+    end;
+prepare_for_encode(List, Seen) when is_list(List) ->
+    [prepare_for_encode(E, Seen) || E <- List];
+prepare_for_encode(true, _Seen) ->
     true;
-prepare_for_encode(false) ->
+prepare_for_encode(false, _Seen) ->
     false;
-prepare_for_encode(V) when is_integer(V) -> V;
-prepare_for_encode(V) when is_float(V) -> V;
-prepare_for_encode(V) when is_binary(V) -> V;
-prepare_for_encode(V) when is_atom(V) ->
+prepare_for_encode(V, _Seen) when is_integer(V) -> V;
+prepare_for_encode(V, _Seen) when is_float(V) -> V;
+prepare_for_encode(V, _Seen) when is_binary(V) -> V;
+prepare_for_encode(V, _Seen) when is_atom(V) ->
     %% Convert atoms (symbols) to strings for JSON compatibility
     atom_to_binary(V, utf8);
-prepare_for_encode(Other) ->
-    %% No selector — callers add the correct one via their catch blocks
-    Error0 = beamtalk_error:new(type_error, 'Json'),
-    Error1 = beamtalk_error:with_details(Error0, #{value => Other}),
-    Error2 = beamtalk_error:with_hint(
-        Error1,
-        <<"Only Dictionary, List, String, Integer, Float, Boolean, and nil can be converted to JSON">>
-    ),
-    beamtalk_error:raise(Error2).
+prepare_for_encode(Other, Seen) ->
+    case try_as_json_hook(Other, Seen) of
+        {ok, Prepared} ->
+            Prepared;
+        no_hook ->
+            %% No selector — callers add the correct one via their catch blocks
+            Error0 = beamtalk_error:new(type_error, 'Json'),
+            Error1 = beamtalk_error:with_details(Error0, #{value => Other}),
+            Error2 = beamtalk_error:with_hint(
+                Error1,
+                <<
+                    "Only Dictionary, List, String, Integer, Float, Boolean, and nil "
+                    "convert to JSON natively; implement asJson to give this class "
+                    "a JSON representation"
+                >>
+            ),
+            beamtalk_error:raise(Error2)
+    end.
+
+-doc """
+Encode a map's entries as a JSON object, stripping the `$beamtalk_class` tag.
+""".
+-spec encode_map_fields(map(), [term()]) -> map().
+encode_map_fields(Map, Seen) ->
+    Cleaned = maps:remove('$beamtalk_class', Map),
+    maps:map(fun(_K, V) -> prepare_for_encode(V, Seen) end, Cleaned).
+
+-doc """
+Dispatch the `asJson` conversion hook on a custom object (BT-2818).
+
+Returns `{ok, Prepared}` when the object understands `asJson`, `no_hook`
+otherwise. Uses `beamtalk_message_dispatch` (the unified send entry point)
+so the check and the call behave exactly like Beamtalk-level
+`value respondsTo: #asJson` / `value asJson` for every receiver shape —
+value-type tagged maps and live actors alike.
+
+A receiver already in `Seen` — either because its hook returned itself
+directly, or because it reappears deeper inside its own JSON output via
+one or more intermediate objects — raises a type error instead of
+recursing forever.
+""".
+-spec try_as_json_hook(term(), [term()]) -> {ok, term()} | no_hook.
+try_as_json_hook(Value, Seen) ->
+    case lists:member(Value, Seen) of
+        true ->
+            Error0 = beamtalk_error:new(type_error, 'Json'),
+            Error1 = beamtalk_error:with_details(Error0, #{value => Value}),
+            Error2 = beamtalk_error:with_hint(
+                Error1,
+                <<
+                    "asJson produced a cycle: this object reappeared inside "
+                    "its own JSON output"
+                >>
+            ),
+            beamtalk_error:raise(Error2);
+        false ->
+            case beamtalk_message_dispatch:send(Value, 'respondsTo:', ['asJson']) of
+                true ->
+                    Json = beamtalk_message_dispatch:send(Value, 'asJson', []),
+                    {ok, prepare_for_encode(Json, [Value | Seen])};
+                _ ->
+                    no_hook
+            end
+    end.
 
 -doc """
 Pretty-print a compact JSON binary with 2-space indentation.

@@ -27,6 +27,7 @@
 
 use crate::ast::{Expression, MessageSelector, Module};
 use crate::language_service::{Location, ProjectIndex};
+use crate::semantic_analysis::type_checker::NativeTypeRegistry;
 use crate::semantic_analysis::{ClassHierarchy, InferredType, infer_types};
 use crate::source_analysis::Span;
 use camino::Utf8PathBuf;
@@ -406,15 +407,21 @@ pub fn resolve_enclosing_superclass_context(
 }
 
 /// Resolve receiver class context for a selector lookup at the given offset.
+///
+/// `native_types` (BT-2887, ADR 0075) lets a receiver whose type came from an
+/// FFI call (e.g. `x := Erlang lists reverse: y`) resolve to its typed
+/// return, so go-to-definition on `x someMethod` isn't left registry-blind.
+/// `None` preserves the previous behaviour.
 #[must_use]
 pub fn resolve_receiver_class_context(
     module: &Module,
     offset: u32,
     selector_lookup: &SelectorLookup,
     hierarchy: &ClassHierarchy,
+    native_types: Option<&NativeTypeRegistry>,
 ) -> Option<ReceiverClassContext> {
     let class_context = find_class_context(module, offset);
-    let type_map = infer_types(module, hierarchy);
+    let type_map = infer_types(module, hierarchy, native_types);
     match &selector_lookup.receiver_hint {
         ReceiverHint::ClassReference(name) => Some(ReceiverClassContext {
             class_name: name.clone(),
@@ -1489,6 +1496,71 @@ mod tests {
         let loc = loc.expect("name collision should still resolve");
         assert_eq!(loc.file, file_class, "real class should win over protocol");
         assert_eq!(loc.span, module_class.classes[0].name.span);
+    }
+
+    #[test]
+    fn resolve_receiver_class_context_with_native_registry_resolves_ffi_typed_receiver() {
+        // BT-2887: a receiver whose type came from an FFI call only resolves
+        // when a NativeTypeRegistry is supplied.
+        use crate::semantic_analysis::type_checker::TypeProvenance;
+        use crate::semantic_analysis::type_checker::native_type_registry::{
+            FunctionSignature, NativeTypeRegistry, ParamType,
+        };
+
+        let source = "x := Erlang lists reverse: #(1, 2, 3).\nx size";
+        let module = parse_source(source);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let mut registry = NativeTypeRegistry::new();
+        registry.register_module(
+            "lists",
+            vec![FunctionSignature {
+                name: "reverse".to_string(),
+                arity: 1,
+                params: vec![ParamType {
+                    keyword: Some(EcoString::from("list")),
+                    type_: InferredType::known("List"),
+                }],
+                return_type: InferredType::known("List"),
+                provenance: TypeProvenance::Extracted,
+                line: None,
+            }],
+        );
+
+        let size_offset =
+            u32::try_from(source.rfind("size").expect("source contains 'size'")).unwrap();
+        let selector_lookup =
+            find_selector_lookup_in_expr(&module.expressions[1].expression, size_offset)
+                .expect("cursor should be on the 'size' selector");
+
+        let context_with_registry = resolve_receiver_class_context(
+            &module,
+            size_offset,
+            &selector_lookup,
+            &hierarchy,
+            Some(&registry),
+        );
+        assert_eq!(
+            context_with_registry,
+            Some(ReceiverClassContext {
+                class_name: EcoString::from("List"),
+                class_side: false,
+            }),
+            "FFI-typed receiver should resolve when registry is provided"
+        );
+
+        // Registry-blind default (None) preserves the previous behaviour.
+        let context_without_registry = resolve_receiver_class_context(
+            &module,
+            size_offset,
+            &selector_lookup,
+            &hierarchy,
+            None,
+        );
+        assert!(
+            context_without_registry.is_none(),
+            "Without a registry, FFI-typed receiver should stay unresolved"
+        );
     }
 
     #[test]

@@ -350,7 +350,7 @@ fn intersect_two_complements_same_base() {
 #[test]
 fn difference_from_never_is_never() {
     assert_eq!(
-        InferredType::difference(&InferredType::Never, &singleton("#a"), prov()),
+        InferredType::difference(&InferredType::Never, &singleton("#a"), prov(), None),
         InferredType::Never
     );
 }
@@ -359,7 +359,7 @@ fn difference_from_never_is_never() {
 fn difference_by_never_is_identity() {
     let t = InferredType::known("Integer");
     assert_eq!(
-        InferredType::difference(&t, &InferredType::Never, prov()),
+        InferredType::difference(&t, &InferredType::Never, prov(), None),
         t
     );
 }
@@ -380,11 +380,11 @@ fn dynamic_asymmetry_regression() {
         p
     );
     assert_eq!(
-        InferredType::difference(&dynamic(), &p, prov()),
+        InferredType::difference(&dynamic(), &p, prov(), None),
         dynamic(),
         "Dynamic never narrows under difference"
     );
-    assert_eq!(InferredType::difference(&p, &dynamic(), prov()), p);
+    assert_eq!(InferredType::difference(&p, &dynamic(), prov(), None), p);
 }
 
 #[test]
@@ -408,7 +408,7 @@ fn intersect_dynamic_identity_both_sides_with_hierarchy() {
 #[test]
 fn difference_drops_union_member() {
     let t = InferredType::union_of(&[InferredType::known("Integer"), singleton("#infinity")]);
-    let result = InferredType::difference(&t, &singleton("#infinity"), prov());
+    let result = InferredType::difference(&t, &singleton("#infinity"), prov(), None);
     assert_eq!(result, InferredType::known("Integer"));
 }
 
@@ -420,7 +420,8 @@ fn difference_generics_compare_exactly() {
         list_of(InferredType::known("Integer")),
         list_of(InferredType::known("Symbol")),
     ]);
-    let result = InferredType::difference(&t, &list_of(InferredType::known("Integer")), prov());
+    let result =
+        InferredType::difference(&t, &list_of(InferredType::known("Integer")), prov(), None);
     assert_eq!(result, list_of(InferredType::known("Symbol")));
 }
 
@@ -431,7 +432,8 @@ fn difference_generics_different_args_is_noop() {
         list_of(InferredType::known("Integer")),
         list_of(InferredType::known("Symbol")),
     ]);
-    let result = InferredType::difference(&t, &list_of(InferredType::known("String")), prov());
+    let result =
+        InferredType::difference(&t, &list_of(InferredType::known("String")), prov(), None);
     assert_eq!(result, t);
 }
 
@@ -439,7 +441,7 @@ fn difference_generics_different_args_is_noop() {
 
 #[test]
 fn difference_symbol_minus_singleton_makes_negation() {
-    let result = InferredType::difference(&symbol(), &singleton("#foo"), prov());
+    let result = InferredType::difference(&symbol(), &singleton("#foo"), prov(), None);
     assert_eq!(result, negation(singleton("#foo")));
 }
 
@@ -448,7 +450,7 @@ fn difference_symbol_minus_singleton_union_negates_the_union() {
     // `excluded` is an InferredType: `difference(Symbol, #a | #b)` =
     // `Negation{Symbol, #a | #b}` (via the RHS-union fold + same-base flatten).
     let removed = InferredType::union_of(&[singleton("#a"), singleton("#b")]);
-    let result = InferredType::difference(&symbol(), &removed, prov());
+    let result = InferredType::difference(&symbol(), &removed, prov(), None);
     assert_eq!(result, negation(removed));
 }
 
@@ -456,8 +458,8 @@ fn difference_symbol_minus_singleton_union_negates_the_union() {
 fn difference_same_base_flattens_nested_negation() {
     // `difference(Negation{Symbol, #a}, #b) = Negation{Symbol, #a | #b}` —
     // nested negation never escapes normal form.
-    let neg_a = InferredType::difference(&symbol(), &singleton("#a"), prov());
-    let result = InferredType::difference(&neg_a, &singleton("#b"), prov());
+    let neg_a = InferredType::difference(&symbol(), &singleton("#a"), prov(), None);
+    let result = InferredType::difference(&neg_a, &singleton("#b"), prov(), None);
     let expected = negation(InferredType::union_of(&[singleton("#a"), singleton("#b")]));
     assert_eq!(result, expected);
 
@@ -479,7 +481,7 @@ fn difference_same_base_flattens_nested_negation() {
 fn difference_meta_is_opaque_to_negation() {
     // `Meta` never becomes a Negation base; subtracting a singleton is a no-op.
     let meta = InferredType::meta("Symbol");
-    let result = InferredType::difference(&meta, &singleton("#foo"), prov());
+    let result = InferredType::difference(&meta, &singleton("#foo"), prov(), None);
     assert_eq!(result, meta);
 }
 
@@ -488,12 +490,125 @@ fn difference_rhs_union_folds_left() {
     // `difference(T, A | B) = difference(difference(T, A), B)`.
     let removed = InferredType::union_of(&[singleton("#a"), singleton("#b")]);
     let folded = InferredType::difference(
-        &InferredType::difference(&symbol(), &singleton("#a"), prov()),
+        &InferredType::difference(&symbol(), &singleton("#a"), prov(), None),
         &singleton("#b"),
         prov(),
+        None,
     );
-    let direct = InferredType::difference(&symbol(), &removed, prov());
+    let direct = InferredType::difference(&symbol(), &removed, prov(), None);
     assert_eq!(direct, folded);
+}
+
+// ── difference: nominal-class base case (ADR 0102 §5, BT-2744) ─────────
+
+#[test]
+fn difference_nominal_subclass_makes_negation() {
+    // `difference(Number, Integer) = Negation{Number, Integer}` — `Integer` is
+    // a strict subclass of `Number` in the builtins, so subtracting it is
+    // irreducible: the class-hierarchy analogue of `Symbol \ #foo`.
+    let h = hierarchy();
+    let number = InferredType::known("Number");
+    let integer = InferredType::known("Integer");
+    let result = InferredType::difference(&number, &integer, prov(), Some(&h));
+    assert_eq!(
+        result,
+        InferredType::Negation {
+            base: Box::new(number),
+            excluded: Box::new(integer),
+            provenance: prov(),
+        }
+    );
+}
+
+#[test]
+fn difference_nominal_supertype_is_never() {
+    // `difference(Integer, Number) = Never` — every `Integer` is also a
+    // `Number`, so nothing survives.
+    let h = hierarchy();
+    let integer = InferredType::known("Integer");
+    let number = InferredType::known("Number");
+    assert_eq!(
+        InferredType::difference(&integer, &number, prov(), Some(&h)),
+        InferredType::Never
+    );
+}
+
+#[test]
+fn difference_nominal_equal_class_is_never() {
+    // `A == B` is caught by the general structural-equality arm before the
+    // nominal-class arm is even reached, but it must still yield `Never`.
+    let h = hierarchy();
+    let integer = InferredType::known("Integer");
+    assert_eq!(
+        InferredType::difference(&integer, &integer.clone(), prov(), Some(&h)),
+        InferredType::Never
+    );
+}
+
+#[test]
+fn difference_nominal_unrelated_is_noop() {
+    // Hierarchy-unrelated nominal classes are disjoint — nothing to remove.
+    let h = hierarchy();
+    let integer = InferredType::known("Integer");
+    let string = InferredType::known("String");
+    assert_eq!(
+        InferredType::difference(&integer, &string, prov(), Some(&h)),
+        integer
+    );
+}
+
+#[test]
+fn difference_nominal_without_hierarchy_is_noop() {
+    // Without a hierarchy there is no way to know `Integer <: Number`, so the
+    // structural-only fallback applies — matches `intersect`'s `None` gate.
+    let number = InferredType::known("Number");
+    let integer = InferredType::known("Integer");
+    assert_eq!(
+        InferredType::difference(&number, &integer, prov(), None),
+        number
+    );
+}
+
+#[test]
+fn difference_nominal_singletons_excluded_from_nominal_arm() {
+    // Singletons are never hierarchy entries — the nominal-class arm must not
+    // fire for them even with a hierarchy present; the dedicated `Symbol \
+    // #foo` arm above still handles `Symbol \ #foo` correctly.
+    let h = hierarchy();
+    let result = InferredType::difference(&symbol(), &singleton("#foo"), prov(), Some(&h));
+    assert_eq!(result, negation(singleton("#foo")));
+}
+
+#[test]
+fn difference_nominal_negation_displays_as_backslash() {
+    let h = hierarchy();
+    let number = InferredType::known("Number");
+    let integer = InferredType::known("Integer");
+    let result = InferredType::difference(&number, &integer, prov(), Some(&h));
+    assert_eq!(
+        result.display_for_diagnostic().unwrap(),
+        "Number \\ Integer"
+    );
+}
+
+#[test]
+fn intersect_through_nominal_complement_reduces() {
+    // `(B \ E) ∩ P = (B ∩ P) \ E` (ADR 0102 §1's complement rule) must compose
+    // correctly now that `difference` is hierarchy-aware: chained narrowing
+    // over a nominal `Negation` — `intersect(Number \ Integer, Float) =
+    // difference(intersect(Number, Float), Integer) = difference(Float,
+    // Integer) = Float` (`Float` and `Integer` are hierarchy-unrelated
+    // siblings under `Number`, so nothing is removed).
+    let h = hierarchy();
+    let neg = InferredType::difference(
+        &InferredType::known("Number"),
+        &InferredType::known("Integer"),
+        prov(),
+        Some(&h),
+    );
+    let result =
+        InferredType::intersect(&neg, &InferredType::known("Float"), prov(), Some(&h), None);
+    assert_eq!(result, InferredType::known("Float"));
 }
 
 // ── canonical `excluded` ordering (GAP 2, ADR 0102 §1) ──────────────────
@@ -504,9 +619,10 @@ fn negation_excluded_is_canonically_sorted_ascending() {
     // is sorted ascending by `class_name` — deterministic serialisation.
     // Build in reverse order (#b then #a) and assert the stored order is #a,#b.
     let neg = InferredType::difference(
-        &InferredType::difference(&symbol(), &singleton("#b"), prov()),
+        &InferredType::difference(&symbol(), &singleton("#b"), prov(), None),
         &singleton("#a"),
         prov(),
+        None,
     );
     let InferredType::Negation { excluded, .. } = &neg else {
         panic!("expected a Negation, got {neg:?}");
@@ -530,7 +646,7 @@ fn negation_excluded_is_canonically_sorted_ascending() {
 #[test]
 fn union_absorbs_negation_and_singleton() {
     // ADR 0102 §1: `(Symbol \ #foo) | #foo ⇒ Symbol`.
-    let neg = InferredType::difference(&symbol(), &singleton("#foo"), prov());
+    let neg = InferredType::difference(&symbol(), &singleton("#foo"), prov(), None);
     assert_eq!(
         InferredType::union_of(&[neg.clone(), singleton("#foo")]),
         symbol()
@@ -604,7 +720,7 @@ fn negation_display_parenthesises_excluded_union() {
 #[test]
 fn difference_threads_provenance_into_negation() {
     let declared = TypeProvenance::Declared(Span::new(3, 9));
-    let result = InferredType::difference(&symbol(), &singleton("#foo"), declared);
+    let result = InferredType::difference(&symbol(), &singleton("#foo"), declared.clone(), None);
     assert_eq!(result.provenance(), Some(declared));
 }
 
@@ -862,7 +978,7 @@ fn intersection_provenance_accessor() {
     let result = InferredType::intersect(
         &InferredType::known("Printable"),
         &InferredType::known("Comparable"),
-        declared,
+        declared.clone(),
         None,
         Some(&registry),
     );
@@ -982,7 +1098,7 @@ proptest! {
     /// Absorption: `(Symbol \ s) | s = Symbol` for any singleton `s`, order-independent.
     #[test]
     fn prop_absorption(s in singleton_strat()) {
-        let neg = InferredType::difference(&symbol(), &s, prov());
+        let neg = InferredType::difference(&symbol(), &s, prov(), None);
         prop_assert_eq!(InferredType::union_of(&[neg.clone(), s.clone()]), symbol());
         prop_assert_eq!(InferredType::union_of(&[s, neg]), symbol());
     }
@@ -1011,11 +1127,12 @@ proptest! {
         b in singleton_strat(),
     ) {
         let removed = InferredType::union_of(&[a.clone(), b.clone()]);
-        let direct = InferredType::difference(&t, &removed, prov());
+        let direct = InferredType::difference(&t, &removed, prov(), None);
         let folded = InferredType::difference(
-            &InferredType::difference(&t, &a, prov()),
+            &InferredType::difference(&t, &a, prov(), None),
             &b,
             prov(),
+            None,
         );
         prop_assert_eq!(direct, folded);
     }
@@ -1025,14 +1142,16 @@ proptest! {
     #[test]
     fn prop_same_base_flatten(a in singleton_strat(), b in singleton_strat()) {
         let step = InferredType::difference(
-            &InferredType::difference(&symbol(), &a, prov()),
+            &InferredType::difference(&symbol(), &a, prov(), None),
             &b,
             prov(),
+            None,
         );
         let direct = InferredType::difference(
             &symbol(),
             &InferredType::union_of(&[a, b]),
             prov(),
+            None,
         );
         prop_assert_eq!(&step, &direct);
         if let InferredType::Negation { excluded, .. } = &step {
@@ -1053,7 +1172,8 @@ proptest! {
         let h = hierarchy();
         let _ = InferredType::intersect(&a, &b, prov(), Some(&h), None);
         let _ = InferredType::intersect(&a, &b, prov(), None, None);
-        let _ = InferredType::difference(&a, &b, prov());
+        let _ = InferredType::difference(&a, &b, prov(), None);
+        let _ = InferredType::difference(&a, &b, prov(), Some(&h));
     }
 
     /// GAP 3: commutativity — `intersect(a, b) == intersect(b, a)` across the
@@ -1072,8 +1192,8 @@ proptest! {
     #[test]
     fn prop_dynamic_asymmetry(p in concrete_leaf()) {
         prop_assert_eq!(InferredType::intersect(&dynamic(), &p, prov(), None, None), p.clone());
-        prop_assert_eq!(InferredType::difference(&dynamic(), &p, prov()), dynamic());
-        prop_assert_eq!(InferredType::difference(&p, &dynamic(), prov()), p);
+        prop_assert_eq!(InferredType::difference(&dynamic(), &p, prov(), None), dynamic());
+        prop_assert_eq!(InferredType::difference(&p, &dynamic(), prov(), None), p);
     }
 
     /// Intersect-through-a-complement singleton case:

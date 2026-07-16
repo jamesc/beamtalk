@@ -82,6 +82,36 @@ cowboy = "2.12.0"
 
 Native dependencies are resolved via rebar3 and included on the BEAM code path. See [ADR 0072](ADR/0072-user-erlang-sources-in-packages.md) for details on Erlang interop within packages.
 
+### `[diagnostics]` Section
+
+Per-category diagnostic severity overrides (ADR 0100 Rule 3). Every key and the section itself are optional — an absent `[diagnostics]` section (the default for new packages) preserves the compiler's built-in completeness-ladder severities (ADR 0100 Rule 1: e.g. an unresolved selector on a fully-known class is a `Hint`, silent when the receiver's method surface can't be proven complete).
+
+```toml
+[diagnostics]
+dnu = "hint"                # ADR 0100 Rule 1 default
+unresolved-class = "warn"
+unresolved-ffi = "warn"
+arity-mismatch = "warn"
+deprecation = "warn"
+type = "hint"
+```
+
+Keys are kebab-case diagnostic categories (`dnu`, `type`, `unused`, `empty-body`, `lint`, `dead-assignment`, `extension-conflict`, `deprecation`, `actor-new`, `visibility`, `unresolved-class`, `unresolved-ffi`, `arity-mismatch`, `shadowed-class`, `type-annotation`, `inheritance`, `sendability`). Values are one of `"off"` (drop the diagnostic entirely), `"lint"`, `"hint"`, `"warn"`, or `"error"` (fails the build unconditionally, independent of `--warnings-as-errors`).
+
+**Precedence (most-specific wins):**
+
+1. A site-level `@expect dnu` / `@expect type` directive (ADR 0077) always wins — it silences the diagnostic regardless of this table.
+2. This table sets the category's base severity for the package.
+3. The Rule 1 completeness-ladder default, when the table doesn't mention the category.
+
+`--warnings-as-errors` remains a *final promotion pass* over whatever 1–3 resolve to: it promotes `Warning`/`Hint` to `Error`, excluding the gradual-migration categories (`unresolved-class`, `unresolved-ffi`, `arity-mismatch`, `deprecation`) — **unless** the table explicitly sets that category, in which case the explicit value wins over the exclusion. This applies for *any* value you choose, not just `"warn"`: `unresolved-class = "hint"` also lifts the exclusion (so `--warnings-as-errors` fails the build), while `unresolved-class = "warn"` does the same. The only value that stays inert under `--warnings-as-errors` is `"lint"`, because `Severity::Lint` is never promoted — it's suppressed from normal build output entirely and shown only by `beamtalk lint`.
+
+**Severity floor:** the table can only affect diagnostics the checker considers *soft* (`Hint`/`Warning`/`Lint`). A diagnostic that is already a hard structural error — e.g. `actor-new` (`Actor subclass` must use `spawn`, not `new`), `inheritance` (subclassing a sealed class), `empty-body` — is never touched by a table entry. Rule 3 is an escalation mechanism for the open-world completeness-ladder diagnostics (Rule 1); it cannot be used to silence a category that's a hard compile error by construction.
+
+**Cross-surface parity:** `beamtalk build`/`check`, the LSP (BT-2800), and the REPL (BT-2839) all apply this table identically — a package that sets `dnu = "error"` fails the CLI build, shows the same site as an `Error` in the editor, *and* shows an `Error` at the REPL, never a soft hint. The LSP loads `beamtalk.toml` once per workspace root at startup; the REPL's compiler-port process loads it once per session from its working directory (the project root the REPL was started in). Edits to the `[diagnostics]` section while the server/session is running require an editor/LSP restart or a fresh REPL session to take effect.
+
+See [ADR 0100](ADR/0100-open-world-diagnostic-policy.md) for the full policy rationale.
+
 ## Dependency Management CLI
 
 The `beamtalk deps` subcommand manages dependencies declared in `beamtalk.toml`.
@@ -357,3 +387,4 @@ The package system is specified in these Architecture Decision Records:
 - [ADR 0026](ADR/0026-package-definition-and-project-manifest.md) — Package definition and `beamtalk.toml` format
 - [ADR 0070](ADR/0070-package-namespaces-and-dependencies.md) — Package namespaces, dependencies, qualified names, and collision detection
 - [ADR 0072](ADR/0072-user-erlang-sources-in-packages.md) — User Erlang sources in packages
+- [ADR 0100](ADR/0100-open-world-diagnostic-policy.md) — Open-world diagnostic policy; the `[diagnostics]` section's severity-override schema (Rule 3)

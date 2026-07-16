@@ -46,7 +46,7 @@ pub mod signature_help_provider;
 
 use crate::ast::{MessageSelector, Module};
 use crate::semantic_analysis::type_checker::TypeMap;
-use crate::semantic_analysis::{ClassHierarchy, infer_types_and_returns};
+use crate::semantic_analysis::{AliasRegistry, ClassHierarchy, infer_types_and_returns};
 use crate::source_analysis::Span;
 
 /// Returns the source span covering a keyword selector's keyword tokens, if any.
@@ -79,11 +79,59 @@ pub(crate) fn selector_span(selector: &MessageSelector) -> Option<Span> {
 ///
 /// Used by [`completion_provider`] and [`hover_provider`] so both share identical
 /// enrichment logic (BT-1014).
+///
+/// BT-2867: `native_type_registry`, when `Some`, lets expressions *downstream*
+/// of a typed FFI call (e.g. `x := (Erlang m) f:. x bar`) see `x`'s real type
+/// in the returned [`TypeMap`] too — not just the FFI call site itself, which
+/// callers already special-case separately via their own `native_types`
+/// parameter.
+///
+/// `alias_registry` is `None` here (ADR 0108, BT-2897) — [`ProjectIndex`]
+/// does not yet track a project-wide alias table (that's LSP integration,
+/// deferred to the later ADR 0108 phase BT-2901), so completions see aliases
+/// as ordinary unresolved names for now. [`hover_provider::compute_hover`]
+/// takes its own `alias_registry` parameter and calls
+/// [`enrich_hierarchy_with_inferred_returns_and_aliases`] directly instead of
+/// this function when a caller has one to offer.
+///
+/// [`ProjectIndex`]: crate::language_service::project_index::ProjectIndex
 pub(crate) fn enrich_hierarchy_with_inferred_returns(
     module: &Module,
     hierarchy: &ClassHierarchy,
+    native_type_registry: Option<&crate::semantic_analysis::type_checker::NativeTypeRegistry>,
 ) -> (Option<ClassHierarchy>, TypeMap) {
-    let (type_map, inferred) = infer_types_and_returns(module, hierarchy);
+    let (type_map, inferred) = infer_types_and_returns(module, hierarchy, native_type_registry);
+    let enriched = if inferred.is_empty() {
+        None
+    } else {
+        let mut h = hierarchy.clone();
+        h.apply_inferred_return_types(&inferred);
+        Some(h)
+    };
+    (enriched, type_map)
+}
+
+/// [`enrich_hierarchy_with_inferred_returns`], additionally threading a type
+/// alias registry (ADR 0108, BT-2897) through to
+/// [`infer_types_and_returns_with_aliases`] so the underlying [`TypeMap`]
+/// resolves and tags alias references (see [`TypeProvenance::Aliased`]).
+/// `alias_registry = None` is identical to
+/// [`enrich_hierarchy_with_inferred_returns`].
+///
+/// [`TypeProvenance::Aliased`]: crate::semantic_analysis::type_checker::TypeProvenance
+pub(crate) fn enrich_hierarchy_with_inferred_returns_and_aliases(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    native_type_registry: Option<&crate::semantic_analysis::type_checker::NativeTypeRegistry>,
+    alias_registry: Option<&AliasRegistry>,
+) -> (Option<ClassHierarchy>, TypeMap) {
+    let (type_map, inferred) =
+        crate::semantic_analysis::type_checker::infer_types_and_returns_with_aliases(
+            module,
+            hierarchy,
+            native_type_registry,
+            alias_registry,
+        );
     let enriched = if inferred.is_empty() {
         None
     } else {

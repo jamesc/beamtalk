@@ -192,7 +192,7 @@ proptest! {
         let (hierarchy_result, _) = ClassHierarchy::build(&module);
         prop_assume!(hierarchy_result.is_ok());
         let hierarchy = hierarchy_result.unwrap();
-        let _type_map = infer_types(&module, &hierarchy);
+        let _type_map = infer_types(&module, &hierarchy, None);
     }
 
     /// Property 5b: Type inference never panics on near-valid input.
@@ -202,6 +202,6 @@ proptest! {
         let (hierarchy_result, _) = ClassHierarchy::build(&module);
         prop_assume!(hierarchy_result.is_ok());
         let hierarchy = hierarchy_result.unwrap();
-        let _type_map = infer_types(&module, &hierarchy);
+        let _type_map = infer_types(&module, &hierarchy, None);
     }
 }

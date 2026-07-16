@@ -86,7 +86,7 @@ At build time, the compiler reads the `abstract_code` chunk from compiled `.beam
    - **EEP-48 docs are read separately at runtime** (not at build time) — see "Documentation" below.
 2. The Rust compiler invokes it via the existing `beamtalk_build_worker` pattern (same mechanism used for `.core` → `.beam` compilation)
 3. The Erlang→Beamtalk type mapping (reverse of `spec_codegen.rs`) converts Erlang abstract type representations to `InferredType` values, using spec variable names as keyword names
-4. Results are cached per module and invalidated when `.beam` file timestamps change
+4. Results are cached per module and invalidated when `.beam` file timestamps change, the OTP version changes, or the compiler's own Erlang→Beamtalk type-mapping logic changes (BT-2852: each entry carries a compile-time content stamp of `beamtalk_spec_reader.erl`, so a `beamtalk` upgrade that changes `map_type/1` invalidates stale specs even when the underlying `.beam` file never changes)
 
 **Parameter names come from specs, not source parsing:**
 

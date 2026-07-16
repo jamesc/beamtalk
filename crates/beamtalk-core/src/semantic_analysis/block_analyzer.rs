@@ -30,7 +30,7 @@ impl Analyser {
         let context = match parent_context {
             Some(ExprContext::ControlFlowArg) => BlockContext::ControlFlow,
             Some(ExprContext::MessageArg) => BlockContext::Passed,
-            Some(ExprContext::Assignment) => BlockContext::Stored,
+            Some(ExprContext::Assignment | ExprContext::FieldAssignment) => BlockContext::Stored,
             None => BlockContext::Unknown,
         };
 
@@ -69,10 +69,41 @@ impl Analyser {
                     // Tier 2 state threading — the actor State IS the StateAcc, so
                     // field reads/writes inside the block propagate back to the caller.
                     //
-                    // Error: Field assignment in Stored blocks remains unsupported because
-                    // the compiler cannot track the Tier 2 type of a block stored in a
-                    // variable (see BT-909 for future tracking of block variable types).
-                    if matches!(context, BlockContext::Stored) {
+                    // BT-2797: Field assignments in blocks stored into an instance
+                    // field (`self.field := [block]`) are also now supported —
+                    // every `self.field value(:...)` call site runtime-discriminates
+                    // Tier 1 vs Tier 2 (generalizing the BT-909 is_function/2
+                    // precedent from Erlang FFI interop to Beamtalk-level block
+                    // calls), regardless of which method performs the call.
+                    //
+                    // Error: Field assignment in blocks stored into a *local
+                    // variable* remains flagged here — codegen's
+                    // `prescan_tier2_local_vars` can prove per-method that a
+                    // specific local's later uses are safe, but this pass has no
+                    // equivalent whole-body lookahead, so it stays conservative.
+                    //
+                    // BT-2797 (PR #2899 review fix): the field-stored exemption
+                    // is only safe when the block does NOT also capture and
+                    // mutate an outer local. `generate_block_stateful` reads a
+                    // captured local's `'__local__<var>'` key from the calling
+                    // method's `StateAcc` with a fallback to the value closed
+                    // over at block-*definition* time — correct for a block
+                    // invoked from the same method (BT-856), but wrong here: a
+                    // field-stored block can be invoked from a *different*
+                    // method whose `StateAcc` never had that key seeded, so the
+                    // fallback silently returns the stale definition-time value
+                    // forever, and the key then leaks into the actor's
+                    // persistent gen_server state once the call site merges the
+                    // returned `NewState` back in. Keep flagging the mixed case
+                    // so it still hits the same compile-time diagnostic as a
+                    // captured-local-only stored block.
+                    let has_captured_local_mutations = mutations
+                        .iter()
+                        .any(|m| matches!(m.kind, MutationKind::CapturedVariable { .. }));
+                    let is_field_stored =
+                        matches!(parent_context, Some(ExprContext::FieldAssignment))
+                            && !has_captured_local_mutations;
+                    if matches!(context, BlockContext::Stored) && !is_field_stored {
                         self.result.diagnostics.push(Diagnostic::error(
                             format!(
                                 "cannot assign to field '{name}' inside a stored closure\n\
@@ -84,11 +115,56 @@ impl Analyser {
                         ).with_hint("Inline the block at the call site, or extract the field assignment into a separate method"));
                     }
                 }
-                MutationKind::CapturedVariable { .. } | MutationKind::LocalVariable { .. } => {
+                MutationKind::CapturedVariable { name } => {
                     // BT-856 (ADR 0041 Phase 3): Captured variable mutations in Stored/Passed
-                    // blocks are now supported via the Tier 2 stateful block protocol (BT-852).
-                    // State is threaded through StateAcc maps so mutations propagate correctly.
-                    // No diagnostic needed — this is valid and working behaviour.
+                    // blocks are supported via the Tier 2 stateful block protocol (BT-852).
+                    // State is threaded through the *calling method's own* StateAcc map, so
+                    // mutations propagate correctly back to that same method — this is valid
+                    // and working behaviour, and needs no diagnostic in that case.
+                    //
+                    // BT-2809: that threading mechanism breaks down for a block stored into
+                    // an instance field (`self.field := [block]`), because the field may be
+                    // invoked from a *different* method than the one that assigned it (the
+                    // whole point of BT-2797). `generate_block_stateful`'s captured-var
+                    // codegen keys the mutation into `'__local__<var>'` on the *calling*
+                    // method's own State — a different method's State was never seeded with
+                    // that key, so the runtime fallback silently returns the value the
+                    // variable had at block-*definition* time forever, and the stray key
+                    // then leaks into the actor's persistent gen_server state once the call
+                    // site merges the returned state back in. Unlike a field mutation (BT-2797
+                    // made those cross-method-safe via runtime is_function/2 discrimination),
+                    // a captured local has no cross-method-visible home to thread through, so
+                    // this is flagged the same way a field-write-plus-captured-local mix
+                    // already is above (`has_captured_local_mutations`) — just for the
+                    // captured-local-only case that arm never reaches.
+                    //
+                    // Only fire for the captured-local-ONLY case: when a field write
+                    // *also* exists in the same block, the Field arm above already emits
+                    // its own diagnostic for this exact mix (that's what its
+                    // `has_captured_local_mutations` check is for), so skip here to avoid
+                    // reporting two separate errors for one closure.
+                    let has_field_mutation = mutations
+                        .iter()
+                        .any(|m| matches!(m.kind, MutationKind::Field { .. }));
+                    if matches!(parent_context, Some(ExprContext::FieldAssignment))
+                        && !has_field_mutation
+                    {
+                        self.result.diagnostics.push(Diagnostic::error(
+                            format!(
+                                "cannot mutate captured variable '{name}' inside a closure stored in a field\n\
+                                 \n\
+                                 = help: a field-stored block may be invoked from a different method, \
+                                   which has no way to see this variable's mutation\n\
+                                 = help: use a field instead of a captured local variable: `self.{name} := ...`"
+                            ),
+                            mutation.span,
+                        ).with_hint("Store the mutated value in a field, or extract the block and the variable into the same method"));
+                    }
+                }
+                MutationKind::LocalVariable { .. } => {
+                    // A block-local variable (defined AND used only inside the block, not
+                    // captured from an outer scope) never escapes the block invocation —
+                    // no state threading is needed, so no diagnostic applies in any context.
                 }
             }
         }
@@ -366,6 +442,70 @@ mod tests {
                 .iter()
                 .any(|d| d.message.contains("cannot assign to field")),
             "Expected field-in-stored-block error, got: {:?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn bt2809_captured_local_only_field_stored_block_produces_error() {
+        // BT-2809: a block stored in a field whose ONLY mutation is a captured
+        // local (no field write) must be flagged — it can be invoked from a
+        // different method whose State never seeded the captured variable's
+        // '__local__' key, silently returning the stale definition-time value.
+        let src = "Actor subclass: Ctr\n  state: total = 0\n  state: callback = nil\n\n  setup =>\n    count := 0\n    self.callback := [:n | count := count + n]\n\n  process: n =>\n    self.callback value: n\n";
+        let module = parse_module(src);
+        let result = analyse(&module);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("cannot mutate captured variable")),
+            "Expected captured-local-in-field-stored-block error, got: {:?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn bt2809_mixed_field_and_captured_local_in_field_stored_block_produces_one_error() {
+        // Code review follow-up: a field-stored block with BOTH a field write and
+        // a captured-local mutation must produce exactly ONE diagnostic (the
+        // Field arm's "cannot assign to field"), not two — the CapturedVariable
+        // arm's own diagnostic is for the captured-local-ONLY case; firing both
+        // for the same closure would be confusing, redundant double-reporting.
+        let src = "Actor subclass: Ctr\n  state: total = 0\n\n  setup =>\n    count := 0\n    self.callback := [:n | self.total := n. count := count + n]\n";
+        let module = parse_module(src);
+        let result = analyse(&module);
+        assert_eq!(
+            result.diagnostics.len(),
+            1,
+            "Expected exactly one diagnostic for a field-stored block with both a \
+             field write and a captured-local mutation, got: {:?}",
+            result.diagnostics
+        );
+        assert!(
+            result.diagnostics[0]
+                .message
+                .contains("cannot assign to field"),
+            "Expected the field-write diagnostic to be the one reported, got: {:?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn captured_local_only_stored_in_local_var_same_method_produces_no_error() {
+        // BT-856/BT-2809 sanity check: a block stored in a *local variable* (not
+        // a field) with only a captured-local mutation must remain undiagnosed —
+        // codegen's prescan_tier2_local_vars proves per-method safety for this
+        // shape (BT-2797), and it's the well-established BT-856 pattern.
+        let src = "Object subclass: Foo\n  bar =>\n    count := 0\n    blk := [:n | count := count + n]\n    blk value: 5";
+        let module = parse_module(src);
+        let result = analyse(&module);
+        assert!(
+            !result
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("cannot mutate captured variable")),
+            "Did not expect a captured-local error for a locally-stored block, got: {:?}",
             result.diagnostics
         );
     }

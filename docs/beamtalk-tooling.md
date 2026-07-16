@@ -9,7 +9,7 @@ Tooling is part of the language, not an afterthought. Beamtalk is designed to be
 beamtalk new mylib          # Create new library project
 beamtalk new myapp --app    # Create new application project (supervisor + Main)
 beamtalk build              # Compile to BEAM
-beamtalk run                # Compile and start
+beamtalk run                # Compile and start (status to stderr, program output to stdout)
 beamtalk check              # Check for errors without compiling
 
 # Dependencies (see Package Management guide)
@@ -61,6 +61,8 @@ Every generated project includes a `Justfile` with these targets:
 | `publish` | `git push origin --tags` | Push release tags |
 | `run` | `beamtalk run` | Run the application (**`--app` only**) |
 
+**`beamtalk run` output routing:** Status and progress lines (`Building...`, `Running ClassName>>selector...`, `Connecting to workspace...`) are written to **stderr**. Stdout carries only the dispatched program's own output, keeping it clean for piped/programmatic consumers (`beamtalk run MyApp run | head`).
+
 ## Build System
 
 `beamtalk build` compiles a project (or a single `.bt` file) to BEAM bytecode. The build pipeline is incremental — unchanged files are skipped, and the compiler caches class metadata across builds.
@@ -99,7 +101,7 @@ The summary is suppressed when `--no-warnings` is passed.
 
 `beamtalk lint` prints the same summary at end of run. In `--format json` mode, a `summary` JSON object is emitted as the last line with `totals_by_severity`, `totals_by_category`, `files_checked`, and `total` fields for CI diffing.
 
-`beamtalk lint` also loads FFI type signatures from the build cache (`_build/type_cache/`) so that lint and build agree on Erlang FFI return types. Cache entries are validated against live `.beam` file mtimes — if the underlying module has been recompiled since the cache was written, the stale entry is skipped and lint falls back to untyped-FFI inference. If the project has never been built, lint proceeds without a cache (matching its pre-cache behaviour).
+`beamtalk lint` also loads FFI type signatures from the build cache (`_build/type_cache/`) so that lint and build agree on Erlang FFI return types. Cache entries are validated against live `.beam` file mtimes and against the producing compiler's Erlang→Beamtalk type-mapping stamp (BT-2852) — if the underlying module has been recompiled since the cache was written, or the entry was written by a `beamtalk` build with different type-mapping logic, the stale entry is skipped and lint falls back to untyped-FFI inference. If the project has never been built, lint proceeds without a cache (matching its pre-cache behaviour).
 
 ### Build Artifact Layout (`BuildLayout`)
 
@@ -264,6 +266,7 @@ REPL commands start with `:` and provide shortcuts for common operations. Most a
 | `:reload Counter` | `Counter reload` | Recompile a class from its source file |
 | `:reload` | *(reload last loaded file/dir)* | Reload the most recently loaded file or directory |
 | `:sync` / `:s` | `Workspace sync` | Sync workspace with project (requires `beamtalk.toml`) |
+| `:recheck image` | `Workspace recheckImage` | Re-check all live classes for stale callers / broken signatures |
 | `:unload Counter` | *(removes class)* | Unload a user class from the workspace |
 
 **`:load`** compiles the file and hot-loads the resulting BEAM module. If a class with the same name already exists, the new code replaces it — live actors pick up the new methods on their next message send.
@@ -805,6 +808,8 @@ Beamtalk includes an MCP (Model Context Protocol) server that gives AI coding ag
 | `get-traces` | Retrieve trace events with optional filters (actor, selector, class, outcome, duration) |
 | `export-traces` | Export trace events to a JSON file |
 | `actor-stats` | Get aggregate per-actor, per-method statistics (call counts, durations, error rates) |
+| `precheck_method` | Pre-save advisory (ADR 0105 Phase 3): compile a pending method edit and report would-be-stale dependents without installing it |
+| `recheck_image` | Whole-image re-check (ADR 0105 Phase 3): re-check all live classes for stale callers and broken signatures |
 | `diagnostic_summary` | Aggregated diagnostic counts by category/severity plus type-coverage stats (offline) |
 
 All MCP tools map to the same `Workspace` and `Beamtalk` APIs available in the REPL. The tracing tools correspond to the `Tracing` stdlib class (see [Language Features — Actor Observability](beamtalk-language-features.md#actor-observability-and-tracing-adr-0069)). The live-edit save tools (`save_method`, `try_method`, `save_class`, `flush`, `list_changes`, `dirty_methods`) correspond to the ChangeLog model (see [Language Features — Saving live edits back to disk](beamtalk-language-features.md#saving-live-edits-back-to-disk--compilesource-changelog-and-flush-adr-0082)); the same operations are exposed to editors via the LSP `executeCommand` handlers `beamtalk.flush`, `beamtalk.flush.class`, `beamtalk.flush.file`, `beamtalk.flush.kind`, and `beamtalk.saveClass`, which emit `workspace/applyEdit` on each flushed file so open buffers refresh automatically.

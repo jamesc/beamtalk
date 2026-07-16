@@ -31,14 +31,17 @@ pub(crate) use class_validators::{
     check_abstract_instantiation, check_actor_field_mutation_in_closure, check_actor_new_usage,
     check_cast_on_value_type, check_class_variable_access, check_data_keyword_class_kind,
     check_handle_scope_on_object, check_new_field_names, check_object_new_usage,
-    check_value_nil_return, check_value_slot_assignment,
+    check_value_nil_return, check_value_slot_assignment, check_value_slot_case_collision,
 };
 pub(crate) use lint_validators::{
     check_effect_free_statements, check_empty_method_bodies, check_literal_boolean_condition,
     check_redundant_assignment, check_redundant_local_type_annotation,
     check_redundant_super_initialize,
 };
-pub(crate) use match_validators::{check_match_exhaustiveness, warn_assignment_in_match_arms};
+pub(crate) use match_validators::{
+    check_match_exhaustiveness, check_type_pattern_classes, is_concrete_leaf_class,
+    warn_assignment_in_match_arms,
+};
 pub(crate) use native_validators::{
     check_native_delegate_reserved_word, check_native_delegate_return_type,
     check_native_state_fields,
@@ -50,11 +53,12 @@ pub(crate) use sendability_validators::{
 };
 pub(crate) use structural_validators::{
     check_ffi_arity, check_unresolved_classes, check_unresolved_ffi_modules,
-    check_workspace_shadows,
+    check_unresolved_type_aliases, check_workspace_shadows, erlang_arity, erlang_function_name,
 };
 pub(crate) use supervision_validators::{
     check_children_supervision_policy, check_supervision_policy_override,
 };
 pub(crate) use visibility_validators::{
-    check_class_visibility, check_internal_method_shadow, check_leaked_method_visibility,
+    check_alias_leaked_visibility, check_class_visibility, check_internal_method_shadow,
+    check_leaked_method_visibility,
 };

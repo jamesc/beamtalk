@@ -43,6 +43,115 @@ use crate::ast::{Expression, Literal, MessageSelector, WellKnownSelector};
 use crate::docvec;
 
 impl CoreErlangGenerator {
+    /// BT-2816: Generates the `<{'error', ..., _}>` case clauses shared by all
+    /// self-dispatch call sites (`safe_dispatch`/`dispatch` error branches).
+    ///
+    /// The dispatched call's error branch has two distinct shapes, mirroring the
+    /// two `<{'error', ...}>` clauses already used at the `handle_cast`/
+    /// `handle_info` boundary (see `gen_server/callbacks.rs`):
+    ///
+    /// 1. **Caught exception**: `safe_dispatch/3` packs a caught exception as a
+    ///    3-tuple `{Type, Reason, Stacktrace}` in the middle element of its
+    ///    `{'error', ..., State}` return (see `generate_safe_dispatch`). Passing
+    ///    that whole triple straight to `beamtalk_error:'raise'/1` — which only
+    ///    accepts a raw `#beamtalk_error{}` record — crashes with
+    ///    `function_clause` instead of propagating the real error (BT-2816).
+    ///    Destructuring the triple and routing it through
+    ///    `beamtalk_exception_handler:'reraise'/4` mirrors the cross-actor call
+    ///    boundary (`beamtalk_actor:sync_send_remote/3`), which correctly
+    ///    classifies raw Erlang errors and preserves already-wrapped
+    ///    `#beamtalk_error{}` values.
+    /// 2. **Plain returned error**: `dispatch/4`'s DNU fallback (and other
+    ///    non-exception error paths) *returns* `{'error', Error, State}` where
+    ///    `Error` is a bare `#beamtalk_error{}` record — not a 3-tuple, so it
+    ///    never reaches `safe_dispatch`'s try/catch at all. This fallback clause
+    ///    must stay, or a self-send that resolves to DNU crashes with
+    ///    `case_clause` instead of raising the DNU error.
+    ///
+    /// BT-2822: Passes a `selector`/`class` breadcrumb `Context` map to
+    /// `reraise/4` — mirroring `sync_send_remote/3`'s
+    /// `#{selector => Selector, class => Class}` construction — so a raw
+    /// Erlang error escaping a self-send forwarding hop gets the same
+    /// `ClassName>>selector: ...` location prefix (via `wrap_raw/2` /
+    /// `located/3`) as the cross-actor equivalent.
+    ///
+    /// BT-2833: `class` is resolved via a *runtime* `beamtalk_actor:lookup_class/1`
+    /// call on `self()`, not a compile-time literal atom. For a self-send inside
+    /// a method a subclass inherits without overriding, the inherited method's
+    /// code lives in the superclass module, so a literal `class_name()` atom
+    /// would yield the superclass instead of the actor's actual runtime class —
+    /// unlike `sync_send_remote/3`, which resolves the runtime class via the
+    /// same `lookup_class/1` ETS reverse-lookup on `beamtalk_instance_registry`.
+    /// Emitting the same runtime lookup here keeps the self-send breadcrumb's
+    /// `class` value in parity with the cross-actor path for inherited methods.
+    /// `selector_atom` is still known at compile time and stays a literal atom.
+    ///
+    /// Known caveat: `lookup_class/1` reads `beamtalk_instance_registry`,
+    /// which the *spawner* populates only after `beamtalk_actor:safe_spawn/2`'s
+    /// `await_initialize/1` confirms `handle_continue(initialize, _)` has
+    /// finished (see `gen_server/spawn.rs`'s `instance_registration_doc`). A
+    /// self-send that raises *during* `initialize` therefore runs before this
+    /// actor's own registry entry exists, so `lookup_class(self())` falls
+    /// back to `'unknown'` for that narrow window — trading a guaranteed-
+    /// correct compile-time atom (for non-inherited classes only) for a
+    /// safe-but-less-specific fallback, in exchange for a correct answer in
+    /// every other case (including all inherited-method self-sends, the
+    /// actual bug this fixes). `lookup_class/1` never crashes either way.
+    ///
+    /// Core Erlang map literals (`~{...}~`) cannot contain `call` expressions
+    /// (see `lifecycle_start_telemetry_doc` in `gen_server/callbacks.rs` for the
+    /// same constraint), so the lookup is hoisted into a `let` binding inside
+    /// the clause body before the map is constructed. This only runs on the
+    /// error path — no overhead on the success path.
+    ///
+    /// # Generated Code
+    ///
+    /// ```erlang
+    /// <{'error', {Type, Reason, Stacktrace}, _}> when 'true' ->
+    ///     let Class = call 'beamtalk_actor':'lookup_class'(call 'erlang':'self'()) in
+    ///     call 'beamtalk_exception_handler':'reraise'(Type, Reason, Stacktrace,
+    ///         ~{'selector' => 'selector:', 'class' => Class}~)
+    /// <{'error', Error, _}> when 'true' -> call 'beamtalk_error':'raise'(Error)
+    /// ```
+    fn generate_self_dispatch_error_clause(
+        &mut self,
+        var_prefix: &str,
+        selector_atom: &str,
+    ) -> Document<'static> {
+        let type_var = self.fresh_var(&format!("{var_prefix}Type"));
+        let reason_var = self.fresh_var(&format!("{var_prefix}Reason"));
+        let stack_var = self.fresh_var(&format!("{var_prefix}Stack"));
+        let plain_error_var = self.fresh_var(&format!("{var_prefix}Plain"));
+        let class_var = self.fresh_var(&format!("{var_prefix}Class"));
+        docvec![
+            "<{'error', {",
+            leaf::var(type_var.clone()),
+            ", ",
+            leaf::var(reason_var.clone()),
+            ", ",
+            leaf::var(stack_var.clone()),
+            "}, _}> when 'true' -> let ",
+            leaf::var(class_var.clone()),
+            " = call 'beamtalk_actor':'lookup_class'(call 'erlang':'self'()) in ",
+            "call 'beamtalk_exception_handler':'reraise'(",
+            leaf::var(type_var),
+            ", ",
+            leaf::var(reason_var),
+            ", ",
+            leaf::var(stack_var),
+            ", ~{'selector' => ",
+            leaf::atom(selector_atom.to_string()),
+            ", 'class' => ",
+            leaf::var(class_var),
+            "}~) ",
+            "<{'error', ",
+            leaf::var(plain_error_var.clone()),
+            ", _}> when 'true' -> call 'beamtalk_error':'raise'(",
+            leaf::var(plain_error_var),
+            ") "
+        ]
+    }
+
     /// Generates a comma-separated argument list for function/message calls.
     ///
     /// This is a shared helper that eliminates the repeated pattern of iterating
@@ -1379,6 +1488,8 @@ impl CoreErlangGenerator {
     /// ```erlang
     /// case call 'module':'safe_dispatch'('selector', [Args], State) of
     ///   <{'reply', Result, _NewState}> when 'true' -> Result
+    ///   <{'error', {Type, Reason, Stacktrace}, _}> when 'true' ->
+    ///       call 'beamtalk_exception_handler':'reraise'(Type, Reason, Stacktrace)
     ///   <{'error', Error, _}> when 'true' -> call 'beamtalk_error':'raise'(Error)
     /// end
     /// ```
@@ -1389,6 +1500,8 @@ impl CoreErlangGenerator {
     /// let Self = call 'beamtalk_actor':'make_self'(State) in
     /// case call 'module':'dispatch'('selector', [Args], Self, State) of
     ///   <{'reply', Result, _NewState}> when 'true' -> Result
+    ///   <{'error', {Type, Reason, Stacktrace}, _}> when 'true' ->
+    ///       call 'beamtalk_exception_handler':'reraise'(Type, Reason, Stacktrace)
     ///   <{'error', Error, _}> when 'true' -> call 'beamtalk_error':'raise'(Error)
     /// end
     /// ```
@@ -1405,11 +1518,11 @@ impl CoreErlangGenerator {
         let selector_atom = selector.to_erlang_atom();
         let result_var = self.fresh_var("SelfResult");
         let state_var = self.fresh_var("SelfState");
-        let error_var = self.fresh_var("SelfError");
         let current_state = self.current_state_var();
         let module = self.module_name.clone();
 
         let args_doc = self.capture_argument_list_doc(arguments)?;
+        let error_clause = self.generate_self_dispatch_error_clause("SelfError", &selector_atom);
 
         let doc = docvec![
             "case call ",
@@ -1428,11 +1541,7 @@ impl CoreErlangGenerator {
             "}> when 'true' -> ",
             leaf::var(result_var),
             " ",
-            "<{'error', ",
-            leaf::var(error_var.clone()),
-            ", _}> when 'true' -> call 'beamtalk_error':'raise'(",
-            leaf::var(error_var),
-            ") ",
+            error_clause,
             "end"
         ];
 
@@ -1450,7 +1559,9 @@ impl CoreErlangGenerator {
     /// ```erlang
     /// let _SD0 = case call 'module':'safe_dispatch'('sel', [Args], State) of
     ///   <{'reply', R, S}> when 'true' -> {R, S}
-    ///   <{'error', E, _}> when 'true' -> call 'beamtalk_error':'raise'(E)
+    ///   <{'error', {Type, Reason, Stacktrace}, _}> when 'true' ->
+    ///       call 'beamtalk_exception_handler':'reraise'(Type, Reason, Stacktrace)
+    ///   <{'error', Error, _}> when 'true' -> call 'beamtalk_error':'raise'(Error)
     /// end in let State1 = call 'erlang':'element'(2, _SD0) in
     /// ```
     ///
@@ -1470,10 +1581,13 @@ impl CoreErlangGenerator {
         } = expr
         {
             let selector_atom = selector.to_erlang_atom();
+            // BT-2822: `selector_atom` is moved into `call_doc` below (some
+            // branches consume it via `leaf::atom`), so clone the value
+            // needed for the error-clause breadcrumb before that happens.
+            let selector_atom_for_error = selector_atom.clone();
             let dispatch_var = self.fresh_temp_var("SD");
             let result_var = self.fresh_var("SDResult");
             let state_var = self.fresh_var("SDState");
-            let error_var = self.fresh_var("SDError");
             let current_state = self.current_state_var();
 
             // Capture arguments via bridge (ADR 0018 Phase 0)
@@ -1552,6 +1666,8 @@ impl CoreErlangGenerator {
 
             // Result/error clauses + state extraction
             let new_state = self.next_state_var();
+            let error_clause =
+                self.generate_self_dispatch_error_clause("SDError", &selector_atom_for_error);
             let doc = docvec![
                 call_doc,
                 "<{'reply', ",
@@ -1563,11 +1679,7 @@ impl CoreErlangGenerator {
                 ", ",
                 leaf::var(state_var),
                 "} ",
-                "<{'error', ",
-                leaf::var(error_var.clone()),
-                ", _}> when 'true' -> call 'beamtalk_error':'raise'(",
-                leaf::var(error_var),
-                ") ",
+                error_clause,
                 "end in ",
                 "let ",
                 leaf::var(new_state),
@@ -1597,18 +1709,19 @@ impl CoreErlangGenerator {
 
         // Level 1: Direct call to standalone sealed method function
         if self.sealed_method_selectors().contains(&selector_name) {
-            return self.generate_direct_sealed_call(&selector_name, arguments);
+            let selector_atom = selector.to_erlang_atom();
+            return self.generate_direct_sealed_call(&selector_name, &selector_atom, arguments);
         }
 
         // Level 2: Direct dispatch/4 call (skip safe_dispatch try/catch)
         let selector_atom = selector.to_erlang_atom();
         let result_var = self.fresh_var("SealedResult");
-        let error_var = self.fresh_var("SealedError");
         let self_var = self.fresh_temp_var("SealedSelf");
         let current_state = self.current_state_var();
         let module = self.module_name.clone();
 
         let args_doc = self.capture_argument_list_doc(arguments)?;
+        let error_clause = self.generate_self_dispatch_error_clause("SealedError", &selector_atom);
 
         let doc = docvec![
             "let ",
@@ -1632,11 +1745,7 @@ impl CoreErlangGenerator {
             ", _}> when 'true' -> ",
             leaf::var(result_var),
             " ",
-            "<{'error', ",
-            leaf::var(error_var.clone()),
-            ", _}> when 'true' -> call 'beamtalk_error':'raise'(",
-            leaf::var(error_var),
-            ") ",
+            error_clause,
             "end"
         ];
 
@@ -1650,16 +1759,23 @@ impl CoreErlangGenerator {
     fn generate_direct_sealed_call(
         &mut self,
         selector_name: &str,
+        selector_atom: &str,
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
         let result_var = self.fresh_var("SealedResult");
-        let error_var = self.fresh_var("SealedError");
         let self_var = self.fresh_temp_var("SealedSelf");
         let current_state = self.current_state_var();
         let module = self.module_name.clone();
 
         let args_doc = self.capture_argument_list_doc(arguments)?;
         let comma = if arguments.is_empty() { "" } else { ", " };
+        // BT-2822: `selector_atom` (from `MessageSelector::to_erlang_atom`) is
+        // the breadcrumb value — kept independent of `selector_name` (used
+        // below for `sealed_fn_name` mangling) so a future change to either
+        // mangling scheme can't silently desync the breadcrumb from the
+        // dispatch atom used at the other call sites.
+        let error_clause =
+            self.generate_self_dispatch_error_clause("SealedDirectError", selector_atom);
 
         let doc = docvec![
             "let ",
@@ -1683,11 +1799,7 @@ impl CoreErlangGenerator {
             ", _}> when 'true' -> ",
             leaf::var(result_var),
             " ",
-            "<{'error', ",
-            leaf::var(error_var.clone()),
-            ", _}> when 'true' -> call 'beamtalk_error':'raise'(",
-            leaf::var(error_var),
-            ") ",
+            error_clause,
             "end"
         ];
 
@@ -1702,6 +1814,21 @@ impl CoreErlangGenerator {
                 if let Expression::Identifier(recv_id) = receiver.as_ref() {
                     return recv_id.name == "self";
                 }
+            }
+        }
+        false
+    }
+
+    /// BT-2797: Checks if an expression is a self-field access (`self.field`).
+    ///
+    /// Used to scope the runtime Tier 1/Tier 2 discrimination for block value
+    /// calls (`self.field value: ...`) to exactly the shape that needs it — a
+    /// block stored in an instance field, whose Tier-ness can't be known
+    /// statically since it may have been assigned from a different method.
+    pub(super) fn is_self_field_access(expr: &Expression) -> bool {
+        if let Expression::FieldAccess { receiver, .. } = expr {
+            if let Expression::Identifier(recv_id) = receiver.as_ref() {
+                return recv_id.name == "self";
             }
         }
         false
@@ -1895,6 +2022,53 @@ impl CoreErlangGenerator {
         false
     }
 
+    /// BT-2797: Generates the RHS `Document` for a `self.field := value`
+    /// assignment, special-casing a block literal with field writes (and no
+    /// captured-local mutations): it's generated via `generate_block_stateful`
+    /// directly, bypassing `generate_block`'s "unsupported block" rejection.
+    ///
+    /// This is safe unconditionally for the field-writes-only case — no
+    /// same-method-only safety analysis is needed here, unlike the local-var
+    /// case in `gen_server/methods.rs`'s `prescan_tier2_local_vars` — because
+    /// every `self.field value(:...)` call site now runtime-discriminates
+    /// Tier 1 vs Tier 2 (`generate_block_value_call_runtime_discriminated`,
+    /// `intrinsics.rs`), regardless of which method performs the call. The
+    /// residual gap — reading the field into a local var and invoking *that*
+    /// — is the same pre-existing class of gap as any other block value
+    /// flowing through an untracked opaque channel.
+    ///
+    /// BT-2797 (PR #2899 review fix): a block that *also* captures and
+    /// mutates an outer local (in addition to writing a field) is NOT safe
+    /// here and must fall through to `expression_doc` → `generate_block` →
+    /// `validate_stored_closure`/the block-analyzer diagnostic instead.
+    /// `generate_block_stateful` reads a captured local's
+    /// `'__local__<var>'` key from the calling method's `StateAcc`, falling
+    /// back to the value closed over at block-*definition* time when that
+    /// key is absent. A field-stored block can be invoked from a different
+    /// method than the one that stored it, so that fallback fires forever
+    /// (stale definition-time value) and, once the returned state is merged
+    /// back into the actor's persistent state, the `'__local__<var>'` key
+    /// leaks into it permanently. See the matching fix in
+    /// `semantic_analysis/block_analyzer.rs`.
+    ///
+    /// Scoped to `Actor` context only, matching the call-site fix: `ValueType`
+    /// field-write Tier 2 support has not been verified safe.
+    pub(super) fn generate_field_assignment_value_doc(
+        &mut self,
+        value: &Expression,
+    ) -> Result<Document<'static>> {
+        if self.context == CodeGenContext::Actor {
+            if let Expression::Block(block) = value {
+                let captured_mutations = Self::captured_mutations_for_block(block);
+                let field_writes = super::block_analysis::analyze_block(block).field_writes;
+                if captured_mutations.is_empty() && !field_writes.is_empty() {
+                    return self.generate_block_stateful(block, &[]);
+                }
+            }
+        }
+        self.expression_doc(value)
+    }
+
     /// Generates the opening part of a field assignment with state threading.
     ///
     /// For `self.field := value`, generates:
@@ -1946,7 +2120,7 @@ impl CoreErlangGenerator {
 
                 let val_var = self.fresh_temp_var("Val");
                 let current_state = self.current_state_var();
-                let val_doc = self.expression_doc(value)?;
+                let val_doc = self.generate_field_assignment_value_doc(value)?;
 
                 let new_state = self.next_state_var();
 
@@ -2870,7 +3044,9 @@ impl CoreErlangGenerator {
     /// let _SD0 = case call 'module':'safe_dispatch'('applyBlock:to:',
     ///     [fun (X, StateAcc) -> ... {Result, StateAcc1} end, 5], State1) of
     ///   <{'reply', R, S}> when 'true' -> {R, S}
-    ///   <{'error', E, _}> when 'true' -> call 'beamtalk_error':'raise'(E)
+    ///   <{'error', {Type, Reason, Stacktrace}, _}> when 'true' ->
+    ///       call 'beamtalk_exception_handler':'reraise'(Type, Reason, Stacktrace)
+    ///   <{'error', Error, _}> when 'true' -> call 'beamtalk_error':'raise'(Error)
     /// end in let State2 = call 'erlang':'element'(2, _SD0) in
     /// let Count = call 'maps':'get'('__local__count', State2) in
     /// ```
@@ -2916,7 +3092,6 @@ impl CoreErlangGenerator {
             let dispatch_var = self.fresh_temp_var("SD");
             let result_var = self.fresh_var("SDResult");
             let state_var = self.fresh_var("SDState");
-            let error_var = self.fresh_var("SDError");
             let current_state = self.current_state_var();
             let module = self.module_name.clone();
             let args_doc = self.generate_tier2_args(arguments, tier2_args)?;
@@ -2934,6 +3109,7 @@ impl CoreErlangGenerator {
 
             // Result/error clauses + state extraction
             let new_state = self.next_state_var();
+            let error_clause = self.generate_self_dispatch_error_clause("SDError", &selector_atom);
             docs.push(docvec![
                 call_doc,
                 "<{'reply', ",
@@ -2944,11 +3120,9 @@ impl CoreErlangGenerator {
                 leaf::var(result_var),
                 ", ",
                 leaf::var(state_var),
-                "} <{'error', ",
-                leaf::var(error_var.clone()),
-                ", _}> when 'true' -> call 'beamtalk_error':'raise'(",
-                leaf::var(error_var),
-                ") end in let ",
+                "} ",
+                error_clause,
+                "end in let ",
                 leaf::var(new_state),
                 " = call 'erlang':'element'(2, ",
                 leaf::var(dispatch_var.clone()),

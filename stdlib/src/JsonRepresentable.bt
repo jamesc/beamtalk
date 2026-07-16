@@ -1,0 +1,24 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+/// JsonRepresentable — Protocol for objects that control their own JSON encoding.
+///
+/// Any class that implements `asJson` automatically conforms to
+/// JsonRepresentable via structural protocol conformance (ADR 0068).
+///
+/// `Json generate:` and `Json prettyPrint:` (see `Json`) dispatch to `asJson`
+/// for any value that is not one of the natively JSON-representable types
+/// (Dictionary, List, String, Integer, Float, Boolean, nil). The returned
+/// value is converted recursively, so it may itself contain further
+/// JsonRepresentable objects, and is typically a Dictionary with explicit
+/// wire-format keys (BT-2818).
+///
+/// ## Examples
+/// ```beamtalk
+/// Value subclass: User
+///   field: fullName = ""
+///
+///   asJson => #{"full_name" => self.fullName}
+/// (User conformsTo: #JsonRepresentable)   // => true
+/// ```
+Protocol define: JsonRepresentable
+  asJson -> Object

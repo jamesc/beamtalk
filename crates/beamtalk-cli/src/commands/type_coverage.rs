@@ -57,6 +57,21 @@ pub fn run(
         miette::bail!("no .bt source files found in '{path}'");
     }
 
+    // BT-2867: Populate the FFI type registry the same way `beamtalk lint` does,
+    // so calls to specced Erlang functions (and expressions consuming their
+    // results) are reported as typed rather than misreported as `Dynamic`.
+    // Falls back to the runtime/stdlib ebin scan (mirroring `extract_type_specs`'s
+    // own `stdlib_mode` branch) when scanning a manifest-less tree such as
+    // `stdlib/src`, which has no `beamtalk.toml`.
+    let package_root = super::lint::find_package_root(&source_path);
+    let native_type_registry = match package_root.as_deref() {
+        Some(root) => {
+            let layout = crate::commands::build_layout::BuildLayout::new(root);
+            super::build::extract_type_specs(&layout, true, false)
+        }
+        None => super::build_stdlib::extract_stdlib_type_specs(),
+    };
+
     // Pass 1: Parse all files and extract class metadata for cross-file hierarchy.
     let mut all_class_infos = Vec::new();
     let mut parsed_files: Vec<(Utf8PathBuf, String, beamtalk_core::ast::Module)> = Vec::new();
@@ -90,7 +105,11 @@ pub fn run(
             cross_file_classes,
         );
 
-        let type_map = infer_types(module, &analysis_result.class_hierarchy);
+        let type_map = infer_types(
+            module,
+            &analysis_result.class_hierarchy,
+            native_type_registry.as_ref(),
+        );
 
         let file_report = CoverageReport::from_module(module, &type_map, file.as_str(), detail);
         report.merge(file_report);

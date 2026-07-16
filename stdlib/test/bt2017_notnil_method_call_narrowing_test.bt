@@ -5,6 +5,14 @@
 // Previously, `local := someObj method` where `method` returns `Integer | Nil`
 // produced Known("Integer | Nil") instead of Union([Integer, UndefinedObject]),
 // causing false binary-operand warnings.
+//
+// BT-2872: `local notNil and: [...]` narrows `local` to non-Nil for the rest
+// of the block, including doubly-nested block-argument positions of binary
+// sends (`5 >= local` inside `local > 0 and: [5 >= local]`), not just
+// receiver positions (`local > 0`). BT-2843 made binary-send argument
+// checking union-aware (matching pre-existing keyword-send behavior), which
+// had surfaced this as a false-positive `@expect type` diagnostic until the
+// `and:`-narrowing fix below.
 
 TestCase subclass: Bt2017NotNilMethodCallNarrowingTest
 

@@ -235,6 +235,19 @@ fn save_method_expr(class: &str, selector: &str, body: &str) -> String {
     )
 }
 
+/// Build the Beamtalk expression for the `precheck_method` MCP tool — the
+/// pre-save advisory precheck (ADR 0105 Phase 3, BT-2782). Selector is the
+/// bare form (no leading `#`). Nothing installs; `Behaviour>>precheckCompile:
+/// source:` is read-only.
+fn precheck_method_expr(class: &str, selector: &str, body: &str) -> String {
+    format!(
+        "{} precheckCompile: #{} source: \"{}\"",
+        class,
+        selector,
+        escape_string_literal(body),
+    )
+}
+
 /// Build the Beamtalk expression for the `try_method` MCP tool — ephemeral
 /// patch path (ADR 0082 Phase 3). Selector is the bare form (no leading `#`).
 fn try_method_expr(class: &str, selector: &str, body: &str) -> String {
@@ -603,6 +616,26 @@ pub struct DiagnosticSummaryParams {
         description = "Path to a .bt source file or directory. Defaults to the current directory."
     )]
     pub path: Option<String>,
+}
+
+/// Parameters for the `precheck_method` MCP tool (ADR 0105 Phase 3, BT-2782).
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct PrecheckMethodParams {
+    /// Name of the Beamtalk class the pending edit targets.
+    #[schemars(
+        description = "Name of the Beamtalk class the pending edit targets (e.g. \"Counter\")."
+    )]
+    pub class: String,
+    /// Method selector — accepted with or without a leading `#`.
+    #[schemars(
+        description = "Method selector the pending edit targets (e.g. \"increment\", \"at:put:\", \"+\"). Accepted with or without a leading '#'."
+    )]
+    pub selector: String,
+    /// Pending method source body as a String value (the right-hand side of `=>`).
+    #[schemars(
+        description = "The pending method body source as a String value (the right-hand side of '=>'). Nothing installs — this is a read-only pre-save check."
+    )]
+    pub body: String,
 }
 
 /// Parameters for the `save_method` MCP tool (ADR 0082 Phase 3, BT-2288).
@@ -2176,6 +2209,89 @@ impl BeamtalkMcp {
         timer.mark_ok();
         Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
     }
+
+    /// Pre-save advisory precheck (ADR 0105 Phase 3, BT-2782).
+    ///
+    /// Compiles to `aClass precheckCompile: #selector source: body`. Nothing
+    /// installs and nothing is recorded to the `ChangeLog` — this is a
+    /// read-only "check before save" report of would-be-stale callers.
+    #[tool(
+        description = "Compile a pending method edit and report would-be-stale dependents, without installing it. Compiles to 'aClass precheckCompile: #selector source: body' — the editor/LSP pre-save advisory (ADR 0105 Phase 3): non-blocking, the post-reload image check that runs automatically on 'save_method' remains the authority. The 'body' argument is the source on the right-hand side of '=>', passed as a String value — no escaping required by the caller. Returns a report Dictionary (findings/checked/totalCandidates/notChecked/capNote/checkedOwners); an edit with no type-relevant signature change reports empty. (ADR 0105 Phase 3, BT-2782.)"
+    )]
+    async fn precheck_method(
+        &self,
+        Parameters(params): Parameters<PrecheckMethodParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let mut timer = ToolTimer::new("precheck_method");
+        validate_class_name(&params.class)?;
+        let selector = params
+            .selector
+            .strip_prefix('#')
+            .unwrap_or(&params.selector);
+        validate_selector(selector)?;
+        tracing::debug!(
+            tool = "precheck_method",
+            class = %params.class,
+            selector = %selector,
+            body_len = params.body.len(),
+            "tool invoked"
+        );
+
+        let expr = precheck_method_expr(&params.class, selector, &params.body);
+        let response = self
+            .client
+            .evaluate_with_options(&expr, false)
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+
+        check_response!(response, "Failed to precheck method");
+
+        let text = {
+            let v = response.value_string();
+            if v.is_empty() {
+                format!("Precheck for {}>>#{}: no findings", params.class, selector)
+            } else {
+                v
+            }
+        };
+
+        timer.mark_ok();
+        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+    }
+
+    /// Whole-image re-check (ADR 0105 Phase 3, BT-2782).
+    ///
+    /// Compiles to `Workspace recheckImage` — the "complete but unbounded"
+    /// path kept out of the automatic per-reload check: re-checks every live
+    /// class the workspace has a recorded source for, not just the
+    /// xref-filtered dependents of one changed selector.
+    #[tool(
+        description = "Re-check every live class in the workspace against the current image, not just the dependents of the last reload. Compiles to 'Workspace recheckImage' — the explicit, on-demand, unbounded sweep (ADR 0105 Phase 3), as opposed to the automatic post-reload check which only re-checks xref-filtered dependents of one changed selector, capped per reload. Returns a report Dictionary (checked/stale/findings). (ADR 0105 Phase 3, BT-2782.)"
+    )]
+    async fn recheck_image(&self) -> Result<CallToolResult, rmcp::ErrorData> {
+        let mut timer = ToolTimer::new("recheck_image");
+        tracing::debug!(tool = "recheck_image", "tool invoked");
+
+        let response = self
+            .client
+            .evaluate_with_options("Workspace recheckImage", false)
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+
+        check_response!(response, "Failed to recheck image");
+
+        let text = {
+            let v = response.value_string();
+            if v.is_empty() {
+                "Whole-image re-check: no findings".to_string()
+            } else {
+                v
+            }
+        };
+
+        timer.mark_ok();
+        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+    }
 }
 
 // --- Lint helpers ---
@@ -2209,10 +2325,26 @@ struct LintResult {
 /// `category.is_some()`, applies `@expect` directives, and returns the
 /// resulting diagnostics together with the `ClassHierarchy` (used by
 /// `compute_diagnostic_summary` for type inference).
+///
+/// `has_package_dependencies` mirrors `beamtalk lint`'s
+/// `CompilerOptions::has_package_dependencies` (BT-2794/BT-2823): true when
+/// the project's manifest declares `[dependencies]`, regardless of whether
+/// any of them could be resolved on disk.
+///
+/// `native_type_registry` (BT-2858) mirrors `beamtalk lint`'s FFI type
+/// registry (BT-2851/BT-2134): when `Some`, `(Erlang m) f:` calls get return
+/// type inference and argument-type checks from the registry instead of
+/// falling back to `Dynamic(UntypedFfi)` — the same registry `beamtalk
+/// build`/`beamtalk lint` use, so MCP `lint`/`diagnostic_summary` never
+/// diverge from them on which Erlang calls are seen as typed.
 fn run_module_analysis(
     module: &beamtalk_core::ast::Module,
     all_class_infos: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
     mut diags: Vec<beamtalk_core::source_analysis::Diagnostic>,
+    has_package_dependencies: bool,
+    native_type_registry: Option<
+        std::sync::Arc<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,
+    >,
 ) -> (
     Vec<beamtalk_core::source_analysis::Diagnostic>,
     beamtalk_core::semantic_analysis::ClassHierarchy,
@@ -2222,10 +2354,15 @@ fn run_module_analysis(
     diags.extend(beamtalk_core::lint::run_lint_passes(module));
 
     let cross_file_classes = ClassHierarchy::cross_file_class_infos(all_class_infos, module);
-    let analysis_result = beamtalk_core::semantic_analysis::analyse_with_options_and_classes(
+    let options = beamtalk_core::CompilerOptions {
+        has_package_dependencies,
+        ..Default::default()
+    };
+    let analysis_result = beamtalk_core::semantic_analysis::analyse_with_natives(
         module,
-        &beamtalk_core::CompilerOptions::default(),
+        &options,
         cross_file_classes,
+        native_type_registry,
     );
     diags.extend(
         analysis_result
@@ -2237,6 +2374,22 @@ fn run_module_analysis(
     beamtalk_core::queries::diagnostic_provider::apply_expect_directives(module, &mut diags);
 
     (diags, analysis_result.class_hierarchy)
+}
+
+/// BT-2858: Build the Erlang FFI native-type registry for `path`'s package,
+/// the same way `beamtalk lint` does (BT-2134/BT-2851's `extract_type_specs`,
+/// now shared via `beamtalk_cli::native_type_specs`) — rather than reading a
+/// possibly-absent/stale on-disk `_build/type_cache/` written by a *previous*
+/// `beamtalk build`. Returns `None` outside a manifest-backed package or when
+/// extraction finds no `.beam` files (e.g. runtime not yet compiled).
+fn build_native_type_registry(
+    path: &str,
+) -> Option<std::sync::Arc<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>> {
+    let project_root =
+        beamtalk_core::project::package::find_package_root(std::path::Path::new(path))?;
+    let project_root = camino::Utf8PathBuf::from_path_buf(project_root).ok()?;
+    let layout = beamtalk_cli::build_layout::BuildLayout::new(&project_root);
+    beamtalk_cli::native_type_specs::extract_project_type_specs(&layout).map(std::sync::Arc::new)
 }
 
 /// BT-2014: Compute a diagnostic summary (counts + type coverage) for a path.
@@ -2311,6 +2464,14 @@ fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
         }
     }
 
+    // BT-2823: Merge dependency class metadata so cross-file references to
+    // classes defined only in a git/path dependency (declared in
+    // beamtalk.toml) resolve the same way `beamtalk build` does.
+    let has_package_dependencies = merge_dependency_class_infos(path, &mut all_class_infos);
+
+    // BT-2858: Populate the FFI type registry the same way `beamtalk lint` does.
+    let native_type_registry = build_native_type_registry(path);
+
     // Pass 2: Analyse each file and collect diagnostics + coverage.
     let mut all_diags = Vec::new();
     let mut coverage = CoverageReport {
@@ -2330,13 +2491,18 @@ fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
             .cloned()
             .collect();
 
-        let (file_diags, class_hierarchy) =
-            run_module_analysis(module, &all_class_infos, initial_diags);
+        let (file_diags, class_hierarchy) = run_module_analysis(
+            module,
+            &all_class_infos,
+            initial_diags,
+            has_package_dependencies,
+            native_type_registry.clone(),
+        );
 
         all_diags.extend(file_diags);
 
         // Type coverage.
-        let type_map = infer_types(module, &class_hierarchy);
+        let type_map = infer_types(module, &class_hierarchy, native_type_registry.as_deref());
         let file_report = CoverageReport::from_module(module, &type_map, file_str, false);
         coverage.merge(file_report);
     }
@@ -2464,6 +2630,38 @@ fn resolve_extraction_files(
     )
 }
 
+/// BT-2823: Merge class metadata from `path`'s package dependencies (as
+/// declared in `beamtalk.toml`) into `all_class_infos`, so `Unresolved
+/// class` diagnostics see the same class hierarchy as `beamtalk
+/// build`/`beamtalk lint` for classes defined only in a dependency.
+///
+/// Delegates to [`beamtalk_cli::dependency_classes::resolve_dependency_class_infos`],
+/// which is filesystem-only and best-effort — it never fetches over the
+/// network, so this never turns an offline `lint`/`diagnostic_summary` call
+/// into one with network side effects. Dependencies that have never been
+/// fetched by a prior `beamtalk build` are silently skipped.
+///
+/// Returns whether the project's manifest declares any dependencies, for use
+/// as `CompilerOptions::has_package_dependencies` (BT-2794).
+fn merge_dependency_class_infos(
+    path: &str,
+    all_class_infos: &mut Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+) -> bool {
+    let Some(project_root) =
+        beamtalk_core::project::package::find_package_root(std::path::Path::new(path))
+    else {
+        return false;
+    };
+    let Ok(project_root) = camino::Utf8PathBuf::from_path_buf(project_root) else {
+        return false;
+    };
+
+    let (has_package_dependencies, dep_class_infos) =
+        beamtalk_cli::dependency_classes::resolve_dependency_class_infos(&project_root);
+    all_class_infos.extend(dep_class_infos);
+    has_package_dependencies
+}
+
 /// Run lint passes on `path` (file or directory) and return structured results.
 ///
 /// BT-2052: Uses a two-pass pipeline mirroring CLI `beamtalk lint`:
@@ -2539,6 +2737,14 @@ fn run_lint_structured(path: &str) -> LintResult {
         }
     }
 
+    // BT-2823: Merge dependency class metadata so cross-file references to
+    // classes defined only in a git/path dependency (declared in
+    // beamtalk.toml) resolve the same way `beamtalk build` does.
+    let has_package_dependencies = merge_dependency_class_infos(path, &mut all_class_infos);
+
+    // BT-2858: Populate the FFI type registry the same way `beamtalk lint` does.
+    let native_type_registry = build_native_type_registry(path);
+
     // Pass 2: Analyse each target file with cross-file class context.
     for (file, source, module, parse_diags) in parsed_targets {
         // Include parse errors (syntax problems) and warnings so files with
@@ -2558,7 +2764,13 @@ fn run_lint_structured(path: &str) -> LintResult {
         // BT-1587 / BT-2052: run_module_analysis runs lint passes, semantic
         // analysis with cross-file class context (mirroring CLI `beamtalk lint`),
         // and applies @expect directives (BT-1476).
-        let (lint_diags, _) = run_module_analysis(&module, &all_class_infos, initial_diags);
+        let (lint_diags, _) = run_module_analysis(
+            &module,
+            &all_class_infos,
+            initial_diags,
+            has_package_dependencies,
+            native_type_registry.clone(),
+        );
 
         let file_name = file.to_string_lossy().into_owned();
         for diag in &lint_diags {
@@ -2662,15 +2874,11 @@ mod tests {
     #[test]
     fn run_lint_structured_non_bt_file() {
         // Use a temp file so the test is portable across platforms.
-        let path = Utf8PathBuf::from_path_buf(std::env::temp_dir())
-            .expect("temp dir should be UTF-8")
-            .join(format!(
-                "beamtalk-mcp-lint-non-bt-{}.txt",
-                std::process::id()
-            ));
+        let temp = tempfile::TempDir::new().unwrap();
+        let path = Utf8PathBuf::from_path_buf(temp.path().join("non_bt.txt"))
+            .expect("temp dir should be UTF-8");
         std::fs::write(path.as_std_path(), "not beamtalk").unwrap();
         let result = run_lint_structured(path.as_str());
-        let _ = std::fs::remove_file(path.as_std_path());
         assert_eq!(result.total, 1);
         assert!(result.errors.len() == 1);
         assert!(result.errors[0].message.contains(".bt file"));
@@ -2680,10 +2888,8 @@ mod tests {
     fn run_lint_structured_includes_dnu_diagnostics() {
         // BT-1587: MCP lint must include DNU diagnostics from semantic analysis,
         // matching CLI `beamtalk lint` behavior.
-        let dir =
-            std::env::temp_dir().join(format!("beamtalk-mcp-lint-dnu-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let file = dir.join("dnu_test.bt");
+        let temp = tempfile::TempDir::new().unwrap();
+        let file = temp.path().join("dnu_test.bt");
         std::fs::write(
             &file,
             r#"Object subclass: DnuTest
@@ -2696,7 +2902,6 @@ mod tests {
         )
         .unwrap();
         let result = run_lint_structured(file.to_str().unwrap());
-        let _ = std::fs::remove_dir_all(&dir);
         let has_dnu = result
             .warnings
             .iter()
@@ -2712,10 +2917,8 @@ mod tests {
     fn run_lint_structured_expect_type_suppresses_dnu() {
         // BT-1587: @expect type should suppress DNU diagnostics in MCP lint,
         // just as it does in CLI lint.
-        let dir =
-            std::env::temp_dir().join(format!("beamtalk-mcp-lint-expect-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let file = dir.join("expect_test.bt");
+        let temp = tempfile::TempDir::new().unwrap();
+        let file = temp.path().join("expect_test.bt");
         std::fs::write(
             &file,
             r#"Object subclass: ExpectTest
@@ -2729,7 +2932,6 @@ mod tests {
         )
         .unwrap();
         let result = run_lint_structured(file.to_str().unwrap());
-        let _ = std::fs::remove_dir_all(&dir);
         let has_dnu = result
             .warnings
             .iter()
@@ -2741,16 +2943,99 @@ mod tests {
         );
     }
 
+    /// BT-2858: `build_native_type_registry` extracts live from OTP `.beam`
+    /// files for a manifest-backed project with no prior `beamtalk build` —
+    /// analogous to `commands::lint`'s
+    /// `lint_extracts_type_specs_live_on_cold_cache_bt_2851` in the CLI
+    /// binary. Before this fix, MCP `lint`/`diagnostic_summary` had no way to
+    /// obtain a registry at all (`run_module_analysis` always passed `None`).
+    #[test]
+    fn build_native_type_registry_extracts_live_on_cold_cache() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = temp.path();
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(
+            dir.join("beamtalk.toml"),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+
+        // No `_build/` directory exists yet — the cold-cache case.
+        assert!(!dir.join("_build").exists());
+
+        let Some(registry) = build_native_type_registry(dir.join("src").to_str().unwrap()) else {
+            // OTP `.beam` discovery is environment-dependent (e.g. a sandbox
+            // with no OTP install on disk); skip rather than false-fail.
+            eprintln!(
+                "skipping build_native_type_registry_extracts_live_on_cold_cache: \
+                 no OTP .beam files discovered in this environment"
+            );
+            return;
+        };
+        assert!(
+            registry.lookup("lists", "reverse", 1).is_some(),
+            "live extraction with no prior build must still find lists:reverse/1"
+        );
+        // The extractor writes the same cache a `beamtalk build`/`beamtalk
+        // lint` run would, so a subsequent call reads it back instead of
+        // re-extracting.
+        assert!(dir.join("_build").join("type_cache").exists());
+    }
+
+    /// BT-2858: MCP `lint` must see the same FFI argument-type registry
+    /// `beamtalk lint`/`beamtalk build` do, so a well-specced `(Erlang m) f:`
+    /// call does not fall back to `Dynamic(UntypedFfi)` and trip the BT-1914
+    /// "Dynamic in typed class" warning — mirrors
+    /// `commands::lint`'s `ffi_call_with_registry_does_not_warn_dynamic_in_typed_class`.
+    /// Before this fix, `run_module_analysis` always analysed with `None`,
+    /// so this warning fired unconditionally regardless of whether the
+    /// runtime's `.beam` files carried a real `-spec`.
+    #[test]
+    fn run_lint_structured_ffi_call_does_not_warn_dynamic_in_typed_class() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = temp.path();
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(
+            dir.join("beamtalk.toml"),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let file = dir.join("src").join("ffi_test.bt");
+        std::fs::write(
+            &file,
+            "sealed typed Value subclass: FfiTest\n\n  check -> Dynamic =>\n    Erlang lists reverse: (1 to: 3) asArray\n",
+        )
+        .unwrap();
+
+        if build_native_type_registry(file.to_str().unwrap()).is_none() {
+            eprintln!(
+                "skipping run_lint_structured_ffi_call_does_not_warn_dynamic_in_typed_class: \
+                 no OTP .beam files discovered in this environment"
+            );
+            return;
+        }
+
+        let result = run_lint_structured(file.to_str().unwrap());
+        let untyped_ffi: Vec<_> = result
+            .warnings
+            .iter()
+            .chain(result.errors.iter())
+            .filter(|d| d.message.contains("untyped FFI"))
+            .collect();
+        assert!(
+            untyped_ffi.is_empty(),
+            "with a live registry, MCP lint must not warn untyped FFI; got: {untyped_ffi:?}"
+        );
+    }
+
     /// BT-2052: MCP lint must resolve cross-file classes from the full package
     /// source set (src/ + test/). Without this, `@expect type` annotations that
     /// suppress diagnostics referencing classes from other files in the same
     /// package are falsely reported as stale.
     #[test]
     fn run_lint_structured_cross_file_classes() {
-        let dir = std::env::temp_dir().join(format!(
-            "beamtalk-mcp-lint-cross-file-{}",
-            std::process::id()
-        ));
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = temp.path();
         let src_dir = dir.join("src");
         let test_dir = dir.join("test");
         std::fs::create_dir_all(&src_dir).unwrap();
@@ -2784,7 +3069,6 @@ mod tests {
         // MyActor from src/.
         let test_file = test_dir.join("my_actor_test.bt");
         let result = run_lint_structured(test_file.to_str().unwrap());
-        let _ = std::fs::remove_dir_all(&dir);
 
         let stale = result
             .warnings
@@ -2794,6 +3078,196 @@ mod tests {
         assert!(
             !stale,
             "MCP lint with cross-file classes should not report @expect as stale, got: {result:?}",
+        );
+    }
+
+    /// Write a fixture project declaring a git dependency `http` in
+    /// `beamtalk.toml`, with the dependency's checkout already present under
+    /// `_build/deps/http/src/` (simulating the state left by a prior
+    /// `beamtalk build`, matching BT-2823's repro). The project's own
+    /// `src/app.bt` references the dependency's `HTTPServer` class. Returns
+    /// the fixture's `TempDir` (keep it alive for the duration of the test —
+    /// it removes the project directory on drop) and the path to
+    /// `src/app.bt`.
+    fn write_git_dependency_fixture() -> (tempfile::TempDir, std::path::PathBuf) {
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = temp.path();
+        let src_dir = dir.join("src");
+        std::fs::create_dir_all(&src_dir).unwrap();
+
+        std::fs::write(
+            dir.join("beamtalk.toml"),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n\
+             [dependencies]\nhttp = { git = \"https://example.com/http.git\", tag = \"v1.0.0\" }\n",
+        )
+        .unwrap();
+
+        // Simulate `beamtalk build` having already fetched the dependency.
+        let dep_src_dir = dir.join("_build").join("deps").join("http").join("src");
+        std::fs::create_dir_all(&dep_src_dir).unwrap();
+        std::fs::write(
+            dep_src_dir.join("http_server.bt"),
+            "Object subclass: HTTPServer\n",
+        )
+        .unwrap();
+
+        // A second project-local class so `has_cross_file_classes` is true
+        // independent of dependency resolution (matching the sentinel
+        // pattern `fixture_sourced_protocol_name_is_not_unresolved` uses in
+        // beamtalk-core). Without this, `check_unresolved_classes` would be
+        // skipped entirely for a single-file project and this test would
+        // pass vacuously regardless of whether the fix is in place.
+        std::fs::write(src_dir.join("other.bt"), "Object subclass: Other\n").unwrap();
+
+        let app_file = src_dir.join("app.bt");
+        std::fs::write(
+            &app_file,
+            "Object subclass: App\n\n  class run =>\n    HTTPServer new\n",
+        )
+        .unwrap();
+
+        (temp, app_file)
+    }
+
+    /// BT-2823: MCP `lint` must resolve classes from a project's git
+    /// dependencies (declared in `beamtalk.toml`) the same way `beamtalk
+    /// build`/`beamtalk lint` do, using whatever dependency checkout is
+    /// already on disk under `_build/deps/<name>/` — without a false-positive
+    /// `Unresolved class` diagnostic.
+    #[test]
+    fn run_lint_structured_resolves_git_dependency_classes() {
+        let (_temp, app_file) = write_git_dependency_fixture();
+        let result = run_lint_structured(app_file.to_str().unwrap());
+
+        let unresolved = result
+            .warnings
+            .iter()
+            .chain(result.errors.iter())
+            .any(|d| d.message.contains("Unresolved class"));
+        assert!(
+            !unresolved,
+            "MCP lint should resolve HTTPServer from the git dependency checkout, got: {result:?}",
+        );
+    }
+
+    /// BT-2823: Same as `run_lint_structured_resolves_git_dependency_classes`
+    /// but for the `diagnostic_summary` tool.
+    #[test]
+    fn compute_diagnostic_summary_resolves_git_dependency_classes() {
+        let (_temp, app_file) = write_git_dependency_fixture();
+        let result = compute_diagnostic_summary(app_file.to_str().unwrap());
+
+        let unresolved_class_total = result["totals_by_category"]["UnresolvedClass"]["total"]
+            .as_u64()
+            .unwrap_or(0);
+        assert_eq!(
+            unresolved_class_total, 0,
+            "diagnostic_summary should resolve HTTPServer from the git dependency \
+             checkout with zero UnresolvedClass diagnostics, got: {result:?}",
+        );
+    }
+
+    /// Write a fixture project declaring a *direct* git dependency `http` in
+    /// `beamtalk.toml`, where `http`'s own checked-out `beamtalk.toml`
+    /// declares a *transitive* git dependency `net` (BT-2836) — never
+    /// mentioned in the project's own manifest. Both checkouts are already
+    /// present under `_build/deps/`, simulating a prior `beamtalk build`. The
+    /// project's own `src/app.bt` references `net`'s `NetClient` class
+    /// directly, which is only reachable by walking `http`'s manifest.
+    /// Returns the fixture's `TempDir` (keep it alive for the duration of the
+    /// test) and the path to `src/app.bt`.
+    fn write_transitive_git_dependency_fixture() -> (tempfile::TempDir, std::path::PathBuf) {
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = temp.path();
+        let src_dir = dir.join("src");
+        std::fs::create_dir_all(&src_dir).unwrap();
+
+        std::fs::write(
+            dir.join("beamtalk.toml"),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n\
+             [dependencies]\nhttp = { git = \"https://example.com/http.git\", tag = \"v1.0.0\" }\n",
+        )
+        .unwrap();
+
+        // Simulate `beamtalk build` having already fetched the direct
+        // dependency, whose own manifest declares a transitive dependency.
+        let http_dir = dir.join("_build").join("deps").join("http");
+        std::fs::create_dir_all(http_dir.join("src")).unwrap();
+        std::fs::write(
+            http_dir.join("beamtalk.toml"),
+            "[package]\nname = \"http\"\nversion = \"0.1.0\"\n\n\
+             [dependencies]\nnet = { git = \"https://example.com/net.git\", tag = \"v1.0.0\" }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            http_dir.join("src").join("http_server.bt"),
+            "Object subclass: HTTPServer\n",
+        )
+        .unwrap();
+
+        // The transitive dependency's checkout, never declared in app's own
+        // `beamtalk.toml` — only discoverable by walking `http`'s manifest.
+        let net_src_dir = dir.join("_build").join("deps").join("net").join("src");
+        std::fs::create_dir_all(&net_src_dir).unwrap();
+        std::fs::write(
+            net_src_dir.join("net_client.bt"),
+            "Object subclass: NetClient\n",
+        )
+        .unwrap();
+
+        // Sentinel class so `has_cross_file_classes` isn't vacuously true/false
+        // independent of dependency resolution, matching
+        // `write_git_dependency_fixture`'s pattern.
+        std::fs::write(src_dir.join("other.bt"), "Object subclass: Other\n").unwrap();
+
+        let app_file = src_dir.join("app.bt");
+        std::fs::write(
+            &app_file,
+            "Object subclass: App\n\n  class run =>\n    NetClient new\n",
+        )
+        .unwrap();
+
+        (temp, app_file)
+    }
+
+    /// BT-2836: MCP `lint` must resolve classes from a *transitive*
+    /// dependency (declared only in a direct dependency's own
+    /// `beamtalk.toml`, not the project's) the same way `beamtalk
+    /// build`/`beamtalk lint` do, using whatever checkout is already on disk
+    /// under `_build/deps/<name>/` — without a false-positive `Unresolved
+    /// class` diagnostic.
+    #[test]
+    fn run_lint_structured_resolves_transitive_git_dependency_classes() {
+        let (_temp, app_file) = write_transitive_git_dependency_fixture();
+        let result = run_lint_structured(app_file.to_str().unwrap());
+
+        let unresolved = result
+            .warnings
+            .iter()
+            .chain(result.errors.iter())
+            .any(|d| d.message.contains("Unresolved class"));
+        assert!(
+            !unresolved,
+            "MCP lint should resolve NetClient from the transitive git dependency \
+             checkout, got: {result:?}",
+        );
+    }
+
+    /// BT-2836: Same as
+    /// `run_lint_structured_resolves_transitive_git_dependency_classes` but
+    /// for the `diagnostic_summary` tool.
+    #[test]
+    fn compute_diagnostic_summary_resolves_transitive_git_dependency_classes() {
+        let (_temp, app_file) = write_transitive_git_dependency_fixture();
+        let result = compute_diagnostic_summary(app_file.to_str().unwrap());
+
+        let unresolved_class_total = result["totals_by_category"]["UnresolvedClass"]["total"]
+            .as_u64()
+            .unwrap_or(0);
+        assert_eq!(
+            unresolved_class_total, 0,
+            "diagnostic_summary should resolve NetClient from the transitive git \
+             dependency checkout with zero UnresolvedClass diagnostics, got: {result:?}",
         );
     }
 
@@ -2810,10 +3284,8 @@ mod tests {
             return;
         }
 
-        let dir = std::env::temp_dir().join(format!(
-            "beamtalk-mcp-lint-unreadable-{}",
-            std::process::id()
-        ));
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = temp.path();
         let src_dir = dir.join("src");
         std::fs::create_dir_all(&src_dir).unwrap();
 
@@ -2835,9 +3307,9 @@ mod tests {
 
         let result = run_lint_structured(target.to_str().unwrap());
 
-        // Restore permissions before cleanup so remove_dir_all succeeds.
+        // Restore permissions so the TempDir's Drop cleanup can remove the
+        // sibling file.
         let _ = std::fs::set_permissions(&sibling, std::fs::Permissions::from_mode(0o644));
-        let _ = std::fs::remove_dir_all(&dir);
 
         let has_unreadable_warning = result.warnings.iter().any(|d| {
             d.message
@@ -2861,10 +3333,8 @@ mod tests {
             return;
         }
 
-        let dir = std::env::temp_dir().join(format!(
-            "beamtalk-mcp-summary-unreadable-{}",
-            std::process::id()
-        ));
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = temp.path();
         let src_dir = dir.join("src");
         std::fs::create_dir_all(&src_dir).unwrap();
 
@@ -2883,8 +3353,9 @@ mod tests {
 
         let result = compute_diagnostic_summary(target.to_str().unwrap());
 
+        // Restore permissions so the TempDir's Drop cleanup can remove the
+        // sibling file.
         let _ = std::fs::set_permissions(&sibling, std::fs::Permissions::from_mode(0o644));
-        let _ = std::fs::remove_dir_all(&dir);
 
         assert!(
             result.get("unreadable_package_files").is_some(),
@@ -2910,11 +3381,8 @@ mod tests {
             return;
         }
 
-        let dir = std::env::temp_dir().join(format!(
-            "beamtalk-mcp-summary-unreadable-target-{}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = temp.path();
 
         let target = dir.join("locked.bt");
         std::fs::write(&target, "Object subclass: Locked\n  class hello => 1\n").unwrap();
@@ -2922,8 +3390,9 @@ mod tests {
 
         let result = compute_diagnostic_summary(target.to_str().unwrap());
 
+        // Restore permissions so the TempDir's Drop cleanup can remove the
+        // target file.
         std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o644)).unwrap();
-        let _ = std::fs::remove_dir_all(&dir);
 
         assert_eq!(result["files_checked"], 0);
         assert!(
@@ -2953,11 +3422,8 @@ mod tests {
             return;
         }
 
-        let dir = std::env::temp_dir().join(format!(
-            "beamtalk-mcp-summary-dir-unreadable-{}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = temp.path();
 
         let readable = dir.join("readable.bt");
         std::fs::write(&readable, "Object subclass: Readable\n  class hello => 1\n").unwrap();
@@ -2968,8 +3434,9 @@ mod tests {
 
         let result = compute_diagnostic_summary(dir.to_str().unwrap());
 
+        // Restore permissions so the TempDir's Drop cleanup can remove the
+        // locked file.
         std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o644)).unwrap();
-        let _ = std::fs::remove_dir_all(&dir);
 
         assert_eq!(
             result["files_checked"], 1,
@@ -2999,11 +3466,8 @@ mod tests {
             return;
         }
 
-        let dir = std::env::temp_dir().join(format!(
-            "beamtalk-mcp-lint-dir-unreadable-{}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = temp.path();
 
         let readable = dir.join("readable.bt");
         std::fs::write(&readable, "Object subclass: Readable\n  class hello => 1\n").unwrap();
@@ -3014,8 +3478,9 @@ mod tests {
 
         let result = run_lint_structured(dir.to_str().unwrap());
 
+        // Restore permissions so the TempDir's Drop cleanup can remove the
+        // locked file.
         std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o644)).unwrap();
-        let _ = std::fs::remove_dir_all(&dir);
 
         let has_locked_error = result
             .errors
@@ -3336,6 +3801,22 @@ mod tests {
     }
 
     #[test]
+    fn precheck_method_and_recheck_image_tools_registered() {
+        // ADR 0105 Phase 3 (BT-2782): surface-parity entries for MCP.
+        let router = BeamtalkMcp::tool_router();
+        let tools = router.list_all();
+        let tool_names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
+        assert!(
+            tool_names.contains(&"precheck_method"),
+            "precheck_method should be in tool list, found: {tool_names:?}"
+        );
+        assert!(
+            tool_names.contains(&"recheck_image"),
+            "recheck_image should be in tool list, found: {tool_names:?}"
+        );
+    }
+
+    #[test]
     fn list_modules_tool_not_registered() {
         let router = BeamtalkMcp::tool_router();
         let tools = router.list_all();
@@ -3412,11 +3893,10 @@ mod tests {
     #[test]
     fn compute_diagnostic_summary_clean_file() {
         // A well-formed source file should produce a summary with files_checked=1.
-        let tmp =
-            std::env::temp_dir().join(format!("beamtalk-mcp-summary-{}.bt", std::process::id()));
-        std::fs::write(&tmp, "Object subclass: Clean\n  class hello => 42\n").unwrap();
-        let result = compute_diagnostic_summary(tmp.to_str().unwrap());
-        let _ = std::fs::remove_file(&tmp);
+        let temp = tempfile::TempDir::new().unwrap();
+        let file = temp.path().join("clean.bt");
+        std::fs::write(&file, "Object subclass: Clean\n  class hello => 42\n").unwrap();
+        let result = compute_diagnostic_summary(file.to_str().unwrap());
         assert_eq!(result["files_checked"], 1);
         // Total may include some diagnostics from semantic analysis depending
         // on the class environment, but files_checked must be correct.
@@ -3457,6 +3937,23 @@ mod tests {
         assert_eq!(
             save_method_expr("Dict", "at:put:", "..."),
             "Dict compile: #at:put: source: \"...\"",
+        );
+    }
+
+    #[test]
+    fn precheck_method_expr_compiles_precheck_compile_source() {
+        // `precheck_method` → `aClass precheckCompile: #selector source: body`.
+        assert_eq!(
+            precheck_method_expr("Counter", "getCount", "getCount => \"nope\""),
+            "Counter precheckCompile: #getCount source: \"getCount => \\\"nope\\\"\"",
+        );
+    }
+
+    #[test]
+    fn precheck_method_expr_preserves_keyword_selectors() {
+        assert_eq!(
+            precheck_method_expr("Dict", "at:put:", "..."),
+            "Dict precheckCompile: #at:put: source: \"...\"",
         );
     }
 

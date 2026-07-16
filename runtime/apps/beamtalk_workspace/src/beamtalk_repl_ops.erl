@@ -46,7 +46,7 @@ leak compiler/runtime internals.
 | actors | `{actors, [ActorMeta]}` | `actors` |
 | inspect | `{inspect, map() \| binary()}` | `inspect` |
 | status | `{status, ok}` | `kill`, `interrupt`, `close`, `shutdown` |
-| value | `{value, JsonValue}` | `nav-query`, `nav-symbols`, `export-traces` |
+| value | `{value, JsonValue}` | `nav-query`, `nav-symbols`, `export-traces`, `list-tests`, `reload-findings` |
 | loaded | `{loaded, Classes, Warnings}` | `load-source` |
 | load_project | `{load_project, Classes, Errors, Summary, Warnings}` | `load-project` |
 | sessions | `{sessions, [SessionMeta]}` | `sessions` |
@@ -169,7 +169,11 @@ dispatch(Op, Params, Msg, SessionPid) when
     Op =:= <<"test">>;
     Op =:= <<"test-all">>;
     Op =:= <<"erlang-help">>;
-    Op =:= <<"erlang-complete">>
+    Op =:= <<"erlang-complete">>;
+    %% BT-2801: reload-induced findings snapshot read (ADR 0105 surface-parity
+    %% gap) — mirrors the workspace/cockpit UI's dist-attached
+    %% `reload_findings` initial read for surfaces with no equivalent.
+    Op =:= <<"reload-findings">>
 ->
     beamtalk_repl_ops_dev:handle_term(Op, Params, Msg, SessionPid);
 dispatch(Op, Params, Msg, SessionPid) when

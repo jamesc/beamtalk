@@ -257,6 +257,9 @@ fn parse_class_info_from_meta_term(
         handle_scope: map_get(m, "handle_scope")
             .and_then(term_to_atom)
             .map(ecow::EcoString::from),
+        // BEAM metadata comes from successfully-compiled modules, whose
+        // surfaces are complete by construction (BT-2796).
+        surface_incomplete: false,
         is_typed,
         state,
         state_types,
@@ -341,6 +344,37 @@ fn extract_class_hierarchy(
         None => vec![],
         Some(term) => parse_class_hierarchy_from_term(term),
     }
+}
+
+/// Extract an optional `known_type_aliases` field: a list of standalone
+/// `type Name = <expansion>` source strings (ADR 0108 Phase 8, BT-2902),
+/// re-parsing each into an `AliasInfo`.
+///
+/// Aliases erase to nothing at runtime, so — unlike `class_hierarchy`, which
+/// the REPL session recovers from live BEAM class metadata every turn —
+/// there is nothing to query on a later turn. The REPL layer is the source
+/// of truth: it stores the exact `type Name = <expansion>` text this port
+/// returned when the alias was first declared (see
+/// `type_alias_definition_ok_response`'s `expansion` field) and resends the
+/// full set on every subsequent `compile_expression` call. A malformed
+/// entry (should not happen — the text round-trips through this port's own
+/// unparse output) is skipped rather than failing the whole request, so a
+/// corrupted session doesn't wedge the REPL.
+fn extract_known_type_aliases(request: &Map) -> Vec<beamtalk_core::semantic_analysis::AliasInfo> {
+    let Some(sources) = map_get(request, "known_type_aliases").and_then(term_to_string_list) else {
+        return vec![];
+    };
+    sources
+        .iter()
+        .filter_map(|src| {
+            let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+            let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+            module
+                .type_aliases
+                .first()
+                .map(beamtalk_core::semantic_analysis::AliasInfo::from_definition)
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -540,6 +574,39 @@ fn protocol_definition_ok_response(
     ]))
 }
 
+/// Build a response map for a successful `type Name = ...` declaration in
+/// the REPL (ADR 0108 Phase 8, BT-2902).
+///
+/// No `core_erlang`/bytecode: an alias erases entirely at annotation
+/// resolution and has no runtime representation to compile (ADR 0108
+/// Semantics). `expansion` is the unparsed `TypeAnnotation` display form
+/// (e.g. `#north | #south | #east | #west`) — both what `:help` shows and
+/// what the REPL session resends verbatim as a `type Name = <expansion>`
+/// line in `known_type_aliases` on later turns (see
+/// `extract_known_type_aliases`). `doc_comment` is `None` when the
+/// declaration had no `///` doc comment.
+fn type_alias_definition_ok_response(
+    alias_name: &str,
+    expansion: &str,
+    doc_comment: Option<&str>,
+    warnings: &[String],
+) -> Term {
+    Term::from(Map::from([
+        (atom("status"), atom("ok")),
+        (atom("kind"), atom("type_alias_definition")),
+        (atom("alias_name"), binary(alias_name)),
+        (atom("expansion"), binary(expansion)),
+        (
+            atom("doc_comment"),
+            doc_comment.map_or_else(|| atom("undefined"), binary),
+        ),
+        (
+            atom("warnings"),
+            Term::from(List::from(build_warning_terms(warnings))),
+        ),
+    ]))
+}
+
 /// Build a response map for a successful `compile` (file compilation).
 fn compile_ok_response(
     core_erlang: &str,
@@ -617,6 +684,13 @@ fn diagnostics_ok_response(diagnostics: &[DiagInfo]) -> Term {
             Term::from(Map::from([
                 (atom("message"), binary(&d.message)),
                 (atom("severity"), binary(&d.severity)),
+                (
+                    atom("category"),
+                    match &d.category {
+                        Some(c) => binary(c),
+                        None => atom("undefined"),
+                    },
+                ),
                 (
                     atom("start"),
                     Term::from(eetf::FixInteger::from(
@@ -787,12 +861,25 @@ fn compile_method_diagnostic_response(
 struct DiagInfo {
     /// Human-readable diagnostic message.
     message: String,
-    /// Severity level (`"error"` or `"warning"`).
+    /// Severity level (`"error"`, `"warning"`, `"lint"`, or `"hint"`).
     severity: String,
+    /// Diagnostic category (`"Dnu"`, `"Type"`, ...), when the checker tagged
+    /// one — `None` for parse errors and other untagged diagnostics
+    /// (ADR 0105 Phase 1, BT-2778: the re-check orchestration filters
+    /// findings by category).
+    category: Option<String>,
     /// Byte offset where the diagnosed span begins.
     start: u32,
     /// Byte offset where the diagnosed span ends.
     end: u32,
+}
+
+/// Render a `Diagnostic`'s category as the same `PascalCase` label
+/// `beamtalk lint` / `beamtalk-mcp` use (`category_name`), or `None` when
+/// the diagnostic carries no category.
+fn diag_category(d: &beamtalk_core::source_analysis::Diagnostic) -> Option<String> {
+    d.category
+        .map(|c| beamtalk_core::source_analysis::category_name(c).to_string())
 }
 
 /// Separate diagnostics into errors and warnings, returning structured info.
@@ -805,6 +892,7 @@ fn partition_diagnostics(
         .map(|d| DiagInfo {
             message: d.message.to_string(),
             severity: "error".to_string(),
+            category: diag_category(d),
             start: d.span.start(),
             end: d.span.end(),
         })
@@ -824,6 +912,7 @@ fn partition_diagnostics(
                 beamtalk_core::source_analysis::Severity::Hint => "hint".to_string(),
                 _ => "warning".to_string(),
             },
+            category: diag_category(d),
             start: d.span.start(),
             end: d.span.end(),
         })
@@ -831,25 +920,168 @@ fn partition_diagnostics(
     (errors, warnings)
 }
 
+/// Process-wide cache for the package's `beamtalk.toml` `[diagnostics]`
+/// severity-override table (ADR 0100 Rule 3, BT-2839).
+///
+/// The compiler port is a long-lived process spawned once per BEAM node
+/// session (interactive REPL, `beamtalk run`, or a connected/LiveView
+/// session attached to either) with its working directory set to the
+/// project root — every node-startup path pins its own cwd there (e.g.
+/// `crates/beamtalk-cli/src/commands/repl/process.rs`,
+/// `crates/beamtalk-cli/src/commands/run.rs`) — and this port process
+/// inherits it at spawn time, unaffected by any later `file:set_cwd/1` on
+/// the Erlang side. Reading and parsing `beamtalk.toml`
+/// on every `compile_expression`/`compile`/`diagnostics` request would repeat
+/// disk I/O on a hot path (`diagnostics` in particular fires on a ~150ms
+/// idle-debounce as the user types); caching once per process — mirroring the
+/// LSP's "load once at startup" (`Backend::load_diagnostics_table`, BT-2800)
+/// — avoids that while keeping the same lenient, no-manifest-is-a-no-op
+/// semantics.
+static DIAGNOSTICS_OVERRIDES: std::sync::OnceLock<beamtalk_core::compilation::DiagnosticsTable> =
+    std::sync::OnceLock::new();
+
+/// Returns the process-wide `[diagnostics]` table, loading it from the
+/// current working directory's `beamtalk.toml` on first use.
+fn diagnostics_overrides() -> &'static beamtalk_core::compilation::DiagnosticsTable {
+    DIAGNOSTICS_OVERRIDES.get_or_init(|| {
+        let cwd = std::env::current_dir().unwrap_or_default();
+        load_diagnostics_overrides_from(&cwd)
+    })
+}
+
+/// Load the `[diagnostics]` severity-override table from `<root>/beamtalk.toml`
+/// (ADR 0100 Rule 3).
+///
+/// Lenient by design, mirroring the LSP's `load_diagnostics_table`: a root
+/// with no `beamtalk.toml`, or one that fails to parse, yields an empty table
+/// (Rule 1 defaults) rather than blocking diagnostics — a malformed manifest
+/// already fails loudly at `beamtalk build` time, and the REPL must keep
+/// evaluating regardless. Parse failures are logged so the mismatch is
+/// discoverable. Pure function of `root` (no global state) so it is directly
+/// unit-testable without touching the process's real working directory.
+fn load_diagnostics_overrides_from(
+    root: &std::path::Path,
+) -> beamtalk_core::compilation::DiagnosticsTable {
+    let manifest_path = root.join("beamtalk.toml");
+    let Ok(content) = std::fs::read_to_string(&manifest_path) else {
+        return beamtalk_core::compilation::DiagnosticsTable::new();
+    };
+    match beamtalk_core::compilation::parse_diagnostics_table_from_manifest_toml(&content) {
+        Ok(table) => {
+            if !table.is_empty() {
+                tracing::debug!(
+                    count = table.len(),
+                    "Loaded [diagnostics] severity override(s) from beamtalk.toml"
+                );
+            }
+            table
+        }
+        Err(e) => {
+            tracing::warn!(
+                path = %manifest_path.display(),
+                error = %e,
+                "failed to parse [diagnostics] table in beamtalk.toml; using Rule 1 defaults"
+            );
+            beamtalk_core::compilation::DiagnosticsTable::new()
+        }
+    }
+}
+
+/// Process-wide cache of the project's Erlang FFI type signatures (ADR 0075,
+/// BT-2891), loaded once from `<root>/_build/type_cache/` — the same on-disk
+/// cache `beamtalk build`/`beamtalk lint` write and read (see
+/// `beamtalk_core::ffi_type_specs`).
+///
+/// Mirrors [`DIAGNOSTICS_OVERRIDES`]: loaded once per process rather than per
+/// request, using the project-root cwd every node-startup path already pins
+/// (see that static's doc comment). Reads the on-disk cache only — never
+/// live-extracts from `.beam` files (unlike the LSP's `load_type_cache`,
+/// which may spawn a `beamtalk_build_worker` BEAM node) — because
+/// `resolve_completion_type` sits on the REPL's tight completion-latency
+/// budget (ADR 0045) and a project that has never run `beamtalk build` should
+/// stay registry-blind rather than block a keystroke on a build-worker spawn.
+static NATIVE_TYPE_REGISTRY: std::sync::OnceLock<
+    beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry,
+> = std::sync::OnceLock::new();
+
+/// Returns the process-wide native type registry, loading it from the
+/// current working directory's `_build/type_cache/` on first use.
+fn native_type_registry()
+-> &'static beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry {
+    NATIVE_TYPE_REGISTRY.get_or_init(|| {
+        let cwd = std::env::current_dir().unwrap_or_default();
+        load_native_type_registry_from(&cwd)
+    })
+}
+
+/// Load the Erlang FFI type registry from `<root>/_build/type_cache/`
+/// (ADR 0075, BT-2891).
+///
+/// Lenient by design, mirroring [`load_diagnostics_overrides_from`]: a root
+/// with no `_build/type_cache/` (project never built) yields an empty
+/// registry rather than an error — `resolve_expression_type` already treats
+/// `None`/empty identically (falls back to `Dynamic`), so this degrades to
+/// exactly the pre-BT-2891 registry-blind behaviour. Pure function of `root`
+/// so it is directly unit-testable without touching the process's real
+/// working directory.
+fn load_native_type_registry_from(
+    root: &std::path::Path,
+) -> beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry {
+    use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
+
+    let Some(root) = camino::Utf8Path::from_path(root) else {
+        tracing::debug!(
+            root = %root.display(),
+            "Project root is not valid UTF-8; native type registry stays empty"
+        );
+        return NativeTypeRegistry::new();
+    };
+    let cache_dir = root.join("_build").join("type_cache");
+    if let Some(registry) = beamtalk_core::ffi_type_specs::load_type_cache_registry(&cache_dir) {
+        tracing::debug!(
+            modules = registry.module_count(),
+            functions = registry.function_count(),
+            "Loaded native type registry from _build/type_cache/"
+        );
+        registry
+    } else {
+        tracing::debug!(
+            cache_dir = %cache_dir,
+            "No _build/type_cache/ found; native type registry stays empty \
+             (FFI expressions fall back to Dynamic until `beamtalk build` runs)"
+        );
+        NativeTypeRegistry::new()
+    }
+}
+
 /// Parse a Beamtalk expression source and run full diagnostics with primitive validation.
 ///
 /// Returns `Ok((module, warnings))` on success, or `Err(response_term)` containing a
 /// formatted `diagnostic_error_response` that the caller should return directly.
+///
+/// `pre_loaded_aliases` (ADR 0108 Phase 8, BT-2902) carries type aliases
+/// declared in earlier turns of the same REPL session, re-parsed standalone
+/// by [`extract_known_type_aliases`] — see that function's doc for why
+/// aliases need their own re-parse path rather than `pre_class_hierarchy`'s
+/// recover-from-live-BEAM-state mechanism.
 fn parse_and_check_expression(
     source: &str,
     known_vars: &[String],
     pre_class_hierarchy: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    pre_loaded_aliases: Vec<beamtalk_core::semantic_analysis::AliasInfo>,
 ) -> Result<(beamtalk_core::ast::Module, Vec<String>), Term> {
     let tokens = beamtalk_core::source_analysis::lex_with_eof(source);
     let (module, parse_diagnostics) = beamtalk_core::source_analysis::parse(tokens);
 
     let known_var_refs: Vec<&str> = known_vars.iter().map(String::as_str).collect();
     let mut all_diagnostics =
-        beamtalk_core::queries::diagnostic_provider::compute_diagnostics_with_known_vars_and_classes(
+        beamtalk_core::queries::diagnostic_provider::compute_diagnostics_with_known_vars_classes_and_aliases(
             &module,
             parse_diagnostics,
             &known_var_refs,
             pre_class_hierarchy,
+            pre_loaded_aliases,
+            diagnostics_overrides(),
         );
 
     let options = beamtalk_core::CompilerOptions::default();
@@ -894,12 +1126,17 @@ fn handle_compile_expression(request: &Map) -> Term {
         Err(resp) => return resp,
     };
     let pre_class_hierarchy = extract_class_hierarchy(request);
+    let pre_loaded_aliases = extract_known_type_aliases(request);
 
-    let (module, warnings) =
-        match parse_and_check_expression(&source, &known_vars, pre_class_hierarchy.clone()) {
-            Ok(r) => r,
-            Err(resp) => return resp,
-        };
+    let (module, warnings) = match parse_and_check_expression(
+        &source,
+        &known_vars,
+        pre_class_hierarchy.clone(),
+        pre_loaded_aliases,
+    ) {
+        Ok(r) => r,
+        Err(resp) => return resp,
+    };
 
     // BT-1670: Extract optional module_name override for inline class definitions
     // so they produce the same module name as file-based compilation in package mode.
@@ -964,6 +1201,15 @@ fn handle_compile_expression(request: &Map) -> Term {
         );
     }
 
+    // ADR 0108 Phase 8 (BT-2902): If the parsed module contains a `type
+    // Name = ...` declaration, return alias metadata for the REPL session
+    // to register — no Core Erlang / bytecode step, since aliases erase
+    // entirely at resolution time (ADR 0108 Semantics) and have no runtime
+    // representation to compile.
+    if !module.type_aliases.is_empty() {
+        return handle_inline_type_alias_definition(&module, &warnings);
+    }
+
     if module.expressions.is_empty() {
         return error_response(&["No expressions to compile".to_string()]);
     }
@@ -1007,20 +1253,26 @@ fn handle_compile_expression_trace(request: &Map) -> Term {
         Err(resp) => return resp,
     };
     let pre_class_hierarchy = extract_class_hierarchy(request);
+    let pre_loaded_aliases = extract_known_type_aliases(request);
 
-    let (module, warnings) =
-        match parse_and_check_expression(&source, &known_vars, pre_class_hierarchy) {
-            Ok(r) => r,
-            Err(resp) => return resp,
-        };
+    let (module, warnings) = match parse_and_check_expression(
+        &source,
+        &known_vars,
+        pre_class_hierarchy,
+        pre_loaded_aliases,
+    ) {
+        Ok(r) => r,
+        Err(resp) => return resp,
+    };
 
     if !module.classes.is_empty()
         || !module.method_definitions.is_empty()
         || !module.protocols.is_empty()
+        || !module.type_aliases.is_empty()
     {
         return error_response(&[
-            "trace mode does not support class, method, or protocol definitions; \
-             use eval without trace to define them"
+            "trace mode does not support class, method, protocol, or type alias \
+             definitions; use eval without trace to define them"
                 .to_string(),
         ]);
     }
@@ -1213,6 +1465,46 @@ fn handle_inline_protocol_definition(
     }
 }
 
+/// Handle a single `type Name = ...` declaration typed directly at the REPL
+/// (ADR 0108 Phase 8, BT-2902).
+///
+/// By the time this is called, `parse_and_check_expression` has already run
+/// full semantic analysis (`AliasRegistry::register_module` — namespace
+/// collision, duplicate, and unbound-type-variable checks) and returned no
+/// error diagnostics, so the declaration is already known-valid; this just
+/// shapes the response. Mirrors the standalone-method-definition precedent
+/// of requiring exactly one declaration per turn — batch multi-alias
+/// resolution (topological ordering across several declarations at once) is
+/// BT-2896's file-compile concern, not a single REPL turn's.
+fn handle_inline_type_alias_definition(
+    module: &beamtalk_core::ast::Module,
+    warnings: &[String],
+) -> Term {
+    if module.type_aliases.len() > 1 {
+        return error_response(&[
+            "Multiple type alias definitions in a single expression are not supported. \
+             Define each `type Name = ...` alias separately."
+                .to_string(),
+        ]);
+    }
+    if !module.expressions.is_empty() {
+        return error_response(&[
+            "A type alias declaration cannot be combined with other expressions in the \
+             same input; declare it on its own, then use it in a later expression."
+                .to_string(),
+        ]);
+    }
+
+    let alias = &module.type_aliases[0];
+    let expansion = beamtalk_core::unparse::unparse_type_annotation_display(&alias.annotation);
+    type_alias_definition_ok_response(
+        &alias.name.name,
+        &expansion,
+        alias.doc_comment.as_deref(),
+        warnings,
+    )
+}
+
 /// Handle a `compile` request (file/class compilation).
 #[allow(clippy::too_many_lines)]
 fn handle_compile(request: &Map) -> Term {
@@ -1241,6 +1533,7 @@ fn handle_compile(request: &Map) -> Term {
             parse_diagnostics,
             &[],
             pre_class_hierarchy.clone(),
+            diagnostics_overrides(),
         );
 
     // Run @primitive validation
@@ -1297,6 +1590,7 @@ fn handle_compile(request: &Map) -> Term {
                         "Standalone method targets unknown class `{target_class}` in this module"
                     ),
                     severity: "warning".to_string(),
+                    category: None,
                     start: method_def.span.start(),
                     end: method_def.span.end(),
                 });
@@ -1542,6 +1836,7 @@ fn handle_compile_method(request: &Map) -> Term {
             merged_parse_diags,
             &[],
             pre_class_hierarchy.clone(),
+            diagnostics_overrides(),
         );
     let options = beamtalk_core::CompilerOptions {
         stdlib_mode,
@@ -1632,6 +1927,13 @@ fn handle_compile_method(request: &Map) -> Term {
 ///     semantic analysis here would emit false positives. Those checks run on
 ///     Compile (`compile_method`, which has class context); live squiggles
 ///     cover syntax.
+///
+/// The optional `class_hierarchy` field (ADR 0105 Phase 1, BT-2778) carries
+/// pre-loaded class metadata — the same channel `compile_expression` /
+/// `compile_method` already accept — so a re-check can inject a reloaded
+/// class's *new* signature and see the resulting diagnostics located and
+/// severity-tagged (`"expression"` mode only; `"method"` mode stays
+/// class-context-free per the paragraph above).
 fn handle_diagnostics(request: &Map) -> Term {
     let Some(source) = map_get(request, "source").and_then(term_to_string) else {
         return error_response(&["Missing or invalid 'source' field".to_string()]);
@@ -1644,10 +1946,13 @@ fn handle_diagnostics(request: &Map) -> Term {
         parse_diagnostics
     } else {
         let (module, parse_diagnostics) = beamtalk_core::source_analysis::parse(tokens);
-        beamtalk_core::queries::diagnostic_provider::compute_diagnostics_with_known_vars(
+        let pre_class_hierarchy = extract_class_hierarchy(request);
+        beamtalk_core::queries::diagnostic_provider::compute_diagnostics_with_known_vars_and_classes(
             &module,
             parse_diagnostics,
             &[],
+            pre_class_hierarchy,
+            diagnostics_overrides(),
         )
     };
 
@@ -1667,6 +1972,7 @@ fn diag_info(d: &beamtalk_core::source_analysis::Diagnostic) -> DiagInfo {
             beamtalk_core::source_analysis::Severity::Lint => "lint".to_string(),
             beamtalk_core::source_analysis::Severity::Hint => "hint".to_string(),
         },
+        category: diag_category(d),
         start: d.span.start(),
         end: d.span.end(),
     }
@@ -1691,6 +1997,11 @@ fn handle_version() -> Term {
 /// - `expression` (binary): the full receiver expression with the incomplete prefix stripped
 /// - `class_hierarchy` (optional map): user-defined class metadata from the REPL session
 ///
+/// Also consults the process-wide native type registry (BT-2891, see
+/// [`native_type_registry`]), loaded once from `_build/type_cache/`, so an
+/// FFI expression (e.g. `Erlang lists reverse: x`) resolves its typed return
+/// class instead of falling back to `Dynamic` when the project has been built.
+///
 /// Response: `#{status => ok, class_name => <<"String">>}` on success,
 /// or `#{status => not_found}` when the type cannot be inferred.
 fn handle_resolve_completion_type(request: &Map) -> Term {
@@ -1699,15 +2010,27 @@ fn handle_resolve_completion_type(request: &Map) -> Term {
     };
 
     let pre_class_hierarchy = extract_class_hierarchy(request);
+    resolve_completion_type_response(&expression, pre_class_hierarchy, native_type_registry())
+}
 
+/// Core `resolve_completion_type` resolution, taking the native type registry
+/// as a parameter rather than reading the process-wide [`native_type_registry`]
+/// directly, so the registry-provided path is unit-testable without touching
+/// the global `OnceLock` or the filesystem (BT-2891).
+fn resolve_completion_type_response(
+    expression: &str,
+    pre_class_hierarchy: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    native_type_registry: &beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry,
+) -> Term {
     let mut hierarchy = beamtalk_core::semantic_analysis::ClassHierarchy::with_builtins();
     if !pre_class_hierarchy.is_empty() {
         hierarchy.add_from_beam_meta(pre_class_hierarchy);
     }
 
     match beamtalk_core::queries::completion_provider::resolve_expression_type(
-        &expression,
+        expression,
         &hierarchy,
+        Some(native_type_registry),
     ) {
         Some(class_name) => Term::from(Map::from([
             (atom("status"), atom("ok")),
@@ -2456,6 +2779,150 @@ mod tests {
         );
     }
 
+    /// ADR 0105 Phase 1 (BT-2778): `diagnostics` accepts `class_hierarchy`
+    /// (like `compile_expression`/`compile_method` already did) and returns
+    /// severity- and category-tagged diagnostics, so a re-check can tell a
+    /// removed-selector `Dnu` from a `Type` mismatch without location alone.
+    #[test]
+    fn diagnostics_accepts_class_hierarchy_and_reports_category() {
+        use eetf::{FixInteger, List};
+
+        let method_info = Map::from([(
+            atom("getCount"),
+            Term::from(Map::from([
+                (atom("arity"), Term::from(FixInteger::from(0))),
+                (atom("param_types"), Term::from(List::from(vec![]))),
+                // The reload changed Counter>>getCount's return type to
+                // String — the caller's `+ 1` is now stale.
+                (atom("return_type"), atom("String")),
+            ])),
+        )]);
+        let counter_meta = Map::from([
+            (atom("superclass"), atom("Object")),
+            (atom("method_info"), Term::from(method_info)),
+        ]);
+        let class_hierarchy_term =
+            Term::from(Map::from([(atom("Counter"), Term::from(counter_meta))]));
+
+        let request = Map::from([
+            (atom("command"), atom("diagnostics")),
+            (
+                atom("source"),
+                binary(
+                    "Object subclass: Dashboard\n  refresh: c :: Counter -> Integer => (c getCount) + 1\n",
+                ),
+            ),
+            (atom("class_hierarchy"), class_hierarchy_term),
+        ]);
+
+        let response = handle_diagnostics(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("ok")));
+        let Some(Term::List(diagnostics)) = map_get(m, "diagnostics") else {
+            panic!("Expected diagnostics list: {response:?}");
+        };
+        assert!(
+            !diagnostics.elements.is_empty(),
+            "expected at least one diagnostic for the now-stale `+ 1`: {response:?}"
+        );
+        // Every diagnostic carries a `category` key (an atom `undefined` or a
+        // binary label) — BT-2778's re-check orchestration filters on it.
+        for diag in &diagnostics.elements {
+            let Term::Map(dm) = diag else {
+                panic!("Expected diagnostic map, got {diag:?}");
+            };
+            assert!(
+                map_get(dm, "category").is_some(),
+                "diagnostic missing category key: {diag:?}"
+            );
+        }
+    }
+
+    /// Without `class_hierarchy`, `diagnostics` behaves exactly as before
+    /// (Counter is unknown, so no diagnostic is produced for the `+ 1` — the
+    /// checker treats an undeclared receiver type as unresolved-class, not
+    /// as `Counter`).
+    #[test]
+    fn diagnostics_without_class_hierarchy_is_unaffected() {
+        let request = Map::from([
+            (atom("command"), atom("diagnostics")),
+            (atom("source"), binary("1 + 1.")),
+        ]);
+
+        let response = handle_diagnostics(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("ok")));
+        let Some(Term::List(diagnostics)) = map_get(m, "diagnostics") else {
+            panic!("Expected diagnostics list: {response:?}");
+        };
+        assert!(
+            diagnostics.elements.is_empty(),
+            "expected no diagnostics for a plain valid expression: {response:?}"
+        );
+    }
+
+    /// BT-2839 (ADR 0100 Rule 3 surface-parity gap): a project root with a
+    /// `dnu = "error"` `[diagnostics]` table parses into a table that
+    /// escalates `Dnu`, mirroring what `beamtalk build` and the LSP
+    /// (BT-2800) already do for the same `beamtalk.toml`.
+    #[test]
+    fn load_diagnostics_overrides_from_parses_project_manifest() {
+        use beamtalk_core::compilation::DiagnosticSeverityOverride;
+        use beamtalk_core::source_analysis::DiagnosticCategory;
+
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        std::fs::write(
+            dir.path().join("beamtalk.toml"),
+            "[package]\nname = \"demo\"\nversion = \"0.1.0\"\n\n[diagnostics]\ndnu = \"error\"\n",
+        )
+        .expect("failed to write beamtalk.toml");
+
+        let table = load_diagnostics_overrides_from(dir.path());
+        assert_eq!(
+            table.get(&DiagnosticCategory::Dnu),
+            Some(&DiagnosticSeverityOverride::Error),
+            "expected dnu = \"error\" to parse into the table, got: {table:?}"
+        );
+    }
+
+    /// Lenient by design: a root with no `beamtalk.toml` at all — the common
+    /// case for an ad-hoc `beamtalk repl` session outside a project — must
+    /// not block diagnostics. An empty table is a complete no-op (Rule 1
+    /// defaults), matching the LSP's `load_diagnostics_table_absent_manifest_is_noop`.
+    #[test]
+    fn load_diagnostics_overrides_from_missing_manifest_is_empty() {
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+
+        let table = load_diagnostics_overrides_from(dir.path());
+        assert!(
+            table.is_empty(),
+            "expected an empty table with no beamtalk.toml, got: {table:?}"
+        );
+    }
+
+    /// A `beamtalk.toml` with an invalid `[diagnostics]` table (unknown
+    /// severity string) must not panic or block diagnostics — it logs and
+    /// falls back to an empty table, same as a missing manifest.
+    #[test]
+    fn load_diagnostics_overrides_from_malformed_table_is_empty() {
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        std::fs::write(
+            dir.path().join("beamtalk.toml"),
+            "[diagnostics]\ndnu = \"not-a-real-severity\"\n",
+        )
+        .expect("failed to write beamtalk.toml");
+
+        let table = load_diagnostics_overrides_from(dir.path());
+        assert!(
+            table.is_empty(),
+            "expected an empty table for a malformed [diagnostics] entry, got: {table:?}"
+        );
+    }
+
     /// ADR 0050 Phase 4: `class_hierarchy` in `compile` request is accepted
     /// and does not cause errors (backward-compatible optional key).
     #[test]
@@ -2533,6 +3000,114 @@ mod tests {
         assert_eq!(
             map_get(m, "class_name").and_then(term_to_string),
             Some("String".to_string())
+        );
+    }
+
+    /// BT-2891: `load_native_type_registry_from` reads `<module>_<16-hex>.json`
+    /// entries from `<root>/_build/type_cache/` (the same on-disk format
+    /// `beamtalk build`/`beamtalk lint` write via
+    /// `beamtalk_core::ffi_type_specs`) and replays their `specs_line` into a
+    /// `NativeTypeRegistry`.
+    #[test]
+    fn load_native_type_registry_from_reads_type_cache() {
+        use beamtalk_core::semantic_analysis::type_checker::InferredType;
+
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        let cache_dir = dir.path().join("_build").join("type_cache");
+        std::fs::create_dir_all(&cache_dir).expect("failed to create type_cache dir");
+        std::fs::write(
+            cache_dir.join("lists_0123456789abcdef.json"),
+            format!(
+                r#"{{"beam_mtime_secs":0,"beam_mtime_nanos":0,"mapping_stamp":"{}","specs_line":"beamtalk-specs-module:lists:[#{{name => <<\"reverse\">>,arity => 1,params => [#{{name => <<\"list\">>,type => <<\"List\">>}}],return_type => <<\"List\">>}}]"}}"#,
+                beamtalk_core::ffi_type_specs::current_spec_mapping_stamp()
+            ),
+        )
+        .expect("failed to write cache entry");
+
+        let registry = load_native_type_registry_from(dir.path());
+        let sig = registry
+            .lookup("lists", "reverse", 1)
+            .expect("lists:reverse/1 should be registered");
+        assert_eq!(sig.arity, 1);
+        assert_eq!(sig.return_type, InferredType::known("List"));
+    }
+
+    /// BT-2891: a project that has never run `beamtalk build` (no
+    /// `_build/type_cache/`) yields an empty registry rather than an error —
+    /// the REPL must keep evaluating, registry-blind, exactly like pre-BT-2891.
+    #[test]
+    fn load_native_type_registry_from_missing_cache_is_empty() {
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        let registry = load_native_type_registry_from(dir.path());
+        assert_eq!(registry.module_count(), 0);
+    }
+
+    /// BT-2891: with an empty native type registry (the pre-BT-2891 state,
+    /// and what a project that has never run `beamtalk build` yields), an FFI
+    /// expression still falls back to `not_found` (`Dynamic`) — unchanged
+    /// behaviour. Exercises `resolve_completion_type_response` directly with
+    /// an explicit empty registry rather than `handle_resolve_completion_type`'s
+    /// process-wide `OnceLock` (which reads the real cwd's `_build/type_cache/`
+    /// and is shared across every test in this binary) so the assertion can't
+    /// flip depending on what happens to be on disk at test time.
+    #[test]
+    fn resolve_completion_type_response_ffi_expression_with_empty_registry_stays_not_found() {
+        use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
+
+        let response = resolve_completion_type_response(
+            "Erlang lists reverse: #(1, 2, 3)",
+            vec![],
+            &NativeTypeRegistry::new(),
+        );
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response");
+        };
+        assert_eq!(
+            map_get(m, "status"),
+            Some(&atom("not_found")),
+            "{response:?}"
+        );
+    }
+
+    /// BT-2891: with a populated native type registry, `resolve_completion_type`
+    /// resolves an FFI expression to its real return class instead of falling
+    /// back to `Dynamic`/`not_found`. Exercises `resolve_completion_type_response`
+    /// directly (rather than `handle_resolve_completion_type`'s process-wide
+    /// `OnceLock`) so the registry-provided path is covered without touching
+    /// the filesystem or global state — mirroring BT-2887's
+    /// `resolve_expression_type_with_native_registry_resolves_ffi_call` test in
+    /// `completion_provider.rs`.
+    #[test]
+    fn resolve_completion_type_response_resolves_ffi_call_with_populated_registry() {
+        use beamtalk_core::semantic_analysis::type_checker::{
+            FunctionSignature, InferredType, NativeTypeRegistry, ParamType, TypeProvenance,
+        };
+
+        let mut registry = NativeTypeRegistry::new();
+        registry.register_module(
+            "lists",
+            vec![FunctionSignature {
+                name: "reverse".to_string(),
+                arity: 1,
+                params: vec![ParamType {
+                    keyword: Some(ecow::EcoString::from("list")),
+                    type_: InferredType::known("List"),
+                }],
+                return_type: InferredType::known("List"),
+                provenance: TypeProvenance::Extracted,
+                line: None,
+            }],
+        );
+
+        let response =
+            resolve_completion_type_response("Erlang lists reverse: #(1, 2, 3)", vec![], &registry);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("ok")), "{response:?}");
+        assert_eq!(
+            map_get(m, "class_name").and_then(term_to_string),
+            Some("List".to_string())
         );
     }
 
@@ -3732,5 +4307,178 @@ mod property_tests {
                 }
             }
         }
+    }
+
+    // -------------------------------------------------------------------
+    // ADR 0108 Phase 8 (BT-2902): `type Name = ...` REPL declarations
+    // -------------------------------------------------------------------
+
+    /// True when a response field is present and is the atom `undefined`
+    /// (Rust's `None`, e.g. an alias declaration with no doc comment).
+    fn response_field_is_undefined_atom(term: &Term, key: &str) -> bool {
+        let Term::Map(map) = term else {
+            return false;
+        };
+        matches!(map_get(map, key), Some(Term::Atom(a)) if a.name == "undefined")
+    }
+
+    #[test]
+    fn type_alias_declaration_without_doc_comment() {
+        let response = handle_compile_expression(&compile_expression_request(
+            "type Direction = #north | #south | #east | #west",
+        ));
+        assert_eq!(
+            response_status(&response).as_deref(),
+            Some("ok"),
+            "resp: {response:?}"
+        );
+        let Term::Map(m) = &response else {
+            panic!("expected a map response, got: {response:?}");
+        };
+        assert_eq!(map_get(m, "kind"), Some(&atom("type_alias_definition")));
+        assert_eq!(
+            response_field_str(&response, "alias_name").as_deref(),
+            Some("Direction")
+        );
+        assert_eq!(
+            response_field_str(&response, "expansion").as_deref(),
+            Some("#north | #south | #east | #west")
+        );
+        assert!(
+            response_field_is_undefined_atom(&response, "doc_comment"),
+            "no doc comment on the declaration must round-trip as `undefined`, \
+             not an empty string: {response:?}"
+        );
+    }
+
+    #[test]
+    fn type_alias_declaration_with_doc_comment() {
+        let response = handle_compile_expression(&compile_expression_request(
+            "/// How a supervised child restarts after exit.\n\
+             type RestartStrategy = #temporary | #transient | #permanent",
+        ));
+        assert_eq!(
+            response_status(&response).as_deref(),
+            Some("ok"),
+            "resp: {response:?}"
+        );
+        assert_eq!(
+            response_field_str(&response, "alias_name").as_deref(),
+            Some("RestartStrategy")
+        );
+        assert_eq!(
+            response_field_str(&response, "expansion").as_deref(),
+            Some("#temporary | #transient | #permanent")
+        );
+        assert_eq!(
+            response_field_str(&response, "doc_comment").as_deref(),
+            Some("How a supervised child restarts after exit.")
+        );
+    }
+
+    #[test]
+    fn multiple_type_alias_declarations_in_one_turn_is_an_error() {
+        let response = handle_compile_expression(&compile_expression_request(
+            "type A = Integer\ntype B = String",
+        ));
+        assert_eq!(
+            response_status(&response).as_deref(),
+            Some("error"),
+            "resp: {response:?}"
+        );
+    }
+
+    /// `known_type_aliases` (ADR 0108 Phase 8) makes an alias declared in an
+    /// *earlier* REPL turn resolvable in the current turn's `::` annotation
+    /// — the cross-turn persistence mechanism this issue adds, since an
+    /// alias has no live BEAM artifact for the session to recover it from
+    /// the way a REPL-declared class is recovered. Asserts on the
+    /// `matchExhaustive:` diagnostic text (not just "no unresolved-type
+    /// error") so this also proves `Direction` expanded to the exact
+    /// closed singleton union — not merely a silently-accepted unknown name.
+    #[test]
+    fn known_type_aliases_resolves_alias_from_earlier_turn() {
+        let request = Map::from([
+            (atom("command"), atom("compile_expression")),
+            (
+                atom("source"),
+                binary(
+                    "scrutinee :: Direction := #north. \
+                     scrutinee matchExhaustive: [#north -> 0; #south -> 1; #east -> 2]",
+                ),
+            ),
+            (atom("module"), binary("bt@test_module")),
+            (
+                atom("known_type_aliases"),
+                Term::from(List::from(vec![binary(
+                    "type Direction = #north | #south | #east | #west",
+                )])),
+            ),
+        ]);
+        let response = handle_compile_expression(&request);
+        assert_eq!(
+            response_status(&response).as_deref(),
+            Some("error"),
+            "resp: {response:?}"
+        );
+        let diags = response_diagnostics(&response).expect("diagnostics");
+        let found = diags.elements.iter().any(|d| {
+            let Term::Map(m) = d else { return false };
+            map_get(m, "message")
+                .and_then(term_to_string)
+                .is_some_and(|msg| {
+                    msg.contains("non-exhaustive matchExhaustive:") && msg.contains("#west")
+                })
+        });
+        assert!(
+            found,
+            "expected a non-exhaustive matchExhaustive: `#west` diagnostic \
+             (proves Direction resolved to the closed union, not an unresolved-type \
+             fallback), got: {response:?}"
+        );
+    }
+
+    /// The `known_type_aliases` round trip (declare → `unparse_type_annotation_display`
+    /// → resend as `type Name = <expansion>` → reparse) is not limited to simple
+    /// singleton unions — ADR 0108 Semantics explicitly allows any `TypeAnnotation`
+    /// on the RHS, including `\`/`&` forms (`type PublicTag = Symbol \ (#reserved |
+    /// #internal)`). Pins that a `Difference` RHS survives the same declare-then-use
+    /// two-turn round trip `known_type_aliases_resolves_alias_from_earlier_turn`
+    /// exercises for a plain union, since the reparse path
+    /// (`extract_known_type_aliases`) silently drops any alias whose expansion text
+    /// fails to reparse — a regression here would fail closed (the alias just
+    /// vanishes) rather than loudly, so it needs its own pin.
+    #[test]
+    fn known_type_aliases_round_trips_a_difference_rhs() {
+        let declare_response = handle_compile_expression(&compile_expression_request(
+            "type PublicTag = Symbol \\ (#reserved | #internal)",
+        ));
+        assert_eq!(
+            response_status(&declare_response).as_deref(),
+            Some("ok"),
+            "resp: {declare_response:?}"
+        );
+        let expansion = response_field_str(&declare_response, "expansion")
+            .expect("expansion field must be present");
+
+        let request = Map::from([
+            (atom("command"), atom("compile_expression")),
+            (atom("source"), binary("tag :: PublicTag := #anything")),
+            (atom("module"), binary("bt@test_module")),
+            (
+                atom("known_type_aliases"),
+                Term::from(List::from(vec![binary(&format!(
+                    "type PublicTag = {expansion}"
+                ))])),
+            ),
+        ]);
+        let response = handle_compile_expression(&request);
+        assert_eq!(
+            response_status(&response).as_deref(),
+            Some("ok"),
+            "a Difference-RHS alias declared in an earlier turn must still resolve \
+             (not silently vanish) when referenced in a later turn's `::` annotation: \
+             {response:?}"
+        );
     }
 }

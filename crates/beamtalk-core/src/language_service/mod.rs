@@ -147,6 +147,25 @@ pub struct SimpleLanguageService {
     project_index: ProjectIndex,
     /// Native type registry for Erlang FFI typed completions (ADR 0075).
     native_types: Option<std::sync::Arc<NativeTypeRegistry>>,
+    /// Whether workspace preload has completed with full coverage (BT-2796).
+    ///
+    /// When `true`, diagnostics are computed with
+    /// `KnowledgeScope::ProjectComplete` — the `ProjectIndex` holds every
+    /// project file's classes, so the receiver-knowledge classifier may
+    /// treat missing parents as genuinely unresolved rather than
+    /// not-yet-seen. Set by the LSP server after `preload_workspace_source_files`
+    /// finishes within its file budget; stays `false` if the budget was
+    /// exhausted (coverage would be partial).
+    project_complete: bool,
+    /// Whether the workspace has package dependencies (BT-2794 pre-WS3 guard).
+    has_package_dependencies: bool,
+    /// Per-category diagnostic severity overrides from the workspace's
+    /// `beamtalk.toml` `[diagnostics]` section (ADR 0100 Rule 3, BT-2800).
+    /// Empty (the default) preserves today's Rule 1 completeness-ladder
+    /// defaults — the same behaviour as before this field existed. Set by
+    /// the LSP server after loading `beamtalk.toml` from each workspace
+    /// root, so the LSP agrees with `beamtalk build` on diagnostic severity.
+    diagnostics_overrides: crate::compilation::diagnostics_policy::DiagnosticsTable,
 }
 
 #[derive(Debug, Clone)]
@@ -167,6 +186,9 @@ impl SimpleLanguageService {
             files: HashMap::new(),
             project_index: ProjectIndex::new(),
             native_types: None,
+            project_complete: false,
+            has_package_dependencies: false,
+            diagnostics_overrides: crate::compilation::diagnostics_policy::DiagnosticsTable::new(),
         }
     }
 
@@ -180,7 +202,43 @@ impl SimpleLanguageService {
             files: HashMap::new(),
             project_index,
             native_types: None,
+            project_complete: false,
+            has_package_dependencies: false,
+            diagnostics_overrides: crate::compilation::diagnostics_policy::DiagnosticsTable::new(),
         }
+    }
+
+    /// Declare that workspace preload completed with full coverage (BT-2796).
+    ///
+    /// After this, diagnostics run with `KnowledgeScope::ProjectComplete`.
+    /// Only call when the preload walked every project source file — a
+    /// budget-exhausted preload must NOT claim completeness, or the
+    /// receiver-knowledge classifier would mistake unseen files for
+    /// genuinely-unresolved classes.
+    pub fn set_project_complete(&mut self, complete: bool) {
+        self.project_complete = complete;
+    }
+
+    /// Declare whether the workspace has package dependencies (BT-2794).
+    ///
+    /// Pre-WS3, dependency extension contributions are invisible, so when
+    /// true (and the project is complete) the receiver-knowledge classifier
+    /// keeps every receiver `Open`.
+    pub fn set_has_package_dependencies(&mut self, has_deps: bool) {
+        self.has_package_dependencies = has_deps;
+    }
+
+    /// Sets the `[diagnostics]` severity-override table loaded from the
+    /// workspace's `beamtalk.toml` (ADR 0100 Rule 3, BT-2800).
+    ///
+    /// Called by the LSP server once per workspace root after loading and
+    /// parsing `beamtalk.toml`. An empty table (the default) is a no-op —
+    /// diagnostics keep today's Rule 1 completeness-ladder severities.
+    pub fn set_diagnostics_overrides(
+        &mut self,
+        table: crate::compilation::diagnostics_policy::DiagnosticsTable,
+    ) {
+        self.diagnostics_overrides = table;
     }
 
     /// Sets the native type registry for Erlang FFI typed completions.
@@ -1265,7 +1323,22 @@ impl SimpleLanguageService {
             Pattern::Binary { segments, .. } => segments
                 .iter()
                 .find_map(|seg| Self::find_identifier_in_pattern(&seg.value, offset_val)),
-            Pattern::Wildcard(_) | Pattern::Literal(_, _) | Pattern::Variable(_) => None,
+            Pattern::Type { class, .. } => {
+                if offset_val >= class.span.start() && offset_val < class.span.end() {
+                    Some((class.clone(), class.span))
+                } else {
+                    // The binding (e.g. `path` in `path :: String`) is a
+                    // local variable, not a class reference — this function
+                    // only navigates class identifiers. Go-to-definition on
+                    // the binding itself is deferred to BT-2855, which is
+                    // when it becomes a fully navigable scope entry.
+                    None
+                }
+            }
+            Pattern::Wildcard(_)
+            | Pattern::Literal(_, _)
+            | Pattern::Variable(_)
+            | Pattern::Nil(_) => None,
         }
     }
 
@@ -1359,9 +1432,29 @@ impl LanguageService for SimpleLanguageService {
             // so LSP features (completions, has_class) work with protocol names.
             class_hierarchy.register_protocol_classes(&module);
 
+            // BT-2796: A file with parse errors may have an under-recovered
+            // method surface (error recovery can drop method definitions).
+            // Mark its classes so cross-file consumers of this file's
+            // hierarchy never emit unresolved-selector hints against a
+            // surface the parser never fully saw.
+            let has_parse_errors = diagnostics
+                .iter()
+                .any(|d| d.severity == crate::source_analysis::Severity::Error);
+            if has_parse_errors {
+                class_hierarchy.mark_module_classes_surface_incomplete(&module);
+            }
+
             // Update the project-wide index with this file's class hierarchy
             self.project_index
                 .update_file(file.clone(), &class_hierarchy);
+
+            // BT-2795: Track this file's standalone extension definitions so
+            // other files' diagnostics see them (cross-file extension
+            // visibility, ADR 0066 / ADR 0100 Rule 2 WS1).
+            let mut extensions = crate::compilation::extension_index::ExtensionIndex::new();
+            extensions.add_module(&module, file.as_std_path());
+            self.project_index
+                .set_file_extensions(file.clone(), extensions);
         } else {
             // Hierarchy build failed: store the file with merged diagnostics
             // but do not update the project index for this file.
@@ -1409,10 +1502,28 @@ impl LanguageService for SimpleLanguageService {
                 if self.project_index.is_stdlib_file(file) {
                     options.stdlib_mode = true;
                 }
+                // BT-2796: After a full-coverage workspace preload the
+                // ProjectIndex holds every project file's classes, so the
+                // injected knowledge is project-complete.
+                if self.project_complete {
+                    options.knowledge_scope =
+                        crate::semantic_analysis::KnowledgeScope::ProjectComplete;
+                }
+                options.has_package_dependencies = self.has_package_dependencies;
+                // BT-2795: Cross-file extensions from the ProjectIndex are
+                // passed so a same-project `ClassName >> selector` defined in
+                // another file resolves instead of producing a false Dnu hint.
+                let cross_file_extensions = self.project_index.cross_file_extensions_for(file);
                 let ctx = crate::queries::diagnostic_provider::ProjectDiagnosticContext {
                     options,
                     cross_file_classes,
+                    cross_file_extensions,
                     native_type_registry: self.native_types.clone(),
+                    // BT-2800: apply the same `beamtalk.toml` `[diagnostics]`
+                    // severity-override table `beamtalk build` uses, so the
+                    // LSP never disagrees with the CLI about a diagnostic's
+                    // severity.
+                    diagnostics_overrides: self.diagnostics_overrides.clone(),
                     ..Default::default()
                 };
                 crate::queries::diagnostic_provider::compute_project_diagnostics(
@@ -1448,12 +1559,19 @@ impl LanguageService for SimpleLanguageService {
     fn hover(&self, file: &Utf8PathBuf, position: Position) -> Option<HoverInfo> {
         let file_data = self.get_file(file)?;
 
+        // BT-2897 / ADR 0108: `ProjectIndex` does not yet track a
+        // project-wide `AliasRegistry` (that's LSP integration, deferred to
+        // the later ADR 0108 phase, BT-2901) — `None` here means an
+        // alias-typed value's hover falls back to its bare structural
+        // expansion rather than `AliasName (expansion)`, matching pre-BT-2897
+        // behaviour until that phase lands.
         crate::queries::hover_provider::compute_hover(
             &file_data.module,
             &file_data.source,
             position,
             self.project_index.hierarchy(),
             self.native_types.as_deref(),
+            None,
         )
     }
 
@@ -1484,6 +1602,7 @@ impl LanguageService for SimpleLanguageService {
                     offset.get(),
                     &selector_lookup,
                     self.project_index.hierarchy(),
+                    self.native_types.as_deref(),
                 );
             return crate::queries::definition_provider::find_method_definition_cross_file_with_receiver(
                 selector_lookup.selector_name.as_str(),
@@ -1634,6 +1753,7 @@ impl LanguageService for SimpleLanguageService {
         let inferred = crate::semantic_analysis::type_checker::infer_method_return_types(
             &file_data.module,
             self.project_index.hierarchy(),
+            self.native_types.as_deref(),
         );
 
         if inferred.is_empty() {
@@ -3681,6 +3801,101 @@ mod tests {
         assert!(
             unresolved.is_empty(),
             "cross-file class `Foo` should resolve via ProjectIndex, got: {unresolved:?}"
+        );
+    }
+
+    /// BT-2800 (ADR 0100 Rule 3 surface-parity gap): `SimpleLanguageService`
+    /// must apply the `[diagnostics]` table set via `set_diagnostics_overrides`
+    /// exactly like `beamtalk build` does — a `dnu = "error"` override
+    /// promotes the default `Hint` on an unresolved selector to `Error`.
+    #[test]
+    fn diagnostics_applies_severity_overrides() {
+        use crate::compilation::diagnostics_policy::{
+            DiagnosticSeverityOverride, DiagnosticsTable,
+        };
+        use crate::source_analysis::{DiagnosticCategory, Severity};
+
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("src/Dnu.bt");
+        service.update_file(file.clone(), "\"hello\" frobnicate".to_string());
+
+        // Baseline: no overrides set, Rule 1 default is Hint.
+        let baseline = service.diagnostics(&file);
+        assert!(
+            baseline.iter().any(
+                |d| d.category == Some(DiagnosticCategory::Dnu) && d.severity == Severity::Hint
+            ),
+            "expected a Dnu Hint before any override: {baseline:?}"
+        );
+
+        let mut table = DiagnosticsTable::new();
+        table.insert(DiagnosticCategory::Dnu, DiagnosticSeverityOverride::Error);
+        service.set_diagnostics_overrides(table);
+
+        let overridden = service.diagnostics(&file);
+        assert!(
+            overridden
+                .iter()
+                .any(|d| d.category == Some(DiagnosticCategory::Dnu)
+                    && d.severity == Severity::Error),
+            "dnu = \"error\" override must promote the Dnu diagnostic to Error: {overridden:?}"
+        );
+    }
+
+    /// BT-2795 (ADR 0100 Rule 2 WS1): a standalone extension defined in one
+    /// file must be visible to another file's diagnostics — the false `Dnu`
+    /// hint on a same-project cross-file extension disappears.
+    #[test]
+    fn diagnostics_resolve_cross_file_extension_via_project_index() {
+        let mut service = SimpleLanguageService::new();
+        let ext_file = Utf8PathBuf::from("src/StringShout.bt");
+        let use_file = Utf8PathBuf::from("src/UseShout.bt");
+
+        service.update_file(
+            ext_file.clone(),
+            "String >> shoutLouder => self\n".to_string(),
+        );
+        service.update_file(
+            use_file.clone(),
+            "Object subclass: UseShout\n  class demo =>\n    \"abc\" shoutLouder\n".to_string(),
+        );
+
+        let diags = service.diagnostics(&use_file);
+        let dnu: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("shoutLouder"))
+            .collect();
+        assert!(
+            dnu.is_empty(),
+            "cross-file extension `String >> shoutLouder` should resolve, got: {dnu:?}"
+        );
+    }
+
+    /// BT-2795: removing the defining file makes the extension unresolved again.
+    #[test]
+    fn diagnostics_cross_file_extension_gone_after_remove() {
+        let mut service = SimpleLanguageService::new();
+        let ext_file = Utf8PathBuf::from("src/StringShout.bt");
+        let use_file = Utf8PathBuf::from("src/UseShout.bt");
+
+        service.update_file(
+            ext_file.clone(),
+            "String >> shoutLouder => self\n".to_string(),
+        );
+        service.update_file(
+            use_file.clone(),
+            "Object subclass: UseShout\n  class demo =>\n    \"abc\" shoutLouder\n".to_string(),
+        );
+        service.remove_file(&ext_file);
+
+        let diags = service.diagnostics(&use_file);
+        let dnu: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("shoutLouder"))
+            .collect();
+        assert!(
+            !dnu.is_empty(),
+            "after removing the defining file the extension should be unresolved again"
         );
     }
 

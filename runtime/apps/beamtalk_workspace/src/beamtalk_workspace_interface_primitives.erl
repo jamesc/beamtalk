@@ -44,6 +44,7 @@ into REPL session state. Workspace readiness is detected via
 | `sync'        | Incremental project sync (compile changed files)   |
 | `bind:as:'    | Register a value in workspace namespace             |
 | `unbind:'     | Remove a value from workspace namespace             |
+| `recheckImage'| Whole-image re-check (ADR 0105 Phase 3, BT-2782)    |
 """.
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -80,6 +81,8 @@ into REPL session state. Workspace readiness is detected via
 -export([newClass/2]).
 %% Workspace flush (ADR 0082 Phase 2, BT-2286)
 -export([flush/0, flush/1]).
+%% Whole-image re-check (ADR 0105 Phase 3, BT-2782)
+-export([recheckImage/0]).
 %% ChangeLog Phase 4 operations and autoflush setting (ADR 0082 Phase 4, BT-2290)
 -export([changeLogRevert/1, changeLogClear/0, changeLogFlushKinds/1]).
 %% Clean-returning revert for non-FFI callers (the LiveView Attach client, ADR
@@ -138,6 +141,8 @@ dispatch(flush, [], _Self) ->
     flush();
 dispatch('flush:', [Filter], _Self) ->
     flush(Filter);
+dispatch(recheckImage, [], _Self) ->
+    recheckImage();
 dispatch(autoflush, [], _Self) ->
     autoflush();
 dispatch('autoflush:', [Value], _Self) ->
@@ -266,6 +271,24 @@ flush(Filter) ->
         {ok, Summary} -> Summary;
         {error, Err} -> beamtalk_error:raise(Err)
     end.
+
+-doc """
+Whole-image re-check (ADR 0105 Phase 3, BT-2782).
+
+Called via `(Erlang beamtalk_workspace_interface_primitives) recheckImage`
+from `Workspace recheckImage` / the REPL `:recheck image` alias. The
+"complete but unbounded" path ADR 0105's Alternatives section keeps out of
+the default per-reload trigger: re-checks every live class the workspace
+has a recorded source for, unlike the automatic post-reload check (which
+only re-checks the xref-filtered dependents of one changed selector).
+Returns a Dictionary: `#findings` (a List of finding Dictionaries —
+`#owner`, `#severity`, `#category`, `#message`, `#start`, `#end`),
+`#checked` (classes a re-check round-trip completed for), `#stale`
+(distinct classes with at least one finding).
+""".
+-spec recheckImage() -> map().
+recheckImage() ->
+    beamtalk_recheck:trigger_image().
 
 -doc """
 Revert a single ChangeEntry (ADR 0082 Phase 4, BT-2290).

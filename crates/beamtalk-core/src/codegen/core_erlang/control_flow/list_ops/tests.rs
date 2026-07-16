@@ -1647,8 +1647,10 @@ fn test_each_with_index_pure_block_falls_through() {
 fn test_each_with_index_wrong_arity_block_falls_through() {
     // A 1-arg block (wrong arity for eachWithIndex:) must not desugar; the
     // Collection.bt method will raise the correct runtime error (covers the
-    // arity guard in try_generate_each_with_index).
-    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    items eachWithIndex: [:x | self.total := self.total + x]\n";
+    // arity guard in try_generate_each_with_index). Body is a pure expression
+    // (not a `self.field :=` mutation) — see BT-2792, which made a mutating
+    // block that falls through to normal dispatch a compile-time error.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    items eachWithIndex: [:x | x + 1]\n";
     let code = codegen(src);
     assert!(
         code.contains("'send'(_items1, 'eachWithIndex:', ["),
@@ -1657,6 +1659,33 @@ fn test_each_with_index_wrong_arity_block_falls_through() {
     assert!(
         !code.contains("'lists':'foldl'"),
         "eachWithIndex: wrong arity: should NOT desugar to lists:foldl. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_each_with_index_wrong_arity_field_mutating_block_is_compile_error() {
+    // BT-2792: the compound case the 7 sibling "falls through" tests above and
+    // below deliberately avoid (they use pure bodies so they can assert on the
+    // dispatch/lists:foldl shape of successful codegen). When a block that
+    // falls through eachWithIndex:'s arity guard *also* mutates self.<field>,
+    // it reaches generate_block's generic fallback and must now be rejected at
+    // compile time — not silently produce Core Erlang erlc rejects.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    items eachWithIndex: [:x | self.total := self.total + x]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(
+                crate::codegen::core_erlang::CodeGenError::FieldAssignmentInUnsupportedBlock { .. }
+            )
+        ),
+        "A field-mutating block that falls through eachWithIndex:'s arity guard must be a \
+         compile-time error (BT-2792), not silently accepted. Got: {result:?}"
     );
 }
 
@@ -1744,8 +1773,10 @@ fn test_each_with_index_degenerate_param_names_falls_through() {
     // `[:x :x | …]` — elem and index sharing a name — must not desugar; the
     // guard in try_generate_each_with_index leaves it to the normal dispatch
     // path's own diagnostics rather than building a fold with a shadowed
-    // accumulator parameter.
-    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    items eachWithIndex: [:x :x | self.total := self.total + x]\n";
+    // accumulator parameter. Body is a pure expression, not a `self.field :=`
+    // mutation — see BT-2792 (a mutating block that falls through to normal
+    // dispatch is now a compile-time error, tested separately).
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    items eachWithIndex: [:x :x | x + 1]\n";
     let code = codegen(src);
     assert!(
         code.contains("'send'(_items1, 'eachWithIndex:', ["),
@@ -1763,12 +1794,11 @@ fn test_each_with_index_non_literal_callable_falls_through() {
     // synthetic AST builders need the actual parameter names and body, so the
     // call dispatches to Collection.bt as an ordinary callable send.
     //
-    // NB: this does NOT mean the field mutation inside `blk` is threaded back
-    // to actor state correctly. It isn't — storing a self-mutating block in a
-    // local and invoking it later is a *pre-existing, general* codegen bug
-    // (unrelated to eachWithIndex:/do:separatedBy:) that produces Core Erlang
-    // `erlc` rejects with "unbound variable" in `dispatch/4`. See BT-2792.
-    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    blk := [:item :i | self.total := self.total + item]\n    items eachWithIndex: blk\n";
+    // Body is a pure expression, not a `self.field :=` mutation: storing a
+    // self-mutating block in a local and invoking it later is now a
+    // compile-time error (BT-2792, tested separately), so it can no longer be
+    // exercised via `codegen()`'s `expect`-success helper here.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    blk := [:item :i | item + i]\n    items eachWithIndex: blk\n";
     let code = codegen(src);
     assert!(
         code.contains("'send'(_items1, 'eachWithIndex:', [Blk]"),
@@ -1783,9 +1813,9 @@ fn test_each_with_index_non_literal_callable_falls_through() {
 #[test]
 fn test_do_separated_by_non_literal_callable_falls_through() {
     // Same non-literal guard as above, but for the `do:separatedBy:` element
-    // block argument. See BT-2792 for the pre-existing state-threading bug
-    // this scenario's field mutation would hit if actually compiled.
-    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    blk := [:x | self.total := self.total + x]\n    items do: blk separatedBy: [nil]\n";
+    // block argument. Body is a pure expression — see BT-2792, which made a
+    // stored self-mutating block invoked this way a compile-time error.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    blk := [:x | x + 1]\n    items do: blk separatedBy: [nil]\n";
     let code = codegen(src);
     // Bracket deliberately left open (no trailing `]`) here, unlike the
     // eachWithIndex: assertion above: do:separatedBy: passes two arguments
@@ -1805,11 +1835,9 @@ fn test_do_separated_by_non_literal_separator_falls_through() {
     // Symmetric with test_do_separated_by_non_literal_callable_falls_through,
     // but the *separator* block (not the element block) is the non-literal
     // variable. Both callable positions must be literal blocks for the
-    // desugar to fire.
-    //
-    // NB: `sep` mutates `self.total`, so the mutation is also subject to the
-    // BT-2792 state-threading bug when this falls through to normal dispatch.
-    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    sep := [self.total := self.total + 1]\n    items do: [:x | x printString] separatedBy: sep\n";
+    // desugar to fire. Body is a pure expression — see BT-2792, which made a
+    // stored self-mutating block invoked this way a compile-time error.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    sep := [nil]\n    items do: [:x | x printString] separatedBy: sep\n";
     let code = codegen(src);
     assert!(
         code.contains("'send'(_items1, 'do:separatedBy:', ["),
@@ -1848,8 +1876,10 @@ fn test_do_separated_by_value_type_desugars_without_reprojection() {
 fn test_each_with_index_zero_arity_block_falls_through() {
     // A 0-arg block is wrong arity too (the guard is `!= 2`, not `== 1`), so it
     // must fall through the same as the 1-arg case covered by
-    // test_each_with_index_wrong_arity_block_falls_through.
-    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    items eachWithIndex: [self.total := self.total + 1]\n";
+    // test_each_with_index_wrong_arity_block_falls_through. Body is a pure
+    // expression — see BT-2792, which made a mutating block that falls
+    // through to normal dispatch a compile-time error.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    items eachWithIndex: [1]\n";
     let code = codegen(src);
     assert!(
         code.contains("'send'(_items1, 'eachWithIndex:', ["),
@@ -1865,8 +1895,10 @@ fn test_each_with_index_zero_arity_block_falls_through() {
 fn test_do_separated_by_separator_with_param_falls_through() {
     // do:separatedBy:'s separator block must be 0-arg (`[…]`); a separator with
     // a parameter (`[:y | …]`) is wrong arity and must fall through, covering
-    // the `!separator_block.parameters.is_empty()` guard.
-    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    items do: [:x | x printString] separatedBy: [:y | self.total := self.total + 1]\n";
+    // the `!separator_block.parameters.is_empty()` guard. Body is a pure
+    // expression — see BT-2792, which made a mutating block that falls
+    // through to normal dispatch a compile-time error.
+    let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: items =>\n    items do: [:x | x printString] separatedBy: [:y | y + 1]\n";
     let code = codegen(src);
     assert!(
         code.contains("'send'(_items1, 'do:separatedBy:', ["),
@@ -1875,5 +1907,251 @@ fn test_do_separated_by_separator_with_param_falls_through() {
     assert!(
         !code.contains("'lists':'foldl'"),
         "do:separatedBy: separator with param: should NOT desugar to lists:foldl. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_select_wrong_arity_block_is_compile_error() {
+    // BT-493: select: requires a 1-arg block. A 0-arg block (`[nil]`) must trigger
+    // validate_block_arity_exact and produce a BlockArityError, covering the `?`
+    // error-propagation branch at filter_ops.rs:27.
+    let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    items select: [nil]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(crate::codegen::core_erlang::CodeGenError::BlockArityError { .. })
+        ),
+        "select: with a 0-arg block must be a compile-time BlockArityError. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_reject_wrong_arity_block_is_compile_error() {
+    // BT-493: reject: requires a 1-arg block. A 0-arg block (`[nil]`) must trigger
+    // validate_block_arity_exact and produce a BlockArityError, covering the `?`
+    // error-propagation branch at filter_ops.rs:50.
+    let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    items reject: [nil]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(crate::codegen::core_erlang::CodeGenError::BlockArityError { .. })
+        ),
+        "reject: with a 0-arg block must be a compile-time BlockArityError. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_select_nested_in_direct_params_loop() {
+    // BT-1329: select: with a local mutation nested inside a direct-params to:do:
+    // loop. The outer loop sets in_direct_params_loop=true, which causes
+    // generate_list_filter_with_mutations to skip the StateAcc repack and emit an
+    // open let-chain instead. Covers filter_ops.rs lines 168-193 (negate=false path).
+    let src = concat!(
+        "Actor subclass: Ctr\n",
+        "  state: x = 0\n\n",
+        "  run: items =>\n",
+        "    count := 0\n",
+        "    seen := 0\n",
+        "    1 to: 3 do: [:i |\n",
+        "      count := count + 1\n",
+        "      items select: [:item | seen := seen + 1. item > 0]\n",
+        "    ]\n",
+        "    count\n",
+    );
+    let code = codegen(src);
+    assert!(
+        code.contains("letrec"),
+        "Outer to:do: should generate a letrec. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'lists':'foldl'"),
+        "select: with local mutation should use lists:foldl. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'lists':'filter'"),
+        "Mutation-threaded select: must NOT use lists:filter. Got:\n{code}"
+    );
+    // Direct-params outer loop rebuilds StateAcc exactly once at exit (ExitSA).
+    assert!(
+        code.contains("ExitSA"),
+        "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_reject_nested_in_direct_params_loop() {
+    // BT-1329: reject: with a local mutation nested inside a direct-params to:do:
+    // loop. The outer loop sets in_direct_params_loop=true, which causes
+    // generate_list_filter_with_mutations to skip the StateAcc repack (negate=true path).
+    // The negate=true flag additionally emits `call 'erlang':'not'` in the fold body.
+    // Covers filter_ops.rs lines 168-193 (negate=true path).
+    let src = concat!(
+        "Actor subclass: Ctr\n",
+        "  state: x = 0\n\n",
+        "  run: items =>\n",
+        "    count := 0\n",
+        "    seen := 0\n",
+        "    1 to: 3 do: [:i |\n",
+        "      count := count + 1\n",
+        "      items reject: [:item | seen := seen + 1. item > 0]\n",
+        "    ]\n",
+        "    count\n",
+    );
+    let code = codegen(src);
+    assert!(
+        code.contains("letrec"),
+        "Outer to:do: should generate a letrec. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'lists':'foldl'"),
+        "reject: with local mutation should use lists:foldl. Got:\n{code}"
+    );
+    // negate=true: the fold body wraps the predicate with erlang:not.
+    assert!(
+        code.contains("call 'erlang':'not'"),
+        "reject: (negate=true) in direct-params loop must emit erlang:not. Got:\n{code}"
+    );
+    // Direct-params outer loop rebuilds StateAcc exactly once at exit (ExitSA).
+    assert!(
+        code.contains("ExitSA"),
+        "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_do_nested_in_direct_params_loop() {
+    // BT-1329: do: with a local mutation nested inside a direct-params to:do: loop.
+    // The outer loop sets in_direct_params_loop=true, which causes
+    // generate_list_do_with_mutations to hit the tuple-acc + in_direct_params_loop
+    // branch (basic_ops.rs lines 94-112): StateAcc repack is skipped, an open
+    // let-chain is emitted, and last_open_scope_result is set to "_" so the outer
+    // loop can chain the next expression directly.
+    let src = concat!(
+        "Actor subclass: Ctr\n",
+        "  state: x = 0\n\n",
+        "  run: items =>\n",
+        "    count := 0\n",
+        "    seen := 0\n",
+        "    1 to: 3 do: [:i |\n",
+        "      count := count + 1\n",
+        "      items do: [:item | seen := seen + 1]\n",
+        "    ]\n",
+        "    count\n",
+    );
+    let code = codegen(src);
+    assert!(
+        code.contains("letrec"),
+        "Outer to:do: should generate a letrec. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'lists':'foldl'"),
+        "do: with local mutation should use lists:foldl. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'lists':'foreach'"),
+        "Mutation-threaded do: must NOT use lists:foreach. Got:\n{code}"
+    );
+    // Direct-params outer loop rebuilds StateAcc exactly once at exit (ExitSA).
+    assert!(
+        code.contains("ExitSA"),
+        "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_collect_nested_in_direct_params_loop() {
+    // BT-1329: collect: with a local mutation nested inside a direct-params to:do:
+    // loop. The outer loop sets in_direct_params_loop=true, which causes
+    // generate_list_collect_with_mutations to hit the tuple-acc + in_direct_params_loop
+    // branch (basic_ops.rs lines 302-360): StateAcc repack is skipped and the result
+    // list is stored in direct_params_list_op_result for the outer loop to consume.
+    let src = concat!(
+        "Actor subclass: Ctr\n",
+        "  state: x = 0\n\n",
+        "  run: items =>\n",
+        "    count := 0\n",
+        "    seen := 0\n",
+        "    1 to: 3 do: [:i |\n",
+        "      count := count + 1\n",
+        "      items collect: [:item | seen := seen + 1. item * 2]\n",
+        "    ]\n",
+        "    count\n",
+    );
+    let code = codegen(src);
+    assert!(
+        code.contains("letrec"),
+        "Outer to:do: should generate a letrec. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'lists':'foldl'"),
+        "collect: with local mutation should use lists:foldl. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'lists':'map'"),
+        "Mutation-threaded collect: must NOT use lists:map. Got:\n{code}"
+    );
+    // collect: reverses the accumulated list after foldl.
+    assert!(
+        code.contains("'lists':'reverse'"),
+        "collect: should reverse the accumulated result list. Got:\n{code}"
+    );
+    // Direct-params outer loop rebuilds StateAcc exactly once at exit (ExitSA).
+    assert!(
+        code.contains("ExitSA"),
+        "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_do_wrong_arity_block_is_compile_error() {
+    // BT-493: do: requires a 1-arg block. A 0-arg block (`[nil]`) must trigger
+    // validate_block_arity_exact and produce a BlockArityError, covering the `?`
+    // error-propagation branch at basic_ops.rs:31.
+    let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    items do: [nil]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(crate::codegen::core_erlang::CodeGenError::BlockArityError { .. })
+        ),
+        "do: with a 0-arg block must be a compile-time BlockArityError. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_collect_wrong_arity_block_is_compile_error() {
+    // BT-493: collect: requires a 1-arg block. A 0-arg block (`[nil]`) must trigger
+    // validate_block_arity_exact and produce a BlockArityError, covering the `?`
+    // error-propagation branch at basic_ops.rs:219.
+    let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    items collect: [nil]\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = crate::codegen::core_erlang::generate_module(
+        &module,
+        crate::codegen::core_erlang::CodegenOptions::new("test").with_workspace_mode(true),
+    );
+    assert!(
+        matches!(
+            result,
+            Err(crate::codegen::core_erlang::CodeGenError::BlockArityError { .. })
+        ),
+        "collect: with a 0-arg block must be a compile-time BlockArityError. Got: {result:?}"
     );
 }

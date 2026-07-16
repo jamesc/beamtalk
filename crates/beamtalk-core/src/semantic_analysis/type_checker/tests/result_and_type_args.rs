@@ -349,6 +349,7 @@ fn type_args_for_generic_class_no_false_positive() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![
         ClassInfo {
+            surface_incomplete: false,
             name: "GenericDict".into(),
             superclass: Some("Object".into()),
             is_sealed: false,
@@ -370,6 +371,7 @@ fn type_args_for_generic_class_no_false_positive() {
             superclass_type_args: vec![],
         },
         ClassInfo {
+            surface_incomplete: false,
             name: "Counter".into(),
             superclass: Some("Object".into()),
             is_sealed: false,
@@ -729,7 +731,7 @@ Object subclass: Counter
     let (module, _diags) = crate::source_analysis::parse(tokens);
 
     let hierarchy = ClassHierarchy::with_builtins();
-    let type_map = infer_types(&module, &hierarchy);
+    let type_map = infer_types(&module, &hierarchy, None);
 
     let report = CoverageReport::from_module(&module, &type_map, "test.bt", false);
 
@@ -756,7 +758,7 @@ Object subclass: Greeter
     let (module, _diags) = crate::source_analysis::parse(tokens);
 
     let hierarchy = ClassHierarchy::with_builtins();
-    let type_map = infer_types(&module, &hierarchy);
+    let type_map = infer_types(&module, &hierarchy, None);
 
     let report = CoverageReport::from_module(&module, &type_map, "greeter.bt", true);
 
@@ -775,7 +777,7 @@ Object subclass: Greeter
 fn coverage_report_empty_module() {
     let module = make_module(vec![]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let type_map = infer_types(&module, &hierarchy);
+    let type_map = infer_types(&module, &hierarchy, None);
 
     let report = CoverageReport::from_module(&module, &type_map, "empty.bt", false);
 

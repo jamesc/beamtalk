@@ -17,6 +17,7 @@ Language features for Beamtalk. See [beamtalk-principles.md](beamtalk-principles
   - [Erlang FFI](#erlang-ffi)
   - [Loading Code into the Workspace](#loading-code-into-the-workspace)
 - [Gradual Typing (ADR 0025)](#gradual-typing-adr-0025)
+  - [Named Type Aliases (`type` Declarations) (ADR 0108)](#named-type-aliases-type-declarations-adr-0108)
 - [Parametric Types — Generics (ADR 0068)](#parametric-types--generics-adr-0068)
 - [Structural Protocols (ADR 0068)](#structural-protocols-adr-0068)
   - [Printable Protocol and Display Methods](#printable-protocol-and-display-methods)
@@ -29,6 +30,7 @@ Language features for Beamtalk. See [beamtalk-principles.md](beamtalk-principles
 - [Live Patching](#live-patching)
   - [Keyword Method Patching — `compile:source:` and `tryCompile:source:` (ADR 0082)](#keyword-method-patching--compilesource-and-trycompilesource-adr-0082)
   - [ChangeLog — Tracking In-Memory Changes (ADR 0082)](#changelog--tracking-in-memory-changes-adr-0082)
+  - [Live Re-Checking on Reload (ADR 0105)](#live-re-checking-on-reload-adr-0105)
 - [Actor Observability and Tracing (ADR 0069)](#actor-observability-and-tracing-adr-0069)
 - [Announcements — Typed Events (ADR 0093)](#announcements--typed-events-adr-0093)
 - [Namespace and Class Visibility](#namespace-and-class-visibility)
@@ -415,6 +417,15 @@ p2 y                     // => 2
 
 // Chaining
 p3 := (Point new withX: 5) withY: 7   // x=5, y=7
+```
+
+The `with<SlotName>:` selector is built by uppercasing only the *first* letter of the slot name. Two slots whose names differ only by the case of their first letter (e.g. `x` and `X`) would generate the same setter selector — this is a compile error:
+
+```beamtalk
+// Compile error — rejected before the code runs:
+// Value subclass: Weird
+//   field: x = 0
+//   field: X = 0   ← error: both `x` and `X` produce the setter `withX:`
 ```
 
 #### Immutability enforcement
@@ -1103,6 +1114,45 @@ klass instanceCount         // resolves class-side method
 - Complex annotations (e.g., unions/generics) are parsed and accepted; deeper checking is phased in.
 - `Self` in return position resolves to the static receiver class. Using `Self` as a parameter type is an error (unsound with subclassing).
 
+### Named Type Aliases (`type` Declarations) (ADR 0108)
+
+A `type` declaration introduces a transparent type alias — a name for an existing type annotation:
+
+```beamtalk
+type RestartStrategy = #temporary | #transient | #permanent
+
+type OptionalString = String | Nil
+
+type JsonKey = String | Symbol
+```
+
+The alias expands to its structural annotation everywhere type annotations are used — parameter types, return types, typed locals, and `match:`/`matchExhaustive:` exhaustiveness checking. A type alias is purely compile-time; it is erased at codegen with no runtime representation.
+
+```beamtalk
+type Direction = #north | #south | #east | #west
+
+Object subclass: Compass
+  heading: h :: Direction =>
+    h matchExhaustive: [
+      #north -> 0;
+      #south -> 180;
+      #east  -> 90;
+      #west  -> 270
+    ]
+
+  defaultHeading -> Direction => #north
+```
+
+**`type` is a contextual keyword.** It is recognized only at top-level declaration position via a three-token lookahead (`type` + uppercase identifier + `=`). It remains a legal identifier everywhere else — `type := 5`, `foo type`, `type printString` are all unaffected.
+
+**Constraints:**
+
+- Single-letter names are rejected at parse time (reserved for ADR 0068's implicit method-local type parameters): `type T = Integer | Nil` produces an error.
+- Alias names share the class/protocol namespace — declaring an alias with the same name as an existing class or protocol is a compile error.
+- The RHS accepts any type annotation: unions (`|`), singletons (`#foo`), generics (`List(Integer)`), difference (`\`), intersection (`&`), and combinations.
+- Parametric aliases (`type Foo(T) = ...`) are not yet supported.
+- Doc comments (`///`) above a `type` declaration are preserved and shown by `:help`.
+
 ### Local Variable Type Annotations
 
 Local variables can carry a type annotation using `name :: Type := expr`. The declared type overrides the inferred type of the right-hand side, which is useful at type-erasure boundaries (FFI returns, deserialization, untyped APIs). The annotation is erased at codegen — there is no runtime effect.
@@ -1628,7 +1678,7 @@ withTimeout: ms :: Integer | #infinity => ...
 restart: policy :: #temporary | #transient | #permanent => ...
 ```
 
-A singleton receiver resolves methods against `Symbol`'s protocol — `#infinity asString` infers `String`, and an unknown selector produces a DNU hint naming the singleton (e.g. `#infinity does not understand 'frobnicate'`). Binary sends (`=:=`, `=`) are excluded from this redirect so statically-decidable comparison hints still fire.
+A singleton receiver resolves methods against `Symbol`'s protocol — `#infinity asString` infers `String`, and an unknown selector produces a DNU hint naming the singleton (e.g. `#infinity does not understand 'frobnicate'`). Equality comparisons (`=:=`, `==`, `/=`, `=/=`) are excluded from this redirect so statically-decidable comparison hints still fire.
 
 Discriminate a singleton union with `=:=` (identity) and the branches narrow — see [Control Flow Narrowing](#control-flow-narrowing).
 
@@ -1717,6 +1767,13 @@ process: x :: Object =>
 validate: x :: Object =>
   x isNil ifTrue: [^nil]
   x doSomething    // x is non-nil for the remainder
+
+// isKindOf: guard-and-return also narrows the rest of the method (BT-2825)
+render: coll :: Printable | Nil -> String =>
+  coll isNil ifTrue: [^""]
+  (coll isKindOf: List) ifFalse: [^""]
+  items :: List := coll   // no `@expect type` needed — coll is List here
+  items inject: "" into: [:acc :item | acc ++ item asString]
 ```
 
 **Supported narrowing patterns:**
@@ -1725,14 +1782,24 @@ validate: x :: Object =>
 |---|---|---|
 | `x class =:= Foo ifTrue: [...]` | `x` is `Foo` in true block | True block only |
 | `x isKindOf: Foo ifTrue: [...]` | `x` is `Foo` in true block | True block only |
+| `x isKindOf: Foo ifFalse: [...]` | `x` is `T \ Foo` in false block | False block only |
+| `x isKindOf: Foo ifFalse: [^...]` | `x` is `Foo` after the statement | Rest of method |
+| `x isKindOf: Foo ifTrue: [^...]` | `x` is `T \ Foo` after the statement | Rest of method |
+| `x isKindOf: Foo ifTrue: [^...] ifFalse: [...]` | `x` is `T \ Foo` after the statement | Rest of method |
 | `x isNil ifTrue: [^...]` | `x` is non-nil after the statement | Rest of method |
 | `x isNil ifTrue: [self error: "..."]` | `x` is non-nil after the statement | Rest of method |
 | `x isNil ifFalse: [...]` | `x` is non-nil in false block | False block |
+| `x isNil ifFalse: [^...]` | `x` is nil after the statement | Rest of method |
 | `x isNil ifTrue: [^...] ifFalse: [...]` | `x` is non-nil in false block | False block |
 | `x ifNotNil: [:v \| ...]` | `v` is non-nil in block | Block only |
 | `x ifNil: [...] ifNotNil: [:v \| ...]` | `v` is non-nil in notNil block | NotNil block |
+| `x notNil and: [...]` | `x` is non-nil in block, including nested block-argument positions | Block only |
 
 The diverging-guard pattern (`isNil ifTrue: [self error: "..."]`) recognises any block whose body infers as `Never` — including calls to `error:`, `notImplemented`, or any `-> Never` method — not just non-local returns (`^`). Narrowing also works on `self.field` reads: inside `self.field isNil ifFalse: [...]`, the field narrows to non-nil within the block.
+
+**`notNil and:` (BT-2872):** `x notNil and: [...]` narrows `x` to non-nil for the whole block argument — not just where `x` is a further send's receiver, but in any nested position, including as an argument to a binary send inside a further-nested block (`local notNil and: [local > 0 and: [5 >= local]]` narrows `local` inside `5 >= local` too). The narrowing does not survive past the block — a later unguarded use of `x` after the `and:` send is unaffected.
+
+**`isKindOf:` guard-and-return (BT-2825):** the same diverging-guard treatment `isNil` gets also applies to `isKindOf:` — `(x isKindOf: Foo) ifFalse: [^default]` proves `x` is `Foo` for the rest of the method, and `(x isKindOf: Foo) ifTrue: [^default]` proves `x` is `T \ Foo`. This also closes a related gap: when `x`'s declared type is a Protocol (e.g. `Printable`) and `Foo` is a concrete class, the narrowed type collapses to the bare `Foo` — a runtime `isKindOf: Foo` check is a stronger proof than the protocol annotation, so the narrowed value is assignable to a `Foo`-typed local without an `@expect type` escape hatch.
 
 ### Conditional Return Type Inference
 
@@ -1746,6 +1813,19 @@ result isOk ifTrue: [result unwrap] ifFalse: [default]
 // inferred as the common type of both arms
 ```
 
+The solo forms — `ifTrue: [...]` and `ifFalse: [...]` — can't unify to a bare `R` the way the two-armed form does: `Boolean>>ifTrue:`/`ifFalse:` are deliberately declared with no return type, because on an unnarrowed `Boolean` receiver the checker can't statically prove whether `True` or `False` handles the send, and the sibling override (e.g. `False>>ifTrue:`) never invokes the block — it returns `self` instead. Rather than collapsing all the way to `Dynamic`, a solo send infers the union of that `Boolean` self-branch and the block's own return type (BT-2868):
+
+```beamtalk
+flag :: Boolean := x > y
+flag ifTrue: [1]
+// inferred as Boolean | Integer, not Dynamic
+
+flag ifFalse: ["no"]
+// inferred as Boolean | String
+```
+
+A receiver already narrowed to exactly `True` or `False` (e.g. inside an `x isKindOf:`-style guard, or after control-flow narrowing) is unaffected — `True>>ifTrue:`/`False>>ifFalse:` declare concrete `-> R` return types and resolve normally, without the extra `Boolean` union member.
+
 `ifNil:ifNotNil:` (and `ifNotNil:ifNil:`) on nullable receivers also infers a branch-union return type — `typeof(nilBranch) | typeof(notNilBranch)`. A branch containing a non-local return (`^`) contributes `Never`, leaving only the surviving branch's type:
 
 ```beamtalk
@@ -1755,6 +1835,21 @@ result := name ifNil: ["unknown"] ifNotNil: [:n | n size]
 
 value := name ifNil: [^nil] ifNotNil: [:n | n]
 // value is inferred as String (nil branch contributes Never, skipped)
+```
+
+The solo forms — `ifNil: [...]` and `ifNotNil: [:v | ...]` — infer the same way, unioning the block's return type with the "self" branch (executed when the nil-check doesn't match):
+
+```beamtalk
+name :: String | nil := dictionary at: "name"
+name ifNil: ["unknown"]
+// inferred as String (T | R, where T = String and R = String both dedup)
+
+count :: Integer | nil := dictionary at: "count"
+count ifNil: ["none"]
+// inferred as Integer | String (T | R)
+
+name ifNotNil: [:n | n size]
+// inferred as Integer | Nil (R | Nil)
 ```
 
 ### Union + Narrowing Compose
@@ -2748,7 +2843,56 @@ temp match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
   Result error: _ -> 0
 ]
 // => 42
+
+// Nil pattern — matches nil exactly (BT-2854, ADR 0107)
+value := nil
+value match: [
+  nil -> "was nil";
+  s :: String -> s;
+  _ -> "other"
+]
+// => "was nil"
+
+// Type patterns — bind and test runtime class (BT-2855, ADR 0107)
+x := "hello"
+x match: [
+  nil -> "nil";
+  s :: String -> s size;
+  n :: Integer -> n + 1;
+  _ -> "other"
+]
+// => 5
+
+// Guard scoped over the type-pattern binding
+x := 42
+x match: [
+  n :: Integer when: [n > 100] -> "big";
+  n :: Integer -> "small";
+  _ -> "other"
+]
+// => "small"
+
+// Mixing type patterns with literal and wildcard patterns
+x := "hi"
+x match: [
+  nil -> 0;
+  s :: String -> s size;
+  _ -> -1
+]
+// => 2
 ```
+
+**Type patterns** test the runtime class of the scrutinee and bind the value to the named variable, narrowed to that class. Subsequent arms see the scrutinee type narrowed by difference (e.g. after a `s :: String` arm, the remaining arms see the type minus `String`).
+
+**Phase A scope (ADR 0107):** type patterns are restricted to concrete/leaf classes only — `binding :: SomeClass` where `SomeClass` has subclasses is a compile error (`"SomeClass has subclasses; type patterns are not yet supported for non-leaf classes"`), never silently-wrong matching. Subclass-polymorphic matching (`binding :: Shape` where `Shape` has subclasses `Circle`/`Square`) is deferred to a future ADR 0107 Phase B. Supported classes today: `String`, `Integer`, `Float`, `List`, `Dictionary`, `Boolean` (uses the `is_boolean/1` BIF; `True`/`False` use exact atom guards — all three are stdlib primitives that bypass the leaf-restriction via a BIF/atom-guard check, not the user-class hierarchy check a `Shape`/`Circle`-style class would go through), `True`, `False`, `Symbol`, `Nil`, `UndefinedObject`, `Block`, `Pid`, `Reference`, `Port`, user-defined `Value` subclasses, `Actor` subclasses, and `Supervisor`/`DynamicSupervisor` subclasses (BT-2870).
+
+Four runtime-representation nuances (see ADR 0107 Implementation for the full codegen rationale):
+- **`Supervisor`/`DynamicSupervisor` subclasses use a distinct runtime shape.** A live supervisor reference is a 4-tuple tagged `'beamtalk_supervisor'` (not `'beamtalk_object'` like Actor subclasses, and not a tagged map like Value subclasses). `x :: MySupervisorSubclass` compiles to a tuple-tag check accepting `'beamtalk_supervisor'` at `element(1)` before comparing `element(2)` against the class name (BT-2870).
+- **`Character` is not a supported type pattern.** It compiles to a plain Erlang integer with no runtime tag distinguishing it from `Integer`, so `x :: Character` could never be told apart from `x :: Integer` at runtime — use `x :: Integer` instead.
+- **`Dictionary` has no `'$beamtalk_class'` tag** — it's a bare Erlang map, unlike tagged `Value`/sealed-class instances (which are also maps, but with a class tag). `x :: Dictionary` is fully supported, but compiles to a different check shape under the hood (a nested map-key test) so it doesn't false-positive on every other map-backed value.
+- **A `Symbol` type pattern excludes `nil` and booleans.** `nil`, `true`/`false`, and symbols are all plain Erlang atoms with no distinguishing runtime tag, so `nil match: [s :: Symbol -> ...]` does **not** match, and a `Symbol` arm can never accidentally shadow a `nil ->` or `b :: Boolean` arm regardless of arm order.
+- **Bare `true`/`false` are not valid patterns.** Unlike `nil`, `true`/`false` are not reserved pattern keywords — a bare `true ->` arm would otherwise silently parse as a variable binding (`Pattern::Variable`) that matches *any* value, not a boolean-literal test, and — tried first in arm order — would always win. This is rejected with a compile-time diagnostic (BT-2883); use `x :: True` / `x :: False` (exact literal) or `x :: Boolean` (either) instead.
+- **Constructor pattern keyword bindings (`Result ok: v`) apply the same `nil`/`true`/`false` rules, but the `true`/`false` fix-it differs.** `Result ok: nil` tests the wrapped value is nil (`Pattern::Nil`), same as top-level `nil`. `Result ok: true`/`Result ok: false` are rejected with a compile-time diagnostic (BT-2884), same as top-level bare `true`/`false` — but since `x :: True`/`x :: False` type patterns aren't supported nested inside a constructor pattern, the diagnostic instead points at binding a variable and testing it in a guard clause: `Result ok: v when: [v =:= true]` / `Result ok: v when: [v =:= false]`.
 
 **Supported pattern types:**
 
@@ -2767,6 +2911,8 @@ temp match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
 | Array rest | `#[a, ...rest]` | Destructure first elements, bind remaining to a sub-array (destructuring assignment only) |
 | Dict/Map | `#{#k => v}` | Match a Dictionary containing key `#k`, bind value to `v`; partial match (other keys ignored) |
 | Constructor | `Result ok: v` | Match sealed type by constructor (Phase 1: Result only) |
+| Nil | `nil` | Matches `nil` exactly; narrows subsequent arms to exclude `Nil` (BT-2854, ADR 0107) |
+| Type | `x :: String` | Bind `x` and test runtime class; `x` is narrowed to the named class in the arm body and guard. Phase A: leaf/concrete classes only — see restrictions below (BT-2855, ADR 0107) |
 
 **Exhaustiveness checking (BT-1299):** `match:` on a sealed type with constructor patterns must cover all known variants or include a wildcard `_` arm, or the compiler emits an error:
 
@@ -2823,12 +2969,13 @@ direction matchExhaustive: [
 ]
 ```
 
-If the scrutinee's type is **not** a closed union of `#symbol` singletons (`Dynamic`, a bare/open `Symbol`, or a mixed union), `matchExhaustive:` cannot verify the assertion and fails loudly rather than staying silent:
+If the scrutinee's type is **not** a closed union of `#symbol` singletons (`Dynamic`, a bare/open `Symbol`, or a mixed union), nor a closed `Known | Nil` union (or small closed union of concrete leaf classes) covered by `nil`/`Type` patterns (ADR 0107), `matchExhaustive:` cannot verify the assertion and fails loudly rather than staying silent:
 
 ```beamtalk
 x matchExhaustive: [#ok -> 1; _ -> 0]
 // ⛔ Error: cannot verify `matchExhaustive:` is exhaustive — scrutinee type
-//    `Dynamic` is not a closed union of symbol singletons
+//    `Dynamic` is not a closed union of symbol singletons, `nil`, or
+//    concrete leaf classes
 ```
 
 Plain `match:`'s advisory warning behaviour is unchanged by `matchExhaustive:` — the two checks are independent, and only the keyword you write selects between them.
@@ -3132,6 +3279,87 @@ Every operation above is reachable via the REPL meta-commands, MCP tools, LSP
 over the Beamtalk language — see [REPL shortcuts](#repl-shortcuts--commands-are-thin-wrappers)
 below and the [Tooling guide](beamtalk-tooling.md#changelog-and-flush-adr-0082)
 for the surface tables.
+
+### Live Re-Checking on Reload (ADR 0105)
+
+A live edit doesn't just change the class being patched — it can invalidate
+every existing caller in the image. Every save above (`>>`, class-body
+redefinition, `:load`) triggers an **incremental re-check of known
+dependents**: the compiler re-checks the callers `beamtalk_xref` (ADR 0087)
+already knows about, using the same type checker that runs at compile time,
+and publishes what it finds as live diagnostics — no rebuild, no manual
+"find senders" required.
+
+```beamtalk
+:load counter.bt
+counter := Counter spawn
+counter getCount + 1          // => 1
+
+// ... change `getCount -> Integer` to `getCount -> String`, save
+// (a plain `Counter >> getCount -> String => ...` live patch) ...
+
+⚠ reload check: Counter>>getCount signature changed;
+   2 callers re-checked, 1 stale
+   Dashboard>>refresh (dashboard.bt:14): `+` expects a number, `getCount` now returns String
+```
+
+Only genuinely-affected callers surface. If `StatsView>>render` also calls
+`getCount` but only stringifies the result, it re-checks *clean* against the
+new signature and stays silent — the header's "2 re-checked, 1 stale" is its
+only trace.
+
+A **removed** selector is a `does_not_understand` waiting to happen, reported
+at `Hint` severity (ADR 0100 Rule 1 — a single closed-complete receiver):
+
+```beamtalk
+ℹ reload check: Counter>>reset was removed; 1 caller remains
+   AdminPanel>>onClick (admin.bt:9): `counter reset` will raise
+   does_not_understand at runtime
+   (Hint severity per ADR 0100 Rule 1 — single closed receiver)
+```
+
+A `state:`/`field:` slot added, removed, or retyped re-checks `spawnWith:`
+call sites and the changed slots' generated accessors the same way, under a
+`shape_change` classification.
+
+**Advisory, never blocking.** The reload already happened — a finding informs,
+it never vetoes. Findings are workspace-session state (LSP diagnostics,
+REPL/workspace-UI notices), never persisted, and never fail a build; they
+disappear on workspace restart. **Clearing is by replacement**: every
+re-check of a caller replaces *all* of its findings attributed to that
+changed class with the fresh result — clean or different — so back-to-back
+reloads of the same method never leave a stale finding sitting alongside a
+current one (supersession), and a later reload that fixes the callee clears
+the caller's finding with no edit to the caller at all.
+
+Two related, on-demand operations round out the surface:
+
+- **Pre-save advisory** — `aClass precheckCompile: #selector source: "..."`
+  compiles a *pending* edit and reports would-be-stale dependents without
+  installing it, so an editor can warn before you save. Never touches the
+  live image, the ChangeLog, or the findings store.
+- **`Workspace recheckImage`** (also `:recheck image`) — the "complete but
+  unbounded" whole-image sweep kept out of the automatic per-reload trigger:
+  re-checks every live class the workspace has a recorded source for and
+  returns a `checked`/`stale`/`findings` report, on demand.
+
+```beamtalk
+(Counter precheckCompile: #getCount source: "getCount -> String => self.value printString")
+// => a Dictionary shaped like the reload_check report — findings without installing
+
+Workspace recheckImage
+// => _  (checked/stale summary across the whole live image)
+```
+
+The dependent lookup is selector-keyed (ADR 0087's xref schema has no
+receiver-class component), so it re-checks every candidate caller and lets
+the checker's own type inference decide relevance — a `size` sender on an
+unrelated class simply re-checks clean. Fan-out is capped per reload (with a
+"N more not checked" note); one level of fan-out only, not transitive; and
+proxy-routed calls (ADR 0104 §4 forwarding) are invisible to xref, so a
+proxy-wrapped caller can go unflagged — see
+[ADR 0105](ADR/0105-live-image-recheck-on-reload.md) for the full mechanism,
+severity rules, and accepted gaps.
 
 ---
 
@@ -4625,6 +4853,15 @@ Declaration-level `@expect` supports the same categories and stale-directive rul
 
 `@expect` works inside method bodies, inside block bodies (e.g., `ifTrue: [...]`, `collect: [...]`, `whileTrue: [...]`), on declarations in class definitions, and at module scope (BT-2010).
 
+**Where `@expect` is evaluated (BT-2851):** `@expect` directives are matched and applied by a single function, `apply_expect_directives`, called at the end of both diagnostic pipelines:
+
+- `beamtalk lint` — after parsing, lint passes, and semantic analysis (`collect_diagnostics` in the CLI's `lint` command).
+- `beamtalk build` / `beamtalk test` / the LSP — after semantic analysis and all post-analysis passes (`compute_project_diagnostics`, the unified pipeline from BT-2009).
+
+"Stale" means: for a given `@expect` directive, *this specific diagnostic run* produced no diagnostic of a matching category whose span falls inside the annotated expression or declaration. Both pipelines share the same semantic-analysis entry points and the same matching logic, so a diagnostic that either surface can produce is treated identically by both — an `@expect` is not stale on one surface and legitimate on the other for the same diagnostic.
+
+This includes Erlang FFI argument-type diagnostics (`@expect type` on a call like `Erlang lists reverse: 42`): both `beamtalk lint` and `beamtalk build`/`beamtalk test` type-check FFI calls against the same native-type registry, populated by the same extractor (`extract_type_specs`) from OTP/dependency `.beam` files. Earlier, lint read that registry only from an on-disk cache (`_build/type_cache/`) written by a *previous* `beamtalk build`; on a project that had never been built, the cache read returned nothing, lint silently skipped the FFI argument-type check, and any `@expect type` added to suppress the corresponding build-time diagnostic was then reported "stale @expect" by lint. Lint now calls the same live extractor build does — which still reads the on-disk cache as a fast path when it is fresh — so both surfaces populate the registry identically regardless of build order.
+
 ### Pragma Annotations (`@primitive` and `@intrinsic`)
 
 The standard library uses pragma annotations to declare methods whose implementations are provided by the compiler or runtime rather than written in Beamtalk code.
@@ -4666,6 +4903,8 @@ hash => @intrinsic hash
 The full list of structural intrinsics: `actorSpawn`, `actorSpawnWith`, `blockValue`, `blockValue1`–`blockValue3`, `whileTrue`, `whileFalse`, `repeat`, `onDo`, `ensure`, `timesRepeat`, `toDo`, `toByDo`, `basicNew`, `basicNewWith`, `hash`, `respondsTo`, `fieldNames`, `fieldAt`, `fieldAtPut`, `dynamicSend`, `dynamicSendWithArgs`, `error`.
 
 **Relationship to `native:` (ADR 0101).** `@primitive` and `@intrinsic` cover native BEAM *value types* and compiler *substrate*. A third mechanism, the class-level `native:` declaration with `=> self delegate` bodies, covers whole-class **delegation** to a single Erlang module (a stateless `Object` such as `Stream`, or an `Actor` gen_server). Pick by what the method needs: guarded dispatch + the open-world extension registry → `@primitive`; the dispatch act itself (`==`, `class`, `perform:`, actor lifecycle) → `@intrinsic`; pure pass-through to one module → `native:`. See [`native:` for stateless Objects](beamtalk-native-erlang.md#native-stateless-objects--native-for-object).
+
+**Known limitation: `whileTrue:`/`whileFalse:`/`repeat`/`on:do:`/`ensure:` via `perform:`.** These five structural intrinsics have real semantics only at the call-site interception the compiler recognizes for a literal message send (e.g. `[cond] whileTrue: [body]` written directly in source). Reaching the compiled method body through any other dispatch path — `perform:`, `perform:withArguments:`, or other generic/dynamic sends — resolves to a placeholder and raises a misleading `does_not_understand` naming the wrong (internal) selector, e.g. `[i < 3] perform: #whileTrue: withArguments: #([i := i + 1])` fails with `Block does not understand 'whileTrue'` rather than working or raising a clear error. `respondsTo:` still returns `true` for these selectors, since the method genuinely is defined — this is a runtime dispatch gap, not a missing method. Fixing it generically would require reimplementing loop and exception-handling control flow (condition re-evaluation, catch/handler dispatch, cleanup-on-exit) over an opaque runtime fun rather than the literal block AST the call-site codegen relies on — a materially bigger change, tracked separately (BT-2908) rather than accepted as part of the smaller List/Collection iteration fix (BT-2888) that closed the equivalent gap for `do:`/`collect:`/`select:`/`reject:`/`inject:into:`.
 
 ---
 

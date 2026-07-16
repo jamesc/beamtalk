@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// NonTypedNoDefaultActor — regression fixture for BT-2881
+//
+// A plain (non-`typed`) `Actor subclass:` with a typed, no-default state
+// field and an explicit `initialize` method. `handle_continue` must dispatch
+// to `initialize` regardless of the `typed` keyword — this is not gated on
+// it (see `uninitialized_state_actor.bt` for the `typed` counterpart).
+
+Actor subclass: NonTypedNoDefaultActor
+  state: count :: Integer
+
+  initialize -> Nil =>
+    self.count := 0
+    nil
+
+  bump -> Integer =>
+    self.count := self.count + 1
+    self.count
+
+  getCount -> Integer => self.count

@@ -266,6 +266,27 @@ websocket_info(
         })
     ),
     {[{text, Push}], State};
+%% ADR 0105 Phase 1 (BT-2779): reload-induced re-check outcome — broadcast
+%% whenever `beamtalk_repl_loader:maybe_trigger_recheck/4` has something for a
+%% live surface to act on (a dependent re-check ran, or a caller's stale
+%% findings were cleared because its own source just changed). `checkedOwners`
+%% is the clearing-by-replacement signal: every surface subscriber should
+%% replace what it is showing for each listed owner with `findings` filtered
+%% to that owner (possibly none — a clean re-check is exactly how a stale
+%% finding disappears without anyone editing the caller).
+websocket_info(
+    {beamtalk_announcement, _SubRef, 'ReloadCheckCompleted', _Handler, Event},
+    State = #ws_state{authenticated = true}
+) ->
+    Push = iolist_to_binary(
+        json:encode(#{
+            <<"type">> => <<"push">>,
+            <<"channel">> => <<"reload_check">>,
+            <<"event">> => <<"completed">>,
+            <<"data">> => encode_reload_check_event(Event)
+        })
+    ),
+    {[{text, Push}], State};
 %% BT-1433: Log event push from beamtalk_ws_log_handler
 websocket_info(
     {log_event, EventData}, State = #ws_state{authenticated = true, log_subscribed = true}
@@ -651,19 +672,34 @@ handle_run_entry_async(Msg, _SessionPid, State) ->
 
 %% Validate the `run-entry` op fields, returning the argv as a `List(String)`
 %% (a list of UTF-8 binaries) on success. `class`/`selector` must be non-empty
-%% binaries; `args` must be a (possibly empty) list of strings.
+%% binaries, `selector` must be a valid run-entry shape (see
+%% is_valid_run_entry_selector/1), and `args` must be a (possibly empty) list
+%% of strings.
 -spec validate_run_entry(term(), term(), term()) ->
     {ok, [binary()]} | {error, beamtalk_error:error()}.
 validate_run_entry(ClassBin, SelectorBin, RawArgs) when
     is_binary(ClassBin), ClassBin =/= <<>>, is_binary(SelectorBin), SelectorBin =/= <<>>
 ->
-    case run_entry_args(RawArgs, []) of
-        {ok, Argv} ->
-            {ok, Argv};
-        error ->
+    case is_valid_run_entry_selector(SelectorBin) of
+        true ->
+            case run_entry_args(RawArgs, []) of
+                {ok, Argv} ->
+                    {ok, Argv};
+                error ->
+                    Err = beamtalk_error:new(invalid_argument, 'Program'),
+                    Err1 = beamtalk_error:with_message(
+                        Err, <<"run-entry `args` must be a list of strings">>
+                    ),
+                    {error, Err1}
+            end;
+        false ->
             Err = beamtalk_error:new(invalid_argument, 'Program'),
             Err1 = beamtalk_error:with_message(
-                Err, <<"run-entry `args` must be a list of strings">>
+                Err,
+                <<
+                    "Invalid run-entry selector: only a unary selector (e.g. `run`) "
+                    "or a single arity-1 keyword selector (e.g. `main:`) is accepted"
+                >>
             ),
             {error, Err1}
     end;
@@ -673,6 +709,25 @@ validate_run_entry(_ClassBin, _SelectorBin, _RawArgs) ->
         Err, <<"run-entry requires non-empty `class` and `selector` strings">>
     ),
     {error, Err1}.
+
+-doc """
+BT-2699: True when `SelectorBin` has a valid run-entry shape — a unary
+selector (no `:`) or a single arity-1 keyword selector (exactly one `:`,
+trailing, e.g. `main:`). Mirrors the CLI's `validate_class_and_selector`
+(`crates/beamtalk-cli/src/commands/run.rs`) so a direct WebSocket client (or
+future MCP/LSP consumer) gets the same "only a unary or single arity-1
+keyword entry is accepted" rejection, rather than `do_dispatch/5` calling
+`class_send/3` with a mismatched selector/arity and surfacing a bare
+`badarg`/`undef` or a confusing DNU. Multi-keyword selectors (`move:to:`) and
+selectors with an interior colon (`at:put`) are rejected.
+""".
+-spec is_valid_run_entry_selector(binary()) -> boolean().
+is_valid_run_entry_selector(SelectorBin) ->
+    case binary:matches(SelectorBin, <<":">>) of
+        [] -> true;
+        [{Pos, _Len}] -> Pos =:= byte_size(SelectorBin) - 1;
+        _ -> false
+    end.
 
 -spec run_entry_args(term(), [binary()]) -> {ok, [binary()]} | error.
 run_entry_args([], Acc) -> {ok, lists:reverse(Acc)};
@@ -910,12 +965,44 @@ carry `className` (a Symbol) — for the `classes` push frame `{class}`.
 encode_class_event(Event) ->
     #{<<"class">> => atom_to_binary(maps:get(className, Event, unknown), utf8)}.
 
+-doc """
+ADR 0105 Phase 1 (BT-2779): encode a `'ReloadCheckCompleted'` announcement
+payload (built by `beamtalk_repl_loader:publish_recheck_outcome/5`) for the
+`reload_check`/`completed` push frame.
+""".
+-spec encode_reload_check_event(map()) -> map().
+encode_reload_check_event(Event) ->
+    #{
+        <<"changedClass">> => maps:get(changedClass, Event, <<>>),
+        <<"changedSelector">> => maps:get(changedSelector, Event, <<>>),
+        <<"classification">> => atom_to_binary(maps:get(classification, Event, self_edit), utf8),
+        <<"checked">> => maps:get(checked, Event, 0),
+        <<"notChecked">> => maps:get(notChecked, Event, 0),
+        <<"capNote">> => beamtalk_repl_protocol:undefined_to_null(
+            maps:get(capNote, Event, undefined)
+        ),
+        <<"checkedOwners">> => maps:get(checkedOwners, Event, []),
+        %% BT-2801: shared with the `reload-findings` op response
+        %% (`beamtalk_repl_ops_dev:handle_term/4`) so the push and
+        %% request/response wire shapes can never drift apart.
+        <<"findings">> => [
+            beamtalk_repl_protocol:encode_reload_finding(F)
+         || F <- maps:get(findings, Event, [])
+        ]
+    }.
+
 -doc "Encode an announcement event pid for JSON, mapping a `nil` pid to `null`.".
 -spec encode_event_pid(pid() | nil) -> binary() | null.
 encode_event_pid(Pid) when is_pid(Pid) -> list_to_binary(pid_to_list(Pid));
 encode_event_pid(_) -> null.
 
--doc "Map a `nil` value to JSON `null`, passing any other value through.".
+-doc """
+Map a `nil` value to JSON `null`, passing any other value through. Distinct
+from `beamtalk_repl_protocol:undefined_to_null/1` (BT-2801), which maps the
+Erlang "missing value" idiom `undefined` instead — `json:encode/1` has no
+default clause for an arbitrary atom, so encoding either unconverted would
+raise.
+""".
 -spec nullable(term()) -> term().
 nullable(nil) -> null;
 nullable(Value) -> Value.

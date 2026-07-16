@@ -454,7 +454,13 @@ fn collect_pattern_var_names_inner(pattern: &crate::ast::Pattern, names: &mut Ve
                 collect_pattern_var_names_inner(binding, names);
             }
         }
-        Pattern::Binary { .. } | Pattern::Wildcard(_) | Pattern::Literal(_, _) => {}
+        // Pattern::Type's binding is not wired into lint scope tracking yet
+        // (BT-2855 — bindings/scope land with narrowing and codegen).
+        Pattern::Binary { .. }
+        | Pattern::Wildcard(_)
+        | Pattern::Literal(_, _)
+        | Pattern::Nil(_)
+        | Pattern::Type { .. } => {}
     }
 }
 
@@ -494,7 +500,13 @@ fn define_pattern_vars_in_scope(pattern: &crate::ast::Pattern, scope: &mut LintS
                 define_pattern_vars_in_scope(binding, scope);
             }
         }
-        Pattern::Binary { .. } | Pattern::Wildcard(_) | Pattern::Literal(_, _) => {}
+        // Pattern::Type's binding is not wired into lint scope tracking yet
+        // (BT-2855 — bindings/scope land with narrowing and codegen).
+        Pattern::Binary { .. }
+        | Pattern::Wildcard(_)
+        | Pattern::Literal(_, _)
+        | Pattern::Nil(_)
+        | Pattern::Type { .. } => {}
     }
 }
 

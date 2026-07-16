@@ -21,21 +21,47 @@ thiserror.workspace = true
 miette.workspace = true
 stacker.workspace = true
 dirs.workspace = true
-serde = { workspace = true, optional = true }
+# why: BT-2859 — no longer optional: `ffi_type_specs`'s on-disk spec cache
+# (ADR 0075) unconditionally derives Serialize/Deserialize on its cache-entry
+# type. The `serde` *feature* below still independently gates the optional
+# derives on `ClassInfo` et al.
+serde.workspace = true
 # why: ADR 0088 Phase 0b — cerl AST nodes ETF-encode through `eetf` so the
 # wire bytes match `term_to_binary(cerl:c_module(...))` on the Erlang side.
 eetf = "0.12"
+# why: ADR 0100 Rule 3 (BT-2800) — parse `beamtalk.toml`'s `[diagnostics]`
+# severity-override table here so both `beamtalk-cli` and `beamtalk-lsp` can
+# apply it without `beamtalk-lsp` depending on `beamtalk-cli`.
+toml.workspace = true
+# why: BT-2859 — `ffi_type_specs`'s on-disk spec cache (ADR 0075) serialises
+# cache entries as JSON, the same format `beamtalk-cli`/`beamtalk-lsp` both
+# read/write.
+serde_json.workspace = true
+# why: BT-2859 — `ffi_type_specs` logs spec-extraction progress/failures
+# (non-fatal by design), matching the tracing usage already established in
+# `beamtalk-cli`/`beamtalk-lsp`.
+tracing.workspace = true
 
 [dev-dependencies]
 insta.workspace = true
 proptest.workspace = true
 criterion.workspace = true
-serde_json.workspace = true
 tempfile = "3.14"
+# why: already present transitively (see Cargo.lock); used in codegen tests to
+# assert on Core Erlang shape without hardcoding fresh-variable counter values.
+regex = "1"
+# why: BT-2859 — serialises env-var-mutating tests in `ffi_type_specs`
+# (mirrors the same pattern in `beamtalk-cli`).
+serial_test = "3"
 
 [[bench]]
 name = "compiler_pipeline"
 harness = false
+
+[build-dependencies]
+# why: BT-2859 — emits BEAMTALK_SPEC_MAPPING_STAMP for `ffi_type_specs`'s
+# cache invalidation (moved here from `beamtalk-cli`'s build.rs).
+beamtalk-build.workspace = true
 
 [features]
 default = []
@@ -45,7 +71,7 @@ default = []
 test = []
 ## Enable serde Serialize/Deserialize derives on ClassInfo and related types.
 ## Used by beamtalk-cli to persist Pass 1 metadata cache for incremental builds.
-serde = ["dep:serde", "ecow/serde"]
+serde = ["ecow/serde"]
 
 [lints]
 workspace = true
