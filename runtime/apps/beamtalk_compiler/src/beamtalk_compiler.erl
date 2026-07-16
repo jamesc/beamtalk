@@ -63,6 +63,7 @@ or `{error, Diagnostics}' on failure, where each diagnostic is a map with
     | {ok, class_definition, map()}
     | {ok, method_definition, map()}
     | {ok, protocol_definition, map()}
+    | {ok, type_alias_definition, map()}
     | {error, [map()]}.
 compile_expression(Source, ModuleName, KnownVars) ->
     beamtalk_compiler_server:compile_expression(Source, ModuleName, KnownVars).
@@ -78,6 +79,7 @@ Options:
     | {ok, class_definition, map()}
     | {ok, method_definition, map()}
     | {ok, protocol_definition, map()}
+    | {ok, type_alias_definition, map()}
     | {error, [map()]}.
 compile_expression(Source, ModuleName, KnownVars, Options) ->
     beamtalk_compiler_server:compile_expression(Source, ModuleName, KnownVars, Options).

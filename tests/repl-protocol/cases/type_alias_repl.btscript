@@ -1,0 +1,82 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for `type Name = ...` declarations typed directly at the REPL,
+// `:help <Alias>`, and cross-turn alias persistence within a session
+// (ADR 0108 Phase 8, BT-2902).
+//
+// REPL display-value decision (flagged for maintainer sign-off — see the
+// PR description and CLAUDE.md's REPL-output rule): a `type` declaration
+// echoes its declared name, mirroring the existing class-declaration
+// convention (`Actor subclass: Counter` displays `Counter`).
+//
+// The `:help` doc-comment-block rendering is covered by
+// beamtalk_repl_eval_tests.erl (format_alias_help/2 with/without a doc
+// comment) and a beamtalk-compiler-port test asserting the compiler
+// correctly extracts a `///` doc comment on a `type` declaration — this
+// harness parses `.btscript` "expressions" line-by-line and cannot express
+// a `///` comment followed by its declaration as a single multi-line REPL
+// input the way real multi-line class bodies are typed (a `///`-prefixed
+// line is indistinguishable here from a plain in-file comment line).
+
+// ===========================================================================
+// Declaring a type alias directly at the REPL echoes its name.
+// ===========================================================================
+
+type Direction = #north | #south | #east | #west
+// => Direction
+
+// ===========================================================================
+// The alias declared in the turn above resolves in a *later*, separate
+// turn's `::` annotation — the session-persistence behaviour this issue
+// adds (aliases erase at runtime, so there is no live BEAM artifact to
+// recover them from the way a REPL-declared class is recovered; the
+// session keeps its own alias table — see beamtalk_repl_state:alias_table).
+// A plain compile error here (rather than `#north`) would mean `Direction`
+// failed to resolve.
+// ===========================================================================
+
+d :: Direction := #north
+// => north
+
+// ===========================================================================
+// `matchExhaustive:` over an alias-typed scrutinee behaves identically to
+// the spelled-out union (ADR 0108 Exhaustiveness — inherited, not new). The
+// declaration and the `matchExhaustive:` are submitted together in one
+// turn (period-separated) because a typed local's *type* — unlike the
+// `Direction` alias itself — is not persisted as workspace state across
+// turns (the same pre-existing constraint `nil-and-type-patterns.btscript`
+// documents for `String | Nil`); what this proves is that the
+// *cross-turn-resolved* `Direction` alias expands to the exact closed
+// singleton union the checker already knows how to reason about.
+// ===========================================================================
+
+missing :: Direction := #north. missing matchExhaustive: [#north -> 0; #south -> 180; #east -> 90]
+// => ERROR: non-exhaustive matchExhaustive: `#west` is not handled
+
+covered :: Direction := #west. covered matchExhaustive: [#north -> 0; #south -> 180; #east -> 90; #west -> 270]
+// => 270
+
+// ===========================================================================
+// `:help <Alias>` on a session-declared alias with no doc comment: just the
+// declaration + expansion line and `Declared in:`, no comment block —
+// matching how `:help` already renders an undocumented class/method.
+// ===========================================================================
+
+:help Direction
+// => type Direction = #north | #south | #east | #west__Declared in: REPL
+
+// ===========================================================================
+// A live redefinition in a later turn is legal (ADR 0108 Semantics) — the
+// newest binding wins for subsequent resolution. Re-checking sites that
+// referenced the old binding is BT-2899's separate hot-reload concern.
+// ===========================================================================
+
+type Direction = #north | #south | #east | #west | #up | #down
+// => Direction
+
+e :: Direction := #up. e matchExhaustive: [#north -> 0; #south -> 1; #east -> 2; #west -> 3; #up -> 4; #down -> 5]
+// => 4
+
+:help Direction
+// => type Direction = #north | #south | #east | #west | #up | #down__Declared in: REPL

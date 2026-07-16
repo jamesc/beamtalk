@@ -141,15 +141,18 @@ pub(in crate::semantic_analysis) fn resolve_type_annotation(
 /// top-level call.
 ///
 /// Cycle detection *itself* (rejecting a cyclic alias at declaration time,
-/// e.g. `type A = B`, `type B = A`) is BT-2896, deliberately out of scope
-/// here (ADR 0108 "No recursion" explicitly assigns it to a later issue).
-/// But eager expansion means a cycle that slips past declaration-time
-/// checking (or simply hasn't been checked yet, since BT-2896 hasn't landed)
-/// would otherwise recurse forever the first time it's *referenced* — this
-/// guard is the "expansion itself carries a visited-set guard so a cycle
-/// that slips through is a diagnostic, never a hang" promise from that same
-/// ADR section, satisfied here defensively: a name already being expanded on
-/// this path resolves to `Dynamic` instead of recursing again.
+/// e.g. `type A = B`, `type B = A`) lives in
+/// [`AliasRegistry::register_module`](crate::semantic_analysis::alias_registry::AliasRegistry::register_module)
+/// and
+/// [`AliasRegistry::redefine_alias`](crate::semantic_analysis::alias_registry::AliasRegistry::redefine_alias)
+/// (BT-2896). But eager expansion means a cycle that slips past
+/// declaration-time checking (a live redefinition landing outside the
+/// `redefine_alias` path, or any other gap) would otherwise recurse forever
+/// the first time it's *referenced* — this guard is the "expansion itself
+/// carries a visited-set guard so a cycle that slips through is a
+/// diagnostic, never a hang" promise from that same ADR section, satisfied
+/// here defensively: a name already being expanded on this path resolves to
+/// `Dynamic` instead of recursing again.
 ///
 /// `memo` exists for a different reason: without it, a *legal, acyclic*
 /// chain of aliases that each reference the previous one twice —
@@ -217,9 +220,10 @@ fn resolve_type_annotation_inner(
                         return cached.clone();
                     }
                     if expanding.contains(name) {
-                        // A cycle slipped through (BT-2896 not yet landed, or
-                        // not yet re-checked on a live redefinition) — never
-                        // hang. See `resolve_type_annotation_inner`'s doc.
+                        // A cycle slipped through declaration-time checking
+                        // (e.g. a live redefinition that bypassed
+                        // `AliasRegistry::redefine_alias`) — never hang. See
+                        // `resolve_type_annotation_inner`'s doc.
                         return InferredType::Dynamic(DynamicReason::Unknown);
                     }
                     expanding.push(name.clone());
@@ -1270,9 +1274,13 @@ mod tests {
 
     #[test]
     fn cyclic_alias_reference_resolves_to_dynamic_instead_of_hanging() {
-        // ADR 0108 "No recursion": full cycle *detection* at declaration
-        // time is BT-2896, out of scope here — but expansion itself must
-        // never hang if a cycle slips through. `type A = B`, `type B = A`.
+        // ADR 0108 "No recursion": real declaration-time cycle *detection*
+        // (BT-2896) lives in `AliasRegistry::register_module` /
+        // `redefine_alias`, which this test bypasses via the test-only
+        // `register_test_alias` — so this exercises the defensive
+        // `expanding` guard in isolation, standing in for a cycle that
+        // somehow slipped past declaration-time checking. `type A = B`,
+        // `type B = A`.
         let mut registry = AliasRegistry::new();
         registry.register_test_alias(AliasInfo {
             name: "A".into(),
