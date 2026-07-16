@@ -199,7 +199,9 @@ dispatch(Op, Params, Msg, SessionPid) when
     Op =:= <<"browse-class-definition">>;
     %% BT-2578 native pane + BT-2648 native-modules enumeration.
     Op =:= <<"browse-native-source">>;
-    Op =:= <<"browse-native-modules">>
+    Op =:= <<"browse-native-modules">>;
+    %% BT-2903 (ADR 0108 Phase 8): type-alias enumeration.
+    Op =:= <<"browse-type-aliases">>
 ->
     %% ADR 0095 (BT-2488): System Browser browse facade — read-only term-ops,
     %% each returning `{value, JsonValue}`.

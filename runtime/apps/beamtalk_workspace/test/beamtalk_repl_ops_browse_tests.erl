@@ -444,6 +444,234 @@ ensure_stdlib() ->
     ok.
 
 %%====================================================================
+%% browse-type-aliases — enumeration + seeding-boundary exclusion (BT-2903)
+%%====================================================================
+
+describe_ops_has_type_aliases_key_test() ->
+    Ops = beamtalk_repl_ops_browse:describe_ops(),
+    ?assert(maps:is_key(<<"browse-type-aliases">>, Ops)),
+    #{<<"browse-type-aliases">> := Info} = Ops,
+    ?assertEqual([], maps:get(<<"params">>, Info)).
+
+%% Sanity: with no `type_aliases` env set anywhere, the op still returns a
+%% (possibly empty) list rather than crashing — most packages, including
+%% stdlib today, declare no aliases.
+type_aliases_returns_list_test() ->
+    ensure_stdlib(),
+    ?assert(is_list(type_aliases())).
+
+%% A package's declared public alias round-trips through every AliasRow field
+%% (ADR 0108: name, expansion, doc, source_file, internal).
+type_aliases_row_shape_test() ->
+    with_stdlib_aliases(
+        [
+            #{
+                name => 'RestartStrategy',
+                expansion => "#temporary | #transient | #permanent",
+                doc => "Restart strategy for a supervised child.",
+                source_file => "src/restart_strategy.bt",
+                internal => false
+            }
+        ],
+        fun() ->
+            Row = find_alias_row(type_aliases(), <<"RestartStrategy">>),
+            ?assertEqual(
+                <<"#temporary | #transient | #permanent">>,
+                maps:get(<<"expansion">>, Row)
+            ),
+            ?assertEqual(
+                <<"Restart strategy for a supervised child.">>,
+                maps:get(<<"doc">>, Row)
+            ),
+            ?assertEqual(
+                <<"src/restart_strategy.bt">>, maps:get(<<"source_file">>, Row)
+            ),
+            ?assertEqual(false, maps:get(<<"internal">>, Row)),
+            ?assertEqual(<<"stdlib">>, maps:get(<<"package">>, Row)),
+            ?assertEqual(<<"stdlib">>, maps:get(<<"source_origin">>, Row))
+        end
+    ).
+
+%% `doc => undefined` (no `///` comment) round-trips as JSON `null`.
+type_aliases_missing_doc_is_null_test() ->
+    with_stdlib_aliases(
+        [
+            #{
+                name => 'TimeoutMs',
+                expansion => "Integer",
+                doc => undefined,
+                source_file => "src/timeout.bt",
+                internal => false
+            }
+        ],
+        fun() ->
+            Row = find_alias_row(type_aliases(), <<"TimeoutMs">>),
+            ?assertEqual(null, maps:get(<<"doc">>, Row))
+        end
+    ).
+
+%% Seeding-boundary exclusion (ADR 0108 Implementation, BT-2903): an internal
+%% alias belonging to a package other than the current project is dropped
+%% entirely — never returned as a row for any browsing session to filter.
+%% Stands in for a dependency package the same way `beamtalk_stdlib` stands in
+%% for "some other loaded package" throughout this suite (see
+%% `with_stdlib_aliases`'s doc) — the current project is configured as
+%% `myapp`, so stdlib (origin `<<"stdlib">>`, never `<<"project">>`) plays the
+%% "not the current project" role.
+type_aliases_internal_from_non_project_package_excluded_test() ->
+    with_project_package(<<"myapp">>, fun() ->
+        with_stdlib_aliases(
+            [
+                #{
+                    name => 'InternalStdlibHelper',
+                    expansion => "Integer",
+                    doc => undefined,
+                    source_file => "src/helper.bt",
+                    internal => true
+                },
+                #{
+                    name => 'PublicStdlibAlias',
+                    expansion => "String",
+                    doc => undefined,
+                    source_file => "src/public.bt",
+                    internal => false
+                }
+            ],
+            fun() ->
+                Names = [maps:get(<<"name">>, R) || R <- type_aliases()],
+                ?assertNot(lists:member(<<"InternalStdlibHelper">>, Names)),
+                ?assert(lists:member(<<"PublicStdlibAlias">>, Names))
+            end
+        )
+    end).
+
+%% Rows are sorted by name (stable tree order).
+type_aliases_sorted_test() ->
+    with_stdlib_aliases(
+        [
+            #{
+                name => 'Zebra',
+                expansion => "Integer",
+                doc => undefined,
+                source_file => "src/z.bt",
+                internal => false
+            },
+            #{
+                name => 'Alpha',
+                expansion => "Integer",
+                doc => undefined,
+                source_file => "src/a.bt",
+                internal => false
+            }
+        ],
+        fun() ->
+            OwnNames = [
+                maps:get(<<"name">>, R)
+             || R <- type_aliases(), maps:get(<<"package">>, R) =:= <<"stdlib">>
+            ],
+            ?assertEqual([<<"Alpha">>, <<"Zebra">>], OwnNames)
+        end
+    ).
+
+%% Resilience: a malformed `type_aliases` env entry (e.g. a hand-edited or
+%% toolchain-mismatched `.app` file, not a map) must not crash the whole
+%% browse — `type_aliases_of_package/1` catches and skips, mirroring
+%% `class_row/2`'s per-class isolation elsewhere in this module.
+type_aliases_malformed_entry_does_not_crash_test() ->
+    with_stdlib_aliases(
+        [not_a_map],
+        fun() ->
+            Rows = type_aliases(),
+            ?assert(is_list(Rows)),
+            ?assertEqual([], [R || R <- Rows, maps:get(<<"package">>, R) =:= <<"stdlib">>])
+        end
+    ).
+
+%% alias_visible/2 — pure seeding-boundary decision (BT-2903).
+alias_visible_internal_project_is_visible_test() ->
+    ?assert(beamtalk_repl_ops_browse:alias_visible(#{internal => true}, <<"project">>)).
+
+alias_visible_internal_non_project_is_hidden_test() ->
+    ?assertNot(
+        beamtalk_repl_ops_browse:alias_visible(#{internal => true}, <<"dependency">>)
+    ),
+    ?assertNot(beamtalk_repl_ops_browse:alias_visible(#{internal => true}, <<"stdlib">>)).
+
+alias_visible_public_always_visible_test() ->
+    ?assert(beamtalk_repl_ops_browse:alias_visible(#{internal => false}, <<"project">>)),
+    ?assert(beamtalk_repl_ops_browse:alias_visible(#{internal => false}, <<"dependency">>)),
+    ?assert(beamtalk_repl_ops_browse:alias_visible(#{internal => false}, <<"stdlib">>)).
+
+%% alias_row/3 — field normalisation from the `.app`-file's atom/string shapes
+%% (`file:consult`-parsed terms, never binaries — see `alias_field_binary/1`'s
+%% doc).
+alias_row_normalises_app_file_shapes_test() ->
+    Entry = #{
+        name => 'JsonKey',
+        expansion => "String",
+        doc => "A doc comment.",
+        source_file => "src/json.bt",
+        internal => false
+    },
+    Row = beamtalk_repl_ops_browse:alias_row(Entry, <<"my_app">>, <<"project">>),
+    ?assertEqual(<<"JsonKey">>, maps:get(<<"name">>, Row)),
+    ?assertEqual(<<"String">>, maps:get(<<"expansion">>, Row)),
+    ?assertEqual(<<"A doc comment.">>, maps:get(<<"doc">>, Row)),
+    ?assertEqual(<<"src/json.bt">>, maps:get(<<"source_file">>, Row)),
+    ?assertEqual(false, maps:get(<<"internal">>, Row)),
+    ?assertEqual(<<"my_app">>, maps:get(<<"package">>, Row)),
+    ?assertEqual(<<"project">>, maps:get(<<"source_origin">>, Row)).
+
+alias_row_undefined_doc_is_null_test() ->
+    Entry = #{
+        name => 'NoDoc',
+        expansion => "Integer",
+        doc => undefined,
+        source_file => "src/nodoc.bt",
+        internal => true
+    },
+    Row = beamtalk_repl_ops_browse:alias_row(Entry, <<"my_app">>, <<"project">>),
+    ?assertEqual(null, maps:get(<<"doc">>, Row)).
+
+%% Helper: enumerate via the term handler.
+type_aliases() ->
+    {value, Rows} = beamtalk_repl_ops_browse:handle_term(
+        <<"browse-type-aliases">>, #{}, make_msg(), self()
+    ),
+    Rows.
+
+find_alias_row(Rows, Name) ->
+    case lists:search(fun(R) -> maps:get(<<"name">>, R) =:= Name end, Rows) of
+        {value, Row} -> Row;
+        false -> error({alias_row_not_found, Name})
+    end.
+
+%% Temporarily set `beamtalk_stdlib`'s `type_aliases` env to `Aliases`, run
+%% `Fun`, then restore the original env (`undefined` → unset).
+%%
+%% Stands in for a real second fixture package: `beamtalk_package:all/0` only
+%% discovers apps with a non-empty `classes` env, and stdlib is the one app
+%% always loaded under the EUnit harness (see `ensure_stdlib/0`) — no test in
+%% this suite constructs a second real loaded OTP application even for
+%% `browse-native-modules` (project/dependency classification there is tested
+%% at the pure-function level instead, see `source_origin_of/2` tests below).
+%% `application:set_env/3` on stdlib is the minimal, precedent-consistent way
+%% to fixture a package's alias env for enumeration tests without building a
+%% real `.app` file end-to-end.
+with_stdlib_aliases(Aliases, Fun) ->
+    ensure_stdlib(),
+    Previous = application:get_env(beamtalk_stdlib, type_aliases),
+    ok = application:set_env(beamtalk_stdlib, type_aliases, Aliases),
+    try
+        Fun()
+    after
+        case Previous of
+            {ok, V} -> application:set_env(beamtalk_stdlib, type_aliases, V);
+            undefined -> application:unset_env(beamtalk_stdlib, type_aliases)
+        end
+    end.
+
+%%====================================================================
 %% Validation error paths (no live class needed)
 %%====================================================================
 

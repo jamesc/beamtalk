@@ -321,6 +321,26 @@ defmodule BtAttach.Workspace do
   def browse_native_modules, do: dispatch_browse("browse-native-modules", %{})
 
   @doc """
+  List every loaded package's declared `type` aliases for the System Browser's
+  "Type Aliases" section (ADR 0108 Phase 8, BT-2903, `browse-type-aliases`).
+  Each row carries `name`, `expansion` (the alias's right-hand side, rendered
+  to Beamtalk display form), `doc` (`null` when undocumented), `source_file`,
+  `internal`, `package`, and `source_origin` (`project`/`dependency`/`stdlib`).
+
+  Aliases erase entirely at compile time (no BEAM module, no live process) —
+  unlike `browse_classes/0`, there is nothing live to reflect on, so rows come
+  from each package's compiled `.app`-file metadata instead. A dependency's
+  `internal` alias is excluded at the seeding boundary (never returned as a
+  row at all — ADR 0108 Implementation), mirroring how `internal` classes are
+  never resolvable cross-package; it is not filtered client-side.
+
+  Returns the live `{:value, rows}` term verbatim; `{:error, reason}` on a
+  dispatch failure.
+  """
+  @spec browse_type_aliases() :: {:value, term()} | {:error, term()}
+  def browse_type_aliases, do: dispatch_browse("browse-type-aliases", %{})
+
+  @doc """
   Save (edit → compile → reload → write-back) a project-owned native (`.erl`)
   module (BT-2670, `save-native-source`). `module` is the native module name,
   `source` the edited Erlang source. The workspace re-derives project ownership

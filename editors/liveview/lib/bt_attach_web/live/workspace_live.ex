@@ -562,6 +562,16 @@ defmodule BtAttachWeb.WorkspaceLive do
       # at once alongside class/method tabs.
       |> assign(:browser_mode, :classes)
       |> assign(:browser_native_modules, [])
+      # BT-2903 (ADR 0108 Phase 8): the third panel mode — every loaded
+      # package's declared `type` aliases (ADR 0108 Implementation: "a new
+      # sibling category alongside the existing Classes/Protocols panes"),
+      # mirroring the Native browser's own separate-panel treatment rather
+      # than a class-tree category bucket (aliases have no live class object
+      # to hang a category flag off of). No client-side source filter, unlike
+      # Native's `native_source`: a dependency's internal alias is already
+      # excluded server-side at the seeding boundary (`browse-type-aliases`),
+      # so every row this holds is already visible-by-construction.
+      |> assign(:browser_type_aliases, [])
       # BT-2656/BT-2661: the Native browser's own source-origin filter, mirroring the
       # class tree's `browser_source`. Defaults to "project" once the rows arrive
       # (`apply_default_native_source/1`), falling back to "all" when there are no
@@ -641,6 +651,7 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign(:next_window_id, 1)
       |> assign(:window_z, 10)
       |> assign_browser_native_modules()
+      |> assign_browser_type_aliases()
       # BT-2636: the set of expanded Changes-pane rows (keyed by the row's
       # `{class, selector}`), driven by the leading disclosure caret. A row's
       # structured net-vs-disk diff renders beneath it only while its key is in
@@ -1538,6 +1549,12 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   def handle_event("browser_mode", %{"mode" => "classes"}, socket) do
     {:noreply, assign(socket, browser_mode: :classes)}
+  end
+
+  # BT-2903: switch into the "Type Aliases" panel, re-fetching so an alias
+  # declared mid-session is discoverable — mirroring the Native mode switch.
+  def handle_event("browser_mode", %{"mode" => "aliases"}, socket) do
+    {:noreply, assign(assign_browser_type_aliases(socket), browser_mode: :aliases)}
   end
 
   def handle_event("browser_mode", _params, socket), do: {:noreply, socket}
@@ -4564,6 +4581,24 @@ defmodule BtAttachWeb.WorkspaceLive do
     socket
     |> assign(browser_native_modules: rows)
     |> apply_default_native_source(rows)
+  end
+
+  # BT-2903 (ADR 0108 Phase 8): load every loaded package's declared `type`
+  # aliases for the "Type Aliases" panel. Each row carries `name`,
+  # `expansion`, `doc`, `source_file`, `internal`, `package`, and
+  # `source_origin`. A dispatch failure / RBAC denial yields an empty list
+  # rather than crashing the browser — the class tree (the primary
+  # navigator) must still render. No client-side origin filter: unlike
+  # native modules, a dependency's `internal` alias is already excluded
+  # server-side at the seeding boundary, so there is nothing left to filter.
+  defp assign_browser_type_aliases(socket) do
+    rows =
+      case Facade.dispatch(:browse_type_aliases, %{}, ctx(socket)) do
+        {:value, rows} when is_list(rows) -> rows
+        _ -> []
+      end
+
+    assign(socket, browser_type_aliases: rows)
   end
 
   # BT-2656/BT-2661: apply the one-shot Project-origin default to the Native browser
@@ -7813,6 +7848,12 @@ defmodule BtAttachWeb.WorkspaceLive do
   attr :browser_native_modules, :list, default: []
   attr :native_source, :string, default: "all"
   attr :native_module_shown, :string, default: nil
+  # BT-2903 (ADR 0108 Phase 8): the third panel mode's data — every loaded
+  # package's declared `type` aliases (AliasRow: name, expansion, doc,
+  # source_file, internal, package, source_origin). Already fully filtered
+  # server-side (seeding-boundary exclusion), so there is no companion
+  # client-side filter attr the way `native_source` is for Native.
+  attr :browser_type_aliases, :list, default: []
 
   defp system_browser_classes(assigns) do
     # BT-2557: filter the rows once, up front, so both the hierarchy and category
@@ -7840,7 +7881,13 @@ defmodule BtAttachWeb.WorkspaceLive do
              native-module list (its own origin filter + count). --%>
         <div class="seg" role="tablist" aria-label="Browser mode">
           <button
-            :for={{mode, label} <- [{"classes", "Classes"}, {"native", "Native"}]}
+            :for={
+              {mode, label} <- [
+                {"classes", "Classes"},
+                {"native", "Native"},
+                {"aliases", "Type Aliases"}
+              ]
+            }
             type="button"
             role="tab"
             class={[to_string(@browser_mode) == mode && "on"]}
@@ -8119,6 +8166,36 @@ defmodule BtAttachWeb.WorkspaceLive do
             </div>
         <% end %>
       </div>
+      <%!-- BT-2903 (ADR 0108 Phase 8): the "Type Aliases" panel body — shown only
+           in `:aliases` mode. A `type Name = ...` declaration produces no BEAM
+           module (aliases erase entirely), so unlike Native there is nothing to
+           open as a source tab — each row is a flat, read-only entry showing the
+           alias's expansion inline, with a package/origin badge (mirroring the
+           class tree/Native vocabulary) and an "internal" tag when set. --%>
+      <div :if={@browser_mode == :aliases} class="panel-body" id="type-aliases-browser">
+        <%= cond do %>
+          <% @browser_type_aliases == [] -> %>
+            <p class="muted-note">No type aliases in the workspace.</p>
+          <% true -> %>
+            <div class="tree type-aliases-list">
+              <div :for={alias_row <- @browser_type_aliases} class="row" title={alias_row["name"]}>
+                <span class="twig">●</span>
+                <span class="cls mono">{alias_row["name"]}</span>
+                <span class="alias-expansion mono">= {alias_row["expansion"]}</span>
+                <span
+                  :if={alias_row["source_origin"] && alias_row["source_origin"] != "project"}
+                  class={"source-origin-tag #{source_origin_class(alias_row)}"}
+                  title={source_origin_title(alias_row)}
+                >
+                  {source_origin_label(alias_row)}
+                </span>
+                <span :if={alias_row["internal"] == true} class="runtime-tag" title="internal alias">
+                  internal
+                </span>
+              </div>
+            </div>
+        <% end %>
+      </div>
       <%!-- BT-2656: the instance/class side toggle drives the class tree's method
            list, so it is only meaningful in `:classes` mode. --%>
       <div :if={@browser_mode == :classes} class="actionbar sb-side">
@@ -8142,6 +8219,12 @@ defmodule BtAttachWeb.WorkspaceLive do
         <span class="native-badge">Erlang</span>
         <span>Native modules</span>
         <span class="count">{length(@visible_modules)}</span>
+      </div>
+      <%!-- BT-2903: a count footer for the Type Aliases panel, mirroring Native's. --%>
+      <div :if={@browser_mode == :aliases} class="actionbar sb-side native-count">
+        <span class="native-badge">type</span>
+        <span>Type aliases</span>
+        <span class="count">{length(@browser_type_aliases)}</span>
       </div>
     </div>
     """
@@ -8746,6 +8829,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                   browser_native_modules={@browser_native_modules}
                   native_source={@native_source}
                   native_module_shown={active_native_module(assigns)}
+                  browser_type_aliases={@browser_type_aliases}
                 />
                 <%!-- Draggable divider (BT-2576): rebalances the class tree vs.
                      the method list ("more class, less method"). phx-update="ignore"
@@ -8755,16 +8839,17 @@ defmodule BtAttachWeb.WorkspaceLive do
                      re-renders the class tree inside it), but the SplitDrag hook's
                      own MutationObserver — not updated() — re-applies the saved size
                      when that happens. --%>
-                <%!-- BT-2733: the method browser (gutter + protocol/method list) is a
-                     Beamtalk-class surface — native `.erl` modules have no protocol
-                     browsing here (their clauses open in an editor tab). In Native
-                     mode we hide it so a stale `@selected_class` method list can't
-                     linger under the unrelated native-module list; `@selected_class`
+                <%!-- BT-2733/BT-2903: the method browser (gutter + protocol/method
+                     list) is a Beamtalk-class surface — native `.erl` modules have no
+                     protocol browsing here (their clauses open in an editor tab), and
+                     a `type` alias has no methods at all. In Native/Type-Aliases mode
+                     we hide it so a stale `@selected_class` method list can't linger
+                     under the unrelated native-module/alias list; `@selected_class`
                      is left intact, so switching back to Classes restores it with no
-                     re-fetch. The remaining class/native panel then fills the column
-                     (the `.browser-split > .panel:last-of-type` flex rule). --%>
+                     re-fetch. The remaining class/native/aliases panel then fills the
+                     column (the `.browser-split > .panel:last-of-type` flex rule). --%>
                 <div
-                  :if={@browser_mode != :native}
+                  :if={@browser_mode == :classes}
                   id="browser-split-gutter"
                   class="split-gutter split-gutter-y"
                   phx-hook="SplitDrag"
@@ -8781,7 +8866,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                 >
                 </div>
                 <.system_browser_methods
-                  :if={@browser_mode != :native}
+                  :if={@browser_mode == :classes}
                   browser_protocols={@browser_protocols}
                   selected_protocol={@selected_protocol}
                   selected_class={@selected_class}

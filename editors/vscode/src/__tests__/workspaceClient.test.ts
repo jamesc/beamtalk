@@ -167,6 +167,68 @@ describe("WorkspaceClient.classes()", () => {
   });
 });
 
+// ─── Op: typeAliases() ────────────────────────────────────────────────────────
+
+describe("WorkspaceClient.typeAliases()", () => {
+  // ADR 0108 Phase 8 (BT-2903): typeAliases() sends `browse-type-aliases`
+  // directly — unlike classes(), there is no older op to route through since
+  // aliases erase entirely at compile time and have no `list-classes`-style
+  // legacy surface.
+  it("sends browse-type-aliases op and maps response to TypeAliasInfo[]", async () => {
+    const { client, ws } = makeConnectedClient();
+
+    const promise = client.typeAliases();
+    const req = ws.sent[ws.sent.length - 1];
+    expect(req.op).toBe("browse-type-aliases");
+
+    respondTo(ws, {
+      value: [
+        {
+          name: "RestartStrategy",
+          expansion: "#temporary | #transient | #permanent",
+          doc: "Restart strategy for a supervised child.",
+          source_file: "src/restart_strategy.bt",
+          internal: false,
+        },
+        {
+          name: "InternalHelper",
+          expansion: "Integer",
+          doc: null,
+          source_file: "src/helper.bt",
+          internal: true,
+        },
+      ],
+    });
+
+    const result = await promise;
+    expect(result).toEqual([
+      {
+        name: "RestartStrategy",
+        expansion: "#temporary | #transient | #permanent",
+        doc: "Restart strategy for a supervised child.",
+        source_file: "src/restart_strategy.bt",
+        internal: false,
+      },
+      {
+        name: "InternalHelper",
+        expansion: "Integer",
+        doc: undefined,
+        source_file: "src/helper.bt",
+        internal: true,
+      },
+    ]);
+    client.dispose();
+  });
+
+  it("returns [] when value field is absent", async () => {
+    const { client, ws } = makeConnectedClient();
+    const promise = client.typeAliases();
+    respondTo(ws, {});
+    expect(await promise).toEqual([]);
+    client.dispose();
+  });
+});
+
 // ─── Op: actors() ────────────────────────────────────────────────────────────
 
 describe("WorkspaceClient.actors()", () => {

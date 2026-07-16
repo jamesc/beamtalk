@@ -35,6 +35,47 @@ pub struct ClassMetadata {
     pub type_params: Vec<String>,
 }
 
+/// Metadata for a `type` alias declaration discovered during compilation
+/// (ADR 0108 Phase 8, BT-2903).
+///
+/// Aliases erase entirely — they produce no BEAM module, so unlike a class
+/// there is no live process or `-file` compile attribute the runtime can
+/// reflect on later. This struct is the *only* durable record of a package's
+/// alias declarations once compiled; it is written into the `.app` file's
+/// `{env, [{type_aliases, [...]}]}` list so the `browse-type-aliases`
+/// term-op (`beamtalk_repl_ops_browse:browse_type_aliases/0`) can read it
+/// back via `application:get_env/2`, mirroring how `browse-native-modules`
+/// reads the `native_modules` env key.
+///
+/// Deliberately **not** filtered by `internal` here (unlike
+/// [`build_class_metadata`](super::build::build_class_metadata), which drops
+/// internal classes from the `.app` file entirely) — a class's `internal`
+/// visibility is still enforced live, since `browse-classes` reflects on
+/// loaded class processes regardless of what the `.app` file says. An alias
+/// has no such live fallback, so *every* declared alias (internal or not)
+/// must round-trip through the `.app` file for the current package's own
+/// browse listing to be complete; the seeding-boundary exclusion for a
+/// *dependency's* internal aliases is applied at browse time instead
+/// (`beamtalk_repl_ops_browse.erl`), comparing each row's `internal` flag
+/// against the browsing session's current project package.
+#[derive(Debug, Clone)]
+pub struct AliasMetadata {
+    /// The alias name (e.g., `RestartStrategy`).
+    pub name: String,
+    /// The alias's right-hand-side, rendered to Beamtalk display form (e.g.
+    /// `"#temporary | #transient | #permanent"`) via
+    /// `beamtalk_core::unparse::unparse_type_annotation_display`.
+    pub expansion: String,
+    /// The alias's `///` doc comment, if any.
+    pub doc: Option<String>,
+    /// The source file the alias was declared in (as given in the package's
+    /// source file list — no live module to recover this from at runtime).
+    pub source_file: String,
+    /// Whether this is an `internal type Foo = ...` alias (ADR 0071 / ADR
+    /// 0108 Phase 5, BT-2898).
+    pub internal: bool,
+}
+
 /// Generate an OTP `.app` file for a compiled package.
 ///
 /// The `.app` file is written to `{build_dir}/{package_name}.app` and contains:
@@ -55,6 +96,7 @@ pub fn generate_app_file(
     native_module_names: &[String],
     bt_dep_names: &[String],
     hex_dep_names: &[String],
+    alias_metadata: &[AliasMetadata],
 ) -> Result<()> {
     let app_content = format_app_file(
         manifest,
@@ -64,6 +106,7 @@ pub fn generate_app_file(
         native_module_names,
         bt_dep_names,
         hex_dep_names,
+        alias_metadata,
     );
     let app_path = build_dir.join(format!("{}.app", manifest.name));
 
@@ -75,6 +118,7 @@ pub fn generate_app_file(
 }
 
 /// Format the OTP `.app` file content as an Erlang term.
+#[allow(clippy::too_many_arguments)]
 fn format_app_file(
     manifest: &PackageManifest,
     module_names: &[String],
@@ -83,6 +127,7 @@ fn format_app_file(
     native_module_names: &[String],
     bt_dep_names: &[String],
     hex_dep_names: &[String],
+    alias_metadata: &[AliasMetadata],
 ) -> String {
     let description = escape_erlang_string(
         manifest
@@ -95,6 +140,7 @@ fn format_app_file(
     let modules_list = format_modules_list(module_names);
     let classes_list = format_classes_list(class_metadata);
     let native_modules_entry = format_native_modules_entry(native_module_names);
+    let type_aliases_entry = format_type_aliases_entry(alias_metadata);
     let applications_list = format_applications_list(bt_dep_names, hex_dep_names);
 
     let mod_entry = match app_callback_module {
@@ -110,7 +156,7 @@ fn format_app_file(
     {{registered, []}},
     {{applications, [{applications}]}},{mod_entry}
     {{env, [
-        {{classes, [{classes}]}}{native_modules}
+        {{classes, [{classes}]}}{native_modules}{type_aliases}
     ]}}
 ]}}.
 "#,
@@ -122,6 +168,7 @@ fn format_app_file(
         classes = classes_list,
         mod_entry = mod_entry,
         native_modules = native_modules_entry,
+        type_aliases = type_aliases_entry,
     )
 }
 
@@ -174,6 +221,50 @@ fn format_native_modules_entry(native_module_names: &[String]) -> String {
     sorted.sort();
     let modules = sorted.join(", ");
     format!(",\n        {{native_modules, [{modules}]}}")
+}
+
+/// Format the `{type_aliases, [...]}` entry for the `.app` `env` section.
+///
+/// ADR 0108 Phase 8 (BT-2903): each entry is a map with `name` (atom, same
+/// naming rules as a class name), `expansion`/`source_file`/`doc` (Erlang
+/// strings — arbitrary display text, not identifiers, so they are escaped
+/// the same way `description` is rather than emitted as atoms), and
+/// `internal` (boolean):
+/// ```erlang
+/// #{name => 'RestartStrategy', expansion => "#temporary | #transient | #permanent",
+///   doc => "Restart strategy for a supervised child.", source_file => "src/restart.bt",
+///   internal => false}
+/// ```
+/// Returns an empty string when there are no type aliases, exactly like
+/// [`format_native_modules_entry`] — packages with no `type` declarations
+/// are unaffected (no `type_aliases` key at all, distinct from an empty
+/// list, matching the `native_modules` precedent).
+fn format_type_aliases_entry(alias_metadata: &[AliasMetadata]) -> String {
+    if alias_metadata.is_empty() {
+        return String::new();
+    }
+    let mut sorted = alias_metadata.to_vec();
+    sorted.sort_by(|a, b| a.name.cmp(&b.name));
+    let entries = sorted
+        .iter()
+        .map(|a| {
+            let doc = match &a.doc {
+                Some(d) => format!("\"{}\"", escape_erlang_string(d)),
+                None => "undefined".to_string(),
+            };
+            format!(
+                "#{{name => '{name}', expansion => \"{expansion}\", doc => {doc}, \
+                 source_file => \"{source_file}\", internal => {internal}}}",
+                name = a.name,
+                expansion = escape_erlang_string(&a.expansion),
+                doc = doc,
+                source_file = escape_erlang_string(&a.source_file),
+                internal = a.internal,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",\n            ");
+    format!(",\n        {{type_aliases, [{entries}]}}")
 }
 
 /// Format the class metadata list for the `.app` file.
@@ -244,7 +335,7 @@ mod tests {
         ];
         let classes = vec![];
 
-        let result = format_app_file(&manifest, &modules, &classes, None, &[], &[], &[]);
+        let result = format_app_file(&manifest, &modules, &classes, None, &[], &[], &[], &[]);
 
         assert!(result.contains("{application, my_app, ["));
         assert!(result.contains("{description, \"A test app\"}"));
@@ -260,7 +351,7 @@ mod tests {
     #[test]
     fn test_format_app_file_default_description() {
         let manifest = test_manifest("my_app", "0.1.0", None);
-        let result = format_app_file(&manifest, &[], &[], None, &[], &[], &[]);
+        let result = format_app_file(&manifest, &[], &[], None, &[], &[], &[], &[]);
 
         assert!(result.contains("{description, \"A beamtalk package\"}"));
     }
@@ -278,7 +369,7 @@ mod tests {
             type_params: vec![],
         }];
 
-        let result = format_app_file(&manifest, &modules, &classes, None, &[], &[], &[]);
+        let result = format_app_file(&manifest, &modules, &classes, None, &[], &[], &[], &[]);
 
         assert!(
             result.contains("name => 'Counter'"),
@@ -326,6 +417,7 @@ mod tests {
             &modules,
             &classes,
             None,
+            &[],
             &[],
             &[],
             &[],
@@ -386,7 +478,7 @@ mod tests {
     #[test]
     fn test_format_app_file_escapes_description() {
         let manifest = test_manifest("my_app", "0.1.0", Some(r#"A "quoted" app"#));
-        let result = format_app_file(&manifest, &[], &[], None, &[], &[], &[]);
+        let result = format_app_file(&manifest, &[], &[], None, &[], &[], &[], &[]);
         assert!(result.contains(r#"{description, "A \"quoted\" app"}"#));
     }
 
@@ -401,6 +493,7 @@ mod tests {
             &[],
             &[],
             &[],
+            &[],
         );
         assert!(result.contains("{mod, {beamtalk_my_app_app, []}}"));
     }
@@ -408,7 +501,7 @@ mod tests {
     #[test]
     fn test_format_app_file_without_mod_entry() {
         let manifest = test_manifest("my_app", "0.1.0", None);
-        let result = format_app_file(&manifest, &[], &[], None, &[], &[], &[]);
+        let result = format_app_file(&manifest, &[], &[], None, &[], &[], &[], &[]);
         assert!(!result.contains("{mod,"));
     }
 
@@ -427,6 +520,7 @@ mod tests {
             &modules,
             &classes,
             Some("beamtalk_my_app_app"),
+            &[],
             &[],
             &[],
             &[],
@@ -472,7 +566,16 @@ mod tests {
             "beamtalk_http".to_string(),
         ];
 
-        let result = format_app_file(&manifest, &modules, &[], None, &native_modules, &[], &[]);
+        let result = format_app_file(
+            &manifest,
+            &modules,
+            &[],
+            None,
+            &native_modules,
+            &[],
+            &[],
+            &[],
+        );
 
         assert!(
             result.contains("{native_modules, [beamtalk_http, beamtalk_http_server]}"),
@@ -487,7 +590,7 @@ mod tests {
     #[test]
     fn test_format_app_file_without_native_modules_unchanged() {
         let manifest = test_manifest("my_app", "0.1.0", Some("No native"));
-        let result = format_app_file(&manifest, &[], &[], None, &[], &[], &[]);
+        let result = format_app_file(&manifest, &[], &[], None, &[], &[], &[], &[]);
 
         assert!(
             !result.contains("native_modules"),
@@ -528,7 +631,7 @@ mod tests {
         let manifest = test_manifest("http", "0.1.0", Some("HTTP package"));
         let hex_deps = vec!["gun".to_string(), "cowboy".to_string()];
 
-        let result = format_app_file(&manifest, &[], &[], None, &[], &[], &hex_deps);
+        let result = format_app_file(&manifest, &[], &[], None, &[], &[], &hex_deps, &[]);
 
         assert!(
             result.contains("{applications, [kernel, stdlib, cowboy, gun, beamtalk_runtime]}"),
@@ -542,7 +645,16 @@ mod tests {
         let native_modules = vec!["beamtalk_http".to_string()];
         let hex_deps = vec!["gun".to_string()];
 
-        let result = format_app_file(&manifest, &[], &[], None, &native_modules, &[], &hex_deps);
+        let result = format_app_file(
+            &manifest,
+            &[],
+            &[],
+            None,
+            &native_modules,
+            &[],
+            &hex_deps,
+            &[],
+        );
 
         assert!(
             result.contains("{applications, [kernel, stdlib, gun, beamtalk_runtime]}"),
@@ -551,6 +663,132 @@ mod tests {
         assert!(
             result.contains("{native_modules, [beamtalk_http]}"),
             "Should include native modules. Got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_format_type_aliases_entry_empty() {
+        let result = format_type_aliases_entry(&[]);
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn test_format_type_aliases_entry_with_doc() {
+        let aliases = vec![AliasMetadata {
+            name: "RestartStrategy".to_string(),
+            expansion: "#temporary | #transient | #permanent".to_string(),
+            doc: Some("Restart strategy for a supervised child.".to_string()),
+            source_file: "src/restart_strategy.bt".to_string(),
+            internal: false,
+        }];
+        let result = format_type_aliases_entry(&aliases);
+        assert!(
+            result.contains("name => 'RestartStrategy'"),
+            "Got: {result}"
+        );
+        assert!(
+            result.contains("expansion => \"#temporary | #transient | #permanent\""),
+            "Got: {result}"
+        );
+        assert!(
+            result.contains("doc => \"Restart strategy for a supervised child.\""),
+            "Got: {result}"
+        );
+        assert!(
+            result.contains("source_file => \"src/restart_strategy.bt\""),
+            "Got: {result}"
+        );
+        assert!(result.contains("internal => false"), "Got: {result}");
+    }
+
+    #[test]
+    fn test_format_type_aliases_entry_escapes_backslash_in_expansion() {
+        // BT-2903: a `Difference`-typed alias's rendered expansion contains a
+        // literal `\` (e.g. `type PublicTag = Symbol \ (#reserved | #internal)`
+        // unparses to `"Symbol \\ (#reserved | #internal)"`, see
+        // `unparse::tests::difference_type_unparse` for the Beamtalk-source
+        // form). Since the `.app` file is a literal Erlang string (escaped via
+        // `escape_erlang_string`, not a binary), an un-escaped `\` would
+        // corrupt the next character when the `.app` file is `file:consult`ed
+        // — this proves the escape survives the round trip textually.
+        let aliases = vec![AliasMetadata {
+            name: "PublicTag".to_string(),
+            expansion: "Symbol \\ (#reserved | #internal)".to_string(),
+            doc: None,
+            source_file: "src/public_tag.bt".to_string(),
+            internal: false,
+        }];
+        let result = format_type_aliases_entry(&aliases);
+        assert!(
+            result.contains(r#"expansion => "Symbol \\ (#reserved | #internal)""#),
+            "backslash must be doubled for a valid Erlang string literal. Got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_format_type_aliases_entry_without_doc() {
+        let aliases = vec![AliasMetadata {
+            name: "TimeoutMs".to_string(),
+            expansion: "Integer".to_string(),
+            doc: None,
+            source_file: "src/timeout.bt".to_string(),
+            internal: true,
+        }];
+        let result = format_type_aliases_entry(&aliases);
+        assert!(result.contains("doc => undefined"), "Got: {result}");
+        assert!(result.contains("internal => true"), "Got: {result}");
+    }
+
+    #[test]
+    fn test_format_type_aliases_entry_sorted() {
+        let aliases = vec![
+            AliasMetadata {
+                name: "Zebra".to_string(),
+                expansion: "Integer".to_string(),
+                doc: None,
+                source_file: "src/z.bt".to_string(),
+                internal: false,
+            },
+            AliasMetadata {
+                name: "Alpha".to_string(),
+                expansion: "Integer".to_string(),
+                doc: None,
+                source_file: "src/a.bt".to_string(),
+                internal: false,
+            },
+        ];
+        let result = format_type_aliases_entry(&aliases);
+        assert!(
+            result.find("'Alpha'").unwrap() < result.find("'Zebra'").unwrap(),
+            "aliases should be sorted by name. Got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_format_app_file_with_type_aliases() {
+        let manifest = test_manifest("my_app", "0.1.0", Some("Test"));
+        let aliases = vec![AliasMetadata {
+            name: "JsonKey".to_string(),
+            expansion: "String".to_string(),
+            doc: None,
+            source_file: "src/json.bt".to_string(),
+            internal: false,
+        }];
+        let result = format_app_file(&manifest, &[], &[], None, &[], &[], &[], &aliases);
+        assert!(
+            result.contains("{type_aliases, ["),
+            "Should contain type_aliases entry. Got: {result}"
+        );
+        assert!(result.contains("name => 'JsonKey'"), "Got: {result}");
+    }
+
+    #[test]
+    fn test_format_app_file_without_type_aliases_unchanged() {
+        let manifest = test_manifest("my_app", "0.1.0", Some("No aliases"));
+        let result = format_app_file(&manifest, &[], &[], None, &[], &[], &[], &[]);
+        assert!(
+            !result.contains("type_aliases"),
+            "Should not contain type_aliases when empty. Got: {result}"
         );
     }
 }
