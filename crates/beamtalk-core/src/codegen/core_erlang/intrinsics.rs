@@ -1317,6 +1317,18 @@ impl CoreErlangGenerator {
     /// instead of a clear diagnostic. This wraps the existing correct Tier 1
     /// body with the same `stateful_block_dispatch` error BT-2812
     /// established, rather than replacing a placeholder.
+    ///
+    /// Selector-keyed, not class-keyed: applies wherever a class declares one
+    /// of these exact selectors as a bare-inferred `@primitive` with a real
+    /// BIF lowering (confirmed to include List, Array, Binary, Dictionary,
+    /// Set, Tuple, Collection, and String's `collect:`/`select:`/`reject:`).
+    ///
+    /// Same arity-only ambiguity BT-2812 documented for `blockValue*`
+    /// (`generate_block_value_structural_fallback`): `erlang:is_function/2`
+    /// can't distinguish a genuinely stateful block from a *pure* block
+    /// simply called with one fewer argument than the selector expects (both
+    /// present as arity `pure_arity + 1`) — hence the hedged hint text rather
+    /// than asserting the block is stateful.
     pub(in crate::codegen::core_erlang) fn generate_stateful_block_guard(
         &mut self,
         block_param: &str,
@@ -1329,7 +1341,7 @@ impl CoreErlangGenerator {
         let error_sel = self.fresh_temp_var("Err");
         let error_hint = self.fresh_temp_var("Err");
         let hint = leaf::binary_lit(
-            "Block captures mutable state and must be invoked directly instead of via perform:/dynamic dispatch",
+            "Wrong argument count, or the block captures mutable state and must be invoked directly instead of via perform:/dynamic dispatch",
         );
         let stateful_branch = docvec![
             "let ",

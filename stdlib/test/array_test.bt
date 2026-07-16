@@ -69,6 +69,19 @@ TestCase subclass: ArrayTest
     self assert: (#[1, 2, 3, 4] inject: 1 into: [:acc :x | acc * x]) equals: 24
     self assert: (#[] inject: 0 into: [:acc :x | acc + x]) equals: 0
 
+  testPerformOnStatefulBlockRaisesClearErrorInsteadOfCrashing =>
+    // BT-2888: the same do:/collect:/select:/inject:into: stateful_block_dispatch
+    // guard List gets also applies to Array, since the guard is keyed on
+    // selector name, not receiver class.
+    count := 0
+    statefulBlock := [:x |
+      count := count + 1
+      x * 2
+    ]
+    self should: [
+      #[1, 2, 3] perform: #collect: withArguments: #(statefulBlock)
+    ] raise: #stateful_block_dispatch
+
   testPrintString =>
     self assert: #[1, 2, 3] printString equals: "#[1, 2, 3]"
     self assert: #[] printString equals: "#[]"

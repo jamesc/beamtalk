@@ -69,3 +69,16 @@ TestCase subclass: StringOperationsTest
     self assert: (s reject: [:ch | ch < "l"]) equals: "llo"
     // empty result
     self assert: ("aaa" reject: [:ch | ch =:= "a"]) equals: ""
+
+  testPerformOnStatefulCollectBlockRaisesClearErrorInsteadOfCrashing =>
+    // BT-2888: the collect: stateful_block_dispatch guard List gets also
+    // applies to String, since the guard is keyed on selector name, not
+    // receiver class.
+    count := 0
+    statefulBlock := [:ch |
+      count := count + 1
+      ch uppercase
+    ]
+    self should: [
+      "hi" perform: #collect: withArguments: #(statefulBlock)
+    ] raise: #stateful_block_dispatch
