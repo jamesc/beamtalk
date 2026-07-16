@@ -32,6 +32,8 @@ use tracing::{debug, info, warn};
 use beamtalk_core::language_service::{
     NavQuery, NavQueryResponse, NavSite, NavSymbolClass, NavSymbolsResponse,
 };
+use serde::de::DeserializeOwned;
+
 use beamtalk_repl_protocol::{ReplResponse, RequestBuilder};
 
 /// How long to wait for individual WebSocket reads / writes during the auth
@@ -353,20 +355,7 @@ impl RuntimeClient {
                 )
             })??;
 
-        if response.is_error() {
-            let msg = response
-                .error
-                .or(response.message)
-                .unwrap_or_else(|| "unknown error".to_string());
-            return Err(RuntimeError::Protocol(format!("nav-query error: {msg}")));
-        }
-
-        let value = response.value.ok_or_else(|| {
-            RuntimeError::Protocol("nav-query: reply missing `value`".to_string())
-        })?;
-        let payload: NavQueryResponse = serde_json::from_value(value).map_err(|e| {
-            RuntimeError::Protocol(format!("nav-query: malformed reply payload: {e}"))
-        })?;
+        let payload: NavQueryResponse = decode_rpc_reply(response, "nav-query")?;
         Ok(payload.sites)
     }
 
@@ -426,20 +415,7 @@ impl RuntimeClient {
                 )
             })??;
 
-        if response.is_error() {
-            let msg = response
-                .error
-                .or(response.message)
-                .unwrap_or_else(|| "unknown error".to_string());
-            return Err(RuntimeError::Protocol(format!("nav-symbols error: {msg}")));
-        }
-
-        let value = response.value.ok_or_else(|| {
-            RuntimeError::Protocol("nav-symbols: reply missing `value`".to_string())
-        })?;
-        let payload: NavSymbolsResponse = serde_json::from_value(value).map_err(|e| {
-            RuntimeError::Protocol(format!("nav-symbols: malformed reply payload: {e}"))
-        })?;
+        let payload: NavSymbolsResponse = decode_rpc_reply(response, "nav-symbols")?;
         Ok(payload.classes)
     }
 
@@ -676,6 +652,31 @@ async fn read_text(ws: &mut WsStream) -> Result<String, String> {
     tokio::time::timeout(IO_TIMEOUT, read_fut)
         .await
         .map_err(|_| format!("websocket read timed out after {}s", IO_TIMEOUT.as_secs()))?
+}
+
+/// Decode a typed payload from a [`ReplResponse`] received after a named RPC op.
+///
+/// Shared by [`RuntimeClient::nav_query`] and [`RuntimeClient::nav_symbols`]
+/// (and any future typed ops) to avoid repeating the same three-step check:
+/// 1. error flag → `RuntimeError::Protocol("{op} error: {msg}")`
+/// 2. missing `value` field → `RuntimeError::Protocol("{op}: reply missing `value`")`
+/// 3. JSON deserialise failure → `RuntimeError::Protocol("{op}: malformed reply payload: {e}")`
+fn decode_rpc_reply<T: DeserializeOwned>(
+    response: ReplResponse,
+    op: &str,
+) -> Result<T, RuntimeError> {
+    if response.is_error() {
+        let msg = response
+            .error
+            .or(response.message)
+            .unwrap_or_else(|| "unknown error".to_string());
+        return Err(RuntimeError::Protocol(format!("{op} error: {msg}")));
+    }
+    let value = response
+        .value
+        .ok_or_else(|| RuntimeError::Protocol(format!("{op}: reply missing `value`")))?;
+    serde_json::from_value(value)
+        .map_err(|e| RuntimeError::Protocol(format!("{op}: malformed reply payload: {e}")))
 }
 
 #[cfg(test)]
