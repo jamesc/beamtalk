@@ -79,6 +79,17 @@ impl AliasInfo {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AliasRegistry {
     aliases: HashMap<EcoString, AliasInfo>,
+    /// Canonicalised cycle chains (see [`canonical_cycle_key`]) already
+    /// reported by [`register_module`](Self::register_module) — BT-2896:
+    /// that method re-scans the *whole* accumulated `aliases` map on every
+    /// call (see its doc), so a package-wide caller seeding this registry
+    /// across several `register_module` calls (one per file) would
+    /// otherwise see the same still-unresolved cycle re-reported on every
+    /// subsequent call. Not consulted by
+    /// [`redefine_alias`](Self::redefine_alias) — a live redefinition's
+    /// diagnostics are always a fresh, one-off judgement of that single
+    /// trial, never deduplicated against history.
+    reported_cycles: std::collections::HashSet<Vec<EcoString>>,
 }
 
 impl AliasRegistry {
@@ -87,6 +98,7 @@ impl AliasRegistry {
     pub fn new() -> Self {
         Self {
             aliases: HashMap::new(),
+            reported_cycles: std::collections::HashSet::new(),
         }
     }
 
@@ -174,8 +186,16 @@ impl AliasRegistry {
         // anyway — rejecting cyclic aliases outright would just cascade into
         // spurious "unknown type" diagnostics at every reference site instead
         // of the one precise cycle diagnostic here.
-        let (cycle_diagnostics, _resolution_order) = detect_cycles(&self.aliases);
-        diagnostics.extend(cycle_diagnostics);
+        //
+        // Deduplicated against `self.reported_cycles` (see its doc): a cycle
+        // that doesn't change between two `register_module` calls on the
+        // same registry is reported only once, not once per call.
+        let (cycles, _resolution_order) = find_cycles(&self.aliases);
+        for (cycle, cycle_span) in cycles {
+            if self.reported_cycles.insert(canonical_cycle_key(&cycle)) {
+                diagnostics.push(cycle_diagnostic(&cycle, cycle_span));
+            }
+        }
 
         diagnostics
     }
@@ -219,8 +239,15 @@ impl AliasRegistry {
 
         let mut candidate = self.aliases.clone();
         candidate.insert(name.clone(), AliasInfo::from_definition(alias_def));
-        let (cycle_diagnostics, _resolution_order) = detect_cycles(&candidate);
-        diagnostics.extend(cycle_diagnostics);
+        // Always a fresh judgement of this one trial — never deduplicated
+        // against `self.reported_cycles` (see its doc): a live redefinition
+        // must be re-flagged every time it (re)introduces a cycle, even if
+        // that exact cycle was already reported once during batch
+        // registration.
+        let (cycles, _resolution_order) = find_cycles(&candidate);
+        for (cycle, cycle_span) in cycles {
+            diagnostics.push(cycle_diagnostic(&cycle, cycle_span));
+        }
 
         // All-or-nothing: any declaration-time error (namespace collision,
         // unbound type variable, or an introduced cycle) rejects the whole
@@ -378,7 +405,7 @@ fn namespace_collision_diagnostic(
     None
 }
 
-/// DFS visitation state for [`detect_cycles`] — standard white/grey/black
+/// DFS visitation state for [`find_cycles`] — standard white/grey/black
 /// cycle detection, collapsed to two states since a `Done` (black) node
 /// never needs revisiting or distinguishing from "never seen" once its
 /// subtree is fully explored.
@@ -411,13 +438,22 @@ enum VisitState {
 ///
 /// Iteration starts from names in sorted order, and `path`/`order` are
 /// plain `Vec`s rather than a `HashSet`, so the result — which cycle is
-/// reported first, and the exact post-order — is deterministic across runs
+/// found first, and the exact post-order — is deterministic across runs
 /// regardless of `HashMap` iteration order.
-fn detect_cycles(aliases: &HashMap<EcoString, AliasInfo>) -> (Vec<Diagnostic>, Vec<EcoString>) {
+///
+/// Returns each detected cycle as a raw `(chain, span)` pair — `chain`'s
+/// first and last elements are equal (see [`visit_alias`]), and `span` is
+/// where the diagnostic should point — rather than a pre-built
+/// [`Diagnostic`], so callers can dedupe or otherwise post-process before
+/// formatting (see [`AliasRegistry::register_module`]'s use of
+/// [`canonical_cycle_key`]). Use [`cycle_diagnostic`] to format one.
+fn find_cycles(
+    aliases: &HashMap<EcoString, AliasInfo>,
+) -> (Vec<(Vec<EcoString>, Span)>, Vec<EcoString>) {
     let mut state: HashMap<EcoString, VisitState> = HashMap::new();
     let mut path: Vec<EcoString> = Vec::new();
     let mut order: Vec<EcoString> = Vec::new();
-    let mut diagnostics = Vec::new();
+    let mut cycles: Vec<(Vec<EcoString>, Span)> = Vec::new();
 
     let mut names: Vec<EcoString> = aliases.keys().cloned().collect();
     names.sort();
@@ -430,14 +466,14 @@ fn detect_cycles(aliases: &HashMap<EcoString, AliasInfo>) -> (Vec<Diagnostic>, V
                 &mut state,
                 &mut path,
                 &mut order,
-                &mut diagnostics,
+                &mut cycles,
             );
         }
     }
-    (diagnostics, order)
+    (cycles, order)
 }
 
-/// The recursive DFS step behind [`detect_cycles`]. See that function's doc
+/// The recursive DFS step behind [`find_cycles`]. See that function's doc
 /// for the overall algorithm and its guarantees.
 fn visit_alias(
     name: &EcoString,
@@ -445,7 +481,7 @@ fn visit_alias(
     state: &mut HashMap<EcoString, VisitState>,
     path: &mut Vec<EcoString>,
     order: &mut Vec<EcoString>,
-    diagnostics: &mut Vec<Diagnostic>,
+    cycles: &mut Vec<(Vec<EcoString>, Span)>,
 ) {
     state.insert(name.clone(), VisitState::Visiting);
     path.push(name.clone());
@@ -455,21 +491,24 @@ fn visit_alias(
         collect_alias_references(&info.annotation, aliases, &mut deps);
         for dep in deps {
             match state.get(&dep) {
-                None => visit_alias(&dep, aliases, state, path, order, diagnostics),
+                None => visit_alias(&dep, aliases, state, path, order, cycles),
                 Some(VisitState::Visiting) => {
                     // Back-edge to an ancestor still on the current path —
                     // a cycle. The chain from that ancestor's first
                     // occurrence through to here (plus repeating the
                     // ancestor once more) is exactly the `A → B → A` shape
-                    // ADR 0108's Error examples specify.
-                    let start_idx = path
-                        .iter()
-                        .position(|n| *n == dep)
-                        .expect("dep is Visiting, so it must be on the current DFS path");
+                    // ADR 0108's Error examples specify. `position` is
+                    // guaranteed to find `dep` (a `Visiting` node is always
+                    // still on `path` — it was pushed when marked `Visiting`
+                    // and is only popped after being marked `Done`) but
+                    // falls back to the start of the path rather than
+                    // panicking if that invariant is ever violated by a
+                    // future refactor.
+                    let start_idx = path.iter().position(|n| *n == dep).unwrap_or(0);
                     let mut cycle: Vec<EcoString> = path[start_idx..].to_vec();
                     cycle.push(dep.clone());
                     let span = aliases.get(&cycle[0]).map_or(Span::new(0, 0), |i| i.span);
-                    diagnostics.push(cycle_diagnostic(&cycle, span));
+                    cycles.push((cycle, span));
                 }
                 // Already fully explored (possibly via a different path) —
                 // no cycle through this edge, and no need to re-walk it.
@@ -481,6 +520,28 @@ fn visit_alias(
     state.insert(name.clone(), VisitState::Done);
     path.pop();
     order.push(name.clone());
+}
+
+/// Canonicalises a cycle chain (as returned by [`find_cycles`], first and
+/// last elements equal) to a rotation-independent key: the chain's "core"
+/// (its members without the repeated closing name), rotated to start at its
+/// lexicographically smallest member. The same directed cycle discovered
+/// from two different entry points (e.g. `register_module` seeing `Ab`
+/// before `Bc` in one call, then `Bc` before `Ab` in another) canonicalises
+/// to the same key, which is what makes deduplication in
+/// [`AliasRegistry::reported_cycles`](AliasRegistry) sound.
+fn canonical_cycle_key(cycle: &[EcoString]) -> Vec<EcoString> {
+    let core = &cycle[..cycle.len().saturating_sub(1)];
+    let min_idx = core
+        .iter()
+        .enumerate()
+        .min_by_key(|(_, name)| name.as_str())
+        .map_or(0, |(idx, _)| idx);
+    core[min_idx..]
+        .iter()
+        .chain(core[..min_idx].iter())
+        .cloned()
+        .collect()
 }
 
 /// Collects the names, among `ann`'s referenced identifiers, that are
@@ -1002,6 +1063,115 @@ mod tests {
         let diags = registry.register_module(&module, &hierarchy, &protocol_registry);
 
         assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+    }
+
+    #[test]
+    fn find_cycles_post_order_is_a_valid_topological_order() {
+        // ADR 0108 "No recursion": "the same DFS the cycle check already
+        // needs ... produces this topological order for free as a side
+        // effect via its post-order" — asserted directly against the raw
+        // algorithm here, not just indirectly via `register_module`'s
+        // pass/fail outcome. type Pa = Integer, type Qb = Pa, type Rc = Qb:
+        // `Pa` (no dependencies) must resolve before `Qb`, which must
+        // resolve before `Rc`.
+        let mut aliases = HashMap::new();
+        aliases.insert(
+            EcoString::from("Pa"),
+            AliasInfo {
+                name: "Pa".into(),
+                annotation: TypeAnnotation::Simple(ident("Integer")),
+                span: span(),
+            },
+        );
+        aliases.insert(
+            EcoString::from("Qb"),
+            AliasInfo {
+                name: "Qb".into(),
+                annotation: TypeAnnotation::Simple(ident("Pa")),
+                span: span(),
+            },
+        );
+        aliases.insert(
+            EcoString::from("Rc"),
+            AliasInfo {
+                name: "Rc".into(),
+                annotation: TypeAnnotation::Simple(ident("Qb")),
+                span: span(),
+            },
+        );
+
+        let (cycles, order) = find_cycles(&aliases);
+        assert!(cycles.is_empty(), "unexpected cycles: {cycles:?}");
+        assert_eq!(
+            order.len(),
+            3,
+            "expected all three names in the order: {order:?}"
+        );
+        let position = |n: &str| order.iter().position(|x| x == n).unwrap();
+        assert!(
+            position("Pa") < position("Qb"),
+            "Pa must resolve before Qb: {order:?}"
+        );
+        assert!(
+            position("Qb") < position("Rc"),
+            "Qb must resolve before Rc: {order:?}"
+        );
+    }
+
+    #[test]
+    fn repeated_register_module_calls_report_the_same_cycle_only_once() {
+        // BT-2896: `register_module` re-scans the *whole* accumulated
+        // registry on every call (see its doc) so a package-wide caller
+        // seeding aliases across several files — one `register_module` call
+        // per file — still catches a cross-file cycle. But that means a
+        // cycle already reported by an earlier call must not be re-reported
+        // by a later call that merely adds unrelated aliases; `Ab`/`Bc`'s
+        // cycle must be flagged exactly once across both calls below.
+        let cyclic_file = Module {
+            type_aliases: vec![
+                alias_def(
+                    "Ab",
+                    TypeAnnotation::Union {
+                        types: vec![
+                            TypeAnnotation::Simple(ident("Bc")),
+                            TypeAnnotation::Simple(ident("Integer")),
+                        ],
+                        span: span(),
+                    },
+                ),
+                alias_def(
+                    "Bc",
+                    TypeAnnotation::Union {
+                        types: vec![
+                            TypeAnnotation::Simple(ident("Ab")),
+                            TypeAnnotation::Simple(ident("Symbol")),
+                        ],
+                        span: span(),
+                    },
+                ),
+            ],
+            ..empty_module()
+        };
+        let unrelated_file = Module {
+            type_aliases: vec![alias_def(
+                "Unrelated",
+                TypeAnnotation::Simple(ident("Integer")),
+            )],
+            ..empty_module()
+        };
+        let hierarchy = ClassHierarchy::with_builtins();
+        let protocol_registry = ProtocolRegistry::new();
+        let mut registry = AliasRegistry::new();
+
+        let diags1 = registry.register_module(&cyclic_file, &hierarchy, &protocol_registry);
+        assert_eq!(diags1.len(), 1, "expected one cycle diagnostic: {diags1:?}");
+
+        let diags2 = registry.register_module(&unrelated_file, &hierarchy, &protocol_registry);
+        assert!(
+            diags2.is_empty(),
+            "the already-reported Ab/Bc cycle must not resurface: {diags2:?}"
+        );
+        assert!(registry.has_alias("Unrelated"));
     }
 
     #[test]
