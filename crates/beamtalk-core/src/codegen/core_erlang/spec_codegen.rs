@@ -236,7 +236,19 @@ fn generic_type_to_spec(
         "Tuple" => Document::Str("{'type', 0, 'tuple', 'any'}"),
         // Any other generic type (custom classes like Result, Array, etc.)
         // maps to any() — the base class is not a built-in Erlang type.
-        _ => simple_type_to_spec(base_name),
+        // BT-2900: if the base name is itself a registered alias (e.g. a
+        // non-parametric `type MyList = List` applied as `MyList(Integer)`),
+        // reference it by name instead — mirrors the `Simple` case in
+        // `type_annotation_to_spec`. The (illegitimate, since ADR 0108 defers
+        // parametric aliases) type argument is dropped, same as any other
+        // unresolvable generic application.
+        _ => {
+            if aliases.is_some_and(|registry| registry.has_alias(base_name)) {
+                alias_type_reference(base_name)
+            } else {
+                simple_type_to_spec(base_name)
+            }
+        }
     }
 }
 
@@ -1538,6 +1550,23 @@ mod tests {
             result,
             "{'type', 0, 'union', [{'user_type', 0, 'timeout', []}, {'atom', 0, 'nil'}]}"
         );
+    }
+
+    #[test]
+    fn alias_reference_as_generic_base_uses_user_type() {
+        // A non-parametric alias applied generically (e.g. `MyList(Integer)`
+        // where `type MyList = List`) is ill-formed, but the generic-base
+        // catch-all should still reference the alias by name (dropping the
+        // type argument) rather than falling through to any() — mirrors the
+        // `Simple` case for symmetry.
+        let registry = alias_registry_with("MyList", TypeAnnotation::simple("List", span()));
+        let ann = TypeAnnotation::generic(
+            Identifier::new("MyList", span()),
+            vec![TypeAnnotation::simple("Integer", span())],
+            span(),
+        );
+        let result = render(&type_annotation_to_spec(&ann, Some(&registry)));
+        assert_eq!(result, "{'user_type', 0, 'my_list', []}");
     }
 
     #[test]
