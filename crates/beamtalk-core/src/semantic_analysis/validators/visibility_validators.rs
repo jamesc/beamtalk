@@ -15,13 +15,21 @@
 //! - **E0402 (leaked visibility):** A public class must not expose an internal
 //!   class in its public signature (parameter types, return types, state type
 //!   annotations). Internal-on-internal is fine.
+//!
+//! BT-2898 (ADR 0108 Phase 5) extends E0402 to `internal type` aliases in two
+//! ways: a public class/protocol signature directly naming an internal alias
+//! is a leak (mirrors the internal-class rule exactly), and a *public* alias
+//! whose expansion transitively reaches an internal class or alias is a leak
+//! at its own declaration — see [`check_alias_leaked_visibility`].
 
 use crate::ast::{Expression, Module, TypeAnnotation};
+use crate::semantic_analysis::alias_registry::AliasRegistry;
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::source_analysis::DiagnosticCategory;
 use crate::source_analysis::{Diagnostic, Span};
 use ecow::EcoString;
+use std::collections::HashSet;
 
 /// Checks all class-level visibility rules for the module.
 ///
@@ -30,6 +38,7 @@ use ecow::EcoString;
 pub fn check_class_visibility(
     module: &Module,
     hierarchy: &ClassHierarchy,
+    alias_registry: &AliasRegistry,
     current_package: Option<&str>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -51,7 +60,13 @@ pub fn check_class_visibility(
 
         // E0402: leaked visibility — only applies to public classes
         if !class.is_internal {
-            check_leaked_visibility_class(class, current_pkg, hierarchy, diagnostics);
+            check_leaked_visibility_class(
+                class,
+                alias_registry,
+                current_pkg,
+                hierarchy,
+                diagnostics,
+            );
         }
 
         // E0401: type annotations in methods (both instance and class-side)
@@ -338,6 +353,7 @@ fn check_type_annotation_cross_package(
 /// public signature (parameter types, return types, state type annotations).
 fn check_leaked_visibility_class(
     class: &crate::ast::ClassDefinition,
+    alias_registry: &AliasRegistry,
     current_pkg: &str,
     hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
@@ -347,7 +363,15 @@ fn check_leaked_visibility_class(
     // Check state field type annotations
     for state in &class.state {
         if let Some(ref ty) = state.type_annotation {
-            check_type_annotation_leaked(ty, class_name, None, current_pkg, hierarchy, diagnostics);
+            check_type_annotation_leaked(
+                ty,
+                class_name,
+                None,
+                current_pkg,
+                hierarchy,
+                alias_registry,
+                diagnostics,
+            );
         }
     }
 
@@ -370,6 +394,7 @@ fn check_leaked_visibility_class(
                     Some(&selector),
                     current_pkg,
                     hierarchy,
+                    alias_registry,
                     diagnostics,
                 );
             }
@@ -383,6 +408,7 @@ fn check_leaked_visibility_class(
                 Some(&selector),
                 current_pkg,
                 hierarchy,
+                alias_registry,
                 diagnostics,
             );
         }
@@ -400,6 +426,7 @@ fn check_type_annotation_leaked(
     method_selector: Option<&ecow::EcoString>,
     current_pkg: &str,
     hierarchy: &ClassHierarchy,
+    alias_registry: &AliasRegistry,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     match ty {
@@ -411,6 +438,7 @@ fn check_type_annotation_leaked(
                 method_selector,
                 current_pkg,
                 hierarchy,
+                alias_registry,
                 diagnostics,
             );
         }
@@ -422,6 +450,7 @@ fn check_type_annotation_leaked(
                     method_selector,
                     current_pkg,
                     hierarchy,
+                    alias_registry,
                     diagnostics,
                 );
             }
@@ -436,6 +465,7 @@ fn check_type_annotation_leaked(
                 method_selector,
                 current_pkg,
                 hierarchy,
+                alias_registry,
                 diagnostics,
             );
             for p in parameters {
@@ -445,6 +475,7 @@ fn check_type_annotation_leaked(
                     method_selector,
                     current_pkg,
                     hierarchy,
+                    alias_registry,
                     diagnostics,
                 );
             }
@@ -456,6 +487,7 @@ fn check_type_annotation_leaked(
                 method_selector,
                 current_pkg,
                 hierarchy,
+                alias_registry,
                 diagnostics,
             );
         }
@@ -466,6 +498,7 @@ fn check_type_annotation_leaked(
                 method_selector,
                 current_pkg,
                 hierarchy,
+                alias_registry,
                 diagnostics,
             );
             check_type_annotation_leaked(
@@ -474,6 +507,7 @@ fn check_type_annotation_leaked(
                 method_selector,
                 current_pkg,
                 hierarchy,
+                alias_registry,
                 diagnostics,
             );
         }
@@ -484,6 +518,7 @@ fn check_type_annotation_leaked(
                 method_selector,
                 current_pkg,
                 hierarchy,
+                alias_registry,
                 diagnostics,
             );
             check_type_annotation_leaked(
@@ -492,6 +527,7 @@ fn check_type_annotation_leaked(
                 method_selector,
                 current_pkg,
                 hierarchy,
+                alias_registry,
                 diagnostics,
             );
         }
@@ -505,6 +541,7 @@ fn check_type_annotation_leaked(
                 method_selector,
                 current_pkg,
                 hierarchy,
+                alias_registry,
                 diagnostics,
             );
         }
@@ -515,7 +552,19 @@ fn check_type_annotation_leaked(
 }
 
 /// Checks if a type name in a public signature references an internal class
-/// from the same package, which is a leaked-visibility error (E0402).
+/// or internal type alias, which is a leaked-visibility error (E0402).
+///
+/// BT-2898: an internal *alias* reference is always a leak when found here —
+/// unlike internal classes, an internal alias is never seeded across a
+/// package boundary at all ([`AliasRegistry::add_pre_loaded`]'s
+/// seeding-boundary exclusion), so a name that resolves via `alias_registry`
+/// with `is_internal: true` is guaranteed to be scoped to the current
+/// compilation; no same-package comparison is needed (contrast with the
+/// class case below, which must additionally check `info.package ==
+/// current_pkg` since internal classes *are* passed across the boundary via
+/// `pre_loaded_classes`/`add_from_beam_meta`, with E0401 handling the
+/// cross-package case separately).
+#[allow(clippy::too_many_arguments)] // BT-2898 added `alias_registry`; each param is load-bearing context, not bundleable without obscuring the leaf check
 fn check_leaked_ref(
     type_name: &ecow::EcoString,
     span: Span,
@@ -523,8 +572,37 @@ fn check_leaked_ref(
     method_selector: Option<&ecow::EcoString>,
     current_pkg: &str,
     hierarchy: &ClassHierarchy,
+    alias_registry: &AliasRegistry,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    let location = if let Some(sel) = method_selector {
+        format!("{class_name} >> {sel}")
+    } else {
+        format!("{class_name}")
+    };
+
+    if let Some(alias_info) = alias_registry.get(type_name) {
+        if alias_info.is_internal {
+            diagnostics.push(
+                Diagnostic::error(
+                    format!(
+                        "Internal type alias '{type_name}' appears in public signature of '{location}'"
+                    ),
+                    span,
+                )
+                .with_hint(format!(
+                    "'{type_name}' is declared 'internal' — make it public, or change the type"
+                ))
+                .with_category(DiagnosticCategory::Visibility),
+            );
+        }
+        // Alias names are disjoint from class names (namespace collision
+        // checks in `AliasRegistry::register_module`/`add_pre_loaded`
+        // prevent a name from being both), so there is no class lookup to
+        // fall through to here.
+        return;
+    }
+
     let Some(info) = hierarchy.get_class(type_name) else {
         return; // Unknown type — other passes handle this
     };
@@ -541,12 +619,6 @@ fn check_leaked_ref(
         return; // No package — builtins or REPL
     }
 
-    let location = if let Some(sel) = method_selector {
-        format!("{class_name} >> {sel}")
-    } else {
-        format!("{class_name}")
-    };
-
     diagnostics.push(
         Diagnostic::error(
             format!("Internal class '{type_name}' appears in public signature of '{location}'"),
@@ -557,6 +629,265 @@ fn check_leaked_ref(
         ))
         .with_category(DiagnosticCategory::Visibility),
     );
+}
+
+/// E0402 (BT-2898, ADR 0108 Semantics): a *public* type alias whose expanded
+/// annotation transitively reaches an internal class or internal alias is a
+/// leaked-visibility error — even though the internal name never appears
+/// directly in any *consumer's* signature, `Pub`'s exported expansion still
+/// exposes it.
+///
+/// `public type Pub = InternalAlias | String` never writes `InternalAlias`
+/// in a public *signature* (that direct-reference case is
+/// [`check_leaked_ref`]'s job, run against usage sites), but `Pub`'s
+/// expansion contains whatever `InternalAlias` expands to — so this check
+/// walks the alias's own right-hand side at *declaration* time, following
+/// alias chains (multi-hop) with cycle detection, mirroring how the same
+/// expansion is already computed eagerly by
+/// [`resolve_type_annotation`](crate::semantic_analysis::type_checker::resolve_type_annotation).
+///
+/// `internal` aliases are skipped entirely — an internal alias's RHS may
+/// reference anything visible in its own package without leaking (mirrors
+/// `check_leaked_visibility_class`'s `!class.is_internal` gate). Protocols
+/// are not checked here: they do not currently have an `is_internal` flag
+/// (see [`check_leaked_method_visibility`]'s note), so there is nothing to
+/// leak from that direction yet.
+pub fn check_alias_leaked_visibility(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    alias_registry: &AliasRegistry,
+    current_package: Option<&str>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let Some(_current_pkg) = current_package else {
+        return;
+    };
+
+    for alias_def in &module.type_aliases {
+        if alias_def.is_internal {
+            continue;
+        }
+        let mut visited = HashSet::new();
+        visited.insert(alias_def.name.name.clone());
+        check_type_annotation_alias_leak(
+            &alias_def.annotation,
+            &alias_def.name.name,
+            hierarchy,
+            alias_registry,
+            &mut visited,
+            diagnostics,
+        );
+    }
+}
+
+/// Recursively walks a public alias's expanded annotation for E0402 alias
+/// leakage. Structurally identical recursion arms to
+/// [`check_type_annotation_leaked`], but delegates to
+/// [`check_alias_leak_ref`] and threads a `visited` set for cycle safety
+/// across alias chains.
+#[allow(clippy::too_many_lines)] // one arm per TypeAnnotation variant, mirroring check_type_annotation_leaked; irreducible
+fn check_type_annotation_alias_leak(
+    ty: &TypeAnnotation,
+    alias_name: &ecow::EcoString,
+    hierarchy: &ClassHierarchy,
+    alias_registry: &AliasRegistry,
+    visited: &mut HashSet<EcoString>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    match ty {
+        TypeAnnotation::Simple(id) => {
+            check_alias_leak_ref(
+                &id.name,
+                id.span,
+                alias_name,
+                hierarchy,
+                alias_registry,
+                visited,
+                diagnostics,
+            );
+        }
+        TypeAnnotation::Union { types, .. } => {
+            for t in types {
+                check_type_annotation_alias_leak(
+                    t,
+                    alias_name,
+                    hierarchy,
+                    alias_registry,
+                    visited,
+                    diagnostics,
+                );
+            }
+        }
+        TypeAnnotation::Generic {
+            base, parameters, ..
+        } => {
+            check_alias_leak_ref(
+                &base.name,
+                base.span,
+                alias_name,
+                hierarchy,
+                alias_registry,
+                visited,
+                diagnostics,
+            );
+            for p in parameters {
+                check_type_annotation_alias_leak(
+                    p,
+                    alias_name,
+                    hierarchy,
+                    alias_registry,
+                    visited,
+                    diagnostics,
+                );
+            }
+        }
+        TypeAnnotation::FalseOr { inner, .. } => {
+            check_type_annotation_alias_leak(
+                inner,
+                alias_name,
+                hierarchy,
+                alias_registry,
+                visited,
+                diagnostics,
+            );
+        }
+        TypeAnnotation::Difference { base, excluded, .. } => {
+            check_type_annotation_alias_leak(
+                base,
+                alias_name,
+                hierarchy,
+                alias_registry,
+                visited,
+                diagnostics,
+            );
+            check_type_annotation_alias_leak(
+                excluded,
+                alias_name,
+                hierarchy,
+                alias_registry,
+                visited,
+                diagnostics,
+            );
+        }
+        TypeAnnotation::Intersection { left, right, .. } => {
+            check_type_annotation_alias_leak(
+                left,
+                alias_name,
+                hierarchy,
+                alias_registry,
+                visited,
+                diagnostics,
+            );
+            check_type_annotation_alias_leak(
+                right,
+                alias_name,
+                hierarchy,
+                alias_registry,
+                visited,
+                diagnostics,
+            );
+        }
+        TypeAnnotation::ClassOf {
+            class_name: cls, ..
+        } => {
+            check_alias_leak_ref(
+                &cls.name,
+                cls.span,
+                alias_name,
+                hierarchy,
+                alias_registry,
+                visited,
+                diagnostics,
+            );
+        }
+        TypeAnnotation::Singleton { .. }
+        | TypeAnnotation::SelfType { .. }
+        | TypeAnnotation::SelfClass { .. } => {}
+    }
+}
+
+/// Leaf check for [`check_type_annotation_alias_leak`]: if `type_name`
+/// resolves to an internal class or internal alias, the enclosing public
+/// alias `alias_name` leaks it. If `type_name` resolves to a (public) alias,
+/// recurses into its own expansion — `visited` guards against a reference
+/// cycle slipping through (full cycle *detection* at declaration time is
+/// BT-2896, out of scope here; this guard only prevents this checker from
+/// hanging on one).
+///
+/// Unlike [`check_leaked_ref`], this does **not** compare `info.package` to
+/// a "current package" — there is no such thing here: a *public* alias's
+/// exported expansion must be resolvable by every consumer, so an internal
+/// class reachable through it is a leak regardless of which package
+/// declared that class (contrast [`check_leaked_ref`]'s usage-site check,
+/// where an internal class from a *different* package is E0401's job, not
+/// E0402's, and a same-package internal class is fine to reference from an
+/// internal signature). A public alias has no "internal signature" escape
+/// hatch — it is public by definition — so every internal class or alias
+/// its expansion reaches is a leak, full stop.
+fn check_alias_leak_ref(
+    type_name: &EcoString,
+    span: Span,
+    alias_name: &EcoString,
+    hierarchy: &ClassHierarchy,
+    alias_registry: &AliasRegistry,
+    visited: &mut HashSet<EcoString>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    // Dedup at the top (not just around the alias-chasing recursion below):
+    // a diamond-shaped alias graph (`Pub = A | B`, `A = C`, `B = C`) would
+    // otherwise reach `C` twice and emit the same leak diagnostic twice.
+    // Once a name has been checked for this top-level alias, every further
+    // reference to it — whether reached again as a class or as an alias —
+    // is a no-op.
+    if !visited.insert(type_name.clone()) {
+        return;
+    }
+
+    if let Some(alias_info) = alias_registry.get(type_name) {
+        if alias_info.is_internal {
+            diagnostics.push(
+                Diagnostic::error(
+                    format!(
+                        "Internal type alias '{type_name}' appears in the expansion of \
+                         public type alias '{alias_name}'"
+                    ),
+                    span,
+                )
+                .with_hint(format!(
+                    "'{type_name}' is declared 'internal' — make it public, or change '{alias_name}'"
+                ))
+                .with_category(DiagnosticCategory::Visibility),
+            );
+        }
+        check_type_annotation_alias_leak(
+            &alias_info.annotation,
+            alias_name,
+            hierarchy,
+            alias_registry,
+            visited,
+            diagnostics,
+        );
+        return;
+    }
+
+    if let Some(info) = hierarchy.get_class(type_name) {
+        if info.is_internal {
+            diagnostics.push(
+                Diagnostic::error(
+                    format!(
+                        "Internal class '{type_name}' appears in the expansion of \
+                         public type alias '{alias_name}'"
+                    ),
+                    span,
+                )
+                .with_hint(format!(
+                    "'{type_name}' is declared 'internal' — make it public, or change '{alias_name}'"
+                ))
+                .with_category(DiagnosticCategory::Visibility),
+            );
+        }
+    }
+    // Protocols have no `is_internal` flag yet — nothing to check.
 }
 
 /// E0402 (BT-1702): Emit error when an internal method satisfies a public protocol.
@@ -827,7 +1158,13 @@ mod tests {
         let module = parse_module("ParserState subclass: MyParser\n  parse => 42");
         let h = build_hierarchy_with_internal_class(&module, "ParserState", "json");
         let mut diags = Vec::new();
-        check_class_visibility(&module, &h, Some("my_app"), &mut diags);
+        check_class_visibility(
+            &module,
+            &h,
+            &AliasRegistry::new(),
+            Some("my_app"),
+            &mut diags,
+        );
 
         assert!(
             diags.iter().any(|d| d.severity == Severity::Error
@@ -849,7 +1186,7 @@ mod tests {
         };
         h.stamp_package("json");
         let mut diags = Vec::new();
-        check_class_visibility(&module, &h, Some("json"), &mut diags);
+        check_class_visibility(&module, &h, &AliasRegistry::new(), Some("json"), &mut diags);
 
         let errors: Vec<_> = diags
             .iter()
@@ -894,7 +1231,13 @@ mod tests {
         };
         h.add_from_beam_meta(vec![info]);
         let mut diags = Vec::new();
-        check_class_visibility(&module, &h, Some("my_app"), &mut diags);
+        check_class_visibility(
+            &module,
+            &h,
+            &AliasRegistry::new(),
+            Some("my_app"),
+            &mut diags,
+        );
 
         let errors: Vec<_> = diags
             .iter()
@@ -911,7 +1254,13 @@ mod tests {
         let module = parse_module("Object subclass: Foo\n  process: input :: ParserState => 42");
         let h = build_hierarchy_with_internal_class(&module, "ParserState", "json");
         let mut diags = Vec::new();
-        check_class_visibility(&module, &h, Some("my_app"), &mut diags);
+        check_class_visibility(
+            &module,
+            &h,
+            &AliasRegistry::new(),
+            Some("my_app"),
+            &mut diags,
+        );
 
         assert!(
             diags.iter().any(|d| d.severity == Severity::Error
@@ -926,7 +1275,13 @@ mod tests {
         let module = parse_module("Object subclass: Foo\n  getState -> ParserState => nil");
         let h = build_hierarchy_with_internal_class(&module, "ParserState", "json");
         let mut diags = Vec::new();
-        check_class_visibility(&module, &h, Some("my_app"), &mut diags);
+        check_class_visibility(
+            &module,
+            &h,
+            &AliasRegistry::new(),
+            Some("my_app"),
+            &mut diags,
+        );
 
         assert!(
             diags.iter().any(|d| d.severity == Severity::Error
@@ -941,7 +1296,7 @@ mod tests {
         let module = parse_module("ParserState subclass: MyParser\n  parse => 42");
         let h = build_hierarchy_with_internal_class(&module, "ParserState", "json");
         let mut diags = Vec::new();
-        check_class_visibility(&module, &h, None, &mut diags);
+        check_class_visibility(&module, &h, &AliasRegistry::new(), None, &mut diags);
 
         assert!(
             diags.is_empty(),
@@ -954,7 +1309,13 @@ mod tests {
         let module = parse_module("Object subclass: Foo\n  state: buf :: ParserState = nil");
         let h = build_hierarchy_with_internal_class(&module, "ParserState", "json");
         let mut diags = Vec::new();
-        check_class_visibility(&module, &h, Some("my_app"), &mut diags);
+        check_class_visibility(
+            &module,
+            &h,
+            &AliasRegistry::new(),
+            Some("my_app"),
+            &mut diags,
+        );
 
         assert!(
             diags.iter().any(|d| d.severity == Severity::Error
@@ -970,7 +1331,13 @@ mod tests {
         let module = parse_module("Object subclass: Foo\n  bar => ParserState new");
         let h = build_hierarchy_with_internal_class(&module, "ParserState", "json");
         let mut diags = Vec::new();
-        check_class_visibility(&module, &h, Some("my_app"), &mut diags);
+        check_class_visibility(
+            &module,
+            &h,
+            &AliasRegistry::new(),
+            Some("my_app"),
+            &mut diags,
+        );
 
         assert!(
             diags.iter().any(|d| d.severity == Severity::Error
@@ -986,7 +1353,13 @@ mod tests {
         let module = parse_module("ParserState new");
         let h = build_hierarchy_with_internal_class(&module, "ParserState", "json");
         let mut diags = Vec::new();
-        check_class_visibility(&module, &h, Some("my_app"), &mut diags);
+        check_class_visibility(
+            &module,
+            &h,
+            &AliasRegistry::new(),
+            Some("my_app"),
+            &mut diags,
+        );
 
         assert!(
             diags.iter().any(|d| d.severity == Severity::Error
@@ -1010,7 +1383,7 @@ mod tests {
         };
         h.stamp_package("json");
         let mut diags = Vec::new();
-        check_class_visibility(&module, &h, Some("json"), &mut diags);
+        check_class_visibility(&module, &h, &AliasRegistry::new(), Some("json"), &mut diags);
 
         assert!(
             diags.iter().any(|d| d.severity == Severity::Error
@@ -1033,7 +1406,7 @@ mod tests {
         };
         h.stamp_package("json");
         let mut diags = Vec::new();
-        check_class_visibility(&module, &h, Some("json"), &mut diags);
+        check_class_visibility(&module, &h, &AliasRegistry::new(), Some("json"), &mut diags);
 
         assert!(
             diags.iter().any(|d| d.severity == Severity::Error
@@ -1056,7 +1429,7 @@ mod tests {
         };
         h.stamp_package("json");
         let mut diags = Vec::new();
-        check_class_visibility(&module, &h, Some("json"), &mut diags);
+        check_class_visibility(&module, &h, &AliasRegistry::new(), Some("json"), &mut diags);
 
         assert!(
             diags.iter().any(|d| d.severity == Severity::Error
@@ -1080,7 +1453,7 @@ mod tests {
         };
         h.stamp_package("json");
         let mut diags = Vec::new();
-        check_class_visibility(&module, &h, Some("json"), &mut diags);
+        check_class_visibility(&module, &h, &AliasRegistry::new(), Some("json"), &mut diags);
 
         let leaked: Vec<_> = diags
             .iter()
@@ -1107,7 +1480,7 @@ mod tests {
         };
         h.stamp_package("json");
         let mut diags = Vec::new();
-        check_class_visibility(&module, &h, Some("json"), &mut diags);
+        check_class_visibility(&module, &h, &AliasRegistry::new(), Some("json"), &mut diags);
 
         let leaked: Vec<_> = diags
             .iter()
@@ -1133,7 +1506,221 @@ mod tests {
         };
         h.stamp_package("json");
         let mut diags = Vec::new();
-        check_class_visibility(&module, &h, None, &mut diags);
+        check_class_visibility(&module, &h, &AliasRegistry::new(), None, &mut diags);
+
+        assert!(
+            diags.is_empty(),
+            "Expected no errors when current_package is None, got: {diags:?}"
+        );
+    }
+
+    // --- BT-2898 (ADR 0108 Phase 5): internal type alias leakage ---
+
+    /// Builds a `ClassHierarchy` and `AliasRegistry` from the module's own
+    /// declarations, package-stamped for `pkg` — the same-package
+    /// counterpart of `build_hierarchy_with_internal_class` for tests that
+    /// exercise a module-local `internal type` alongside a public class.
+    fn build_hierarchy_and_aliases(module: &Module, pkg: &str) -> (ClassHierarchy, AliasRegistry) {
+        let (Ok(mut h), _) = ClassHierarchy::build(module) else {
+            panic!("build should succeed");
+        };
+        h.stamp_package(pkg);
+        let protocol_registry = ProtocolRegistry::new();
+        let mut alias_registry = AliasRegistry::new();
+        let diags = alias_registry.register_module(module, &h, &protocol_registry);
+        assert!(
+            diags.is_empty(),
+            "unexpected alias registration diagnostics: {diags:?}"
+        );
+        (h, alias_registry)
+    }
+
+    #[test]
+    fn e0402_public_signature_directly_referencing_internal_alias() {
+        // A public method returning an internal alias directly — mirrors
+        // ADR 0071's existing rule for internal classes.
+        let module = parse_module(
+            "internal type ParserState = Integer\n\n\
+             Object subclass: Parser\n  tokenize: input :: String -> ParserState => nil",
+        );
+        let (h, alias_registry) = build_hierarchy_and_aliases(&module, "json");
+        let mut diags = Vec::new();
+        check_class_visibility(&module, &h, &alias_registry, Some("json"), &mut diags);
+
+        assert!(
+            diags.iter().any(|d| d.severity == Severity::Error
+                && d.message.contains("Internal type alias 'ParserState'")
+                && d.message.contains("Parser >> tokenize:")),
+            "Expected leaked visibility error for internal alias in public return type, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn e0402_no_error_internal_method_referencing_internal_alias() {
+        // Internal-on-internal is fine — an internal method on a public
+        // class can reference an internal alias without leaking it.
+        let module = parse_module(
+            "internal type ParserState = Integer\n\n\
+             Object subclass: Parser\n  internal tokenize: input :: String -> ParserState => nil",
+        );
+        let (h, alias_registry) = build_hierarchy_and_aliases(&module, "json");
+        let mut diags = Vec::new();
+        check_class_visibility(&module, &h, &alias_registry, Some("json"), &mut diags);
+
+        let leaked: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("Internal type alias"))
+            .collect();
+        assert!(
+            leaked.is_empty(),
+            "Expected no leaked visibility error for internal method referencing internal alias, got: {leaked:?}"
+        );
+    }
+
+    #[test]
+    fn alias_leak_public_alias_directly_exposes_internal_alias() {
+        // `public type Pub = InternalAlias | String` — direct one-hop case.
+        let module = parse_module("internal type Priv = Integer\ntype Pub = Priv | String");
+        let (h, alias_registry) = build_hierarchy_and_aliases(&module, "json");
+        let mut diags = Vec::new();
+        check_alias_leaked_visibility(&module, &h, &alias_registry, Some("json"), &mut diags);
+
+        assert!(
+            diags.iter().any(|d| d.severity == Severity::Error
+                && d.message.contains("Internal type alias 'Priv'")
+                && d.message.contains("public type alias 'Pub'")),
+            "Expected alias-leak error, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn alias_leak_multi_hop_through_intermediate_public_alias() {
+        // `type Pub = Mid`, `type Mid = Priv` (internal) — the leak must be
+        // found by following the chain, not just Pub's own written RHS.
+        let module = parse_module("internal type Priv = Integer\ntype Mid = Priv\ntype Pub = Mid");
+        let (h, alias_registry) = build_hierarchy_and_aliases(&module, "json");
+        let mut diags = Vec::new();
+        check_alias_leaked_visibility(&module, &h, &alias_registry, Some("json"), &mut diags);
+
+        let pub_leaks: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("public type alias 'Pub'"))
+            .collect();
+        assert!(
+            pub_leaks.iter().any(|d| d.message.contains("Priv")),
+            "Expected multi-hop alias-leak error naming 'Priv' reachable through 'Mid', got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn alias_leak_diamond_shaped_expansion_reports_once() {
+        // `type Pub = Aa | Bb`, `type Aa = Priv`, `type Bb = Priv` (internal)
+        // — both branches of the diamond reach `Priv`; the leak must be
+        // reported exactly once, not once per path.
+        let module = parse_module(
+            "internal type Priv = Integer\ntype Aa = Priv\ntype Bb = Priv\ntype Pub = Aa | Bb",
+        );
+        let (h, alias_registry) = build_hierarchy_and_aliases(&module, "json");
+        let mut diags = Vec::new();
+        check_alias_leaked_visibility(&module, &h, &alias_registry, Some("json"), &mut diags);
+
+        let priv_leaks: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("public type alias 'Pub'") && d.message.contains("Priv"))
+            .collect();
+        assert_eq!(
+            priv_leaks.len(),
+            1,
+            "expected exactly one leak diagnostic for 'Priv' reached via both 'A' and 'B', got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn alias_leak_through_generic_type_argument() {
+        // `type Pub = List(Priv)` — the leak-check must recurse into a
+        // Generic annotation's type arguments, not just its base name.
+        let module = parse_module("internal type Priv = Integer\ntype Pub = List(Priv)");
+        let (h, alias_registry) = build_hierarchy_and_aliases(&module, "json");
+        let mut diags = Vec::new();
+        check_alias_leaked_visibility(&module, &h, &alias_registry, Some("json"), &mut diags);
+
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.message.contains("Internal type alias 'Priv'")
+                    && d.message.contains("public type alias 'Pub'")),
+            "Expected alias-leak error through a Generic type argument, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn alias_leak_through_intersection_and_difference() {
+        // `type Pub = (Priv & String) \ Symbol` — both the Intersection and
+        // Difference recursion arms must be walked.
+        let module =
+            parse_module("internal type Priv = Integer\ntype Pub = (Priv & String) \\ Symbol");
+        let (h, alias_registry) = build_hierarchy_and_aliases(&module, "json");
+        let mut diags = Vec::new();
+        check_alias_leaked_visibility(&module, &h, &alias_registry, Some("json"), &mut diags);
+
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.message.contains("Internal type alias 'Priv'")
+                    && d.message.contains("public type alias 'Pub'")),
+            "Expected alias-leak error through Intersection/Difference, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn alias_leak_public_alias_reaching_internal_class() {
+        // `type Pub = ParserState` where `ParserState` is an internal class
+        // — the leakage check also walks through to internal classes, not
+        // just internal aliases.
+        let module = parse_module("type Pub = ParserState");
+        let h = build_hierarchy_with_internal_class(&module, "ParserState", "json");
+        let protocol_registry = ProtocolRegistry::new();
+        let mut alias_registry = AliasRegistry::new();
+        let diags = alias_registry.register_module(&module, &h, &protocol_registry);
+        assert!(diags.is_empty());
+
+        let mut diags = Vec::new();
+        check_alias_leaked_visibility(&module, &h, &alias_registry, Some("json"), &mut diags);
+
+        assert!(
+            diags.iter().any(|d| d.severity == Severity::Error
+                && d.message.contains("Internal class 'ParserState'")
+                && d.message.contains("public type alias 'Pub'")),
+            "Expected alias-leak error naming the internal class, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn alias_leak_internal_alias_is_not_checked_itself() {
+        // Internal-on-internal is fine: an internal alias's own RHS may
+        // reference anything visible in its own package without leaking.
+        let module = parse_module("internal type Priv = ParserState");
+        let h = build_hierarchy_with_internal_class(&module, "ParserState", "json");
+        let protocol_registry = ProtocolRegistry::new();
+        let mut alias_registry = AliasRegistry::new();
+        let diags = alias_registry.register_module(&module, &h, &protocol_registry);
+        assert!(diags.is_empty());
+
+        let mut diags = Vec::new();
+        check_alias_leaked_visibility(&module, &h, &alias_registry, Some("json"), &mut diags);
+
+        assert!(
+            diags.is_empty(),
+            "An internal alias's own RHS must not be leak-checked, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn alias_leak_no_check_without_current_package() {
+        let module = parse_module("internal type Priv = Integer\ntype Pub = Priv | String");
+        let (h, alias_registry) = build_hierarchy_and_aliases(&module, "json");
+        let mut diags = Vec::new();
+        check_alias_leaked_visibility(&module, &h, &alias_registry, None, &mut diags);
 
         assert!(
             diags.is_empty(),

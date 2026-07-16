@@ -217,6 +217,12 @@ pub struct AnalysisContext<'a> {
     /// Protocol definitions extracted from other source files, e.g. `BUnit`
     /// fixtures (BT-2006).
     pub pre_loaded_protocols: Vec<protocol_registry::ProtocolInfo>,
+    /// Type alias definitions extracted from other source files or packages
+    /// (BT-2898, ADR 0108 Phase 5). Seeded into the alias registry the same
+    /// way `pre_loaded_protocols` is — `internal` entries are excluded at
+    /// the seeding boundary before this ever reaches
+    /// `AliasRegistry::add_pre_loaded`.
+    pub pre_loaded_aliases: Vec<alias_registry::AliasInfo>,
     /// Known package names for package-qualifier validation (ADR 0070
     /// Phase 2). `None` skips the check entirely.
     pub known_packages: Option<std::collections::HashSet<String>>,
@@ -415,6 +421,41 @@ pub fn analyse_with_natives_and_protocols(
     )
 }
 
+/// Analyse a module with compiler options, pre-loaded classes, pre-loaded
+/// protocols, pre-loaded type aliases, and native type registry.
+///
+/// BT-2898: Mirrors `analyse_with_natives_and_protocols` but also accepts
+/// alias definitions extracted from other source files or packages (ADR 0108
+/// Phase 5) so the alias registry recognises fixture/dependency-only alias
+/// names when analysing a downstream module.
+#[allow(clippy::too_many_arguments)]
+pub fn analyse_with_natives_and_protocols_and_aliases(
+    module: &Module,
+    options: &crate::CompilerOptions,
+    pre_loaded_classes: Vec<class_hierarchy::ClassInfo>,
+    pre_loaded_protocols: Vec<protocol_registry::ProtocolInfo>,
+    pre_loaded_aliases: Vec<alias_registry::AliasInfo>,
+    native_type_registry: Option<std::sync::Arc<type_checker::NativeTypeRegistry>>,
+    cross_file_extensions: &crate::compilation::extension_index::ExtensionIndex,
+) -> AnalysisResult {
+    analyse_full(
+        module,
+        AnalysisContext {
+            stdlib_mode: options.stdlib_mode,
+            skip_module_expression_lint: options.skip_module_expression_lint,
+            pre_loaded_classes,
+            pre_loaded_protocols,
+            pre_loaded_aliases,
+            current_package: options.current_package.as_deref(),
+            native_type_registry,
+            knowledge_scope: options.knowledge_scope,
+            cross_file_extensions: Some(cross_file_extensions),
+            has_package_dependencies: options.has_package_dependencies,
+            ..Default::default()
+        },
+    )
+}
+
 /// Analyse a module with pre-defined variables and pre-loaded class entries
 /// from BEAM metadata (ADR 0050 Phase 4).
 ///
@@ -474,6 +515,7 @@ fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult {
         skip_module_expression_lint,
         pre_loaded_classes,
         pre_loaded_protocols,
+        pre_loaded_aliases,
         known_packages,
         current_package,
         native_type_registry,
@@ -594,12 +636,38 @@ fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult {
         result.diagnostics.extend(proto_diags);
     }
 
-    // Phase 0.6: Type Alias Registration (ADR 0108 Phase 2, BT-2895)
+    // Phase 0.6: Type Alias Registration (ADR 0108 Phase 2/5, BT-2895/BT-2898)
     // Must happen after both the class hierarchy and protocol registry are
     // fully built for the current module — aliases share the class/protocol
     // namespace, and this ordering (classes → protocols → aliases) is what
     // gives `AliasRegistry::register_module` bidirectional collision
     // detection within a single batch compile (see its doc comment).
+    //
+    // BT-2898: Seed the registry with pre-loaded aliases (e.g. other files in
+    // the same package, or a dependency's exported aliases) *before*
+    // registering the current module's own aliases — mirrors the protocol
+    // seeding immediately above. Skip pre-loaded entries whose names also
+    // appear in the current module (current-module wins), and let
+    // `add_pre_loaded` itself apply the seeding-boundary exclusion for
+    // `internal` entries from a *different* package (ADR 0108 Semantics) —
+    // a same-package `internal` entry (e.g. another file in the same
+    // multi-file package) is still seeded, since ADR 0108 scopes `internal`
+    // aliases to the whole declaring *package*, not just the declaring file.
+    if !pre_loaded_aliases.is_empty() {
+        let current_alias_names: std::collections::HashSet<&EcoString> =
+            module.type_aliases.iter().map(|a| &a.name.name).collect();
+        let cross_file_aliases: Vec<_> = pre_loaded_aliases
+            .into_iter()
+            .filter(|a| !current_alias_names.contains(&a.name))
+            .collect();
+        let collision_diags = result.alias_registry.add_pre_loaded(
+            cross_file_aliases,
+            &result.class_hierarchy,
+            &result.protocol_registry,
+            current_package,
+        );
+        result.diagnostics.extend(collision_diags);
+    }
     if !module.type_aliases.is_empty() {
         let alias_diags = result.alias_registry.register_module(
             module,
@@ -826,10 +894,11 @@ fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult {
 
     // Phase 8: Visibility enforcement (ADR 0071)
     // E0401: cross-package internal class references (BT-1701)
-    // E0402: leaked visibility — internal class in public signature (BT-1701)
+    // E0402: leaked visibility — internal class/alias in public signature (BT-1701/BT-2898)
     validators::check_class_visibility(
         module,
         &result.class_hierarchy,
+        &result.alias_registry,
         current_package,
         &mut result.diagnostics,
     );
@@ -838,6 +907,16 @@ fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult {
         module,
         &result.class_hierarchy,
         &result.protocol_registry,
+        current_package,
+        &mut result.diagnostics,
+    );
+    // E0402 (BT-2898, ADR 0108 Semantics): a public alias whose expansion
+    // transitively reaches an internal class/alias leaks it, even when the
+    // internal name never appears directly in any signature.
+    validators::check_alias_leaked_visibility(
+        module,
+        &result.class_hierarchy,
+        &result.alias_registry,
         current_package,
         &mut result.diagnostics,
     );
