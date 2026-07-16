@@ -121,6 +121,27 @@ pub enum TypeProvenance {
     Aliased { name: EcoString, span: Span },
 }
 
+impl TypeProvenance {
+    /// Degrades [`TypeProvenance::Aliased`] to a spanless [`TypeProvenance::Inferred`];
+    /// a no-op for every other variant.
+    ///
+    /// Callers that construct a `Negation` (via [`InferredType::make_negation`])
+    /// from a provenance captured off an *existing* negation — same-base
+    /// flattening in [`InferredType::difference`], and [`InferredType::absorb_negations`]'s
+    /// "first negation wins" carry-over — must call this first. The captured
+    /// provenance describes the *input* negation, but the widened `excluded`
+    /// set makes the *result* structurally different from whatever alias the
+    /// input happened to be tagged with, so carrying the tag forward
+    /// unchanged would violate `Aliased`'s own documented invariant (this tag
+    /// does not survive `difference`).
+    fn strip_alias(self) -> Self {
+        match self {
+            Self::Aliased { .. } => Self::Inferred(Span::default()),
+            other => other,
+        }
+    }
+}
+
 /// Controls how [`InferredType`] renders class names when converted to a
 /// display string.
 ///
@@ -1011,7 +1032,13 @@ impl InferredType {
                     excluded,
                     provenance,
                 } if Self::is_symbol_base(&base) => {
-                    neg_provenance.get_or_insert(provenance);
+                    // The merged negation's `excluded` set is the union of
+                    // every absorbed negation's own set, so it's structurally
+                    // different from whichever single input this provenance
+                    // was captured from — strip a stale `Aliased` tag for the
+                    // same reason `difference`'s same-base flattening arm
+                    // does (see `TypeProvenance::strip_alias`'s doc).
+                    neg_provenance.get_or_insert(provenance.strip_alias());
                     neg_excludeds.push(*excluded);
                 }
                 Self::Known { ref class_name, .. } if class_name == "Symbol" => {
@@ -1411,7 +1438,7 @@ impl InferredType {
                 Self::make_negation(
                     (**base).clone(),
                     Self::union_of(&[(**excluded).clone(), b.clone()]),
-                    neg_prov.clone(),
+                    neg_prov.clone().strip_alias(),
                 )
             }
             // `Symbol \ #foo = Negation{Symbol, #foo}`.
@@ -1715,6 +1742,37 @@ mod display_tests {
             "difference residual must not carry the alias name, got: {rendered}"
         );
         assert_eq!(rendered, "#transient | #permanent");
+    }
+
+    #[test]
+    fn difference_strips_alias_tag_from_the_residual_negation_arm() {
+        // Same as `difference_strips_alias_tag_from_the_residual`, but for
+        // the same-base-flattening Negation arm rather than the Union arm —
+        // regression test for a review finding on BT-2897: `type PublicTag =
+        // Symbol \ #internal`, then narrowing further (`Symbol \ #internal \
+        // #other`) produced a residual that still displayed as `"PublicTag
+        // (...)"` even though it's structurally different from the alias's
+        // own definition.
+        let base_negation = InferredType::difference(
+            &InferredType::known("Symbol"),
+            &InferredType::known("#internal"),
+            TypeProvenance::Inferred(Span::default()),
+            None,
+        );
+        let aliased = base_negation.tag_alias_expansion("PublicTag".into(), Span::new(0, 1));
+        let residual = InferredType::difference(
+            &aliased,
+            &InferredType::known("#other"),
+            TypeProvenance::Inferred(Span::default()),
+            None,
+        );
+        assert_eq!(residual.alias_display_name(), None);
+        let rendered = residual.display_for_diagnostic().unwrap();
+        assert!(
+            !rendered.contains("PublicTag"),
+            "negation-arm difference residual must not carry the alias name, got: {rendered}"
+        );
+        assert_eq!(rendered, "Symbol \\ (#internal | #other)");
     }
 
     #[test]
