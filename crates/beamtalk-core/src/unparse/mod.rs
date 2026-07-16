@@ -797,6 +797,21 @@ fn unparse_method_definition_inner(
         docs.extend(unparse_comment_attachment_leading(&method.comments));
     }
 
+    // A method with no doc comment of its own still needs a separator after
+    // a preserved, earlier `///` block that broke away from a different
+    // declaration (BT-2924) — otherwise the orphaned block re-attaches to
+    // this method as its doc comment on the next parse. When the method
+    // *does* have its own doc comment, the blank-line push inside the `if
+    // let Some(doc)` block below already covers this (it fires for any
+    // non-empty leading comments, orphaned or not) — do not also push here,
+    // or the separator doubles up.
+    if method.doc_comment.is_none()
+        && emit_leading
+        && leading_ends_with_orphaned_doc_comment(&method.comments)
+    {
+        docs.push(line());
+    }
+
     // Doc comment — emit `///` for empty lines (no trailing space)
     if let Some(doc) = &method.doc_comment {
         // Blank line between leading comments and doc comment (e.g. section separators)
@@ -3704,6 +3719,34 @@ mod tests {
         );
         assert!(
             formatted.contains("Orphaned block, meant for something else entirely."),
+            "the orphaned block's text must still be preserved somewhere:\n{formatted}"
+        );
+    }
+
+    #[test]
+    fn method_with_no_doc_comment_preceded_by_orphaned_doc_block_does_not_attach_it() {
+        // BT-2924 follow-up (review finding on the fix itself): a `///` block
+        // that breaks away from a different declaration must not attach to a
+        // *method with no doc comment of its own* on a format round-trip —
+        // the class/protocol/state cases were fixed, but the method case was
+        // missed since its blank-line guard lives inside `if let Some(doc)`.
+        let source = concat!(
+            "Object subclass: Foo\n",
+            "  /// Section header (orphaned — blank line below).\n",
+            "\n",
+            "  doSomething => 1\n",
+        );
+        let formatted = format_source(source).expect("format_source must succeed for valid source");
+        let module = parse_source(&formatted);
+        assert_eq!(module.classes.len(), 1);
+        let method = &module.classes[0].methods[0];
+        assert_eq!(
+            method.doc_comment, None,
+            "the orphaned block above must not attach as the method's own doc comment; \
+             formatted output:\n{formatted}"
+        );
+        assert!(
+            formatted.contains("Section header (orphaned"),
             "the orphaned block's text must still be preserved somewhere:\n{formatted}"
         );
     }
