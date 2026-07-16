@@ -1,0 +1,24 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for the BT-2905 alias hot-reload re-check E2E test
+// (tests/repl-protocol/cases/type_alias_repl.btscript).
+//
+// `labelFor:`'s `matchExhaustive:` is sound against `HotReloadColor`'s
+// three-member expansion at load time (the alias is declared in the REPL
+// session, not in this file — `:: HotReloadColor` resolves against
+// `beamtalk_compiler_server`'s ambient alias cache, kept in sync with the
+// session's alias table). Loading this file (not typing the class directly
+// at the REPL) is required so the compile goes through
+// `beamtalk_repl_compiler:compile_file_core/4`, the path that registers
+// alias-name -> annotation-site edges into `beamtalk_alias_xref` — a class
+// definition typed directly at the REPL does not.
+
+Object subclass: HotReloadColorSwitch
+
+  labelFor: c :: HotReloadColor -> Integer =>
+    c matchExhaustive: [
+      #red -> 1;
+      #green -> 2;
+      #blue -> 3
+    ]
