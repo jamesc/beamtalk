@@ -231,6 +231,24 @@ impl Comment {
             preceding_blank_line: false,
         }
     }
+
+    /// Creates a doc-style line comment (`/// text`).
+    ///
+    /// Used to preserve a `///` line as a *leading comment* on a
+    /// [`CommentAttachment`] rather than as a declaration's `doc_comment`
+    /// field — e.g. a `///` block that a blank line or another comment broke
+    /// away from the declaration it visually precedes (BT-2924). Keeping a
+    /// distinct kind (instead of re-encoding it as [`CommentKind::Line`])
+    /// lets it round-trip byte-for-byte as `///`, not `//`.
+    #[must_use]
+    pub fn doc(content: impl Into<EcoString>, span: Span) -> Self {
+        Self {
+            content: content.into(),
+            span,
+            kind: CommentKind::Doc,
+            preceding_blank_line: false,
+        }
+    }
 }
 
 /// The kind of comment.
@@ -240,6 +258,10 @@ pub enum CommentKind {
     Line,
     /// A block comment (`/* text */`).
     Block,
+    /// A `///` doc-style line comment that isn't attached to any
+    /// declaration's `doc_comment` field (BT-2924) — e.g. an earlier block
+    /// that a blank line broke away from the declaration it precedes.
+    Doc,
 }
 
 /// Comments attached to an AST node (ADR 0044).

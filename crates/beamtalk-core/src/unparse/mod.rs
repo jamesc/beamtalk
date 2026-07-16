@@ -569,6 +569,13 @@ fn unparse_type_alias_definition(type_alias: &TypeAliasDefinition) -> Document<'
     // Non-doc leading comments
     docs.extend(unparse_comment_attachment_leading(&type_alias.comments));
 
+    // Blank line between a preserved, earlier `///` block that broke away
+    // from a different declaration (BT-2924) and this alias's own doc
+    // comment — see `leading_ends_with_orphaned_doc_comment`.
+    if leading_ends_with_orphaned_doc_comment(&type_alias.comments) {
+        docs.push(line());
+    }
+
     // Doc comment
     if let Some(doc) = &type_alias.doc_comment {
         for line_text in doc.lines() {
@@ -608,6 +615,13 @@ fn unparse_protocol_definition(protocol: &ProtocolDefinition) -> Document<'stati
 
     // Non-doc leading comments
     docs.extend(unparse_comment_attachment_leading(&protocol.comments));
+
+    // Blank line between a preserved, earlier `///` block that broke away
+    // from a different declaration (BT-2924) and this protocol's own doc
+    // comment — see `leading_ends_with_orphaned_doc_comment`.
+    if leading_ends_with_orphaned_doc_comment(&protocol.comments) {
+        docs.push(line());
+    }
 
     // Doc comment
     if let Some(doc) = &protocol.doc_comment {
@@ -783,6 +797,21 @@ fn unparse_method_definition_inner(
         docs.extend(unparse_comment_attachment_leading(&method.comments));
     }
 
+    // A method with no doc comment of its own still needs a separator after
+    // a preserved, earlier `///` block that broke away from a different
+    // declaration (BT-2924) — otherwise the orphaned block re-attaches to
+    // this method as its doc comment on the next parse. When the method
+    // *does* have its own doc comment, the blank-line push inside the `if
+    // let Some(doc)` block below already covers this (it fires for any
+    // non-empty leading comments, orphaned or not) — do not also push here,
+    // or the separator doubles up.
+    if method.doc_comment.is_none()
+        && emit_leading
+        && leading_ends_with_orphaned_doc_comment(&method.comments)
+    {
+        docs.push(line());
+    }
+
     // Doc comment — emit `///` for empty lines (no trailing space)
     if let Some(doc) = &method.doc_comment {
         // Blank line between leading comments and doc comment (e.g. section separators)
@@ -948,6 +977,13 @@ fn unparse_state_declaration_inner(state: &StateDeclaration, is_class: bool) -> 
 
     // Non-doc leading comments
     docs.extend(unparse_comment_attachment_leading(&state.comments));
+
+    // Blank line between a preserved, earlier `///` block that broke away
+    // from a different declaration (BT-2924) and this field's own doc
+    // comment — see `leading_ends_with_orphaned_doc_comment`.
+    if leading_ends_with_orphaned_doc_comment(&state.comments) {
+        docs.push(line());
+    }
 
     // Doc comment — emit `///` for empty lines (no trailing space)
     if let Some(doc) = &state.doc_comment {
@@ -1853,7 +1889,8 @@ fn unparse_expect_category(cat: ExpectCategory) -> Document<'static> {
 
 /// Builds a [`Document`] for a single [`Comment`].
 ///
-/// Line comments become `// content`, block comments become `/* content */`.
+/// Line comments become `// content`, block comments become `/* content */`,
+/// doc-style leading comments become `/// content` (BT-2924).
 fn unparse_comment(comment: &Comment) -> Document<'static> {
     match comment.kind {
         CommentKind::Line => {
@@ -1865,6 +1902,13 @@ fn unparse_comment(comment: &Comment) -> Document<'static> {
         }
         CommentKind::Block => {
             docvec!["/* ", leaf::raw_text(&comment.content), " */"]
+        }
+        CommentKind::Doc => {
+            if comment.content.is_empty() {
+                Document::Str("///")
+            } else {
+                docvec!["/// ", leaf::raw_text(&comment.content)]
+            }
         }
     }
 }
@@ -1885,6 +1929,40 @@ fn unparse_comment_attachment_leading(ca: &CommentAttachment) -> Vec<Document<'s
         docs.push(line());
     }
     docs
+}
+
+/// Whether a blank line must separate `comments.leading` from whatever
+/// follows (a doc comment, or the declaration header when there is no doc
+/// comment).
+///
+/// Only true when the *last* leading comment is [`CommentKind::Doc`] — a
+/// `///` block that `collect_comment_attachment` preserved because a blank
+/// line (or `//` comment) broke it away from the declaration it visually
+/// precedes (BT-2924). Such a block is, by construction, never adjacent to
+/// what follows in the original source — a blank line always separated it —
+/// so reinserting one here reconstructs that gap and stops the preserved
+/// block from visually gluing onto (and, on the next parse, merging into)
+/// this declaration's own doc comment.
+///
+/// Ordinary leading comments (license headers, section notes) are
+/// deliberately excluded: several declaration kinds (`Protocol define:`,
+/// `state:`/`classState:`) have established, already-canonical stdlib source
+/// where such comments sit directly against the following doc comment or
+/// header with no blank line, and this must not force one in.
+///
+/// Checking only the *last* entry (not `any()` over the whole slice) is
+/// correct because a [`CommentKind::Doc`] entry that *needs* a blank-line
+/// separator (i.e., nothing in the original source separated it from what
+/// follows) will always be the last item in `comments.leading`. If a
+/// [`CommentKind::Line`] (`//` comment) follows an orphaned `///` block in
+/// the trivia, it is appended to `leading` *after* the `Doc` entry and
+/// already provides the separation — so this function correctly returns
+/// `false` and no extra blank line is inserted.
+fn leading_ends_with_orphaned_doc_comment(comments: &CommentAttachment) -> bool {
+    comments
+        .leading
+        .last()
+        .is_some_and(|c| c.kind == CommentKind::Doc)
 }
 
 // --- Helper utilities ---
@@ -3512,6 +3590,174 @@ mod tests {
         // ADR 0071, ADR 0108 Phase 5, BT-2898.
         let source = "internal type ParserState = Integer | String\n";
         assert_identity(source);
+    }
+
+    // --- BT-2924 regression: `type` alias sandwiched between a class's doc
+    // comment and the class itself must not lose the class's doc comment. ---
+
+    /// The exact repro shape from BT-2924: a class's doc comment, a blank
+    /// line, a `type` alias with its own directly-adjacent doc comment, a
+    /// blank line, then the class declaration the first doc comment
+    /// describes.
+    ///
+    /// Before the fix, `format_source` deleted the class's doc comment
+    /// outright (it lives in the `type` alias token's leading trivia, and
+    /// `collect_doc_comment` kept only the alias's own — nearer — block,
+    /// discarding the earlier one without preserving it anywhere).
+    const HTTPSERVER_REPRO_SOURCE: &str = concat!(
+        "/// HTTPServer — cowboy-backed HTTP server actor for Beamtalk.\n",
+        "/// Some more description text here.\n",
+        "/// @see HTTPResponse (for building response objects)\n",
+        "\n",
+        "/// Anything `HTTPServer start:handler:` accepts as a request handler.\n",
+        "type HTTPHandlerLike = Integer | String\n",
+        "\n",
+        "Actor subclass: HTTPServer\n",
+        "  start => 1\n",
+    );
+
+    #[test]
+    fn type_alias_preceded_by_orphaned_class_doc_preserves_all_text() {
+        let formatted = format_source(HTTPSERVER_REPRO_SOURCE)
+            .expect("format_source must succeed for valid source");
+
+        // Neither doc comment's content may be dropped.
+        for line in [
+            "/// HTTPServer — cowboy-backed HTTP server actor for Beamtalk.",
+            "/// Some more description text here.",
+            "/// @see HTTPResponse (for building response objects)",
+            "/// Anything `HTTPServer start:handler:` accepts as a request handler.",
+        ] {
+            assert!(
+                formatted.contains(line),
+                "formatted output lost {line:?}:\n{formatted}"
+            );
+        }
+
+        // Formatting must be idempotent — a second pass changes nothing.
+        let formatted_again =
+            format_source(&formatted).expect("format_source must succeed on formatted output");
+        assert_eq!(
+            formatted, formatted_again,
+            "format_source is not idempotent for the BT-2924 repro shape"
+        );
+    }
+
+    #[test]
+    fn type_alias_preceded_by_orphaned_class_doc_reattaches_correctly_on_reparse() {
+        let formatted = format_source(HTTPSERVER_REPRO_SOURCE)
+            .expect("format_source must succeed for valid source");
+        let module = parse_source(&formatted);
+
+        assert_eq!(module.type_aliases.len(), 1);
+        assert_eq!(
+            module.type_aliases[0].doc_comment.as_deref(),
+            Some("Anything `HTTPServer start:handler:` accepts as a request handler."),
+            "the alias's own doc comment must still attach to the alias after a format round-trip"
+        );
+        assert_eq!(module.classes.len(), 1);
+        assert_eq!(module.classes[0].name.name, "HTTPServer");
+    }
+
+    #[test]
+    fn type_alias_with_directly_adjacent_doc_comment_has_no_unattached_warning() {
+        // BT-2924 secondary bug: the lint must not flag the alias's own
+        // directly-adjacent `///` comment as unattached just because an
+        // earlier, unrelated block shares the same leading trivia.
+        use crate::source_analysis::{Severity, lex_with_eof, parse};
+        let tokens = lex_with_eof(HTTPSERVER_REPRO_SOURCE);
+        let (_module, diagnostics) = parse(tokens);
+        let warnings: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Warning)
+            .collect();
+        assert!(
+            warnings.is_empty(),
+            "expected no warnings for the BT-2924 repro shape, got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn state_declaration_preceded_by_orphaned_doc_block_does_not_merge_into_own_doc_comment() {
+        // BT-2924 follow-up (found in adversarial review): a `///` block that
+        // breaks away from a *different* declaration must not get glued onto
+        // — and then silently merged into — a state field's own doc comment
+        // on a format round-trip.
+        let source = concat!(
+            "Object subclass: Foo\n",
+            "  /// Section header orphan.\n",
+            "\n",
+            "  /// The port to bind.\n",
+            "  state: port :: Integer = 0\n",
+        );
+        let formatted = format_source(source).expect("format_source must succeed for valid source");
+        let module = parse_source(&formatted);
+        assert_eq!(module.classes.len(), 1);
+        let field = &module.classes[0].state[0];
+        assert_eq!(
+            field.doc_comment.as_deref(),
+            Some("The port to bind."),
+            "the orphaned block above must not merge into the field's own doc comment; \
+             formatted output:\n{formatted}"
+        );
+        assert!(
+            formatted.contains("Section header orphan."),
+            "the orphaned block's text must still be preserved somewhere:\n{formatted}"
+        );
+    }
+
+    #[test]
+    fn protocol_preceded_by_orphaned_doc_block_does_not_merge_into_own_doc_comment() {
+        // BT-2924 follow-up (found in adversarial review): same shape as
+        // above, for a `Protocol define:` declaration.
+        let source = concat!(
+            "/// Orphaned block, meant for something else entirely.\n",
+            "\n",
+            "/// Things that can be printed.\n",
+            "Protocol define: Displayable\n",
+            "  asString -> String\n",
+        );
+        let formatted = format_source(source).expect("format_source must succeed for valid source");
+        let module = parse_source(&formatted);
+        assert_eq!(module.protocols.len(), 1);
+        assert_eq!(
+            module.protocols[0].doc_comment.as_deref(),
+            Some("Things that can be printed."),
+            "the orphaned block above must not merge into the protocol's own doc comment; \
+             formatted output:\n{formatted}"
+        );
+        assert!(
+            formatted.contains("Orphaned block, meant for something else entirely."),
+            "the orphaned block's text must still be preserved somewhere:\n{formatted}"
+        );
+    }
+
+    #[test]
+    fn method_with_no_doc_comment_preceded_by_orphaned_doc_block_does_not_attach_it() {
+        // BT-2924 follow-up (review finding on the fix itself): a `///` block
+        // that breaks away from a different declaration must not attach to a
+        // *method with no doc comment of its own* on a format round-trip —
+        // the class/protocol/state cases were fixed, but the method case was
+        // missed since its blank-line guard lives inside `if let Some(doc)`.
+        let source = concat!(
+            "Object subclass: Foo\n",
+            "  /// Section header (orphaned — blank line below).\n",
+            "\n",
+            "  doSomething => 1\n",
+        );
+        let formatted = format_source(source).expect("format_source must succeed for valid source");
+        let module = parse_source(&formatted);
+        assert_eq!(module.classes.len(), 1);
+        let method = &module.classes[0].methods[0];
+        assert_eq!(
+            method.doc_comment, None,
+            "the orphaned block above must not attach as the method's own doc comment; \
+             formatted output:\n{formatted}"
+        );
+        assert!(
+            formatted.contains("Section header (orphaned"),
+            "the orphaned block's text must still be preserved somewhere:\n{formatted}"
+        );
     }
 
     // --- escape_string_literal ---
