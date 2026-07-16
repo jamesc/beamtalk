@@ -236,6 +236,12 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, force: bool) 
         .full_manifest
         .as_ref()
         .is_some_and(|m| !m.dependencies.is_empty());
+    // BT-2920: Set the current package so E0401/E0402 visibility checks
+    // (`check_class_visibility`/`check_alias_leaked_visibility`) actually run
+    // — they're gated on `current_package: Some(_)` and silently emit zero
+    // diagnostics otherwise. `None` for single-file/manifest-less builds,
+    // which have no package boundary to enforce.
+    options.current_package = env.pkg_manifest().map(|m| m.name.clone());
     let options = &options;
 
     let dep_ctx = resolve_and_validate_dependencies(&env, options)?;
@@ -1567,6 +1573,16 @@ pub(crate) fn build_class_module_index(
                 info.surface_incomplete = true;
             }
         }
+        // BT-2920: Stamp the package now, while each file's classes are still
+        // isolated — `analyse_full`'s `stamp_package` only reaches classes
+        // built from the *current* module's own AST, never the cross-file
+        // `ClassInfo` this Pass 1 index injects into every other file's
+        // compilation. Without this, E0401/E0402 treat a same-package class
+        // from a sibling file as package-less and never flag it as a leak.
+        beamtalk_core::semantic_analysis::ClassHierarchy::stamp_package_on_infos(
+            &mut class_infos,
+            pkg_name,
+        );
         all_class_infos.extend(class_infos);
 
         // BT-2795: Collect standalone extension definitions

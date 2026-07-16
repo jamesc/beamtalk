@@ -36,6 +36,7 @@ use tracing::warn;
 /// project so that cross-file type/DNU diagnostics match what `build` emits.
 /// Without this, `@expect type` / `@expect all` annotations that suppress real
 /// diagnostics during build would be reported as stale by lint.
+#[allow(clippy::too_many_arguments)] // BT-2920 added `current_package`; each param is load-bearing context
 fn collect_diagnostics(
     module: &beamtalk_core::ast::Module,
     parse_diags: Vec<beamtalk_core::source_analysis::Diagnostic>,
@@ -46,6 +47,7 @@ fn collect_diagnostics(
     knowledge_scope: beamtalk_core::semantic_analysis::KnowledgeScope,
     cross_file_extensions: &beamtalk_core::compilation::extension_index::ExtensionIndex,
     has_package_dependencies: bool,
+    current_package: Option<&str>,
 ) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
     // Collect parser-level lint diagnostics (e.g. unnecessary `.` — BT-948)
     // plus AST-level lint passes.
@@ -70,9 +72,13 @@ fn collect_diagnostics(
     // FFI call falls back to `Dynamic(UntypedFfi)` and lint emits a
     // "Dynamic in typed class" warning that build does not — leaving the user
     // with no `@expect` configuration that satisfies both passes.
+    // BT-2920: Set current_package so E0401/E0402 visibility checks fire in
+    // `beamtalk lint`, matching `beamtalk build` — both gate on
+    // `current_package: Some(_)` (see `check_class_visibility`).
     let options = beamtalk_core::CompilerOptions {
         knowledge_scope,
         has_package_dependencies,
+        current_package: current_package.map(str::to_string),
         ..Default::default()
     };
     let analysis_result = beamtalk_core::semantic_analysis::analyse_with_natives_and_extensions(
@@ -100,6 +106,7 @@ fn collect_diagnostics(
 /// Run lint passes on the given path (file or directory).
 ///
 /// Prints each lint diagnostic and returns an error if any are found.
+#[allow(clippy::too_many_lines)] // BT-2920 added current_package resolution; orchestration function
 pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
     let source_path = Utf8PathBuf::from(path);
     let (source_files, erl_files) = collect_lint_files(&source_path, path)?;
@@ -115,8 +122,24 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
     // visible. Otherwise a test file that references a `src/` class produces
     // spurious `Unresolved class` diagnostics.
     let package_root = find_package_root(&source_path);
-    let (mut all_class_infos, extension_index, parsed_files) =
-        parse_and_extract_class_infos(&source_files, package_root.as_deref())?;
+
+    // BT-2920: Resolve the package name so E0401/E0402 visibility checks fire
+    // in lint the same way they do in `beamtalk build` — both are gated on
+    // `current_package: Some(_)` (see `check_class_visibility`). Resolved
+    // before extraction so cross-file `ClassInfo` can be package-stamped too
+    // (see `parse_and_extract_class_infos`'s `stamp_package_on_infos` call).
+    let current_package = package_root.as_deref().and_then(|root| {
+        super::manifest::find_manifest_full(root)
+            .ok()
+            .flatten()
+            .map(|m| m.package.name)
+    });
+
+    let (mut all_class_infos, extension_index, parsed_files) = parse_and_extract_class_infos(
+        &source_files,
+        package_root.as_deref(),
+        current_package.as_deref(),
+    )?;
 
     // Resolve dependency class metadata so lint sees the same class hierarchy
     // as build. Without this, @expect annotations that suppress real cross-package
@@ -173,6 +196,7 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
             knowledge_scope,
             &extension_index,
             has_package_dependencies,
+            current_package.as_deref(),
         );
 
         for diag in &lint_diags {
@@ -419,6 +443,7 @@ type ParsedLintFile = (
 fn parse_and_extract_class_infos(
     source_files: &[Utf8PathBuf],
     package_root: Option<&Utf8Path>,
+    current_package: Option<&str>,
 ) -> Result<(
     Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
     beamtalk_core::compilation::extension_index::ExtensionIndex,
@@ -460,6 +485,15 @@ fn parse_and_extract_class_infos(
             for info in &mut class_infos {
                 info.surface_incomplete = true;
             }
+        }
+        // BT-2920: Stamp the package per-file, same as build's Pass 1 — see
+        // `stamp_package_on_infos`'s doc comment for why this can't wait
+        // until each file's own analysis pass.
+        if let Some(pkg) = current_package {
+            beamtalk_core::semantic_analysis::ClassHierarchy::stamp_package_on_infos(
+                &mut class_infos,
+                pkg,
+            );
         }
         all_class_infos.extend(class_infos);
 
@@ -612,6 +646,7 @@ fn collect_lint_diagnostics(source: &str) -> Vec<beamtalk_core::source_analysis:
         beamtalk_core::semantic_analysis::KnowledgeScope::default(),
         &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
         false,
+        None,
     )
 }
 
@@ -705,6 +740,7 @@ mod tests {
             beamtalk_core::semantic_analysis::KnowledgeScope::default(),
             &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
             false,
+            None,
         );
         let stale = diags.iter().any(|d| d.message.contains("stale @expect"));
         assert!(
@@ -904,6 +940,7 @@ mod tests {
             beamtalk_core::semantic_analysis::KnowledgeScope::default(),
             &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
             false,
+            None,
         );
 
         let unresolved: Vec<_> = diags
@@ -1010,6 +1047,7 @@ mod tests {
             beamtalk_core::semantic_analysis::KnowledgeScope::default(),
             &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
             false,
+            None,
         );
 
         let has_untyped_ffi = diags.iter().any(|d| d.message.contains("untyped FFI"));
@@ -1057,6 +1095,7 @@ mod tests {
             beamtalk_core::semantic_analysis::KnowledgeScope::default(),
             &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
             false,
+            None,
         );
 
         let untyped_ffi: Vec<_> = diags
@@ -1118,6 +1157,7 @@ mod tests {
             beamtalk_core::semantic_analysis::KnowledgeScope::default(),
             &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
             false,
+            None,
         );
         let stale = diags.iter().any(|d| d.message.contains("stale @expect"));
         assert!(
