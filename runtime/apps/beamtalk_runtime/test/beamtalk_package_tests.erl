@@ -297,3 +297,71 @@ package_name_for_delegates_to_package_name_test() ->
         beamtalk_package:package_name('Object'),
         beamtalk_package:packageNameFor('Object')
     ).
+
+%%% ============================================================================
+%%% Types-only package tests (BT-2915) — a package with zero classes and a
+%%% non-empty `type_aliases` env key must still be discoverable.
+%%% ============================================================================
+
+%% all/0 discovers a package that declares only `type_aliases`, no `classes`,
+%% deriving the package name from the OTP application's own atom name (app
+%% name == package name by construction for `beamtalk build`'s `.app` files).
+all_includes_types_only_app_test() ->
+    setup(),
+    App = bt_fake_types_only_pkg,
+    load_fake_app(
+        App,
+        [{env, [{type_aliases, [#{name => 'RestartStrategy', internal => false}]}]}]
+    ),
+    try
+        ?assert(lists:member(<<"bt_fake_types_only_pkg">>, beamtalk_package:all()))
+    after
+        _ = application:unload(App)
+    end.
+
+%% all/0 excludes an app with neither `classes` nor `type_aliases` (or with
+%% both empty) — no discovery signal at all.
+all_excludes_app_with_no_classes_or_aliases_test() ->
+    setup(),
+    App = bt_fake_empty_pkg,
+    load_fake_app(App, [{env, [{classes, []}, {type_aliases, []}]}]),
+    try
+        ?assertNot(lists:member(<<"bt_fake_empty_pkg">>, beamtalk_package:all()))
+    after
+        _ = application:unload(App)
+    end.
+
+%% find_app_for_package/1 resolves a types-only package's name back to its
+%% OTP application — exercised by `browse-type-aliases`
+%% (`beamtalk_repl_ops_browse:type_aliases_of_package/1`).
+find_app_for_package_resolves_types_only_app_test() ->
+    setup(),
+    App = bt_fake_types_only_pkg2,
+    load_fake_app(
+        App,
+        [{env, [{type_aliases, [#{name => 'JsonValue', internal => false}]}]}]
+    ),
+    try
+        ?assertEqual(
+            {ok, App}, beamtalk_package:find_app_for_package(<<"bt_fake_types_only_pkg2">>)
+        )
+    after
+        _ = application:unload(App)
+    end.
+
+%% named/1 builds a Package info map for a types-only package — `classes` is
+%% empty but the package itself still resolves (no `package_not_found`).
+named_resolves_types_only_package_test() ->
+    setup(),
+    App = bt_fake_types_only_pkg3,
+    load_fake_app(
+        App,
+        [{env, [{type_aliases, [#{name => 'JsonValue', internal => false}]}]}]
+    ),
+    try
+        Info = beamtalk_package:named(<<"bt_fake_types_only_pkg3">>),
+        ?assertEqual(<<"bt_fake_types_only_pkg3">>, maps:get(name, Info)),
+        ?assertEqual([], maps:get(classes, Info))
+    after
+        _ = application:unload(App)
+    end.

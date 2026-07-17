@@ -587,6 +587,37 @@ type_aliases_malformed_entry_does_not_crash_test() ->
         end
     ).
 
+%% A package with zero classes and one or more `type` declarations is
+%% discoverable via `beamtalk_package:all/0` and its aliases appear here
+%% end to end (BT-2915) — unlike `with_stdlib_aliases`, this constructs a
+%% real second OTP application (stdlib always carries `classes`, so it can't
+%% exercise the types-only discovery path) with only a `type_aliases` env
+%% key, no `classes` key at all.
+type_aliases_surfaces_types_only_package_test() ->
+    with_types_only_fixture_app(
+        bt_fake_types_only_browse_pkg,
+        [
+            #{
+                name => 'RestartStrategy',
+                expansion => "#temporary | #transient | #permanent",
+                doc => undefined,
+                source_file => "src/restart_strategy.bt",
+                internal => false
+            }
+        ],
+        fun() ->
+            Row = find_alias_row(type_aliases(), <<"RestartStrategy">>),
+            ?assertEqual(
+                <<"#temporary | #transient | #permanent">>,
+                maps:get(<<"expansion">>, Row)
+            ),
+            ?assertEqual(
+                <<"bt_fake_types_only_browse_pkg">>, maps:get(<<"package">>, Row)
+            ),
+            ?assertEqual(<<"dependency">>, maps:get(<<"source_origin">>, Row))
+        end
+    ).
+
 %% alias_visible/2 — pure seeding-boundary decision (BT-2903).
 alias_visible_internal_project_is_visible_test() ->
     ?assert(beamtalk_repl_ops_browse:alias_visible(#{internal => true}, <<"project">>)).
@@ -649,15 +680,17 @@ find_alias_row(Rows, Name) ->
 %% Temporarily set `beamtalk_stdlib`'s `type_aliases` env to `Aliases`, run
 %% `Fun`, then restore the original env (`undefined` → unset).
 %%
-%% Stands in for a real second fixture package: `beamtalk_package:all/0` only
-%% discovers apps with a non-empty `classes` env, and stdlib is the one app
-%% always loaded under the EUnit harness (see `ensure_stdlib/0`) — no test in
-%% this suite constructs a second real loaded OTP application even for
-%% `browse-native-modules` (project/dependency classification there is tested
-%% at the pure-function level instead, see `source_origin_of/2` tests below).
-%% `application:set_env/3` on stdlib is the minimal, precedent-consistent way
-%% to fixture a package's alias env for enumeration tests without building a
-%% real `.app` file end-to-end.
+%% Stands in for a real second fixture package for most tests in this
+%% describe block: stdlib is the one app always loaded under the EUnit
+%% harness (see `ensure_stdlib/0`), and `application:set_env/3` on it is the
+%% minimal, precedent-consistent way to fixture a package's alias env for
+%% enumeration tests without building a real `.app` file end-to-end
+%% (`browse-native-modules`'s project/dependency classification is likewise
+%% tested at the pure-function level, see `source_origin_of/2` tests below).
+%% The types-only discovery path (BT-2915) can't be exercised this way,
+%% since stdlib always carries a non-empty `classes` env — see
+%% `with_types_only_fixture_app/3` below for the real second OTP application
+%% that path needs.
 with_stdlib_aliases(Aliases, Fun) ->
     ensure_stdlib(),
     Previous = application:get_env(beamtalk_stdlib, type_aliases),
@@ -669,6 +702,26 @@ with_stdlib_aliases(Aliases, Fun) ->
             {ok, V} -> application:set_env(beamtalk_stdlib, type_aliases, V);
             undefined -> application:unset_env(beamtalk_stdlib, type_aliases)
         end
+    end.
+
+%% Load a throwaway OTP application declaring only `{type_aliases, Aliases}`
+%% (no `classes` key at all), run `Fun`, then unload it (mirrors
+%% `beamtalk_package_tests:load_fake_app/2`, the precedent for fixturing a
+%% real second OTP application rather than piggybacking on stdlib's env).
+with_types_only_fixture_app(App, Aliases, Fun) ->
+    ensure_stdlib(),
+    _ = application:unload(App),
+    ok = application:load(
+        {application, App, [
+            {description, "fake types-only package"},
+            {vsn, "1.0.0"},
+            {env, [{type_aliases, Aliases}]}
+        ]}
+    ),
+    try
+        Fun()
+    after
+        _ = application:unload(App)
     end.
 
 %%====================================================================

@@ -814,7 +814,8 @@ native_module_editable_target(Module) when is_atom(Module) ->
 %% module a Beamtalk package *declares* it ships, never the whole code path:
 %%
 %%   1. Walk `beamtalk_package:all/0` — every loaded OTP application that is a
-%%      Beamtalk package (has a non-empty `classes` env, ADR 0070).
+%%      Beamtalk package (has a non-empty `classes` env, ADR 0070, or a
+%%      non-empty `type_aliases` env with no classes, BT-2915).
 %%   2. For each package's app, take its declared native modules:
 %%        * user / dependency packages: the generated `{native_modules, [...]}`
 %%          app-env key (ADR 0072 Phase 1; the `native/*.erl` stems);
@@ -859,38 +860,12 @@ browse_native_modules() ->
 %% name + origin. A package whose app cannot be resolved contributes nothing.
 -spec native_modules_of_package(binary()) -> [map()].
 native_modules_of_package(PkgName) ->
-    case find_app_for_package(PkgName) of
+    case beamtalk_package:find_app_for_package(PkgName) of
         {ok, App} ->
             Origin = package_origin(App, PkgName),
             [native_module_row(Mod, PkgName, Origin) || Mod <- package_native_modules(App)];
         error ->
             []
-    end.
-
-%% The OTP application hosting a Beamtalk package (mirrors
-%% `beamtalk_package:find_app_for_package/1`, which is not exported).
--spec find_app_for_package(binary()) -> {ok, atom()} | error.
-find_app_for_package(PkgName) ->
-    Apps = application:loaded_applications(),
-    find_app_for_package(PkgName, Apps).
-
--spec find_app_for_package(binary(), [{atom(), term(), term()}]) -> {ok, atom()} | error.
-find_app_for_package(_PkgName, []) ->
-    error;
-find_app_for_package(PkgName, [{App, _Desc, _Vsn} | Rest]) ->
-    case app_package_name(App) of
-        PkgName -> {ok, App};
-        _ -> find_app_for_package(PkgName, Rest)
-    end.
-
-%% The package name an app hosts (the package segment of its declared classes),
-%% or `undefined` for a non-Beamtalk app.
--spec app_package_name(atom()) -> binary() | undefined.
-app_package_name(App) ->
-    case application:get_env(App, classes) of
-        {ok, [#{package := Pkg} | _]} when is_atom(Pkg) -> atom_to_binary(Pkg, utf8);
-        {ok, [#{package := Pkg} | _]} when is_binary(Pkg) -> Pkg;
-        _ -> undefined
     end.
 
 %% An app's declared native modules. User / dependency packages carry the
@@ -1067,18 +1042,14 @@ backing_source_file(Backing) ->
 %% deduping here would silently hide one package's real declaration instead
 %% of surfacing both, distinguished by their `package`/`source_origin` tags.
 %%
-%% **Known gap — a package with only `type` declarations (no classes) is
-%% invisible here (BT-2915):** discovery walks `beamtalk_package:all/0`,
-%% which recognises a package solely by a non-empty `classes` app-env key
-%% (ADR 0070) — a hypothetical types-only "shared vocabulary" package with
-%% zero classes would never be enumerated, so its aliases (even public ones)
-%% never appear, regardless of the seeding-boundary logic above. Every
-%% concrete consumer this ADR ships against (stdlib's `RestartStrategy`,
-%% `JsonValue`) declares aliases alongside real classes, so this has not
-%% bitten a real package yet; broadening `beamtalk_package:all/0`'s discovery
-%% signal is shared infra touching every other consumer of that function
-%% (`browse-native-modules`, `Package packageNameFor:`, …), so it is tracked
-%% as a follow-up rather than folded into this op.
+%% **Types-only packages (BT-2915):** discovery walks `beamtalk_package:all/0`,
+%% which recognises a package via a non-empty `classes` app-env key (ADR 0070)
+%% *or* a non-empty `type_aliases` app-env key with no classes — a types-only
+%% "shared vocabulary" package with zero classes is enumerated the same as any
+%% other package, deriving its name from the OTP application's own atom name
+%% (app name == package name by construction). Its aliases (public ones, and
+%% internal ones from the current project) surface here the same as any other
+%% package's, subject to the seeding-boundary logic above.
 -spec browse_type_aliases() -> [map()].
 browse_type_aliases() ->
     Packages =
@@ -1113,7 +1084,7 @@ browse_type_aliases() ->
 -spec type_aliases_of_package(binary()) -> [map()].
 type_aliases_of_package(PkgName) ->
     try
-        case find_app_for_package(PkgName) of
+        case beamtalk_package:find_app_for_package(PkgName) of
             {ok, App} ->
                 Origin = package_origin(App, PkgName),
                 [
