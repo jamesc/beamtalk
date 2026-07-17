@@ -65,6 +65,7 @@ TestCase subclass: InspectTest
     str := c inspect printString
     self assert: (str includesSubstring: "Counter") equals: true
     self assert: (str includesSubstring: "value: 0") equals: true
+    c stop
 
   testActorSubclassAfterMutationShowsUpdatedValue =>
     c := Counter spawn
@@ -72,6 +73,7 @@ TestCase subclass: InspectTest
     c increment
     str := c inspect printString
     self assert: (str includesSubstring: "value: 2") equals: true
+    c stop
 
   // --- Nested value objects use recursive printString ---
   testNestedValueObjectUsesRecursivePrintString =>
@@ -93,6 +95,7 @@ TestCase subclass: InspectTest
   testInspectOnActorClassifiesAsActor =>
     c := Counter spawn
     self assert: c inspect kind equals: #actor
+    c stop
 
   testInspectOnPrimitiveClassifiesAsValue =>
     self assert: 42 inspect kind equals: #value

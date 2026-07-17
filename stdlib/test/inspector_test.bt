@@ -67,6 +67,7 @@ TestCase subclass: InspectorTest
     c := Counter spawn
     i := Inspector on: c
     self assert: i kind equals: #actor
+    c stop
 
   // === #value: structural field derivation (ADR 0094 sort order) ===
   testValueFieldsAreSlots => self assert: self.i fields size equals: 2
@@ -137,6 +138,7 @@ TestCase subclass: InspectorTest
     i := Inspector on: c
     valueField := i fields detect: [:f | f name == #value]
     self assert: valueField value equals: 2
+    c stop
 
   testActorSnapshotIsFrozen =>
     // The snapshot is captured at `on:`; later mutation is not seen until refresh.
@@ -145,6 +147,7 @@ TestCase subclass: InspectorTest
     c increment
     valueField := i fields detect: [:f | f name == #value]
     self assert: valueField value equals: 0
+    c stop
 
   testRefreshReSnapshotsActor =>
     c := Counter spawn
@@ -153,6 +156,7 @@ TestCase subclass: InspectorTest
     refreshed := i refresh
     valueField := refreshed fields detect: [:f | f name == #value]
     self assert: valueField value equals: 1
+    c stop
 
   testRefreshReturnsNewCursorOriginalUnchanged =>
     c := Counter spawn
@@ -162,6 +166,7 @@ TestCase subclass: InspectorTest
     // Original cursor still shows the T0 snapshot.
     valueField := i fields detect: [:f | f name == #value]
     self assert: valueField value equals: 0
+    c stop
 
   // === Busy / dead actor degrades to #unavailable, never crashes ===
   testDeadActorFieldsAreUnavailable =>
@@ -202,6 +207,7 @@ TestCase subclass: InspectorTest
     b setPeer: a
     str := (Inspector on: a) printStringExpanded: 5
     self assert: (str includesSubstring: "↩ Actor") equals: true
+    a stop. b stop
 
   testActorCycleRenderTerminates =>
     // The expansion completes (does not hang) and names both actors once.
@@ -211,6 +217,7 @@ TestCase subclass: InspectorTest
     b setPeer: a
     str := (Inspector on: a) printStringExpanded: 5
     self assert: (str includesSubstring: "Inspector(CycleActorA)") equals: true
+    a stop. b stop
 
   testSharedActorReferenceIsNotMistakenForCycle =>
     // A diamond (shared, non-cyclic) reference: a value whose two fields both
@@ -221,6 +228,7 @@ TestCase subclass: InspectorTest
     pair := InspectPair new: #{#left => c, #right => c}
     str := (Inspector on: pair) printStringExpanded: 3
     self deny: (str includesSubstring: "↩ Actor")
+    c stop
 
   // === Depth bound: deeper expansion shows nested fields ===
   testDepthOneRendersNestedValueInline =>
@@ -272,6 +280,7 @@ TestCase subclass: InspectorTest
   testInspectShorthandOnActor =>
     c := Counter spawn
     self assert: c inspect kind equals: #actor
+    c stop
 
   testInspectShorthandOnActorCapturesState =>
     // Regression guard (BT-2504): `c inspect` dispatches *inside* the actor's
@@ -284,6 +293,7 @@ TestCase subclass: InspectorTest
     c increment
     valueField := c inspect fields detect: [:f | f name == #value]
     self assert: valueField value equals: 2
+    c stop
 
   // === #collection: windowing, size, page:, direct-index at: (ADR 0095 §6) ===
   testListClassifiedAsCollection =>
@@ -394,6 +404,7 @@ TestCase subclass: InspectorTest
     result := i evaluate: "self increment"
     self assert: result isError equals: true
     self assert: result error kind equals: #actor_eval_unsupported
+    c stop
 
   // === asDictionaries / asDictionary — wire form (ADR 0095 §7) ===
   testAsDictionariesIsOneDictPerField =>
