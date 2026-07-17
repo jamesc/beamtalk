@@ -161,7 +161,8 @@ Returns the list of dependency package names (binaries) for a package.
 
 Reads the OTP application dependency list and filters to only those
 applications that are themselves Beamtalk packages (have a non-empty
-`classes` env or a non-empty `type_aliases` env).
+`classes` env, or — when `classes` is absent/empty — a non-empty
+`type_aliases` env).
 Returns an empty list if the package is not found.
 """.
 -spec dependencies(binary() | atom()) -> [binary()].
