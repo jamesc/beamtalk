@@ -21,6 +21,7 @@ use crate::ast::{
     Module, WellKnownSelector,
 };
 use crate::docvec;
+use crate::semantic_analysis::alias_registry::AliasRegistry;
 
 /// Classification of how a value-type method body expression should be handled
 /// for Self-threading.  Produced by [`CoreErlangGenerator::classify_vt_body_expr`]
@@ -423,16 +424,25 @@ impl CoreErlangGenerator {
         class: &ClassDefinition,
         exports: Document<'static>,
     ) -> Document<'static> {
+        // BT-2909: build the alias registry once from this module's own
+        // `type_aliases` so alias-named annotations resolve to `user_type`
+        // references (ADR 0108) instead of falling through to `any()`.
+        // Cross-module aliases (an annotation referencing an alias exported
+        // by a dependency, ADR 0108) are not resolved here — only this
+        // module's own declarations — so they still fall through to `any()`.
+        // TODO(BT-2932): thread the full seeded registry through instead of
+        // reconstructing a module-local one.
+        let alias_registry = AliasRegistry::from_module_declarations(module);
+
         // BT-586: Generate spec attributes from type annotations
-        // BT-2900: `None` — see actor_codegen.rs's identical comment; alias
-        // registry plumbing into codegen call sites is a follow-up.
-        let spec_attrs = spec_codegen::generate_class_specs(class, true, None);
+        let spec_attrs = spec_codegen::generate_class_specs(class, true, Some(&alias_registry));
         let spec_suffix: Document<'static> = spec_codegen::format_spec_attributes(&spec_attrs)
             .map_or(Document::Nil, |s| docvec![",\n     ", s]);
 
         // BT-1156: Generate -type t() alias for Value classes with state: declarations.
         let class_name_for_type = self.class_name();
-        let type_alias_opt = spec_codegen::generate_type_alias(class, &class_name_for_type, None);
+        let type_alias_opt =
+            spec_codegen::generate_type_alias(class, &class_name_for_type, Some(&alias_registry));
         let export_type_suffix: Document<'static> = if type_alias_opt.is_some() {
             Document::Str(",\n     'export_type' = [{'t', 0}]")
         } else {
@@ -440,6 +450,16 @@ impl CoreErlangGenerator {
         };
         let type_alias_suffix: Document<'static> =
             type_alias_opt.map_or(Document::Nil, |s| docvec![",\n     ", s]);
+
+        // BT-2909: every class module that could contain a `user_type`
+        // reference must also declare the matching named `-type` in the same
+        // module attribute list (an `erlc` compile error otherwise) — empty
+        // for a module with no `type_aliases`, so this is a no-op change for
+        // the common case.
+        let alias_type_attrs = spec_codegen::generate_alias_type_attrs(&alias_registry);
+        let alias_type_suffix: Document<'static> =
+            spec_codegen::format_alias_type_attributes(&alias_type_attrs)
+                .map_or(Document::Nil, |s| docvec![",\n     ", s]);
 
         // BT-745: Build beamtalk_class attribute for dependency-ordered bootstrap
         let beamtalk_class_attr = super::util::beamtalk_class_attribute(&module.classes);
@@ -458,6 +478,7 @@ impl CoreErlangGenerator {
             beamtalk_class_attr,
             file_attr,
             source_path_attr,
+            alias_type_suffix,
             type_alias_suffix,
             export_type_suffix,
             spec_suffix,
