@@ -230,6 +230,10 @@ name by construction for `beamtalk build`'s generated `.app` files).
 -spec package_name_for_app(atom()) -> binary() | undefined.
 package_name_for_app(AppName) ->
     case application:get_env(AppName, classes) of
+        %% A non-empty but malformed classes list (no `package` key on any
+        %% entry) intentionally does NOT fall through to type_aliases below:
+        %% a non-empty classes env means "not types-only", so this app is
+        %% correctly reported as undiscoverable rather than misidentified.
         {ok, ClassList} when is_list(ClassList), ClassList =/= [] ->
             package_name_from_classes(ClassList);
         _ ->
