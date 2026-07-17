@@ -320,6 +320,18 @@ fn unparse_method_display_signature_doc(method: &MethodDefinition) -> Document<'
 
 // --- Document builders (pub(crate) for testing) ---
 
+/// One of the three top-level declaration kinds that can appear in a
+/// [`Module`] outside of standalone methods and expressions.
+///
+/// Used only by [`unparse_module_doc`] to interleave classes, protocols, and
+/// type aliases back into their original source order (BT-2907) rather than
+/// grouping them by kind.
+enum TopLevelDecl<'a> {
+    Class(&'a ClassDefinition),
+    Protocol(&'a ProtocolDefinition),
+    TypeAlias(&'a TypeAliasDefinition),
+}
+
 /// Builds a [`Document`] for a [`Module`].
 #[must_use]
 pub(crate) fn unparse_module_doc(module: &Module) -> Document<'static> {
@@ -331,21 +343,31 @@ pub(crate) fn unparse_module_doc(module: &Module) -> Document<'static> {
         docs.push(line());
     }
 
-    // ADR 0108 Phase 1: Type alias definitions
-    for type_alias in &module.type_aliases {
-        docs.push(unparse_type_alias_definition(type_alias));
-        docs.push(line());
-    }
+    // Classes, protocols, and type aliases (ADR 0068 Phase 2a, ADR 0108 Phase 1)
+    // are interleaved back into their original source order (BT-2907) rather
+    // than grouped by kind — a `type` alias declared after a class must stay
+    // after that class on a format round-trip. `sort_by_key` is a stable
+    // sort, so declarations that legitimately share a start offset
+    // (shouldn't happen for top-level decls) keep this append order:
+    // classes, then protocols, then type aliases.
+    let mut top_level_decls: Vec<TopLevelDecl<'_>> = Vec::new();
+    top_level_decls.extend(module.classes.iter().map(TopLevelDecl::Class));
+    top_level_decls.extend(module.protocols.iter().map(TopLevelDecl::Protocol));
+    top_level_decls.extend(module.type_aliases.iter().map(TopLevelDecl::TypeAlias));
+    top_level_decls.sort_by_key(|decl| match decl {
+        TopLevelDecl::Class(class) => class.span.start(),
+        TopLevelDecl::Protocol(protocol) => protocol.span.start(),
+        TopLevelDecl::TypeAlias(type_alias) => type_alias.span.start(),
+    });
 
-    // ADR 0068 Phase 2a: Protocol definitions
-    for protocol in &module.protocols {
-        docs.push(unparse_protocol_definition(protocol));
-        docs.push(line());
-    }
-
-    // Classes
-    for class in &module.classes {
-        docs.push(unparse_class_definition(class));
+    for decl in top_level_decls {
+        match decl {
+            TopLevelDecl::Class(class) => docs.push(unparse_class_definition(class)),
+            TopLevelDecl::Protocol(protocol) => docs.push(unparse_protocol_definition(protocol)),
+            TopLevelDecl::TypeAlias(type_alias) => {
+                docs.push(unparse_type_alias_definition(type_alias));
+            }
+        }
         docs.push(line());
     }
 
@@ -3674,6 +3696,133 @@ mod tests {
         assert!(
             warnings.is_empty(),
             "expected no warnings for the BT-2924 repro shape, got: {warnings:?}"
+        );
+    }
+
+    // --- BT-2907: top-level declaration order (classes/protocols/type aliases) ---
+    //
+    // `unparse_module_doc` used to always emit type aliases first, then
+    // protocols, then classes — regardless of where each declaration
+    // appeared in the source. A `type` alias (or a protocol) declared
+    // *after* a class would jump to the top of the file on a format
+    // round-trip. The three declaration kinds are now interleaved back into
+    // their original source order.
+
+    #[test]
+    fn type_alias_after_class_preserves_source_order() {
+        // Before the fix, this `type` alias — declared after the class —
+        // would have been hoisted above `Actor subclass: Server`.
+        let source = concat!(
+            "Actor subclass: Server\n",
+            "  start => 1\n",
+            "\n",
+            "type Port = Integer\n",
+        );
+        let formatted = format_source(source).expect("format_source must succeed for valid source");
+        let class_pos = formatted
+            .find("Actor subclass: Server")
+            .expect("class declaration must be present");
+        let alias_pos = formatted
+            .find("type Port = Integer")
+            .expect("type alias declaration must be present");
+        assert!(
+            class_pos < alias_pos,
+            "a type alias declared after a class must stay after it on format; \
+             formatted output:\n{formatted}"
+        );
+
+        // Idempotent: formatting the already-formatted output changes nothing.
+        let formatted_again =
+            format_source(&formatted).expect("format_source must succeed on formatted output");
+        assert_eq!(
+            formatted, formatted_again,
+            "format_source is not idempotent"
+        );
+    }
+
+    #[test]
+    fn protocol_after_class_preserves_source_order() {
+        // Same category of bug as the type-alias case above, for protocols:
+        // before the fix, a protocol declared after a class would jump above it.
+        let source = concat!(
+            "Actor subclass: Server\n",
+            "  start => 1\n",
+            "\n",
+            "Protocol define: Startable\n",
+            "  start -> Integer\n",
+        );
+        let formatted = format_source(source).expect("format_source must succeed for valid source");
+        let class_pos = formatted
+            .find("Actor subclass: Server")
+            .expect("class declaration must be present");
+        let protocol_pos = formatted
+            .find("Protocol define: Startable")
+            .expect("protocol declaration must be present");
+        assert!(
+            class_pos < protocol_pos,
+            "a protocol declared after a class must stay after it on format; \
+             formatted output:\n{formatted}"
+        );
+
+        let formatted_again =
+            format_source(&formatted).expect("format_source must succeed on formatted output");
+        assert_eq!(
+            formatted, formatted_again,
+            "format_source is not idempotent"
+        );
+    }
+
+    #[test]
+    fn class_protocol_type_alias_interleaved_preserves_relative_order() {
+        // Classes, protocols, and type aliases interleaved in source must
+        // come back out in the same relative order — not grouped by kind.
+        let source = concat!(
+            "type Port = Integer\n",
+            "\n",
+            "Protocol define: Startable\n",
+            "  start -> Integer\n",
+            "\n",
+            "Actor subclass: Server\n",
+            "  start => 1\n",
+            "\n",
+            "type Timeout = Integer\n",
+            "\n",
+            "Actor subclass: Client\n",
+            "  connect => 1\n",
+        );
+        let formatted = format_source(source).expect("format_source must succeed for valid source");
+
+        let positions = [
+            ("type Port = Integer", "type Port"),
+            ("Protocol define: Startable", "Protocol define: Startable"),
+            ("Actor subclass: Server", "Actor subclass: Server"),
+            ("type Timeout = Integer", "type Timeout"),
+            ("Actor subclass: Client", "Actor subclass: Client"),
+        ]
+        .map(|(needle, label)| {
+            (
+                formatted
+                    .find(needle)
+                    .unwrap_or_else(|| panic!("{label} must be present:\n{formatted}")),
+                label,
+            )
+        });
+
+        for pair in positions.windows(2) {
+            let (prev_pos, prev_label) = pair[0];
+            let (next_pos, next_label) = pair[1];
+            assert!(
+                prev_pos < next_pos,
+                "{prev_label} must come before {next_label} on format; \
+                 formatted output:\n{formatted}"
+            );
+        }
+
+        let formatted_again =
+            format_source(&formatted).expect("format_source must succeed on formatted output");
+        assert_eq!(
+            formatted, formatted_again,
+            "format_source is not idempotent"
         );
     }
 
