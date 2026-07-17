@@ -256,6 +256,28 @@ pub fn compute_diagnostics_with_native_types(
     all_diagnostics
 }
 
+/// Shared finalization pipeline for the REPL / compiler-port diagnostics
+/// entry points.
+///
+/// Combines `parse_diagnostics` with the diagnostics produced by whichever
+/// `analyse_*` variant was called, applies `@expect` suppressions, then
+/// applies the per-package severity-override table — in that fixed order,
+/// matching [`compute_project_diagnostics`].
+fn run_diagnostic_pipeline(
+    module: &crate::ast::Module,
+    parse_diagnostics: Vec<Diagnostic>,
+    analysis_diagnostics: Vec<Diagnostic>,
+    diagnostics_overrides: &crate::compilation::diagnostics_policy::DiagnosticsTable,
+) -> Vec<Diagnostic> {
+    let mut all_diagnostics = parse_diagnostics;
+    all_diagnostics.extend(analysis_diagnostics);
+    apply_expect_directives(module, &mut all_diagnostics);
+    crate::compilation::diagnostics_policy::apply_diagnostics_table(
+        all_diagnostics,
+        diagnostics_overrides,
+    )
+}
+
 /// Computes diagnostics with pre-defined REPL variables and pre-loaded class
 /// entries from BEAM metadata (ADR 0050 Phase 4).
 ///
@@ -280,16 +302,15 @@ pub fn compute_diagnostics_with_known_vars_and_classes(
     pre_loaded_classes: Vec<crate::semantic_analysis::class_hierarchy::ClassInfo>,
     diagnostics_overrides: &crate::compilation::diagnostics_policy::DiagnosticsTable,
 ) -> Vec<Diagnostic> {
-    let mut all_diagnostics = parse_diagnostics;
     let analysis_result = crate::semantic_analysis::analyse_with_known_vars_and_classes(
         module,
         known_vars,
         pre_loaded_classes,
     );
-    all_diagnostics.extend(analysis_result.diagnostics);
-    apply_expect_directives(module, &mut all_diagnostics);
-    crate::compilation::diagnostics_policy::apply_diagnostics_table(
-        all_diagnostics,
+    run_diagnostic_pipeline(
+        module,
+        parse_diagnostics,
+        analysis_result.diagnostics,
         diagnostics_overrides,
     )
 }
@@ -312,17 +333,16 @@ pub fn compute_diagnostics_with_known_vars_classes_and_aliases(
     pre_loaded_aliases: Vec<crate::semantic_analysis::AliasInfo>,
     diagnostics_overrides: &crate::compilation::diagnostics_policy::DiagnosticsTable,
 ) -> Vec<Diagnostic> {
-    let mut all_diagnostics = parse_diagnostics;
     let analysis_result = crate::semantic_analysis::analyse_with_known_vars_classes_and_aliases(
         module,
         known_vars,
         pre_loaded_classes,
         pre_loaded_aliases,
     );
-    all_diagnostics.extend(analysis_result.diagnostics);
-    apply_expect_directives(module, &mut all_diagnostics);
-    crate::compilation::diagnostics_policy::apply_diagnostics_table(
-        all_diagnostics,
+    run_diagnostic_pipeline(
+        module,
+        parse_diagnostics,
+        analysis_result.diagnostics,
         diagnostics_overrides,
     )
 }
@@ -347,20 +367,20 @@ pub fn compute_diagnostics_and_referenced_aliases(
     pre_loaded_aliases: Vec<crate::semantic_analysis::AliasInfo>,
     diagnostics_overrides: &crate::compilation::diagnostics_policy::DiagnosticsTable,
 ) -> (Vec<Diagnostic>, Vec<EcoString>) {
-    let mut all_diagnostics = parse_diagnostics;
     let analysis_result = crate::semantic_analysis::analyse_with_known_vars_classes_and_aliases(
         module,
         known_vars,
         pre_loaded_classes,
         pre_loaded_aliases,
     );
-    all_diagnostics.extend(analysis_result.diagnostics);
-    apply_expect_directives(module, &mut all_diagnostics);
-    let diagnostics = crate::compilation::diagnostics_policy::apply_diagnostics_table(
-        all_diagnostics,
+    let referenced_aliases = analysis_result.referenced_aliases;
+    let diagnostics = run_diagnostic_pipeline(
+        module,
+        parse_diagnostics,
+        analysis_result.diagnostics,
         diagnostics_overrides,
     );
-    (diagnostics, analysis_result.referenced_aliases)
+    (diagnostics, referenced_aliases)
 }
 
 /// Applies `@expect` directives to suppress matching diagnostics.
