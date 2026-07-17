@@ -616,13 +616,23 @@ fn unparse_type_alias_definition(type_alias: &TypeAliasDefinition) -> Document<'
     } else {
         Document::Nil
     };
-    docs.push(docvec![
+    let header = docvec![
         internal_prefix,
         "type ",
         leaf::ident(&type_alias.name.name),
         " = ",
         unparse_type_annotation(&type_alias.annotation),
-    ]);
+    ];
+
+    // Trailing end-of-line comment on the declaration line, e.g.
+    // `type Port = Integer // comment` (BT-2906).
+    let header = if let Some(trail) = &type_alias.comments.trailing {
+        docvec![header, "  ", unparse_comment(trail)]
+    } else {
+        header
+    };
+
+    docs.push(header);
 
     concat(docs)
 }
@@ -676,6 +686,15 @@ fn unparse_protocol_definition(protocol: &ProtocolDefinition) -> Document<'stati
     }
 
     docs.push(Document::Vec(header));
+
+    // Trailing end-of-line comment on the declaration header line, e.g.
+    // `Protocol define: Sortable // comment` (BT-2906). Emitted right after
+    // the header, matching where the parser collects it — before
+    // `extending:`/the body, which start on their own indented lines.
+    if let Some(trail) = &protocol.comments.trailing {
+        docs.push(Document::Str("  "));
+        docs.push(unparse_comment(trail));
+    }
 
     // `extending: ParentProtocol`
     if let Some(ext) = &protocol.extending {
@@ -3572,6 +3591,18 @@ mod tests {
         assert_identity(source);
     }
 
+    #[test]
+    fn protocol_trailing_comment_round_trip() {
+        // BT-2906: a trailing end-of-line comment on the `Protocol define:`
+        // declaration line must round-trip losslessly, mirroring the
+        // identical fix for `type` declarations below.
+        let source = concat!(
+            "Protocol define: Sortable  // comment\n",
+            "  sortKey -> Object\n",
+        );
+        assert_identity(source);
+    }
+
     // --- Type alias round-trip (ADR 0108, Phase 1, BT-2894) ---
 
     #[test]
@@ -3611,6 +3642,14 @@ mod tests {
     fn internal_type_alias_round_trip() {
         // ADR 0071, ADR 0108 Phase 5, BT-2898.
         let source = "internal type ParserState = Integer | String\n";
+        assert_identity(source);
+    }
+
+    #[test]
+    fn type_alias_trailing_comment_round_trip() {
+        // BT-2906: a trailing end-of-line comment on the declaration line
+        // must round-trip losslessly instead of being dropped.
+        let source = "type Port = Integer  // comment\n";
         assert_identity(source);
     }
 
