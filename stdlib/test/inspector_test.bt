@@ -207,7 +207,8 @@ TestCase subclass: InspectorTest
     b setPeer: a
     str := (Inspector on: a) printStringExpanded: 5
     self assert: (str includesSubstring: "↩ Actor") equals: true
-    a stop. b stop
+    a stop
+    b stop
 
   testActorCycleRenderTerminates =>
     // The expansion completes (does not hang) and names both actors once.
@@ -217,7 +218,8 @@ TestCase subclass: InspectorTest
     b setPeer: a
     str := (Inspector on: a) printStringExpanded: 5
     self assert: (str includesSubstring: "Inspector(CycleActorA)") equals: true
-    a stop. b stop
+    a stop
+    b stop
 
   testSharedActorReferenceIsNotMistakenForCycle =>
     // A diamond (shared, non-cyclic) reference: a value whose two fields both
