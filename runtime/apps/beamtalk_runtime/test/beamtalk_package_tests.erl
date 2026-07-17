@@ -267,6 +267,34 @@ dependencies_excludes_unpackaged_dep_test() ->
         _ = application:unload(Dep)
     end.
 
+%% dependencies/1 includes a types-only dep app (non-empty `type_aliases`,
+%% no `classes`) — mirrors dependencies_includes_beamtalk_package_deps_test/0
+%% but the dependency has no class entries to extract a `#{package := ...}`
+%% key from, so its binary name must come from `package_name_for_app/1`'s
+%% type_aliases fallback (the OTP application's own atom name via
+%% `atom_to_binary/2`), not a classes-derived package key (BT-2934).
+dependencies_includes_types_only_dep_test() ->
+    setup(),
+    Dep = bt_fake_types_only_dep,
+    Main = bt_fake_main3_pkg,
+    load_fake_app(
+        Dep,
+        [{env, [{type_aliases, [#{name => 'JsonValue', internal => false}]}]}]
+    ),
+    load_fake_app(
+        Main,
+        [{applications, [Dep]}, {env, [{classes, [#{package => main3p, name => 'M3'}]}]}]
+    ),
+    try
+        Deps = beamtalk_package:dependencies(<<"main3p">>),
+        %% Binary name is the app-atom-derived name, not a classes `package` key.
+        ?assertEqual(<<"bt_fake_types_only_dep">>, atom_to_binary(Dep, utf8)),
+        ?assert(lists:member(atom_to_binary(Dep, utf8), Deps))
+    after
+        _ = application:unload(Main),
+        _ = application:unload(Dep)
+    end.
+
 %% classes/1 accepts the legacy `{Mod, Name, Super}` tuple entry shape alongside
 %% the map shape (class_entry_name/1 tuple clause).
 classes_handles_legacy_tuple_entries_test() ->
