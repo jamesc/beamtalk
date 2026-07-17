@@ -66,6 +66,11 @@ to avoid temp files on disk (BT-48).
     %% ADR 0050 Phase 3: Accumulated class metadata cache.
     %% Maps class name atom → __beamtalk_meta/0 map.
     %% Populated via register_class/2 casts and crash recovery on init.
+    %% Accumulates entries from every session that has ever called
+    %% register_class/2, with no removal on session disconnect — the
+    %% `aliases` field below (ADR 0108, BT-2899) was modeled on this same
+    %% cache and shares this exact limitation (BT-2916); see its doc for the
+    %% full rationale, which applies here unchanged.
     classes = #{} :: #{atom() => map()},
     %% ADR 0108 hot-reload re-check trigger (BT-2899): ambient session type
     %% alias cache, keyed by alias name -> its reparseable `type Name =
@@ -92,7 +97,13 @@ to avoid temp files on disk (BT-48).
     %% (`maps:put/3` in `register_class/2`'s cast handler) rather than
     %% diverging from that precedent. Like `classes`, there is no removal on
     %% session disconnect — an accepted limitation this shares with every
-    %% ambient cache in this module.
+    %% ambient cache in this module. Not a regression introduced here: it is
+    %% the pre-existing, already-accepted `classes` limitation carried over
+    %% unchanged (BT-2916 tracks this as a cross-reference, not a bug —
+    %% `beamtalk_session_sup` termination pruning a departing session's
+    %% names from either cache would need to weigh the same cost/benefit for
+    %% both, so a fix to one without the other would just leave them
+    %% inconsistent).
     aliases = #{} :: #{binary() => binary()},
     %% BT-2832 (test-only): when set (via inject_diagnostics_failure/1, only
     %% exported in TEST builds), the *next* diagnostics/3 call fails with this
