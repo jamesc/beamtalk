@@ -361,7 +361,9 @@ named_resolves_types_only_package_test() ->
     try
         Info = beamtalk_package:named(<<"bt_fake_types_only_pkg3">>),
         ?assertEqual(<<"bt_fake_types_only_pkg3">>, maps:get(name, Info)),
-        ?assertEqual([], maps:get(classes, Info))
+        ?assertEqual([], maps:get(classes, Info)),
+        ?assertEqual(<<"1.0.0">>, maps:get(version, Info)),
+        ?assertEqual([], maps:get(dependencies, Info))
     after
         _ = application:unload(App)
     end.
