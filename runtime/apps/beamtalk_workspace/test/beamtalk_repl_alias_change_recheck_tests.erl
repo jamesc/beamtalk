@@ -417,7 +417,7 @@ live_redefinition_of_a_deeply_transitive_alias_triggers_recheck_test_() ->
                         ])
                     ),
                     ok = file:write_file(UserPath, deep_chain_user_source()),
-                    {ok, _, _State4} = beamtalk_repl_loader:handle_load(UserPath, State3),
+                    {ok, _, State4} = beamtalk_repl_loader:handle_load(UserPath, State3),
 
                     %% The class only ever wrote `:: AliasChangeDeepC`, but
                     %% the innermost name of the chain, `AliasChangeDeepA`,
@@ -432,6 +432,11 @@ live_redefinition_of_a_deeply_transitive_alias_triggers_recheck_test_() ->
                         [<<"AliasChangeDeepChainUser">>],
                         beamtalk_alias_xref:dependents_of(<<"AliasChangeDeepB">>)
                     ),
+                    %% And the directly written annotation name.
+                    ?assertEqual(
+                        [<<"AliasChangeDeepChainUser">>],
+                        beamtalk_alias_xref:dependents_of(<<"AliasChangeDeepC">>)
+                    ),
 
                     subscribe_self_to_reload_check(),
 
@@ -443,7 +448,7 @@ live_redefinition_of_a_deeply_transitive_alias_triggers_recheck_test_() ->
                     _State5 = declare_alias(
                         <<"AliasChangeDeepA">>,
                         <<"#north | #south | #east | #west">>,
-                        State3
+                        State4
                     ),
                     wait_for_alias_change_worker(),
 
