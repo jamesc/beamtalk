@@ -138,7 +138,10 @@ clear_when_not_running_test() ->
     ?assertEqual(ok, beamtalk_alias_xref:clear()).
 
 register_class_when_not_running_test() ->
-    %% Exercises the _:_ -> ok catch in register_class/2 (line 125).
+    %% Validates that register_class/2 returns ok when the server is not running.
+    %% gen_server:cast/2 already swallows send errors internally in OTP, so the
+    %% outer try/catch in register_class/2 is a belt-and-suspenders guard for
+    %% older/unusual paths; the function returns ok via its trailing `ok` (line 127).
     stop_server_if_running(),
     ?assertEqual(ok, beamtalk_alias_xref:register_class(<<"Ghost">>, [<<"A">>])).
 
