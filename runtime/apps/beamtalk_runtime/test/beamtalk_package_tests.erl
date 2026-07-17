@@ -288,8 +288,7 @@ dependencies_includes_types_only_dep_test() ->
     try
         Deps = beamtalk_package:dependencies(<<"main3p">>),
         %% Binary name is the app-atom-derived name, not a classes `package` key.
-        ?assertEqual(<<"bt_fake_types_only_dep">>, atom_to_binary(Dep, utf8)),
-        ?assert(lists:member(atom_to_binary(Dep, utf8), Deps))
+        ?assert(lists:member(<<"bt_fake_types_only_dep">>, Deps))
     after
         _ = application:unload(Main),
         _ = application:unload(Dep)
