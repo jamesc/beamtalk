@@ -244,6 +244,10 @@ extract_type_term(Content) ->
 %% Shared extraction: find ALL `AttrKey = [...]` positions and extract each
 %% balanced `[...]` value using bracket counting (regex can't handle nested
 %% brackets), parsing it as a list of Erlang terms.
+%%
+%% AttrKey is spliced directly into the regex source below, so it must be a
+%% compile-time literal (`"'spec'"`, `"'type'"`) — never a dynamic or
+%% user-supplied string.
 extract_attr_term(Content, AttrKey) ->
     case
         re:run(

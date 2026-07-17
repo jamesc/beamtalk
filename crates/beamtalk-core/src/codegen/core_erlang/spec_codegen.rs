@@ -137,6 +137,14 @@ fn type_annotation_to_spec(
 /// `RestartStrategy` → `restart_strategy`) so the emitted `-type` reads as
 /// idiomatic Erlang, matching the ADR 0108 goal of a more idiomatic FFI
 /// boundary for Erlang/Elixir consumers.
+///
+/// Caution: a Value class that declares a `state:` field (BT-1156, which
+/// always emits `-type t() :: ...`) *and* a `type T = ...` alias (which maps
+/// to `t` here) would emit two conflicting `'type' = [{t, ...}]` module
+/// attributes — an `erlc` duplicate-type compile error. Neither this
+/// function nor [`generate_alias_type_attrs`] special-cases the collision;
+/// `validate_specs.escript`'s Dialyzer/erlc checks surface it at compile
+/// time rather than silently picking one.
 fn alias_erlang_type_name(alias_name: &str) -> String {
     to_module_name(alias_name)
 }

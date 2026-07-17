@@ -93,6 +93,9 @@ impl CoreErlangGenerator {
         // BT-2909: build the alias registry once from this module's own
         // `type_aliases` so alias-named annotations resolve to `user_type`
         // references (ADR 0108) instead of falling through to `any()`.
+        // Cross-module aliases (an annotation referencing an alias exported
+        // by a dependency, ADR 0108) are not resolved here — only this
+        // module's own declarations — so they still fall through to `any()`.
         let alias_registry = AliasRegistry::from_module_declarations(module);
         let spec_attrs = spec_codegen::generate_class_specs(class, true, Some(&alias_registry));
         let spec_suffix: Document<'static> = spec_codegen::format_spec_attributes(&spec_attrs)
@@ -183,6 +186,9 @@ impl CoreErlangGenerator {
         // BT-2909: build the alias registry once from this module's own
         // `type_aliases` so alias-named annotations resolve to `user_type`
         // references (ADR 0108) instead of falling through to `any()`.
+        // Cross-module aliases (an annotation referencing an alias exported
+        // by a dependency, ADR 0108) are not resolved here — only this
+        // module's own declarations — so they still fall through to `any()`.
         let alias_registry = AliasRegistry::from_module_declarations(module);
         let spec_attrs = spec_codegen::generate_class_specs(class, true, Some(&alias_registry));
         let spec_suffix: Document<'static> = spec_codegen::format_spec_attributes(&spec_attrs)
