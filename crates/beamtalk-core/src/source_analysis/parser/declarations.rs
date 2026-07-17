@@ -1839,7 +1839,7 @@ impl Parser {
     pub(super) fn parse_type_alias_definition(&mut self) -> TypeAliasDefinition {
         let start = self.current_token().span();
         let doc_comment = self.collect_doc_comment();
-        let comments = self.collect_comment_attachment();
+        let mut comments = self.collect_comment_attachment();
 
         let is_internal =
             matches!(self.current_kind(), TokenKind::Identifier(name) if name == "internal");
@@ -1878,6 +1878,11 @@ impl Parser {
         let annotation = self.parse_type_annotation();
         let span = start.merge(annotation.span());
 
+        // Collect a trailing end-of-line comment on the declaration line
+        // (e.g. `type Port = Integer // comment`), mirroring the state
+        // declaration handling above (BT-2906).
+        comments.trailing = self.collect_trailing_comment();
+
         TypeAliasDefinition {
             name,
             annotation,
@@ -1908,7 +1913,7 @@ impl Parser {
     pub(super) fn parse_protocol_definition(&mut self) -> ProtocolDefinition {
         let start = self.current_token().span();
         let doc_comment = self.collect_doc_comment();
-        let comments = self.collect_comment_attachment();
+        let mut comments = self.collect_comment_attachment();
 
         // Consume `Protocol`
         self.advance();
@@ -1934,6 +1939,13 @@ impl Parser {
 
         // Parse optional type parameters: `Collection(E)`, `Mapping(K, V)`
         let type_params = self.parse_optional_type_params();
+
+        // Collect a trailing end-of-line comment on the declaration header
+        // line (e.g. `Protocol define: Sortable // comment`), mirroring the
+        // identical fix for `type` declarations (BT-2906). Collected before
+        // `extending:`/the body since those start on their own indented
+        // lines and aren't part of the header.
+        comments.trailing = self.collect_trailing_comment();
 
         // Parse optional `extending:` clause
         let extending = if matches!(self.current_kind(), TokenKind::Keyword(k) if k == "extending:")
