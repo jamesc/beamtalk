@@ -367,3 +367,24 @@ named_resolves_types_only_package_test() ->
     after
         _ = application:unload(App)
     end.
+
+%% package_name_for_app/1 must NOT fall through to type_aliases when classes
+%% is non-empty but malformed (no `package` key on any entry) — a non-empty
+%% classes env means "not types-only", even if type_aliases is also present.
+types_only_not_used_when_classes_env_nonempty_test() ->
+    setup(),
+    App = bt_fake_malformed_classes_pkg,
+    load_fake_app(
+        App,
+        [
+            {env, [
+                {classes, [#{name => 'X'}]},
+                {type_aliases, [#{name => 'Y', internal => false}]}
+            ]}
+        ]
+    ),
+    try
+        ?assertNot(lists:member(atom_to_binary(App, utf8), beamtalk_package:all()))
+    after
+        _ = application:unload(App)
+    end.
