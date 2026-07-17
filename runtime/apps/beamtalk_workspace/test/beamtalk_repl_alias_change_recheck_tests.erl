@@ -339,3 +339,142 @@ compile_method_patch_registers_alias_dependency_test_() ->
                 end)
             ]
         end}}.
+
+%%====================================================================
+%% End-to-end (BT-2916, BT-2899 follow-up): a live redefinition of a
+%% *deeply* (3-level) transitively referenced alias still fires the
+%% dependent's re-check.
+%%
+%% `type AliasChangeDeepC = AliasChangeDeepB`,
+%% `type AliasChangeDeepB = AliasChangeDeepA` — the dependent class's only
+%% written annotation is `:: AliasChangeDeepC`, yet its compile's
+%% `referenced_aliases` must span the *full* transitive walk (all three
+%% names — see `resolve_type_annotation_with_alias_deps`'s doc and the
+%% Rust-level `alias_deps_records_both_levels_of_a_chained_alias` unit test
+%% for the 2-level version of this same guarantee), so
+%% `beamtalk_alias_xref` records the class as a dependent of the
+%% *innermost* name too. Redefining only `AliasChangeDeepA` (never
+%% `AliasChangeDeepB`/`AliasChangeDeepC` themselves) must still trigger
+%% `beamtalk_recheck:trigger_alias_change/1` for that class — proving the
+%% chain-recording guarantee actually reaches the live hot-reload trigger,
+%% not just the recording logic in isolation.
+%%====================================================================
+
+deep_chain_user_source() ->
+    <<
+        "Object subclass: AliasChangeDeepChainUser\n"
+        "  test: x :: AliasChangeDeepC => x matchExhaustive: [\n"
+        "    #north -> 0;\n"
+        "    #south -> 1;\n"
+        "    #east -> 2\n"
+        "  ]\n"
+    >>.
+
+live_redefinition_of_a_deeply_transitive_alias_triggers_recheck_test_() ->
+    {timeout, 30,
+        {setup, fun alias_recheck_setup/0, fun alias_recheck_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    %% Turn 1-3: build the 3-level chain
+                    %% C -> B -> A, innermost first so each declaration's RHS
+                    %% resolves against an already-known name.
+                    State0 = beamtalk_repl_state:new(undefined, 0),
+                    State1 = declare_alias(
+                        <<"AliasChangeDeepA">>,
+                        <<"#north | #south | #east">>,
+                        State0
+                    ),
+                    State2 = declare_alias(
+                        <<"AliasChangeDeepB">>,
+                        <<"AliasChangeDeepA">>,
+                        State1
+                    ),
+                    State3 = declare_alias(
+                        <<"AliasChangeDeepC">>,
+                        <<"AliasChangeDeepB">>,
+                        State2
+                    ),
+
+                    %% Sanity check: the dependent's matchExhaustive: (written
+                    %% against `:: AliasChangeDeepC`) compiles clean while the
+                    %% chain still bottoms out at exactly the three members it
+                    %% matches against.
+                    {ok, SanityDiagnostics} = beamtalk_compiler:diagnostics(
+                        deep_chain_user_source(), <<"expression">>, #{class_hierarchy => true}
+                    ),
+                    ?assertEqual(
+                        [],
+                        [D || D <- SanityDiagnostics, maps:get(severity, D) =:= <<"error">>]
+                    ),
+
+                    %% Load the dependent for real so its referenced_aliases
+                    %% (all three chain names, per the full-transitive-walk
+                    %% guarantee) land in beamtalk_alias_xref's index.
+                    UserPath = filename:join(
+                        temp_dir(),
+                        io_lib:format("alias_recheck_deep_chain_user_~p.bt", [
+                            erlang:unique_integer([positive])
+                        ])
+                    ),
+                    ok = file:write_file(UserPath, deep_chain_user_source()),
+                    {ok, _, State4} = beamtalk_repl_loader:handle_load(UserPath, State3),
+
+                    %% The class only ever wrote `:: AliasChangeDeepC`, but
+                    %% the innermost name of the chain, `AliasChangeDeepA`,
+                    %% must still have it recorded as a dependent — this is
+                    %% the crux of the deep-chain guarantee.
+                    ?assertEqual(
+                        [<<"AliasChangeDeepChainUser">>],
+                        beamtalk_alias_xref:dependents_of(<<"AliasChangeDeepA">>)
+                    ),
+                    %% And so must the middle name.
+                    ?assertEqual(
+                        [<<"AliasChangeDeepChainUser">>],
+                        beamtalk_alias_xref:dependents_of(<<"AliasChangeDeepB">>)
+                    ),
+                    %% And the directly written annotation name.
+                    ?assertEqual(
+                        [<<"AliasChangeDeepChainUser">>],
+                        beamtalk_alias_xref:dependents_of(<<"AliasChangeDeepC">>)
+                    ),
+
+                    subscribe_self_to_reload_check(),
+
+                    %% Turn 4: redefine only the innermost alias, adding
+                    %% `#west` — never touching `AliasChangeDeepB` or
+                    %% `AliasChangeDeepC` directly. The dependent's
+                    %% matchExhaustive: (still only covering north/south/east)
+                    %% is now newly non-exhaustive.
+                    _State5 = declare_alias(
+                        <<"AliasChangeDeepA">>,
+                        <<"#north | #south | #east | #west">>,
+                        State4
+                    ),
+                    wait_for_alias_change_worker(),
+
+                    Event = receive_reload_check_announcement(),
+                    ?assertEqual(
+                        <<"AliasChangeDeepA">>, maps:get(changedClass, Event)
+                    ),
+                    ?assertEqual(alias_change, maps:get(classification, Event)),
+                    ?assert(
+                        lists:member(
+                            <<"AliasChangeDeepChainUser">>, maps:get(checkedOwners, Event)
+                        )
+                    ),
+
+                    Findings = beamtalk_workspace_findings_store:for_owner(
+                        <<"AliasChangeDeepChainUser">>
+                    ),
+                    ?assert(length(Findings) > 0),
+                    ?assert(
+                        lists:any(
+                            fun(F) ->
+                                binary:match(maps:get(message, F), <<"exhaustive">>) =/= nomatch
+                            end,
+                            Findings
+                        )
+                    )
+                end)
+            ]
+        end}}.

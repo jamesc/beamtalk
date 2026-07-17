@@ -4465,6 +4465,94 @@ fn pre_loaded_internal_alias_from_same_package_is_still_seeded() {
     );
 }
 
+// BT-2916 (BT-2899 follow-up, ADR 0108 hot-reload re-check trigger): a
+// cross-package `referenced_aliases`/`beamtalk_alias_xref` dependency edge
+// must be recorded when a *seeded* (pre-loaded, from a dependency package)
+// alias is referenced by the current module — and a foreign `internal`
+// alias must never appear as such an edge, since `add_pre_loaded`'s
+// seeding-boundary exclusion (see its doc) means it was never seeded into
+// the consumer's alias table in the first place, so a reference to it
+// resolves as an ordinary unknown-class annotation, not an alias
+// dependency. Both halves matter for BT-2899's live-redefinition re-check:
+// only a *recorded* dependency edge lets `beamtalk_alias_xref` find the
+// dependent class when the alias is later redefined live.
+#[test]
+fn referenced_aliases_records_a_seeded_cross_package_alias_and_excludes_a_foreign_internal_one() {
+    use crate::semantic_analysis::alias_registry::AliasInfo;
+
+    // Two classes in the *consuming* (`app`) package: one references the
+    // dependency's public exported alias `Timeout`, the other attempts to
+    // reference a *different* dependency's `internal` alias `ParserState`
+    // — which `add_pre_loaded` never seeds because it is `internal` and
+    // belongs to a package (`other_pkg`) other than the current compile.
+    let src = "Object subclass: TimeoutUser\n  wait: t :: Timeout => t\n\n\
+               Object subclass: ParserStateUser\n  parse: s :: ParserState => s\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _parse_diags) = crate::source_analysis::parse(tokens);
+
+    let public_dependency_alias = AliasInfo {
+        name: EcoString::from("Timeout"),
+        annotation: TypeAnnotation::Simple(Identifier {
+            name: EcoString::from("Integer"),
+            span: Span::default(),
+        }),
+        is_internal: false,
+        package: Some(EcoString::from("net")),
+        span: Span::default(),
+    };
+    let foreign_internal_alias = AliasInfo {
+        name: EcoString::from("ParserState"),
+        annotation: TypeAnnotation::Simple(Identifier {
+            name: EcoString::from("Integer"),
+            span: Span::default(),
+        }),
+        is_internal: true,
+        package: Some(EcoString::from("other_pkg")),
+        span: Span::default(),
+    };
+
+    let options = crate::CompilerOptions {
+        current_package: Some("app".to_string()),
+        ..Default::default()
+    };
+    let result = analyse_with_natives_and_protocols_and_aliases(
+        &module,
+        &options,
+        vec![],
+        vec![],
+        vec![public_dependency_alias, foreign_internal_alias],
+        None,
+        &crate::compilation::extension_index::ExtensionIndex::new(),
+    );
+
+    // (a) The public dependency alias is seeded and, once referenced by
+    // `TimeoutUser`'s parameter, recorded as a dependency edge — exactly
+    // what `beamtalk_alias_xref` needs to find `TimeoutUser` as a dependent
+    // when `Timeout` is later redefined live.
+    assert!(result.alias_registry.has_alias("Timeout"));
+    assert!(
+        result
+            .referenced_aliases
+            .contains(&EcoString::from("Timeout")),
+        "expected Timeout in referenced_aliases, got: {:?}",
+        result.referenced_aliases
+    );
+
+    // (b) The foreign internal alias is never seeded — the seeding-boundary
+    // exclusion in `add_pre_loaded` runs before any reference to it is ever
+    // resolved, so it can never appear in `referenced_aliases` for any
+    // class, including one (`ParserStateUser`) that names it directly.
+    assert!(!result.alias_registry.has_alias("ParserState"));
+    assert!(
+        !result
+            .referenced_aliases
+            .contains(&EcoString::from("ParserState")),
+        "a never-seeded internal alias from another package must never appear \
+         as a referenced_aliases entry, got: {:?}",
+        result.referenced_aliases
+    );
+}
+
 // BT-2898: end-to-end wiring check — the E0402 alias-leak checks (Phase 8)
 // must fire through the full `analyse_with_options` pipeline, not just when
 // the validator functions are called directly in `visibility_validators.rs`.
