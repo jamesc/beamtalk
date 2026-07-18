@@ -1338,7 +1338,7 @@ Actor subclass: Worker
   run: t :: Timeout => // ...
 ```
 
-Generates (in the compiled `.core` module's attributes):
+Generates:
 
 ```erlang
 -type 'Timeout'() :: integer() | 'infinity'.
