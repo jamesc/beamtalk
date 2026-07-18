@@ -2033,10 +2033,12 @@ impl Parser {
             && !self.is_at_type_alias_definition()
             && !self.is_at_standalone_method_definition()
         {
-            // BT-1618: Collect doc comment *before* checking for `class` prefix,
-            // because the doc comment is leading trivia on the `class` token and
-            // would be lost when we advance past it.
+            // BT-1618/BT-2930: Collect the doc comment and any non-doc leading
+            // comments *before* checking for `class` prefix, because both are
+            // leading trivia on the `class` token and would be lost when we
+            // advance past it.
             let doc_comment = self.collect_doc_comment();
+            let comments = self.collect_comment_attachment();
 
             // BT-1611: Detect `class` prefix for class method signatures.
             // Use the same lookahead as class definition parsing: `class` followed
@@ -2050,7 +2052,8 @@ impl Parser {
                 self.advance(); // consume `class`
             }
 
-            if let Some(sig) = self.parse_protocol_method_signature_with_doc(doc_comment) {
+            if let Some(sig) = self.parse_protocol_method_signature_with_doc(doc_comment, comments)
+            {
                 if is_class_method {
                     class_signatures.push(sig);
                 } else {
@@ -2072,9 +2075,11 @@ impl Parser {
     ///
     /// Returns `None` if the current position doesn't look like a method signature.
     ///
-    /// If `pre_doc` is `Some`, it is used as the doc comment (already collected
-    /// by the caller before consuming a `class` prefix). Otherwise, collects
-    /// the doc comment from the current token's leading trivia.
+    /// `pre_doc` and `pre_comments` are the doc comment and non-doc leading
+    /// comments, respectively, already collected by the caller before
+    /// consuming an optional `class` prefix — both live in the `class`
+    /// token's leading trivia and would be lost once the parser advances
+    /// past it (BT-1618, BT-2930).
     ///
     /// Syntax:
     /// - Unary: `asString -> String`
@@ -2083,10 +2088,11 @@ impl Parser {
     fn parse_protocol_method_signature_with_doc(
         &mut self,
         pre_doc: Option<String>,
+        pre_comments: CommentAttachment,
     ) -> Option<ProtocolMethodSignature> {
         let start = self.current_token().span();
         let doc_comment = pre_doc.or_else(|| self.collect_doc_comment());
-        let comments = self.collect_comment_attachment();
+        let comments = pre_comments;
 
         // Determine what kind of signature this is
         let (selector, parameters) = match self.current_kind() {
