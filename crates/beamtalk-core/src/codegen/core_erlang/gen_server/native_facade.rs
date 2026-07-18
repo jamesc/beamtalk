@@ -15,7 +15,6 @@ use super::super::spec_codegen;
 use super::super::{CodeGenContext, CoreErlangGenerator, Result};
 use crate::ast::{MethodDefinition, MethodKind, Module};
 use crate::docvec;
-use crate::semantic_analysis::alias_registry::AliasRegistry;
 use crate::unparse::unparse_method_display_signature;
 
 impl CoreErlangGenerator {
@@ -43,19 +42,19 @@ impl CoreErlangGenerator {
         let class_method_export_doc = Self::build_class_method_export_doc(module);
 
         // BT-586: Generate spec attributes from type annotations
-        // BT-2909: build the alias registry once from this module's own
-        // `type_aliases` so alias-named annotations resolve to `user_type`
-        // references (ADR 0108) instead of falling through to `any()`.
-        // Cross-module aliases (an annotation referencing an alias exported
-        // by a dependency, ADR 0108) are not resolved here — only this
-        // module's own declarations — so they still fall through to `any()`.
-        // TODO(BT-2932): thread the full seeded registry through instead of
-        // reconstructing a module-local one.
-        let alias_registry = AliasRegistry::from_module_declarations(module);
+        // BT-2909/BT-2932: use the generator's cross-module-aware alias
+        // registry (this module's own `type_aliases` merged with any
+        // pre-loaded aliases from other modules in the same compilation
+        // unit — see `CoreErlangGenerator::alias_registry`'s doc) so an
+        // alias-named annotation resolves to a `user_type` reference (ADR
+        // 0108) instead of falling through to `any()`, regardless of which
+        // module declared the alias.
         let spec_attrs = module
             .classes
             .first()
-            .map(|class| spec_codegen::generate_class_specs(class, false, Some(&alias_registry)))
+            .map(|class| {
+                spec_codegen::generate_class_specs(class, false, Some(&self.alias_registry))
+            })
             .unwrap_or_default();
         let spec_suffix: Document<'static> = spec_codegen::format_spec_attributes(&spec_attrs)
             .map_or(Document::Nil, |s| docvec![",\n     ", s]);
@@ -64,7 +63,7 @@ impl CoreErlangGenerator {
         // module attribute list (an `erlc` compile error otherwise) — empty
         // for a module with no `type_aliases`, so this is a no-op change for
         // the common case.
-        let alias_type_attrs = spec_codegen::generate_alias_type_attrs(&alias_registry);
+        let alias_type_attrs = spec_codegen::generate_alias_type_attrs(&self.alias_registry);
         let alias_type_suffix: Document<'static> =
             spec_codegen::format_alias_type_attributes(&alias_type_attrs)
                 .map_or(Document::Nil, |s| docvec![",\n     ", s]);
