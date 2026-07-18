@@ -3354,6 +3354,74 @@ mod tests {
         );
     }
 
+    /// BT-2928 (review follow-up): `collect_project_alias_infos` scans every
+    /// source file in the compilation unit, including the one currently being
+    /// compiled — unlike `ClassHierarchy::cross_file_class_infos`, which
+    /// explicitly filters out the current file's own classes before
+    /// injection. So compiling `a.bt` (which declares `type Direction = ...`)
+    /// with `pre_loaded_aliases` that *also* contains `a.bt`'s own `Direction`
+    /// entry must not raise a "Duplicate type alias definition" diagnostic —
+    /// `analyse_full`'s merge order must let the module's own declaration take
+    /// precedence over its duplicate pre-loaded entry.
+    #[test]
+    fn test_cross_file_alias_resolution_no_false_duplicate_for_own_alias() {
+        let temp = TempDir::new().unwrap();
+        let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let src_path = project_path.join("src");
+        fs::create_dir_all(&src_path).unwrap();
+
+        write_test_file(
+            &src_path.join("a.bt"),
+            "type Direction = #north | #south | #east | #west\n\
+             Value subclass: A\n  heading -> Direction => #north\n",
+        );
+
+        let build_dir = project_path.join("_build/dev/ebin");
+        fs::create_dir_all(&build_dir).unwrap();
+
+        let source_files = vec![src_path.join("a.bt")];
+        let (
+            class_module_index,
+            class_superclass_index,
+            all_class_infos,
+            _extensions,
+            _cached_asts,
+        ) = build_class_module_index(&source_files, Some(&src_path), "test_pkg").unwrap();
+        // Includes a.bt's own `Direction` alias, exactly as the real Pass 1
+        // scan would when compiling a.bt itself.
+        let all_alias_infos = collect_project_alias_infos(&source_files, "test_pkg");
+
+        let core_file = build_dir.join("bt@test_pkg@a.core");
+        let options = default_options();
+        let diagnostics = compile_file(
+            &src_path.join("a.bt"),
+            "bt@test_pkg@a",
+            &core_file,
+            &options,
+            &CompileContext {
+                hierarchy: ClassHierarchyContext {
+                    class_module_index,
+                    class_superclass_index,
+                    pre_loaded_classes: all_class_infos,
+                    pre_loaded_aliases: all_alias_infos,
+                    ..ClassHierarchyContext::default()
+                },
+                ..CompileContext::default()
+            },
+            None,
+        )
+        .expect("Compiling a file whose own alias is also pre-loaded should succeed");
+
+        assert!(core_file.exists());
+        assert!(
+            diagnostics
+                .iter()
+                .all(|d| !d.message.contains("Duplicate type alias")),
+            "Expected no false duplicate-alias diagnostic when a file's own \
+             alias is also present in pre_loaded_aliases, got: {diagnostics:?}"
+        );
+    }
+
     #[test]
     fn test_clean_stale_artifacts_removes_orphaned_beam() {
         let temp = TempDir::new().unwrap();

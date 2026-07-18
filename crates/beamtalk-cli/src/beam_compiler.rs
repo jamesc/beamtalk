@@ -677,7 +677,13 @@ pub struct ClassHierarchyContext {
     /// the same package (BT-2928, ADR 0108). Seeded into the `AliasRegistry`
     /// during semantic analysis so a cross-file alias reference resolves
     /// through `resolve_type_annotation` instead of staying an opaque,
-    /// unresolved name — mirrors `pre_loaded_protocols` immediately above.
+    /// unresolved name. Structurally a `ctx.hierarchy.*` field like
+    /// `pre_loaded_protocols` above, but populated differently in practice:
+    /// the CLI build path (`execute_build_passes`) leaves `pre_loaded_protocols`
+    /// empty while fully populating `pre_loaded_aliases` from every source
+    /// file in the compilation unit, including the file being compiled —
+    /// `analyse_full`'s merge order lets the module's own declaration take
+    /// precedence over its duplicate pre-loaded entry.
     pub pre_loaded_aliases: Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
     /// Project-wide standalone extension definitions from Pass 1 (BT-2795).
     /// Registered into each file's class hierarchy during Pass 2 so
