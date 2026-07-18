@@ -466,7 +466,26 @@ impl TypeChecker {
             return;
         };
 
-        let declared_type = type_annotation.type_name();
+        // BT-2928: resolve the declared type through the alias table before
+        // comparing against the default value's inferred type — mirroring
+        // `check_state_defaults`'s alias-aware resolution (its same-file
+        // sibling, fixed in BT-2923/ADR 0108). This method is only reached
+        // for `TypeAnnotation::Generic` fields (see
+        // `check_generic_variance_in_module`'s caller-side gate), so the
+        // alias in question is typically a type *argument* — e.g. `field:
+        // items :: Array(RestartStrategy) = Array new` — and
+        // `resolve_type_annotation_with_alias_deps` recurses into `Generic`
+        // parameters, expanding the alias before `is_assignable_to_with_variance`
+        // ever sees it, instead of comparing against its opaque unresolved name.
+        let (resolved_declared, alias_deps) =
+            super::type_resolver::resolve_type_annotation_with_alias_deps(
+                type_annotation,
+                &super::type_resolver::SubstitutionMap::new(),
+                None,
+                self.alias_registry.as_ref(),
+            );
+        self.referenced_aliases.extend(alias_deps);
+        let declared_type = Self::inferred_type_to_string(&resolved_declared);
         let mut env = TypeEnv::new();
         env.set_local("self", InferredType::known(class.name.name.clone()));
         let inferred = self.infer_expr(default_value, hierarchy, &mut env, false);

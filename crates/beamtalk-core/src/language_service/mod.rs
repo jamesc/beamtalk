@@ -1696,9 +1696,15 @@ impl LanguageService for SimpleLanguageService {
                 // passed so a same-project `ClassName >> selector` defined in
                 // another file resolves instead of producing a false Dnu hint.
                 let cross_file_extensions = self.project_index.cross_file_extensions_for(file);
+                // BT-2928: Cross-file type aliases from the ProjectIndex, so a
+                // `type Name = ...` declared in another project file resolves
+                // instead of leaving `Dynamic (dynamic receiver)` behind —
+                // mirrors `cross_file_classes` immediately above.
+                let pre_loaded_aliases = self.project_index.cross_file_alias_infos_for(file);
                 let ctx = crate::queries::diagnostic_provider::ProjectDiagnosticContext {
                     options,
                     cross_file_classes,
+                    pre_loaded_aliases,
                     cross_file_extensions,
                     native_type_registry: self.native_types.clone(),
                     // BT-2800: apply the same `beamtalk.toml` `[diagnostics]`

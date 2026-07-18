@@ -673,6 +673,18 @@ pub struct ClassHierarchyContext {
     /// recognise protocol names defined outside the current module (BT-2006).
     pub pre_loaded_protocols:
         Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
+    /// Type alias declarations (`type Name = ...`) from other source files in
+    /// the same package (BT-2928, ADR 0108). Seeded into the `AliasRegistry`
+    /// during semantic analysis so a cross-file alias reference resolves
+    /// through `resolve_type_annotation` instead of staying an opaque,
+    /// unresolved name. Structurally a `ctx.hierarchy.*` field like
+    /// `pre_loaded_protocols` above, but populated differently in practice:
+    /// the CLI build path (`execute_build_passes`) leaves `pre_loaded_protocols`
+    /// empty while fully populating `pre_loaded_aliases` from every source
+    /// file in the compilation unit, including the file being compiled —
+    /// `analyse_full`'s merge order lets the module's own declaration take
+    /// precedence over its duplicate pre-loaded entry.
+    pub pre_loaded_aliases: Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
     /// Project-wide standalone extension definitions from Pass 1 (BT-2795).
     /// Registered into each file's class hierarchy during Pass 2 so
     /// same-project cross-file extensions resolve instead of producing
@@ -864,6 +876,12 @@ pub(crate) fn compile_source_with_bindings(
         options: options.clone(),
         cross_file_classes: cross_file_classes.clone(),
         pre_loaded_protocols: ctx.hierarchy.pre_loaded_protocols.clone(),
+        // BT-2928: cross-file/package type aliases from Pass 1 — see
+        // `ClassHierarchyContext::pre_loaded_aliases`'s doc. `analyse_full`
+        // filters out any name the current module redeclares itself, so no
+        // "current file's own aliases" pre-filter is needed here (mirrors
+        // `pre_loaded_protocols` immediately above).
+        pre_loaded_aliases: ctx.hierarchy.pre_loaded_aliases.clone(),
         cross_file_extensions: ctx.hierarchy.extension_index.clone(),
         native_type_registry: ctx.native_type_registry.clone(),
         dep_registry: ctx.dep_registry,

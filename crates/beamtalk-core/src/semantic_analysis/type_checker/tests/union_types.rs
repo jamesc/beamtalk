@@ -162,13 +162,13 @@ fn resolve_type_annotation_false_or() {
 
 #[test]
 fn resolve_type_name_string_simple() {
-    let result = TypeChecker::resolve_type_name_string(&"Integer".into());
+    let result = TypeChecker::resolve_type_name_string(&"Integer".into(), None);
     assert_eq!(result, InferredType::known("Integer"));
 }
 
 #[test]
 fn resolve_type_name_string_union() {
-    let result = TypeChecker::resolve_type_name_string(&"String | nil".into());
+    let result = TypeChecker::resolve_type_name_string(&"String | nil".into(), None);
     assert_eq!(
         result,
         InferredType::simple_union(&["String", "UndefinedObject"])
