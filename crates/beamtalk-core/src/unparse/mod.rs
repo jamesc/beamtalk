@@ -4008,6 +4008,25 @@ mod tests {
     }
 
     #[test]
+    fn blank_line_preserved_across_all_three_declaration_kinds_interleaved() {
+        // Full combination: type alias, protocol, and class, each separated
+        // by a blank line — every pairwise gap (type-alias/protocol,
+        // protocol/class, class/type-alias) must round-trip.
+        assert_identity(concat!(
+            "type Port = Integer\n",
+            "\n",
+            "Protocol define: Startable\n",
+            "  start -> Integer\n",
+            "\n",
+            "Object subclass: Server\n",
+            "\n",
+            "  start => 1\n",
+            "\n",
+            "type Timeout = Integer\n",
+        ));
+    }
+
+    #[test]
     fn state_declaration_preceded_by_orphaned_doc_block_does_not_merge_into_own_doc_comment() {
         // BT-2924 follow-up (found in adversarial review): a `///` block that
         // breaks away from a *different* declaration must not get glued onto
