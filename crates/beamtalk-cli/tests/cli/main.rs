@@ -8,8 +8,8 @@
 //! was the dominant contributor to `target/debug` size.
 //!
 //! `repl_protocol.rs` and `spec_validation.rs` stay as their own binaries:
-//! both are invoked by name elsewhere (`cargo test --test repl_protocol`,
-//! `--test spec_validation`) in the Justfile and docs.
+//! `repl_protocol` is invoked by name in the Justfile; `spec_validation`
+//! is referenced in `docs/development/common-tasks.md`.
 //!
 //! Unlike before, these modules' tests now run as threads of one process
 //! rather than as separate processes, so a test must never mutate
