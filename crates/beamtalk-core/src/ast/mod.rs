@@ -284,9 +284,12 @@ pub struct CommentAttachment {
     /// type — so that the many existing `CommentAttachment::default()` call
     /// sites (tests, synthetic AST construction) keep compiling unchanged.
     /// Populated by [`crate::source_analysis::parser`]'s
-    /// `collect_comment_attachment` and consulted by the module-level
-    /// unparser to preserve the blank line separating top-level class /
-    /// protocol / type-alias declarations (BT-2929).
+    /// `collect_comment_attachment` for every `CommentAttachment` it
+    /// produces — method bodies, state declarations, and expression
+    /// statements included, not only top-level declarations — but
+    /// currently consulted only by the module-level unparser, to preserve
+    /// the blank line separating top-level class / protocol / type-alias
+    /// declarations (BT-2929).
     pub leading_blank_line: bool,
 }
 
@@ -295,8 +298,8 @@ impl CommentAttachment {
     ///
     /// Deliberately ignores `leading_blank_line` — a call site gated on
     /// `is_empty()` will silently discard that field's value. See
-    /// `PendingDeclarationExpect::apply_to` for the one call site where
-    /// this is already known to be harmless.
+    /// `PendingDeclarationExpect::apply_to` for the production call site
+    /// where this is already known to be harmless.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.leading.is_empty() && self.trailing.is_none()
