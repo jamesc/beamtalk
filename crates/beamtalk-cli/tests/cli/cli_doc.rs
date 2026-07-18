@@ -3,7 +3,7 @@
 
 //! Subprocess tests for `beamtalk doc` and `beamtalk test-docs` (BT-2084).
 
-mod cli_common;
+use crate::cli_common;
 
 use predicates::str::contains;
 

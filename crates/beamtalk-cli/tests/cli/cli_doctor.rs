@@ -8,7 +8,7 @@
 //! * a synthesized broken runtime directory (error path) — stdlib/runtime
 //!   checks fail and the command exits non-zero with actionable output.
 
-mod cli_common;
+use crate::cli_common;
 
 use predicates::prelude::*;
 use predicates::str::contains;
