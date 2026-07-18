@@ -4008,6 +4008,21 @@ mod tests {
     }
 
     #[test]
+    fn multiple_blank_lines_between_top_level_declarations_normalised_to_one() {
+        // BT-2929 (review follow-up): `has_blank_line_before_first_comment`
+        // treats any run of 2+ blank lines as "a blank line preceded this
+        // node" — the unparser always re-emits exactly one, so multiple
+        // blank lines collapse to one on format (standard normalisation),
+        // not a bug. Two blank lines in source...
+        let source = "type Port = Integer\n\n\ntype Timeout = Integer\n";
+        let formatted = format_source(source).expect("format_source must succeed");
+        // ...become one blank line in the formatted output...
+        assert_eq!(formatted, "type Port = Integer\n\ntype Timeout = Integer\n");
+        // ...and that single-blank-line form is stable under a second pass.
+        assert_identity(&formatted);
+    }
+
+    #[test]
     fn blank_line_preserved_across_all_three_declaration_kinds_interleaved() {
         // Full combination: type alias, protocol, and class, each separated
         // by a blank line — every pairwise gap (type-alias/protocol,
