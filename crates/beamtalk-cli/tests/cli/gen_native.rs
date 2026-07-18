@@ -7,7 +7,7 @@
 //! `.bt` source with `native:` to skeleton `.erl` `gen_server` file.
 //!
 //! Tests are `#[ignore]` because they require the beamtalk binary.
-//! Run with: `cargo test --test gen_native -- --ignored`
+//! Run with: `cargo test --test cli gen_native:: -- --ignored`
 
 use crate::cli_common;
 
