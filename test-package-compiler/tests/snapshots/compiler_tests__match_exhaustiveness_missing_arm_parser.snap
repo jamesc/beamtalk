@@ -60,6 +60,7 @@ Module {
                             comments: CommentAttachment {
                                 leading: [],
                                 trailing: None,
+                                leading_blank_line: false,
                             },
                             expression: Match {
                                 value: Identifier(
@@ -115,6 +116,7 @@ Module {
                                                         comments: CommentAttachment {
                                                             leading: [],
                                                             trailing: None,
+                                                            leading_blank_line: false,
                                                         },
                                                         expression: MessageSend {
                                                             receiver: Identifier(
@@ -158,6 +160,7 @@ Module {
                                         comments: CommentAttachment {
                                             leading: [],
                                             trailing: None,
+                                            leading_blank_line: false,
                                         },
                                         span: Span {
                                             start: 243,
@@ -183,6 +186,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [],
                         trailing: None,
+                        leading_blank_line: false,
                     },
                     doc_comment: None,
                     span: Span {
@@ -233,6 +237,7 @@ Module {
                     },
                 ],
                 trailing: None,
+                leading_blank_line: false,
             },
             doc_comment: None,
             backing_module: None,

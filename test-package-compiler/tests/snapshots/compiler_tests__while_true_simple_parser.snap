@@ -41,6 +41,7 @@ Module {
                     },
                 ],
                 trailing: None,
+                leading_blank_line: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -60,6 +61,7 @@ Module {
                                 comments: CommentAttachment {
                                     leading: [],
                                     trailing: None,
+                                    leading_blank_line: false,
                                 },
                                 expression: Assignment {
                                     target: Identifier(
@@ -92,6 +94,7 @@ Module {
                                 comments: CommentAttachment {
                                     leading: [],
                                     trailing: None,
+                                    leading_blank_line: false,
                                 },
                                 expression: MessageSend {
                                     receiver: Block(
@@ -102,6 +105,7 @@ Module {
                                                     comments: CommentAttachment {
                                                         leading: [],
                                                         trailing: None,
+                                                        leading_blank_line: false,
                                                     },
                                                     expression: MessageSend {
                                                         receiver: Identifier(
@@ -162,6 +166,7 @@ Module {
                                                         comments: CommentAttachment {
                                                             leading: [],
                                                             trailing: None,
+                                                            leading_blank_line: false,
                                                         },
                                                         expression: Assignment {
                                                             target: Identifier(
@@ -231,6 +236,7 @@ Module {
                                 comments: CommentAttachment {
                                     leading: [],
                                     trailing: None,
+                                    leading_blank_line: false,
                                 },
                                 expression: Return {
                                     value: Identifier(
@@ -278,6 +284,7 @@ Module {
                     },
                 ],
                 trailing: None,
+                leading_blank_line: true,
             },
             expression: Assignment {
                 target: Identifier(
@@ -297,6 +304,7 @@ Module {
                                 comments: CommentAttachment {
                                     leading: [],
                                     trailing: None,
+                                    leading_blank_line: false,
                                 },
                                 expression: Assignment {
                                     target: Identifier(
@@ -329,6 +337,7 @@ Module {
                                 comments: CommentAttachment {
                                     leading: [],
                                     trailing: None,
+                                    leading_blank_line: false,
                                 },
                                 expression: MessageSend {
                                     receiver: Block(
@@ -339,6 +348,7 @@ Module {
                                                     comments: CommentAttachment {
                                                         leading: [],
                                                         trailing: None,
+                                                        leading_blank_line: false,
                                                     },
                                                     expression: MessageSend {
                                                         receiver: Identifier(
@@ -399,6 +409,7 @@ Module {
                                                         comments: CommentAttachment {
                                                             leading: [],
                                                             trailing: None,
+                                                            leading_blank_line: false,
                                                         },
                                                         expression: Assignment {
                                                             target: Identifier(
@@ -468,6 +479,7 @@ Module {
                                 comments: CommentAttachment {
                                     leading: [],
                                     trailing: None,
+                                    leading_blank_line: false,
                                 },
                                 expression: Return {
                                     value: Identifier(
@@ -515,6 +527,7 @@ Module {
                     },
                 ],
                 trailing: None,
+                leading_blank_line: true,
             },
             expression: Assignment {
                 target: Identifier(
@@ -534,6 +547,7 @@ Module {
                                 comments: CommentAttachment {
                                     leading: [],
                                     trailing: None,
+                                    leading_blank_line: false,
                                 },
                                 expression: Assignment {
                                     target: Identifier(
@@ -562,6 +576,7 @@ Module {
                                                         comments: CommentAttachment {
                                                             leading: [],
                                                             trailing: None,
+                                                            leading_blank_line: false,
                                                         },
                                                         expression: MessageSend {
                                                             receiver: Block(
@@ -572,6 +587,7 @@ Module {
                                                                             comments: CommentAttachment {
                                                                                 leading: [],
                                                                                 trailing: None,
+                                                                                leading_blank_line: false,
                                                                             },
                                                                             expression: MessageSend {
                                                                                 receiver: Identifier(
@@ -632,6 +648,7 @@ Module {
                                                                                 comments: CommentAttachment {
                                                                                     leading: [],
                                                                                     trailing: None,
+                                                                                    leading_blank_line: false,
                                                                                 },
                                                                                 expression: Assignment {
                                                                                     target: Identifier(
@@ -701,6 +718,7 @@ Module {
                                                         comments: CommentAttachment {
                                                             leading: [],
                                                             trailing: None,
+                                                            leading_blank_line: false,
                                                         },
                                                         expression: Identifier(
                                                             Identifier {
@@ -760,6 +778,7 @@ Module {
                                 comments: CommentAttachment {
                                     leading: [],
                                     trailing: None,
+                                    leading_blank_line: false,
                                 },
                                 expression: Return {
                                     value: Identifier(
@@ -807,6 +826,7 @@ Module {
                     },
                 ],
                 trailing: None,
+                leading_blank_line: true,
             },
             expression: Assignment {
                 target: Identifier(
@@ -826,6 +846,7 @@ Module {
                                 comments: CommentAttachment {
                                     leading: [],
                                     trailing: None,
+                                    leading_blank_line: false,
                                 },
                                 expression: Assignment {
                                     target: Identifier(
@@ -854,6 +875,7 @@ Module {
                                                         comments: CommentAttachment {
                                                             leading: [],
                                                             trailing: None,
+                                                            leading_blank_line: false,
                                                         },
                                                         expression: MessageSend {
                                                             receiver: Block(
@@ -864,6 +886,7 @@ Module {
                                                                             comments: CommentAttachment {
                                                                                 leading: [],
                                                                                 trailing: None,
+                                                                                leading_blank_line: false,
                                                                             },
                                                                             expression: MessageSend {
                                                                                 receiver: Identifier(
@@ -924,6 +947,7 @@ Module {
                                                                                 comments: CommentAttachment {
                                                                                     leading: [],
                                                                                     trailing: None,
+                                                                                    leading_blank_line: false,
                                                                                 },
                                                                                 expression: Assignment {
                                                                                     target: Identifier(
@@ -993,6 +1017,7 @@ Module {
                                                         comments: CommentAttachment {
                                                             leading: [],
                                                             trailing: None,
+                                                            leading_blank_line: false,
                                                         },
                                                         expression: Identifier(
                                                             Identifier {
@@ -1052,6 +1077,7 @@ Module {
                                 comments: CommentAttachment {
                                     leading: [],
                                     trailing: None,
+                                    leading_blank_line: false,
                                 },
                                 expression: Return {
                                     value: Identifier(
@@ -1099,6 +1125,7 @@ Module {
                     },
                 ],
                 trailing: None,
+                leading_blank_line: true,
             },
             expression: Assignment {
                 target: Identifier(
@@ -1118,6 +1145,7 @@ Module {
                                 comments: CommentAttachment {
                                     leading: [],
                                     trailing: None,
+                                    leading_blank_line: false,
                                 },
                                 expression: Assignment {
                                     target: Identifier(
@@ -1150,6 +1178,7 @@ Module {
                                 comments: CommentAttachment {
                                     leading: [],
                                     trailing: None,
+                                    leading_blank_line: false,
                                 },
                                 expression: MessageSend {
                                     receiver: Literal(
@@ -1181,6 +1210,7 @@ Module {
                                                         comments: CommentAttachment {
                                                             leading: [],
                                                             trailing: None,
+                                                            leading_blank_line: false,
                                                         },
                                                         expression: Assignment {
                                                             target: Identifier(
@@ -1250,6 +1280,7 @@ Module {
                                 comments: CommentAttachment {
                                     leading: [],
                                     trailing: None,
+                                    leading_blank_line: false,
                                 },
                                 expression: Return {
                                     value: Identifier(
@@ -1297,6 +1328,7 @@ Module {
                     },
                 ],
                 trailing: None,
+                leading_blank_line: true,
             },
             expression: Assignment {
                 target: Identifier(
@@ -1316,6 +1348,7 @@ Module {
                                 comments: CommentAttachment {
                                     leading: [],
                                     trailing: None,
+                                    leading_blank_line: false,
                                 },
                                 expression: Assignment {
                                     target: Identifier(
@@ -1344,6 +1377,7 @@ Module {
                                                         comments: CommentAttachment {
                                                             leading: [],
                                                             trailing: None,
+                                                            leading_blank_line: false,
                                                         },
                                                         expression: MessageSend {
                                                             receiver: Literal(
@@ -1375,6 +1409,7 @@ Module {
                                                                                 comments: CommentAttachment {
                                                                                     leading: [],
                                                                                     trailing: None,
+                                                                                    leading_blank_line: false,
                                                                                 },
                                                                                 expression: Assignment {
                                                                                     target: Identifier(
@@ -1444,6 +1479,7 @@ Module {
                                                         comments: CommentAttachment {
                                                             leading: [],
                                                             trailing: None,
+                                                            leading_blank_line: false,
                                                         },
                                                         expression: Identifier(
                                                             Identifier {
@@ -1503,6 +1539,7 @@ Module {
                                 comments: CommentAttachment {
                                     leading: [],
                                     trailing: None,
+                                    leading_blank_line: false,
                                 },
                                 expression: Return {
                                     value: Identifier(
@@ -1550,6 +1587,7 @@ Module {
                     },
                 ],
                 trailing: None,
+                leading_blank_line: true,
             },
             expression: Assignment {
                 target: Identifier(
@@ -1569,6 +1607,7 @@ Module {
                                 comments: CommentAttachment {
                                     leading: [],
                                     trailing: None,
+                                    leading_blank_line: false,
                                 },
                                 expression: Assignment {
                                     target: Identifier(
@@ -1601,6 +1640,7 @@ Module {
                                 comments: CommentAttachment {
                                     leading: [],
                                     trailing: None,
+                                    leading_blank_line: false,
                                 },
                                 expression: MessageSend {
                                     receiver: Literal(
@@ -1656,6 +1696,7 @@ Module {
                                                         comments: CommentAttachment {
                                                             leading: [],
                                                             trailing: None,
+                                                            leading_blank_line: false,
                                                         },
                                                         expression: Assignment {
                                                             target: Identifier(
@@ -1725,6 +1766,7 @@ Module {
                                 comments: CommentAttachment {
                                     leading: [],
                                     trailing: None,
+                                    leading_blank_line: false,
                                 },
                                 expression: Return {
                                     value: Identifier(
@@ -1772,6 +1814,7 @@ Module {
                     },
                 ],
                 trailing: None,
+                leading_blank_line: true,
             },
             expression: Assignment {
                 target: Identifier(
@@ -1791,6 +1834,7 @@ Module {
                                 comments: CommentAttachment {
                                     leading: [],
                                     trailing: None,
+                                    leading_blank_line: false,
                                 },
                                 expression: Assignment {
                                     target: Identifier(
@@ -1819,6 +1863,7 @@ Module {
                                                         comments: CommentAttachment {
                                                             leading: [],
                                                             trailing: None,
+                                                            leading_blank_line: false,
                                                         },
                                                         expression: Assignment {
                                                             target: Identifier(
@@ -1851,6 +1896,7 @@ Module {
                                                         comments: CommentAttachment {
                                                             leading: [],
                                                             trailing: None,
+                                                            leading_blank_line: false,
                                                         },
                                                         expression: MessageSend {
                                                             receiver: Identifier(
@@ -1906,6 +1952,7 @@ Module {
                                                                                 comments: CommentAttachment {
                                                                                     leading: [],
                                                                                     trailing: None,
+                                                                                    leading_blank_line: false,
                                                                                 },
                                                                                 expression: Assignment {
                                                                                     target: Identifier(
@@ -1975,6 +2022,7 @@ Module {
                                                         comments: CommentAttachment {
                                                             leading: [],
                                                             trailing: None,
+                                                            leading_blank_line: false,
                                                         },
                                                         expression: Identifier(
                                                             Identifier {
@@ -2034,6 +2082,7 @@ Module {
                                 comments: CommentAttachment {
                                     leading: [],
                                     trailing: None,
+                                    leading_blank_line: false,
                                 },
                                 expression: Return {
                                     value: Identifier(
