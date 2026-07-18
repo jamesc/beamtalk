@@ -756,6 +756,16 @@ fn unparse_protocol_method_signature(
 ) -> Document<'static> {
     let mut docs: Vec<Document<'static>> = Vec::new();
 
+    // Non-doc leading comments
+    docs.extend(unparse_comment_attachment_leading(&sig.comments));
+
+    // Blank line between a preserved, earlier `///` block that broke away
+    // from a different declaration (BT-2924) and this signature's own doc
+    // comment — see `leading_ends_with_orphaned_doc_comment`.
+    if leading_ends_with_orphaned_doc_comment(&sig.comments) {
+        docs.push(line());
+    }
+
     // Doc comment
     if let Some(doc) = &sig.doc_comment {
         for line_text in doc.lines() {
@@ -3613,6 +3623,71 @@ mod tests {
             "Protocol define: Displayable\n",
             "  /// Convert to display string.\n",
             "  asString -> String\n",
+        );
+        assert_identity(source);
+    }
+
+    // --- BT-2930 regression: leading `//`/`/* */` comments on protocol
+    // method signatures must survive a `beamtalk fmt` round-trip. ---
+
+    #[test]
+    fn protocol_instance_method_leading_comment_round_trip() {
+        // Exact repro from BT-2930: an ordinary leading `//` comment (no doc
+        // comment) directly above an instance-side signature was silently
+        // dropped because `unparse_protocol_method_signature` never called
+        // `unparse_comment_attachment_leading`.
+        let source = concat!(
+            "Protocol define: Displayable\n",
+            "  // A leading comment.\n",
+            "  asString -> String\n",
+        );
+        assert_identity(source);
+    }
+
+    #[test]
+    fn protocol_instance_method_leading_block_comment_round_trip() {
+        let source = concat!(
+            "Protocol define: Displayable\n",
+            "  /* A leading block comment. */\n",
+            "  asString -> String\n",
+        );
+        assert_identity(source);
+    }
+
+    #[test]
+    fn protocol_instance_method_leading_comment_and_doc_comment_round_trip() {
+        // Leading comments and doc comments must both render, in the right
+        // order (leading comment first, then doc comment, then signature) —
+        // matching every other declaration kind.
+        let source = concat!(
+            "Protocol define: Displayable\n",
+            "  // A leading comment.\n",
+            "  /// Convert to display string.\n",
+            "  asString -> String\n",
+        );
+        assert_identity(source);
+    }
+
+    #[test]
+    fn protocol_class_method_leading_comment_round_trip() {
+        let source = concat!(
+            "Protocol define: Creatable\n",
+            "  // A leading comment.\n",
+            "  class create -> Self\n",
+        );
+        assert_identity(source);
+    }
+
+    #[test]
+    fn protocol_class_method_leading_comment_and_doc_comment_round_trip() {
+        // Verifies interaction with the existing doc-comment-before-`class`-
+        // keyword handling: leading comment, then doc comment, then `class`
+        // on the signature line.
+        let source = concat!(
+            "Protocol define: Parseable\n",
+            "  // A leading comment.\n",
+            "  /// Reconstruct from string.\n",
+            "  class fromString: aString :: String -> Self\n",
         );
         assert_identity(source);
     }
