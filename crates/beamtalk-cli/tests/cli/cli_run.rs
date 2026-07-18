@@ -6,7 +6,7 @@
 //! Covers the script-mode entry-point invocation. Service mode (`run .`)
 //! requires a running BEAM workspace and is exercised by the e2e tests.
 
-mod cli_common;
+use crate::cli_common;
 
 use predicates::prelude::*;
 use predicates::str::contains;

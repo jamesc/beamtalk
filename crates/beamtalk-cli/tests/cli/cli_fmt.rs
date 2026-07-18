@@ -5,7 +5,7 @@
 //!
 //! Verifies in-place rewriting, unified diff output, and exit codes.
 
-mod cli_common;
+use crate::cli_common;
 
 use predicates::prelude::*;
 use predicates::str::contains;
