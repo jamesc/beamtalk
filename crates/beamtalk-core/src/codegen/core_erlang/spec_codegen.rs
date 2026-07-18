@@ -565,6 +565,19 @@ fn generate_alias_type_attr(
 /// must declare the corresponding named `-type` in the same module attribute
 /// list, since a reference to an undeclared type is an `erlc` compile error,
 /// not just a Dialyzer warning.
+///
+/// Emits a `-type` for every name in `aliases` (BT-2932), not only the ones
+/// this module's own specs actually reference — since (BT-2932) `aliases` is
+/// the full pre-loaded registry seeded from every source file in the
+/// compilation unit, a module using one cross-module alias still declares
+/// `-type` attributes for all of them. This is correctness-safe (extra
+/// `-type` declarations are valid metadata, and the registry is
+/// self-consistent, so no undeclared-type `erlc` error results) but grows
+/// each compiled module's attribute list with the full project's alias
+/// count rather than just what it uses. Tracking which names are actually
+/// touched during `generate_class_specs`/`generate_method_spec` and scoping
+/// emission to those would need a second pass or accumulator — deferred
+/// until this proves costly at real project scale.
 pub fn generate_alias_type_attrs(aliases: &AliasRegistry) -> Vec<Document<'static>> {
     let mut names: Vec<&EcoString> = aliases.alias_names().collect();
     names.sort_unstable();

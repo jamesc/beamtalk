@@ -3315,6 +3315,42 @@ Actor subclass: Supervisor
 }
 
 #[test]
+fn test_cross_module_alias_reference_compiles_through_erlc() {
+    // BT-2932 (review follow-up): the sibling same-module case is guarded
+    // through erlc by `test_alias_annotated_actor_module_compiles_through_erlc`
+    // (BT-2909) — this exercises the cross-module case (alias declared in
+    // one module, referenced via `pre_loaded_aliases` from another) the same
+    // way, so a `-type`/`user_type` pairing bug here would fail to compile
+    // rather than only fail a string assertion.
+    let alias_src = "type RestartStrategy = #temporary | #transient | #permanent";
+    let alias_tokens = crate::source_analysis::lex_with_eof(alias_src);
+    let (alias_module, alias_diags) = crate::source_analysis::parse(alias_tokens);
+    assert!(
+        alias_diags.is_empty(),
+        "alias-declaring module parse should succeed: {alias_diags:?}"
+    );
+    let pre_loaded_aliases =
+        crate::semantic_analysis::AliasRegistry::extract_alias_infos(&alias_module);
+
+    let src = "
+Actor subclass: Supervisor
+  class defaultStrategy: policy :: RestartStrategy => policy
+";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, diags) = crate::source_analysis::parse(tokens);
+    assert!(diags.is_empty(), "parse should succeed: {diags:?}");
+
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt_cross_module_alias_erlc_check")
+            .with_pre_loaded_aliases(pre_loaded_aliases),
+    )
+    .expect("codegen should succeed");
+
+    crate::test_helpers::assert_compiles_through_erlc("bt_cross_module_alias_erlc_check", &code);
+}
+
+#[test]
 fn test_cross_module_alias_reference_without_pre_loaded_aliases_falls_back_to_any() {
     // BT-2932 negative control: the same module, compiled without
     // `with_pre_loaded_aliases`, reproduces the pre-fix gap this issue
