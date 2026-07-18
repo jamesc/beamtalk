@@ -464,14 +464,30 @@ impl TypeChecker {
         }
     }
 
-    /// Converts a type name string (from `ClassHierarchy::state_field_type`)
-    /// to a proper `InferredType`, splitting unions on `|`.
+    /// Converts a type name string (from `ClassHierarchy::state_field_type` or
+    /// a cross-file `MethodInfo::return_type`/`param_types` entry) to a proper
+    /// `InferredType`, splitting unions on `|`.
     ///
     /// Examples:
     /// - `"Integer"` → `Known("Integer")`
     /// - `"String | nil"` → `Union(["String", "UndefinedObject"])`
     /// - `"List(String)"` → `Known("List", type_args: [Known("String")])`
-    pub(super) fn resolve_type_name_string(type_name: &EcoString) -> InferredType {
+    ///
+    /// `alias_registry` (BT-2928, ADR 0108) is consulted for the bare-name
+    /// case only — an alias is never itself parametric, so a `Base(Args...)`
+    /// generic's base name is resolved as an ordinary nominal class, matching
+    /// `type_resolver::resolve_type_annotation`'s equivalent restriction.
+    /// This is what makes a *cross-file* method/field signature — stored here
+    /// as an opaque string extracted once at Pass 1, not a live
+    /// `TypeAnnotation` re-resolved against the current file's alias table —
+    /// expand a same-package alias declared in another file, instead of
+    /// treating the alias name as an unknown nominal class (the literal
+    /// `A new heading` cross-file repro this fixes). Pass `None` when no
+    /// registry is available, matching this function's pre-BT-2928 behaviour.
+    pub(super) fn resolve_type_name_string(
+        type_name: &EcoString,
+        alias_registry: Option<&crate::semantic_analysis::alias_registry::AliasRegistry>,
+    ) -> InferredType {
         if WellKnownClass::from_str(type_name) == Some(WellKnownClass::Never) {
             return InferredType::Never;
         }
@@ -492,7 +508,7 @@ impl TypeChecker {
             if members.len() > 1 {
                 let resolved: Vec<InferredType> = members
                     .into_iter()
-                    .map(|s| Self::resolve_type_name_string(&EcoString::from(s)))
+                    .map(|s| Self::resolve_type_name_string(&EcoString::from(s), alias_registry))
                     .collect();
                 return InferredType::union_of(&resolved);
             }
@@ -506,7 +522,7 @@ impl TypeChecker {
             let base = Self::resolve_type_keyword(&EcoString::from(base_str));
             let type_args: Vec<InferredType> = Self::split_type_params(inner)
                 .into_iter()
-                .map(|p| Self::resolve_type_name_string(&EcoString::from(p)))
+                .map(|p| Self::resolve_type_name_string(&EcoString::from(p), alias_registry))
                 .collect();
             InferredType::Known {
                 class_name: base,
@@ -514,6 +530,24 @@ impl TypeChecker {
                 provenance: super::TypeProvenance::Declared(crate::source_analysis::Span::default()),
             }
         } else {
+            // BT-2928: consult the alias registry before falling back to a
+            // bare nominal class — mirrors `type_resolver::resolve_type_annotation`'s
+            // `subst → alias table → nominal class` order (ADR 0108
+            // Semantics). Resolves through the alias's own stored
+            // `TypeAnnotation` (not this string-based function) so chained
+            // aliases, cycle-guarding, and hover-display tagging all reuse
+            // the same machinery every other alias reference goes through.
+            if let Some(registry) = alias_registry {
+                if let Some(alias_info) = registry.get(type_name) {
+                    let resolved = super::type_resolver::resolve_type_annotation(
+                        &alias_info.annotation,
+                        &super::type_resolver::SubstitutionMap::new(),
+                        None,
+                        alias_registry,
+                    );
+                    return resolved.tag_alias_expansion(type_name.clone(), alias_info.span);
+                }
+            }
             InferredType::known(Self::resolve_type_keyword(type_name))
         }
     }
@@ -561,7 +595,10 @@ impl TypeChecker {
                                 } else if let Some(field_type) =
                                     hierarchy.state_field_type(&class_name, name)
                                 {
-                                    Self::resolve_type_name_string(&field_type)
+                                    Self::resolve_type_name_string(
+                                        &field_type,
+                                        self.alias_registry.as_ref(),
+                                    )
                                 } else {
                                     InferredType::Dynamic(DynamicReason::Unknown)
                                 }
@@ -610,7 +647,10 @@ impl TypeChecker {
                             if let Some(field_type) =
                                 hierarchy.state_field_type(&class_name, &field.name)
                             {
-                                result = Self::resolve_type_name_string(&field_type);
+                                result = Self::resolve_type_name_string(
+                                    &field_type,
+                                    self.alias_registry.as_ref(),
+                                );
                             }
                         }
                     }
@@ -2075,7 +2115,10 @@ impl TypeChecker {
                     //  * Plain class names — pass through to `Known(name, [])`.
                     //  * Nested generics — `Result(List(String), Error)`
                     //    keeps both layers.
-                    return Self::resolve_type_name_string(ret_ty);
+                    //  * BT-2928: a cross-file alias name expands to its
+                    //    declared union/structural type instead of staying
+                    //    an opaque nominal class.
+                    return Self::resolve_type_name_string(ret_ty, self.alias_registry.as_ref());
                 }
 
                 // BT-2868: `ret_ty` is None — the method exists but declares
@@ -2603,7 +2646,11 @@ impl TypeChecker {
         if super::is_generic_type_param(ret_ty) && !hierarchy.has_class(ret_ty) {
             return None;
         }
-        Some(Self::resolve_type_name_string(ret_ty))
+        // No alias registry threaded here: `ret_ty` comes from the built-in
+        // Metaclass/Class/Behaviour/Object/ProtoObject tower, which never
+        // declares an alias-typed return (BT-2928 follow-up covers the
+        // general case; this call site is out of scope for it).
+        Some(Self::resolve_type_name_string(ret_ty, None))
     }
 
     /// Returns true if `expr` resolves to a class-side receiver — either a
@@ -2836,7 +2883,10 @@ impl TypeChecker {
                                 // parametric type args (`List(String)` keeps
                                 // its element type) and parse union return
                                 // types into `InferredType::Union`.
-                                return_types.push(Self::resolve_type_name_string(ret_ty));
+                                return_types.push(Self::resolve_type_name_string(
+                                    ret_ty,
+                                    self.alias_registry.as_ref(),
+                                ));
                             }
                         }
                     } else if let Some(ty) = Self::if_true_false_solo_boolean_ret_ty(
@@ -2893,7 +2943,7 @@ impl TypeChecker {
                     } else if WellKnownClass::from_str(ret_ty) == Some(WellKnownClass::Never) {
                         InferredType::Never
                     } else {
-                        Self::resolve_type_name_string(ret_ty)
+                        Self::resolve_type_name_string(ret_ty, self.alias_registry.as_ref())
                     };
                     return_types.push(nil_contribution);
                 } else {
@@ -5054,7 +5104,14 @@ impl TypeChecker {
         if let EnvKey::SelfField(field_name) = var_key {
             if let Some(InferredType::Known { class_name, .. }) = env.get_local("self") {
                 if let Some(field_type) = hierarchy.state_field_type(&class_name, field_name) {
-                    return Self::resolve_type_name_string(&field_type);
+                    // No alias registry threaded here — this free function's
+                    // several callers don't have one in scope. A narrowing
+                    // check (e.g. `self.field isNil ifFalse: [...]`) on a
+                    // cross-file alias-typed field falls back to the
+                    // opaque-name behaviour this fixes elsewhere (BT-2928
+                    // follow-up: thread `alias_registry` through the
+                    // narrowing call chain too).
+                    return Self::resolve_type_name_string(&field_type, None);
                 }
             }
         }
@@ -6087,7 +6144,7 @@ mod tests {
     #[test]
     fn resolve_type_name_string_simple() {
         assert_eq!(
-            TypeChecker::resolve_type_name_string(&"Integer".into()),
+            TypeChecker::resolve_type_name_string(&"Integer".into(), None),
             InferredType::known("Integer")
         );
     }
@@ -6095,14 +6152,14 @@ mod tests {
     #[test]
     fn resolve_type_name_string_nil_keyword() {
         assert_eq!(
-            TypeChecker::resolve_type_name_string(&"nil".into()),
+            TypeChecker::resolve_type_name_string(&"nil".into(), None),
             InferredType::known("UndefinedObject")
         );
     }
 
     #[test]
     fn resolve_type_name_string_union() {
-        let result = TypeChecker::resolve_type_name_string(&"String | nil".into());
+        let result = TypeChecker::resolve_type_name_string(&"String | nil".into(), None);
         match result {
             InferredType::Union { members, .. } => {
                 assert_eq!(members.len(), 2);
@@ -6115,7 +6172,7 @@ mod tests {
 
     #[test]
     fn resolve_type_name_string_three_way_union() {
-        let result = TypeChecker::resolve_type_name_string(&"Integer | String | nil".into());
+        let result = TypeChecker::resolve_type_name_string(&"Integer | String | nil".into(), None);
         match result {
             InferredType::Union { members, .. } => {
                 assert_eq!(members.len(), 3);
@@ -6125,6 +6182,65 @@ mod tests {
             }
             other => panic!("Expected Union, got {other:?}"),
         }
+    }
+
+    /// BT-2928: a cross-file alias name (as stored raw in a `ClassInfo`/
+    /// `MethodInfo` string, e.g. a `MethodInfo::return_type` extracted from
+    /// another file's `-> RestartStrategy` annotation) expands to its
+    /// declared union through the alias registry, instead of staying an
+    /// opaque, unresolved nominal class.
+    #[test]
+    fn resolve_type_name_string_expands_alias_from_registry() {
+        use crate::ast::{Module, TypeAliasDefinition};
+        use crate::semantic_analysis::alias_registry::AliasRegistry;
+        use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
+
+        let ann = TypeAnnotation::Union {
+            types: vec![
+                TypeAnnotation::Singleton {
+                    name: "permanent".into(),
+                    span: span(),
+                },
+                TypeAnnotation::Singleton {
+                    name: "temporary".into(),
+                    span: span(),
+                },
+            ],
+            span: span(),
+        };
+        let module = Module {
+            type_aliases: vec![TypeAliasDefinition {
+                name: ident("RestartStrategy"),
+                annotation: ann,
+                is_internal: false,
+                comments: crate::ast::CommentAttachment::default(),
+                doc_comment: None,
+                span: span(),
+            }],
+            ..Module::new(vec![], span())
+        };
+        let hierarchy = ClassHierarchy::with_builtins();
+        let protocol_registry = ProtocolRegistry::new();
+        let mut registry = AliasRegistry::new();
+        let diags = registry.register_module(&module, &hierarchy, &protocol_registry);
+        assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+
+        let result =
+            TypeChecker::resolve_type_name_string(&"RestartStrategy".into(), Some(&registry));
+        match result {
+            InferredType::Union { members, .. } => {
+                assert_eq!(members.len(), 2);
+                assert!(members.contains(&InferredType::known("#permanent")));
+                assert!(members.contains(&InferredType::known("#temporary")));
+            }
+            other => panic!("Expected Union (alias expansion), got {other:?}"),
+        }
+
+        // Without the registry, the same raw string stays an opaque nominal
+        // class — the pre-BT-2928 behaviour this test guards against
+        // regressing back to.
+        let unresolved = TypeChecker::resolve_type_name_string(&"RestartStrategy".into(), None);
+        assert_eq!(unresolved, InferredType::known("RestartStrategy"));
     }
 
     // ---- detect_narrowing ----

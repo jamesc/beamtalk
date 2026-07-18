@@ -480,7 +480,7 @@ fn method_call_union_return_no_false_binary_warning() {
 /// "Integer | Nil" into a proper Union type (not Known("Integer | Nil")).
 #[test]
 fn resolve_type_name_string_splits_union() {
-    let ty = TypeChecker::resolve_type_name_string(&"Integer | Nil".into());
+    let ty = TypeChecker::resolve_type_name_string(&"Integer | Nil".into(), None);
     match &ty {
         InferredType::Union { members, .. } => {
             assert_eq!(

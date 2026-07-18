@@ -384,6 +384,12 @@ struct ClassIndexResult {
     class_superclass_index: HashMap<String, String>,
     /// Unified collection of all `ClassInfo` from source and dependency classes.
     all_class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    /// BT-2928: Type alias declarations (`type Name = ...`) collected from
+    /// every project source file, for cross-file/package alias resolution
+    /// during Pass 2. See `collect_project_alias_infos`'s doc for why this
+    /// is a plain full scan rather than threaded through the incremental
+    /// Pass 1 cache the way `all_class_infos` is.
+    all_alias_infos: Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
     /// Project-wide standalone extension index from Pass 1 (BT-2795).
     extension_index: beamtalk_core::compilation::extension_index::ExtensionIndex,
     /// Dependency registry for cross-package collision detection.
@@ -497,10 +503,22 @@ fn build_class_index(
         check_stdlib_reservations(&dep_registry)?;
     }
 
+    // BT-2928: Same-package cross-file type-alias resolution. Only runs for
+    // manifest-based package builds (matching `pre_loaded_classes`'s existing
+    // scope) — a manifest-less directory/single-file build has no package
+    // boundary and keeps today's same-file-only alias resolution. Dependency
+    // (cross-package) alias export is deferred — see the BT-2928 follow-up
+    // filed for `dependency_classes.rs`.
+    let all_alias_infos = match pkg_manifest {
+        Some(pkg) => collect_project_alias_infos(&env.source_files, &pkg.name),
+        None => Vec::new(),
+    };
+
     Ok(ClassIndexResult {
         class_module_index,
         class_superclass_index,
         all_class_infos,
+        all_alias_infos,
         extension_index,
         dep_registry,
         cached_asts,
@@ -778,6 +796,7 @@ fn execute_build_passes(
             class_superclass_index: index.class_superclass_index.clone(),
             pre_loaded_classes: index.all_class_infos.clone(),
             pre_loaded_protocols: Vec::new(),
+            pre_loaded_aliases: index.all_alias_infos.clone(),
             extension_index: index.extension_index.clone(),
         },
         dep_registry: registry_ref,
@@ -1632,6 +1651,49 @@ pub(crate) fn build_class_module_index(
         extension_index,
         cached_asts,
     ))
+}
+
+/// Extracts type-alias declarations (`type Name = ...`) from every project
+/// source file, for cross-file/package alias resolution during Pass 2
+/// (BT-2928).
+///
+/// Unlike `ClassInfo`, alias metadata is *not* threaded through the
+/// incremental Pass 1 cache (`build_cache.rs`'s `.beamtalk-pass1-cache.json`):
+/// `AliasInfo` embeds an unresolved `TypeAnnotation`, which (unlike
+/// `ClassInfo`'s stringly-typed method signatures) has no `serde` support —
+/// adding it would mean threading `Serialize`/`Deserialize` through the AST's
+/// `TypeAnnotation` tree purely to satisfy the cache format, a disproportionate
+/// blast radius for this fix (tracked as a BT-2928 follow-up for anyone who
+/// wants the incremental-cache perf win later). Lexing and parsing every
+/// project source file just to pull out `type` declarations is cheap relative
+/// to the rest of a build, so this always does a full, uncached scan
+/// regardless of per-file change detection — every call re-derives the
+/// project's alias table from scratch rather than risking staleness.
+///
+/// Parse errors on an individual file are non-fatal here: that file simply
+/// contributes no aliases to the merged set, and the same parse error is
+/// already reported through the normal Pass 1 diagnostics path.
+pub(crate) fn collect_project_alias_infos(
+    source_files: &[Utf8PathBuf],
+    pkg_name: &str,
+) -> Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo> {
+    let mut all_aliases = Vec::new();
+    for file in source_files {
+        let Ok(source) = fs::read_to_string(file) else {
+            continue;
+        };
+        let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
+        let (module, _diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+        let mut infos =
+            beamtalk_core::semantic_analysis::alias_registry::AliasRegistry::extract_alias_infos(
+                &module,
+            );
+        for info in &mut infos {
+            info.package = Some(pkg_name.into());
+        }
+        all_aliases.extend(infos);
+    }
+    all_aliases
 }
 
 // ── BT-1730: Class module header generation ─────────────────────────────────
@@ -3170,6 +3232,126 @@ mod tests {
         .expect("Cross-file inheritance should compile without errors");
 
         assert!(core_file.exists());
+    }
+
+    /// BT-2928: cross-file/package type-alias resolution for a manifest-based
+    /// package build's Pass 1.
+    ///
+    /// File A declares `type Direction = ...` and a method returning it;
+    /// file B calls that method and passes the result as an argument to a
+    /// parameter typed with the *same* union spelled out directly (mirroring
+    /// the real `stdlib/src/Actor.bt` / `stdlib/src/SupervisionSpec.bt`
+    /// `RestartStrategy` bug this issue fixes: the declared parameter side
+    /// already resolved correctly same-file, but the cross-file argument's
+    /// inferred type — read back from `A`'s `ClassInfo`/`MethodInfo` as an
+    /// opaque `"Direction"` string — never expanded through the alias table,
+    /// so it never matched the union's members). Before BT-2928's
+    /// `resolve_type_name_string` alias-awareness fix, this produced a
+    /// spurious "Argument 1 of 'useDirection:' ... expects ..., got
+    /// Direction" warning; after the fix, `A new heading`'s type expands to
+    /// the same union and no warning fires.
+    #[test]
+    fn test_cross_file_alias_resolution_no_false_type_mismatch() {
+        let temp = TempDir::new().unwrap();
+        let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let src_path = project_path.join("src");
+        fs::create_dir_all(&src_path).unwrap();
+
+        // File 1: declares the alias and a method that returns it. `A` is a
+        // `Value` subclass so `A new` is instantiable (Object classes are
+        // abstract and not directly instantiable).
+        write_test_file(
+            &src_path.join("a.bt"),
+            "type Direction = #north | #south | #east | #west\n\
+             Value subclass: A\n  heading -> Direction => #north\n",
+        );
+
+        // File 2: consumes A's alias-typed return value as an argument to a
+        // parameter typed with the spelled-out equivalent union.
+        write_test_file(
+            &src_path.join("b.bt"),
+            "Object subclass: B\n  \
+             useDirection: d :: #north | #south | #east | #west => d\n  \
+             test => self useDirection: A new heading\n",
+        );
+
+        let build_dir = project_path.join("_build/dev/ebin");
+        fs::create_dir_all(&build_dir).unwrap();
+
+        let source_files = vec![src_path.join("a.bt"), src_path.join("b.bt")];
+        let (
+            class_module_index,
+            class_superclass_index,
+            all_class_infos,
+            _extensions,
+            _cached_asts,
+        ) = build_class_module_index(&source_files, Some(&src_path), "test_pkg").unwrap();
+        let all_alias_infos = collect_project_alias_infos(&source_files, "test_pkg");
+
+        assert!(
+            all_alias_infos.iter().any(|a| a.name == "Direction"),
+            "Pass 1 should extract the Direction alias from a.bt"
+        );
+
+        // Compile B with cross-file class infos AND cross-file alias infos —
+        // should produce no "Type mismatch" / "Argument ... expects" warning.
+        let core_file = build_dir.join("bt@test_pkg@b.core");
+        let options = default_options();
+        let diagnostics = compile_file(
+            &src_path.join("b.bt"),
+            "bt@test_pkg@b",
+            &core_file,
+            &options,
+            &CompileContext {
+                hierarchy: ClassHierarchyContext {
+                    class_module_index: class_module_index.clone(),
+                    class_superclass_index: class_superclass_index.clone(),
+                    pre_loaded_classes: all_class_infos.clone(),
+                    pre_loaded_aliases: all_alias_infos.clone(),
+                    ..ClassHierarchyContext::default()
+                },
+                ..CompileContext::default()
+            },
+            None,
+        )
+        .expect("Cross-file alias-typed argument should compile without errors");
+
+        assert!(core_file.exists());
+        assert!(
+            diagnostics.iter().all(|d| !d.message.contains("Argument")),
+            "Expected no false argument-type-mismatch diagnostic once cross-file \
+             aliases are seeded, got: {diagnostics:?}"
+        );
+
+        // Negative control: WITHOUT `pre_loaded_aliases`, the same compile
+        // reproduces the pre-BT-2928 false positive — proving this test
+        // actually exercises the fix rather than a scenario that never warned.
+        let core_file_unfixed = build_dir.join("bt@test_pkg@b_unfixed.core");
+        let diagnostics_unfixed = compile_file(
+            &src_path.join("b.bt"),
+            "bt@test_pkg@b_unfixed",
+            &core_file_unfixed,
+            &options,
+            &CompileContext {
+                hierarchy: ClassHierarchyContext {
+                    class_module_index,
+                    class_superclass_index,
+                    pre_loaded_classes: all_class_infos,
+                    // No pre_loaded_aliases — reproduces the pre-fix gap.
+                    ..ClassHierarchyContext::default()
+                },
+                ..CompileContext::default()
+            },
+            None,
+        )
+        .expect("Compile should still succeed (warning, not error)");
+        assert!(
+            diagnostics_unfixed
+                .iter()
+                .any(|d| d.message.contains("Argument") && d.message.contains("Direction")),
+            "Expected the negative control (no pre_loaded_aliases) to reproduce \
+             the false positive, got: {diagnostics_unfixed:?}"
+        );
     }
 
     #[test]

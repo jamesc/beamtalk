@@ -108,7 +108,7 @@ fn resolve_type_annotation_dynamic_nested_in_generic_resolves_to_dynamic_variant
 /// resolve a bare `Dynamic` to the real `InferredType::Dynamic` variant.
 #[test]
 fn resolve_type_name_string_dynamic_keyword_resolves_to_dynamic_variant() {
-    let result = TypeChecker::resolve_type_name_string(&eco_string("Dynamic"));
+    let result = TypeChecker::resolve_type_name_string(&eco_string("Dynamic"), None);
     assert!(
         matches!(result, InferredType::Dynamic(_)),
         "expected the real Dynamic variant, got: {result:?}"
@@ -119,7 +119,8 @@ fn resolve_type_name_string_dynamic_keyword_resolves_to_dynamic_variant() {
 /// a generic's type args too.
 #[test]
 fn resolve_type_name_string_dynamic_nested_in_generic_resolves_to_dynamic_variant() {
-    let result = TypeChecker::resolve_type_name_string(&eco_string("MyResult(Dynamic, Error)"));
+    let result =
+        TypeChecker::resolve_type_name_string(&eco_string("MyResult(Dynamic, Error)"), None);
     let InferredType::Known {
         class_name,
         type_args,

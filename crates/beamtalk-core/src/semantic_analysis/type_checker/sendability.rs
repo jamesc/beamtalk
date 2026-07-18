@@ -300,7 +300,12 @@ fn tier_of_known(
                 // no such class, and a generic field would silently drop to
                 // `Unknown` instead of composing its element tier (BT-2770).
                 Some(field_ty) => {
-                    let field_type = super::TypeChecker::resolve_type_name_string(&field_ty);
+                    // No alias registry threaded here (BT-2928 follow-up) —
+                    // this free function's callers don't have one in scope.
+                    // An alias-typed field's sendability tier falls back to
+                    // treating the alias name as an unresolved nominal class
+                    // (`Tier::Unknown`), same as before this fix.
+                    let field_type = super::TypeChecker::resolve_type_name_string(&field_ty, None);
                     tier_of_depth(&field_type, hierarchy, depth + 1)
                 }
                 // An untyped field carries no static tier — treat as Unknown.

@@ -418,6 +418,14 @@ fn compile_dependency_with_context(
         }
     }
 
+    // BT-2928: Same-package cross-file type-alias resolution within the
+    // dependency's own multi-file compilation — mirrors `all_class_infos`
+    // immediately above. Exporting these aliases to *consumers* of this
+    // dependency (cross-package alias resolution) is deferred — see the
+    // BT-2928 follow-up filed for this module.
+    let all_alias_infos =
+        crate::commands::build::collect_project_alias_infos(&source_files, dep_name);
+
     // Compile .bt sources to .core files
     let compile_ctx = crate::beam_compiler::CompileContext {
         hierarchy: crate::beam_compiler::ClassHierarchyContext {
@@ -425,6 +433,7 @@ fn compile_dependency_with_context(
             class_superclass_index: class_superclass_index.clone(),
             pre_loaded_classes: all_class_infos.clone(),
             pre_loaded_protocols: Vec::new(),
+            pre_loaded_aliases: all_alias_infos,
             // BT-2795: The dep's own project-wide extensions — its files see
             // each other's extensions during its own compilation. (Exporting
             // them to consumers is WS3 / the ADR 0070 amendment.)
