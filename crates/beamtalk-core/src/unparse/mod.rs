@@ -4008,6 +4008,19 @@ mod tests {
     }
 
     #[test]
+    fn blank_line_before_first_top_level_declaration_is_dropped() {
+        // BT-2929 (review follow-up): the `i > 0` guard in
+        // `unparse_module_doc`'s loop intentionally does not preserve a
+        // blank line before the very first top-level declaration — this
+        // predates BT-2929 and is documented in the loop's comment.
+        // Confirmed here with an explicit regression test rather than only
+        // a code comment.
+        let source = "\ntype Port = Integer\n";
+        let formatted = format_source(source).expect("format_source must succeed");
+        assert_eq!(formatted, "type Port = Integer\n");
+    }
+
+    #[test]
     fn multiple_blank_lines_between_top_level_declarations_normalised_to_one() {
         // BT-2929 (review follow-up): `has_blank_line_before_first_comment`
         // treats any run of 2+ blank lines as "a blank line preceded this

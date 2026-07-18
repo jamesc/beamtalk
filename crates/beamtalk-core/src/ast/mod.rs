@@ -297,9 +297,12 @@ impl CommentAttachment {
     /// Returns true if no comments are attached.
     ///
     /// Deliberately ignores `leading_blank_line` — a call site gated on
-    /// `is_empty()` will silently discard that field's value. See
-    /// `PendingDeclarationExpect::apply_to` for the production call site
-    /// where this is already known to be harmless.
+    /// `is_empty()` will silently discard or overwrite that field's value
+    /// (discard if it drops the whole attachment on the empty branch,
+    /// overwrite if it replaces one attachment with another there). See
+    /// `PendingDeclarationExpect::apply_to` for the production call site —
+    /// an overwrite — where this is already known to be harmless
+    /// (tracked as BT-2944).
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.leading.is_empty() && self.trailing.is_none()
