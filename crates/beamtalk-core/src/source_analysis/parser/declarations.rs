@@ -95,8 +95,8 @@ impl PendingDeclarationExpect {
             // value when it's replaced wholesale. Harmless today because no
             // unparser reads `leading_blank_line` on class-member-level
             // `CommentAttachment`s (state/class-var/method) — only on
-            // top-level class/protocol/type-alias declarations. Revisit
-            // this overwrite if that ever changes.
+            // top-level class/protocol/type-alias declarations. Tracked as
+            // BT-2944: revisit this overwrite if that ever changes.
             *comments = self.comments;
         }
     }
