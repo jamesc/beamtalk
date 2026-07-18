@@ -3190,6 +3190,51 @@ Value subclass: Child
 }
 
 #[test]
+fn test_value_subclass_cross_module_alias_reference_emits_user_type() {
+    // BT-2932: same wiring check as
+    // `test_value_subclass_field_alias_emits_user_type_and_named_type`
+    // above, but the alias is declared in a *different* compiled module —
+    // threaded in via `CodegenOptions::with_pre_loaded_aliases`, mirroring
+    // how the CLI build pipeline populates it from
+    // `ClassHierarchyContext::pre_loaded_aliases` — instead of this
+    // module's own `type_aliases`.
+    let alias_src = "type RestartStrategy = #temporary | #transient | #permanent";
+    let alias_tokens = crate::source_analysis::lex_with_eof(alias_src);
+    let (alias_module, alias_diags) = crate::source_analysis::parse(alias_tokens);
+    assert!(
+        alias_diags.is_empty(),
+        "alias-declaring module parse should succeed: {alias_diags:?}"
+    );
+    let pre_loaded_aliases =
+        crate::semantic_analysis::AliasRegistry::extract_alias_infos(&alias_module);
+
+    // No `type RestartStrategy = ...` in this module — only a `state:`
+    // field referencing the name declared elsewhere.
+    let src = "
+Value subclass: Child
+  state: strategy :: RestartStrategy = #temporary
+";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, diags) = crate::source_analysis::parse(tokens);
+    assert!(diags.is_empty(), "parse should succeed: {diags:?}");
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@child_cross_module").with_pre_loaded_aliases(pre_loaded_aliases),
+    )
+    .expect("codegen should succeed");
+
+    assert!(
+        code.contains("{'user_type', 0, 'restart_strategy', []}"),
+        "state field typed with a cross-module alias should emit a user_type reference. \
+         Got:\n{code}"
+    );
+    assert!(
+        code.contains("'export_type' = [{'t', 0}]"),
+        "Value subclass's own -type t() alias (BT-1156) must be unaffected. Got:\n{code}"
+    );
+}
+
+#[test]
 fn test_module_without_type_aliases_is_unaffected_by_alias_wiring() {
     // BT-2909 acceptance criterion: confirm generated Core Erlang for
     // message dispatch/field access is unaffected for modules with no
@@ -3210,6 +3255,90 @@ Actor subclass: Counter
     assert!(
         !code.contains("user_type"),
         "a module with no type_aliases must never emit a user_type reference. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_cross_module_alias_reference_emits_user_type_via_pre_loaded_aliases() {
+    // BT-2932: an alias declared in one compiled module — simulated here by
+    // extracting `AliasInfo`s from a standalone `type X = ...` module via
+    // `AliasRegistry::extract_alias_infos`, the same mechanism the CLI build
+    // pipeline uses to populate `ClassHierarchyContext::pre_loaded_aliases`
+    // — and referenced in a method annotation in a *different* module must
+    // still emit a `user_type` reference. Before this issue,
+    // `actor_codegen.rs`'s `generate_class_specs` call site only ever saw
+    // `AliasRegistry::from_module_declarations(module)` — the referencing
+    // module's own (here, empty) `type_aliases` — so this exact case fell
+    // through to `any()` (see the negative-control test below).
+    let alias_src = "type RestartStrategy = #temporary | #transient | #permanent";
+    let alias_tokens = crate::source_analysis::lex_with_eof(alias_src);
+    let (alias_module, alias_diags) = crate::source_analysis::parse(alias_tokens);
+    assert!(
+        alias_diags.is_empty(),
+        "alias-declaring module parse should succeed: {alias_diags:?}"
+    );
+    let pre_loaded_aliases =
+        crate::semantic_analysis::AliasRegistry::extract_alias_infos(&alias_module);
+    assert_eq!(
+        pre_loaded_aliases.len(),
+        1,
+        "sanity: exactly one pre-loaded alias extracted"
+    );
+
+    // The consuming module declares no `type RestartStrategy = ...` of its
+    // own — only a method annotation referencing the name declared in the
+    // other (pre-loaded) module.
+    let src = "
+Actor subclass: Supervisor
+  class defaultStrategy: policy :: RestartStrategy => policy
+";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, diags) = crate::source_analysis::parse(tokens);
+    assert!(diags.is_empty(), "parse should succeed: {diags:?}");
+
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@supervisor_cross_module")
+            .with_pre_loaded_aliases(pre_loaded_aliases),
+    )
+    .expect("codegen should succeed");
+
+    assert!(
+        code.contains("{'user_type', 0, 'restart_strategy', []}"),
+        "class method param typed with a cross-module alias should emit a user_type reference. \
+         Got:\n{code}"
+    );
+    assert!(
+        code.contains("'restart_strategy'"),
+        "module must declare the matching named -type for the cross-module alias. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_cross_module_alias_reference_without_pre_loaded_aliases_falls_back_to_any() {
+    // BT-2932 negative control: the same module, compiled without
+    // `with_pre_loaded_aliases`, reproduces the pre-fix gap this issue
+    // closes — since the module has no local `type_aliases` of its own,
+    // `RestartStrategy` is an unresolved name and the annotation falls
+    // through to `any()` rather than a spurious `user_type` reference.
+    let src = "
+Actor subclass: Supervisor
+  class defaultStrategy: policy :: RestartStrategy => policy
+";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, diags) = crate::source_analysis::parse(tokens);
+    assert!(diags.is_empty(), "parse should succeed: {diags:?}");
+
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@supervisor_cross_module_neg"),
+    )
+    .expect("codegen should succeed");
+
+    assert!(
+        !code.contains("user_type"),
+        "without pre-loaded aliases, an unresolved cross-module alias name must fall back to \
+         any(), not user_type. Got:\n{code}"
     );
 }
 
@@ -4003,6 +4132,53 @@ fn test_native_facade_class_method_alias_param_emits_user_type_and_named_type() 
     assert!(
         code.contains("'restart_strategy'"),
         "module must declare the matching named -type for the alias. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_native_facade_cross_module_alias_reference_emits_user_type() {
+    // BT-2932: same wiring check as
+    // `test_native_facade_class_method_alias_param_emits_user_type_and_named_type`
+    // above, but the alias is declared in a *different* compiled module —
+    // threaded in via `CodegenOptions::with_pre_loaded_aliases` — instead of
+    // this module's own `type_aliases`.
+    let strategy_alias = TypeAliasDefinition {
+        name: Identifier::new("RestartStrategy", Span::new(0, 0)),
+        annotation: TypeAnnotation::union(
+            vec![
+                TypeAnnotation::singleton("temporary", Span::new(0, 0)),
+                TypeAnnotation::singleton("transient", Span::new(0, 0)),
+                TypeAnnotation::singleton("permanent", Span::new(0, 0)),
+            ],
+            Span::new(0, 0),
+        ),
+        is_internal: false,
+        comments: CommentAttachment::default(),
+        doc_comment: None,
+        span: Span::new(0, 0),
+    };
+    let pre_loaded_aliases =
+        vec![crate::semantic_analysis::alias_registry::AliasInfo::from_definition(&strategy_alias)];
+
+    // No `type_aliases` of its own — the module only references the name.
+    let mut module = make_native_actor_with_class_methods();
+    module.classes[0].class_methods[0].parameters[0].type_annotation =
+        Some(TypeAnnotation::simple("RestartStrategy", Span::new(0, 0)));
+
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@test_rich_cross_module")
+            .with_pre_loaded_aliases(pre_loaded_aliases),
+    )
+    .expect("codegen should succeed");
+    assert!(
+        code.contains("{'user_type', 0, 'restart_strategy', []}"),
+        "class method param typed with a cross-module alias should emit a user_type reference. \
+         Got:\n{code}"
+    );
+    assert!(
+        code.contains("'restart_strategy'"),
+        "module must declare the matching named -type for the cross-module alias. Got:\n{code}"
     );
 }
 

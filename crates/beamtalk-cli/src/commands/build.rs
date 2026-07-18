@@ -3422,6 +3422,85 @@ mod tests {
         );
     }
 
+    /// BT-2932: cross-module `AliasRegistry` wiring into codegen — the
+    /// codegen counterpart of `test_cross_file_alias_resolution_no_false_type_mismatch`
+    /// above. File A declares `type Direction = ...`; file B has no alias
+    /// declarations of its own, only a method parameter explicitly
+    /// annotated `:: Direction`. Before this issue, `compile_file`'s codegen
+    /// call (`write_core_erlang_with_bindings` → `CodegenOptions`) only ever
+    /// built `AliasRegistry::from_module_declarations(module)` — B's own
+    /// (empty) `type_aliases` — so this parameter's generated `-spec` fell
+    /// through to `any()` even though semantic analysis (BT-2928) already
+    /// resolved the reference correctly. With `pre_loaded_aliases` threaded
+    /// through (`ClassHierarchyContext::pre_loaded_aliases` →
+    /// `codegen_hierarchy` → `CodegenOptions::with_pre_loaded_aliases`), B's
+    /// generated `.core` file must contain a `user_type` reference to the
+    /// alias declared in A, plus the matching named `-type` declaration (an
+    /// `erlc` compile error otherwise).
+    #[test]
+    fn test_cross_file_alias_reference_emits_user_type_in_generated_core_erlang() {
+        let temp = TempDir::new().unwrap();
+        let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let src_path = project_path.join("src");
+        fs::create_dir_all(&src_path).unwrap();
+
+        write_test_file(
+            &src_path.join("a.bt"),
+            "type Direction = #north | #south | #east | #west\n\
+             Value subclass: A\n  heading -> Direction => #north\n",
+        );
+        write_test_file(
+            &src_path.join("b.bt"),
+            "Object subclass: B\n  useDirection: d :: Direction => d\n",
+        );
+
+        let build_dir = project_path.join("_build/dev/ebin");
+        fs::create_dir_all(&build_dir).unwrap();
+
+        let source_files = vec![src_path.join("a.bt"), src_path.join("b.bt")];
+        let (
+            class_module_index,
+            class_superclass_index,
+            all_class_infos,
+            _extensions,
+            _cached_asts,
+        ) = build_class_module_index(&source_files, Some(&src_path), "test_pkg").unwrap();
+        let all_alias_infos = collect_project_alias_infos(&source_files, "test_pkg");
+
+        let core_file = build_dir.join("bt@test_pkg@b.core");
+        let options = default_options();
+        compile_file(
+            &src_path.join("b.bt"),
+            "bt@test_pkg@b",
+            &core_file,
+            &options,
+            &CompileContext {
+                hierarchy: ClassHierarchyContext {
+                    class_module_index,
+                    class_superclass_index,
+                    pre_loaded_classes: all_class_infos,
+                    pre_loaded_aliases: all_alias_infos,
+                    ..ClassHierarchyContext::default()
+                },
+                ..CompileContext::default()
+            },
+            None,
+        )
+        .expect("Cross-file alias-typed parameter should compile without errors");
+
+        let core_src = fs::read_to_string(&core_file).unwrap();
+        assert!(
+            core_src.contains("{'user_type', 0, 'direction', []}"),
+            "parameter typed with a cross-file alias should emit a user_type reference in the \
+             generated Core Erlang. Got:\n{core_src}"
+        );
+        assert!(
+            core_src.contains("'direction'"),
+            "module must declare the matching named -type for the cross-file alias. \
+             Got:\n{core_src}"
+        );
+    }
+
     #[test]
     fn test_clean_stale_artifacts_removes_orphaned_beam() {
         let temp = TempDir::new().unwrap();

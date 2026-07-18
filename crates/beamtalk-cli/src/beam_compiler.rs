@@ -762,6 +762,13 @@ pub fn write_core_erlang_with_bindings(
             .with_class_superclass_index(hierarchy.class_superclass_index.clone())
             .with_source_path_opt(source_path)
             .with_class_hierarchy(hierarchy.pre_loaded_classes.clone())
+            // BT-2932: thread cross-module type aliases through to codegen so
+            // an alias-typed annotation referencing a `type Name = ...` from
+            // another module in the same compilation unit resolves to a
+            // `user_type` reference in generated `-spec`/`-type` attributes
+            // instead of falling through to `any()` — mirrors
+            // `pre_loaded_classes` immediately above.
+            .with_pre_loaded_aliases(hierarchy.pre_loaded_aliases.clone())
             .with_native_type_registry(native_type_registry)
             // ADR 0098 Phase 3: bake the producing-toolchain identity into __beamtalk_meta.
             .with_provenance(
@@ -991,10 +998,18 @@ pub(crate) fn compile_source_with_bindings(
     let embed_source_path = Some(embed_source_path.as_str());
     // Build a codegen-specific hierarchy with cross-file classes (filtered to
     // exclude the current file's classes, which are added by codegen itself).
+    // BT-2932: `pre_loaded_aliases` is *not* filtered the way `cross_file_classes`
+    // is — it already includes the current file's own aliases (see
+    // `ClassHierarchyContext::pre_loaded_aliases`'s doc), and codegen's merge
+    // (`AliasRegistry::from_module_declarations_with_pre_loaded`) lets the
+    // module's own declaration take precedence over its duplicate pre-loaded
+    // entry, mirroring how semantic analysis's `AnalysisContext::pre_loaded_aliases`
+    // already handles the same list.
     let codegen_hierarchy = ClassHierarchyContext {
         class_module_index: ctx.hierarchy.class_module_index.clone(),
         class_superclass_index: ctx.hierarchy.class_superclass_index.clone(),
         pre_loaded_classes: cross_file_classes,
+        pre_loaded_aliases: ctx.hierarchy.pre_loaded_aliases.clone(),
         ..ClassHierarchyContext::default()
     };
     write_core_erlang_with_bindings(
