@@ -59,6 +59,7 @@ Module {
                     },
                 ],
                 trailing: None,
+                leading_blank_line: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -102,6 +103,7 @@ Module {
                     },
                 ],
                 trailing: None,
+                leading_blank_line: true,
             },
             expression: Assignment {
                 target: Identifier(
@@ -145,6 +147,7 @@ Module {
                     },
                 ],
                 trailing: None,
+                leading_blank_line: true,
             },
             expression: Assignment {
                 target: Identifier(
@@ -188,6 +191,7 @@ Module {
                     },
                 ],
                 trailing: None,
+                leading_blank_line: true,
             },
             expression: MessageSend {
                 receiver: Identifier(

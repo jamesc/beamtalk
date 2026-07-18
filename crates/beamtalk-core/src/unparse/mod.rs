@@ -332,6 +332,17 @@ enum TopLevelDecl<'a> {
     TypeAlias(&'a TypeAliasDefinition),
 }
 
+impl TopLevelDecl<'_> {
+    /// Whether a blank line preceded this declaration in the source (BT-2929).
+    fn preceding_blank_line(&self) -> bool {
+        match self {
+            Self::Class(class) => class.comments.leading_blank_line,
+            Self::Protocol(protocol) => protocol.comments.leading_blank_line,
+            Self::TypeAlias(type_alias) => type_alias.comments.leading_blank_line,
+        }
+    }
+}
+
 /// Builds a [`Document`] for a [`Module`].
 #[must_use]
 pub(crate) fn unparse_module_doc(module: &Module) -> Document<'static> {
@@ -360,7 +371,15 @@ pub(crate) fn unparse_module_doc(module: &Module) -> Document<'static> {
         TopLevelDecl::TypeAlias(type_alias) => type_alias.span.start(),
     });
 
-    for decl in top_level_decls {
+    for (i, decl) in top_level_decls.into_iter().enumerate() {
+        // BT-2929: re-emit the blank line the author placed between this
+        // declaration and the previous one. Skipped for the first
+        // declaration in the section — a blank line there (before the very
+        // first top-level declaration) is dropped, same as pre-existing
+        // behaviour; we only preserve inter-declaration gaps.
+        if i > 0 && decl.preceding_blank_line() {
+            docs.push(line());
+        }
         match decl {
             TopLevelDecl::Class(class) => docs.push(unparse_class_definition(class)),
             TopLevelDecl::Protocol(protocol) => docs.push(unparse_protocol_definition(protocol)),
@@ -2273,6 +2292,7 @@ mod tests {
             comments: CommentAttachment {
                 leading: vec![Comment::line("This is 42", span())],
                 trailing: None,
+                leading_blank_line: false,
             },
             expression: Expression::Literal(Literal::Integer(42), span()),
             preceding_blank_line: false,
@@ -2287,6 +2307,7 @@ mod tests {
             comments: CommentAttachment {
                 leading: Vec::new(),
                 trailing: Some(Comment::line("trailing", span())),
+                leading_blank_line: false,
             },
             expression: Expression::Literal(Literal::Integer(1), span()),
             preceding_blank_line: false,
@@ -2301,6 +2322,7 @@ mod tests {
             comments: CommentAttachment {
                 leading: vec![Comment::line("before", span())],
                 trailing: Some(Comment::line("after", span())),
+                leading_blank_line: false,
             },
             expression: Expression::Literal(Literal::Integer(99), span()),
             preceding_blank_line: false,
@@ -2341,6 +2363,7 @@ mod tests {
         method.comments = CommentAttachment {
             leading: vec![Comment::line("Returns the current value", span())],
             trailing: None,
+            leading_blank_line: false,
         };
         let output = unparse_method_definition(&method).to_pretty_string();
         assert_eq!(output, "// Returns the current value\ngetValue => 0");
@@ -2642,6 +2665,7 @@ mod tests {
             comments: CommentAttachment {
                 leading: vec![Comment::line("the result", span())],
                 trailing: None,
+                leading_blank_line: false,
             },
             expression: Expression::Identifier(Identifier::new("x", span())),
             preceding_blank_line: false,
@@ -2707,6 +2731,7 @@ mod tests {
             comments: CommentAttachment {
                 leading: vec![Comment::line("do the thing", span())],
                 trailing: None,
+                leading_blank_line: false,
             },
             expression: Expression::Identifier(Identifier::new("x", span())),
             preceding_blank_line: false,
@@ -2730,6 +2755,7 @@ mod tests {
                     Comment::line("second comment", span()),
                 ],
                 trailing: None,
+                leading_blank_line: false,
             },
             expression: Expression::Literal(Literal::Integer(42), span()),
             preceding_blank_line: false,
@@ -3921,6 +3947,116 @@ mod tests {
             formatted, formatted_again,
             "format_source is not idempotent"
         );
+    }
+
+    // --- BT-2929: blank line between top-level declarations ---
+    //
+    // `unparse_module_doc` used to always emit exactly one `line()` after
+    // each top-level declaration, regardless of whether the source had a
+    // blank line there — so the separating blank line was either silently
+    // dropped, or (for a class) looked "relocated" into the class's own
+    // body, since a class unconditionally gets a blank line before its
+    // first method whether or not it has state declarations (an unrelated,
+    // pre-existing formatting rule — see the `Blank line before first
+    // method` comment in `unparse_class_definition`). All three assertions
+    // below use `assert_identity` with sources that are already in that
+    // canonical form, so a regression here fails on the *first* format
+    // pass rather than requiring a second one to notice non-idempotency.
+
+    #[test]
+    fn blank_line_preserved_type_alias_then_class() {
+        // Repro A from BT-2929.
+        assert_identity(concat!(
+            "type Port = Integer\n",
+            "\n",
+            "Object subclass: Foo\n",
+            "\n",
+            "  m => 1\n",
+        ));
+    }
+
+    #[test]
+    fn blank_line_preserved_class_then_class() {
+        // Repro B from BT-2929 — confirms the bug wasn't type-alias-specific.
+        assert_identity(concat!(
+            "Object subclass: A\n",
+            "\n",
+            "  m => 1\n",
+            "\n",
+            "Object subclass: B\n",
+            "\n",
+            "  n => 2\n",
+        ));
+    }
+
+    #[test]
+    fn blank_line_preserved_type_alias_then_type_alias() {
+        // Repro C from BT-2929 — the blank line was dropped outright here
+        // (neither declaration has a body to "absorb" it into).
+        assert_identity(concat!(
+            "type Port = Integer\n",
+            "\n",
+            "type Timeout = Integer\n",
+        ));
+    }
+
+    #[test]
+    fn no_blank_line_between_top_level_declarations_stays_absent() {
+        // The converse of the three tests above: declarations with *no*
+        // blank line between them in the source must not gain one.
+        assert_identity(concat!("type Port = Integer\n", "type Timeout = Integer\n",));
+    }
+
+    #[test]
+    fn blank_line_before_first_top_level_declaration_is_dropped() {
+        // BT-2929 (review follow-up): the `i > 0` guard in
+        // `unparse_module_doc`'s loop intentionally does not preserve a
+        // blank line before the very first top-level declaration — this
+        // predates BT-2929 and is documented in the loop's comment.
+        // Confirmed here with an explicit regression test rather than only
+        // a code comment.
+        //
+        // Two leading newlines are required, not one: a single `\n` is
+        // below `has_blank_line_before_first_comment()`'s `>= 2` threshold,
+        // so it would produce `leading_blank_line: false` and never
+        // actually exercise the `i > 0` guard this test targets.
+        let source = "\n\ntype Port = Integer\n";
+        let formatted = format_source(source).expect("format_source must succeed");
+        assert_eq!(formatted, "type Port = Integer\n");
+    }
+
+    #[test]
+    fn multiple_blank_lines_between_top_level_declarations_normalised_to_one() {
+        // BT-2929 (review follow-up): `has_blank_line_before_first_comment`
+        // treats any run of 2+ blank lines as "a blank line preceded this
+        // node" — the unparser always re-emits exactly one, so multiple
+        // blank lines collapse to one on format (standard normalisation),
+        // not a bug. Two blank lines in source...
+        let source = "type Port = Integer\n\n\ntype Timeout = Integer\n";
+        let formatted = format_source(source).expect("format_source must succeed");
+        // ...become one blank line in the formatted output...
+        assert_eq!(formatted, "type Port = Integer\n\ntype Timeout = Integer\n");
+        // ...and that single-blank-line form is stable under a second pass.
+        assert_identity(&formatted);
+    }
+
+    #[test]
+    fn blank_line_preserved_across_all_three_declaration_kinds_interleaved() {
+        // Full combination: type alias, protocol, and class, each separated
+        // by a blank line — every pairwise gap (type-alias/protocol,
+        // protocol/class, class/type-alias) must round-trip.
+        assert_identity(concat!(
+            "type Port = Integer\n",
+            "\n",
+            "Protocol define: Startable\n",
+            "  start -> Integer\n",
+            "\n",
+            "Object subclass: Server\n",
+            "\n",
+            "  start => 1\n",
+            "\n",
+            "type Timeout = Integer\n",
+        ));
     }
 
     #[test]

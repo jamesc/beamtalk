@@ -59,6 +59,7 @@ Module {
                     },
                 ],
                 trailing: None,
+                leading_blank_line: false,
             },
             expression: Error {
                 message: "Invalid assignment target",
@@ -73,6 +74,7 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
             },
             expression: Error {
                 message: "Unexpected token: expected expression, found .",
@@ -87,6 +89,7 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
             },
             expression: Error {
                 message: "Invalid assignment target",
@@ -101,6 +104,7 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
             },
             expression: MessageSend {
                 receiver: MessageSend {
@@ -147,6 +151,7 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
             },
             expression: Error {
                 message: "Unexpected token: expected expression, found ]",
@@ -161,6 +166,7 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
             },
             expression: Return {
                 value: Identifier(
@@ -183,6 +189,7 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
             },
             expression: Error {
                 message: "Unexpected token: expected expression, found ]",
@@ -197,6 +204,7 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
             },
             expression: Error {
                 message: "Unexpected token: expected expression, found .",
@@ -211,6 +219,7 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
             },
             expression: Error {
                 message: "Unexpected token: expected expression, found ]",
@@ -225,6 +234,7 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
             },
             expression: Error {
                 message: "Unexpected token: expected expression, found .",
@@ -239,6 +249,7 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
             },
             expression: Error {
                 message: "Unexpected token: expected expression, found .",
