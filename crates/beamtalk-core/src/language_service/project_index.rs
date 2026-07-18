@@ -403,6 +403,22 @@ impl ProjectIndex {
             .collect()
     }
 
+    /// Returns cross-file `AliasInfo` entries for diagnostic computation
+    /// (BT-2928) — the alias-namespace analogue of
+    /// [`Self::cross_file_class_infos_for`]. Returns every tracked alias
+    /// declaration from files other than `file`, for seeding into
+    /// `ProjectDiagnosticContext::pre_loaded_aliases` so a `type Name = ...`
+    /// declared in a different project file resolves during LSP diagnostics
+    /// the same way a cross-file class reference already does.
+    #[must_use]
+    pub fn cross_file_alias_infos_for(&self, file: &Utf8PathBuf) -> Vec<AliasInfo> {
+        self.file_aliases
+            .iter()
+            .filter(|(path, _)| *path != file)
+            .flat_map(|(_, infos)| infos.iter().cloned())
+            .collect()
+    }
+
     /// Returns the package name for a file, if determinable.
     ///
     /// Uses the file-local hierarchy (not the merged hierarchy) so that

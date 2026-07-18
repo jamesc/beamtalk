@@ -41,6 +41,7 @@ Module {
                             comments: CommentAttachment {
                                 leading: [],
                                 trailing: None,
+                                leading_blank_line: false,
                             },
                             expression: Literal(
                                 Symbol(
@@ -105,6 +106,7 @@ Module {
                             },
                         ],
                         trailing: None,
+                        leading_blank_line: true,
                     },
                     doc_comment: None,
                     span: Span {
@@ -166,6 +168,7 @@ Module {
                             comments: CommentAttachment {
                                 leading: [],
                                 trailing: None,
+                                leading_blank_line: false,
                             },
                             expression: MessageSend {
                                 receiver: Identifier(
@@ -228,6 +231,7 @@ Module {
                             },
                         ],
                         trailing: None,
+                        leading_blank_line: true,
                     },
                     doc_comment: None,
                     span: Span {
@@ -301,6 +305,7 @@ Module {
                             comments: CommentAttachment {
                                 leading: [],
                                 trailing: None,
+                                leading_blank_line: false,
                             },
                             expression: Match {
                                 value: Identifier(
@@ -336,6 +341,7 @@ Module {
                                         comments: CommentAttachment {
                                             leading: [],
                                             trailing: None,
+                                            leading_blank_line: false,
                                         },
                                         span: Span {
                                             start: 1771,
@@ -365,6 +371,7 @@ Module {
                                         comments: CommentAttachment {
                                             leading: [],
                                             trailing: None,
+                                            leading_blank_line: false,
                                         },
                                         span: Span {
                                             start: 1793,
@@ -394,6 +401,7 @@ Module {
                                         comments: CommentAttachment {
                                             leading: [],
                                             trailing: None,
+                                            leading_blank_line: false,
                                         },
                                         span: Span {
                                             start: 1817,
@@ -457,6 +465,7 @@ Module {
                             },
                         ],
                         trailing: None,
+                        leading_blank_line: true,
                     },
                     doc_comment: None,
                     span: Span {
@@ -642,6 +651,7 @@ Module {
                     },
                 ],
                 trailing: None,
+                leading_blank_line: false,
             },
             doc_comment: None,
             backing_module: None,
@@ -675,6 +685,7 @@ Module {
                         comments: CommentAttachment {
                             leading: [],
                             trailing: None,
+                            leading_blank_line: false,
                         },
                         expression: Literal(
                             Symbol(
@@ -784,6 +795,7 @@ Module {
                         },
                     ],
                     trailing: None,
+                    leading_blank_line: false,
                 },
                 doc_comment: None,
                 span: Span {
@@ -816,6 +828,7 @@ Module {
                         comments: CommentAttachment {
                             leading: [],
                             trailing: None,
+                            leading_blank_line: false,
                         },
                         expression: Identifier(
                             Identifier {
@@ -994,6 +1007,7 @@ Module {
                         },
                     ],
                     trailing: None,
+                    leading_blank_line: false,
                 },
                 doc_comment: None,
                 span: Span {

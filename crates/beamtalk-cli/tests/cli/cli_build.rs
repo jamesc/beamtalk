@@ -6,7 +6,7 @@
 //! Verifies exit code, the `_build/` artefact set produced by a successful
 //! build, and error output when sources fail to parse.
 
-mod cli_common;
+use crate::cli_common;
 
 use predicates::prelude::*;
 use predicates::str::contains;

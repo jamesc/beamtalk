@@ -332,6 +332,17 @@ enum TopLevelDecl<'a> {
     TypeAlias(&'a TypeAliasDefinition),
 }
 
+impl TopLevelDecl<'_> {
+    /// Whether a blank line preceded this declaration in the source (BT-2929).
+    fn preceding_blank_line(&self) -> bool {
+        match self {
+            Self::Class(class) => class.comments.leading_blank_line,
+            Self::Protocol(protocol) => protocol.comments.leading_blank_line,
+            Self::TypeAlias(type_alias) => type_alias.comments.leading_blank_line,
+        }
+    }
+}
+
 /// Builds a [`Document`] for a [`Module`].
 #[must_use]
 pub(crate) fn unparse_module_doc(module: &Module) -> Document<'static> {
@@ -360,7 +371,15 @@ pub(crate) fn unparse_module_doc(module: &Module) -> Document<'static> {
         TopLevelDecl::TypeAlias(type_alias) => type_alias.span.start(),
     });
 
-    for decl in top_level_decls {
+    for (i, decl) in top_level_decls.into_iter().enumerate() {
+        // BT-2929: re-emit the blank line the author placed between this
+        // declaration and the previous one. Skipped for the first
+        // declaration in the section — a blank line there (before the very
+        // first top-level declaration) is dropped, same as pre-existing
+        // behaviour; we only preserve inter-declaration gaps.
+        if i > 0 && decl.preceding_blank_line() {
+            docs.push(line());
+        }
         match decl {
             TopLevelDecl::Class(class) => docs.push(unparse_class_definition(class)),
             TopLevelDecl::Protocol(protocol) => docs.push(unparse_protocol_definition(protocol)),
@@ -736,6 +755,16 @@ fn unparse_protocol_method_signature(
     prefix: Option<&'static str>,
 ) -> Document<'static> {
     let mut docs: Vec<Document<'static>> = Vec::new();
+
+    // Non-doc leading comments
+    docs.extend(unparse_comment_attachment_leading(&sig.comments));
+
+    // Blank line between a preserved, earlier `///` block that broke away
+    // from a different declaration (BT-2924) and this signature's own doc
+    // comment — see `leading_ends_with_orphaned_doc_comment`.
+    if leading_ends_with_orphaned_doc_comment(&sig.comments) {
+        docs.push(line());
+    }
 
     // Doc comment
     if let Some(doc) = &sig.doc_comment {
@@ -2273,6 +2302,7 @@ mod tests {
             comments: CommentAttachment {
                 leading: vec![Comment::line("This is 42", span())],
                 trailing: None,
+                leading_blank_line: false,
             },
             expression: Expression::Literal(Literal::Integer(42), span()),
             preceding_blank_line: false,
@@ -2287,6 +2317,7 @@ mod tests {
             comments: CommentAttachment {
                 leading: Vec::new(),
                 trailing: Some(Comment::line("trailing", span())),
+                leading_blank_line: false,
             },
             expression: Expression::Literal(Literal::Integer(1), span()),
             preceding_blank_line: false,
@@ -2301,6 +2332,7 @@ mod tests {
             comments: CommentAttachment {
                 leading: vec![Comment::line("before", span())],
                 trailing: Some(Comment::line("after", span())),
+                leading_blank_line: false,
             },
             expression: Expression::Literal(Literal::Integer(99), span()),
             preceding_blank_line: false,
@@ -2341,6 +2373,7 @@ mod tests {
         method.comments = CommentAttachment {
             leading: vec![Comment::line("Returns the current value", span())],
             trailing: None,
+            leading_blank_line: false,
         };
         let output = unparse_method_definition(&method).to_pretty_string();
         assert_eq!(output, "// Returns the current value\ngetValue => 0");
@@ -2642,6 +2675,7 @@ mod tests {
             comments: CommentAttachment {
                 leading: vec![Comment::line("the result", span())],
                 trailing: None,
+                leading_blank_line: false,
             },
             expression: Expression::Identifier(Identifier::new("x", span())),
             preceding_blank_line: false,
@@ -2707,6 +2741,7 @@ mod tests {
             comments: CommentAttachment {
                 leading: vec![Comment::line("do the thing", span())],
                 trailing: None,
+                leading_blank_line: false,
             },
             expression: Expression::Identifier(Identifier::new("x", span())),
             preceding_blank_line: false,
@@ -2730,6 +2765,7 @@ mod tests {
                     Comment::line("second comment", span()),
                 ],
                 trailing: None,
+                leading_blank_line: false,
             },
             expression: Expression::Literal(Literal::Integer(42), span()),
             preceding_blank_line: false,
@@ -3591,6 +3627,71 @@ mod tests {
         assert_identity(source);
     }
 
+    // --- BT-2930 regression: leading `//`/`/* */` comments on protocol
+    // method signatures must survive a `beamtalk fmt` round-trip. ---
+
+    #[test]
+    fn protocol_instance_method_leading_comment_round_trip() {
+        // Exact repro from BT-2930: an ordinary leading `//` comment (no doc
+        // comment) directly above an instance-side signature was silently
+        // dropped because `unparse_protocol_method_signature` never called
+        // `unparse_comment_attachment_leading`.
+        let source = concat!(
+            "Protocol define: Displayable\n",
+            "  // A leading comment.\n",
+            "  asString -> String\n",
+        );
+        assert_identity(source);
+    }
+
+    #[test]
+    fn protocol_instance_method_leading_block_comment_round_trip() {
+        let source = concat!(
+            "Protocol define: Displayable\n",
+            "  /* A leading block comment. */\n",
+            "  asString -> String\n",
+        );
+        assert_identity(source);
+    }
+
+    #[test]
+    fn protocol_instance_method_leading_comment_and_doc_comment_round_trip() {
+        // Leading comments and doc comments must both render, in the right
+        // order (leading comment first, then doc comment, then signature) —
+        // matching every other declaration kind.
+        let source = concat!(
+            "Protocol define: Displayable\n",
+            "  // A leading comment.\n",
+            "  /// Convert to display string.\n",
+            "  asString -> String\n",
+        );
+        assert_identity(source);
+    }
+
+    #[test]
+    fn protocol_class_method_leading_comment_round_trip() {
+        let source = concat!(
+            "Protocol define: Creatable\n",
+            "  // A leading comment.\n",
+            "  class create -> Self\n",
+        );
+        assert_identity(source);
+    }
+
+    #[test]
+    fn protocol_class_method_leading_comment_and_doc_comment_round_trip() {
+        // Verifies interaction with the existing doc-comment-before-`class`-
+        // keyword handling: leading comment, then doc comment, then `class`
+        // on the signature line.
+        let source = concat!(
+            "Protocol define: Parseable\n",
+            "  // A leading comment.\n",
+            "  /// Reconstruct from string.\n",
+            "  class fromString: aString :: String -> Self\n",
+        );
+        assert_identity(source);
+    }
+
     #[test]
     fn protocol_trailing_comment_round_trip() {
         // BT-2906: a trailing end-of-line comment on the `Protocol define:`
@@ -3650,6 +3751,64 @@ mod tests {
         // BT-2906: a trailing end-of-line comment on the declaration line
         // must round-trip losslessly instead of being dropped.
         let source = "type Port = Integer  // comment\n";
+        assert_identity(source);
+    }
+
+    // --- Class definition header trailing comment (BT-2933) ---
+
+    #[test]
+    fn class_header_trailing_comment_round_trip() {
+        // BT-2933: a trailing end-of-line comment on the `subclass:` header
+        // line must round-trip losslessly, mirroring the identical fix for
+        // type alias/protocol declarations (BT-2906). Before the fix,
+        // `parse_class_definition` never populated `comments.trailing`, so
+        // `unparse_class_definition`'s trailing-comment branch was dead code
+        // and the comment was silently dropped.
+        // A class with no `state:` declarations always gets a blank line
+        // before its first method (canonical formatting, unrelated to this
+        // fix), hence the blank line in the expected output below.
+        let source = concat!(
+            "Object subclass: Foo  // header comment\n",
+            "\n",
+            "  x => 1\n",
+        );
+        assert_identity(source);
+    }
+
+    #[test]
+    fn class_header_trailing_comment_with_type_params_round_trip() {
+        // BT-2933: the trailing comment attaches after the last header
+        // token — here, the type parameter list.
+        let source = concat!(
+            "Object subclass: Box(T)  // header comment\n",
+            "\n",
+            "  x => 1\n",
+        );
+        assert_identity(source);
+    }
+
+    #[test]
+    fn class_header_trailing_comment_with_native_round_trip() {
+        // BT-2933: the trailing comment attaches after the `native:` module
+        // name — the last header token when present.
+        let source = concat!(
+            "Object subclass: Foo native: my_module  // header comment\n",
+            "\n",
+            "  x => 1\n",
+        );
+        assert_identity(source);
+    }
+
+    #[test]
+    fn class_header_trailing_comment_with_state_round_trip() {
+        // BT-2933 (review follow-up): the most common real-world class
+        // shape — a header trailing comment plus a `state:` declaration.
+        let source = concat!(
+            "Object subclass: Counter  // counter class\n",
+            "  state: count :: Integer = 0\n",
+            "\n",
+            "  increment => count := count + 1\n",
+        );
         assert_identity(source);
     }
 
@@ -3863,6 +4022,116 @@ mod tests {
             formatted, formatted_again,
             "format_source is not idempotent"
         );
+    }
+
+    // --- BT-2929: blank line between top-level declarations ---
+    //
+    // `unparse_module_doc` used to always emit exactly one `line()` after
+    // each top-level declaration, regardless of whether the source had a
+    // blank line there — so the separating blank line was either silently
+    // dropped, or (for a class) looked "relocated" into the class's own
+    // body, since a class unconditionally gets a blank line before its
+    // first method whether or not it has state declarations (an unrelated,
+    // pre-existing formatting rule — see the `Blank line before first
+    // method` comment in `unparse_class_definition`). All three assertions
+    // below use `assert_identity` with sources that are already in that
+    // canonical form, so a regression here fails on the *first* format
+    // pass rather than requiring a second one to notice non-idempotency.
+
+    #[test]
+    fn blank_line_preserved_type_alias_then_class() {
+        // Repro A from BT-2929.
+        assert_identity(concat!(
+            "type Port = Integer\n",
+            "\n",
+            "Object subclass: Foo\n",
+            "\n",
+            "  m => 1\n",
+        ));
+    }
+
+    #[test]
+    fn blank_line_preserved_class_then_class() {
+        // Repro B from BT-2929 — confirms the bug wasn't type-alias-specific.
+        assert_identity(concat!(
+            "Object subclass: A\n",
+            "\n",
+            "  m => 1\n",
+            "\n",
+            "Object subclass: B\n",
+            "\n",
+            "  n => 2\n",
+        ));
+    }
+
+    #[test]
+    fn blank_line_preserved_type_alias_then_type_alias() {
+        // Repro C from BT-2929 — the blank line was dropped outright here
+        // (neither declaration has a body to "absorb" it into).
+        assert_identity(concat!(
+            "type Port = Integer\n",
+            "\n",
+            "type Timeout = Integer\n",
+        ));
+    }
+
+    #[test]
+    fn no_blank_line_between_top_level_declarations_stays_absent() {
+        // The converse of the three tests above: declarations with *no*
+        // blank line between them in the source must not gain one.
+        assert_identity(concat!("type Port = Integer\n", "type Timeout = Integer\n",));
+    }
+
+    #[test]
+    fn blank_line_before_first_top_level_declaration_is_dropped() {
+        // BT-2929 (review follow-up): the `i > 0` guard in
+        // `unparse_module_doc`'s loop intentionally does not preserve a
+        // blank line before the very first top-level declaration — this
+        // predates BT-2929 and is documented in the loop's comment.
+        // Confirmed here with an explicit regression test rather than only
+        // a code comment.
+        //
+        // Two leading newlines are required, not one: a single `\n` is
+        // below `has_blank_line_before_first_comment()`'s `>= 2` threshold,
+        // so it would produce `leading_blank_line: false` and never
+        // actually exercise the `i > 0` guard this test targets.
+        let source = "\n\ntype Port = Integer\n";
+        let formatted = format_source(source).expect("format_source must succeed");
+        assert_eq!(formatted, "type Port = Integer\n");
+    }
+
+    #[test]
+    fn multiple_blank_lines_between_top_level_declarations_normalised_to_one() {
+        // BT-2929 (review follow-up): `has_blank_line_before_first_comment`
+        // treats any run of 2+ blank lines as "a blank line preceded this
+        // node" — the unparser always re-emits exactly one, so multiple
+        // blank lines collapse to one on format (standard normalisation),
+        // not a bug. Two blank lines in source...
+        let source = "type Port = Integer\n\n\ntype Timeout = Integer\n";
+        let formatted = format_source(source).expect("format_source must succeed");
+        // ...become one blank line in the formatted output...
+        assert_eq!(formatted, "type Port = Integer\n\ntype Timeout = Integer\n");
+        // ...and that single-blank-line form is stable under a second pass.
+        assert_identity(&formatted);
+    }
+
+    #[test]
+    fn blank_line_preserved_across_all_three_declaration_kinds_interleaved() {
+        // Full combination: type alias, protocol, and class, each separated
+        // by a blank line — every pairwise gap (type-alias/protocol,
+        // protocol/class, class/type-alias) must round-trip.
+        assert_identity(concat!(
+            "type Port = Integer\n",
+            "\n",
+            "Protocol define: Startable\n",
+            "  start -> Integer\n",
+            "\n",
+            "Object subclass: Server\n",
+            "\n",
+            "  start => 1\n",
+            "\n",
+            "type Timeout = Integer\n",
+        ));
     }
 
     #[test]
