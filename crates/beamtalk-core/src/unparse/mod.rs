@@ -3946,10 +3946,7 @@ mod tests {
     fn no_blank_line_between_top_level_declarations_stays_absent() {
         // The converse of the three tests above: declarations with *no*
         // blank line between them in the source must not gain one.
-        assert_identity(concat!(
-            "type Port = Integer\n",
-            "type Timeout = Integer\n",
-        ));
+        assert_identity(concat!("type Port = Integer\n", "type Timeout = Integer\n",));
     }
 
     #[test]
