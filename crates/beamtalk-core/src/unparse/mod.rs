@@ -3698,6 +3698,19 @@ mod tests {
         assert_identity(source);
     }
 
+    #[test]
+    fn class_header_trailing_comment_with_state_round_trip() {
+        // BT-2933 (review follow-up): the most common real-world class
+        // shape — a header trailing comment plus a `state:` declaration.
+        let source = concat!(
+            "Object subclass: Counter  // counter class\n",
+            "  state: count :: Integer = 0\n",
+            "\n",
+            "  increment => count := count + 1\n",
+        );
+        assert_identity(source);
+    }
+
     // --- BT-2924 regression: `type` alias sandwiched between a class's doc
     // comment and the class itself must not lose the class's doc comment. ---
 
