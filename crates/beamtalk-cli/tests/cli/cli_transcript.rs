@@ -9,7 +9,7 @@
 //! workspace name that doesn't exist. Streaming behaviour is covered by
 //! e2e tests against a live workspace.
 
-mod cli_common;
+use crate::cli_common;
 
 use predicates::prelude::*;
 use predicates::str::contains;

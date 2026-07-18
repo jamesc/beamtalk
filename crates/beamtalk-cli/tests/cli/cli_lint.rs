@@ -7,7 +7,7 @@
 //! happy- and error-path cases. Uses `assert_cmd` against the built
 //! `beamtalk` binary and a hermetic fixture project per test.
 
-mod cli_common;
+use crate::cli_common;
 
 use predicates::prelude::*;
 use predicates::str::contains;

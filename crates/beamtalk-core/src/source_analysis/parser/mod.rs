@@ -1007,6 +1007,11 @@ impl Parser {
     /// current token is the same for both calls.
     pub(super) fn collect_comment_attachment(&self) -> CommentAttachment {
         let token_span = self.current_token().span();
+        // Blank line before the *entire* leading block (before any leading
+        // comment, or before the node itself when it has none) — distinct
+        // from `saw_blank_line` below, which tracks blank lines *between*
+        // consecutive leading comments (BT-2929).
+        let leading_blank_line = self.current_token().has_blank_line_before_first_comment();
         let mut leading = Vec::new();
         let mut saw_blank_line = false;
         // Positions (within this token's leading trivia) already captured by
@@ -1081,6 +1086,7 @@ impl Parser {
         CommentAttachment {
             leading,
             trailing: None,
+            leading_blank_line,
         }
     }
 

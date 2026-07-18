@@ -65,6 +65,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [],
                         trailing: None,
+                        leading_blank_line: false,
                     },
                     doc_comment: None,
                     span: Span {
@@ -84,6 +85,7 @@ Module {
                             comments: CommentAttachment {
                                 leading: [],
                                 trailing: None,
+                                leading_blank_line: false,
                             },
                             expression: FieldAccess {
                                 receiver: Identifier(
@@ -139,6 +141,7 @@ Module {
                             },
                         ],
                         trailing: None,
+                        leading_blank_line: true,
                     },
                     doc_comment: None,
                     span: Span {
@@ -185,6 +188,7 @@ Module {
                             comments: CommentAttachment {
                                 leading: [],
                                 trailing: None,
+                                leading_blank_line: false,
                             },
                             expression: Assignment {
                                 target: FieldAccess {
@@ -290,6 +294,7 @@ Module {
                             },
                         ],
                         trailing: None,
+                        leading_blank_line: true,
                     },
                     doc_comment: None,
                     span: Span {
@@ -307,6 +312,7 @@ Module {
                             comments: CommentAttachment {
                                 leading: [],
                                 trailing: None,
+                                leading_blank_line: false,
                             },
                             expression: MessageSend {
                                 receiver: Parenthesized {
@@ -385,6 +391,7 @@ Module {
                                                     comments: CommentAttachment {
                                                         leading: [],
                                                         trailing: None,
+                                                        leading_blank_line: false,
                                                     },
                                                     expression: FieldAccess {
                                                         receiver: Identifier(
@@ -425,6 +432,7 @@ Module {
                                                     comments: CommentAttachment {
                                                         leading: [],
                                                         trailing: None,
+                                                        leading_blank_line: false,
                                                     },
                                                     expression: Identifier(
                                                         Identifier {
@@ -500,6 +508,7 @@ Module {
                             },
                         ],
                         trailing: None,
+                        leading_blank_line: true,
                     },
                     doc_comment: None,
                     span: Span {
@@ -517,6 +526,7 @@ Module {
                             comments: CommentAttachment {
                                 leading: [],
                                 trailing: None,
+                                leading_blank_line: false,
                             },
                             expression: Assignment {
                                 target: FieldAccess {
@@ -612,6 +622,7 @@ Module {
                             },
                         ],
                         trailing: None,
+                        leading_blank_line: true,
                     },
                     doc_comment: None,
                     span: Span {
@@ -653,6 +664,7 @@ Module {
                     },
                 ],
                 trailing: None,
+                leading_blank_line: false,
             },
             doc_comment: None,
             backing_module: None,

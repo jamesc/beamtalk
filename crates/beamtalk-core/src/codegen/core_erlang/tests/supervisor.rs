@@ -427,3 +427,199 @@ fn test_static_supervisor_class_method_alias_param_emits_user_type_and_named_typ
         "module must declare the matching named -type for the alias. Got:\n{code}"
     );
 }
+
+#[test]
+fn test_static_supervisor_cross_module_alias_reference_emits_user_type() {
+    // BT-2932: same wiring check as
+    // `test_static_supervisor_class_method_alias_param_emits_user_type_and_named_type`
+    // above, but the alias is declared in a *different* module — passed via
+    // `CodegenOptions::with_pre_loaded_aliases` instead of this module's own
+    // `type_aliases` — the cross-module case `supervisor_codegen.rs`'s
+    // `generate_static_supervisor` couldn't resolve before this issue, since
+    // it only ever built `AliasRegistry::from_module_declarations(module)`.
+    let strategy_alias = TypeAliasDefinition {
+        name: Identifier::new("RestartStrategy", Span::new(0, 0)),
+        annotation: TypeAnnotation::union(
+            vec![
+                TypeAnnotation::singleton("temporary", Span::new(0, 0)),
+                TypeAnnotation::singleton("transient", Span::new(0, 0)),
+                TypeAnnotation::singleton("permanent", Span::new(0, 0)),
+            ],
+            Span::new(0, 0),
+        ),
+        is_internal: false,
+        comments: CommentAttachment::default(),
+        doc_comment: None,
+        span: Span::new(0, 0),
+    };
+    let pre_loaded_aliases =
+        vec![crate::semantic_analysis::alias_registry::AliasInfo::from_definition(&strategy_alias)];
+    let strategy_method = MethodDefinition {
+        selector: MessageSelector::Keyword(vec![KeywordPart::new(
+            "defaultStrategy:",
+            Span::new(0, 0),
+        )]),
+        parameters: vec![ParameterDefinition::with_type(
+            Identifier::new("policy", Span::new(0, 0)),
+            TypeAnnotation::simple("RestartStrategy", Span::new(0, 0)),
+        )],
+        body: vec![bare(Expression::Identifier(Identifier::new(
+            "policy",
+            Span::new(0, 0),
+        )))],
+        kind: MethodKind::Primary,
+        return_type: None,
+        is_sealed: false,
+        is_internal: false,
+        is_class_method: false,
+        span: Span::new(0, 0),
+        doc_comment: None,
+        expect: None,
+        comments: CommentAttachment::default(),
+    };
+    let class = ClassDefinition {
+        name: Identifier::new("WebApp", Span::new(0, 0)),
+        superclass: Some(Identifier::new("Supervisor", Span::new(0, 0))),
+        superclass_package: None,
+        class_kind: ClassKind::Object,
+        is_abstract: false,
+        is_sealed: false,
+        is_typed: false,
+        is_internal: false,
+        supervisor_kind: Some(SupervisorKind::Static),
+        state: vec![],
+        methods: vec![],
+        class_methods: vec![strategy_method],
+        class_variables: vec![],
+        type_params: vec![],
+        superclass_type_args: vec![],
+        comments: CommentAttachment::default(),
+        doc_comment: None,
+        backing_module: None,
+        handle_scope: None,
+        span: Span::new(0, 0),
+    };
+    // No `type_aliases` of its own — the module only references the name.
+    let module = Module {
+        classes: vec![class],
+        method_definitions: vec![],
+        protocols: Vec::new(),
+        type_aliases: Vec::new(),
+        expressions: vec![],
+        span: Span::new(0, 0),
+        file_leading_comments: vec![],
+        file_trailing_comments: vec![],
+    };
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@webapp_cross_module").with_pre_loaded_aliases(pre_loaded_aliases),
+    )
+    .expect("codegen should succeed");
+    assert!(
+        code.contains("{'user_type', 0, 'restart_strategy', []}"),
+        "class method param typed with a cross-module alias should emit a user_type reference. \
+         Got:\n{code}"
+    );
+    assert!(
+        code.contains("'restart_strategy'"),
+        "module must declare the matching named -type for the cross-module alias. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_dynamic_supervisor_cross_module_alias_reference_emits_user_type() {
+    // BT-2932: same wiring check as
+    // `test_static_supervisor_cross_module_alias_reference_emits_user_type`
+    // above, but for `supervisor_codegen.rs`'s *second* call site,
+    // `generate_dynamic_supervisor` (`DynamicSupervisor subclass:`) — the
+    // two call sites are separate copies of the same
+    // `AliasRegistry`-consuming code, so both need coverage.
+    let strategy_alias = TypeAliasDefinition {
+        name: Identifier::new("RestartStrategy", Span::new(0, 0)),
+        annotation: TypeAnnotation::union(
+            vec![
+                TypeAnnotation::singleton("temporary", Span::new(0, 0)),
+                TypeAnnotation::singleton("transient", Span::new(0, 0)),
+                TypeAnnotation::singleton("permanent", Span::new(0, 0)),
+            ],
+            Span::new(0, 0),
+        ),
+        is_internal: false,
+        comments: CommentAttachment::default(),
+        doc_comment: None,
+        span: Span::new(0, 0),
+    };
+    let pre_loaded_aliases =
+        vec![crate::semantic_analysis::alias_registry::AliasInfo::from_definition(&strategy_alias)];
+    let strategy_method = MethodDefinition {
+        selector: MessageSelector::Keyword(vec![KeywordPart::new(
+            "defaultStrategy:",
+            Span::new(0, 0),
+        )]),
+        parameters: vec![ParameterDefinition::with_type(
+            Identifier::new("policy", Span::new(0, 0)),
+            TypeAnnotation::simple("RestartStrategy", Span::new(0, 0)),
+        )],
+        body: vec![bare(Expression::Identifier(Identifier::new(
+            "policy",
+            Span::new(0, 0),
+        )))],
+        kind: MethodKind::Primary,
+        return_type: None,
+        is_sealed: false,
+        is_internal: false,
+        is_class_method: false,
+        span: Span::new(0, 0),
+        doc_comment: None,
+        expect: None,
+        comments: CommentAttachment::default(),
+    };
+    let class = ClassDefinition {
+        name: Identifier::new("WorkerPool", Span::new(0, 0)),
+        superclass: Some(Identifier::new("DynamicSupervisor", Span::new(0, 0))),
+        superclass_package: None,
+        class_kind: ClassKind::Object,
+        is_abstract: false,
+        is_sealed: false,
+        is_typed: false,
+        is_internal: false,
+        supervisor_kind: Some(SupervisorKind::Dynamic),
+        state: vec![],
+        methods: vec![],
+        class_methods: vec![strategy_method],
+        class_variables: vec![],
+        type_params: vec![],
+        superclass_type_args: vec![],
+        comments: CommentAttachment::default(),
+        doc_comment: None,
+        backing_module: None,
+        handle_scope: None,
+        span: Span::new(0, 0),
+    };
+    // No `type_aliases` of its own — the module only references the name.
+    let module = Module {
+        classes: vec![class],
+        method_definitions: vec![],
+        protocols: Vec::new(),
+        type_aliases: Vec::new(),
+        expressions: vec![],
+        span: Span::new(0, 0),
+        file_leading_comments: vec![],
+        file_trailing_comments: vec![],
+    };
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@workerpool_cross_module")
+            .with_pre_loaded_aliases(pre_loaded_aliases),
+    )
+    .expect("codegen should succeed");
+    assert!(
+        code.contains("{'user_type', 0, 'restart_strategy', []}"),
+        "class method param typed with a cross-module alias should emit a user_type reference. \
+         Got:\n{code}"
+    );
+    assert!(
+        code.contains("'restart_strategy'"),
+        "module must declare the matching named -type for the cross-module alias. Got:\n{code}"
+    );
+}

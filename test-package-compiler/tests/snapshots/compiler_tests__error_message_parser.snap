@@ -41,6 +41,7 @@ Module {
                             comments: CommentAttachment {
                                 leading: [],
                                 trailing: None,
+                                leading_blank_line: false,
                             },
                             expression: MessageSend {
                                 receiver: Identifier(
@@ -92,6 +93,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [],
                         trailing: None,
+                        leading_blank_line: false,
                     },
                     doc_comment: None,
                     span: Span {
@@ -109,6 +111,7 @@ Module {
                             comments: CommentAttachment {
                                 leading: [],
                                 trailing: None,
+                                leading_blank_line: false,
                             },
                             expression: Assignment {
                                 target: Identifier(
@@ -141,6 +144,7 @@ Module {
                             comments: CommentAttachment {
                                 leading: [],
                                 trailing: None,
+                                leading_blank_line: false,
                             },
                             expression: MessageSend {
                                 receiver: Identifier(
@@ -192,6 +196,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [],
                         trailing: None,
+                        leading_blank_line: false,
                     },
                     doc_comment: None,
                     span: Span {
@@ -242,6 +247,7 @@ Module {
                     },
                 ],
                 trailing: None,
+                leading_blank_line: false,
             },
             doc_comment: None,
             backing_module: None,

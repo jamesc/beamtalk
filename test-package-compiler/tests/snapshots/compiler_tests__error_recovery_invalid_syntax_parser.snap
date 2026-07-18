@@ -59,6 +59,7 @@ Module {
                     },
                 ],
                 trailing: None,
+                leading_blank_line: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -89,6 +90,7 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
             },
             expression: Literal(
                 Integer(
@@ -115,6 +117,7 @@ Module {
                     },
                 ],
                 trailing: None,
+                leading_blank_line: true,
             },
             expression: Assignment {
                 target: Identifier(
@@ -145,6 +148,7 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
             },
             expression: Identifier(
                 Identifier {
@@ -171,6 +175,7 @@ Module {
                     },
                 ],
                 trailing: None,
+                leading_blank_line: true,
             },
             expression: Error {
                 message: "Invalid assignment target",

@@ -51,6 +51,14 @@ pub struct ProjectDiagnosticContext<'a> {
     pub cross_file_classes: Vec<crate::semantic_analysis::class_hierarchy::ClassInfo>,
     /// Pre-loaded protocol definitions from other source files.
     pub pre_loaded_protocols: Vec<crate::semantic_analysis::protocol_registry::ProtocolInfo>,
+    /// Pre-loaded type alias definitions from other source files in the same
+    /// package (BT-2928, ADR 0108). Mirrors `pre_loaded_protocols` — seeded
+    /// into the `AliasRegistry` before the current module's own aliases are
+    /// registered, so a `type Name = ...` declared in a different file
+    /// resolves cross-file the same way a cross-file class reference already
+    /// does. Empty for callers that don't (yet) supply project-wide alias
+    /// metadata — the pipeline degrades to today's same-file-only resolution.
+    pub pre_loaded_aliases: Vec<crate::semantic_analysis::AliasInfo>,
     /// Project-wide standalone extension definitions (BT-2795, ADR 0066).
     /// Registered into the class hierarchy so cross-file
     /// `ClassName >> selector` extensions resolve instead of producing
@@ -102,11 +110,15 @@ pub fn compute_project_diagnostics(
     let mut diagnostics = initial_diagnostics;
 
     // Run semantic analysis with the richest available entry point.
-    let analysis_result = crate::semantic_analysis::analyse_with_natives_and_protocols(
+    // BT-2928: thread `pre_loaded_aliases` through so a cross-file/package
+    // type alias resolves the same way a cross-file class reference already
+    // does — see `AnalysisContext::pre_loaded_aliases`'s doc.
+    let analysis_result = crate::semantic_analysis::analyse_with_natives_and_protocols_and_aliases(
         module,
         &ctx.options,
         ctx.cross_file_classes.clone(),
         ctx.pre_loaded_protocols.clone(),
+        ctx.pre_loaded_aliases.clone(),
         ctx.native_type_registry.clone(),
         &ctx.cross_file_extensions,
     );

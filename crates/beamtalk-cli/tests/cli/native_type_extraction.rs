@@ -13,7 +13,7 @@
 //! reference collapsed to `Dynamic` — degrading `{ok, T} | {error, E}` to a
 //! bare `Result` instead of the parameterized `Result(T, E)`.
 
-mod cli_common;
+use crate::cli_common;
 
 #[test]
 fn native_sibling_type_reference_resolves_after_build() {
