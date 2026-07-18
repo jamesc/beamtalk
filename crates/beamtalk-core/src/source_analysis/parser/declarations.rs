@@ -130,7 +130,7 @@ impl Parser {
     pub(super) fn parse_class_definition(&mut self) -> ClassDefinition {
         let start = self.current_token().span();
         let doc_comment = self.collect_doc_comment();
-        let comments = self.collect_comment_attachment();
+        let mut comments = self.collect_comment_attachment();
         let mut is_abstract = false;
         let mut is_sealed = false;
         let mut is_typed = false;
@@ -223,6 +223,12 @@ impl Parser {
         // Parse optional `handleScope: #symbol` clause (ADR 0103). Appears at
         // the head of the class body, like `native:` is a header clause.
         let handle_scope = self.parse_optional_handle_scope();
+
+        // Collect a trailing end-of-line comment on the class header line
+        // (after the last header token — class name, type params, `native:`
+        // module, or `handleScope:` symbol, whichever comes last), mirroring
+        // the identical fix for type alias/protocol declarations (BT-2906).
+        comments.trailing = self.collect_trailing_comment();
 
         // Parse class body (state declarations, instance methods, class methods, class variables)
         let (state, methods, class_methods, class_variables) = self.parse_class_body();
