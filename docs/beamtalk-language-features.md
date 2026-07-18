@@ -1345,6 +1345,8 @@ Generates:
 -spec run('Timeout'()) -> any().
 ```
 
+(The bare `('Timeout'())` form omits the parameter name — both it and the named form `(T :: 'Timeout'())` are valid Erlang specs; codegen emits the bare form, matching typical `erlc` output.)
+
 Cross-package alias references (an annotation referencing an alias exported by a dependency) are not yet resolved in codegen — they still fall through to `any()`.
 
 ### REPL Type Display
