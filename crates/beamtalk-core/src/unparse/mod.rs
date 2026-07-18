@@ -3679,6 +3679,64 @@ mod tests {
         assert_identity(source);
     }
 
+    // --- Class definition header trailing comment (BT-2933) ---
+
+    #[test]
+    fn class_header_trailing_comment_round_trip() {
+        // BT-2933: a trailing end-of-line comment on the `subclass:` header
+        // line must round-trip losslessly, mirroring the identical fix for
+        // type alias/protocol declarations (BT-2906). Before the fix,
+        // `parse_class_definition` never populated `comments.trailing`, so
+        // `unparse_class_definition`'s trailing-comment branch was dead code
+        // and the comment was silently dropped.
+        // A class with no `state:` declarations always gets a blank line
+        // before its first method (canonical formatting, unrelated to this
+        // fix), hence the blank line in the expected output below.
+        let source = concat!(
+            "Object subclass: Foo  // header comment\n",
+            "\n",
+            "  x => 1\n",
+        );
+        assert_identity(source);
+    }
+
+    #[test]
+    fn class_header_trailing_comment_with_type_params_round_trip() {
+        // BT-2933: the trailing comment attaches after the last header
+        // token — here, the type parameter list.
+        let source = concat!(
+            "Object subclass: Box(T)  // header comment\n",
+            "\n",
+            "  x => 1\n",
+        );
+        assert_identity(source);
+    }
+
+    #[test]
+    fn class_header_trailing_comment_with_native_round_trip() {
+        // BT-2933: the trailing comment attaches after the `native:` module
+        // name — the last header token when present.
+        let source = concat!(
+            "Object subclass: Foo native: my_module  // header comment\n",
+            "\n",
+            "  x => 1\n",
+        );
+        assert_identity(source);
+    }
+
+    #[test]
+    fn class_header_trailing_comment_with_state_round_trip() {
+        // BT-2933 (review follow-up): the most common real-world class
+        // shape — a header trailing comment plus a `state:` declaration.
+        let source = concat!(
+            "Object subclass: Counter  // counter class\n",
+            "  state: count :: Integer = 0\n",
+            "\n",
+            "  increment => count := count + 1\n",
+        );
+        assert_identity(source);
+    }
+
     // --- BT-2924 regression: `type` alias sandwiched between a class's doc
     // comment and the class itself must not lose the class's doc comment. ---
 
