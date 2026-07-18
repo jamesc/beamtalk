@@ -4015,7 +4015,12 @@ mod tests {
         // predates BT-2929 and is documented in the loop's comment.
         // Confirmed here with an explicit regression test rather than only
         // a code comment.
-        let source = "\ntype Port = Integer\n";
+        //
+        // Two leading newlines are required, not one: a single `\n` is
+        // below `has_blank_line_before_first_comment()`'s `>= 2` threshold,
+        // so it would produce `leading_blank_line: false` and never
+        // actually exercise the `i > 0` guard this test targets.
+        let source = "\n\ntype Port = Integer\n";
         let formatted = format_source(source).expect("format_source must succeed");
         assert_eq!(formatted, "type Port = Integer\n");
     }
