@@ -86,6 +86,17 @@ impl PendingDeclarationExpect {
             *doc_comment = self.doc_comment;
         }
         if comments.is_empty() {
+            // `CommentAttachment::is_empty()` only looks at `leading`/
+            // `trailing`, so this deliberately ignores `leading_blank_line`
+            // on both sides (BT-2929) — the declaration's own (usually
+            // `false`, since it directly follows `@expect` with no blank
+            // line) `leading_blank_line` is kept when `comments` is
+            // otherwise non-empty, and overwritten by `self.comments`'s
+            // value when it's replaced wholesale. Harmless today because no
+            // unparser reads `leading_blank_line` on class-member-level
+            // `CommentAttachment`s (state/class-var/method) — only on
+            // top-level class/protocol/type-alias declarations. Revisit
+            // this overwrite if that ever changes.
             *comments = self.comments;
         }
     }
