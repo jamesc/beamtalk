@@ -374,9 +374,9 @@ pub(crate) fn unparse_module_doc(module: &Module) -> Document<'static> {
     for (i, decl) in top_level_decls.into_iter().enumerate() {
         // BT-2929: re-emit the blank line the author placed between this
         // declaration and the previous one. Skipped for the first
-        // declaration — there's nothing before it in this section to
-        // separate from (any file-level leading comments/blank line were
-        // already handled above).
+        // declaration in the section — a blank line there (before the very
+        // first top-level declaration) is dropped, same as pre-existing
+        // behaviour; we only preserve inter-declaration gaps.
         if i > 0 && decl.preceding_blank_line() {
             docs.push(line());
         }

@@ -292,6 +292,11 @@ pub struct CommentAttachment {
 
 impl CommentAttachment {
     /// Returns true if no comments are attached.
+    ///
+    /// Deliberately ignores `leading_blank_line` — a call site gated on
+    /// `is_empty()` will silently discard that field's value. See
+    /// `PendingDeclarationExpect::apply_to` for the one call site where
+    /// this is already known to be harmless.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.leading.is_empty() && self.trailing.is_none()
