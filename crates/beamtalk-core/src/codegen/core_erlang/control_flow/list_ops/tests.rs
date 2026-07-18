@@ -2156,7 +2156,7 @@ fn test_collect_wrong_arity_block_is_compile_error() {
     );
 }
 
-// ── BT-XXXX: transform ops nested inside a direct-params to:do: loop ─────────
+// ── BT-2413: transform ops nested inside a direct-params to:do: loop ─────────
 //
 // Each of the seven remaining transform operations (count:, flatMap:,
 // inject:into:, takeWhile:, dropWhile:, partition:, groupBy:) has an
@@ -2388,6 +2388,10 @@ fn test_partition_nested_in_direct_params_loop() {
         "partition: with local mutation should use lists:foldl. Got:\n{code}"
     );
     assert!(
+        code.contains("'lists':'reverse'"),
+        "partition: in direct-params loop should reverse both sublists. Got:\n{code}"
+    );
+    assert!(
         code.contains("ExitSA"),
         "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
     );
@@ -2430,6 +2434,11 @@ fn test_group_by_nested_in_direct_params_loop() {
     );
 }
 
+// ── sort: local-variable mutation via generate_list_sort_with_mutations ──────
+//
+// Not a direct-params-loop test (no to:do: nesting) — exercises the
+// `is_local_var_assignment` branch of generate_list_sort_with_mutations directly.
+
 #[test]
 fn test_sort_with_local_mutation_uses_process_dict() {
     // sort: with a LOCAL VARIABLE mutation (not a field mutation) inside the
@@ -2437,6 +2446,10 @@ fn test_sort_with_local_mutation_uses_process_dict() {
     // generate_list_sort_with_mutations (transform_ops.rs:1998), which calls
     // generate_local_var_assignment_in_loop instead of generate_field_assignment_open.
     // The local var is threaded via maps:put with key '__local__n' (not bare 'n').
+    //
+    // KNOWN LIMITATION (BT-2948): the process-dict key '$bt_sort_state' is fixed,
+    // not unique per call site. Nested mutating sort: calls in the same process
+    // can stomp each other's state — this test blesses only the single-call case.
     let src = concat!(
         "Actor subclass: Ctr\n",
         "  state: x = 0\n\n",
