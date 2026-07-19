@@ -42,6 +42,7 @@ Module {
                                 leading: [],
                                 trailing: None,
                                 leading_blank_line: false,
+                                blank_line_after_comments: false,
                             },
                             expression: Primitive {
                                 name: "size",
@@ -76,6 +77,7 @@ Module {
                         ],
                         trailing: None,
                         leading_blank_line: true,
+                        blank_line_after_comments: false,
                     },
                     doc_comment: None,
                     span: Span {
@@ -94,6 +96,7 @@ Module {
                                 leading: [],
                                 trailing: None,
                                 leading_blank_line: false,
+                                blank_line_after_comments: false,
                             },
                             expression: Primitive {
                                 name: "keys",
@@ -118,6 +121,7 @@ Module {
                         leading: [],
                         trailing: None,
                         leading_blank_line: false,
+                        blank_line_after_comments: false,
                     },
                     doc_comment: None,
                     span: Span {
@@ -136,6 +140,7 @@ Module {
                                 leading: [],
                                 trailing: None,
                                 leading_blank_line: false,
+                                blank_line_after_comments: false,
                             },
                             expression: Primitive {
                                 name: "values",
@@ -160,6 +165,7 @@ Module {
                         leading: [],
                         trailing: None,
                         leading_blank_line: false,
+                        blank_line_after_comments: false,
                     },
                     doc_comment: None,
                     span: Span {
@@ -197,6 +203,7 @@ Module {
                                 leading: [],
                                 trailing: None,
                                 leading_blank_line: false,
+                                blank_line_after_comments: false,
                             },
                             expression: Primitive {
                                 name: "at:",
@@ -221,6 +228,7 @@ Module {
                         leading: [],
                         trailing: None,
                         leading_blank_line: false,
+                        blank_line_after_comments: false,
                     },
                     doc_comment: None,
                     span: Span {
@@ -275,6 +283,7 @@ Module {
                                 leading: [],
                                 trailing: None,
                                 leading_blank_line: false,
+                                blank_line_after_comments: false,
                             },
                             expression: Primitive {
                                 name: "at:ifAbsent:",
@@ -299,6 +308,7 @@ Module {
                         leading: [],
                         trailing: None,
                         leading_blank_line: false,
+                        blank_line_after_comments: false,
                     },
                     doc_comment: None,
                     span: Span {
@@ -353,6 +363,7 @@ Module {
                                 leading: [],
                                 trailing: None,
                                 leading_blank_line: false,
+                                blank_line_after_comments: false,
                             },
                             expression: Primitive {
                                 name: "at:put:",
@@ -377,6 +388,7 @@ Module {
                         leading: [],
                         trailing: None,
                         leading_blank_line: false,
+                        blank_line_after_comments: false,
                     },
                     doc_comment: None,
                     span: Span {
@@ -414,6 +426,7 @@ Module {
                                 leading: [],
                                 trailing: None,
                                 leading_blank_line: false,
+                                blank_line_after_comments: false,
                             },
                             expression: Primitive {
                                 name: "includesKey:",
@@ -438,6 +451,7 @@ Module {
                         leading: [],
                         trailing: None,
                         leading_blank_line: false,
+                        blank_line_after_comments: false,
                     },
                     doc_comment: None,
                     span: Span {
@@ -475,6 +489,7 @@ Module {
                                 leading: [],
                                 trailing: None,
                                 leading_blank_line: false,
+                                blank_line_after_comments: false,
                             },
                             expression: Primitive {
                                 name: "removeKey:",
@@ -509,6 +524,7 @@ Module {
                         ],
                         trailing: None,
                         leading_blank_line: true,
+                        blank_line_after_comments: false,
                     },
                     doc_comment: None,
                     span: Span {
@@ -546,6 +562,7 @@ Module {
                                 leading: [],
                                 trailing: None,
                                 leading_blank_line: false,
+                                blank_line_after_comments: false,
                             },
                             expression: Primitive {
                                 name: "merge:",
@@ -570,6 +587,7 @@ Module {
                         leading: [],
                         trailing: None,
                         leading_blank_line: false,
+                        blank_line_after_comments: false,
                     },
                     doc_comment: None,
                     span: Span {
@@ -607,6 +625,7 @@ Module {
                                 leading: [],
                                 trailing: None,
                                 leading_blank_line: false,
+                                blank_line_after_comments: false,
                             },
                             expression: Primitive {
                                 name: "keysAndValuesDo:",
@@ -641,6 +660,7 @@ Module {
                         ],
                         trailing: None,
                         leading_blank_line: true,
+                        blank_line_after_comments: false,
                     },
                     doc_comment: None,
                     span: Span {
@@ -701,6 +721,7 @@ Module {
                 ],
                 trailing: None,
                 leading_blank_line: false,
+                blank_line_after_comments: true,
             },
             doc_comment: None,
             backing_module: None,

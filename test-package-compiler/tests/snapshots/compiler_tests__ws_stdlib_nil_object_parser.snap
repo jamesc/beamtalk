@@ -88,6 +88,7 @@ Module {
                     },
                 ),
                 leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -142,6 +143,7 @@ Module {
                     },
                 ),
                 leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -196,6 +198,7 @@ Module {
                     },
                 ),
                 leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -260,6 +263,7 @@ Module {
                     },
                 ),
                 leading_blank_line: true,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -314,6 +318,7 @@ Module {
                     },
                 ),
                 leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -368,6 +373,7 @@ Module {
                     },
                 ),
                 leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -432,6 +438,7 @@ Module {
                     },
                 ),
                 leading_blank_line: true,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -486,6 +493,7 @@ Module {
                     },
                 ),
                 leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -540,6 +548,7 @@ Module {
                     },
                 ),
                 leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -594,6 +603,7 @@ Module {
                     },
                 ),
                 leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -685,6 +695,7 @@ Module {
                     },
                 ),
                 leading_blank_line: true,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -727,6 +738,7 @@ Module {
                                             leading: [],
                                             trailing: None,
                                             leading_blank_line: false,
+                                            blank_line_after_comments: false,
                                         },
                                         expression: Literal(
                                             String(
@@ -786,6 +798,7 @@ Module {
                     },
                 ),
                 leading_blank_line: true,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -836,6 +849,7 @@ Module {
                                             leading: [],
                                             trailing: None,
                                             leading_blank_line: false,
+                                            blank_line_after_comments: false,
                                         },
                                         expression: MessageSend {
                                             receiver: Identifier(
@@ -916,6 +930,7 @@ Module {
                     },
                 ),
                 leading_blank_line: true,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -965,6 +980,7 @@ Module {
                                             leading: [],
                                             trailing: None,
                                             leading_blank_line: false,
+                                            blank_line_after_comments: false,
                                         },
                                         expression: Literal(
                                             String(
@@ -1001,6 +1017,7 @@ Module {
                                             leading: [],
                                             trailing: None,
                                             leading_blank_line: false,
+                                            blank_line_after_comments: false,
                                         },
                                         expression: MessageSend {
                                             receiver: Identifier(
@@ -1071,6 +1088,7 @@ Module {
                     },
                 ),
                 leading_blank_line: true,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -1128,6 +1146,7 @@ Module {
                                             leading: [],
                                             trailing: None,
                                             leading_blank_line: false,
+                                            blank_line_after_comments: false,
                                         },
                                         expression: MessageSend {
                                             receiver: Identifier(
@@ -1177,6 +1196,7 @@ Module {
                                             leading: [],
                                             trailing: None,
                                             leading_blank_line: false,
+                                            blank_line_after_comments: false,
                                         },
                                         expression: Literal(
                                             Integer(
@@ -1263,6 +1283,7 @@ Module {
                     },
                 ),
                 leading_blank_line: true,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -1313,6 +1334,7 @@ Module {
                                             leading: [],
                                             trailing: None,
                                             leading_blank_line: false,
+                                            blank_line_after_comments: false,
                                         },
                                         expression: MessageSend {
                                             receiver: Identifier(
@@ -1383,6 +1405,7 @@ Module {
                     },
                 ),
                 leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -1433,6 +1456,7 @@ Module {
                                             leading: [],
                                             trailing: None,
                                             leading_blank_line: false,
+                                            blank_line_after_comments: false,
                                         },
                                         expression: MessageSend {
                                             receiver: Identifier(
@@ -1503,6 +1527,7 @@ Module {
                     },
                 ),
                 leading_blank_line: true,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -1553,6 +1578,7 @@ Module {
                                             leading: [],
                                             trailing: None,
                                             leading_blank_line: false,
+                                            blank_line_after_comments: false,
                                         },
                                         expression: MessageSend {
                                             receiver: Parenthesized {
@@ -1687,6 +1713,7 @@ Module {
                     },
                 ),
                 leading_blank_line: true,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -1739,6 +1766,7 @@ Module {
                                                     leading: [],
                                                     trailing: None,
                                                     leading_blank_line: false,
+                                                    blank_line_after_comments: false,
                                                 },
                                                 expression: MessageSend {
                                                     receiver: Identifier(
@@ -1844,6 +1872,7 @@ Module {
                     },
                 ),
                 leading_blank_line: true,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -1894,6 +1923,7 @@ Module {
                                             leading: [],
                                             trailing: None,
                                             leading_blank_line: false,
+                                            blank_line_after_comments: false,
                                         },
                                         expression: MessageSend {
                                             receiver: Identifier(
@@ -1934,6 +1964,7 @@ Module {
                                                                     leading: [],
                                                                     trailing: None,
                                                                     leading_blank_line: false,
+                                                                    blank_line_after_comments: false,
                                                                 },
                                                                 expression: MessageSend {
                                                                     receiver: Identifier(
@@ -2030,6 +2061,7 @@ Module {
                     },
                 ),
                 leading_blank_line: true,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -2074,6 +2106,7 @@ Module {
                                                     leading: [],
                                                     trailing: None,
                                                     leading_blank_line: false,
+                                                    blank_line_after_comments: false,
                                                 },
                                                 expression: Literal(
                                                     Integer(
@@ -2185,6 +2218,7 @@ Module {
                     },
                 ),
                 leading_blank_line: true,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -2238,6 +2272,7 @@ Module {
                                             leading: [],
                                             trailing: None,
                                             leading_blank_line: false,
+                                            blank_line_after_comments: false,
                                         },
                                         expression: Identifier(
                                             Identifier {
@@ -2287,6 +2322,7 @@ Module {
                     },
                 ),
                 leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -2340,6 +2376,7 @@ Module {
                                             leading: [],
                                             trailing: None,
                                             leading_blank_line: false,
+                                            blank_line_after_comments: false,
                                         },
                                         expression: Identifier(
                                             Identifier {
@@ -2399,6 +2436,7 @@ Module {
                     },
                 ),
                 leading_blank_line: true,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -2459,6 +2497,7 @@ Module {
                                             leading: [],
                                             trailing: None,
                                             leading_blank_line: false,
+                                            blank_line_after_comments: false,
                                         },
                                         expression: Literal(
                                             String(
@@ -2487,6 +2526,7 @@ Module {
                                             leading: [],
                                             trailing: None,
                                             leading_blank_line: false,
+                                            blank_line_after_comments: false,
                                         },
                                         expression: Literal(
                                             String(
@@ -2573,6 +2613,7 @@ Module {
                     },
                 ),
                 leading_blank_line: true,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -2594,6 +2635,7 @@ Module {
                                         leading: [],
                                         trailing: None,
                                         leading_blank_line: false,
+                                        blank_line_after_comments: false,
                                     },
                                     expression: Literal(
                                         Integer(
@@ -2646,6 +2688,7 @@ Module {
                     },
                 ),
                 leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -2675,6 +2718,7 @@ Module {
                                         leading: [],
                                         trailing: None,
                                         leading_blank_line: false,
+                                        blank_line_after_comments: false,
                                     },
                                     expression: Identifier(
                                         Identifier {
@@ -2764,6 +2808,7 @@ Module {
                     },
                 ),
                 leading_blank_line: true,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -2808,6 +2853,7 @@ Module {
                                                     leading: [],
                                                     trailing: None,
                                                     leading_blank_line: false,
+                                                    blank_line_after_comments: false,
                                                 },
                                                 expression: Literal(
                                                     Integer(
@@ -2892,6 +2938,7 @@ Module {
                     },
                 ),
                 leading_blank_line: true,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -2934,6 +2981,7 @@ Module {
                                             leading: [],
                                             trailing: None,
                                             leading_blank_line: false,
+                                            blank_line_after_comments: false,
                                         },
                                         expression: MessageSend {
                                             receiver: Literal(
@@ -3052,6 +3100,7 @@ Module {
                 ],
                 trailing: None,
                 leading_blank_line: true,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -3095,6 +3144,7 @@ Module {
                     },
                 ),
                 leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -3155,6 +3205,7 @@ Module {
                                             leading: [],
                                             trailing: None,
                                             leading_blank_line: false,
+                                            blank_line_after_comments: false,
                                         },
                                         expression: Literal(
                                             Integer(
@@ -3183,6 +3234,7 @@ Module {
                                             leading: [],
                                             trailing: None,
                                             leading_blank_line: false,
+                                            blank_line_after_comments: false,
                                         },
                                         expression: Identifier(
                                             Identifier {
@@ -3232,6 +3284,7 @@ Module {
                 ],
                 trailing: None,
                 leading_blank_line: true,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -3275,6 +3328,7 @@ Module {
                     },
                 ),
                 leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -3325,6 +3379,7 @@ Module {
                                             leading: [],
                                             trailing: None,
                                             leading_blank_line: false,
+                                            blank_line_after_comments: false,
                                         },
                                         expression: MessageSend {
                                             receiver: Identifier(
@@ -3405,6 +3460,7 @@ Module {
                     },
                 ),
                 leading_blank_line: true,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -3454,6 +3510,7 @@ Module {
                                             leading: [],
                                             trailing: None,
                                             leading_blank_line: false,
+                                            blank_line_after_comments: false,
                                         },
                                         expression: Literal(
                                             String(
@@ -3490,6 +3547,7 @@ Module {
                                             leading: [],
                                             trailing: None,
                                             leading_blank_line: false,
+                                            blank_line_after_comments: false,
                                         },
                                         expression: Literal(
                                             String(
@@ -3539,6 +3597,7 @@ Module {
                     },
                 ),
                 leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -3588,6 +3647,7 @@ Module {
                                             leading: [],
                                             trailing: None,
                                             leading_blank_line: false,
+                                            blank_line_after_comments: false,
                                         },
                                         expression: Literal(
                                             String(
@@ -3624,6 +3684,7 @@ Module {
                                             leading: [],
                                             trailing: None,
                                             leading_blank_line: false,
+                                            blank_line_after_comments: false,
                                         },
                                         expression: Literal(
                                             String(
@@ -3710,6 +3771,7 @@ Module {
                     },
                 ),
                 leading_blank_line: true,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -3762,6 +3824,7 @@ Module {
                                                     leading: [],
                                                     trailing: None,
                                                     leading_blank_line: false,
+                                                    blank_line_after_comments: false,
                                                 },
                                                 expression: MessageSend {
                                                     receiver: Identifier(
@@ -3867,6 +3930,7 @@ Module {
                     },
                 ),
                 leading_blank_line: true,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -3911,6 +3975,7 @@ Module {
                                                     leading: [],
                                                     trailing: None,
                                                     leading_blank_line: false,
+                                                    blank_line_after_comments: false,
                                                 },
                                                 expression: Literal(
                                                     Integer(
@@ -4012,6 +4077,7 @@ Module {
                 ],
                 trailing: None,
                 leading_blank_line: true,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -4055,6 +4121,7 @@ Module {
                     },
                 ),
                 leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -4105,6 +4172,7 @@ Module {
                                             leading: [],
                                             trailing: None,
                                             leading_blank_line: false,
+                                            blank_line_after_comments: false,
                                         },
                                         expression: MessageSend {
                                             receiver: MessageSend {
@@ -4196,6 +4264,7 @@ Module {
                 ],
                 trailing: None,
                 leading_blank_line: true,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -4239,6 +4308,7 @@ Module {
                     },
                 ),
                 leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -4281,6 +4351,7 @@ Module {
                                             leading: [],
                                             trailing: None,
                                             leading_blank_line: false,
+                                            blank_line_after_comments: false,
                                         },
                                         expression: Literal(
                                             Integer(
@@ -4330,6 +4401,7 @@ Module {
                 ],
                 trailing: None,
                 leading_blank_line: true,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -4373,6 +4445,7 @@ Module {
                     },
                 ),
                 leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -4422,6 +4495,7 @@ Module {
                                             leading: [],
                                             trailing: None,
                                             leading_blank_line: false,
+                                            blank_line_after_comments: false,
                                         },
                                         expression: Literal(
                                             Integer(
@@ -4458,6 +4532,7 @@ Module {
                                             leading: [],
                                             trailing: None,
                                             leading_blank_line: false,
+                                            blank_line_after_comments: false,
                                         },
                                         expression: MessageSend {
                                             receiver: Identifier(

@@ -432,8 +432,14 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
     // Non-doc leading comments
     docs.extend(unparse_comment_attachment_leading(&class.comments));
 
-    // Blank line between leading comments (e.g. license block) and doc/header
-    if !class.comments.leading.is_empty() {
+    // Blank line between leading comments (e.g. license block) and doc/header:
+    // either because the source actually had one there (BT-2945), or because
+    // the last leading entry is an orphaned `///` block that must, by
+    // construction, always be separated from what follows (BT-2924) — see
+    // `leading_ends_with_orphaned_doc_comment`.
+    if leading_ends_with_orphaned_doc_comment(&class.comments)
+        || class.comments.blank_line_after_comments
+    {
         docs.push(line());
     }
 
@@ -610,10 +616,14 @@ fn unparse_type_alias_definition(type_alias: &TypeAliasDefinition) -> Document<'
     // Non-doc leading comments
     docs.extend(unparse_comment_attachment_leading(&type_alias.comments));
 
-    // Blank line between a preserved, earlier `///` block that broke away
-    // from a different declaration (BT-2924) and this alias's own doc
-    // comment — see `leading_ends_with_orphaned_doc_comment`.
-    if leading_ends_with_orphaned_doc_comment(&type_alias.comments) {
+    // Blank line between this alias's leading comments and its own doc
+    // comment/header: either because the source actually had one there
+    // (BT-2945), or because the last leading entry is a preserved, earlier
+    // `///` block that broke away from a different declaration (BT-2924) —
+    // see `leading_ends_with_orphaned_doc_comment`.
+    if leading_ends_with_orphaned_doc_comment(&type_alias.comments)
+        || type_alias.comments.blank_line_after_comments
+    {
         docs.push(line());
     }
 
@@ -667,10 +677,14 @@ fn unparse_protocol_definition(protocol: &ProtocolDefinition) -> Document<'stati
     // Non-doc leading comments
     docs.extend(unparse_comment_attachment_leading(&protocol.comments));
 
-    // Blank line between a preserved, earlier `///` block that broke away
-    // from a different declaration (BT-2924) and this protocol's own doc
-    // comment — see `leading_ends_with_orphaned_doc_comment`.
-    if leading_ends_with_orphaned_doc_comment(&protocol.comments) {
+    // Blank line between this protocol's leading comments and its own doc
+    // comment/header: either because the source actually had one there
+    // (BT-2945), or because the last leading entry is a preserved, earlier
+    // `///` block that broke away from a different declaration (BT-2924) —
+    // see `leading_ends_with_orphaned_doc_comment`.
+    if leading_ends_with_orphaned_doc_comment(&protocol.comments)
+        || protocol.comments.blank_line_after_comments
+    {
         docs.push(line());
     }
 
@@ -2303,6 +2317,7 @@ mod tests {
                 leading: vec![Comment::line("This is 42", span())],
                 trailing: None,
                 leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Expression::Literal(Literal::Integer(42), span()),
             preceding_blank_line: false,
@@ -2318,6 +2333,7 @@ mod tests {
                 leading: Vec::new(),
                 trailing: Some(Comment::line("trailing", span())),
                 leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Expression::Literal(Literal::Integer(1), span()),
             preceding_blank_line: false,
@@ -2333,6 +2349,7 @@ mod tests {
                 leading: vec![Comment::line("before", span())],
                 trailing: Some(Comment::line("after", span())),
                 leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Expression::Literal(Literal::Integer(99), span()),
             preceding_blank_line: false,
@@ -2374,6 +2391,7 @@ mod tests {
             leading: vec![Comment::line("Returns the current value", span())],
             trailing: None,
             leading_blank_line: false,
+            blank_line_after_comments: false,
         };
         let output = unparse_method_definition(&method).to_pretty_string();
         assert_eq!(output, "// Returns the current value\ngetValue => 0");
@@ -2676,6 +2694,7 @@ mod tests {
                 leading: vec![Comment::line("the result", span())],
                 trailing: None,
                 leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Expression::Identifier(Identifier::new("x", span())),
             preceding_blank_line: false,
@@ -2742,6 +2761,7 @@ mod tests {
                 leading: vec![Comment::line("do the thing", span())],
                 trailing: None,
                 leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Expression::Identifier(Identifier::new("x", span())),
             preceding_blank_line: false,
@@ -2766,6 +2786,7 @@ mod tests {
                 ],
                 trailing: None,
                 leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Expression::Literal(Literal::Integer(42), span()),
             preceding_blank_line: false,
@@ -4129,6 +4150,80 @@ mod tests {
             "Object subclass: Server\n",
             "\n",
             "  start => 1\n",
+            "\n",
+            "type Timeout = Integer\n",
+        ));
+    }
+
+    // --- Blank line between a leading comment and its declaration (BT-2945) ---
+    //
+    // `has_blank_line_before_first_comment` (BT-2929's `leading_blank_line`)
+    // only detects a blank line *before* the whole leading-comment block; it
+    // has no way to represent a blank line *inside* that block, between the
+    // last comment and the declaration itself. `blank_line_after_comments`
+    // fills that gap.
+
+    #[test]
+    fn blank_line_preserved_between_leading_comment_and_type_alias() {
+        assert_identity(concat!("// note\n", "\n", "type Foo = Bar\n"));
+    }
+
+    #[test]
+    fn blank_line_preserved_between_leading_comment_and_protocol() {
+        assert_identity(concat!(
+            "// note\n",
+            "\n",
+            "Protocol define: Startable\n",
+            "  start -> Integer\n",
+        ));
+    }
+
+    #[test]
+    fn blank_line_preserved_between_leading_comment_and_class() {
+        assert_identity(concat!(
+            "// note\n",
+            "\n",
+            "Object subclass: Foo\n",
+            "\n",
+            "  m => 1\n",
+        ));
+    }
+
+    #[test]
+    fn no_blank_line_between_leading_comment_and_declaration_stays_absent() {
+        // The converse of the three tests above, for all three declaration
+        // kinds: no blank line in source between the comment and the
+        // declaration must not gain one. This also guards against
+        // `unparse_class_definition`'s pre-fix behaviour, which used to
+        // unconditionally insert a blank line after any non-empty leading
+        // comment regardless of what the source actually had.
+        assert_identity("// note\ntype Foo = Bar\n");
+        assert_identity(concat!(
+            "// note\n",
+            "Protocol define: Startable\n",
+            "  start -> Integer\n",
+        ));
+        assert_identity(concat!(
+            "// note\n",
+            "Object subclass: Foo\n",
+            "\n",
+            "  m => 1\n",
+        ));
+    }
+
+    #[test]
+    fn blank_line_before_comment_block_and_after_it_are_independent_signals() {
+        // A blank line before the whole comment block (BT-2929's
+        // `leading_blank_line`) and a blank line after the last comment,
+        // before the declaration (BT-2945's `blank_line_after_comments`) are
+        // tracked independently and must both round-trip when both are
+        // present in the same source, between two top-level declarations
+        // (blank-before-the-first-declaration-in-a-section is dropped by
+        // design, so this needs a preceding declaration to attach to).
+        assert_identity(concat!(
+            "type Port = Integer\n",
+            "\n",
+            "// note\n",
             "\n",
             "type Timeout = Integer\n",
         ));

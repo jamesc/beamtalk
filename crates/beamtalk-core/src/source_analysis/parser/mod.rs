@@ -1013,6 +1013,16 @@ impl Parser {
         // consecutive leading comments (BT-2929).
         let leading_blank_line = self.current_token().has_blank_line_before_first_comment();
         let mut leading = Vec::new();
+        // Tracks blank lines *between* consecutive leading comments (BT-2929)
+        // as the loop below walks the trivia. Its value when the loop ends
+        // additionally doubles as "is there a blank line after the very last
+        // leading comment, before whatever follows" (BT-2945) — see
+        // `blank_line_after_comments` below, which reads it in that final
+        // state. An already-attached `///` doc-comment trivia item (handled
+        // in the `DocComment` arm) does not reset this flag, so a blank line
+        // detected right after the last non-doc-comment leading comment
+        // survives untouched through any attached doc-comment trivia that
+        // follows, correctly describing the gap before that doc comment too.
         let mut saw_blank_line = false;
         // Positions (within this token's leading trivia) already captured by
         // the immediately-preceding `collect_doc_comment()` call, if any —
@@ -1083,10 +1093,16 @@ impl Parser {
                 }
             }
         }
+        // BT-2945: a blank line after the *last* leading comment (before the
+        // declaration's own doc comment, or the declaration itself when it
+        // has none) — meaningless without a leading comment to have a gap
+        // after, hence gated on `leading` being non-empty.
+        let blank_line_after_comments = !leading.is_empty() && saw_blank_line;
         CommentAttachment {
             leading,
             trailing: None,
             leading_blank_line,
+            blank_line_after_comments,
         }
     }
 

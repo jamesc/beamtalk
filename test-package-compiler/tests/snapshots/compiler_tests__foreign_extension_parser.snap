@@ -27,6 +27,7 @@ Module {
                             leading: [],
                             trailing: None,
                             leading_blank_line: false,
+                            blank_line_after_comments: false,
                         },
                         expression: MessageSend {
                             receiver: Identifier(
@@ -117,6 +118,7 @@ Module {
                     ],
                     trailing: None,
                     leading_blank_line: false,
+                    blank_line_after_comments: false,
                 },
                 doc_comment: None,
                 span: Span {

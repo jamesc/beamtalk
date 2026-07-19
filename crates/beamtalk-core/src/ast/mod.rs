@@ -291,6 +291,20 @@ pub struct CommentAttachment {
     /// the blank line separating top-level class / protocol / type-alias
     /// declarations (BT-2929).
     pub leading_blank_line: bool,
+    /// Whether a blank line separates the *last* leading comment from
+    /// whatever follows it (a doc comment, or the node itself when there is
+    /// no doc comment) — the mirror image of `leading_blank_line`, which
+    /// only tracks a blank line *before* the whole comment block.
+    ///
+    /// `leading_blank_line` alone cannot represent the `// note\n\ntype Foo
+    /// = Bar` shape: a blank line inside the leading trivia, after the last
+    /// comment, was previously dropped outright on `beamtalk fmt` (BT-2945).
+    /// Meaningless (always `false`) when `leading` is empty — there is no
+    /// comment block to have a gap after.
+    ///
+    /// Populated by [`crate::source_analysis::parser`]'s
+    /// `collect_comment_attachment`, mirroring `leading_blank_line`'s scope.
+    pub blank_line_after_comments: bool,
 }
 
 impl CommentAttachment {
@@ -303,6 +317,12 @@ impl CommentAttachment {
     /// `PendingDeclarationExpect::apply_to` for the production call site —
     /// an overwrite — where this is already known to be harmless
     /// (tracked as BT-2944).
+    ///
+    /// Also ignores `blank_line_after_comments` for the same reason, though
+    /// that field is always `false` whenever `leading` is empty (the parser
+    /// enforces `blank_line_after_comments = !leading.is_empty() &&
+    /// saw_blank_line`), so `is_empty()` staying silent on it here is
+    /// implicitly sound rather than merely overlooked.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.leading.is_empty() && self.trailing.is_none()
@@ -933,6 +953,7 @@ mod tests {
             leading: vec![Comment::line("a comment", Span::new(0, 11))],
             trailing: None,
             leading_blank_line: false,
+            blank_line_after_comments: false,
         };
         assert!(!ca.is_empty());
     }
@@ -943,6 +964,7 @@ mod tests {
             leading: Vec::new(),
             trailing: Some(Comment::line("trailing", Span::new(10, 20))),
             leading_blank_line: false,
+            blank_line_after_comments: false,
         };
         assert!(!ca.is_empty());
     }
@@ -953,6 +975,7 @@ mod tests {
             leading: vec![Comment::line("leading", Span::new(0, 9))],
             trailing: Some(Comment::line("trailing", Span::new(20, 30))),
             leading_blank_line: false,
+            blank_line_after_comments: false,
         };
         assert!(!ca.is_empty());
         assert_eq!(ca.leading.len(), 1);
@@ -986,6 +1009,7 @@ mod tests {
                 leading: vec![Comment::line("before", Span::new(0, 8))],
                 trailing: None,
                 leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: expr,
             preceding_blank_line: false,
