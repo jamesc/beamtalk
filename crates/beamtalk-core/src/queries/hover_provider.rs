@@ -124,6 +124,7 @@ pub fn compute_hover(
             hierarchy,
             &type_map,
             native_types,
+            alias_registry,
         ) {
             return Some(hover);
         }
@@ -143,6 +144,7 @@ pub fn compute_hover(
                     hierarchy,
                     &type_map,
                     native_types,
+                    alias_registry,
                 ) {
                     return Some(hover);
                 }
@@ -160,6 +162,7 @@ pub fn compute_hover(
                     hierarchy,
                     &type_map,
                     native_types,
+                    alias_registry,
                 ) {
                     return Some(hover);
                 }
@@ -182,6 +185,7 @@ pub fn compute_hover(
                 hierarchy,
                 &type_map,
                 native_types,
+                alias_registry,
             ) {
                 return Some(hover);
             }
@@ -714,6 +718,7 @@ fn find_hover_in_expr(
     hierarchy: &ClassHierarchy,
     type_map: &TypeMap,
     native_types: Option<&NativeTypeRegistry>,
+    alias_registry: Option<&AliasRegistry>,
 ) -> Option<HoverInfo> {
     let span = expr.span();
     if offset < span.start() || offset >= span.end() {
@@ -737,9 +742,17 @@ fn find_hover_in_expr(
                 };
                 // ADR 0103: annotate reference/handle-typed values with their
                 // sendability tier (the tier's sole v1 consumer).
+                //
+                // `alias_registry` (BT-2936, ADR 0108 follow-up to BT-2928)
+                // is threaded through from `compute_hover` so an alias-typed
+                // `Value` field's hover tier composes through the alias's
+                // expansion instead of falling back to `Tier::Unknown` for
+                // the opaque alias name.
                 if let Some(tier) = inferred.and_then(|ty| {
                     crate::semantic_analysis::type_checker::sendability::hover_tier_label(
-                        ty, hierarchy,
+                        ty,
+                        hierarchy,
+                        alias_registry,
                     )
                 }) {
                     contents.push_str(" — Sendability: ");
@@ -791,11 +804,26 @@ fn find_hover_in_expr(
                 None
             }
         }
-        Expression::Assignment { target, value, .. } => {
-            find_hover_in_expr(target, offset, context, hierarchy, type_map, native_types).or_else(
-                || find_hover_in_expr(value, offset, context, hierarchy, type_map, native_types),
+        Expression::Assignment { target, value, .. } => find_hover_in_expr(
+            target,
+            offset,
+            context,
+            hierarchy,
+            type_map,
+            native_types,
+            alias_registry,
+        )
+        .or_else(|| {
+            find_hover_in_expr(
+                value,
+                offset,
+                context,
+                hierarchy,
+                type_map,
+                native_types,
+                alias_registry,
             )
-        }
+        }),
         Expression::MessageSend {
             receiver,
             selector,
@@ -804,13 +832,27 @@ fn find_hover_in_expr(
             ..
         } => {
             // First check receiver and arguments
-            if let Some(hover) =
-                find_hover_in_expr(receiver, offset, context, hierarchy, type_map, native_types)
-            {
+            if let Some(hover) = find_hover_in_expr(
+                receiver,
+                offset,
+                context,
+                hierarchy,
+                type_map,
+                native_types,
+                alias_registry,
+            ) {
                 return Some(hover);
             }
             if let Some(hover) = arguments.iter().find_map(|arg| {
-                find_hover_in_expr(arg, offset, context, hierarchy, type_map, native_types)
+                find_hover_in_expr(
+                    arg,
+                    offset,
+                    context,
+                    hierarchy,
+                    type_map,
+                    native_types,
+                    alias_registry,
+                )
             }) {
                 return Some(hover);
             }
@@ -871,14 +913,29 @@ fn find_hover_in_expr(
                 hierarchy,
                 type_map,
                 native_types,
+                alias_registry,
             )
         }),
-        Expression::Return { value, .. } => {
-            find_hover_in_expr(value, offset, context, hierarchy, type_map, native_types)
-        }
+        Expression::Return { value, .. } => find_hover_in_expr(
+            value,
+            offset,
+            context,
+            hierarchy,
+            type_map,
+            native_types,
+            alias_registry,
+        ),
         Expression::DestructureAssignment { pattern, value, .. } => {
             find_hover_in_pattern(pattern, offset, type_map).or_else(|| {
-                find_hover_in_expr(value, offset, context, hierarchy, type_map, native_types)
+                find_hover_in_expr(
+                    value,
+                    offset,
+                    context,
+                    hierarchy,
+                    type_map,
+                    native_types,
+                    alias_registry,
+                )
             })
         }
         Expression::Parenthesized { expression, .. } => find_hover_in_expr(
@@ -888,6 +945,7 @@ fn find_hover_in_expr(
             hierarchy,
             type_map,
             native_types,
+            alias_registry,
         ),
         Expression::FieldAccess {
             receiver, field, ..
@@ -927,22 +985,44 @@ fn find_hover_in_expr(
                         .with_documentation("_state variable_".to_string()),
                 )
             } else {
-                find_hover_in_expr(receiver, offset, context, hierarchy, type_map, native_types)
+                find_hover_in_expr(
+                    receiver,
+                    offset,
+                    context,
+                    hierarchy,
+                    type_map,
+                    native_types,
+                    alias_registry,
+                )
             }
         }
         Expression::Cascade {
             receiver, messages, ..
         } => {
-            if let Some(hover) =
-                find_hover_in_expr(receiver, offset, context, hierarchy, type_map, native_types)
-            {
+            if let Some(hover) = find_hover_in_expr(
+                receiver,
+                offset,
+                context,
+                hierarchy,
+                type_map,
+                native_types,
+                alias_registry,
+            ) {
                 return Some(hover);
             }
             // Check each cascaded message
             for msg in messages {
                 // Check arguments first
                 if let Some(hover) = msg.arguments.iter().find_map(|arg| {
-                    find_hover_in_expr(arg, offset, context, hierarchy, type_map, native_types)
+                    find_hover_in_expr(
+                        arg,
+                        offset,
+                        context,
+                        hierarchy,
+                        type_map,
+                        native_types,
+                        alias_registry,
+                    )
                 }) {
                     return Some(hover);
                 }
@@ -973,37 +1053,44 @@ fn find_hover_in_expr(
             }
             None
         }
-        Expression::Match { value, arms, .. } => {
-            find_hover_in_expr(value, offset, context, hierarchy, type_map, native_types).or_else(
-                || {
-                    arms.iter().find_map(|arm| {
-                        find_hover_in_pattern(&arm.pattern, offset, type_map)
-                            .or_else(|| {
-                                arm.guard.as_ref().and_then(|g| {
-                                    find_hover_in_expr(
-                                        g,
-                                        offset,
-                                        context,
-                                        hierarchy,
-                                        type_map,
-                                        native_types,
-                                    )
-                                })
-                            })
-                            .or_else(|| {
-                                find_hover_in_expr(
-                                    &arm.body,
-                                    offset,
-                                    context,
-                                    hierarchy,
-                                    type_map,
-                                    native_types,
-                                )
-                            })
+        Expression::Match { value, arms, .. } => find_hover_in_expr(
+            value,
+            offset,
+            context,
+            hierarchy,
+            type_map,
+            native_types,
+            alias_registry,
+        )
+        .or_else(|| {
+            arms.iter().find_map(|arm| {
+                find_hover_in_pattern(&arm.pattern, offset, type_map)
+                    .or_else(|| {
+                        arm.guard.as_ref().and_then(|g| {
+                            find_hover_in_expr(
+                                g,
+                                offset,
+                                context,
+                                hierarchy,
+                                type_map,
+                                native_types,
+                                alias_registry,
+                            )
+                        })
                     })
-                },
-            )
-        }
+                    .or_else(|| {
+                        find_hover_in_expr(
+                            &arm.body,
+                            offset,
+                            context,
+                            hierarchy,
+                            type_map,
+                            native_types,
+                            alias_registry,
+                        )
+                    })
+            })
+        }),
         Expression::MapLiteral { pairs, span } => {
             if offset >= span.start() && offset < span.end() {
                 // Check if hovering over a specific key or value
@@ -1015,6 +1102,7 @@ fn find_hover_in_expr(
                         hierarchy,
                         type_map,
                         native_types,
+                        alias_registry,
                     ) {
                         return Some(hover);
                     }
@@ -1025,6 +1113,7 @@ fn find_hover_in_expr(
                         hierarchy,
                         type_map,
                         native_types,
+                        alias_registry,
                     ) {
                         return Some(hover);
                     }
@@ -1045,16 +1134,28 @@ fn find_hover_in_expr(
         } => {
             if offset >= span.start() && offset < span.end() {
                 for elem in elements {
-                    if let Some(hover) =
-                        find_hover_in_expr(elem, offset, context, hierarchy, type_map, native_types)
-                    {
+                    if let Some(hover) = find_hover_in_expr(
+                        elem,
+                        offset,
+                        context,
+                        hierarchy,
+                        type_map,
+                        native_types,
+                        alias_registry,
+                    ) {
                         return Some(hover);
                     }
                 }
                 if let Some(t) = tail {
-                    if let Some(hover) =
-                        find_hover_in_expr(t, offset, context, hierarchy, type_map, native_types)
-                    {
+                    if let Some(hover) = find_hover_in_expr(
+                        t,
+                        offset,
+                        context,
+                        hierarchy,
+                        type_map,
+                        native_types,
+                        alias_registry,
+                    ) {
                         return Some(hover);
                     }
                 }
@@ -1069,9 +1170,15 @@ fn find_hover_in_expr(
         Expression::ArrayLiteral { elements, span } => {
             if offset >= span.start() && offset < span.end() {
                 for elem in elements {
-                    if let Some(hover) =
-                        find_hover_in_expr(elem, offset, context, hierarchy, type_map, native_types)
-                    {
+                    if let Some(hover) = find_hover_in_expr(
+                        elem,
+                        offset,
+                        context,
+                        hierarchy,
+                        type_map,
+                        native_types,
+                        alias_registry,
+                    ) {
                         return Some(hover);
                     }
                 }
@@ -1119,6 +1226,7 @@ fn find_hover_in_expr(
                             hierarchy,
                             type_map,
                             native_types,
+                            alias_registry,
                         ) {
                             return Some(info);
                         }
@@ -1604,6 +1712,57 @@ mod tests {
         );
     }
 
+    /// BT-2936: an alias-typed field (`type PortAlias = Port`) composes its
+    /// sendability tier through the alias's expansion when `compute_hover`'s
+    /// `alias_registry` is threaded all the way through to `hover_tier_label`,
+    /// instead of silently omitting the tier line for the opaque alias name.
+    #[test]
+    fn hover_shows_composed_handle_scope_for_alias_typed_value_field() {
+        use crate::semantic_analysis::alias_registry::AliasRegistry;
+        use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
+
+        let src = "type PortAlias = Port\ntyped Value subclass: Wrapper\n  field: p :: PortAlias = nil\n\n\
+                   Object subclass: M\n  run: w :: Wrapper =>\n    w printString\n";
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "parse failed: {parse_diags:?}");
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let protocol_registry = ProtocolRegistry::new();
+        let mut registry = AliasRegistry::new();
+        let diags = registry.register_module(&module, &hierarchy, &protocol_registry);
+        assert!(diags.is_empty(), "unexpected alias diagnostics: {diags:?}");
+
+        // Line 6, col 4 is the `w` use in the body.
+        let hover = compute_hover(
+            &module,
+            src,
+            Position::new(6, 4),
+            &hierarchy,
+            None,
+            Some(&registry),
+        )
+        .expect("hover");
+        assert!(
+            hover
+                .contents
+                .contains("Sendability: HandleScoped(#process)"),
+            "expected composed HandleScoped(#process) tier through the alias, got: {}",
+            hover.contents
+        );
+
+        // Without the registry, the alias name stays opaque and the tier
+        // silently falls back to Unknown (no tier line) — the pre-BT-2936
+        // fallback this test guards against regressing back to.
+        let hover_no_registry =
+            compute_hover(&module, src, Position::new(6, 4), &hierarchy, None, None)
+                .expect("hover");
+        assert!(
+            !hover_no_registry.contents.contains("Sendability:"),
+            "without the registry the tier should stay silent (Unknown), got: {}",
+            hover_no_registry.contents
+        );
+    }
+
     #[test]
     fn hover_omits_tier_for_sendable() {
         let src = "Object subclass: M\n  run: n :: Integer =>\n    n printString\n";
@@ -1742,7 +1901,7 @@ mod tests {
             is_inferred: false,
             span: Span::new(0, 22),
         };
-        let hover = find_hover_in_expr(&expr, 5, &ctx, &hierarchy, &TypeMap::new(), None);
+        let hover = find_hover_in_expr(&expr, 5, &ctx, &hierarchy, &TypeMap::new(), None, None);
         assert!(hover.is_some());
         let hover = hover.unwrap();
         assert!(hover.contents.contains("`@primitive \"erlang_add\"`"));
@@ -1763,7 +1922,7 @@ mod tests {
             is_inferred: false,
             span: Span::new(0, 15),
         };
-        let hover = find_hover_in_expr(&expr, 5, &ctx, &hierarchy, &TypeMap::new(), None);
+        let hover = find_hover_in_expr(&expr, 5, &ctx, &hierarchy, &TypeMap::new(), None, None);
         assert!(hover.is_some());
         let hover = hover.unwrap();
         assert!(hover.contents.contains("`@primitive size`"));

@@ -813,6 +813,7 @@ fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult {
         &result.class_hierarchy,
         analyser.type_map(),
         &analyser.result.block_info,
+        Some(&result.alias_registry),
         &mut result.diagnostics,
     );
     result.diagnostics.extend(analyser.result.diagnostics);

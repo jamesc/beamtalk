@@ -1020,7 +1020,7 @@ fn test_refine_singleton_eq_splits_union() {
         vec![symbol_lit("infinity")],
     );
     let info = TypeChecker::detect_narrowing(&expr).unwrap();
-    let refined = TypeChecker::refine_singleton_narrowing(info, &env, &hierarchy);
+    let refined = TypeChecker::refine_singleton_narrowing(info, &env, &hierarchy, None);
     assert_eq!(refined.true_type, InferredType::known("#infinity"));
     assert_eq!(refined.false_type, Some(InferredType::known("Integer")));
 }
@@ -1037,7 +1037,7 @@ fn test_refine_singleton_inequality_swaps_branches() {
         vec![symbol_lit("infinity")],
     );
     let info = TypeChecker::detect_narrowing(&expr).unwrap();
-    let refined = TypeChecker::refine_singleton_narrowing(info, &env, &hierarchy);
+    let refined = TypeChecker::refine_singleton_narrowing(info, &env, &hierarchy, None);
     assert_eq!(refined.true_type, InferredType::known("Integer"));
     assert_eq!(refined.false_type, Some(InferredType::known("#infinity")));
 }
@@ -1058,7 +1058,7 @@ fn test_refine_singleton_eq_multi_member_union_keeps_rest() {
         vec![symbol_lit("north")],
     );
     let info = TypeChecker::detect_narrowing(&expr).unwrap();
-    let refined = TypeChecker::refine_singleton_narrowing(info, &env, &hierarchy);
+    let refined = TypeChecker::refine_singleton_narrowing(info, &env, &hierarchy, None);
     assert_eq!(refined.true_type, InferredType::known("#north"));
     assert_eq!(
         refined.false_type,
@@ -1079,7 +1079,7 @@ fn test_refine_singleton_eq_all_removed_is_never() {
         vec![symbol_lit("north")],
     );
     let info = TypeChecker::detect_narrowing(&expr).unwrap();
-    let refined = TypeChecker::refine_singleton_narrowing(info, &env, &hierarchy);
+    let refined = TypeChecker::refine_singleton_narrowing(info, &env, &hierarchy, None);
     assert_eq!(refined.true_type, InferredType::known("#north"));
     assert_eq!(refined.false_type, Some(InferredType::Never));
 }
@@ -1097,7 +1097,7 @@ fn test_refine_singleton_eq_dynamic_variable_keeps_false_dynamic() {
         vec![symbol_lit("foo")],
     );
     let info = TypeChecker::detect_narrowing(&expr).unwrap();
-    let refined = TypeChecker::refine_singleton_narrowing(info, &env, &hierarchy);
+    let refined = TypeChecker::refine_singleton_narrowing(info, &env, &hierarchy, None);
     assert_eq!(refined.true_type, InferredType::known("#foo"));
     assert_eq!(
         refined.false_type,
@@ -1119,7 +1119,7 @@ fn test_refine_singleton_symbol_left_inequality_swaps_branches() {
         vec![var("ms")],
     );
     let info = TypeChecker::detect_narrowing(&expr).unwrap();
-    let refined = TypeChecker::refine_singleton_narrowing(info, &env, &hierarchy);
+    let refined = TypeChecker::refine_singleton_narrowing(info, &env, &hierarchy, None);
     assert_eq!(refined.true_type, InferredType::known("Integer"));
     assert_eq!(refined.false_type, Some(InferredType::known("#infinity")));
 }
@@ -1141,7 +1141,7 @@ fn test_refine_singleton_eq_impossible_true_branch_is_never() {
         vec![symbol_lit("foo")],
     );
     let info = TypeChecker::detect_narrowing(&expr).unwrap();
-    let refined = TypeChecker::refine_singleton_narrowing(info, &env, &hierarchy);
+    let refined = TypeChecker::refine_singleton_narrowing(info, &env, &hierarchy, None);
     // True branch is unreachable — the value can never be `#foo`.
     assert_eq!(refined.true_type, InferredType::Never);
     // False branch keeps the full `Integer` type (nothing removable).
@@ -1162,7 +1162,7 @@ fn test_refine_singleton_eq_symbol_false_branch_is_negation() {
         vec![symbol_lit("foo")],
     );
     let info = TypeChecker::detect_narrowing(&expr).unwrap();
-    let refined = TypeChecker::refine_singleton_narrowing(info, &env, &hierarchy);
+    let refined = TypeChecker::refine_singleton_narrowing(info, &env, &hierarchy, None);
     // True branch narrows to the singleton itself.
     assert_eq!(refined.true_type, InferredType::known("#foo"));
     // False branch is the complement `Symbol \ #foo`.
@@ -1473,7 +1473,7 @@ fn bt2764_refine_singleton_eq_symbol_supertype_true_branch_is_singleton() {
         vec![symbol_lit("foo")],
     );
     let info = TypeChecker::detect_narrowing(&expr).unwrap();
-    let refined = TypeChecker::refine_singleton_narrowing(info, &env, &hierarchy);
+    let refined = TypeChecker::refine_singleton_narrowing(info, &env, &hierarchy, None);
     assert_eq!(refined.true_type, InferredType::known("#foo"));
     assert_eq!(refined.false_type, Some(InferredType::known("ProtoObject")));
 }
