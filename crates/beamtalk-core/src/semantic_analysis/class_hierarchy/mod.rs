@@ -244,6 +244,35 @@ impl ClassHierarchy {
             .clone()
     }
 
+    /// Returns every stdlib type alias declaration (`type Name = ...`),
+    /// bootstrapped from `generated_builtins.rs`'s persisted alias-source
+    /// table the same way [`Self::with_builtins`] bootstraps stdlib classes
+    /// from that file's `generated_builtin_classes()` (BT-2935).
+    ///
+    /// Unlike [`Self::with_builtins`], this is *not* baked automatically into
+    /// every [`ClassHierarchy`]/[`AliasRegistry`](crate::semantic_analysis::alias_registry::AliasRegistry)
+    /// — `AliasRegistry` has no built-in-alias concept analogous to
+    /// `with_builtins`'s always-on class seeding, so a caller that wants
+    /// stdlib's own cross-file aliases visible (today: only
+    /// `beamtalk build-stdlib`'s own compile loop, via
+    /// `ClassHierarchyContext::pre_loaded_aliases`) must call this and thread
+    /// the result through explicitly. Wiring this into every ordinary
+    /// compile's `AliasRegistry` (so application code can reference a stdlib
+    /// alias without importing it) is BT-2938, deliberately out of scope
+    /// here.
+    ///
+    /// The underlying re-parse (one `AliasRegistry::from_source_text` call
+    /// per stdlib alias) is computed once and cached in a `OnceLock`, exactly
+    /// like [`Self::with_builtins`]'s cached class map — each call clones the
+    /// cached `Vec` rather than re-lexing every stored declaration string
+    /// from scratch.
+    #[must_use]
+    pub fn generated_stdlib_aliases() -> Vec<crate::semantic_analysis::alias_registry::AliasInfo> {
+        static STDLIB_ALIASES: OnceLock<Vec<crate::semantic_analysis::alias_registry::AliasInfo>> =
+            OnceLock::new();
+        STDLIB_ALIASES.get_or_init(builtins::stdlib_aliases).clone()
+    }
+
     /// How complete the knowledge injected into this hierarchy is (BT-2796).
     #[must_use]
     pub fn knowledge_scope(&self) -> crate::semantic_analysis::receiver_knowledge::KnowledgeScope {
