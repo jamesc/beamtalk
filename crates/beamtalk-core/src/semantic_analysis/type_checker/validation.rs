@@ -1055,6 +1055,23 @@ impl TypeChecker {
             if hierarchy.is_protocol_class(super::type_resolver::base_name_of_string(expected_ty)) {
                 continue;
             }
+            // BT-2911: `method.param_types` predates ADR 0108 and stores a
+            // bare `EcoString` with no alias provenance — unlike an
+            // `InferredType`, which BT-2897 already tags via
+            // `TypeProvenance::Aliased` when resolved through
+            // `resolve_type_annotation`. Re-resolve `expected_ty` through
+            // `AliasRegistry::resolve_display_name` when it names a
+            // registered alias so this diagnostic renders `AliasName
+            // (expansion)` just like a mismatched alias-typed local/return
+            // type already does; fall back to the existing `UndefinedObject`
+            // -> `Nil` display (BT-2066) otherwise. Computed once here
+            // (after the protocol-type early-continue above, which never
+            // needs it) and reused by every `arg_ty` arm below.
+            let expected_display = self
+                .alias_registry
+                .as_ref()
+                .and_then(|registry| registry.resolve_display_name(expected_ty))
+                .unwrap_or_else(|| InferredType::class_name_for_diagnostic(expected_ty.as_str()));
             let is_class_ref_arg = arg_exprs
                 .and_then(|exprs| exprs.get(i))
                 .is_some_and(|e| matches!(e, Expression::ClassReference { .. }));
@@ -1090,8 +1107,7 @@ impl TypeChecker {
                         // BT-2066: Render `UndefinedObject` as `Nil` in user-facing messages.
                         let actual_display =
                             InferredType::class_name_for_diagnostic(actual_ty.as_str());
-                        let expected_display =
-                            InferredType::class_name_for_diagnostic(expected_ty.as_str());
+                        let expected_display = expected_display.clone();
                         let mut diag = if is_generic {
                             Diagnostic::hint(
                                 format!(
@@ -1142,8 +1158,7 @@ impl TypeChecker {
                     if !compat {
                         let param_pos = i + 1;
                         let actual_display: EcoString = format!("{meta_class} class").into();
-                        let expected_display =
-                            InferredType::class_name_for_diagnostic(expected_ty.as_str());
+                        let expected_display = expected_display.clone();
                         self.diagnostics.push(
                             Diagnostic::warning(
                                 format!(
@@ -1174,9 +1189,7 @@ impl TypeChecker {
                     let union_display = arg_ty
                         .display_for_diagnostic()
                         .unwrap_or_else(|| EcoString::from("Dynamic"));
-                    // BT-2066: Render `UndefinedObject` as `Nil` for the declared type too.
-                    let expected_display =
-                        InferredType::class_name_for_diagnostic(expected_ty.as_str());
+                    let expected_display = expected_display.clone();
                     let mut diag = if compat == 0 {
                         Diagnostic::warning(
                             format!("Argument {param_pos} of '{selector}' on {class_name} expects {expected_display}, got {union_display}"),
@@ -1922,6 +1935,20 @@ impl TypeChecker {
         let Some(declared_type) = hierarchy.state_field_type(&class_name, &field.name) else {
             return; // No type annotation on this field
         };
+        // BT-2911: `ClassHierarchy::state_field_type` predates ADR 0108 and
+        // returns a bare `EcoString` with no alias provenance — unlike an
+        // `InferredType`, which BT-2897 already tags via
+        // `TypeProvenance::Aliased` when it flows through
+        // `resolve_type_annotation`. Re-resolve `declared_type` through
+        // `AliasRegistry::resolve_display_name` when it names a registered
+        // alias so this diagnostic renders `AliasName (expansion)` just like
+        // a mismatched alias-typed parameter already does; fall back to the
+        // existing `UndefinedObject` -> `Nil` display (BT-2066) otherwise.
+        let declared_display = self
+            .alias_registry
+            .as_ref()
+            .and_then(|registry| registry.resolve_display_name(&declared_type))
+            .unwrap_or_else(|| InferredType::class_name_for_diagnostic(declared_type.as_str()));
         match value_ty {
             InferredType::Known {
                 class_name: value_type,
@@ -1929,8 +1956,7 @@ impl TypeChecker {
             } => {
                 if !Self::is_assignable_to(value_type, &declared_type, hierarchy) {
                     // BT-2066: Render `UndefinedObject` as `Nil` in user-facing messages.
-                    let declared_display =
-                        InferredType::class_name_for_diagnostic(declared_type.as_str());
+                    let declared_display = declared_display.clone();
                     let value_display =
                         InferredType::class_name_for_diagnostic(value_type.as_str());
                     self.diagnostics.push(
@@ -1963,9 +1989,7 @@ impl TypeChecker {
                 let union_display = value_ty
                     .display_for_diagnostic()
                     .unwrap_or_else(|| EcoString::from("Dynamic"));
-                // BT-2066: Render `UndefinedObject` as `Nil` in user-facing messages.
-                let declared_display =
-                    InferredType::class_name_for_diagnostic(declared_type.as_str());
+                let declared_display = declared_display.clone();
                 let diag = if compat == 0 {
                     Diagnostic::warning(
                         format!("Type mismatch: field `{}` declared as {declared_display}, got {union_display}", field.name),
@@ -1997,8 +2021,7 @@ impl TypeChecker {
                 // assignability walk.
                 let class_name_ty: EcoString = "Class".into();
                 if !Self::is_assignable_to(&class_name_ty, &declared_type, hierarchy) {
-                    let declared_display =
-                        InferredType::class_name_for_diagnostic(declared_type.as_str());
+                    let declared_display = declared_display.clone();
                     let value_display: EcoString = format!("{meta_class} class").into();
                     self.diagnostics.push(
                         Diagnostic::warning(
@@ -2153,7 +2176,16 @@ impl TypeChecker {
         let Some(value_ty) = self.type_map.get(value_expr.span()).cloned() else {
             return; // Dynamic / unknown value type — skip conservatively.
         };
-        let declared_display = InferredType::class_name_for_diagnostic(declared_ty.as_str());
+        // BT-2911: `declared_ty` is a bare `EcoString` pulled from
+        // `ClassHierarchy::state_field_type` — the same pre-ADR-0108
+        // storage `check_field_assignment` sits on. Re-resolve through
+        // `AliasRegistry::resolve_display_name` when it names a registered
+        // alias, mirroring that sibling check.
+        let declared_display = self
+            .alias_registry
+            .as_ref()
+            .and_then(|registry| registry.resolve_display_name(declared_ty))
+            .unwrap_or_else(|| InferredType::class_name_for_diagnostic(declared_ty.as_str()));
         match &value_ty {
             InferredType::Known {
                 class_name: value_type,
@@ -2284,6 +2316,17 @@ impl TypeChecker {
             if type_param_names.contains(&declared_type.as_str()) {
                 continue;
             }
+            // BT-2911: `resolved_declared` already carries BT-2897's
+            // `TypeProvenance::Aliased` tag when `type_annotation` names a
+            // registered alias (see the doc above) — `display_for_diagnostic`
+            // renders it as `AliasName (expansion)` directly. Computed once
+            // here, before the tag is discarded by the `inferred_type_to_string`
+            // flattening above (needed for `is_assignable_to`'s structural
+            // comparison), and reused by every arm below instead of
+            // re-deriving a plain display from the flattened `declared_type`.
+            let declared_display = resolved_declared
+                .display_for_diagnostic()
+                .unwrap_or_else(|| EcoString::from("Dynamic"));
             let mut env = TypeEnv::new();
             env.set_local("self", InferredType::known(class.name.name.clone()));
             let inferred = self.infer_expr(default_value, hierarchy, &mut env, false);
@@ -2293,9 +2336,8 @@ impl TypeChecker {
                     ..
                 } => {
                     if !Self::is_assignable_to(value_type, &declared_type, hierarchy) {
+                        let declared_display = declared_display.clone();
                         // BT-2066: Render `UndefinedObject` as `Nil` in user-facing messages.
-                        let declared_display =
-                            InferredType::class_name_for_diagnostic(declared_type.as_str());
                         let value_display =
                             InferredType::class_name_for_diagnostic(value_type.as_str());
                         self.diagnostics.push(
@@ -2330,9 +2372,7 @@ impl TypeChecker {
                     let union_display = inferred
                         .display_for_diagnostic()
                         .unwrap_or_else(|| EcoString::from("Dynamic"));
-                    // BT-2066: Render `UndefinedObject` as `Nil` in user-facing messages.
-                    let declared_display =
-                        InferredType::class_name_for_diagnostic(declared_type.as_str());
+                    let declared_display = declared_display.clone();
                     let diag = if compat == 0 {
                         Diagnostic::warning(
                             format!(
