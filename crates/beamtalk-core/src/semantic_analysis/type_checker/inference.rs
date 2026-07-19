@@ -17,6 +17,7 @@ use crate::ast::{
     Expression, ExpressionStatement, Literal, MatchArm, MessageSelector, Module, Pattern,
     TypeAnnotation,
 };
+use crate::semantic_analysis::alias_registry::AliasRegistry;
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::string_utils::edit_distance;
 use crate::semantic_analysis::validators::is_concrete_leaf_class;
@@ -1361,6 +1362,7 @@ impl TypeChecker {
                                 &type_args,
                                 parent,
                                 hierarchy,
+                                self.alias_registry.as_ref(),
                             )
                         } else {
                             InferredType::Dynamic(DynamicReason::Unknown)
@@ -1568,8 +1570,22 @@ impl TypeChecker {
         ) {
             Self::detect_narrowing(receiver)
                 .map(|info| self.refine_responds_to_narrowing(info))
-                .map(|info| Self::refine_result_narrowing(info, env, hierarchy))
-                .map(|info| Self::refine_singleton_narrowing(info, env, hierarchy))
+                .map(|info| {
+                    Self::refine_result_narrowing(
+                        info,
+                        env,
+                        hierarchy,
+                        self.alias_registry.as_ref(),
+                    )
+                })
+                .map(|info| {
+                    Self::refine_singleton_narrowing(
+                        info,
+                        env,
+                        hierarchy,
+                        self.alias_registry.as_ref(),
+                    )
+                })
                 .map(|info| self.refine_class_narrowing(info, env, hierarchy, span))
         } else {
             None
@@ -1626,7 +1642,12 @@ impl TypeChecker {
             // like `5 >= local` in `local > 0 and: [5 >= local]` — see the
             // narrowed type too, closing the gap where only receiver
             // positions were narrowed.
-            let current_ty = Self::resolve_narrowing_variable_type(&var_key, env, hierarchy);
+            let current_ty = Self::resolve_narrowing_variable_type(
+                &var_key,
+                env,
+                hierarchy,
+                self.alias_registry.as_ref(),
+            );
             let non_nil_ty = Self::non_nil_type(&current_ty);
             vec![self.infer_block_with_narrowing(
                 arg,
@@ -2648,8 +2669,12 @@ impl TypeChecker {
         }
         // No alias registry threaded here: `ret_ty` comes from the built-in
         // Metaclass/Class/Behaviour/Object/ProtoObject tower, which never
-        // declares an alias-typed return (BT-2928 follow-up covers the
-        // general case; this call site is out of scope for it).
+        // declares an alias-typed return. BT-2936 (the general follow-up
+        // that threaded `alias_registry` through the other deferred call
+        // sites) revisited this one specifically and confirmed it stays
+        // out of scope: the tower's method table is fixed, built-in, and
+        // has no alias-typed entries to expand, so there is nothing for a
+        // registry to do here.
         Some(Self::resolve_type_name_string(ret_ty, None))
     }
 
@@ -3078,11 +3103,13 @@ impl TypeChecker {
         mut info: NarrowingInfo,
         env: &TypeEnv,
         hierarchy: &ClassHierarchy,
+        alias_registry: Option<&AliasRegistry>,
     ) -> NarrowingInfo {
         if !info.is_result_ok_check && !info.is_result_error_check {
             return info;
         }
-        let current_ty = Self::resolve_narrowing_variable_type(&info.variable, env, hierarchy);
+        let current_ty =
+            Self::resolve_narrowing_variable_type(&info.variable, env, hierarchy, alias_registry);
         let is_result = matches!(
             &current_ty,
             InferredType::Known { class_name, .. }
@@ -3127,11 +3154,13 @@ impl TypeChecker {
         mut info: NarrowingInfo,
         env: &TypeEnv,
         hierarchy: &ClassHierarchy,
+        alias_registry: Option<&AliasRegistry>,
     ) -> NarrowingInfo {
         let Some(eq) = info.singleton_eq.clone() else {
             return info;
         };
-        let current_ty = Self::resolve_narrowing_variable_type(&info.variable, env, hierarchy);
+        let current_ty =
+            Self::resolve_narrowing_variable_type(&info.variable, env, hierarchy, alias_registry);
 
         let matched = InferredType::known(eq.singleton.as_type_name().clone());
         let provenance = super::TypeProvenance::Inferred(Span::default());
@@ -3188,7 +3217,12 @@ impl TypeChecker {
         let Some(ClassTestInfo { class_name, .. }) = info.class_test.clone() else {
             return info;
         };
-        let current_ty = Self::resolve_narrowing_variable_type(&info.variable, env, hierarchy);
+        let current_ty = Self::resolve_narrowing_variable_type(
+            &info.variable,
+            env,
+            hierarchy,
+            self.alias_registry.as_ref(),
+        );
         let refined_info = Self::compute_class_narrowing(
             info,
             &current_ty,
@@ -4369,8 +4403,12 @@ impl TypeChecker {
                         arg_types.push(ty);
                     } else if info.is_nil_check {
                         // isNil ifFalse: → variable is non-nil
-                        let current_ty =
-                            Self::resolve_narrowing_variable_type(&info.variable, env, hierarchy);
+                        let current_ty = Self::resolve_narrowing_variable_type(
+                            &info.variable,
+                            env,
+                            hierarchy,
+                            self.alias_registry.as_ref(),
+                        );
                         let non_nil = Self::non_nil_type(&current_ty);
                         let ty = self.infer_block_with_narrowing(
                             arg,
@@ -4438,8 +4476,12 @@ impl TypeChecker {
                         arg_types.push(ty);
                     } else if info.is_nil_check {
                         // isNil ifTrue: [...] ifFalse: [block] → non-nil in false block
-                        let current_ty =
-                            Self::resolve_narrowing_variable_type(&info.variable, env, hierarchy);
+                        let current_ty = Self::resolve_narrowing_variable_type(
+                            &info.variable,
+                            env,
+                            hierarchy,
+                            self.alias_registry.as_ref(),
+                        );
                         let non_nil = Self::non_nil_type(&current_ty);
                         let ty = self.infer_block_with_narrowing(
                             false_arg,
@@ -5090,10 +5132,16 @@ impl TypeChecker {
     /// [`EnvKey::SelfField`] (BT-2048 / BT-2062) we prefer a previously
     /// pushed narrowing, falling back to the declared state type resolved
     /// through the class hierarchy when none is present.
+    ///
+    /// `alias_registry` (BT-2936, ADR 0108 follow-up to BT-2928) is threaded
+    /// through so a `self.field isNil ifFalse: [...]` narrowing check on a
+    /// cross-file alias-typed field expands the alias instead of falling
+    /// back to an opaque nominal class.
     fn resolve_narrowing_variable_type(
         var_key: &EnvKey,
         env: &TypeEnv,
         hierarchy: &ClassHierarchy,
+        alias_registry: Option<&AliasRegistry>,
     ) -> InferredType {
         // Regular env lookup first (handles locals and previously-narrowed fields).
         if let Some(ty) = env.get(var_key) {
@@ -5104,14 +5152,7 @@ impl TypeChecker {
         if let EnvKey::SelfField(field_name) = var_key {
             if let Some(InferredType::Known { class_name, .. }) = env.get_local("self") {
                 if let Some(field_type) = hierarchy.state_field_type(&class_name, field_name) {
-                    // No alias registry threaded here — this free function's
-                    // several callers don't have one in scope. A narrowing
-                    // check (e.g. `self.field isNil ifFalse: [...]`) on a
-                    // cross-file alias-typed field falls back to the
-                    // opaque-name behaviour this fixes elsewhere (BT-2928
-                    // follow-up: thread `alias_registry` through the
-                    // narrowing call chain too).
-                    return Self::resolve_type_name_string(&field_type, None);
+                    return Self::resolve_type_name_string(&field_type, alias_registry);
                 }
             }
         }
@@ -5211,7 +5252,12 @@ impl TypeChecker {
             // `compute_class_narrowing` — `expr` (this exact guard) was
             // already fully type-checked by `infer_stmts` above, so the
             // "comparison can never be true" hint already fired once.
-            let current_ty = Self::resolve_narrowing_variable_type(&info.variable, env, hierarchy);
+            let current_ty = Self::resolve_narrowing_variable_type(
+                &info.variable,
+                env,
+                hierarchy,
+                self.alias_registry.as_ref(),
+            );
             info = Self::compute_class_narrowing(
                 info,
                 &current_ty,
@@ -5240,7 +5286,12 @@ impl TypeChecker {
                     }
                 }
             }
-            let Some(narrowed) = Self::early_return_false_branch_type(&info, env, hierarchy) else {
+            let Some(narrowed) = Self::early_return_false_branch_type(
+                &info,
+                env,
+                hierarchy,
+                self.alias_registry.as_ref(),
+            ) else {
                 return;
             };
             // BT-2050: after this statement, the variable is narrowed.
@@ -5287,11 +5338,17 @@ impl TypeChecker {
         info: &NarrowingInfo,
         env: &TypeEnv,
         hierarchy: &ClassHierarchy,
+        alias_registry: Option<&AliasRegistry>,
     ) -> Option<InferredType> {
         if let Some(ref false_ty) = info.false_type {
             Some(false_ty.clone())
         } else if info.is_nil_check {
-            let current_ty = Self::resolve_narrowing_variable_type(&info.variable, env, hierarchy);
+            let current_ty = Self::resolve_narrowing_variable_type(
+                &info.variable,
+                env,
+                hierarchy,
+                alias_registry,
+            );
             Some(Self::non_nil_type(&current_ty))
         } else {
             None
@@ -6243,6 +6300,55 @@ mod tests {
         assert_eq!(unresolved, InferredType::known("RestartStrategy"));
     }
 
+    /// BT-2936: a `self.field` narrowing lookup (e.g. the `self.field isNil
+    /// ifFalse: [...]` shape [`Self::resolve_narrowing_variable_type`]
+    /// serves) on an alias-typed field expands the alias through the
+    /// threaded `alias_registry`, instead of leaving it an opaque nominal
+    /// class — the deferred half of BT-2928's `resolve_type_name_string`
+    /// fix for the narrowing call chain specifically.
+    #[test]
+    fn resolve_narrowing_variable_type_expands_alias_for_self_field() {
+        use crate::semantic_analysis::alias_registry::AliasRegistry;
+        use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
+
+        let tokens = crate::source_analysis::lex_with_eof(
+            "type RestartStrategy = #permanent | #temporary\n\
+             Object subclass: Supervisor\n  state: strategy :: RestartStrategy = nil\n",
+        );
+        let (module, parse_diags) = crate::source_analysis::parse(tokens);
+        assert!(parse_diags.is_empty(), "parse failed: {parse_diags:?}");
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let protocol_registry = ProtocolRegistry::new();
+        let mut registry = AliasRegistry::new();
+        let diags = registry.register_module(&module, &hierarchy, &protocol_registry);
+        assert!(diags.is_empty(), "unexpected alias diagnostics: {diags:?}");
+
+        let mut env = TypeEnv::new();
+        env.set_local("self", InferredType::known("Supervisor"));
+        let var_key = EnvKey::self_field("strategy");
+
+        let result = TypeChecker::resolve_narrowing_variable_type(
+            &var_key,
+            &env,
+            &hierarchy,
+            Some(&registry),
+        );
+        match result {
+            InferredType::Union { members, .. } => {
+                assert_eq!(members.len(), 2);
+                assert!(members.contains(&InferredType::known("#permanent")));
+                assert!(members.contains(&InferredType::known("#temporary")));
+            }
+            other => panic!("Expected Union (alias expansion), got {other:?}"),
+        }
+
+        // Without the registry, the field's raw type name stays opaque — the
+        // pre-BT-2936 fallback this test guards against regressing back to.
+        let unresolved =
+            TypeChecker::resolve_narrowing_variable_type(&var_key, &env, &hierarchy, None);
+        assert_eq!(unresolved, InferredType::known("RestartStrategy"));
+    }
+
     // ---- detect_narrowing ----
 
     #[test]
@@ -6481,7 +6587,7 @@ mod tests {
             class_test: None,
         };
         let hierarchy = ClassHierarchy::with_builtins();
-        let refined = TypeChecker::refine_result_narrowing(info, &env, &hierarchy);
+        let refined = TypeChecker::refine_result_narrowing(info, &env, &hierarchy, None);
         assert_eq!(refined.true_type, result_ty);
         assert_eq!(refined.false_type, Some(result_ty));
         assert!(refined.is_result_ok_check);
@@ -6505,7 +6611,7 @@ mod tests {
             class_test: None,
         };
         let hierarchy = ClassHierarchy::with_builtins();
-        let refined = TypeChecker::refine_result_narrowing(info, &env, &hierarchy);
+        let refined = TypeChecker::refine_result_narrowing(info, &env, &hierarchy, None);
         assert!(!refined.is_result_ok_check);
         assert!(!refined.is_result_error_check);
         assert!(refined.false_type.is_none());

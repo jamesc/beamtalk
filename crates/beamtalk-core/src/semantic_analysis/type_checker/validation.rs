@@ -886,7 +886,7 @@ impl TypeChecker {
                 continue;
             };
             let sendability::Tier::HandleScoped(sendability::HandleScope::Process) =
-                sendability::tier_of(value_ty, hierarchy)
+                sendability::tier_of(value_ty, hierarchy, self.alias_registry.as_ref())
             else {
                 continue;
             };
@@ -949,7 +949,7 @@ impl TypeChecker {
         }
         for (i, arg_ty) in arg_types.iter().enumerate() {
             let sendability::Tier::HandleScoped(sendability::HandleScope::Process) =
-                sendability::tier_of(arg_ty, hierarchy)
+                sendability::tier_of(arg_ty, hierarchy, self.alias_registry.as_ref())
             else {
                 continue;
             };
