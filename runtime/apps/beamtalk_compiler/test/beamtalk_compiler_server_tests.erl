@@ -66,6 +66,67 @@ handle_compile_response_ok_test() ->
         Result
     ).
 
+%% ADR 0108 hot-reload re-check trigger (BT-2899): a class-defining
+%% compile's `referenced_aliases` field must survive this response
+%% reshaping, defaulting to `[]` for an older compiler-port binary that
+%% omits the key.
+handle_compile_response_ok_forwards_referenced_aliases_test() ->
+    Response = #{
+        status => ok,
+        core_erlang => <<"core">>,
+        module_name => <<"mod">>,
+        classes => [<<"Foo">>],
+        warnings => [],
+        referenced_aliases => [<<"Direction">>]
+    },
+    Result = beamtalk_compiler_server:handle_compile_response(Response),
+    ?assertMatch(
+        {ok, #{referenced_aliases := [<<"Direction">>]}},
+        Result
+    ).
+
+%% BT-2917 (BT-2899 follow-up): the protocol_definition clause is a
+%% *separate* reshaping match arm from the class-definition one above — it
+%% must forward `referenced_aliases` too. Confirmed missing by inspection
+%% before this fix: the port response carried the field, but this reshaping
+%% step silently dropped it (rebuilds the reply map by hand instead of
+%% forwarding `Response` verbatim), so nothing downstream ever saw it, even
+%% though `crates/beamtalk-compiler-port/src/main.rs`'s
+%% `protocol_definition_ok_response` had already started sending it.
+handle_compile_response_protocol_definition_forwards_referenced_aliases_test() ->
+    Response = #{
+        status => ok,
+        kind => protocol_definition,
+        core_erlang => <<"core">>,
+        module_name => <<"mod">>,
+        protocols => [<<"Directional">>],
+        warnings => [],
+        referenced_aliases => [<<"Direction">>]
+    },
+    Result = beamtalk_compiler_server:handle_compile_response(Response),
+    ?assertMatch(
+        {ok, protocol_definition, #{referenced_aliases := [<<"Direction">>]}},
+        Result
+    ).
+
+%% Defensive default: a protocol_definition response omitting the field
+%% entirely (an older compiler-port binary predating BT-2917) must still
+%% decode, with `referenced_aliases => []` rather than crashing.
+handle_compile_response_protocol_definition_defaults_referenced_aliases_test() ->
+    Response = #{
+        status => ok,
+        kind => protocol_definition,
+        core_erlang => <<"core">>,
+        module_name => <<"mod">>,
+        protocols => [<<"Directional">>],
+        warnings => []
+    },
+    Result = beamtalk_compiler_server:handle_compile_response(Response),
+    ?assertMatch(
+        {ok, protocol_definition, #{referenced_aliases := []}},
+        Result
+    ).
+
 handle_compile_response_error_test() ->
     Response = #{status => error, diagnostics => [<<"parse error">>]},
     Result = beamtalk_compiler_server:handle_compile_response(Response),
