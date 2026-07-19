@@ -478,9 +478,29 @@ compile_expression_via_port(Expression, ModuleName, Bindings, KnownTypeAliasSour
 -doc """
 Compile a protocol definition result to BEAM bytecode (BT-1612).
 
-Deliberately does NOT register `beamtalk_alias_xref` edges itself — see
-`register_alias_xref_for_protocols/2`'s doc for why that has to happen at
-specific call sites instead, not here.
+ADR 0108 hot-reload re-check trigger (BT-2899 follow-up, BT-2917, BT-2952):
+also registers `ProtocolInfo`'s `referenced_aliases` into `beamtalk_alias_xref`
+for the compiled protocols — see `register_alias_xref_for_protocols/2`'s doc.
+
+## History: why this used to be split into two functions
+
+This function is shared by *two* callers: `compile_file_via_port/5` (a real
+file compile) and `compile_expression_via_port/4` (a REPL-typed `Protocol
+define: ...`). Before BT-2952, only the file-compile path's
+`referenced_aliases` was the compiler-port's genuinely-computed set — the
+REPL-inline path's was hardcoded `[]` (the Rust side didn't compute one for
+that path yet), so registering unconditionally here would have let a
+REPL-inline recompile of an already-`:load`ed protocol silently *clobber*
+the real edge with `[]` (`beamtalk_alias_xref:register_class/2` is
+whole-set replacement, not a delta — see its own doc). Registration used to
+live only in a `compile_protocol_definition_result_for_file/1` wrapper the
+file-compile path alone called.
+
+BT-2952 made the compiler port compute a genuine `referenced_aliases` set
+for the REPL-inline path too (mirroring `compile_class_definition_result/2`,
+classes' REPL-inline equivalent, which registers directly for the same
+reason), so both callers now carry trustworthy data and the split is no
+longer needed.
 """.
 -spec compile_protocol_definition_result(map()) ->
     {ok, protocol_definition, map(), [binary()]} | {error, binary()}.
@@ -495,6 +515,8 @@ compile_protocol_definition_result(ProtocolInfo) ->
     ModuleName = binary_to_atom(ModuleNameBin, utf8),
     case beamtalk_compiler:compile_core_erlang(CoreErlang) of
         {ok, _CompiledMod, Binary} ->
+            ReferencedAliases = maps:get(referenced_aliases, ProtocolInfo, []),
+            register_alias_xref_for_protocols(Protocols, ReferencedAliases),
             {ok, protocol_definition,
                 #{
                     binary => Binary,
@@ -510,51 +532,19 @@ compile_protocol_definition_result(ProtocolInfo) ->
     end.
 
 -doc """
-`compile_protocol_definition_result/1`, additionally registering
-`beamtalk_alias_xref` edges for the compiled protocols — the file-compile
-(`compile_file_via_port/5`) path ONLY (ADR 0108 hot-reload re-check trigger,
-BT-2899 follow-up, BT-2917).
+Compile a class definition result including optional trailing expressions.
 
-## Why not inside `compile_protocol_definition_result/1` itself
-
-`compile_protocol_definition_result/1` is shared by *two* callers:
-`compile_file_via_port/5` (a real file compile — `ProtocolInfo`'s
-`referenced_aliases` is the compiler-port's genuinely-computed set, threaded
-from `handle_compile`'s own alias-dependency analysis) and
-`compile_expression_via_port/4` (a REPL-typed `Protocol define: ...` —
-`referenced_aliases` is hardcoded `[]` on the Rust side today, since that
-path doesn't compute it yet; tracked separately as BT-2952).
-
-`beamtalk_alias_xref:register_class/2` is **whole-set replacement**, not a
-delta (see its own doc). If registration lived inside
-`compile_protocol_definition_result/1`, the sequence "`:load` a protocol
-file with a real alias-typed signature (registers the real edge), then
-retype the identical `Protocol define: ...` inline at the REPL (registers
-`[]`)" would silently *clobber* the edge `:load` just registered — a
-regression of previously-correct state, not the same "REPL-inline just
-doesn't get edges yet" limitation BT-2952 documents for the empty-vs-real
-gap itself. Registering only from this file-compile wrapper means the
-REPL-inline path leaves whatever `beamtalk_alias_xref` already has for that
-protocol name untouched, matching how classes already behave (only
-`compile_file_core/4`/`compile_method_reload/3` call
-`register_alias_xref_for_classes/2` — `compile_class_definition_result/2`,
-classes' REPL-inline equivalent, never does).
+ADR 0108 hot-reload re-check trigger (BT-2899 / BT-2952 follow-up): also
+registers `ClassInfo`'s `referenced_aliases` into `beamtalk_alias_xref` for
+every class this REPL-inline definition installs — see
+`register_alias_xref_for_classes/2`'s doc for why the same flat set is
+registered against every class in a multi-class source. Previously this
+never registered anything (only the file-compile path's `compile_file_core/4`
+did) because the compiler port hardcoded an empty `referenced_aliases` set
+for REPL-inline class definitions; now that the port computes a genuine set
+(BT-2952), registering here is exactly as safe as `compile_file_core/4`
+doing it for the file-compile path.
 """.
--spec compile_protocol_definition_result_for_file(map()) ->
-    {ok, protocol_definition, map(), [binary()]} | {error, binary()}.
-compile_protocol_definition_result_for_file(ProtocolInfo) ->
-    Result = compile_protocol_definition_result(ProtocolInfo),
-    case Result of
-        {ok, protocol_definition, _, _} ->
-            Protocols = maps:get(protocols, ProtocolInfo, []),
-            ReferencedAliases = maps:get(referenced_aliases, ProtocolInfo, []),
-            register_alias_xref_for_protocols(Protocols, ReferencedAliases);
-        {error, _} ->
-            ok
-    end,
-    Result.
-
-%% Compile a class definition result including optional trailing expressions.
 -spec compile_class_definition_result(map(), atom()) ->
     {ok, class_definition, map(), [binary()]} | {error, binary()}.
 compile_class_definition_result(ClassInfo, ModuleName) ->
@@ -568,6 +558,8 @@ compile_class_definition_result(ClassInfo, ModuleName) ->
     ClassModName = binary_to_atom(ClassModNameBin, utf8),
     case beamtalk_compiler:compile_core_erlang(CoreErlang) of
         {ok, _CompiledMod, Binary} ->
+            ReferencedAliases = maps:get(referenced_aliases, ClassInfo, []),
+            register_alias_xref_for_classes(Classes, ReferencedAliases),
             TrailingResult = compile_trailing_expressions(ClassInfo, ModuleName),
             assemble_class_result(Binary, ClassModName, Classes, Warnings, TrailingResult);
         {error, Reason} ->
@@ -652,14 +644,12 @@ compile_file_via_port(Source, Path, StdlibMode, ModuleNameOverride, PrebuiltInde
                     compile_file_core(CoreErlang, ModuleName, Classes, ReferencedAliases);
                 %% BT-1950: Protocol definitions from the compile path — compile
                 %% Core Erlang to BEAM and return a protocol_definition result.
-                %% BT-2917: this file-compile path is the only caller of
-                %% `compile_protocol_definition_result/1` with a trustworthy
-                %% `referenced_aliases` — see
-                %% `compile_protocol_definition_result_for_file/1`'s doc for
-                %% why registration happens here, not inside that shared
-                %% helper.
+                %% BT-2917/BT-2952: `compile_protocol_definition_result/1`
+                %% itself registers `beamtalk_alias_xref` edges from
+                %% `ProtocolInfo`'s `referenced_aliases` — see that
+                %% function's doc.
                 {ok, protocol_definition, ProtocolInfo} ->
-                    compile_protocol_definition_result_for_file(ProtocolInfo);
+                    compile_protocol_definition_result(ProtocolInfo);
                 {error, Diagnostics} ->
                     {error, {compile_error, format_formatted_diagnostics(Diagnostics)}}
             end
