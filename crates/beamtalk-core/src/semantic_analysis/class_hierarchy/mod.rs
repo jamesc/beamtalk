@@ -244,6 +244,27 @@ impl ClassHierarchy {
             .clone()
     }
 
+    /// Returns every stdlib type alias declaration (`type Name = ...`),
+    /// bootstrapped from `generated_builtins.rs`'s persisted alias-source
+    /// table the same way [`Self::with_builtins`] bootstraps stdlib classes
+    /// from that file's `generated_builtin_classes()` (BT-2935).
+    ///
+    /// Unlike [`Self::with_builtins`], this is *not* baked automatically into
+    /// every [`ClassHierarchy`]/[`AliasRegistry`](crate::semantic_analysis::alias_registry::AliasRegistry)
+    /// — `AliasRegistry` has no built-in-alias concept analogous to
+    /// `with_builtins`'s always-on class seeding, so a caller that wants
+    /// stdlib's own cross-file aliases visible (today: only
+    /// `beamtalk build-stdlib`'s own compile loop, via
+    /// `ClassHierarchyContext::pre_loaded_aliases`) must call this and thread
+    /// the result through explicitly. Wiring this into every ordinary
+    /// compile's `AliasRegistry` (so application code can reference a stdlib
+    /// alias without importing it) is BT-2938, deliberately out of scope
+    /// here.
+    #[must_use]
+    pub fn generated_stdlib_aliases() -> Vec<crate::semantic_analysis::alias_registry::AliasInfo> {
+        builtins::stdlib_aliases()
+    }
+
     /// How complete the knowledge injected into this hierarchy is (BT-2796).
     #[must_use]
     pub fn knowledge_scope(&self) -> crate::semantic_analysis::receiver_knowledge::KnowledgeScope {

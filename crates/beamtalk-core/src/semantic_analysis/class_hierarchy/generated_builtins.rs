@@ -4178,3 +4178,21 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
 
     classes
 }
+
+/// Returns the verbatim `type Name = ...` declaration source text for every
+/// stdlib type alias (BT-2935), sorted by alias name.
+///
+/// Auto-generated from `stdlib/src/*.bt` ASTs. See
+/// `crates/beamtalk-cli/src/commands/build_stdlib.rs`'s `generate_builtins_rs`
+/// doc for why source text (re-parsed by
+/// `AliasRegistry::from_source_text`), not a literal-Rust `TypeAnnotation`
+/// construction or a `serde` blob, was chosen to represent each alias here.
+pub(super) fn generated_stdlib_alias_sources() -> Vec<&'static str> {
+    vec![
+        "type EtsTableType = #set | #orderedSet | #bag | #duplicateBag",
+        "type JsonValue = Nil | Boolean | Integer | Float | String | List | Dictionary",
+        "type LogFormat = #text | #json",
+        "type LogLevel = #emergency | #alert | #critical | #error | #warning | #notice | #info | #debug",
+        "type SupervisionStrategy = #oneForOne | #oneForAll | #restForOne",
+    ]
+}

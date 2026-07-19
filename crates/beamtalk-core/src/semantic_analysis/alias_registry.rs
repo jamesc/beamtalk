@@ -432,6 +432,35 @@ impl AliasRegistry {
             .collect()
     }
 
+    /// Reconstructs a single [`AliasInfo`] from a standalone declaration
+    /// string (e.g. `"type RestartStrategy = #temporary | #transient |
+    /// #permanent"` or `"internal type Foo = Integer"`) — BT-2935.
+    ///
+    /// Lexes and parses `text` as its own tiny module and delegates to
+    /// [`Self::extract_alias_infos`], returning the first (and expected only)
+    /// entry. This is the read-side counterpart of `build_stdlib.rs`'s
+    /// generator, which persists each stdlib alias as exactly this kind of
+    /// verbatim declaration text into `generated_builtins.rs` — see that
+    /// generator's module doc for why source text (re-parsed here with the
+    /// same lexer/parser every other caller already trusts) was chosen over
+    /// adding `serde` derives to the recursive [`TypeAnnotation`] AST or
+    /// hand-rolling a literal-Rust-construction emitter for it.
+    ///
+    /// Returns `None` if `text` contains no parseable `type Name = ...`
+    /// declaration (e.g. empty input, or a caller passing malformed text) —
+    /// non-fatal by design, mirroring [`Self::extract_alias_infos`]'s own
+    /// "always returns whatever was found, however much that is" contract.
+    /// The returned `AliasInfo`'s `span` describes an offset into `text`
+    /// alone, not any original file — fine for a pre-loaded alias, whose
+    /// span is already "foreign" to the module currently being compiled (see
+    /// [`Self::add_pre_loaded`]'s doc).
+    #[must_use]
+    pub fn from_source_text(text: &str) -> Option<AliasInfo> {
+        let tokens = crate::source_analysis::lex_with_eof(text);
+        let (module, _diagnostics) = crate::source_analysis::parse(tokens);
+        Self::extract_alias_infos(&module).into_iter().next()
+    }
+
     /// Seed the registry with aliases pre-compiled from other source files or
     /// packages, or carried over from earlier turns of the same REPL session.
     ///
@@ -2084,6 +2113,55 @@ mod tests {
                 .iter()
                 .any(|i| i.name.as_str() == "Internal" && i.is_internal)
         );
+    }
+
+    // ---- BT-2935: from_source_text (build_stdlib.rs's generated-table
+    //      read-side reparse) ----
+
+    #[test]
+    fn from_source_text_reconstructs_simple_alias() {
+        let info = AliasRegistry::from_source_text("type TimeoutMs = Integer")
+            .expect("should parse a simple alias declaration");
+        assert_eq!(info.name.as_str(), "TimeoutMs");
+        assert!(!info.is_internal);
+        // Spans are relative to `text` alone (not any original file), so
+        // compare structurally via `type_name()` rather than full `PartialEq`
+        // (which would also compare the — necessarily different — spans).
+        assert_eq!(info.annotation.type_name(), "Integer");
+        assert!(matches!(info.annotation, TypeAnnotation::Simple(_)));
+    }
+
+    #[test]
+    fn from_source_text_reconstructs_union_alias() {
+        let info = AliasRegistry::from_source_text(
+            "type RestartStrategy = #temporary | #transient | #permanent",
+        )
+        .expect("should parse a union alias declaration");
+        assert_eq!(info.name.as_str(), "RestartStrategy");
+        let TypeAnnotation::Union { types, .. } = &info.annotation else {
+            panic!("expected a Union annotation, got: {:?}", info.annotation);
+        };
+        let names: Vec<&str> = types
+            .iter()
+            .map(|t| match t {
+                TypeAnnotation::Singleton { name, .. } => name.as_str(),
+                other => panic!("expected a Singleton member, got: {other:?}"),
+            })
+            .collect();
+        assert_eq!(names, vec!["temporary", "transient", "permanent"]);
+    }
+
+    #[test]
+    fn from_source_text_preserves_internal_modifier() {
+        let info = AliasRegistry::from_source_text("internal type Scratch = Integer")
+            .expect("should parse an internal alias declaration");
+        assert!(info.is_internal);
+    }
+
+    #[test]
+    fn from_source_text_returns_none_for_non_alias_text() {
+        assert!(AliasRegistry::from_source_text("").is_none());
+        assert!(AliasRegistry::from_source_text("Object subclass: Foo").is_none());
     }
 
     // ---- BT-2898: add_pre_loaded (pattern to mirror:
