@@ -1155,6 +1155,49 @@ mod tests {
              seeding-boundary check can tell it apart from consumer's own package"
         );
 
+        // Directly exercise the seeding step `collect_diagnostics` performs
+        // internally (`AliasRegistry::add_pre_loaded`, via
+        // `analyse_with_natives_and_protocols_and_aliases`), rather than
+        // trying to observe the exclusion through a lint diagnostic: a `::
+        // Secret` annotation on its own produces no diagnostic either way —
+        // `check_unresolved_type_aliases` (structural_validators.rs) is
+        // deliberately scoped to near-miss *typos* of already-registered
+        // alias names, not general annotation-existence checking (per its
+        // own doc comment, "no general annotation-existence checker exists
+        // yet"), so an unregistered `Secret` is silently accepted in
+        // annotation position regardless of whether the wiring below is
+        // correct. This directly proves what actually matters: the
+        // `is_internal`/`package` data this test's earlier assertions
+        // confirmed reaches `all_alias_infos` correctly is exactly what lets
+        // `add_pre_loaded`'s own seeding-boundary filter (already unit-tested
+        // in `alias_registry.rs`'s
+        // `add_pre_loaded_never_seeds_internal_alias_from_different_package`)
+        // actually exclude `Secret` while still seeding `Status`.
+        let hierarchy =
+            beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::with_builtins();
+        let protocol_registry =
+            beamtalk_core::semantic_analysis::protocol_registry::ProtocolRegistry::new();
+        let mut alias_registry =
+            beamtalk_core::semantic_analysis::alias_registry::AliasRegistry::new();
+        let seeding_diags = alias_registry.add_pre_loaded(
+            all_alias_infos.clone(),
+            &hierarchy,
+            &protocol_registry,
+            Some("consumer"),
+        );
+        assert!(
+            seeding_diags.is_empty(),
+            "seeding should not produce collision diagnostics: {seeding_diags:?}"
+        );
+        assert!(
+            alias_registry.has_alias("Status"),
+            "producer's public Status alias must be seeded into consumer's alias table"
+        );
+        assert!(
+            !alias_registry.has_alias("Secret"),
+            "producer's internal Secret alias must NOT be seeded into consumer's alias table"
+        );
+
         let (file, _source, module, parse_diags) = parsed_files
             .into_iter()
             .find(|(f, ..)| *f == consumer_file)
