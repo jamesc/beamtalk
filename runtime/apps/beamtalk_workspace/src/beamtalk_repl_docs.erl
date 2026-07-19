@@ -369,16 +369,12 @@ metaclass_method_doc(<<"spawnWith:">>) ->
 metaclass_method_doc(_) ->
     not_found.
 
--doc "Safe atom conversion — returns error instead of creating new atoms.".
+-doc """
+Safe atom conversion — returns error instead of creating new atoms.
+Implementation lives in beamtalk_repl_errors (extracted BT-865).
+""".
 -spec safe_to_existing_atom(binary()) -> {ok, atom()} | {error, badarg}.
-safe_to_existing_atom(<<>>) ->
-    {error, badarg};
-safe_to_existing_atom(Bin) when is_binary(Bin) ->
-    try binary_to_existing_atom(Bin, utf8) of
-        Atom -> {ok, Atom}
-    catch
-        error:badarg -> {error, badarg}
-    end.
+safe_to_existing_atom(Bin) -> beamtalk_repl_errors:safe_to_existing_atom(Bin).
 
 -doc """
 Get method doc info from a CompiledMethod map.
