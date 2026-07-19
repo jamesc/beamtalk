@@ -1133,7 +1133,7 @@ impl Parser {
     /// `current - 1` would point at the `#symbol` token rather than the
     /// header line's last token.
     pub(super) fn collect_trailing_comment_at(&self, token_idx: usize) -> Option<Comment> {
-        debug_assert!(
+        assert!(
             token_idx < self.current && token_idx < self.tokens.len(),
             "collect_trailing_comment_at: token_idx {token_idx} must be < current ({}) and < tokens.len() ({})",
             self.current,
