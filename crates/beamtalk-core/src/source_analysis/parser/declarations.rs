@@ -1867,10 +1867,18 @@ impl Parser {
             class_leading_comments.append(&mut method.comments.leading);
             method.comments.leading = class_leading_comments;
         }
-        // BT-2943: use the blank-line signal captured before the class-name
-        // token, not whatever `parse_method_definition()` computed for the
-        // selector token (there's normally no blank line between `>>` and the
-        // selector, so that value would just be `false`).
+        // BT-2943: `leading_blank_line` is consulted only by the module-level
+        // unparser, to decide whether to re-emit a blank line before this
+        // whole standalone-method construct (mirroring
+        // `TopLevelDecl::preceding_blank_line` for classes/protocols/type
+        // aliases, BT-2929) — never to control spacing *within* the leading
+        // comment block, which `unparse_comment_attachment_leading` handles
+        // itself via each comment's own `preceding_blank_line`. So the value
+        // captured before the class-name token — the true start of this
+        // construct — always wins here, even in the obscure case of a
+        // comment sitting between `>>` and the selector (whose own,
+        // internally-computed `leading_blank_line` describes a different gap
+        // that nothing renders).
         method.comments.leading_blank_line = leading_blank_line;
 
         let span = start.merge(method.span);

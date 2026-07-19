@@ -627,6 +627,18 @@ pub(crate) fn unparse_standalone_method_definition(
     smd: &StandaloneMethodDefinition,
 ) -> Document<'static> {
     let class = leaf::ident(&smd.class_name.name);
+    // Cross-package extension methods (ADR 0070): `package@ClassName >> ...`.
+    // Found while adding BT-2943's package-qualified regression test:
+    // `smd.package` was previously never consulted here, so `beamtalk fmt`
+    // silently dropped the package qualifier from any cross-package
+    // standalone method — a pre-existing, unrelated bug, fixed alongside
+    // this issue since the fix is a one-line addition and the test that
+    // caught it already lives in this file.
+    let class = if let Some(package) = &smd.package {
+        docvec![leaf::ident(&package.name), "@", class]
+    } else {
+        class
+    };
     let separator = if smd.is_class_method {
         Document::Str(" class >> ")
     } else {
@@ -4345,6 +4357,82 @@ mod tests {
             "Foo >> baz => 3\n",
             "\n",
             "x := 1\n",
+        ));
+    }
+
+    #[test]
+    fn blank_line_before_class_name_wins_over_internal_selector_comment_blank_line() {
+        // BT-2943 regression: when a standalone method has no leading comment
+        // before its class name, but does have one wedged between `>>` and
+        // the selector (unusual, but the parser doesn't reject it), the
+        // blank-line signal used for module-level section-boundary spacing
+        // must still come from the position right before the class-name
+        // token — the true start of the construct — not from
+        // `parse_method_definition()`'s own, unrelated collect for that
+        // inner comment (which, on its own, sees no blank line here).
+        let source = concat!(
+            "Counter >> increment => self.value := self.value + 1\n",
+            "\n",
+            "Counter >> // note\n",
+            "  decrement => self.value := self.value - 1\n",
+        );
+        let module = parse_source(source);
+        assert_eq!(module.method_definitions.len(), 2);
+        assert!(
+            module.method_definitions[1]
+                .method
+                .comments
+                .leading_blank_line,
+            "expected the blank line before the second standalone method's \
+             class name to be preserved: {:#?}",
+            module.method_definitions[1].method.comments
+        );
+    }
+
+    #[test]
+    fn blank_line_preserved_between_protocol_and_standalone_method() {
+        // The declarations→standalone-methods boundary must round-trip for
+        // every declaration kind, not just `Object subclass:` — protocols and
+        // type aliases go through the same `TopLevelDecl` interleaving.
+        assert_identity(concat!(
+            "Protocol define: Startable\n",
+            "  start -> Integer\n",
+            "\n",
+            "Counter >> start => 1\n",
+        ));
+    }
+
+    #[test]
+    fn blank_line_preserved_between_type_alias_and_expression_directly() {
+        // Declarations→expressions with no standalone-methods section in
+        // between — exercises the same `is_first_module_item` check in
+        // `parse_module`, but with `method_definitions` empty rather than
+        // `classes`/`protocols`/`type_aliases`.
+        assert_identity(concat!("type Port = Integer\n", "\n", "x := 1\n",));
+    }
+
+    #[test]
+    fn blank_line_preserved_before_class_side_standalone_method() {
+        // The blank-line signal is captured before the class-name token,
+        // ahead of the optional `class` modifier — must still work for
+        // class-side standalone methods (`Counter class >> ...`).
+        assert_identity(concat!(
+            "Counter >> increment => self.value := self.value + 1\n",
+            "\n",
+            "Counter class >> withInitial: n => n\n",
+        ));
+    }
+
+    #[test]
+    fn blank_line_preserved_before_package_qualified_standalone_method() {
+        // Same, for a package-qualified standalone method
+        // (`package@Class >> ...`, ADR 0070) — the blank line must be
+        // captured before the package identifier, not lost when the
+        // `identifier @ Identifier` pair is parsed.
+        assert_identity(concat!(
+            "Counter >> increment => self.value := self.value + 1\n",
+            "\n",
+            "json@Parser >> lenientParse: input => input\n",
         ));
     }
 
