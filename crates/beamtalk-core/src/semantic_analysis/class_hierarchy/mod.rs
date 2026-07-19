@@ -260,9 +260,17 @@ impl ClassHierarchy {
     /// compile's `AliasRegistry` (so application code can reference a stdlib
     /// alias without importing it) is BT-2938, deliberately out of scope
     /// here.
+    ///
+    /// The underlying re-parse (one `AliasRegistry::from_source_text` call
+    /// per stdlib alias) is computed once and cached in a `OnceLock`, exactly
+    /// like [`Self::with_builtins`]'s cached class map — each call clones the
+    /// cached `Vec` rather than re-lexing every stored declaration string
+    /// from scratch.
     #[must_use]
     pub fn generated_stdlib_aliases() -> Vec<crate::semantic_analysis::alias_registry::AliasInfo> {
-        builtins::stdlib_aliases()
+        static STDLIB_ALIASES: OnceLock<Vec<crate::semantic_analysis::alias_registry::AliasInfo>> =
+            OnceLock::new();
+        STDLIB_ALIASES.get_or_init(builtins::stdlib_aliases).clone()
     }
 
     /// How complete the knowledge injected into this hierarchy is (BT-2796).

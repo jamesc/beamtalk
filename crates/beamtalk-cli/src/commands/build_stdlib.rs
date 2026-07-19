@@ -160,7 +160,6 @@ pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
 /// contribute no `ClassMeta`. Files are independent (no compile ordering
 /// required); cross-file class/alias visibility comes entirely from
 /// `compile_ctx` (built by the caller before this runs).
-#[allow(clippy::too_many_arguments)] // orchestration glue — see call site
 fn compile_all_stdlib_files(
     source_files: &[Utf8PathBuf],
     temp_path: &Utf8Path,
