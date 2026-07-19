@@ -1289,8 +1289,18 @@ impl Parser {
                 method_definitions.push(method_def);
             } else {
                 let pos_before = self.current;
-                // BT-987: detect blank lines (2+ newlines) before this statement
-                let has_blank_line = !expressions.is_empty()
+                // BT-987: detect blank lines (2+ newlines) before this statement.
+                // BT-2943: this must also fire for the *first* expression when it
+                // follows a class/protocol/type-alias declaration or a standalone
+                // method — not only when it follows another expression — so the
+                // blank line separating the expressions section from whatever
+                // section precedes it round-trips through `beamtalk fmt`.
+                let is_first_module_item = classes.is_empty()
+                    && method_definitions.is_empty()
+                    && protocols.is_empty()
+                    && type_aliases.is_empty()
+                    && expressions.is_empty();
+                let has_blank_line = !is_first_module_item
                     && self.current_token().has_blank_line_before_first_comment();
                 let mut comments = self.collect_comment_attachment();
                 let expr = self.parse_expression();

@@ -1800,8 +1800,18 @@ impl Parser {
 
         // Collect leading comments from the class-name token's leading trivia.
         // parse_identifier() advances past the class name without reading trivia,
-        // so we must collect here before the token is consumed.
-        let mut class_leading_comments = self.collect_comment_attachment().leading;
+        // so we must collect here before the token is consumed. Also remember
+        // whether a blank line preceded the whole construct (before any leading
+        // comment, or before the class-name token itself if it has none) — this
+        // is the accurate signal for "was there a blank line before this
+        // standalone method", mirroring how classes/protocols/type-aliases
+        // capture `leading_blank_line` once at the start of their own construct
+        // (BT-2929). The later `collect_comment_attachment()` inside
+        // `parse_method_definition()` looks at the selector token instead, which
+        // would otherwise silently lose this signal (BT-2943).
+        let initial_comments = self.collect_comment_attachment();
+        let leading_blank_line = initial_comments.leading_blank_line;
+        let mut class_leading_comments = initial_comments.leading;
 
         // Parse class name, with optional package qualifier (ADR 0070).
         // Pattern: `identifier @ Identifier` or just `Identifier`.
@@ -1857,6 +1867,19 @@ impl Parser {
             class_leading_comments.append(&mut method.comments.leading);
             method.comments.leading = class_leading_comments;
         }
+        // BT-2943: `leading_blank_line` is consulted only by the module-level
+        // unparser, to decide whether to re-emit a blank line before this
+        // whole standalone-method construct (mirroring
+        // `TopLevelDecl::preceding_blank_line` for classes/protocols/type
+        // aliases, BT-2929) — never to control spacing *within* the leading
+        // comment block, which `unparse_comment_attachment_leading` handles
+        // itself via each comment's own `preceding_blank_line`. So the value
+        // captured before the class-name token — the true start of this
+        // construct — always wins here, even in the obscure case of a
+        // comment sitting between `>>` and the selector (whose own,
+        // internally-computed `leading_blank_line` describes a different gap
+        // that nothing renders).
+        method.comments.leading_blank_line = leading_blank_line;
 
         let span = start.merge(method.span);
 

@@ -391,7 +391,17 @@ pub(crate) fn unparse_module_doc(module: &Module) -> Document<'static> {
     }
 
     // Standalone method definitions
-    for smd in &module.method_definitions {
+    for (i, smd) in module.method_definitions.iter().enumerate() {
+        // BT-2943: re-emit the blank line the author placed before this
+        // standalone method — either separating it from the previous
+        // standalone method (i > 0), or separating the whole
+        // standalone-methods section from the class/protocol/type-alias
+        // declarations above it (i == 0, but `docs` already has content).
+        // Dropped when nothing precedes it (same first-item convention as
+        // the declarations loop above, BT-2929).
+        if (i > 0 || !docs.is_empty()) && smd.method.comments.leading_blank_line {
+            docs.push(line());
+        }
         docs.push(unparse_standalone_method_definition(smd));
         docs.push(line());
     }
@@ -403,6 +413,14 @@ pub(crate) fn unparse_module_doc(module: &Module) -> Document<'static> {
             if stmt.preceding_blank_line {
                 docs.push(line());
             }
+            docs.push(line());
+        } else if !docs.is_empty() && stmt.preceding_blank_line {
+            // BT-2943: preserve a blank line separating the first top-level
+            // expression from the declarations/standalone-methods section(s)
+            // above it. The i > 0 branch above already provides its own
+            // separator `line()` between expressions; here, the previous
+            // section's trailing `line()` already plays that role, so a
+            // single extra `line()` is enough to open up the blank line.
             docs.push(line());
         }
         docs.push(unparse_expression_statement(stmt));
@@ -609,6 +627,18 @@ pub(crate) fn unparse_standalone_method_definition(
     smd: &StandaloneMethodDefinition,
 ) -> Document<'static> {
     let class = leaf::ident(&smd.class_name.name);
+    // Cross-package extension methods (ADR 0070): `package@ClassName >> ...`.
+    // Found while adding BT-2943's package-qualified regression test:
+    // `smd.package` was previously never consulted here, so `beamtalk fmt`
+    // silently dropped the package qualifier from any cross-package
+    // standalone method — a pre-existing, unrelated bug, fixed alongside
+    // this issue since the fix is a one-line addition and the test that
+    // caught it already lives in this file.
+    let class = if let Some(package) = &smd.package {
+        docvec![leaf::ident(&package.name), "@", class]
+    } else {
+        class
+    };
     let separator = if smd.is_class_method {
         Document::Str(" class >> ")
     } else {
@@ -4227,6 +4257,182 @@ mod tests {
             "  start => 1\n",
             "\n",
             "type Timeout = Integer\n",
+        ));
+    }
+
+    // --- Blank line at section boundaries: declarations / standalone methods
+    // / expressions (BT-2943) ---
+    //
+    // BT-2929 only fixed blank-line preservation *within* the interleaved
+    // class/protocol/type-alias declaration section. `Module`'s other two
+    // sections — standalone methods (`Class >> method => body`) and top-level
+    // expressions — are always rendered after it, in that fixed order. These
+    // tests cover the three section *boundaries* where a blank line was still
+    // silently dropped: declarations→standalone-methods,
+    // standalone-method→standalone-method, and
+    // standalone-methods→expressions.
+
+    #[test]
+    fn blank_line_preserved_between_declaration_and_standalone_method() {
+        assert_identity(concat!(
+            "Object subclass: Foo\n",
+            "\n",
+            "  m => 1\n",
+            "\n",
+            "Foo >> bar => 2\n",
+        ));
+    }
+
+    #[test]
+    fn no_blank_line_between_declaration_and_standalone_method_stays_absent() {
+        assert_identity(concat!(
+            "Object subclass: Foo\n",
+            "\n",
+            "  m => 1\n",
+            "Foo >> bar => 2\n",
+        ));
+    }
+
+    #[test]
+    fn blank_line_preserved_between_standalone_methods() {
+        assert_identity(concat!(
+            "Counter >> increment => self.value := self.value + 1\n",
+            "\n",
+            "Counter >> decrement => self.value := self.value - 1\n",
+        ));
+    }
+
+    #[test]
+    fn no_blank_line_between_standalone_methods_stays_absent() {
+        assert_identity(concat!(
+            "Counter >> increment => self.value := self.value + 1\n",
+            "Counter >> decrement => self.value := self.value - 1\n",
+        ));
+    }
+
+    #[test]
+    fn blank_line_before_first_standalone_method_is_dropped() {
+        // Mirrors `blank_line_before_first_top_level_declaration_is_dropped`:
+        // a blank line before the very first construct in the file — here, a
+        // standalone method with no preceding declaration section — is
+        // dropped, not preserved. Two leading newlines are required (see that
+        // test's comment for why one is not enough).
+        let source = "\n\nCounter >> increment => self.value := self.value + 1\n";
+        let formatted = format_source(source).expect("format_source must succeed");
+        assert_eq!(
+            formatted,
+            "Counter >> increment => self.value := self.value + 1\n"
+        );
+    }
+
+    #[test]
+    fn blank_line_preserved_between_standalone_method_and_expression() {
+        assert_identity(concat!(
+            "Counter >> increment => self.value := self.value + 1\n",
+            "\n",
+            "x := 1\n",
+        ));
+    }
+
+    #[test]
+    fn no_blank_line_between_standalone_method_and_expression_stays_absent() {
+        assert_identity(concat!(
+            "Counter >> increment => self.value := self.value + 1\n",
+            "x := 1\n",
+        ));
+    }
+
+    #[test]
+    fn blank_line_preserved_across_all_three_section_boundaries() {
+        // Full combination: declaration, two standalone methods, and an
+        // expression, each separated by a blank line — every boundary from
+        // BT-2943's acceptance criteria in one round-trip.
+        assert_identity(concat!(
+            "Object subclass: Foo\n",
+            "\n",
+            "  m => 1\n",
+            "\n",
+            "Foo >> bar => 2\n",
+            "\n",
+            "Foo >> baz => 3\n",
+            "\n",
+            "x := 1\n",
+        ));
+    }
+
+    #[test]
+    fn blank_line_before_class_name_wins_over_internal_selector_comment_blank_line() {
+        // BT-2943 regression: when a standalone method has no leading comment
+        // before its class name, but does have one wedged between `>>` and
+        // the selector (unusual, but the parser doesn't reject it), the
+        // blank-line signal used for module-level section-boundary spacing
+        // must still come from the position right before the class-name
+        // token — the true start of the construct — not from
+        // `parse_method_definition()`'s own, unrelated collect for that
+        // inner comment (which, on its own, sees no blank line here).
+        let source = concat!(
+            "Counter >> increment => self.value := self.value + 1\n",
+            "\n",
+            "Counter >> // note\n",
+            "  decrement => self.value := self.value - 1\n",
+        );
+        let module = parse_source(source);
+        assert_eq!(module.method_definitions.len(), 2);
+        assert!(
+            module.method_definitions[1]
+                .method
+                .comments
+                .leading_blank_line,
+            "expected the blank line before the second standalone method's \
+             class name to be preserved: {:#?}",
+            module.method_definitions[1].method.comments
+        );
+    }
+
+    #[test]
+    fn blank_line_preserved_between_protocol_and_standalone_method() {
+        // The declarations→standalone-methods boundary must round-trip for
+        // every declaration kind, not just `Object subclass:` — protocols and
+        // type aliases go through the same `TopLevelDecl` interleaving.
+        assert_identity(concat!(
+            "Protocol define: Startable\n",
+            "  start -> Integer\n",
+            "\n",
+            "Counter >> start => 1\n",
+        ));
+    }
+
+    #[test]
+    fn blank_line_preserved_between_type_alias_and_expression_directly() {
+        // Declarations→expressions with no standalone-methods section in
+        // between — exercises the same `is_first_module_item` check in
+        // `parse_module`, but with `method_definitions` empty rather than
+        // `classes`/`protocols`/`type_aliases`.
+        assert_identity(concat!("type Port = Integer\n", "\n", "x := 1\n",));
+    }
+
+    #[test]
+    fn blank_line_preserved_before_class_side_standalone_method() {
+        // The blank-line signal is captured before the class-name token,
+        // ahead of the optional `class` modifier — must still work for
+        // class-side standalone methods (`Counter class >> ...`).
+        assert_identity(concat!(
+            "Counter >> increment => self.value := self.value + 1\n",
+            "\n",
+            "Counter class >> withInitial: n => n\n",
+        ));
+    }
+
+    #[test]
+    fn blank_line_preserved_before_package_qualified_standalone_method() {
+        // Same, for a package-qualified standalone method
+        // (`package@Class >> ...`, ADR 0070) — the blank line must be
+        // captured before the package identifier, not lost when the
+        // `identifier @ Identifier` pair is parsed.
+        assert_identity(concat!(
+            "Counter >> increment => self.value := self.value + 1\n",
+            "\n",
+            "json@Parser >> lenientParse: input => input\n",
         ));
     }
 
