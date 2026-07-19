@@ -36,11 +36,13 @@ use tracing::warn;
 /// project so that cross-file type/DNU diagnostics match what `build` emits.
 /// Without this, `@expect type` / `@expect all` annotations that suppress real
 /// diagnostics during build would be reported as stale by lint.
-#[allow(clippy::too_many_arguments)] // BT-2920 added `current_package`; each param is load-bearing context
+#[allow(clippy::too_many_arguments)] // BT-2910 added pre_loaded_protocols/pre_loaded_aliases; each param is load-bearing context
 fn collect_diagnostics(
     module: &beamtalk_core::ast::Module,
     parse_diags: Vec<beamtalk_core::source_analysis::Diagnostic>,
     cross_file_classes: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    pre_loaded_protocols: Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
+    pre_loaded_aliases: Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
     native_type_registry: Option<
         std::sync::Arc<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,
     >,
@@ -81,13 +83,16 @@ fn collect_diagnostics(
         current_package: current_package.map(str::to_string),
         ..Default::default()
     };
-    let analysis_result = beamtalk_core::semantic_analysis::analyse_with_natives_and_extensions(
-        module,
-        &options,
-        cross_file_classes,
-        native_type_registry,
-        cross_file_extensions,
-    );
+    let analysis_result =
+        beamtalk_core::semantic_analysis::analyse_with_natives_and_protocols_and_aliases(
+            module,
+            &options,
+            cross_file_classes,
+            pre_loaded_protocols,
+            pre_loaded_aliases,
+            native_type_registry,
+            cross_file_extensions,
+        );
     lint_diags.extend(
         analysis_result
             .diagnostics
@@ -154,17 +159,28 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
     // Resolved before extraction so cross-file `ClassInfo` can be
     // package-stamped too (see `parse_and_extract_class_infos`'s
     // `stamp_package_on_infos` call).
-    let (mut all_class_infos, extension_index, parsed_files) = parse_and_extract_class_infos(
+    let (
+        mut all_class_infos,
+        extension_index,
+        mut all_protocol_infos,
+        mut all_alias_infos,
+        parsed_files,
+    ) = parse_and_extract_class_infos(
         &source_files,
         package_root.as_deref(),
         current_package.as_deref(),
     )?;
 
-    // Merge dependency class metadata so lint sees the same class hierarchy
-    // as build. Without this, @expect annotations that suppress real cross-package
-    // diagnostics would be reported as stale.
+    // Merge dependency class/protocol/alias metadata so lint sees the same
+    // cross-package picture as build. Without this, @expect annotations that
+    // suppress real cross-package diagnostics would be reported as stale.
     if let Some(ref project_root) = package_root {
-        merge_dependency_class_infos(project_root, &mut all_class_infos);
+        merge_dependency_infos(
+            project_root,
+            &mut all_class_infos,
+            &mut all_protocol_infos,
+            &mut all_alias_infos,
+        );
     }
 
     // BT-2134 / BT-2851: Populate the FFI type registry via the same
@@ -209,6 +225,8 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
             &module,
             parse_diags,
             cross_file_classes,
+            all_protocol_infos.clone(),
+            all_alias_infos.clone(),
             native_type_registry.clone(),
             knowledge_scope,
             &extension_index,
@@ -457,6 +475,7 @@ type ParsedLintFile = (
     Vec<beamtalk_core::source_analysis::Diagnostic>,
 );
 
+#[allow(clippy::type_complexity)] // Mirrors the pre-existing 3-tuple return; BT-2910 adds two sibling collections
 fn parse_and_extract_class_infos(
     source_files: &[Utf8PathBuf],
     package_root: Option<&Utf8Path>,
@@ -464,6 +483,8 @@ fn parse_and_extract_class_infos(
 ) -> Result<(
     Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
     beamtalk_core::compilation::extension_index::ExtensionIndex,
+    Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
+    Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
     Vec<ParsedLintFile>,
 )> {
     let extraction_files = match package_root {
@@ -481,6 +502,12 @@ fn parse_and_extract_class_infos(
         .collect();
     let mut all_class_infos = Vec::new();
     let mut extension_index = beamtalk_core::compilation::extension_index::ExtensionIndex::new();
+    // BT-2910: Same-package cross-file protocol/alias metadata — `beamtalk
+    // lint` previously collected neither (protocols not at all; aliases only
+    // via BT-2928 in `build`), so `:: Alias` and `extending:` diagnostics
+    // could disagree between `build` and `lint`.
+    let mut all_protocol_infos = Vec::new();
+    let mut all_alias_infos = Vec::new();
     let mut parsed_files: Vec<ParsedLintFile> = Vec::new();
 
     for file in &extraction_files {
@@ -519,12 +546,40 @@ fn parse_and_extract_class_infos(
         // way they do during build.
         extension_index.add_module(&module, file.as_std_path());
 
+        // BT-2910: Extract protocol/alias infos from the already-parsed
+        // module — no second parse pass, mirroring the class_infos handling
+        // just above. Aliases are stamped with `current_package` the same
+        // way `build`'s `collect_project_alias_infos` stamps them, so
+        // `AliasRegistry::add_pre_loaded`'s seeding-boundary filter can tell
+        // a same-package alias apart from a dependency's `internal` one.
+        all_protocol_infos.extend(
+            beamtalk_core::semantic_analysis::protocol_registry::ProtocolRegistry::extract_protocol_infos(
+                &module,
+            ),
+        );
+        let mut alias_infos =
+            beamtalk_core::semantic_analysis::alias_registry::AliasRegistry::extract_alias_infos(
+                &module,
+            );
+        if let Some(pkg) = current_package {
+            for info in &mut alias_infos {
+                info.package = Some(pkg.into());
+            }
+        }
+        all_alias_infos.extend(alias_infos);
+
         if source_file_set.contains(&canonicalize_or_clone(file)) {
             parsed_files.push((file.clone(), source, module, parse_diags));
         }
     }
 
-    Ok((all_class_infos, extension_index, parsed_files))
+    Ok((
+        all_class_infos,
+        extension_index,
+        all_protocol_infos,
+        all_alias_infos,
+        parsed_files,
+    ))
 }
 
 /// Walk ancestors from the given path to find the package root (containing `beamtalk.toml`).
@@ -542,33 +597,42 @@ pub(crate) fn find_package_root(start: &Utf8Path) -> Option<Utf8PathBuf> {
     package::find_package_root(start.as_std_path()).and_then(|p| Utf8PathBuf::from_path_buf(p).ok())
 }
 
-/// Resolve dependency classes and merge them into the class info list.
+/// Resolve dependency classes/protocols/aliases and merge them into the
+/// respective info lists.
 ///
 /// Best-effort: if dependency resolution fails (e.g. network error for a git
-/// dep), lint continues without dep classes rather than failing entirely.
+/// dep), lint continues without dep metadata rather than failing entirely.
 ///
 /// BT-2920 (review S1): `has_package_dependencies` (BT-2794) used to be
 /// computed here from its own re-parse of `beamtalk.toml`, independently of
 /// `run_lint`'s `current_package` resolution — two reads of the same file
 /// with inconsistent error handling. `run_lint` now parses the manifest once
 /// and derives both from that single read; this function's only remaining
-/// job is the dependency-class side effect on `all_class_infos`.
-fn merge_dependency_class_infos(
+/// job is the dependency-metadata side effect on the three `all_*` lists.
+///
+/// BT-2910: Renamed from `merge_dependency_class_infos` — now also merges
+/// `dep.protocol_infos`/`dep.alias_infos`, giving `beamtalk lint` the same
+/// cross-package protocol/alias resolution `beamtalk build` has.
+fn merge_dependency_infos(
     project_root: &Utf8Path,
     all_class_infos: &mut Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    all_protocol_infos: &mut Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
+    all_alias_infos: &mut Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
 ) {
     let options = beamtalk_core::CompilerOptions::default();
     match super::deps::ensure_deps_resolved(project_root, &options) {
         Ok(resolved_deps) => {
             for dep in &resolved_deps {
                 all_class_infos.extend(dep.class_infos.clone());
+                all_protocol_infos.extend(dep.protocol_infos.clone());
+                all_alias_infos.extend(dep.alias_infos.clone());
             }
         }
         Err(e) => {
             warn!(
                 error = %e,
                 "Failed to resolve dependencies for lint; \
-                 dependency classes may not be available"
+                 dependency classes/protocols/aliases may not be available"
             );
         }
     }
@@ -642,6 +706,8 @@ fn collect_lint_diagnostics(source: &str) -> Vec<beamtalk_core::source_analysis:
     collect_diagnostics(
         &module,
         parse_diags,
+        vec![],
+        vec![],
         vec![],
         None,
         beamtalk_core::semantic_analysis::KnowledgeScope::default(),
@@ -737,6 +803,8 @@ mod tests {
             &module,
             parse_diags,
             cross_file_classes,
+            vec![],
+            vec![],
             None,
             beamtalk_core::semantic_analysis::KnowledgeScope::default(),
             &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
@@ -937,6 +1005,8 @@ mod tests {
             &module,
             parse_diags,
             cross_file_classes,
+            vec![],
+            vec![],
             None,
             beamtalk_core::semantic_analysis::KnowledgeScope::default(),
             &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
@@ -954,6 +1024,172 @@ mod tests {
         assert!(
             unresolved.is_empty(),
             "test/ file should resolve src/ classes, got unresolved: {unresolved:?}"
+        );
+    }
+
+    /// BT-2910 (acceptance criterion): `beamtalk lint` must resolve a
+    /// dependency's exported protocol and public type alias — mirroring what
+    /// `beamtalk build` already does via `ResolvedDependency.protocol_infos`/
+    /// `.alias_infos` — while a dependency's `internal type` stays excluded.
+    ///
+    /// Sets up a two-package path-dependency fixture on disk: `producer`
+    /// exports a public `Status` alias, an `internal` `Secret` alias, and a
+    /// `Greetable` protocol; `consumer` depends on `producer` (path dep) and
+    /// references all three names without declaring any of them itself.
+    ///
+    /// `producer`'s ebin/provenance stamp is faked (mirroring
+    /// `commands::deps::mod::tests::create_dep_ebin_with_beam`) so
+    /// `ensure_deps_resolved`'s "deps are fresh" fast path
+    /// (`collect_fresh_deps` → `build_dep_class_index`, pure parsing, no
+    /// `erlc`) is used instead of a real compile — keeping this test fast
+    /// and runnable without an Erlang toolchain.
+    #[test]
+    #[allow(clippy::too_many_lines)] // Two-package fixture setup + assertions; splitting would obscure the flow
+    fn lint_resolves_dependency_protocol_and_public_alias_but_not_internal_alias() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = temp.path();
+
+        // Producer package: public Status alias, internal Secret alias,
+        // Greetable protocol.
+        let producer_dir = root.join("producer");
+        std::fs::create_dir_all(producer_dir.join("src")).unwrap();
+        std::fs::write(
+            producer_dir.join("beamtalk.toml"),
+            "[package]\nname = \"producer\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            producer_dir.join("src").join("types.bt"),
+            "type Status = #ok | #error\n\
+             internal type Secret = Integer\n\n\
+             Protocol define: Greetable\n  \
+             greet -> String\n",
+        )
+        .unwrap();
+
+        // Consumer package: depends on producer, references Status,
+        // Greetable, and Secret without declaring any of them.
+        let consumer_dir = root.join("consumer");
+        std::fs::create_dir_all(consumer_dir.join("src")).unwrap();
+        std::fs::write(
+            consumer_dir.join("beamtalk.toml"),
+            "[package]\nname = \"consumer\"\nversion = \"0.1.0\"\n\n\
+             [dependencies]\nproducer = { path = \"../producer\" }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            consumer_dir.join("src").join("consumer.bt"),
+            "Object subclass: Consumer\n  \
+             useStatus: s :: Status => s\n  \
+             useSecret: s :: Secret => s\n  \
+             greetableInfo => Greetable requiredMethods\n",
+        )
+        .unwrap();
+
+        let consumer_root = camino::Utf8PathBuf::from_path_buf(consumer_dir.clone()).unwrap();
+
+        // Fake the producer's compiled state, *relative to the consumer's
+        // own `_build/deps/producer/`* (`ensure_deps_resolved` is called
+        // with `consumer_root`, so that's where it looks for freshness) —
+        // so `ensure_deps_resolved` takes the fresh/no-recompile fast path
+        // (`collect_fresh_deps` → `build_dep_class_index`) instead of a real
+        // `erlc` compile, keeping this test fast and toolchain-independent.
+        let layout = crate::commands::build_layout::BuildLayout::new(&consumer_root);
+        let ebin_dir = layout.dep_ebin_dir("producer");
+        std::fs::create_dir_all(&ebin_dir).unwrap();
+        std::fs::write(ebin_dir.join("bt@producer@types.beam"), b"BEAM").unwrap();
+        crate::commands::build_stamp::write_stamp(
+            &layout.dep_stamp_path("producer"),
+            crate::commands::build_stamp::current_otp_version(),
+        );
+        let consumer_file = consumer_root.join("src").join("consumer.bt");
+        let source_files = vec![consumer_file.clone()];
+
+        // Mirrors `run_lint`'s own orchestration: extract same-package
+        // protocol/alias infos, then merge in the resolved dependency's.
+        let (
+            mut all_class_infos,
+            extension_index,
+            mut all_protocol_infos,
+            mut all_alias_infos,
+            parsed_files,
+        ) = parse_and_extract_class_infos(&source_files, Some(&consumer_root), Some("consumer"))
+            .unwrap();
+        merge_dependency_infos(
+            &consumer_root,
+            &mut all_class_infos,
+            &mut all_protocol_infos,
+            &mut all_alias_infos,
+        );
+
+        assert!(
+            all_protocol_infos.iter().any(|p| p.name == "Greetable"),
+            "producer's Greetable protocol should be merged in: {all_protocol_infos:?}"
+        );
+        assert!(
+            all_alias_infos
+                .iter()
+                .any(|a| a.name == "Status" && !a.is_internal),
+            "producer's public Status alias should be merged in: {all_alias_infos:?}"
+        );
+        // The internal Secret alias is *not* filtered out at this merge
+        // stage (`merge_dependency_infos`/`ResolvedDependency.alias_infos`
+        // carry every declaration, filtered or not) — the seeding-boundary
+        // exclusion happens downstream, inside `AliasRegistry::add_pre_loaded`
+        // when `collect_diagnostics` calls `analyse_with_natives_and_protocols_and_aliases`
+        // below. That exclusion logic itself is already covered by
+        // `add_pre_loaded_never_seeds_internal_alias_from_different_package`
+        // in `alias_registry.rs` (BT-2898); what this test proves is that the
+        // wiring correctly delivers `is_internal`/`package` all the way from
+        // `producer`'s source to `consumer`'s lint pass so that exclusion can
+        // actually engage.
+        let secret = all_alias_infos
+            .iter()
+            .find(|a| a.name == "Secret")
+            .expect("producer's Secret alias should be merged in (unfiltered at this stage)");
+        assert!(secret.is_internal, "Secret must be flagged internal");
+        assert_eq!(
+            secret.package.as_deref(),
+            Some("producer"),
+            "Secret must be stamped with producer's package name so the \
+             seeding-boundary check can tell it apart from consumer's own package"
+        );
+
+        let (file, _source, module, parse_diags) = parsed_files
+            .into_iter()
+            .find(|(f, ..)| *f == consumer_file)
+            .expect("consumer.bt should be among the parsed files");
+        assert_eq!(file, consumer_file);
+
+        let diags = collect_diagnostics(
+            &module,
+            parse_diags,
+            vec![], // no same-package cross-file classes
+            all_protocol_infos,
+            all_alias_infos,
+            None,
+            beamtalk_core::semantic_analysis::KnowledgeScope::ProjectComplete,
+            &extension_index,
+            true, // has_package_dependencies
+            Some("consumer"),
+        );
+
+        let unresolved_names: Vec<String> = diags
+            .iter()
+            .filter(|d| {
+                d.category
+                    == Some(beamtalk_core::source_analysis::DiagnosticCategory::UnresolvedClass)
+            })
+            .map(|d| d.message.to_string())
+            .collect();
+
+        assert!(
+            !unresolved_names.iter().any(|m| m.contains("Status")),
+            "dependency-exported Status alias should resolve, unresolved: {unresolved_names:?}"
+        );
+        assert!(
+            !unresolved_names.iter().any(|m| m.contains("Greetable")),
+            "dependency-exported Greetable protocol should resolve, unresolved: {unresolved_names:?}"
         );
     }
 
@@ -1044,6 +1280,8 @@ mod tests {
             &module,
             parse_diags,
             vec![],
+            vec![],
+            vec![],
             None,
             beamtalk_core::semantic_analysis::KnowledgeScope::default(),
             &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
@@ -1091,6 +1329,8 @@ mod tests {
         let diags = collect_diagnostics(
             &module,
             parse_diags,
+            vec![],
+            vec![],
             vec![],
             Some(std::sync::Arc::new(registry)),
             beamtalk_core::semantic_analysis::KnowledgeScope::default(),
@@ -1153,6 +1393,8 @@ mod tests {
         let diags = collect_diagnostics(
             &module,
             parse_diags,
+            vec![],
+            vec![],
             vec![],
             Some(std::sync::Arc::new(registry)),
             beamtalk_core::semantic_analysis::KnowledgeScope::default(),

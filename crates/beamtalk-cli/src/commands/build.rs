@@ -389,7 +389,17 @@ struct ClassIndexResult {
     /// during Pass 2. See `collect_project_alias_infos`'s doc for why this
     /// is a plain full scan rather than threaded through the incremental
     /// Pass 1 cache the way `all_class_infos` is.
+    ///
+    /// BT-2910: Merged with dependency-exported alias infos
+    /// (`ResolvedDependency.alias_infos`), so cross-package aliases (e.g.
+    /// stdlib's `JsonValue`) resolve the same way cross-package classes do.
     all_alias_infos: Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
+    /// BT-2910: Unified collection of all `ProtocolInfo` from same-package
+    /// cross-file protocol definitions and dependency-exported protocols,
+    /// mirroring `all_alias_infos`/`all_class_infos`. Protocols have no
+    /// `internal` modifier at the AST level, so every declared protocol
+    /// project-wide (and every dependency's) is included unconditionally.
+    all_protocol_infos: Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
     /// Project-wide standalone extension index from Pass 1 (BT-2795).
     extension_index: beamtalk_core::compilation::extension_index::ExtensionIndex,
     /// Dependency registry for cross-package collision detection.
@@ -477,9 +487,12 @@ fn build_class_index(
     let dep_registry =
         beamtalk_core::semantic_analysis::build_dependency_registry_with_graph(&dep_infos);
 
-    // Collect dependency ClassInfo separately, then merge with source ClassInfo
-    // via collect_all_class_infos (BT-1733).
+    // Collect dependency ClassInfo/ProtocolInfo/AliasInfo separately, then
+    // merge with source-side infos via the collect_all_* helpers (BT-1733,
+    // BT-2910).
     let mut dep_class_infos = Vec::new();
+    let mut dep_protocol_infos = Vec::new();
+    let mut dep_alias_infos = Vec::new();
     for dep in &dep_ctx.resolved_deps {
         for (class_name, module_name) in &dep.class_module_index {
             debug!(
@@ -491,6 +504,8 @@ fn build_class_index(
             class_module_index.insert(class_name.clone(), module_name.clone());
         }
         dep_class_infos.extend(dep.class_infos.clone());
+        dep_protocol_infos.extend(dep.protocol_infos.clone());
+        dep_alias_infos.extend(dep.alias_infos.clone());
     }
 
     // BT-1733: Single unified collection of all ClassInfo from all sources.
@@ -503,14 +518,28 @@ fn build_class_index(
         check_stdlib_reservations(&dep_registry)?;
     }
 
-    // BT-2928: Same-package cross-file type-alias resolution. Only runs for
-    // manifest-based package builds (matching `pre_loaded_classes`'s existing
-    // scope) — a manifest-less directory/single-file build has no package
-    // boundary and keeps today's same-file-only alias resolution. Dependency
-    // (cross-package) alias export is deferred — see the BT-2928 follow-up
-    // filed for `dependency_classes.rs`.
+    // BT-2928 / BT-2910: Same-package cross-file type-alias resolution,
+    // merged with dependency-exported aliases. Only runs for manifest-based
+    // package builds (matching `pre_loaded_classes`'s existing scope) — a
+    // manifest-less directory/single-file build has no package boundary and
+    // keeps today's same-file-only alias resolution.
     let all_alias_infos = match pkg_manifest {
-        Some(pkg) => collect_project_alias_infos(&env.source_files, &pkg.name),
+        Some(pkg) => collect_all_alias_infos(&[
+            &collect_project_alias_infos(&env.source_files, &pkg.name),
+            &dep_alias_infos,
+        ]),
+        None => Vec::new(),
+    };
+
+    // BT-2910: Same-package cross-file protocol resolution (didn't exist at
+    // all before this — real `build` always passed `Vec::new()`), merged
+    // with dependency-exported protocols. Scoped to manifest-based package
+    // builds like the alias/class collections above.
+    let all_protocol_infos = match pkg_manifest {
+        Some(_) => collect_all_protocol_infos(&[
+            &collect_project_protocol_infos(&env.source_files),
+            &dep_protocol_infos,
+        ]),
         None => Vec::new(),
     };
 
@@ -519,6 +548,7 @@ fn build_class_index(
         class_superclass_index,
         all_class_infos,
         all_alias_infos,
+        all_protocol_infos,
         extension_index,
         dep_registry,
         cached_asts,
@@ -795,7 +825,7 @@ fn execute_build_passes(
             class_module_index: index.class_module_index.clone(),
             class_superclass_index: index.class_superclass_index.clone(),
             pre_loaded_classes: index.all_class_infos.clone(),
-            pre_loaded_protocols: Vec::new(),
+            pre_loaded_protocols: index.all_protocol_infos.clone(),
             pre_loaded_aliases: index.all_alias_infos.clone(),
             extension_index: index.extension_index.clone(),
         },
@@ -1694,6 +1724,67 @@ pub(crate) fn collect_project_alias_infos(
         all_aliases.extend(infos);
     }
     all_aliases
+}
+
+/// Merge alias infos from multiple sources (same-package cross-file +
+/// dependency-exported) into one collection, mirroring `collect_all_class_infos`
+/// (BT-2910). A plain concatenation — collision diagnostics are handled by
+/// `AliasRegistry::add_pre_loaded`, not here.
+pub(crate) fn collect_all_alias_infos(
+    sources: &[&[beamtalk_core::semantic_analysis::alias_registry::AliasInfo]],
+) -> Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo> {
+    let total_len: usize = sources.iter().map(|s| s.len()).sum();
+    let mut result = Vec::with_capacity(total_len);
+    for source in sources {
+        result.extend_from_slice(source);
+    }
+    result
+}
+
+/// Extracts protocol declarations (`Protocol define: Name ...`) from every
+/// project source file, for same-package cross-file protocol resolution
+/// during Pass 2 (BT-2910).
+///
+/// Mirrors `collect_project_alias_infos`: a plain, uncached full scan rather
+/// than threaded through the incremental Pass 1 cache. Unlike `AliasInfo`,
+/// `ProtocolInfo` carries no `package` field to stamp — protocols have no
+/// `internal` modifier at the AST level, so every declared protocol is
+/// exported project-wide.
+///
+/// Parse errors on an individual file are non-fatal here: that file simply
+/// contributes no protocols to the merged set, and the same parse error is
+/// already reported through the normal Pass 1 diagnostics path.
+pub(crate) fn collect_project_protocol_infos(
+    source_files: &[Utf8PathBuf],
+) -> Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo> {
+    let mut all_protocols = Vec::new();
+    for file in source_files {
+        let Ok(source) = fs::read_to_string(file) else {
+            continue;
+        };
+        let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
+        let (module, _diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+        all_protocols.extend(
+            beamtalk_core::semantic_analysis::protocol_registry::ProtocolRegistry::extract_protocol_infos(
+                &module,
+            ),
+        );
+    }
+    all_protocols
+}
+
+/// Merge protocol infos from multiple sources (same-package cross-file +
+/// dependency-exported) into one collection, mirroring `collect_all_class_infos`
+/// / `collect_all_alias_infos` (BT-2910).
+pub(crate) fn collect_all_protocol_infos(
+    sources: &[&[beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo]],
+) -> Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo> {
+    let total_len: usize = sources.iter().map(|s| s.len()).sum();
+    let mut result = Vec::with_capacity(total_len);
+    for source in sources {
+        result.extend_from_slice(source);
+    }
+    result
 }
 
 // ── BT-1730: Class module header generation ─────────────────────────────────
@@ -3422,6 +3513,114 @@ mod tests {
         );
     }
 
+    /// BT-2910: `collect_project_protocol_infos`/`collect_all_protocol_infos`
+    /// and `collect_all_alias_infos` are the merge helpers `build_class_index`
+    /// uses to combine same-package cross-file protocol/alias metadata with
+    /// a dependency's exported protocol/alias metadata (`ResolvedDependency`).
+    /// This test exercises that merge directly — mirroring
+    /// `test_cross_file_alias_resolution_no_false_type_mismatch`'s pattern
+    /// for aliases, but for a *dependency-sourced* protocol and alias rather
+    /// than a same-package cross-file one — and confirms the merged sets,
+    /// once threaded through `pre_loaded_protocols`/`pre_loaded_aliases`,
+    /// let a consumer file resolve a protocol name and an alias-typed
+    /// annotation it never declares itself.
+    #[test]
+    fn dependency_protocol_and_alias_infos_merge_and_resolve() {
+        use beamtalk_core::semantic_analysis::alias_registry::AliasInfo;
+        use beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo;
+
+        let temp = TempDir::new().unwrap();
+        let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let src_path = project_path.join("src");
+        fs::create_dir_all(&src_path).unwrap();
+
+        // Consumer file: no protocol/alias declarations of its own, only a
+        // reference to a dependency-only protocol name and a parameter
+        // annotated with a dependency-only alias.
+        write_test_file(
+            &src_path.join("consumer.bt"),
+            "Object subclass: Consumer\n  \
+             useStatus: s :: Status => s\n  \
+             greetableInfo => Greetable requiredMethods\n",
+        );
+
+        let build_dir = project_path.join("_build/dev/ebin");
+        fs::create_dir_all(&build_dir).unwrap();
+
+        let source_files = vec![src_path.join("consumer.bt")];
+        let (class_module_index, class_superclass_index, all_class_infos, _extensions, _cached) =
+            build_class_module_index(&source_files, Some(&src_path), "test_pkg").unwrap();
+
+        // Same-package cross-file collections are empty here (single file,
+        // no protocol/alias declarations) — this test's focus is the
+        // dependency-sourced side of the merge.
+        let source_protocol_infos = collect_project_protocol_infos(&source_files);
+        let source_alias_infos = collect_project_alias_infos(&source_files, "test_pkg");
+        assert!(source_protocol_infos.is_empty());
+        assert!(source_alias_infos.is_empty());
+
+        // Simulate a resolved dependency exporting a `Greetable` protocol and
+        // a public `Status` alias (`ResolvedDependency.protocol_infos` /
+        // `.alias_infos`, as populated by `build_dep_class_index`).
+        let dep_protocol_infos = vec![ProtocolInfo {
+            name: "Greetable".into(),
+            type_params: vec![],
+            type_param_bounds: vec![],
+            extending: None,
+            methods: vec![],
+            class_methods: vec![],
+            span: beamtalk_core::source_analysis::Span::default(),
+        }];
+        let dep_alias_infos = vec![AliasInfo {
+            name: "Status".into(),
+            annotation: beamtalk_core::ast::TypeAnnotation::Simple(
+                beamtalk_core::ast::Identifier {
+                    name: "Symbol".into(),
+                    span: beamtalk_core::source_analysis::Span::default(),
+                },
+            ),
+            is_internal: false,
+            package: Some("dep_types".into()),
+            span: beamtalk_core::source_analysis::Span::default(),
+        }];
+
+        let all_protocol_infos =
+            collect_all_protocol_infos(&[&source_protocol_infos, &dep_protocol_infos]);
+        let all_alias_infos = collect_all_alias_infos(&[&source_alias_infos, &dep_alias_infos]);
+        assert_eq!(all_protocol_infos.len(), 1);
+        assert_eq!(all_alias_infos.len(), 1);
+
+        let core_file = build_dir.join("bt@test_pkg@consumer.core");
+        let options = default_options();
+        let diagnostics = compile_file(
+            &src_path.join("consumer.bt"),
+            "bt@test_pkg@consumer",
+            &core_file,
+            &options,
+            &CompileContext {
+                hierarchy: ClassHierarchyContext {
+                    class_module_index,
+                    class_superclass_index,
+                    pre_loaded_classes: all_class_infos,
+                    pre_loaded_protocols: all_protocol_infos,
+                    pre_loaded_aliases: all_alias_infos,
+                    ..ClassHierarchyContext::default()
+                },
+                ..CompileContext::default()
+            },
+            None,
+        )
+        .expect("Compiling with dependency-merged protocol/alias infos should succeed");
+
+        assert!(core_file.exists());
+        assert!(
+            diagnostics.iter().all(|d| d.category
+                != Some(beamtalk_core::source_analysis::DiagnosticCategory::UnresolvedClass)),
+            "Dependency-sourced Greetable/Status must not be reported unresolved \
+             once merged into pre_loaded_protocols/pre_loaded_aliases, got: {diagnostics:?}"
+        );
+    }
+
     /// BT-2932: cross-module `AliasRegistry` wiring into codegen — the
     /// codegen counterpart of `test_cross_file_alias_resolution_no_false_type_mismatch`
     /// above. File A declares `type Direction = ...`; file B has no alias
@@ -3969,6 +4168,8 @@ mod tests {
             ebin_path: dep_root.join("ebin"),
             class_module_index: HashMap::new(),
             class_infos: Vec::new(),
+            protocol_infos: Vec::new(),
+            alias_infos: Vec::new(),
             is_direct: true,
             via_chain: Vec::new(),
         }];
@@ -4030,6 +4231,8 @@ mod tests {
                 ebin_path: first_root.join("ebin"),
                 class_module_index: HashMap::new(),
                 class_infos: Vec::new(),
+                protocol_infos: Vec::new(),
+                alias_infos: Vec::new(),
                 is_direct: true,
                 via_chain: Vec::new(),
             },
@@ -4039,6 +4242,8 @@ mod tests {
                 ebin_path: second_root.join("ebin"),
                 class_module_index: HashMap::new(),
                 class_infos: Vec::new(),
+                protocol_infos: Vec::new(),
+                alias_infos: Vec::new(),
                 is_direct: true,
                 via_chain: Vec::new(),
             },
@@ -4097,6 +4302,8 @@ mod tests {
             ebin_path: dep_root.join("ebin"),
             class_module_index: HashMap::new(),
             class_infos: Vec::new(),
+            protocol_infos: Vec::new(),
+            alias_infos: Vec::new(),
             is_direct: true,
             via_chain: Vec::new(),
         }];
@@ -4547,6 +4754,8 @@ mod tests {
             ebin_path: Utf8PathBuf::from_path_buf(root.join(name).join("ebin")).unwrap(),
             class_module_index: std::collections::HashMap::new(),
             class_infos: Vec::new(),
+            protocol_infos: Vec::new(),
+            alias_infos: Vec::new(),
             is_direct: true,
             via_chain: Vec::new(),
         }
