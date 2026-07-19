@@ -541,8 +541,12 @@ pub(in crate::semantic_analysis) fn super_receiver_type(
             // generics (`List(Integer)`), unions (`Integer | Nil`), and `Nil`
             // keyword aliases canonicalise correctly instead of becoming an
             // opaque `Known("List(Integer)")`.
+            // No alias registry threaded here (BT-2928 follow-up) — this
+            // free function's callers don't have one in scope; an
+            // alias-typed `extends Base(SomeAlias)` type arg falls back to
+            // an opaque nominal class, same as before this fix.
             SuperclassTypeArg::Concrete { type_name } => {
-                super::TypeChecker::resolve_type_name_string(type_name)
+                super::TypeChecker::resolve_type_name_string(type_name, None)
             }
         })
         .collect();

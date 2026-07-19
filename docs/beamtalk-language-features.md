@@ -1329,6 +1329,26 @@ Generates:
 
 Unresolved type parameters map to `any()` in Dialyzer specs.
 
+**Named type alias emission.** When a module declares `type` aliases (ADR 0108), codegen emits matching named Erlang `-type` attributes into the compiled module. Method annotations referencing an alias name emit `user_type` references in their `-spec` attributes instead of `any()`:
+
+```beamtalk
+type Timeout = Integer | #infinity
+
+Actor subclass: Worker
+  run: t :: Timeout => // ...
+```
+
+Generates:
+
+```erlang
+-type 'Timeout'() :: integer() | 'infinity'.
+-spec run('Timeout'()) -> any().
+```
+
+(The bare `('Timeout'())` form omits the parameter name — both it and the named form `(T :: 'Timeout'())` are valid Erlang specs; codegen emits the bare form, matching typical `erlc` output.)
+
+Cross-package alias references (an annotation referencing an alias exported by a dependency) are not yet resolved in codegen — they still fall through to `any()`.
+
 ### REPL Type Display
 
 The REPL displays generic type information when available:
@@ -1789,6 +1809,8 @@ type Pub = Priv | String
 - Aliases may reference other aliases; a reference cycle — including self-reference — is a compile error at declaration time (`type Ab = Bc | Integer` / `type Bc = Ab | Symbol` → `type alias cycle: 'Ab' → 'Bc' → 'Ab'`).
 - Parametric aliases (`type Option(T) = T | Nil`) and recursive aliases (`type JsonValue = ... | List(JsonValue)`) are **not yet supported** — both need deferred (lazy) resolution in place of the eager expansion aliases use today. `type Name(...) = ...` is reserved syntax for the future parametric form.
 - Doc comments (`///`) above a `type` declaration are preserved and shown by `:help <Alias>` and LSP hover.
+
+**Erlang interop.** Codegen emits a named Erlang `-type` attribute for each alias declared in a module, and method `-spec` attributes reference it via `user_type` instead of expanding to `any()`. Erlang/Elixir consumers of a compiled Beamtalk module see idiomatic Dialyzer types (e.g. `-type 'Timeout'() :: integer() | 'infinity'.`). See [Dialyzer Spec Generation](#dialyzer-spec-generation) for details.
 
 **Tooling.** The LSP offers completions, go-to-definition, find-references, and hover for alias names in `.bt` files. In the REPL, `type` declarations are accepted as input and persist for the rest of the session; declaring `type Direction = ...` at the prompt echoes the declared name (`=> Direction`), the same convention a class declaration echoes (`Actor subclass: Counter` → `Counter`); `:help <Alias>` renders the declaration, its expansion, and any doc comment. The System Browser and the VS Code Workspace Explorer sidebar list declared aliases in a "Type Aliases" section alongside Classes and Protocols. See [`docs/development/surface-parity.md`](development/surface-parity.md) for the full cross-surface matrix.
 

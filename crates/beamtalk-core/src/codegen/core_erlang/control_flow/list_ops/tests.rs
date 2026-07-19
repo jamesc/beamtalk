@@ -2155,3 +2155,319 @@ fn test_collect_wrong_arity_block_is_compile_error() {
         "collect: with a 0-arg block must be a compile-time BlockArityError. Got: {result:?}"
     );
 }
+
+// ── BT-2413: transform ops nested inside a direct-params to:do: loop ─────────
+//
+// Each of the seven remaining transform operations (count:, flatMap:,
+// inject:into:, takeWhile:, dropWhile:, partition:, groupBy:) has an
+// `in_direct_params_loop=true` branch that skips the StateAcc repack and emits
+// an open let-chain so variable rebindings escape to the outer to:do: scope.
+// The existing BT-2561/BT-1329 series covers the search and filter/basic ops;
+// these tests cover the remaining transform_ops.rs paths.
+
+#[test]
+fn test_count_nested_in_direct_params_loop() {
+    // count: with a local mutation nested inside a direct-params to:do: loop.
+    // in_direct_params_loop=true causes generate_list_count_with_mutations to
+    // skip the StateAcc repack and emit an open let-chain (transform_ops.rs:131).
+    let src = concat!(
+        "Actor subclass: Ctr\n",
+        "  state: x = 0\n\n",
+        "  run: items =>\n",
+        "    count := 0\n",
+        "    seen := 0\n",
+        "    1 to: 3 do: [:i |\n",
+        "      count := count + 1\n",
+        "      items count: [:item | seen := seen + 1. item > 0]\n",
+        "    ]\n",
+        "    count\n",
+    );
+    let code = codegen(src);
+    assert!(
+        code.contains("letrec"),
+        "Outer to:do: should generate a letrec. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'lists':'foldl'"),
+        "count: with local mutation should use lists:foldl. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'lists':'filter'"),
+        "Mutation-threaded count: must NOT use lists:filter. Got:\n{code}"
+    );
+    assert!(
+        code.contains("ExitSA"),
+        "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_flat_map_nested_in_direct_params_loop() {
+    // flatMap: with a local mutation nested inside a direct-params to:do: loop.
+    // in_direct_params_loop=true causes generate_list_flat_map_with_mutations to
+    // skip the StateAcc repack; the branch also emits lists:reverse + lists:append
+    // to reconstruct the flattened result (transform_ops.rs:358).
+    let src = concat!(
+        "Actor subclass: Ctr\n",
+        "  state: x = 0\n\n",
+        "  run: items =>\n",
+        "    count := 0\n",
+        "    seen := 0\n",
+        "    1 to: 3 do: [:i |\n",
+        "      count := count + 1\n",
+        "      items flatMap: [:item | seen := seen + 1. #(item, item)]\n",
+        "    ]\n",
+        "    count\n",
+    );
+    let code = codegen(src);
+    assert!(
+        code.contains("letrec"),
+        "Outer to:do: should generate a letrec. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'lists':'foldl'"),
+        "flatMap: with local mutation should use lists:foldl. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'lists':'flatmap'"),
+        "Mutation-threaded flatMap: must NOT use lists:flatmap. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'lists':'reverse'"),
+        "flatMap: in direct-params loop should reverse the accumulated result. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'lists':'append'"),
+        "flatMap: in direct-params loop should flatten via lists:append. Got:\n{code}"
+    );
+    assert!(
+        code.contains("ExitSA"),
+        "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_inject_nested_in_direct_params_loop() {
+    // inject:into: with a local mutation nested inside a direct-params to:do: loop.
+    // in_direct_params_loop=true causes generate_list_inject_with_mutations to skip
+    // the StateAcc repack and emit an open let-chain (transform_ops.rs:670).
+    let src = concat!(
+        "Actor subclass: Ctr\n",
+        "  state: x = 0\n\n",
+        "  run: items =>\n",
+        "    count := 0\n",
+        "    seen := 0\n",
+        "    1 to: 3 do: [:i |\n",
+        "      count := count + 1\n",
+        "      items inject: 0 into: [:acc :item | seen := seen + 1. acc + item]\n",
+        "    ]\n",
+        "    count\n",
+    );
+    let code = codegen(src);
+    assert!(
+        code.contains("letrec"),
+        "Outer to:do: should generate a letrec. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'lists':'foldl'"),
+        "inject:into: with local mutation should use lists:foldl. Got:\n{code}"
+    );
+    assert!(
+        code.contains("ExitSA"),
+        "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_take_while_nested_in_direct_params_loop() {
+    // takeWhile: with a local mutation nested inside a direct-params to:do: loop.
+    // in_direct_params_loop=true causes generate_list_take_while_with_mutations to
+    // skip the StateAcc repack; the branch reverses the accumulated result list
+    // (transform_ops.rs:920).
+    let src = concat!(
+        "Actor subclass: Ctr\n",
+        "  state: x = 0\n\n",
+        "  run: items =>\n",
+        "    count := 0\n",
+        "    seen := 0\n",
+        "    1 to: 3 do: [:i |\n",
+        "      count := count + 1\n",
+        "      items takeWhile: [:item | seen := seen + 1. item > 0]\n",
+        "    ]\n",
+        "    count\n",
+    );
+    let code = codegen(src);
+    assert!(
+        code.contains("letrec"),
+        "Outer to:do: should generate a letrec. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'lists':'foldl'"),
+        "takeWhile: with local mutation should use lists:foldl. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'lists':'takewhile'"),
+        "Mutation-threaded takeWhile: must NOT use lists:takewhile. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'lists':'reverse'"),
+        "takeWhile: in direct-params loop should reverse the accumulated result. Got:\n{code}"
+    );
+    assert!(
+        code.contains("ExitSA"),
+        "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_drop_while_nested_in_direct_params_loop() {
+    // dropWhile: with a local mutation nested inside a direct-params to:do: loop.
+    // in_direct_params_loop=true causes generate_list_drop_while_with_mutations to
+    // skip the StateAcc repack; the branch reverses the accumulated result list
+    // (transform_ops.rs:1170).
+    let src = concat!(
+        "Actor subclass: Ctr\n",
+        "  state: x = 0\n\n",
+        "  run: items =>\n",
+        "    count := 0\n",
+        "    seen := 0\n",
+        "    1 to: 3 do: [:i |\n",
+        "      count := count + 1\n",
+        "      items dropWhile: [:item | seen := seen + 1. item > 0]\n",
+        "    ]\n",
+        "    count\n",
+    );
+    let code = codegen(src);
+    assert!(
+        code.contains("letrec"),
+        "Outer to:do: should generate a letrec. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'lists':'foldl'"),
+        "dropWhile: with local mutation should use lists:foldl. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'lists':'dropwhile'"),
+        "Mutation-threaded dropWhile: must NOT use lists:dropwhile. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'lists':'reverse'"),
+        "dropWhile: in direct-params loop should reverse the accumulated result. Got:\n{code}"
+    );
+    assert!(
+        code.contains("ExitSA"),
+        "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_partition_nested_in_direct_params_loop() {
+    // partition: with a local mutation nested inside a direct-params to:do: loop.
+    // in_direct_params_loop=true causes generate_list_partition_with_mutations to
+    // skip the StateAcc repack and emit an open let-chain that extracts two reversed
+    // sublists from the fold result (transform_ops.rs:1425).
+    let src = concat!(
+        "Actor subclass: Ctr\n",
+        "  state: x = 0\n\n",
+        "  run: items =>\n",
+        "    count := 0\n",
+        "    seen := 0\n",
+        "    1 to: 3 do: [:i |\n",
+        "      count := count + 1\n",
+        "      items partition: [:item | seen := seen + 1. item > 0]\n",
+        "    ]\n",
+        "    count\n",
+    );
+    let code = codegen(src);
+    assert!(
+        code.contains("letrec"),
+        "Outer to:do: should generate a letrec. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'lists':'foldl'"),
+        "partition: with local mutation should use lists:foldl. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'lists':'reverse'"),
+        "partition: in direct-params loop should reverse both sublists. Got:\n{code}"
+    );
+    assert!(
+        code.contains("ExitSA"),
+        "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_group_by_nested_in_direct_params_loop() {
+    // groupBy: with a local mutation nested inside a direct-params to:do: loop.
+    // in_direct_params_loop=true causes generate_list_group_by_with_mutations to
+    // skip the StateAcc repack; the branch still calls beamtalk_list:reverse_group_values
+    // to finalise the accumulated map (transform_ops.rs:1720).
+    let src = concat!(
+        "Actor subclass: Ctr\n",
+        "  state: x = 0\n\n",
+        "  run: items =>\n",
+        "    count := 0\n",
+        "    seen := 0\n",
+        "    1 to: 3 do: [:i |\n",
+        "      count := count + 1\n",
+        "      items groupBy: [:item | seen := seen + 1. item > 0]\n",
+        "    ]\n",
+        "    count\n",
+    );
+    let code = codegen(src);
+    assert!(
+        code.contains("letrec"),
+        "Outer to:do: should generate a letrec. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'lists':'foldl'"),
+        "groupBy: with local mutation should use lists:foldl. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'beamtalk_list':'reverse_group_values'"),
+        "groupBy: in direct-params loop should call reverse_group_values. Got:\n{code}"
+    );
+    assert!(
+        code.contains("ExitSA"),
+        "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
+    );
+}
+
+// ── sort: local-variable mutation via generate_list_sort_with_mutations ──────
+//
+// Not a direct-params-loop test (no to:do: nesting) — exercises the
+// `is_local_var_assignment` branch of generate_list_sort_with_mutations directly.
+
+#[test]
+fn test_sort_with_local_mutation_uses_process_dict() {
+    // sort: with a LOCAL VARIABLE mutation (not a field mutation) inside the
+    // comparator block. This exercises the `is_local_var_assignment` branch in
+    // generate_list_sort_with_mutations (transform_ops.rs:1998), which calls
+    // generate_local_var_assignment_in_loop instead of generate_field_assignment_open.
+    // The local var is threaded via maps:put with key '__local__n' (not bare 'n').
+    //
+    // KNOWN LIMITATION (BT-2948): the process-dict key '$bt_sort_state' is fixed,
+    // not unique per call site. Nested mutating sort: calls in the same process
+    // can stomp each other's state — this test blesses only the single-call case.
+    let src = concat!(
+        "Actor subclass: Ctr\n",
+        "  state: x = 0\n\n",
+        "  run: items =>\n",
+        "    n := 0\n",
+        "    items sort: [:a :b | n := n + 1. a < b]\n",
+    );
+    let code = codegen(src);
+    assert!(
+        code.contains("'lists':'sort'"),
+        "sort: with local mutation should use lists:sort. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'$bt_sort_state'"),
+        "sort: should use process dictionary with '$bt_sort_state' key. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'__local__n'"),
+        "sort: local var mutation should thread '__local__n' via maps:put. Got:\n{code}"
+    );
+}

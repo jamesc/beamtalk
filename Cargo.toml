@@ -6,6 +6,13 @@ resolver = "2"
 members = ["crates/*", "crates/beamtalk-examples/build-corpus", "test-package-compiler"]
 exclude = ["fuzz"]
 
+[profile.dev]
+debug = "line-tables-only"
+split-debuginfo = "unpacked"
+
+[profile.release]
+strip = "debuginfo"
+
 [workspace.package]
 # Keep in sync with VERSION file at repo root
 version = "0.4.0"

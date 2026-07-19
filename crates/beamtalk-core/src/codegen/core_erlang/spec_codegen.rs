@@ -557,16 +557,27 @@ fn generate_alias_type_attr(
 /// [`generate_class_specs`] / [`format_spec_attributes`]'s shape for
 /// `'spec'` entries.
 ///
-/// Not yet called from the module-level codegen drivers (`actor_codegen.rs`,
-/// `value_type_codegen.rs`, `supervisor_codegen.rs`) — see the `BT-2900`
-/// comments at their `generate_class_specs`/`generate_type_alias` call
-/// sites. Wiring this in requires also emitting these attributes into every
-/// class module that could reference the alias (a `user_type` reference to
-/// an undeclared type is an `erlc` compile error, not just a Dialyzer
-/// warning), which is a bigger, riskier change than this function itself;
-/// tracked as follow-up. This function and its unit tests establish the
-/// emission is correct in isolation.
-#[allow(dead_code)]
+/// Called from the module-level codegen drivers (`actor_codegen.rs`,
+/// `value_type_codegen.rs`, `supervisor_codegen.rs`,
+/// `gen_server/native_facade.rs`; ADR 0108, BT-2909) alongside `Some(registry)`
+/// at their `generate_class_specs`/`generate_method_spec`/`generate_type_alias`
+/// call sites — every class module that could contain a `user_type` reference
+/// must declare the corresponding named `-type` in the same module attribute
+/// list, since a reference to an undeclared type is an `erlc` compile error,
+/// not just a Dialyzer warning.
+///
+/// Emits a `-type` for every name in `aliases` (BT-2932), not only the ones
+/// this module's own specs actually reference — since (BT-2932) `aliases` is
+/// the full pre-loaded registry seeded from every source file in the
+/// compilation unit, a module using one cross-module alias still declares
+/// `-type` attributes for all of them. This is correctness-safe (extra
+/// `-type` declarations are valid metadata, and the registry is
+/// self-consistent, so no undeclared-type `erlc` error results) but grows
+/// each compiled module's attribute list with the full project's alias
+/// count rather than just what it uses. Tracking which names are actually
+/// touched during `generate_class_specs`/`generate_method_spec` and scoping
+/// emission to those would need a second pass or accumulator — deferred
+/// until this proves costly at real project scale.
 pub fn generate_alias_type_attrs(aliases: &AliasRegistry) -> Vec<Document<'static>> {
     let mut names: Vec<&EcoString> = aliases.alias_names().collect();
     names.sort_unstable();
@@ -589,8 +600,6 @@ pub fn generate_alias_type_attrs(aliases: &AliasRegistry) -> Vec<Document<'stati
 /// [`format_spec_attributes`]'s join shape (`,\n     ` between entries) since
 /// both are lists of `Key = [...]` module attribute blocks.
 ///
-/// Not yet called in production — see [`generate_alias_type_attrs`].
-#[allow(dead_code)]
 pub fn format_alias_type_attributes(
     alias_types: &[Document<'static>],
 ) -> Option<Document<'static>> {

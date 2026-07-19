@@ -340,6 +340,76 @@ impl AliasRegistry {
         diagnostics
     }
 
+    /// Builds an alias registry directly from a module's parsed type-alias
+    /// declarations, with no validation (ADR 0108, BT-2909).
+    ///
+    /// Unlike [`register_module`](Self::register_module), this constructor
+    /// does not check for namespace collisions, duplicate definitions,
+    /// unbound type variables, or reference cycles — it is for **codegen**
+    /// consumption only. By the time a module reaches codegen it has already
+    /// passed semantic analysis (including `register_module`'s diagnostics),
+    /// so codegen only needs the name → annotation map to resolve
+    /// [`TypeAnnotation::Simple`] references to `user_type` forms (see
+    /// `codegen::core_erlang::spec_codegen::type_annotation_to_spec`); it
+    /// does not need to re-run those checks.
+    ///
+    /// A duplicate name in `module.type_aliases` (which should be
+    /// unreachable post-semantic-analysis, since `register_module` would
+    /// have already rejected it) keeps the first definition, mirroring
+    /// `register_module`'s "first definition wins" behaviour.
+    #[must_use]
+    pub fn from_module_declarations(module: &Module) -> Self {
+        let mut aliases = HashMap::new();
+        for alias_def in &module.type_aliases {
+            aliases
+                .entry(alias_def.name.name.clone())
+                .or_insert_with(|| AliasInfo::from_definition(alias_def));
+        }
+        Self {
+            aliases,
+            reported_cycles: std::collections::HashSet::new(),
+        }
+    }
+
+    /// Builds an alias registry from a module's own declarations, extended
+    /// with pre-loaded aliases from other modules in the same compilation
+    /// unit (ADR 0108, BT-2932) — the **codegen**-only counterpart of
+    /// [`Self::add_pre_loaded`].
+    ///
+    /// Like [`Self::from_module_declarations`], this constructor runs no
+    /// validation (no namespace-collision, duplicate-name, or
+    /// package-boundary `internal`-visibility checks): by the time a module
+    /// reaches codegen, semantic analysis has already run
+    /// [`Self::register_module`] and [`Self::add_pre_loaded`] against the
+    /// full package (which *do* run those checks), so any name that
+    /// survived to codegen is already known-good — codegen only needs the
+    /// name → annotation map to resolve [`TypeAnnotation::Simple`]
+    /// references to `user_type` forms (see
+    /// `codegen::core_erlang::spec_codegen::type_annotation_to_spec`).
+    ///
+    /// A pre-loaded alias never overrides a same-named module-local
+    /// declaration — mirrors `add_pre_loaded`'s `entry(..).or_insert(..)`
+    /// "first (module-local) definition wins" behaviour. This matters
+    /// because callers (e.g. `ClassHierarchyContext::pre_loaded_aliases`)
+    /// typically populate `pre_loaded_aliases` from *every* source file in
+    /// the compilation unit, including the one currently being compiled —
+    /// so the module's own duplicate entry in that list is a silent no-op
+    /// rather than something the caller needs to filter out first.
+    #[must_use]
+    pub fn from_module_declarations_with_pre_loaded(
+        module: &Module,
+        pre_loaded_aliases: &[AliasInfo],
+    ) -> Self {
+        let mut registry = Self::from_module_declarations(module);
+        for info in pre_loaded_aliases {
+            registry
+                .aliases
+                .entry(info.name.clone())
+                .or_insert_with(|| info.clone());
+        }
+        registry
+    }
+
     /// Extract `AliasInfo` entries from a parsed module without registering them.
     ///
     /// BT-2898: Mirrors `ProtocolRegistry::extract_protocol_infos` /

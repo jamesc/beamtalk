@@ -41,6 +41,7 @@ Module {
                             comments: CommentAttachment {
                                 leading: [],
                                 trailing: None,
+                                leading_blank_line: false,
                             },
                             expression: Primitive {
                                 name: "size",
@@ -74,6 +75,7 @@ Module {
                             },
                         ],
                         trailing: None,
+                        leading_blank_line: true,
                     },
                     doc_comment: None,
                     span: Span {
@@ -110,6 +112,7 @@ Module {
                             comments: CommentAttachment {
                                 leading: [],
                                 trailing: None,
+                                leading_blank_line: false,
                             },
                             expression: Primitive {
                                 name: "at:",
@@ -133,6 +136,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [],
                         trailing: None,
+                        leading_blank_line: false,
                     },
                     doc_comment: None,
                     span: Span {
@@ -150,6 +154,7 @@ Module {
                             comments: CommentAttachment {
                                 leading: [],
                                 trailing: None,
+                                leading_blank_line: false,
                             },
                             expression: Primitive {
                                 name: "isOk",
@@ -183,6 +188,7 @@ Module {
                             },
                         ],
                         trailing: None,
+                        leading_blank_line: true,
                     },
                     doc_comment: None,
                     span: Span {
@@ -200,6 +206,7 @@ Module {
                             comments: CommentAttachment {
                                 leading: [],
                                 trailing: None,
+                                leading_blank_line: false,
                             },
                             expression: Primitive {
                                 name: "isError",
@@ -223,6 +230,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [],
                         trailing: None,
+                        leading_blank_line: false,
                     },
                     doc_comment: None,
                     span: Span {
@@ -240,6 +248,7 @@ Module {
                             comments: CommentAttachment {
                                 leading: [],
                                 trailing: None,
+                                leading_blank_line: false,
                             },
                             expression: Primitive {
                                 name: "unwrap",
@@ -273,6 +282,7 @@ Module {
                             },
                         ],
                         trailing: None,
+                        leading_blank_line: true,
                     },
                     doc_comment: None,
                     span: Span {
@@ -309,6 +319,7 @@ Module {
                             comments: CommentAttachment {
                                 leading: [],
                                 trailing: None,
+                                leading_blank_line: false,
                             },
                             expression: Primitive {
                                 name: "unwrapOr:",
@@ -332,6 +343,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [],
                         trailing: None,
+                        leading_blank_line: false,
                     },
                     doc_comment: None,
                     span: Span {
@@ -368,6 +380,7 @@ Module {
                             comments: CommentAttachment {
                                 leading: [],
                                 trailing: None,
+                                leading_blank_line: false,
                             },
                             expression: Primitive {
                                 name: "unwrapOrElse:",
@@ -391,6 +404,7 @@ Module {
                     comments: CommentAttachment {
                         leading: [],
                         trailing: None,
+                        leading_blank_line: false,
                     },
                     doc_comment: None,
                     span: Span {
@@ -408,6 +422,7 @@ Module {
                             comments: CommentAttachment {
                                 leading: [],
                                 trailing: None,
+                                leading_blank_line: false,
                             },
                             expression: Primitive {
                                 name: "asString",
@@ -441,6 +456,7 @@ Module {
                             },
                         ],
                         trailing: None,
+                        leading_blank_line: true,
                     },
                     doc_comment: None,
                     span: Span {
@@ -500,6 +516,7 @@ Module {
                     },
                 ],
                 trailing: None,
+                leading_blank_line: false,
             },
             doc_comment: None,
             backing_module: None,

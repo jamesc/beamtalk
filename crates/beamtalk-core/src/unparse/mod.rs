@@ -320,6 +320,29 @@ fn unparse_method_display_signature_doc(method: &MethodDefinition) -> Document<'
 
 // --- Document builders (pub(crate) for testing) ---
 
+/// One of the three top-level declaration kinds that can appear in a
+/// [`Module`] outside of standalone methods and expressions.
+///
+/// Used only by [`unparse_module_doc`] to interleave classes, protocols, and
+/// type aliases back into their original source order (BT-2907) rather than
+/// grouping them by kind.
+enum TopLevelDecl<'a> {
+    Class(&'a ClassDefinition),
+    Protocol(&'a ProtocolDefinition),
+    TypeAlias(&'a TypeAliasDefinition),
+}
+
+impl TopLevelDecl<'_> {
+    /// Whether a blank line preceded this declaration in the source (BT-2929).
+    fn preceding_blank_line(&self) -> bool {
+        match self {
+            Self::Class(class) => class.comments.leading_blank_line,
+            Self::Protocol(protocol) => protocol.comments.leading_blank_line,
+            Self::TypeAlias(type_alias) => type_alias.comments.leading_blank_line,
+        }
+    }
+}
+
 /// Builds a [`Document`] for a [`Module`].
 #[must_use]
 pub(crate) fn unparse_module_doc(module: &Module) -> Document<'static> {
@@ -331,21 +354,39 @@ pub(crate) fn unparse_module_doc(module: &Module) -> Document<'static> {
         docs.push(line());
     }
 
-    // ADR 0108 Phase 1: Type alias definitions
-    for type_alias in &module.type_aliases {
-        docs.push(unparse_type_alias_definition(type_alias));
-        docs.push(line());
-    }
+    // Classes, protocols, and type aliases (ADR 0068 Phase 2a, ADR 0108 Phase 1)
+    // are interleaved back into their original source order (BT-2907) rather
+    // than grouped by kind — a `type` alias declared after a class must stay
+    // after that class on a format round-trip. `sort_by_key` is a stable
+    // sort, so declarations that legitimately share a start offset
+    // (shouldn't happen for top-level decls) keep this append order:
+    // classes, then protocols, then type aliases.
+    let mut top_level_decls: Vec<TopLevelDecl<'_>> = Vec::new();
+    top_level_decls.extend(module.classes.iter().map(TopLevelDecl::Class));
+    top_level_decls.extend(module.protocols.iter().map(TopLevelDecl::Protocol));
+    top_level_decls.extend(module.type_aliases.iter().map(TopLevelDecl::TypeAlias));
+    top_level_decls.sort_by_key(|decl| match decl {
+        TopLevelDecl::Class(class) => class.span.start(),
+        TopLevelDecl::Protocol(protocol) => protocol.span.start(),
+        TopLevelDecl::TypeAlias(type_alias) => type_alias.span.start(),
+    });
 
-    // ADR 0068 Phase 2a: Protocol definitions
-    for protocol in &module.protocols {
-        docs.push(unparse_protocol_definition(protocol));
-        docs.push(line());
-    }
-
-    // Classes
-    for class in &module.classes {
-        docs.push(unparse_class_definition(class));
+    for (i, decl) in top_level_decls.into_iter().enumerate() {
+        // BT-2929: re-emit the blank line the author placed between this
+        // declaration and the previous one. Skipped for the first
+        // declaration in the section — a blank line there (before the very
+        // first top-level declaration) is dropped, same as pre-existing
+        // behaviour; we only preserve inter-declaration gaps.
+        if i > 0 && decl.preceding_blank_line() {
+            docs.push(line());
+        }
+        match decl {
+            TopLevelDecl::Class(class) => docs.push(unparse_class_definition(class)),
+            TopLevelDecl::Protocol(protocol) => docs.push(unparse_protocol_definition(protocol)),
+            TopLevelDecl::TypeAlias(type_alias) => {
+                docs.push(unparse_type_alias_definition(type_alias));
+            }
+        }
         docs.push(line());
     }
 
@@ -594,13 +635,23 @@ fn unparse_type_alias_definition(type_alias: &TypeAliasDefinition) -> Document<'
     } else {
         Document::Nil
     };
-    docs.push(docvec![
+    let header = docvec![
         internal_prefix,
         "type ",
         leaf::ident(&type_alias.name.name),
         " = ",
         unparse_type_annotation(&type_alias.annotation),
-    ]);
+    ];
+
+    // Trailing end-of-line comment on the declaration line, e.g.
+    // `type Port = Integer // comment` (BT-2906).
+    let header = if let Some(trail) = &type_alias.comments.trailing {
+        docvec![header, "  ", unparse_comment(trail)]
+    } else {
+        header
+    };
+
+    docs.push(header);
 
     concat(docs)
 }
@@ -655,6 +706,15 @@ fn unparse_protocol_definition(protocol: &ProtocolDefinition) -> Document<'stati
 
     docs.push(Document::Vec(header));
 
+    // Trailing end-of-line comment on the declaration header line, e.g.
+    // `Protocol define: Sortable // comment` (BT-2906). Emitted right after
+    // the header, matching where the parser collects it — before
+    // `extending:`/the body, which start on their own indented lines.
+    if let Some(trail) = &protocol.comments.trailing {
+        docs.push(Document::Str("  "));
+        docs.push(unparse_comment(trail));
+    }
+
     // `extending: ParentProtocol`
     if let Some(ext) = &protocol.extending {
         docs.push(line());
@@ -695,6 +755,16 @@ fn unparse_protocol_method_signature(
     prefix: Option<&'static str>,
 ) -> Document<'static> {
     let mut docs: Vec<Document<'static>> = Vec::new();
+
+    // Non-doc leading comments
+    docs.extend(unparse_comment_attachment_leading(&sig.comments));
+
+    // Blank line between a preserved, earlier `///` block that broke away
+    // from a different declaration (BT-2924) and this signature's own doc
+    // comment — see `leading_ends_with_orphaned_doc_comment`.
+    if leading_ends_with_orphaned_doc_comment(&sig.comments) {
+        docs.push(line());
+    }
 
     // Doc comment
     if let Some(doc) = &sig.doc_comment {
@@ -2232,6 +2302,7 @@ mod tests {
             comments: CommentAttachment {
                 leading: vec![Comment::line("This is 42", span())],
                 trailing: None,
+                leading_blank_line: false,
             },
             expression: Expression::Literal(Literal::Integer(42), span()),
             preceding_blank_line: false,
@@ -2246,6 +2317,7 @@ mod tests {
             comments: CommentAttachment {
                 leading: Vec::new(),
                 trailing: Some(Comment::line("trailing", span())),
+                leading_blank_line: false,
             },
             expression: Expression::Literal(Literal::Integer(1), span()),
             preceding_blank_line: false,
@@ -2260,6 +2332,7 @@ mod tests {
             comments: CommentAttachment {
                 leading: vec![Comment::line("before", span())],
                 trailing: Some(Comment::line("after", span())),
+                leading_blank_line: false,
             },
             expression: Expression::Literal(Literal::Integer(99), span()),
             preceding_blank_line: false,
@@ -2300,6 +2373,7 @@ mod tests {
         method.comments = CommentAttachment {
             leading: vec![Comment::line("Returns the current value", span())],
             trailing: None,
+            leading_blank_line: false,
         };
         let output = unparse_method_definition(&method).to_pretty_string();
         assert_eq!(output, "// Returns the current value\ngetValue => 0");
@@ -2601,6 +2675,7 @@ mod tests {
             comments: CommentAttachment {
                 leading: vec![Comment::line("the result", span())],
                 trailing: None,
+                leading_blank_line: false,
             },
             expression: Expression::Identifier(Identifier::new("x", span())),
             preceding_blank_line: false,
@@ -2666,6 +2741,7 @@ mod tests {
             comments: CommentAttachment {
                 leading: vec![Comment::line("do the thing", span())],
                 trailing: None,
+                leading_blank_line: false,
             },
             expression: Expression::Identifier(Identifier::new("x", span())),
             preceding_blank_line: false,
@@ -2689,6 +2765,7 @@ mod tests {
                     Comment::line("second comment", span()),
                 ],
                 trailing: None,
+                leading_blank_line: false,
             },
             expression: Expression::Literal(Literal::Integer(42), span()),
             preceding_blank_line: false,
@@ -3550,6 +3627,83 @@ mod tests {
         assert_identity(source);
     }
 
+    // --- BT-2930 regression: leading `//`/`/* */` comments on protocol
+    // method signatures must survive a `beamtalk fmt` round-trip. ---
+
+    #[test]
+    fn protocol_instance_method_leading_comment_round_trip() {
+        // Exact repro from BT-2930: an ordinary leading `//` comment (no doc
+        // comment) directly above an instance-side signature was silently
+        // dropped because `unparse_protocol_method_signature` never called
+        // `unparse_comment_attachment_leading`.
+        let source = concat!(
+            "Protocol define: Displayable\n",
+            "  // A leading comment.\n",
+            "  asString -> String\n",
+        );
+        assert_identity(source);
+    }
+
+    #[test]
+    fn protocol_instance_method_leading_block_comment_round_trip() {
+        let source = concat!(
+            "Protocol define: Displayable\n",
+            "  /* A leading block comment. */\n",
+            "  asString -> String\n",
+        );
+        assert_identity(source);
+    }
+
+    #[test]
+    fn protocol_instance_method_leading_comment_and_doc_comment_round_trip() {
+        // Leading comments and doc comments must both render, in the right
+        // order (leading comment first, then doc comment, then signature) —
+        // matching every other declaration kind.
+        let source = concat!(
+            "Protocol define: Displayable\n",
+            "  // A leading comment.\n",
+            "  /// Convert to display string.\n",
+            "  asString -> String\n",
+        );
+        assert_identity(source);
+    }
+
+    #[test]
+    fn protocol_class_method_leading_comment_round_trip() {
+        let source = concat!(
+            "Protocol define: Creatable\n",
+            "  // A leading comment.\n",
+            "  class create -> Self\n",
+        );
+        assert_identity(source);
+    }
+
+    #[test]
+    fn protocol_class_method_leading_comment_and_doc_comment_round_trip() {
+        // Verifies interaction with the existing doc-comment-before-`class`-
+        // keyword handling: leading comment, then doc comment, then `class`
+        // on the signature line.
+        let source = concat!(
+            "Protocol define: Parseable\n",
+            "  // A leading comment.\n",
+            "  /// Reconstruct from string.\n",
+            "  class fromString: aString :: String -> Self\n",
+        );
+        assert_identity(source);
+    }
+
+    #[test]
+    fn protocol_trailing_comment_round_trip() {
+        // BT-2906: a trailing end-of-line comment on the `Protocol define:`
+        // declaration line must round-trip losslessly, mirroring the
+        // identical fix for `type` declarations below.
+        let source = concat!(
+            "Protocol define: Sortable  // comment\n",
+            "  sortKey -> Object\n",
+        );
+        assert_identity(source);
+    }
+
     // --- Type alias round-trip (ADR 0108, Phase 1, BT-2894) ---
 
     #[test]
@@ -3589,6 +3743,72 @@ mod tests {
     fn internal_type_alias_round_trip() {
         // ADR 0071, ADR 0108 Phase 5, BT-2898.
         let source = "internal type ParserState = Integer | String\n";
+        assert_identity(source);
+    }
+
+    #[test]
+    fn type_alias_trailing_comment_round_trip() {
+        // BT-2906: a trailing end-of-line comment on the declaration line
+        // must round-trip losslessly instead of being dropped.
+        let source = "type Port = Integer  // comment\n";
+        assert_identity(source);
+    }
+
+    // --- Class definition header trailing comment (BT-2933) ---
+
+    #[test]
+    fn class_header_trailing_comment_round_trip() {
+        // BT-2933: a trailing end-of-line comment on the `subclass:` header
+        // line must round-trip losslessly, mirroring the identical fix for
+        // type alias/protocol declarations (BT-2906). Before the fix,
+        // `parse_class_definition` never populated `comments.trailing`, so
+        // `unparse_class_definition`'s trailing-comment branch was dead code
+        // and the comment was silently dropped.
+        // A class with no `state:` declarations always gets a blank line
+        // before its first method (canonical formatting, unrelated to this
+        // fix), hence the blank line in the expected output below.
+        let source = concat!(
+            "Object subclass: Foo  // header comment\n",
+            "\n",
+            "  x => 1\n",
+        );
+        assert_identity(source);
+    }
+
+    #[test]
+    fn class_header_trailing_comment_with_type_params_round_trip() {
+        // BT-2933: the trailing comment attaches after the last header
+        // token — here, the type parameter list.
+        let source = concat!(
+            "Object subclass: Box(T)  // header comment\n",
+            "\n",
+            "  x => 1\n",
+        );
+        assert_identity(source);
+    }
+
+    #[test]
+    fn class_header_trailing_comment_with_native_round_trip() {
+        // BT-2933: the trailing comment attaches after the `native:` module
+        // name — the last header token when present.
+        let source = concat!(
+            "Object subclass: Foo native: my_module  // header comment\n",
+            "\n",
+            "  x => 1\n",
+        );
+        assert_identity(source);
+    }
+
+    #[test]
+    fn class_header_trailing_comment_with_state_round_trip() {
+        // BT-2933 (review follow-up): the most common real-world class
+        // shape — a header trailing comment plus a `state:` declaration.
+        let source = concat!(
+            "Object subclass: Counter  // counter class\n",
+            "  state: count :: Integer = 0\n",
+            "\n",
+            "  increment => count := count + 1\n",
+        );
         assert_identity(source);
     }
 
@@ -3675,6 +3895,243 @@ mod tests {
             warnings.is_empty(),
             "expected no warnings for the BT-2924 repro shape, got: {warnings:?}"
         );
+    }
+
+    // --- BT-2907: top-level declaration order (classes/protocols/type aliases) ---
+    //
+    // `unparse_module_doc` used to always emit type aliases first, then
+    // protocols, then classes — regardless of where each declaration
+    // appeared in the source. A `type` alias (or a protocol) declared
+    // *after* a class would jump to the top of the file on a format
+    // round-trip. The three declaration kinds are now interleaved back into
+    // their original source order.
+
+    #[test]
+    fn type_alias_after_class_preserves_source_order() {
+        // Before the fix, this `type` alias — declared after the class —
+        // would have been hoisted above `Actor subclass: Server`.
+        let source = concat!(
+            "Actor subclass: Server\n",
+            "  start => 1\n",
+            "\n",
+            "type Port = Integer\n",
+        );
+        let formatted = format_source(source).expect("format_source must succeed for valid source");
+        let class_pos = formatted
+            .find("Actor subclass: Server")
+            .expect("class declaration must be present");
+        let alias_pos = formatted
+            .find("type Port = Integer")
+            .expect("type alias declaration must be present");
+        assert!(
+            class_pos < alias_pos,
+            "a type alias declared after a class must stay after it on format; \
+             formatted output:\n{formatted}"
+        );
+
+        // Idempotent: formatting the already-formatted output changes nothing.
+        let formatted_again =
+            format_source(&formatted).expect("format_source must succeed on formatted output");
+        assert_eq!(
+            formatted, formatted_again,
+            "format_source is not idempotent"
+        );
+    }
+
+    #[test]
+    fn protocol_after_class_preserves_source_order() {
+        // Same category of bug as the type-alias case above, for protocols:
+        // before the fix, a protocol declared after a class would jump above it.
+        let source = concat!(
+            "Actor subclass: Server\n",
+            "  start => 1\n",
+            "\n",
+            "Protocol define: Startable\n",
+            "  start -> Integer\n",
+        );
+        let formatted = format_source(source).expect("format_source must succeed for valid source");
+        let class_pos = formatted
+            .find("Actor subclass: Server")
+            .expect("class declaration must be present");
+        let protocol_pos = formatted
+            .find("Protocol define: Startable")
+            .expect("protocol declaration must be present");
+        assert!(
+            class_pos < protocol_pos,
+            "a protocol declared after a class must stay after it on format; \
+             formatted output:\n{formatted}"
+        );
+
+        let formatted_again =
+            format_source(&formatted).expect("format_source must succeed on formatted output");
+        assert_eq!(
+            formatted, formatted_again,
+            "format_source is not idempotent"
+        );
+    }
+
+    #[test]
+    fn class_protocol_type_alias_interleaved_preserves_relative_order() {
+        // Classes, protocols, and type aliases interleaved in source must
+        // come back out in the same relative order — not grouped by kind.
+        let source = concat!(
+            "type Port = Integer\n",
+            "\n",
+            "Protocol define: Startable\n",
+            "  start -> Integer\n",
+            "\n",
+            "Actor subclass: Server\n",
+            "  start => 1\n",
+            "\n",
+            "type Timeout = Integer\n",
+            "\n",
+            "Actor subclass: Client\n",
+            "  connect => 1\n",
+        );
+        let formatted = format_source(source).expect("format_source must succeed for valid source");
+
+        let positions = [
+            ("type Port = Integer", "type Port"),
+            ("Protocol define: Startable", "Protocol define: Startable"),
+            ("Actor subclass: Server", "Actor subclass: Server"),
+            ("type Timeout = Integer", "type Timeout"),
+            ("Actor subclass: Client", "Actor subclass: Client"),
+        ]
+        .map(|(needle, label)| {
+            (
+                formatted
+                    .find(needle)
+                    .unwrap_or_else(|| panic!("{label} must be present:\n{formatted}")),
+                label,
+            )
+        });
+
+        for pair in positions.windows(2) {
+            let (prev_pos, prev_label) = pair[0];
+            let (next_pos, next_label) = pair[1];
+            assert!(
+                prev_pos < next_pos,
+                "{prev_label} must come before {next_label} on format; \
+                 formatted output:\n{formatted}"
+            );
+        }
+
+        let formatted_again =
+            format_source(&formatted).expect("format_source must succeed on formatted output");
+        assert_eq!(
+            formatted, formatted_again,
+            "format_source is not idempotent"
+        );
+    }
+
+    // --- BT-2929: blank line between top-level declarations ---
+    //
+    // `unparse_module_doc` used to always emit exactly one `line()` after
+    // each top-level declaration, regardless of whether the source had a
+    // blank line there — so the separating blank line was either silently
+    // dropped, or (for a class) looked "relocated" into the class's own
+    // body, since a class unconditionally gets a blank line before its
+    // first method whether or not it has state declarations (an unrelated,
+    // pre-existing formatting rule — see the `Blank line before first
+    // method` comment in `unparse_class_definition`). All three assertions
+    // below use `assert_identity` with sources that are already in that
+    // canonical form, so a regression here fails on the *first* format
+    // pass rather than requiring a second one to notice non-idempotency.
+
+    #[test]
+    fn blank_line_preserved_type_alias_then_class() {
+        // Repro A from BT-2929.
+        assert_identity(concat!(
+            "type Port = Integer\n",
+            "\n",
+            "Object subclass: Foo\n",
+            "\n",
+            "  m => 1\n",
+        ));
+    }
+
+    #[test]
+    fn blank_line_preserved_class_then_class() {
+        // Repro B from BT-2929 — confirms the bug wasn't type-alias-specific.
+        assert_identity(concat!(
+            "Object subclass: A\n",
+            "\n",
+            "  m => 1\n",
+            "\n",
+            "Object subclass: B\n",
+            "\n",
+            "  n => 2\n",
+        ));
+    }
+
+    #[test]
+    fn blank_line_preserved_type_alias_then_type_alias() {
+        // Repro C from BT-2929 — the blank line was dropped outright here
+        // (neither declaration has a body to "absorb" it into).
+        assert_identity(concat!(
+            "type Port = Integer\n",
+            "\n",
+            "type Timeout = Integer\n",
+        ));
+    }
+
+    #[test]
+    fn no_blank_line_between_top_level_declarations_stays_absent() {
+        // The converse of the three tests above: declarations with *no*
+        // blank line between them in the source must not gain one.
+        assert_identity(concat!("type Port = Integer\n", "type Timeout = Integer\n",));
+    }
+
+    #[test]
+    fn blank_line_before_first_top_level_declaration_is_dropped() {
+        // BT-2929 (review follow-up): the `i > 0` guard in
+        // `unparse_module_doc`'s loop intentionally does not preserve a
+        // blank line before the very first top-level declaration — this
+        // predates BT-2929 and is documented in the loop's comment.
+        // Confirmed here with an explicit regression test rather than only
+        // a code comment.
+        //
+        // Two leading newlines are required, not one: a single `\n` is
+        // below `has_blank_line_before_first_comment()`'s `>= 2` threshold,
+        // so it would produce `leading_blank_line: false` and never
+        // actually exercise the `i > 0` guard this test targets.
+        let source = "\n\ntype Port = Integer\n";
+        let formatted = format_source(source).expect("format_source must succeed");
+        assert_eq!(formatted, "type Port = Integer\n");
+    }
+
+    #[test]
+    fn multiple_blank_lines_between_top_level_declarations_normalised_to_one() {
+        // BT-2929 (review follow-up): `has_blank_line_before_first_comment`
+        // treats any run of 2+ blank lines as "a blank line preceded this
+        // node" — the unparser always re-emits exactly one, so multiple
+        // blank lines collapse to one on format (standard normalisation),
+        // not a bug. Two blank lines in source...
+        let source = "type Port = Integer\n\n\ntype Timeout = Integer\n";
+        let formatted = format_source(source).expect("format_source must succeed");
+        // ...become one blank line in the formatted output...
+        assert_eq!(formatted, "type Port = Integer\n\ntype Timeout = Integer\n");
+        // ...and that single-blank-line form is stable under a second pass.
+        assert_identity(&formatted);
+    }
+
+    #[test]
+    fn blank_line_preserved_across_all_three_declaration_kinds_interleaved() {
+        // Full combination: type alias, protocol, and class, each separated
+        // by a blank line — every pairwise gap (type-alias/protocol,
+        // protocol/class, class/type-alias) must round-trip.
+        assert_identity(concat!(
+            "type Port = Integer\n",
+            "\n",
+            "Protocol define: Startable\n",
+            "  start -> Integer\n",
+            "\n",
+            "Object subclass: Server\n",
+            "\n",
+            "  start => 1\n",
+            "\n",
+            "type Timeout = Integer\n",
+        ));
     }
 
     #[test]

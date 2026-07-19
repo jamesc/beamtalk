@@ -1160,7 +1160,7 @@ fn handle_compile_expression(request: &Map) -> Term {
         &source,
         &known_vars,
         pre_class_hierarchy.clone(),
-        pre_loaded_aliases,
+        pre_loaded_aliases.clone(),
     ) {
         Ok(r) => r,
         Err(resp) => return resp,
@@ -1180,6 +1180,7 @@ fn handle_compile_expression(request: &Map) -> Term {
             &class_superclass_index,
             class_module_index,
             pre_class_hierarchy,
+            pre_loaded_aliases,
             module_name_override.as_deref(),
         );
     }
@@ -1370,6 +1371,7 @@ fn handle_inline_class_definition(
     class_superclass_index: &std::collections::HashMap<String, String>,
     class_module_index: std::collections::HashMap<String, String>,
     pre_class_hierarchy: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    pre_loaded_aliases: Vec<beamtalk_core::semantic_analysis::AliasInfo>,
     module_name_override: Option<&str>,
 ) -> Term {
     let mut module = module;
@@ -1437,7 +1439,8 @@ fn handle_inline_class_definition(
             .with_source(source)
             .with_class_superclass_index(class_superclass_index.clone())
             .with_class_module_index(class_module_index)
-            .with_class_hierarchy(pre_class_hierarchy),
+            .with_class_hierarchy(pre_class_hierarchy)
+            .with_pre_loaded_aliases(pre_loaded_aliases),
     ) {
         Ok(code) => class_definition_ok_response(
             &code,
@@ -1573,7 +1576,7 @@ fn handle_compile(request: &Map) -> Term {
             parse_diagnostics,
             &[],
             pre_class_hierarchy.clone(),
-            pre_loaded_aliases,
+            pre_loaded_aliases.clone(),
             diagnostics_overrides(),
         );
 
@@ -1711,6 +1714,7 @@ fn handle_compile(request: &Map) -> Term {
             .with_class_module_index(class_module_index)
             .with_class_superclass_index(class_superclass_index)
             .with_class_hierarchy(pre_class_hierarchy)
+            .with_pre_loaded_aliases(pre_loaded_aliases)
             .with_source_path_opt(source_path.as_deref()),
     ) {
         Ok(code) => compile_ok_response(
@@ -1887,7 +1891,7 @@ fn handle_compile_method(request: &Map) -> Term {
             merged_parse_diags,
             &[],
             pre_class_hierarchy.clone(),
-            pre_loaded_aliases,
+            pre_loaded_aliases.clone(),
             diagnostics_overrides(),
         );
     let options = beamtalk_core::CompilerOptions {
@@ -1943,6 +1947,7 @@ fn handle_compile_method(request: &Map) -> Term {
             .with_class_module_index(class_module_index)
             .with_class_superclass_index(class_superclass_index)
             .with_class_hierarchy(pre_class_hierarchy)
+            .with_pre_loaded_aliases(pre_loaded_aliases)
             .with_source_path_opt(source_path.as_deref()),
     ) {
         Ok(code) => compile_method_ok_response(

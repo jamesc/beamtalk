@@ -267,6 +267,33 @@ dependencies_excludes_unpackaged_dep_test() ->
         _ = application:unload(Dep)
     end.
 
+%% dependencies/1 includes a types-only dep app (non-empty `type_aliases`,
+%% no `classes`) — mirrors dependencies_includes_beamtalk_package_deps_test/0
+%% but the dependency has no class entries to extract a `#{package := ...}`
+%% key from, so its binary name must come from `package_name_for_app/1`'s
+%% type_aliases fallback (the OTP application's own atom name via
+%% `atom_to_binary/2`), not a classes-derived package key (BT-2934).
+dependencies_includes_types_only_dep_test() ->
+    setup(),
+    Dep = bt_fake_types_only_dep,
+    Main = bt_fake_main3_pkg,
+    load_fake_app(
+        Dep,
+        [{env, [{type_aliases, [#{name => 'JsonValue', internal => false}]}]}]
+    ),
+    load_fake_app(
+        Main,
+        [{applications, [Dep]}, {env, [{classes, [#{package => main3p, name => 'M3'}]}]}]
+    ),
+    try
+        Deps = beamtalk_package:dependencies(<<"main3p">>),
+        %% Binary name is the app-atom-derived name, not a classes `package` key.
+        ?assert(lists:member(<<"bt_fake_types_only_dep">>, Deps))
+    after
+        _ = application:unload(Main),
+        _ = application:unload(Dep)
+    end.
+
 %% classes/1 accepts the legacy `{Mod, Name, Super}` tuple entry shape alongside
 %% the map shape (class_entry_name/1 tuple clause).
 classes_handles_legacy_tuple_entries_test() ->
@@ -297,3 +324,94 @@ package_name_for_delegates_to_package_name_test() ->
         beamtalk_package:package_name('Object'),
         beamtalk_package:packageNameFor('Object')
     ).
+
+%%% ============================================================================
+%%% Types-only package tests (BT-2915) — a package with zero classes and a
+%%% non-empty `type_aliases` env key must still be discoverable.
+%%% ============================================================================
+
+%% all/0 discovers a package that declares only `type_aliases`, no `classes`,
+%% deriving the package name from the OTP application's own atom name (app
+%% name == package name by construction for `beamtalk build`'s `.app` files).
+all_includes_types_only_app_test() ->
+    setup(),
+    App = bt_fake_types_only_pkg,
+    load_fake_app(
+        App,
+        [{env, [{type_aliases, [#{name => 'RestartStrategy', internal => false}]}]}]
+    ),
+    try
+        ?assert(lists:member(<<"bt_fake_types_only_pkg">>, beamtalk_package:all()))
+    after
+        _ = application:unload(App)
+    end.
+
+%% all/0 excludes an app with neither `classes` nor `type_aliases` (or with
+%% both empty) — no discovery signal at all.
+all_excludes_app_with_no_classes_or_aliases_test() ->
+    setup(),
+    App = bt_fake_empty_pkg,
+    load_fake_app(App, [{env, [{classes, []}, {type_aliases, []}]}]),
+    try
+        ?assertNot(lists:member(<<"bt_fake_empty_pkg">>, beamtalk_package:all()))
+    after
+        _ = application:unload(App)
+    end.
+
+%% find_app_for_package/1 resolves a types-only package's name back to its
+%% OTP application — exercised by `browse-type-aliases`
+%% (`beamtalk_repl_ops_browse:type_aliases_of_package/1`).
+find_app_for_package_resolves_types_only_app_test() ->
+    setup(),
+    App = bt_fake_types_only_pkg2,
+    load_fake_app(
+        App,
+        [{env, [{type_aliases, [#{name => 'JsonValue', internal => false}]}]}]
+    ),
+    try
+        ?assertEqual(
+            {ok, App}, beamtalk_package:find_app_for_package(<<"bt_fake_types_only_pkg2">>)
+        )
+    after
+        _ = application:unload(App)
+    end.
+
+%% named/1 builds a Package info map for a types-only package — `classes` is
+%% empty but the package itself still resolves (no `package_not_found`).
+named_resolves_types_only_package_test() ->
+    setup(),
+    App = bt_fake_types_only_pkg3,
+    load_fake_app(
+        App,
+        [{env, [{type_aliases, [#{name => 'JsonValue', internal => false}]}]}]
+    ),
+    try
+        Info = beamtalk_package:named(<<"bt_fake_types_only_pkg3">>),
+        ?assertEqual(<<"bt_fake_types_only_pkg3">>, maps:get(name, Info)),
+        ?assertEqual([], maps:get(classes, Info)),
+        ?assertEqual(<<"1.0.0">>, maps:get(version, Info)),
+        ?assertEqual([], maps:get(dependencies, Info))
+    after
+        _ = application:unload(App)
+    end.
+
+%% package_name_for_app/1 must NOT fall through to type_aliases when classes
+%% is non-empty but malformed (no `package` key on any entry) — a non-empty
+%% classes env means "not types-only", even if type_aliases is also present.
+types_only_not_used_when_classes_env_nonempty_test() ->
+    setup(),
+    App = bt_fake_malformed_classes_pkg,
+    load_fake_app(
+        App,
+        [
+            {env, [
+                {classes, [#{name => 'X'}]},
+                {type_aliases, [#{name => 'Y', internal => false}]}
+            ]}
+        ]
+    ),
+    try
+        ?assertNot(lists:member(atom_to_binary(App, utf8), beamtalk_package:all()))
+    after
+        _ = application:unload(App)
+    end.

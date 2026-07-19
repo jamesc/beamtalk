@@ -6,7 +6,7 @@
 //! Verifies exit code mapping (pass = 0, fail = nonzero) and the text
 //! summary format. Uses a hermetic fixture project per test.
 
-mod cli_common;
+use crate::cli_common;
 
 use predicates::prelude::*;
 use predicates::str::contains;
