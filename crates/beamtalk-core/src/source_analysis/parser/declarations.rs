@@ -79,25 +79,37 @@ impl PendingDeclarationExpect {
         doc_comment: &mut Option<String>,
         comments: &mut CommentAttachment,
     ) {
-        if self.expect.is_some() {
+        let had_expect = self.expect.is_some();
+        if had_expect {
             *expect = self.expect;
         }
         if doc_comment.is_none() {
             *doc_comment = self.doc_comment;
         }
+        // BT-2944: decide `leading_blank_line` explicitly, independently of
+        // whether `leading`/`trailing` get replaced below, rather than
+        // piggybacking on the `comments.is_empty()` check below (which only
+        // ever looks at `leading`/`trailing`). When an `@expect` was
+        // actually present, it — and anything directly above it — is the
+        // true start of this declaration's leading trivia, so the
+        // blank-line-before-`@expect` signal always wins over the
+        // destination's own signal, which only reflects the (usually
+        // nonexistent) gap between `@expect` and the declaration keyword.
+        // Without this, a declaration with its own leading comment
+        // sandwiched between `@expect` and itself would keep its own
+        // (typically `false`) `leading_blank_line` and silently drop the
+        // fact that a blank line separated the whole `@expect`-annotated
+        // declaration from the previous one. No unparser reads
+        // `leading_blank_line` on class-member-level `CommentAttachment`s
+        // yet (state/class-var/method — only top-level class/protocol/
+        // type-alias declarations), but the correct merge is captured now
+        // so it doesn't need rediscovering once that changes.
+        let expect_leading_blank_line = self.comments.leading_blank_line;
         if comments.is_empty() {
-            // `CommentAttachment::is_empty()` only looks at `leading`/
-            // `trailing`, so this deliberately ignores `leading_blank_line`
-            // on both sides (BT-2929) — the declaration's own (usually
-            // `false`, since it directly follows `@expect` with no blank
-            // line) `leading_blank_line` is kept when `comments` is
-            // otherwise non-empty, and overwritten by `self.comments`'s
-            // value when it's replaced wholesale. Harmless today because no
-            // unparser reads `leading_blank_line` on class-member-level
-            // `CommentAttachment`s (state/class-var/method) — only on
-            // top-level class/protocol/type-alias declarations. Tracked as
-            // BT-2944: revisit this overwrite if that ever changes.
             *comments = self.comments;
+        }
+        if had_expect {
+            comments.leading_blank_line = expect_leading_blank_line;
         }
     }
 }
