@@ -237,6 +237,63 @@ impl TypeChecker {
         }
     }
 
+    /// Records every alias name a protocol's declared method signatures
+    /// (instance- and class-side) transitively depend on, into
+    /// `self.referenced_aliases` (ADR 0108 hot-reload re-check trigger,
+    /// BT-2899 / BT-2917 follow-up).
+    ///
+    /// Protocol method signatures ([`crate::ast::ProtocolMethodSignature`])
+    /// have no body — unlike a class method, there is nothing for the main
+    /// [`Self::check_module`] pass to type-check, so
+    /// [`Self::set_param_types`]'s `referenced_aliases.extend(deps)` (the
+    /// call site that normally records this for a `::`-annotated class
+    /// method parameter) never runs for them. Without this dedicated walk, a
+    /// live redefinition of an alias named only in a `Protocol define:`
+    /// body's signature (e.g. `direction :: Direction`) would never register
+    /// a dependency edge for anything, even though the identical annotation
+    /// on a class method's signature works correctly.
+    ///
+    /// Every parameter and return-type annotation is resolved unconditionally
+    /// (not just `TypeAnnotation::Generic`, unlike
+    /// [`Self::check_bounds_in_type_annotation`]'s bounds-only walk) since an
+    /// alias dependency can appear on a plain `Simple` annotation too.
+    pub(super) fn record_protocol_signature_referenced_aliases(
+        &mut self,
+        module: &Module,
+        protocol_registry: &ProtocolRegistry,
+    ) {
+        let subst = super::type_resolver::SubstitutionMap::new();
+        for protocol in &module.protocols {
+            for sig in protocol
+                .method_signatures
+                .iter()
+                .chain(protocol.class_method_signatures.iter())
+            {
+                for param in &sig.parameters {
+                    if let Some(ref ann) = param.type_annotation {
+                        let (_, deps) =
+                            super::type_resolver::resolve_type_annotation_with_alias_deps(
+                                ann,
+                                &subst,
+                                Some(protocol_registry),
+                                self.alias_registry.as_ref(),
+                            );
+                        self.referenced_aliases.extend(deps);
+                    }
+                }
+                if let Some(ref ann) = sig.return_type {
+                    let (_, deps) = super::type_resolver::resolve_type_annotation_with_alias_deps(
+                        ann,
+                        &subst,
+                        Some(protocol_registry),
+                        self.alias_registry.as_ref(),
+                    );
+                    self.referenced_aliases.extend(deps);
+                }
+            }
+        }
+    }
+
     /// Check type parameter bounds for all generic type annotations in a module (ADR 0068 Phase 2d).
     ///
     /// Walks class definitions, standalone methods, and protocol definitions looking for

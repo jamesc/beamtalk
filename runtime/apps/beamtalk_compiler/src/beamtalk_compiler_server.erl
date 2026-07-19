@@ -1204,19 +1204,28 @@ handle_compile_response(
     }};
 %% BT-1950: Protocol definitions use a different response shape (kind := protocol_definition)
 %% and have no `classes` key — they have `protocols` instead.
-handle_compile_response(#{
-    status := ok,
-    kind := protocol_definition,
-    core_erlang := CoreErlang,
-    module_name := ModuleName,
-    protocols := Protocols,
-    warnings := Warnings
-}) ->
+handle_compile_response(
+    #{
+        status := ok,
+        kind := protocol_definition,
+        core_erlang := CoreErlang,
+        module_name := ModuleName,
+        protocols := Protocols,
+        warnings := Warnings
+    } = Response
+) ->
+    %% ADR 0108 hot-reload re-check trigger (BT-2899 follow-up, BT-2917):
+    %% see the class-definition clause immediately above's identical field —
+    %% a protocol-defining compile's own method-signature annotations get
+    %% the same forwarding so `beamtalk_repl_compiler` can register the same
+    %% `beamtalk_alias_xref` dependency edges a class-defining compile gets.
+    ReferencedAliases = maps:get(referenced_aliases, Response, []),
     {ok, protocol_definition, #{
         core_erlang => CoreErlang,
         module_name => ModuleName,
         protocols => Protocols,
-        warnings => Warnings
+        warnings => Warnings,
+        referenced_aliases => ReferencedAliases
     }};
 handle_compile_response(#{status := error, diagnostics := Diagnostics}) ->
     {error, Diagnostics};
