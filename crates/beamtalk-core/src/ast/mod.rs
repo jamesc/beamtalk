@@ -317,6 +317,12 @@ impl CommentAttachment {
     /// `PendingDeclarationExpect::apply_to` for the production call site —
     /// an overwrite — where this is already known to be harmless
     /// (tracked as BT-2944).
+    ///
+    /// Also ignores `blank_line_after_comments` for the same reason, though
+    /// that field is always `false` whenever `leading` is empty (the parser
+    /// enforces `blank_line_after_comments = !leading.is_empty() &&
+    /// saw_blank_line`), so `is_empty()` staying silent on it here is
+    /// implicitly sound rather than merely overlooked.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.leading.is_empty() && self.trailing.is_none()
