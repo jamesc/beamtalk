@@ -499,8 +499,20 @@ file-compile path alone called.
 BT-2952 made the compiler port compute a genuine `referenced_aliases` set
 for the REPL-inline path too (mirroring `compile_class_definition_result/2`,
 classes' REPL-inline equivalent, which registers directly for the same
-reason), so both callers now carry trustworthy data and the split is no
-longer needed.
+reason), so both callers now carry trustworthy data for *aliases declared in
+the REPL session* and the split is no longer needed for that case.
+
+## Known gap: file-local aliases (BT-2955)
+
+"Trustworthy" above does not extend to an alias declared inside the SAME
+file as the protocol/class (e.g. `stdlib/src/Ets.bt`'s `type EtsTableType =
+...` alongside `Ets`'s own method signatures) — a REPL-inline redefinition
+of that protocol/class has no way to see a file-local alias it didn't also
+declare in-session, so its `referenced_aliases` silently omits it and this
+function's registration call clobbers whatever a prior `:load` of that file
+registered. Tracked as BT-2955; not fixed here because a real fix needs
+either an additive-only registration mode or a way to recover file-local
+alias declarations from live state, both bigger than this function.
 """.
 -spec compile_protocol_definition_result(map()) ->
     {ok, protocol_definition, map(), [binary()]} | {error, binary()}.
@@ -542,8 +554,13 @@ registered against every class in a multi-class source. Previously this
 never registered anything (only the file-compile path's `compile_file_core/4`
 did) because the compiler port hardcoded an empty `referenced_aliases` set
 for REPL-inline class definitions; now that the port computes a genuine set
-(BT-2952), registering here is exactly as safe as `compile_file_core/4`
-doing it for the file-compile path.
+(BT-2952) for aliases declared in the REPL session, registering here is as
+safe as `compile_file_core/4` doing it for the file-compile path — but see
+`compile_protocol_definition_result/1`'s "Known gap: file-local aliases"
+section (BT-2955): a REPL-inline redefinition of a class whose alias
+reference was declared *inside the same file* the class originally came
+from, not in the REPL session, still silently under-reports and can clobber
+a real edge a prior `:load` registered.
 """.
 -spec compile_class_definition_result(map(), atom()) ->
     {ok, class_definition, map(), [binary()]} | {error, binary()}.
