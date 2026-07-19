@@ -196,6 +196,30 @@ fn parse_handle_scope_on_new_line_falls_back_to_its_own_trailing_comment() {
 }
 
 #[test]
+fn parse_handle_scope_on_new_line_prefers_header_over_scope_comment_when_both_present() {
+    // BT-2942 (Claude review bot follow-up): `comments.trailing` is a single
+    // slot, so when *both* the header line and the `handleScope:` line carry
+    // a trailing comment, only one can survive. The header-line comment
+    // deliberately wins (it's the more prominent of the two) — this is not
+    // an oversight, and the `handleScope:`-line comment is silently
+    // discarded in this specific combined case.
+    let module = parse_ok(
+        "Object subclass: Foo  // header comment
+  handleScope: #node  // scope comment",
+    );
+    let class = &module.classes[0];
+    assert!(
+        class
+            .comments
+            .trailing
+            .as_ref()
+            .is_some_and(|c| c.content.contains("header comment")),
+        "expected the header-line comment to win, got: {:?}",
+        class.comments.trailing
+    );
+}
+
+#[test]
 fn parse_native_keyword_missing_module_name_emits_error() {
     let diagnostics = parse_err("Actor subclass: Foo native:");
     assert!(

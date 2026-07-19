@@ -259,6 +259,13 @@ impl Parser {
         // back to the post-`handleScope:` check (its old, only behavior) so
         // a comment trailing the `handleScope: #symbol` line is still
         // captured instead of silently dropped.
+        //
+        // `comments.trailing` is a single slot, so if *both* the header line
+        // and the `handleScope:` line carry a trailing comment, only the
+        // header-line one survives — the `handleScope:`-line comment is
+        // discarded. This is a deliberate choice (the header-line comment is
+        // the more prominent of the two), not an oversight; see
+        // `parse_handle_scope_on_new_line_prefers_header_over_scope_comment_when_both_present`.
         comments.trailing = if handle_scope.is_some() && handle_scope_on_new_line {
             self.collect_trailing_comment_at(header_line_end)
                 .or_else(|| self.collect_trailing_comment())
