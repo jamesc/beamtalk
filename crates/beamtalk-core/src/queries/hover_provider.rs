@@ -953,19 +953,16 @@ fn find_hover_in_expr(
             if offset >= field.span.start() && offset < field.span.end() {
                 // Show declared state type if available from the class hierarchy.
                 //
-                // BT-2897 boundary (not this issue's scope, tracked as a
-                // follow-up): `state_field_type` returns a bare `EcoString`
-                // from `ClassHierarchy`, not a resolved `InferredType`, so
-                // this path never sees a `TypeProvenance::Aliased` tag —
-                // hovering a state field *access* (`self someField`) shows
-                // the raw annotation text, never `AliasName (expansion)`,
-                // unlike hovering a local/parameter value (which flows
-                // through `type_map`'s `InferredType`s). Fixing this would
-                // mean threading alias-aware `InferredType`s (or at least
-                // display strings) through `ClassHierarchy`'s field-type
-                // storage — the same EcoString-based boundary
-                // `check_field_assignment`/`check_argument_types`
-                // (validation.rs) sit on, out of scope for BT-2897.
+                // BT-2911: `state_field_type` returns a bare `EcoString` from
+                // `ClassHierarchy`, not a resolved `InferredType`, so it
+                // never carries a `TypeProvenance::Aliased` tag the way
+                // `type_map`'s `InferredType`s do for a local/parameter
+                // value (BT-2897). Re-resolve through
+                // `AliasRegistry::resolve_display_name` when the declared
+                // type names a registered alias so hovering a state field
+                // *access* (`self someField`) shows `AliasName (expansion)`
+                // too, matching local/parameter hover; fall back to the raw
+                // annotation text otherwise.
                 let field_type = match context {
                     HoverClassContext::InstanceMethod(class) => {
                         hierarchy.state_field_type(class.name.name.as_str(), field.name.as_str())
@@ -976,7 +973,10 @@ fn find_hover_in_expr(
                     _ => None,
                 };
                 let contents = if let Some(ty) = field_type {
-                    format!("`{} :: {ty}`", field.name)
+                    let display = alias_registry
+                        .and_then(|registry| registry.resolve_display_name(&ty))
+                        .unwrap_or(ty);
+                    format!("`{} :: {display}`", field.name)
                 } else {
                     format!("`{}`", field.name)
                 };
@@ -2973,6 +2973,71 @@ mod tests {
         assert!(
             hover.contents.contains("internal type"),
             "Got: {}",
+            hover.contents
+        );
+    }
+
+    // ── BT-2911: state field *access* hover (the `Expression::FieldAccess`
+    // gap BT-2897 left, since `state_field_type` reads a bare `EcoString`
+    // from `ClassHierarchy` with no alias provenance) ─────────────────────
+
+    #[test]
+    fn hover_on_alias_typed_state_field_access_shows_alias_name_and_expansion() {
+        // Hovering `self.policy` (a state field *access*) must show
+        // `AliasName (expansion)` too, matching what hovering an
+        // alias-typed parameter/local already shows (BT-2897's
+        // `hover_on_alias_typed_param_shows_alias_name_and_expansion`).
+        let source = "type RestartStrategy = #temporary | #transient | #permanent\n\n\
+                       Actor subclass: Supervisor\n  state: policy :: RestartStrategy = #temporary\n\n  \
+                       currentPolicy => self.policy\n";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let alias_registry = alias_registry_for(&module, &hierarchy);
+
+        // Hover over `policy` in `self.policy` (the field access, not the
+        // `state:` declaration itself).
+        let offset = source.rfind("self.policy").unwrap() + "self.".len();
+        let pos = pos_at(source, offset);
+        let hover = compute_hover(
+            &module,
+            source,
+            pos,
+            &hierarchy,
+            None,
+            Some(&alias_registry),
+        );
+        let hover = hover.expect("should get hover for alias-typed state field access");
+        assert!(
+            hover
+                .contents
+                .contains("RestartStrategy (#temporary | #transient | #permanent)"),
+            "Alias-typed field access should show `AliasName (expansion)`. Got: {}",
+            hover.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_alias_typed_state_field_access_without_alias_registry_shows_raw_name() {
+        // Sanity check mirroring `hover_without_alias_registry_does_not_resolve_alias`:
+        // without a registry, the field access falls back to the raw
+        // (unresolved) declared type text — pre-BT-2911 behaviour, and the
+        // real-LSP-caller default when no project-wide alias table is
+        // available yet.
+        let source = "type RestartStrategy = #temporary | #transient | #permanent\n\n\
+                       Actor subclass: Supervisor\n  state: policy :: RestartStrategy = #temporary\n\n  \
+                       currentPolicy => self.policy\n";
+        let tokens = lex_with_eof(source);
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+
+        let offset = source.rfind("self.policy").unwrap() + "self.".len();
+        let pos = pos_at(source, offset);
+        let hover = compute_hover(&module, source, pos, &hierarchy, None, None);
+        let hover = hover.expect("should get hover for alias-typed state field access");
+        assert!(
+            hover.contents.contains("RestartStrategy") && !hover.contents.contains('('),
+            "Without an alias registry, hover must show the raw name with no expansion. Got: {}",
             hover.contents
         );
     }

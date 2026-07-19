@@ -54,10 +54,10 @@ use std::collections::HashMap;
 
 use ecow::EcoString;
 
-use crate::ast::{Module, TypeAliasDefinition, TypeAnnotation};
+use crate::ast::{Identifier, Module, TypeAliasDefinition, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
-use crate::semantic_analysis::type_checker::is_generic_type_param;
+use crate::semantic_analysis::type_checker::{is_generic_type_param, resolve_type_annotation};
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
 /// Information about a type alias in the registry.
@@ -561,6 +561,46 @@ impl AliasRegistry {
     #[must_use]
     pub fn get(&self, name: &str) -> Option<&AliasInfo> {
         self.aliases.get(name)
+    }
+
+    /// Best-effort alias-aware display for a bare type name pulled from
+    /// [`ClassHierarchy`]'s pre-ADR-0108 `EcoString` storage (state field
+    /// types via `state_field_type`, method parameter types via
+    /// `MethodInfo::param_types`) — BT-2911, closing the gap BT-2897's
+    /// `TypeProvenance::Aliased` left in diagnostic paths that never touch
+    /// `InferredType` at all: `hover_provider.rs`'s `Expression::FieldAccess`
+    /// branch, and `type_checker::validation`'s `check_field_assignment` /
+    /// `check_argument_types`.
+    ///
+    /// Returns `Some("AliasName (expansion)")` when `name` is *exactly* a
+    /// registered alias name — built by re-resolving a synthetic `Simple`
+    /// reference to `name` through [`resolve_type_annotation`] with `self`
+    /// as the alias registry, then
+    /// [`InferredType::display_for_diagnostic`](crate::semantic_analysis::type_checker::InferredType::display_for_diagnostic).
+    /// That is the exact same path production `InferredType`-based
+    /// diagnostics already use (see `type_resolver.rs`'s
+    /// `resolve_type_annotation_inner`, which tags the resolved value via
+    /// `InferredType::tag_alias_expansion` on every alias reference), so the
+    /// returned string is byte-identical to what hovering a parameter/local
+    /// declared with the same alias type already renders.
+    ///
+    /// Returns `None` when `name` is not a registered alias name —
+    /// including when `name` is a flattened multi-token annotation string
+    /// (a union or generic, e.g. `"RestartStrategy | Foo"`) that merely
+    /// *contains* an alias name as a substring: `ClassHierarchy`'s current
+    /// storage is a single opaque `EcoString` per field/param with no
+    /// re-parseable structure, so only the common bare-alias-reference case
+    /// (`field :: AliasName`) is recognised. Callers should fall back to
+    /// their existing plain-name display in that case.
+    #[must_use]
+    pub fn resolve_display_name(&self, name: &str) -> Option<EcoString> {
+        let info = self.aliases.get(name)?;
+        let reference = TypeAnnotation::Simple(Identifier {
+            name: info.name.clone(),
+            span: info.span,
+        });
+        let resolved = resolve_type_annotation(&reference, &HashMap::new(), None, Some(self));
+        resolved.display_for_diagnostic()
     }
 
     /// Checks if an alias exists in the registry.

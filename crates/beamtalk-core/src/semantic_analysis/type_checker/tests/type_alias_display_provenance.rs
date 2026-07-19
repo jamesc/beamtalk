@@ -158,3 +158,248 @@ Object subclass: Supervisor
         "negated case must never suggest, got: {message}"
     );
 }
+// ── BT-2911: EcoString-based diagnostic paths never touched by BT-2897 ─────
+
+#[test]
+fn field_assignment_mismatch_on_alias_typed_state_field_names_the_alias() {
+    // `check_field_assignment` reads `declared_type` as a bare `EcoString`
+    // from `ClassHierarchy::state_field_type` — pre-ADR-0108 storage that
+    // never carries a `TypeProvenance::Aliased` tag the way an
+    // `InferredType` does. Assigning an incompatible `Integer` to a
+    // `RestartStrategy`-typed `state:` field must still name the alias in
+    // the "Type mismatch: field ... declared as ..." message, matching what
+    // an alias-typed parameter mismatch already renders (BT-2897).
+    let source = r"
+type RestartStrategy = #temporary | #transient | #permanent
+
+Actor subclass: Supervisor
+  state: policy :: RestartStrategy = #temporary
+
+  reset =>
+    self.policy := 42
+";
+    let diags = analyse_diagnostics(source);
+    let hits: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("Type mismatch: field"))
+        .collect();
+    assert_eq!(hits.len(), 1, "expected one diagnostic, got: {diags:?}");
+    assert!(
+        hits[0]
+            .message
+            .contains("RestartStrategy (#temporary | #transient | #permanent)"),
+        "should name the alias with its expansion, got: {}",
+        hits[0].message
+    );
+}
+
+#[test]
+fn field_assignment_mismatch_on_plain_typed_state_field_is_unaffected() {
+    // Sibling to the alias case above with a plain (non-alias) declared
+    // field type — pins that the BT-2911 fix is a no-op when there is no
+    // alias registry entry to resolve, matching pre-BT-2911 behaviour.
+    let source = r#"
+Actor subclass: Supervisor
+  state: count :: Integer = 0
+
+  reset =>
+    self.count := "oops"
+"#;
+    let diags = analyse_diagnostics(source);
+    let hits: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("Type mismatch: field"))
+        .collect();
+    assert_eq!(hits.len(), 1, "expected one diagnostic, got: {diags:?}");
+    assert!(
+        hits[0].message.contains("declared as Integer, got String"),
+        "plain declared type must render unchanged, got: {}",
+        hits[0].message
+    );
+}
+
+#[test]
+fn argument_mismatch_on_alias_typed_parameter_names_the_alias() {
+    // `check_argument_types` reads `expected_ty` as a bare `EcoString` from
+    // `MethodInfo::param_types` — the same pre-ADR-0108 storage
+    // `check_field_assignment` sits on. Unlike that sibling, this path
+    // cannot be exercised through the *full* compile pipeline: an alias
+    // name is never registered as a class in `ClassHierarchy`
+    // (`hierarchy.has_class("RestartStrategy")` is always `false`), and
+    // `is_type_compatible`'s pre-existing, unrelated "unknown declared
+    // class → conservatively compatible" fallback (validation.rs, the
+    // `!hierarchy.has_class(actual_base) || !hierarchy.has_class(expected_base)`
+    // check) absorbs *every* argument against a bare alias-typed parameter
+    // as compatible, so the mismatch branch this test targets never runs
+    // end-to-end today. That gap is pre-existing and out of BT-2911's
+    // display-only scope (its own acceptance criteria: no change to
+    // `is_assignable_to`/`is_type_compatible`) — fixing it would mean
+    // resolving `param_types` through the alias table before the
+    // compatibility check itself, a bigger change than display provenance.
+    //
+    // So this test calls `check_argument_types` directly (mirroring
+    // `local_annotations.rs`'s `register_test_alias` pattern) with a
+    // hierarchy where a `RestartStrategy` *class* happens to also exist —
+    // purely to satisfy `is_type_compatible`'s `has_class` guard and reach
+    // the mismatch branch — while the `AliasRegistry` alias of the same
+    // name is seeded independently via `register_test_alias`, bypassing
+    // `AliasRegistry::register_module`'s namespace-collision check (which
+    // would legitimately reject a real alias/class name collision — see
+    // that method's doc). This is an intentionally synthetic setup to reach
+    // otherwise-unreachable code; it does not assert anything about
+    // real-world alias/class collisions.
+    use crate::semantic_analysis::alias_registry::{AliasInfo, AliasRegistry};
+
+    let source = r"
+Object subclass: RestartStrategy
+
+Object subclass: Widget
+  restart: policy :: RestartStrategy => policy
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let (hierarchy, hierarchy_diags) = crate::semantic_analysis::ClassHierarchy::build(&module);
+    let hierarchy = hierarchy.expect("hierarchy should build");
+    assert!(
+        hierarchy_diags.is_empty(),
+        "unexpected: {hierarchy_diags:?}"
+    );
+
+    let mut alias_registry = AliasRegistry::new();
+    alias_registry.register_test_alias(AliasInfo {
+        name: "RestartStrategy".into(),
+        annotation: crate::ast::TypeAnnotation::Union {
+            types: vec![
+                crate::ast::TypeAnnotation::Singleton {
+                    name: "temporary".into(),
+                    span: crate::source_analysis::Span::new(0, 1),
+                },
+                crate::ast::TypeAnnotation::Singleton {
+                    name: "transient".into(),
+                    span: crate::source_analysis::Span::new(0, 1),
+                },
+                crate::ast::TypeAnnotation::Singleton {
+                    name: "permanent".into(),
+                    span: crate::source_analysis::Span::new(0, 1),
+                },
+            ],
+            span: crate::source_analysis::Span::new(0, 1),
+        },
+        is_internal: false,
+        package: None,
+        span: crate::source_analysis::Span::new(0, 1),
+    });
+
+    let mut checker = crate::semantic_analysis::type_checker::TypeChecker::new();
+    checker.set_alias_registry(alias_registry);
+    checker.check_argument_types(
+        &"Widget".into(),
+        "restart:",
+        &[crate::semantic_analysis::InferredType::known("Integer")],
+        crate::source_analysis::Span::new(0, 1),
+        &hierarchy,
+        false,
+        None,
+        None,
+    );
+    let diags = checker.diagnostics();
+    let hits: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("expects"))
+        .collect();
+    assert_eq!(hits.len(), 1, "expected one diagnostic, got: {diags:?}");
+    assert!(
+        hits[0].message.contains(
+            "expects RestartStrategy (#temporary | #transient | #permanent), got Integer"
+        ),
+        "should name the alias with its expansion, got: {}",
+        hits[0].message
+    );
+}
+
+#[test]
+fn field_assignment_of_a_valid_alias_member_currently_false_positives_bt2953() {
+    // KNOWN BUG, tracked as BT-2953 — pinned here deliberately, not silently
+    // left as a gap: `check_field_assignment` calls `is_assignable_to`
+    // (validation.rs) with the *bare* alias name (`"RestartStrategy"`,
+    // never expanded — `ClassHierarchy` predates ADR 0108 and has no
+    // `AliasRegistry` access). `is_assignable_to` has no "unknown declared
+    // class" escape hatch, so a bare alias name that never matches any
+    // registered class falls through to a superclass-chain walk that always
+    // returns `false` — meaning it currently reports EVERY value as
+    // incompatible with an alias-typed field, including values that ARE
+    // valid members of the alias (like `#transient` here).
+    //
+    // BT-2911 (this file's own issue) is display-only per its own
+    // acceptance criteria ("No regression to existing EcoString-based
+    // assignability logic") — it intentionally left `is_assignable_to`
+    // untouched, so it correctly makes the (already-wrong) message *name*
+    // the alias without fixing the underlying false positive. That's why
+    // the assertion below looks paradoxical: the message literally lists
+    // `#transient` inside the union it says `#transient` doesn't belong to.
+    // BT-2953 tracks fixing the compatibility check itself; when it lands,
+    // this test must be updated to assert NO diagnostic fires.
+    let source = r"
+type RestartStrategy = #temporary | #transient | #permanent
+
+Actor subclass: Supervisor
+  state: policy :: RestartStrategy = #temporary
+
+  reset =>
+    self.policy := #transient
+";
+    let diags = analyse_diagnostics(source);
+    let hits: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("Type mismatch: field"))
+        .collect();
+    assert_eq!(
+        hits.len(),
+        1,
+        "BT-2953: expected the known false-positive to still fire — if this \
+         now fails with 0 hits, BT-2953 has been fixed and this test (and \
+         its doc comment) should be rewritten to assert no diagnostic fires. \
+         Got: {diags:?}"
+    );
+    assert!(
+        hits[0]
+            .message
+            .contains("RestartStrategy (#temporary | #transient | #permanent)"),
+        "display should still name the alias even while the underlying \
+         check is wrong (BT-2953), got: {}",
+        hits[0].message
+    );
+}
+
+#[test]
+fn spawn_with_value_mismatch_on_alias_typed_slot_names_the_alias() {
+    // `check_spawn_with_value` (validation.rs) sits on the same
+    // pre-ADR-0108 `state_field_type` `EcoString` boundary as
+    // `check_field_assignment` — found during BT-2911's own adversarial
+    // review as a fourth EcoString-based display path the issue's three
+    // named call sites didn't enumerate. `C spawnWith: #{ slot: value }`
+    // must name the alias in its "type mismatch for state key ..." message
+    // too.
+    let source = r"
+type RestartStrategy = #temporary | #transient | #permanent
+
+Actor subclass: Supervisor
+  state: policy :: RestartStrategy = #temporary
+
+Supervisor spawnWith: #{#policy => 42}
+";
+    let diags = analyse_diagnostics(source);
+    let hits: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("type mismatch for state key"))
+        .collect();
+    assert_eq!(hits.len(), 1, "expected one diagnostic, got: {diags:?}");
+    assert!(
+        hits[0]
+            .message
+            .contains("RestartStrategy (#temporary | #transient | #permanent)"),
+        "should name the alias with its expansion, got: {}",
+        hits[0].message
+    );
+}
