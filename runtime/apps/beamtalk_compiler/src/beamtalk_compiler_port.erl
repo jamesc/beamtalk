@@ -985,11 +985,19 @@ handle_response(
     } = Response
 ) ->
     PrettyCore = maybe_pretty_core(CoreErlang),
+    %% ADR 0108 hot-reload re-check trigger (BT-2899 / BT-2952 follow-up):
+    %% the alias names this REPL-inline class definition's annotations
+    %% transitively referenced — `[]` when omitted (an older compiler-port
+    %% binary predating BT-2952). Forwarded so `beamtalk_repl_compiler` can
+    %% register `beamtalk_alias_xref` dependency edges for it, mirroring
+    %% `beamtalk_compiler_server:handle_compile_response/1`'s identical field.
+    ReferencedAliases = maps:get(referenced_aliases, Response, []),
     BaseInfo = #{
         core_erlang => PrettyCore,
         module_name => ModuleName,
         classes => Classes,
-        warnings => Warnings
+        warnings => Warnings,
+        referenced_aliases => ReferencedAliases
     },
     %% BT-903: Forward trailing_core_erlang when present (inline class + trailing expressions)
     ClassInfo =
@@ -1029,20 +1037,30 @@ handle_response(
         warnings => Warnings
     }};
 %% BT-1612: Protocol definition response
-handle_response(#{
-    status := ok,
-    kind := protocol_definition,
-    core_erlang := CoreErlang,
-    module_name := ModuleName,
-    protocols := Protocols,
-    warnings := Warnings
-}) ->
+handle_response(
+    #{
+        status := ok,
+        kind := protocol_definition,
+        core_erlang := CoreErlang,
+        module_name := ModuleName,
+        protocols := Protocols,
+        warnings := Warnings
+    } = Response
+) ->
     PrettyCore = maybe_pretty_core(CoreErlang),
+    %% ADR 0108 hot-reload re-check trigger (BT-2899 / BT-2917 / BT-2952
+    %% follow-up): see the class-definition clause above's identical field —
+    %% a REPL-inline protocol definition's own method-signature annotations
+    %% get the same forwarding so `beamtalk_repl_compiler` can register the
+    %% same `beamtalk_alias_xref` dependency edges a class-defining compile
+    %% gets.
+    ReferencedAliases = maps:get(referenced_aliases, Response, []),
     {ok, protocol_definition, #{
         core_erlang => PrettyCore,
         module_name => ModuleName,
         protocols => Protocols,
-        warnings => Warnings
+        warnings => Warnings,
+        referenced_aliases => ReferencedAliases
     }};
 %% ADR 0108 Phase 8 (BT-2902): type alias definition response — no
 %% core_erlang, since an alias erases entirely at resolution time and has no
