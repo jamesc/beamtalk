@@ -518,29 +518,28 @@ fn build_class_index(
         check_stdlib_reservations(&dep_registry)?;
     }
 
-    // BT-2928 / BT-2910: Same-package cross-file type-alias resolution,
-    // merged with dependency-exported aliases. Only runs for manifest-based
-    // package builds (matching `pre_loaded_classes`'s existing scope) — a
-    // manifest-less directory/single-file build has no package boundary and
-    // keeps today's same-file-only alias resolution.
-    let all_alias_infos = match pkg_manifest {
-        Some(pkg) => collect_all_alias_infos(&[
-            &collect_project_alias_infos(&env.source_files, &pkg.name),
-            &dep_alias_infos,
-        ]),
-        None => Vec::new(),
-    };
-
-    // BT-2910: Same-package cross-file protocol resolution (didn't exist at
-    // all before this — real `build` always passed `Vec::new()`), merged
-    // with dependency-exported protocols. Scoped to manifest-based package
-    // builds like the alias/class collections above.
-    let all_protocol_infos = match pkg_manifest {
-        Some(_) => collect_all_protocol_infos(&[
-            &collect_project_protocol_infos(&env.source_files),
-            &dep_protocol_infos,
-        ]),
-        None => Vec::new(),
+    // BT-2928 / BT-2910: Same-package cross-file protocol and type-alias
+    // resolution, merged with dependency-exported protocols/aliases. Only
+    // runs for manifest-based package builds (matching `pre_loaded_classes`'s
+    // existing scope) — a manifest-less directory/single-file build has no
+    // package boundary and keeps today's same-file-only resolution.
+    //
+    // Protocols and aliases are extracted together in one uncached scan
+    // (`collect_project_protocol_and_alias_infos`) rather than two separate
+    // ones — a build review finding: scanning the project source set twice
+    // here, on top of `build_class_module_index`'s own (incrementally
+    // cached) scan for classes, was doing up to three full parses of every
+    // file per build.
+    let (all_protocol_infos, all_alias_infos) = match pkg_manifest {
+        Some(pkg) => {
+            let (source_protocol_infos, source_alias_infos) =
+                collect_project_protocol_and_alias_infos(&env.source_files, &pkg.name);
+            (
+                collect_all_protocol_infos(&[&source_protocol_infos, &dep_protocol_infos]),
+                collect_all_alias_infos(&[&source_alias_infos, &dep_alias_infos]),
+            )
+        }
+        None => (Vec::new(), Vec::new()),
     };
 
     Ok(ClassIndexResult {
@@ -1707,23 +1706,7 @@ pub(crate) fn collect_project_alias_infos(
     source_files: &[Utf8PathBuf],
     pkg_name: &str,
 ) -> Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo> {
-    let mut all_aliases = Vec::new();
-    for file in source_files {
-        let Ok(source) = fs::read_to_string(file) else {
-            continue;
-        };
-        let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
-        let (module, _diagnostics) = beamtalk_core::source_analysis::parse(tokens);
-        let mut infos =
-            beamtalk_core::semantic_analysis::alias_registry::AliasRegistry::extract_alias_infos(
-                &module,
-            );
-        for info in &mut infos {
-            info.package = Some(pkg_name.into());
-        }
-        all_aliases.extend(infos);
-    }
-    all_aliases
+    collect_project_protocol_and_alias_infos(source_files, pkg_name).1
 }
 
 /// Merge alias infos from multiple sources (same-package cross-file +
@@ -1754,23 +1737,69 @@ pub(crate) fn collect_all_alias_infos(
 /// Parse errors on an individual file are non-fatal here: that file simply
 /// contributes no protocols to the merged set, and the same parse error is
 /// already reported through the normal Pass 1 diagnostics path.
+///
+/// `build_class_index`'s production path calls
+/// `collect_project_protocol_and_alias_infos` directly to extract both kinds
+/// in one scan; this standalone single-purpose wrapper is kept for tests
+/// that only care about protocols (mirrors `collect_project_alias_infos`,
+/// which stays in production use via `compile_dependency_with_context`).
+#[allow(dead_code)] // Used by tests; production path uses the combined extractor above
 pub(crate) fn collect_project_protocol_infos(
     source_files: &[Utf8PathBuf],
 ) -> Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo> {
+    collect_project_protocol_and_alias_infos(source_files, "").0
+}
+
+/// Extracts both protocol and type-alias declarations from every project
+/// source file in a single lex/parse pass per file (BT-2910 review finding).
+///
+/// `collect_project_protocol_infos`/`collect_project_alias_infos` used to
+/// each independently re-parse the full project source set, meaning a
+/// manifest-based build did up to three full scans of every source file:
+/// once (incrementally cached) in `build_class_module_index` for classes,
+/// then two more *uncached* scans here for protocols and aliases. This
+/// combines those last two into one uncached scan, mirroring how
+/// `build_dep_class_index` already extracts both kinds from a single pass
+/// over its cached ASTs. The class-index scan stays separate — it's
+/// incrementally cached and produces different data
+/// (`class_module_index`/`class_superclass_index`), not a natural fit for
+/// this merge.
+///
+/// `pkg_name` is only used to stamp `AliasInfo.package`; pass `""` when only
+/// the protocol half of the result is needed (see
+/// `collect_project_protocol_infos`, which never stamps a package anyway).
+fn collect_project_protocol_and_alias_infos(
+    source_files: &[Utf8PathBuf],
+    pkg_name: &str,
+) -> (
+    Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
+    Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
+) {
     let mut all_protocols = Vec::new();
+    let mut all_aliases = Vec::new();
     for file in source_files {
         let Ok(source) = fs::read_to_string(file) else {
             continue;
         };
         let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
         let (module, _diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+
         all_protocols.extend(
             beamtalk_core::semantic_analysis::protocol_registry::ProtocolRegistry::extract_protocol_infos(
                 &module,
             ),
         );
+
+        let mut infos =
+            beamtalk_core::semantic_analysis::alias_registry::AliasRegistry::extract_alias_infos(
+                &module,
+            );
+        for info in &mut infos {
+            info.package = Some(pkg_name.into());
+        }
+        all_aliases.extend(infos);
     }
-    all_protocols
+    (all_protocols, all_aliases)
 }
 
 /// Merge protocol infos from multiple sources (same-package cross-file +
