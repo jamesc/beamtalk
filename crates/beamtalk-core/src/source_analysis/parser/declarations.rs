@@ -1800,8 +1800,18 @@ impl Parser {
 
         // Collect leading comments from the class-name token's leading trivia.
         // parse_identifier() advances past the class name without reading trivia,
-        // so we must collect here before the token is consumed.
-        let mut class_leading_comments = self.collect_comment_attachment().leading;
+        // so we must collect here before the token is consumed. Also remember
+        // whether a blank line preceded the whole construct (before any leading
+        // comment, or before the class-name token itself if it has none) — this
+        // is the accurate signal for "was there a blank line before this
+        // standalone method", mirroring how classes/protocols/type-aliases
+        // capture `leading_blank_line` once at the start of their own construct
+        // (BT-2929). The later `collect_comment_attachment()` inside
+        // `parse_method_definition()` looks at the selector token instead, which
+        // would otherwise silently lose this signal (BT-2943).
+        let initial_comments = self.collect_comment_attachment();
+        let leading_blank_line = initial_comments.leading_blank_line;
+        let mut class_leading_comments = initial_comments.leading;
 
         // Parse class name, with optional package qualifier (ADR 0070).
         // Pattern: `identifier @ Identifier` or just `Identifier`.
@@ -1857,6 +1867,11 @@ impl Parser {
             class_leading_comments.append(&mut method.comments.leading);
             method.comments.leading = class_leading_comments;
         }
+        // BT-2943: use the blank-line signal captured before the class-name
+        // token, not whatever `parse_method_definition()` computed for the
+        // selector token (there's normally no blank line between `>>` and the
+        // selector, so that value would just be `false`).
+        method.comments.leading_blank_line = leading_blank_line;
 
         let span = start.merge(method.span);
 
