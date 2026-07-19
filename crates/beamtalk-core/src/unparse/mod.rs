@@ -532,6 +532,18 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
         header
     };
 
+    // `handleScope: #symbol` (ADR 0103) — canonical style puts it on its own
+    // indented line following the class header (and its trailing comment, if
+    // any), mirroring `docs/ADR/0103-sendability-typing-from-class-kinds.md`.
+    let header = if let Some(hs) = &class.handle_scope {
+        docvec![
+            header,
+            nest(2, docvec![line(), "handleScope: #", leaf::ident(&hs.name)])
+        ]
+    } else {
+        header
+    };
+
     docs.push(header);
 
     // State declarations — use nest(2, ...) so that leading comments and
@@ -3829,6 +3841,69 @@ mod tests {
             "  state: count :: Integer = 0\n",
             "\n",
             "  increment => count := count + 1\n",
+        );
+        assert_identity(source);
+    }
+
+    // --- `handleScope:` unparse emission + header trailing comment (BT-2942) ---
+
+    #[test]
+    fn handle_scope_round_trip() {
+        // BT-2942: the unparser never emitted `handleScope:` at all, so a
+        // class declaring it didn't round-trip. Canonical style (ADR 0103)
+        // puts the clause on its own indented line following the header.
+        let source = concat!(
+            "sealed typed Object subclass: MetricsTable\n",
+            "  handleScope: #node\n",
+        );
+        assert_identity(source);
+    }
+
+    #[test]
+    fn handle_scope_with_state_and_methods_round_trip() {
+        // BT-2942: `handleScope:` alongside a state declaration and a method,
+        // exercising the blank-line-before-first-method logic together with
+        // the new `handleScope:` line.
+        let source = concat!(
+            "Object subclass: Registry\n",
+            "  handleScope: #process\n",
+            "  state: count :: Integer = 0\n",
+            "\n",
+            "  increment => count := count + 1\n",
+        );
+        assert_identity(source);
+    }
+
+    #[test]
+    fn handle_scope_on_new_line_with_header_trailing_comment_round_trip() {
+        // BT-2942: when `handleScope:` sits on its own line (the canonical
+        // style), a trailing comment on the class header line itself (e.g.
+        // `Object subclass: Foo  // comment`) lives in the class-name
+        // token's trailing trivia, not `handleScope:`'s `#symbol` token's.
+        // Before the fix, `collect_trailing_comment()` unconditionally
+        // inspected `current - 1` *after* parsing `handleScope:`, landing on
+        // the `#symbol` token and silently dropping the header comment.
+        let source = concat!(
+            "Object subclass: Foo  // header comment\n",
+            "  handleScope: #node\n",
+            "\n",
+            "  x => 1\n",
+        );
+        assert_identity(source);
+    }
+
+    #[test]
+    fn handle_scope_with_native_and_header_trailing_comment_round_trip() {
+        // BT-2942: header clauses are parsed in a fixed order — `native:`
+        // then `handleScope:` (ADR 0103) — so the trailing-comment anchor
+        // must still be the `native:` module token, not the class name,
+        // when both a `native:` clause and a following-line `handleScope:`
+        // are present.
+        let source = concat!(
+            "Object subclass: Foo native: my_module  // header comment\n",
+            "  handleScope: #node\n",
+            "\n",
+            "  x => 1\n",
         );
         assert_identity(source);
     }
