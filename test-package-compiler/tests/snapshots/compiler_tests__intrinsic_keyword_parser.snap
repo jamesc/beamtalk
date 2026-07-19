@@ -42,6 +42,7 @@ Module {
                                 leading: [],
                                 trailing: None,
                                 leading_blank_line: false,
+                                blank_line_after_comments: false,
                             },
                             expression: Primitive {
                                 name: "blockValue",
@@ -66,6 +67,7 @@ Module {
                         leading: [],
                         trailing: None,
                         leading_blank_line: false,
+                        blank_line_after_comments: false,
                     },
                     doc_comment: None,
                     span: Span {
@@ -84,6 +86,7 @@ Module {
                                 leading: [],
                                 trailing: None,
                                 leading_blank_line: false,
+                                blank_line_after_comments: false,
                             },
                             expression: Primitive {
                                 name: "size",
@@ -108,6 +111,7 @@ Module {
                         leading: [],
                         trailing: None,
                         leading_blank_line: false,
+                        blank_line_after_comments: false,
                     },
                     doc_comment: None,
                     span: Span {
@@ -159,6 +163,7 @@ Module {
                 ],
                 trailing: None,
                 leading_blank_line: false,
+                blank_line_after_comments: true,
             },
             doc_comment: None,
             backing_module: None,
