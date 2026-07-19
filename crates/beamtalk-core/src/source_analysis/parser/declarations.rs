@@ -254,9 +254,14 @@ impl Parser {
         // (after the last header token — class name, type params, or
         // `native:` module — or, when `handleScope:` follows on the same
         // line, its `#symbol`), mirroring the identical fix for type
-        // alias/protocol declarations (BT-2906).
+        // alias/protocol declarations (BT-2906). When `handleScope:` is on
+        // its own line, prefer a comment on the header line itself, but fall
+        // back to the post-`handleScope:` check (its old, only behavior) so
+        // a comment trailing the `handleScope: #symbol` line is still
+        // captured instead of silently dropped.
         comments.trailing = if handle_scope.is_some() && handle_scope_on_new_line {
             self.collect_trailing_comment_at(header_line_end)
+                .or_else(|| self.collect_trailing_comment())
         } else {
             self.collect_trailing_comment()
         };
