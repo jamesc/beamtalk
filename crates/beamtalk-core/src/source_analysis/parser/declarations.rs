@@ -231,15 +231,35 @@ impl Parser {
             None
         };
 
+        // Anchor for a trailing comment on the class header line itself
+        // (e.g. `Object subclass: Foo  // comment`) — the last token consumed
+        // so far (class name, type params, or `native:` module). Captured
+        // *before* parsing `handleScope:` because that clause conventionally
+        // sits on its own indented line (ADR 0103); if we let
+        // `collect_trailing_comment()` look at `current - 1` unconditionally
+        // after parsing it, it would inspect the `#symbol` token's own
+        // trailing trivia instead of the header line's, silently dropping a
+        // header-line comment (BT-2942).
+        let header_line_end = self.current.saturating_sub(1);
+        let handle_scope_on_new_line = matches!(
+            self.current_kind(),
+            TokenKind::Keyword(k) if k == "handleScope:"
+        ) && self.current_token().has_leading_newline();
+
         // Parse optional `handleScope: #symbol` clause (ADR 0103). Appears at
         // the head of the class body, like `native:` is a header clause.
         let handle_scope = self.parse_optional_handle_scope();
 
         // Collect a trailing end-of-line comment on the class header line
-        // (after the last header token — class name, type params, `native:`
-        // module, or `handleScope:` symbol, whichever comes last), mirroring
-        // the identical fix for type alias/protocol declarations (BT-2906).
-        comments.trailing = self.collect_trailing_comment();
+        // (after the last header token — class name, type params, or
+        // `native:` module — or, when `handleScope:` follows on the same
+        // line, its `#symbol`), mirroring the identical fix for type
+        // alias/protocol declarations (BT-2906).
+        comments.trailing = if handle_scope.is_some() && handle_scope_on_new_line {
+            self.collect_trailing_comment_at(header_line_end)
+        } else {
+            self.collect_trailing_comment()
+        };
 
         // Parse class body (state declarations, instance methods, class methods, class variables)
         let (state, methods, class_methods, class_variables) = self.parse_class_body();

@@ -1120,7 +1120,20 @@ impl Parser {
         if self.current == 0 {
             return None;
         }
-        let last_token = &self.tokens[self.current - 1];
+        self.collect_trailing_comment_at(self.current - 1)
+    }
+
+    /// Collects a trailing end-of-line comment from the trailing trivia of a
+    /// specific, already-consumed token (`token_idx < self.current`).
+    ///
+    /// Use this instead of [`Self::collect_trailing_comment`] when one or more
+    /// tokens have been consumed *after* the line whose trailing comment you
+    /// want to check — e.g. a class header's `handleScope: #symbol` clause
+    /// (BT-2942) can follow the header on its own line, in which case
+    /// `current - 1` would point at the `#symbol` token rather than the
+    /// header line's last token.
+    pub(super) fn collect_trailing_comment_at(&self, token_idx: usize) -> Option<Comment> {
+        let last_token = &self.tokens[token_idx];
         for trivia in last_token.trailing_trivia() {
             if let super::Trivia::LineComment(text) = trivia {
                 let s = text.as_str();
