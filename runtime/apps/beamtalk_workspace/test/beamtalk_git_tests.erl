@@ -633,6 +633,87 @@ git_revert_file_discards_change_test() ->
     end).
 
 %%% ============================================================================
+%%% Parser edge cases — uncovered branches (BT-2413)
+%%% ============================================================================
+
+%% A `2` (rename) entry that arrives as the very last NUL record (Rest = [])
+%% takes the defensive `[] -> []` arm in fold_status, so the entry is still
+%% parsed correctly rather than crashing (line 487).
+status_rename_at_end_no_orig_path_test() ->
+    Bin = nul_join([
+        <<"# branch.head main">>,
+        <<"2 R. N... 100644 100644 100644 aaa bbb R100 last.bt">>
+    ]),
+    Status = beamtalk_git:parse_status(Bin),
+    ?assertEqual(
+        [#{path => <<"last.bt">>, index => renamed, worktree => unmodified}],
+        maps:get(files, Status)
+    ).
+
+%% An ordinary `1` entry with no body after the XY prefix (no space delimiter)
+%% is silently dropped; the parse_ordinary `_` catch-all returns `error` and
+%% add_ordinary falls through to continue parsing (lines 514–515, 528–529).
+status_malformed_ordinary_entry_is_dropped_test() ->
+    Bin = nul_join([<<"# branch.head main">>, <<"1 XY">>]),
+    Status = beamtalk_git:parse_status(Bin),
+    ?assertEqual([], maps:get(files, Status)).
+
+%% An ordinary `1` entry where the metadata block has too few space-delimited
+%% tokens for drop_fields to consume causes drop_fields to return `error`, which
+%% add_ordinary silently drops (lines 514–515, 539–540).
+status_entry_with_insufficient_metadata_fields_is_dropped_test() ->
+    %% After splitting off XY(".M"), drop_fields needs 6 tokens from "sub" but
+    %% finds none → `error` from drop_fields → `error` from parse_ordinary.
+    Bin = nul_join([<<"# branch.head main">>, <<"1 .M sub">>]),
+    Status = beamtalk_git:parse_status(Bin),
+    ?assertEqual([], maps:get(files, Status)).
+
+%% classify_xy/1 with a binary that is not exactly 2 bytes returns
+%% {unmodified, unmodified} rather than crashing (line 563–564).
+classify_xy_wrong_length_returns_unmodified_test() ->
+    ?assertEqual({unmodified, unmodified}, beamtalk_git:classify_xy(<<"A">>)).
+
+%%% ============================================================================
+%%% Error-path integration tests — uncovered branches (BT-2413)
+%%% ============================================================================
+
+%% git_stage/1 called when no beamtalk_workspace_meta process is running returns
+%% a structured error.  project_dir/0 returns {error, not_started} which
+%% propagates through run_git/2 (line 271–272) to mutate/3 (line 231–232).
+git_mutating_op_without_workspace_meta_returns_error_test() ->
+    stop_meta_if_running(),
+    ?assertMatch({error, _}, beamtalk_git:git_stage(<<"any.bt">>)).
+
+%% git_stage/1 with a path that does not exist in the index causes `git add`
+%% to exit 128 with a non-"not a git repository" stderr.  This routes through
+%% finish/4 line 430 → mutate/3 {ok, Stdout, Code} arm (line 229–230) →
+%% exit_error/3 (lines 659–663) → with_stderr/2 non-empty branch (line 677).
+git_stage_nonexistent_path_returns_error_test() ->
+    with_repo_root_project(fun(Top, _RelFile) ->
+        with_workspace_meta(Top, <<"git_stage_nonexistent_test">>, fun() ->
+            ?assertMatch(
+                {error, _},
+                beamtalk_git:git_stage(<<"nonexistent_does_not_exist.bt">>)
+            )
+        end)
+    end).
+
+%% git_status/0 when the workspace project dir is not inside any git repo
+%% returns a structured error.  cached_repo_toplevel/2 calls repo_toplevel/2
+%% which detects the "not a git repository" stderr and returns {error, _}; that
+%% error propagates through cached_repo_toplevel/2 (line 292) and run_git/2
+%% (line 269) back to the caller.
+git_status_in_non_git_dir_returns_error_test() ->
+    Dir = make_temp_dir(),
+    try
+        with_workspace_meta(list_to_binary(Dir), <<"git_status_non_repo_test">>, fun() ->
+            ?assertMatch({error, _}, beamtalk_git:git_status())
+        end)
+    after
+        rm_rf(Dir)
+    end.
+
+%%% ============================================================================
 %%% Helpers
 %%% ============================================================================
 
