@@ -40,6 +40,22 @@ pub struct ResolvedDependency {
     /// class references (superclass chains, method signatures, etc.).
     /// Empty when metadata is unavailable (e.g., compiled-only dependencies).
     pub class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    /// Full protocol metadata from the dependency's source files (BT-2910).
+    ///
+    /// Lets a consumer's `extending:`/conformance checks resolve protocol
+    /// names exported by this dependency. Protocols have no `internal`
+    /// modifier at the AST level, so every declared protocol is exported —
+    /// unlike `alias_infos`, there is no seeding-boundary filter to apply.
+    pub protocol_infos: Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
+    /// Full type-alias metadata from the dependency's source files (BT-2910),
+    /// each stamped with `.package = Some(name)`.
+    ///
+    /// Lets a consumer's `:: Alias` annotations resolve type aliases exported
+    /// by this dependency. `AliasRegistry::add_pre_loaded`'s existing
+    /// seeding-boundary filter uses the stamped `package` to exclude this
+    /// dependency's `internal type` declarations while still seeding its
+    /// public aliases (ADR 0108 Phase 5).
+    pub alias_infos: Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
     /// Whether this is a direct dependency of the root package (ADR 0070 Phase 3).
     /// `false` means it is a transitive dependency.
     pub is_direct: bool,
@@ -226,14 +242,17 @@ fn resolve_single_path_dep(
 
     info!(dep = %name, ebin = %ebin_path, "Resolved path dependency");
 
+    let (_, class_infos, protocol_infos, alias_infos) =
+        build_dep_class_index(&dep_root, name).unwrap_or_default();
+
     resolved.push(ResolvedDependency {
         name: name.to_string(),
         root: dep_root.clone(),
         ebin_path,
         class_module_index: dep_class_module_index,
-        class_infos: build_dep_class_index(&dep_root, name)
-            .map(|(_, infos)| infos)
-            .unwrap_or_default(),
+        class_infos,
+        protocol_infos,
+        alias_infos,
         is_direct: true, // Legacy path — all treated as direct
         via_chain: Vec::new(),
     });
@@ -316,14 +335,17 @@ pub(crate) fn compile_dependency_at(
     let (ebin_path, class_module_index) =
         compile_dependency_with_context(project_root, dep_root, dep_name, options, prior_deps)?;
 
+    let (_, class_infos, protocol_infos, alias_infos) =
+        build_dep_class_index(dep_root, dep_name).unwrap_or_default();
+
     Ok(ResolvedDependency {
         name: dep_name.to_string(),
         root: dep_root.to_path_buf(),
         ebin_path,
         class_module_index,
-        class_infos: build_dep_class_index(dep_root, dep_name)
-            .map(|(_, infos)| infos)
-            .unwrap_or_default(),
+        class_infos,
+        protocol_infos,
+        alias_infos,
         is_direct: false, // Caller sets this based on graph knowledge
         via_chain: Vec::new(),
     })
@@ -610,14 +632,23 @@ fn generate_dependency_app_file(
 
 /// Build a class module index for a dependency without compiling.
 ///
-/// Scans the dependency's source files and extracts class-to-module mappings.
-/// This is the fast path used when deps are fresh and don't need recompilation.
+/// Scans the dependency's source files and extracts class-to-module mappings,
+/// plus (BT-2910) protocol and type-alias metadata for cross-package
+/// `extending:`/`:: Alias` resolution. This is the fast path used when deps
+/// are fresh and don't need recompilation.
+///
+/// Protocol and alias extraction reuses `build_class_module_index`'s cached,
+/// already-parsed ASTs rather than re-lexing/re-parsing the dependency's
+/// source files a second and third time.
+#[allow(clippy::type_complexity)] // 4-tuple mirrors ResolvedDependency's own fields; a type alias wouldn't clarify
 pub(crate) fn build_dep_class_index(
     dep_root: &Utf8Path,
     dep_name: &str,
 ) -> Result<(
     HashMap<String, String>,
     Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
+    Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
 )> {
     let src_dir = dep_root.join("src");
     let search_dir = if src_dir.exists() {
@@ -628,7 +659,7 @@ pub(crate) fn build_dep_class_index(
 
     let source_files = crate::commands::build::collect_source_files_from_dir(&search_dir)?;
     if source_files.is_empty() {
-        return Ok((HashMap::new(), Vec::new()));
+        return Ok((HashMap::new(), Vec::new(), Vec::new(), Vec::new()));
     }
 
     let source_root = if src_dir.exists() {
@@ -637,14 +668,38 @@ pub(crate) fn build_dep_class_index(
         None
     };
 
-    let (class_module_index, _, class_infos, _, _) =
+    let (class_module_index, _, class_infos, _, cached_asts) =
         crate::commands::build::build_class_module_index(
             &source_files,
             source_root.as_deref(),
             dep_name,
         )?;
 
-    Ok((class_module_index, class_infos))
+    // BT-2910: Extract protocol/alias infos from the already-parsed modules,
+    // iterating in a stable (sorted-by-path) order for deterministic output.
+    let mut sorted_files: Vec<&Utf8PathBuf> = cached_asts.keys().collect();
+    sorted_files.sort();
+
+    let mut protocol_infos = Vec::new();
+    let mut alias_infos = Vec::new();
+    for file in sorted_files {
+        let module = &cached_asts[file].module;
+        protocol_infos.extend(
+            beamtalk_core::semantic_analysis::protocol_registry::ProtocolRegistry::extract_protocol_infos(
+                module,
+            ),
+        );
+        let mut infos =
+            beamtalk_core::semantic_analysis::alias_registry::AliasRegistry::extract_alias_infos(
+                module,
+            );
+        for info in &mut infos {
+            info.package = Some(dep_name.into());
+        }
+        alias_infos.extend(infos);
+    }
+
+    Ok((class_module_index, class_infos, protocol_infos, alias_infos))
 }
 
 #[cfg(test)]
@@ -1007,6 +1062,78 @@ dep_utils = { path = "dep_utils" }"#,
         assert!(
             !beam_files.is_empty(),
             "dep ebin should contain .beam files"
+        );
+    }
+
+    /// BT-2910: `build_dep_class_index` must extract a dependency's protocol
+    /// and type-alias declarations alongside its classes, so that a
+    /// consumer's cross-package `extending:`/`:: Alias` resolution can be
+    /// wired from `ResolvedDependency.protocol_infos`/`alias_infos`.
+    ///
+    /// Each `AliasInfo` (public and `internal`) must be stamped with
+    /// `.package = Some(dep_name)` — `AliasRegistry::add_pre_loaded`'s
+    /// seeding-boundary filter (ADR 0108 Phase 5) relies on that stamp to
+    /// exclude a dependency's `internal type` while still seeding its public
+    /// aliases. Extraction itself does not filter `internal` aliases out —
+    /// that exclusion happens downstream at seeding time.
+    #[test]
+    fn build_dep_class_index_extracts_protocols_and_aliases() {
+        let temp = TempDir::new().unwrap();
+        let dep_dir = temp.path().join("dep_types");
+        fs::create_dir_all(&dep_dir).unwrap();
+        write_manifest(&dep_dir, "dep_types", "0.1.0", "");
+        write_source(
+            &dep_dir,
+            "types.bt",
+            "type Status = #ok | #error\n\
+             internal type Secret = Integer\n\n\
+             Protocol define: Greetable\n  \
+             greet -> String\n",
+        );
+
+        let dep_root = Utf8PathBuf::from_path_buf(dep_dir).unwrap();
+        let (class_module_index, _class_infos, protocol_infos, alias_infos) =
+            build_dep_class_index(&dep_root, "dep_types").unwrap();
+
+        assert!(
+            class_module_index.is_empty(),
+            "fixture declares no classes: {class_module_index:?}"
+        );
+
+        assert_eq!(
+            protocol_infos.len(),
+            1,
+            "should extract the Greetable protocol: {protocol_infos:?}"
+        );
+        assert_eq!(protocol_infos[0].name.as_str(), "Greetable");
+
+        assert_eq!(
+            alias_infos.len(),
+            2,
+            "should extract both Status and Secret aliases: {alias_infos:?}"
+        );
+        let status = alias_infos
+            .iter()
+            .find(|a| a.name.as_str() == "Status")
+            .expect("Status alias should be extracted");
+        assert!(!status.is_internal, "Status is a public alias");
+        assert_eq!(
+            status.package.as_deref(),
+            Some("dep_types"),
+            "alias must be stamped with the dependency's package name"
+        );
+
+        let secret = alias_infos
+            .iter()
+            .find(|a| a.name.as_str() == "Secret")
+            .expect(
+                "Secret alias should be extracted (filtering happens at seeding, not extraction)",
+            );
+        assert!(secret.is_internal, "Secret is declared `internal type`");
+        assert_eq!(
+            secret.package.as_deref(),
+            Some("dep_types"),
+            "internal alias must still be stamped so add_pre_loaded can filter it"
         );
     }
 }
