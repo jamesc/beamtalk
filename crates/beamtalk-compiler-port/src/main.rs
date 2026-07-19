@@ -1244,6 +1244,7 @@ fn handle_compile_expression(request: &Map) -> Term {
             &class_superclass_index,
             class_module_index,
             pre_class_hierarchy,
+            pre_loaded_aliases,
             module_name_override.as_deref(),
             false, // REPL expressions are never stdlib
             &[],
@@ -1484,6 +1485,12 @@ fn handle_inline_class_definition(
 /// REPL `compile_expression` path — see that call site's comment), threaded
 /// straight into the response so the Erlang side can register the same
 /// `beamtalk_alias_xref` dependency edges a class-defining compile gets.
+/// BT-2941: Accepts `pre_loaded_aliases` — mirrors the `.with_pre_loaded_aliases(...)`
+/// wiring BT-2932 applied to the other three `CodegenOptions` call sites in this
+/// file (`handle_inline_class_definition`, `handle_compile`'s class path,
+/// `handle_compile_method`) — so a protocol method signature referencing a
+/// cross-module alias resolves to a `user_type` reference in the generated
+/// `-type` attributes instead of silently dropping the alias (empty registry).
 #[allow(clippy::too_many_arguments)]
 fn handle_inline_protocol_definition(
     module: &beamtalk_core::ast::Module,
@@ -1492,6 +1499,7 @@ fn handle_inline_protocol_definition(
     class_superclass_index: &std::collections::HashMap<String, String>,
     class_module_index: std::collections::HashMap<String, String>,
     pre_class_hierarchy: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    pre_loaded_aliases: Vec<beamtalk_core::semantic_analysis::AliasInfo>,
     module_name_override: Option<&str>,
     stdlib_mode: bool,
     referenced_aliases: &[ecow::EcoString],
@@ -1513,7 +1521,8 @@ fn handle_inline_protocol_definition(
             .with_source(source)
             .with_class_superclass_index(class_superclass_index.clone())
             .with_class_module_index(class_module_index)
-            .with_class_hierarchy(pre_class_hierarchy),
+            .with_class_hierarchy(pre_class_hierarchy)
+            .with_pre_loaded_aliases(pre_loaded_aliases),
     ) {
         Ok(code) => protocol_definition_ok_response(
             &code,
@@ -1723,6 +1732,7 @@ fn handle_compile(request: &Map) -> Term {
             &class_superclass_index,
             class_module_index,
             pre_class_hierarchy,
+            pre_loaded_aliases,
             module_name_override.as_deref(),
             stdlib_mode,
             &referenced_aliases,
@@ -3256,6 +3266,106 @@ mod tests {
             names,
             vec!["Direction".to_string()],
             "expected Direction to be recorded as referenced: {response:?}"
+        );
+    }
+
+    /// BT-2941: `handle_inline_protocol_definition` (the protocol-only branch
+    /// of `handle_compile`) previously never threaded `pre_loaded_aliases`
+    /// into `CodegenOptions`, so `self.alias_registry` at codegen time was
+    /// always the empty module-local registry — a protocol source file never
+    /// declares its own `type Name = ...` (that's a separate top-level
+    /// declaration), so every alias a protocol method signature could
+    /// reference is necessarily cross-module/pre-loaded. Mirrors the BT-2932
+    /// wiring pattern: `Wrapper`'s own alias body references `Base` (a
+    /// second, separately pre-loaded alias) by name, so the fix is only
+    /// observable if the *whole* pre-loaded registry reaches codegen, not
+    /// just semantic analysis (which already resolved both names before this
+    /// fix — see `compile_protocol_with_known_type_aliases_reports_referenced_aliases`
+    /// above, which passed even before this fix since it only checks
+    /// `referenced_aliases`, a semantic-analysis-only signal).
+    #[test]
+    fn compile_protocol_cross_module_alias_reference_emits_user_type() {
+        let request = Map::from([
+            (atom("command"), atom("compile")),
+            (
+                atom("source"),
+                binary("Protocol define: Directional\n  heading: d :: Wrapper -> Boolean\n"),
+            ),
+            (atom("module_name"), binary("bt@directional")),
+            (
+                atom("known_type_aliases"),
+                Term::from(List::from(vec![
+                    binary("type Base = #north | #south | #east | #west"),
+                    binary("type Wrapper = Base"),
+                ])),
+            ),
+        ]);
+
+        let response = handle_compile(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response");
+        };
+        assert_eq!(
+            map_get(m, "status"),
+            Some(&atom("ok")),
+            "expected compile to succeed: {response:?}"
+        );
+        let core_erlang = map_get(m, "core_erlang")
+            .and_then(term_to_string)
+            .expect("core_erlang field must be present");
+        assert!(
+            core_erlang.contains("{'user_type', 0, 'base', []}"),
+            "Wrapper's alias body should resolve Base as a user_type reference \
+             now that pre_loaded_aliases reaches the protocol codegen path. \
+             Got:\n{core_erlang}"
+        );
+        assert!(
+            core_erlang.contains("'wrapper'") && core_erlang.contains("'base'"),
+            "module must declare named -type attributes for both pre-loaded \
+             aliases. Got:\n{core_erlang}"
+        );
+    }
+
+    /// BT-2941 sibling of `compile_protocol_cross_module_alias_reference_emits_user_type`
+    /// for the OTHER `handle_inline_protocol_definition` caller: the REPL-inline
+    /// `compile_expression` path (`handle_compile_expression`'s protocol branch).
+    /// Both call sites needed the same `.with_pre_loaded_aliases(...)` wiring.
+    #[test]
+    fn compile_expression_protocol_cross_module_alias_reference_emits_user_type() {
+        let request = Map::from([
+            (atom("command"), atom("compile_expression")),
+            (
+                atom("source"),
+                binary("Protocol define: Directional\n  heading: d :: Wrapper -> Boolean\n"),
+            ),
+            (atom("module"), binary("bt@repl_eval_1")),
+            (atom("known_vars"), Term::from(List::from(vec![]))),
+            (
+                atom("known_type_aliases"),
+                Term::from(List::from(vec![
+                    binary("type Base = #north | #south | #east | #west"),
+                    binary("type Wrapper = Base"),
+                ])),
+            ),
+        ]);
+
+        let response = handle_compile_expression(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected a map response, got: {response:?}");
+        };
+        assert_eq!(
+            map_get(m, "status").and_then(term_to_atom).as_deref(),
+            Some("ok"),
+            "expected compile_expression to succeed: {response:?}"
+        );
+        let core_erlang = map_get(m, "core_erlang")
+            .and_then(term_to_string)
+            .expect("core_erlang field must be present");
+        assert!(
+            core_erlang.contains("{'user_type', 0, 'base', []}"),
+            "Wrapper's alias body should resolve Base as a user_type reference \
+             now that pre_loaded_aliases reaches the REPL-inline protocol codegen \
+             path. Got:\n{core_erlang}"
         );
     }
 
