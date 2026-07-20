@@ -1112,12 +1112,15 @@ impl TypeChecker {
                             name: info.name.clone(),
                             span: info.span,
                         });
-                        super::type_resolver::resolve_type_annotation(
-                            &reference,
-                            &HashMap::new(),
-                            None,
-                            self.alias_registry.as_ref(),
-                        )
+                        let (resolved, arg_alias_deps) =
+                            super::type_resolver::resolve_type_annotation_with_alias_deps(
+                                &reference,
+                                &HashMap::new(),
+                                None,
+                                self.alias_registry.as_ref(),
+                            );
+                        self.referenced_aliases.extend(arg_alias_deps);
+                        resolved
                     }),
                 _ => None,
             };
@@ -1139,8 +1142,16 @@ impl TypeChecker {
                     // properly, the shortcut must be scoped to class-literal
                     // arguments here so a plain `TestCase` instance does not
                     // satisfy a `:: Class` parameter.
+                    //
+                    // Claude review on PR #3082 (BT-2953): this guard must
+                    // check `expected_structural`, not the bare `expected_ty`
+                    // — otherwise `type MyAlias = Class` would resolve to
+                    // `expected_structural == "Class"` while `expected_ty`
+                    // still names the alias, silently skipping the guard and
+                    // letting `is_type_compatible`'s BT-1877 shortcut accept
+                    // any known class instance against a `:: MyAlias` param.
                     let class_shortcut_applies =
-                        expected_ty.as_str() == "Class" && !is_class_ref_arg;
+                        expected_structural.as_str() == "Class" && !is_class_ref_arg;
                     let instance_compat = !class_shortcut_applies
                         && Self::is_type_compatible(actual_ty, &expected_structural, hierarchy);
                     let class_literal_compat = !instance_compat
