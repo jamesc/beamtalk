@@ -311,6 +311,18 @@ other) reaches a fresh, healthy process — no explicit re-clear needed, unlike
 `inject_diagnostics_failure/1`'s flag (a fresh `init/1` always starts with
 `diagnostics_exit_fault = false`). Never touches the port itself, and
 unrelated requests (`compile_expression`, `compile`, ...) are unaffected.
+
+**Shared crash budget:** each use spends one of `beamtalk_compiler_sup`'s
+`one_for_one` restart allowance (`intensity => 5, period => 60` — production
+crash tolerance, not test-specific), and that allowance is NOT reset between
+test groups that never stop the `beamtalk_compiler` application between them
+(e.g. within a single `*_tests.erl` module using a no-op teardown — see
+`beamtalk_compiler_server_tests.erl`'s `stop_compiler/1`). Fine for a
+handful of uses; a test suite piling up more than a couple of these within
+one un-torn-down run risks exceeding the budget and leaving the server
+permanently down (`noproc`) for every subsequent test. Prefer scoping call
+sites that *do* `application:stop(beamtalk_compiler)` between test groups
+(e.g. `beamtalk_recheck_tests.erl`'s `recheck_teardown/1`) when adding more.
 """.
 -spec inject_diagnostics_exit() -> ok.
 inject_diagnostics_exit() ->
