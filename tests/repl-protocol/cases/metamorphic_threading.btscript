@@ -54,7 +54,7 @@ cm := Beamtalk classNamed: #MutationCorpusClassMethod
 //  to:do:
 // ===========================================================================
 a := MutationCorpusActor spawn
-// => _
+// => Actor(MutationCorpusActor, _)
 
 v toDoNonLastWriteOnly
 // => 5
@@ -162,7 +162,7 @@ cm rangeDoNonLastReadWrite
 //  collect:
 // ===========================================================================
 b := MutationCorpusActor spawn
-// => _
+// => Actor(MutationCorpusActor, _)
 
 v collectNonLastReadWrite
 // => 3
@@ -249,7 +249,7 @@ cm countNonLastReadWrite
 //  ifTrue:
 // ===========================================================================
 d := MutationCorpusActor spawn
-// => _
+// => Actor(MutationCorpusActor, _)
 
 v ifTrueNonLastWriteOnly: true
 // => 9
