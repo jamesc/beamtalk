@@ -631,3 +631,109 @@ fn instance_arg_rejected_for_class_typed_alias_parameter() {
         diags[0].message
     );
 }
+
+#[test]
+fn arg_ty_side_alias_name_is_recorded_in_referenced_aliases() {
+    // BT-2939 hot-reload coverage gap: `argument_that_is_itself_an_alias_typed_return_value_is_not_flagged`
+    // above only asserts the diagnostic side (no false "expects ... got ..."
+    // warning). It doesn't confirm the actual fix's point — that resolving
+    // the *actual* side's bare alias name now folds it into
+    // `self.referenced_aliases` (ADR 0108 hot-reload re-check trigger,
+    // BT-2899) via `resolve_type_annotation_with_alias_deps`, the same way
+    // the `expected_structural`/BT-2953 side already does.
+    //
+    // Declares the parameter with the union *spelled out* (not through the
+    // alias) so the only path that can record `RestartStrategy` as a
+    // dependency is the arg_ty-side resolution this test targets — the
+    // expected_structural side has nothing to resolve, since `expected_ty`
+    // here is never a registered alias name.
+    use crate::semantic_analysis::alias_registry::{AliasInfo, AliasRegistry};
+    use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, ClassInfo, MethodInfo};
+
+    let mut hierarchy = ClassHierarchy::with_builtins();
+    hierarchy.add_from_beam_meta(vec![ClassInfo {
+        surface_incomplete: false,
+        name: "Widget".into(),
+        superclass: Some("Object".into()),
+        is_sealed: false,
+        is_abstract: false,
+        is_typed: false,
+        is_internal: false,
+        package: None,
+        is_value: false,
+        is_native: false,
+        handle_scope: None,
+        state: vec![],
+        state_types: std::collections::HashMap::new(),
+        state_has_default: std::collections::HashMap::new(),
+        methods: vec![MethodInfo {
+            selector: "restart:".into(),
+            arity: 1,
+            kind: crate::ast::MethodKind::Primary,
+            defined_in: "Widget".into(),
+            is_sealed: false,
+            is_internal: false,
+            spawns_block: false,
+            return_type: Some("Boolean".into()),
+            param_types: vec![Some("#temporary | #transient | #permanent".into())],
+            doc: None,
+        }],
+        class_methods: vec![],
+        class_variables: vec![],
+        type_params: vec![],
+        type_param_bounds: vec![],
+        superclass_type_args: vec![],
+    }]);
+
+    let mut alias_registry = AliasRegistry::new();
+    alias_registry.register_test_alias(AliasInfo {
+        name: "RestartStrategy".into(),
+        annotation: crate::ast::TypeAnnotation::Union {
+            types: vec![
+                crate::ast::TypeAnnotation::Singleton {
+                    name: "temporary".into(),
+                    span: crate::source_analysis::Span::new(0, 1),
+                },
+                crate::ast::TypeAnnotation::Singleton {
+                    name: "transient".into(),
+                    span: crate::source_analysis::Span::new(0, 1),
+                },
+                crate::ast::TypeAnnotation::Singleton {
+                    name: "permanent".into(),
+                    span: crate::source_analysis::Span::new(0, 1),
+                },
+            ],
+            span: crate::source_analysis::Span::new(0, 1),
+        },
+        is_internal: false,
+        package: None,
+        span: crate::source_analysis::Span::new(0, 1),
+    });
+
+    let mut checker = crate::semantic_analysis::type_checker::TypeChecker::new();
+    checker.set_alias_registry(alias_registry);
+    checker.check_argument_types(
+        &"Widget".into(),
+        "restart:",
+        &[crate::semantic_analysis::InferredType::known(
+            "RestartStrategy",
+        )],
+        crate::source_analysis::Span::new(0, 1),
+        &hierarchy,
+        false,
+        None,
+        None,
+    );
+    assert!(
+        checker.diagnostics().is_empty(),
+        "a valid member flowing through the alias-typed actual side must not \
+         be flagged, got: {:?}",
+        checker.diagnostics()
+    );
+    let referenced = checker.take_referenced_aliases();
+    assert!(
+        referenced.contains("RestartStrategy"),
+        "the arg_ty-side resolution must record the alias name it touched \
+         for hot-reload re-check, got: {referenced:?}"
+    );
+}
