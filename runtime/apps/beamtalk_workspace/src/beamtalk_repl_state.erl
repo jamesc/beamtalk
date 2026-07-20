@@ -398,17 +398,28 @@ stdlib_type_aliases_env() ->
 %% dropping internal rows (see `stdlib_alias_table/0` doc) and any row
 %% missing the `name`/`expansion` keys every `format_type_aliases_entry`
 %% row carries.
+%%
+%% Fails **safe**, not open, on a missing `internal` key (`maps:get(internal,
+%% Entry, true)` — should never happen, `format_type_aliases_entry` always
+%% emits it): mirrors `beamtalk_repl_ops_browse:alias_visible/2`'s explicit
+%% "no `internal` key at all... fail safe by treating as internal"
+%% convention, so a row shape this reader doesn't yet know about can't
+%% silently leak a should-be-internal alias into every fresh REPL session
+%% instead of just being dropped.
 -spec stdlib_alias_fold(term(), #{binary() => alias_entry()}) -> #{binary() => alias_entry()}.
-stdlib_alias_fold(#{internal := true}, Acc) ->
-    Acc;
 stdlib_alias_fold(#{name := Name, expansion := Expansion} = Entry, Acc) ->
-    Acc#{
-        app_env_binary(Name) => #{
-            expansion => app_env_binary(Expansion),
-            doc_comment => app_env_doc(maps:get(doc, Entry, undefined)),
-            declared_in => <<"stdlib">>
-        }
-    };
+    case maps:get(internal, Entry, true) of
+        true ->
+            Acc;
+        false ->
+            Acc#{
+                app_env_binary(Name) => #{
+                    expansion => app_env_binary(Expansion),
+                    doc_comment => app_env_doc(maps:get(doc, Entry, undefined)),
+                    declared_in => <<"stdlib">>
+                }
+            }
+    end;
 stdlib_alias_fold(_Entry, Acc) ->
     Acc.
 

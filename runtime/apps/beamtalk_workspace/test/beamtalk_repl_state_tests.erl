@@ -345,6 +345,28 @@ stdlib_internal_alias_excluded_test() ->
         end
     ).
 
+%% Fail-safe (not fail-open) on a row missing the `internal` key entirely —
+%% mirrors `beamtalk_repl_ops_browse:alias_visible/2`'s convention. Should
+%% never happen against real `format_type_aliases_entry` output (which
+%% always emits `internal`), but a row shape this reader doesn't recognise
+%% must not default to seeding it as public.
+stdlib_alias_missing_internal_key_excluded_test() ->
+    with_stdlib_aliases(
+        [
+            #{
+                name => 'NoInternalKeyStrategy',
+                expansion => "#a | #b",
+                doc => undefined,
+                source_file => "stdlib/src/Fixture.bt"
+            }
+        ],
+        fun() ->
+            State = beamtalk_repl_state:new(undefined, 0),
+            AliasTable = beamtalk_repl_state:get_alias_table(State),
+            ?assertNot(maps:is_key(<<"NoInternalKeyStrategy">>, AliasTable))
+        end
+    ).
+
 %% A session-declared `type Name = ...` legally shadows a same-named stdlib
 %% entry (ADR 0108 Semantics' "current turn wins" precedent) rather than
 %% erroring or being ignored.
