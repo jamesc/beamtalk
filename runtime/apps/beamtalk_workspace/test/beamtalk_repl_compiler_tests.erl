@@ -583,7 +583,7 @@ build_class_module_index_ok() ->
 
 compile_expression_protocol_ok() ->
     %% `Protocol define: Name` compiles to a protocol_definition result, exercising
-    %% compile_protocol_definition_result/1 (Core Erlang -> BEAM for the protocol module).
+    %% compile_protocol_definition_result/2 (Core Erlang -> BEAM for the protocol module).
     Result = beamtalk_repl_compiler:compile_expression(
         "Protocol define: ReplCompProto", proto_ok_mod, #{}
     ),

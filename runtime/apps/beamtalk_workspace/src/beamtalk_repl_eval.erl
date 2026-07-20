@@ -666,7 +666,9 @@ eval_with_self(Self, Source) ->
     %% result below is rejected immediately via eval_not_an_expression_error/0,
     %% so there is no reader for a beamtalk_alias_xref edge (or even a wasted
     %% bytecode compile) that compile_expression/3 would otherwise trigger.
-    case beamtalk_repl_compiler:compile_expression_no_registration(SourceStr, ModuleName, Bindings) of
+    case
+        beamtalk_repl_compiler:compile_expression_no_registration(SourceStr, ModuleName, Bindings)
+    of
         {ok, class_definition, _Info, _Warnings} ->
             eval_not_an_expression_error();
         {ok, method_definition, _Info, _Warnings} ->

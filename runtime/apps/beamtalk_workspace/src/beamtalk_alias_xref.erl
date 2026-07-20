@@ -45,7 +45,7 @@ exactly mirroring how `beamtalk_object_class:init/1` reads `method_xref` out
 of `__beamtalk_meta/0` and calls `beamtalk_xref:register_class/2`, just from
 a compiler-port response instead of installed BEAM metadata.
 
-## Whole-set replacement, not incremental
+## Whole-set replacement, not incremental — except REPL-inline compiles (BT-2955)
 
 `register_class/2` takes the *complete* current set of aliases `ClassNameBin`
 references, not a delta — a class that stops referencing an alias (the
@@ -55,6 +55,24 @@ referenced alias would re-check a class that no longer has anything to do
 with it. The reverse index (`class_to_aliases`) exists purely to make this
 cheap: computing "what did this class use to depend on" from the forward
 index alone would mean scanning every alias's dependent set on every reload.
+
+This whole-set-replace contract only holds when a call site has the
+*complete* picture of aliases a class references — true for a real file
+compile (`compile_file_core/4`), which sees every `type Name = ...` the file
+itself declares, but not for a REPL-inline class/protocol redefinition
+(`beamtalk_repl_compiler:compile_class_definition_result/2`,
+`compile_protocol_definition_result/2`): those only ever see aliases
+declared *at the REPL*, so a file-local alias (declared in the same file the
+class originally came from, not the REPL session) is invisible to them.
+Calling `register_class/2` from there would silently clobber a real edge a
+prior file `:load` registered (BT-2955's concrete `stdlib/src/Ets.bt` +
+`EtsTableType` repro). `register_class_additive/2` exists for exactly those
+two call sites: additive-only (never removes an edge), trading "a class's
+dependency set can only grow across a session, never accurately shrink from
+a REPL-inline redefinition alone" for "never silently lose a real edge" —
+the same "over-approximation is safe, under-approximation is not" risk
+tolerance the rest of this module already accepts (see "Recorded
+limitation" below).
 
 ## Recorded limitation
 
@@ -75,7 +93,7 @@ restart.
 
 -include_lib("kernel/include/logger.hrl").
 
--export([start_link/0, register_class/2, dependents_of/1, clear/0]).
+-export([start_link/0, register_class/2, register_class_additive/2, dependents_of/1, clear/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -121,6 +139,47 @@ otherwise crash the compile on `noproc`.
 register_class(ClassNameBin, AliasNames) when is_binary(ClassNameBin), is_list(AliasNames) ->
     try
         gen_server:cast(?MODULE, {register_class, ClassNameBin, sets:from_list(AliasNames)})
+    catch
+        _:_ -> ok
+    end,
+    ok.
+
+-doc """
+Additive-only sibling of `register_class/2` for REPL-inline compiles
+(BT-2955): records that `ClassNameBin` also references `AliasNames`, without
+touching any alias edge already recorded for it. Never removes an edge —
+the "whole-set replacement" behaviour `register_class/2` documents does not
+apply here.
+
+Why this exists: a REPL-inline redefinition (`beamtalk_repl_compiler:
+compile_class_definition_result/2`, `compile_protocol_definition_result/2`)
+only ever sees aliases declared *at the REPL* — a `type Name = ...` alias
+declared in the *same source file* as the class/protocol being redefined
+(e.g. `stdlib/src/Ets.bt`'s `EtsTableType`, referenced by `Ets`'s own class
+method signature in that same file) is invisible to that compile's
+`AliasRegistry`, so its `referenced_aliases` response silently omits it —
+not because the class stopped using it, but because this compile had no way
+to know. Calling `register_class/2` with that incomplete set would clobber
+the real edge a prior `:load` of the file registered. Using this additive
+variant instead means a REPL-inline redefinition can only ever *under-report
+an addition*, never *falsely report a removal* — matching this module's
+documented "over-approximation is safe, under-approximation is not" risk
+tolerance (an edge that lingers after a class genuinely stops referencing an
+alias just means one extra, harmless re-check candidate; a lost edge means a
+live alias redefinition silently skips checking a real dependent).
+
+`compile_file_core/4` (the file-compile path, which always has the complete
+picture for its own file) keeps calling `register_class/2` — it remains the
+sole authority that can ever retire a stale edge.
+""".
+-spec register_class_additive(binary(), [binary()]) -> ok.
+register_class_additive(ClassNameBin, AliasNames) when
+    is_binary(ClassNameBin), is_list(AliasNames)
+->
+    try
+        gen_server:cast(
+            ?MODULE, {register_class_additive, ClassNameBin, sets:from_list(AliasNames)}
+        )
     catch
         _:_ -> ok
     end,
@@ -197,6 +256,24 @@ handle_cast(
             false -> ClassToAliases#{ClassNameBin => NewAliasSet}
         end,
     {noreply, State#state{alias_to_classes = AliasToClasses2, class_to_aliases = ClassToAliases1}};
+handle_cast(
+    {register_class_additive, ClassNameBin, NewAliasSet},
+    State = #state{alias_to_classes = AliasToClasses, class_to_aliases = ClassToAliases}
+) ->
+    OldAliasSet = maps:get(ClassNameBin, ClassToAliases, sets:new()),
+    AddedAliases = sets:to_list(sets:subtract(NewAliasSet, OldAliasSet)),
+    AliasToClasses1 = lists:foldl(
+        fun(AliasName, Acc) -> add_dependent(AliasName, ClassNameBin, Acc) end,
+        AliasToClasses,
+        AddedAliases
+    ),
+    MergedAliasSet = sets:union(OldAliasSet, NewAliasSet),
+    ClassToAliases1 =
+        case sets:is_empty(MergedAliasSet) of
+            true -> ClassToAliases;
+            false -> ClassToAliases#{ClassNameBin => MergedAliasSet}
+        end,
+    {noreply, State#state{alias_to_classes = AliasToClasses1, class_to_aliases = ClassToAliases1}};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
