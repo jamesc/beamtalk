@@ -57,7 +57,8 @@ to avoid temp files on disk (BT-48).
     handle_diagnostics_response/1,
     handle_version_response/1,
     clear_classes/0,
-    inject_diagnostics_failure/1
+    inject_diagnostics_failure/1,
+    inject_diagnostics_exit/0
 ]).
 -endif.
 
@@ -110,7 +111,16 @@ to avoid temp files on disk (BT-48).
     %% reason instead of reaching the real compiler port, then self-clears.
     %% Always `undefined` in production — nothing outside TEST builds can set
     %% it. See inject_diagnostics_failure/1's doc for why this exists.
-    diagnostics_fault = undefined :: undefined | binary()
+    diagnostics_fault = undefined :: undefined | binary(),
+    %% BT-2806 (test-only): when `true` (via inject_diagnostics_exit/0, only
+    %% exported in TEST builds), the *next* diagnostics/3 call stops this
+    %% process instead of replying, simulating the compiler port's
+    %% gen_server:call itself exiting (`noproc`/`timeout`) rather than an
+    %% ordinary `{error, _}` return. No self-clear flag needed, unlike
+    %% `diagnostics_fault` above — the process restart itself is the clear
+    %% (a fresh `init/1` always starts with `false`). Always `false` in
+    %% production. See inject_diagnostics_exit/0's doc for why this exists.
+    diagnostics_exit_fault = false :: boolean()
 }).
 
 %%% Public API
@@ -278,6 +288,45 @@ one consumed — are unaffected.
 -spec inject_diagnostics_failure(binary()) -> ok.
 inject_diagnostics_failure(Reason) ->
     gen_server:call(?MODULE, {inject_diagnostics_failure, Reason}, 5000).
+
+-doc """
+Force the *next* `diagnostics/3' call to exit instead of returning a value at
+all — a stricter sibling of `inject_diagnostics_failure/1' (BT-2806, test use
+only).
+
+`beamtalk_recheck:recheck_image_class/2' and `recheck_owner_for_leaf_change/3'
+each additionally `catch` the compiler port's `gen_server:call` itself exiting
+(`noproc`/`timeout`), not just an `{error, Reason}` return —
+`inject_diagnostics_failure/1' cannot reach that `catch` clause, since it
+still replies normally (with an error *value*) to a live call. This hook
+instead arms a flag that makes the *next* `{diagnostics, ...}' request stop
+this gen_server without replying at all, so the caller's `gen_server:call`
+raises an `exit` — the same shape of failure a real port crash or timeout
+would produce.
+
+Deterministic and safe to use per-test: `beamtalk_compiler_sup` supervises
+this server with `one_for_one`/`permanent`, so it is restarted immediately
+after the stop, and the very next `diagnostics/3` call (in this test or any
+other) reaches a fresh, healthy process — no explicit re-clear needed, unlike
+`inject_diagnostics_failure/1`'s flag (a fresh `init/1` always starts with
+`diagnostics_exit_fault = false`). Never touches the port itself, and
+unrelated requests (`compile_expression`, `compile`, ...) are unaffected.
+
+**Shared crash budget:** each use spends one of `beamtalk_compiler_sup`'s
+`one_for_one` restart allowance (`intensity => 5, period => 60` — production
+crash tolerance, not test-specific), and that allowance is NOT reset between
+test groups that never stop the `beamtalk_compiler` application between them
+(e.g. within a single `*_tests.erl` module using a no-op teardown — see
+`beamtalk_compiler_server_tests.erl`'s `stop_compiler/1`). Fine for a
+handful of uses; a test suite piling up more than a couple of these within
+one un-torn-down run risks exceeding the budget and leaving the server
+permanently down (`noproc`) for every subsequent test. Prefer scoping call
+sites that *do* `application:stop(beamtalk_compiler)` between test groups
+(e.g. `beamtalk_recheck_tests.erl`'s `recheck_teardown/1`) when adding more.
+""".
+-spec inject_diagnostics_exit() -> ok.
+inject_diagnostics_exit() ->
+    gen_server:call(?MODULE, inject_diagnostics_exit, 5000).
 -endif.
 
 -doc """
@@ -727,6 +776,16 @@ handle_call({resolve_completion_type, Expression}, _From, State) ->
     ),
     {reply, Result, State};
 handle_call(
+    {diagnostics, _Source, _Mode, _Options}, _From, #state{diagnostics_exit_fault = true} = State
+) ->
+    %% BT-2806 (test-only fault injection, see inject_diagnostics_exit/0):
+    %% stop without replying — the caller's gen_server:call raises an exit
+    %% (`{shutdown, {gen_server, call, [...]}}`) instead of getting a normal
+    %% return, simulating the compiler port's call itself exiting. `shutdown`
+    %% (not a crash reason) so this produces no crash report noise; the
+    %% `permanent` supervisor restarts it regardless of exit reason.
+    {stop, shutdown, State};
+handle_call(
     {diagnostics, _Source, _Mode, _Options}, _From, #state{diagnostics_fault = Fault} = State
 ) when
     Fault =/= undefined
@@ -806,6 +865,8 @@ handle_call(clear_classes, _From, State) ->
     {reply, ok, State#state{classes = #{}, aliases = #{}}};
 handle_call({inject_diagnostics_failure, Reason}, _From, State) ->
     {reply, ok, State#state{diagnostics_fault = Reason}};
+handle_call(inject_diagnostics_exit, _From, State) ->
+    {reply, ok, State#state{diagnostics_exit_fault = true}};
 handle_call(get_classes, _From, State) ->
     {reply, State#state.classes, State};
 handle_call(get_aliases, _From, State) ->

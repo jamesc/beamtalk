@@ -419,6 +419,61 @@ no_fault_reaches_port() ->
     ?assertMatch({ok, _}, Result).
 
 %%% ---------------------------------------------------------------
+%%% BT-2806: inject_diagnostics_exit/0 (test-only fault injection)
+%%%
+%%% Sibling to BT-2832's inject_diagnostics_failure/1 above: that mechanism
+%%% only forces an ordinary `{error, _}' *return*, which cannot reach
+%%% `beamtalk_recheck:recheck_image_class/2''s (and
+%%% `recheck_owner_for_leaf_change/3''s) additional `catch' clause guarding
+%%% against the compiler port's `gen_server:call' itself *exiting*
+%%% (`noproc'/`timeout'). This hook instead stops the server without
+%%% replying, so the caller's `gen_server:call' raises an exit — see
+%%% `beamtalk_recheck_tests.erl' for the higher-level regression coverage
+%%% this exists to enable.
+%%% ---------------------------------------------------------------
+
+diagnostics_exit_fault_injection_test_() ->
+    {timeout, 10,
+        {setup, fun start_compiler/0, fun stop_compiler/1, [
+            {"armed exit fault makes the next diagnostics call exit, not return",
+                fun exit_fault_makes_next_call_exit/0},
+            {"compiler server recovers (supervisor restart) after the injected exit",
+                fun exit_fault_recovers_after_restart/0}
+        ]}}.
+
+exit_fault_makes_next_call_exit() ->
+    ok = beamtalk_compiler_server:inject_diagnostics_exit(),
+    ?assertExit({shutdown, _}, beamtalk_compiler_server:diagnostics(<<"1 + 2">>)),
+    %% Let beamtalk_compiler_sup finish restarting before the next test in
+    %% this group runs — otherwise its own inject call could race the
+    %% not-yet-re-registered name.
+    ok = wait_for_compiler_server_restart().
+
+exit_fault_recovers_after_restart() ->
+    ok = beamtalk_compiler_server:inject_diagnostics_exit(),
+    ?assertExit({shutdown, _}, beamtalk_compiler_server:diagnostics(<<"1 + 2">>)),
+    %% beamtalk_compiler_sup (one_for_one/permanent) restarts the server
+    %% immediately after the injected stop — wait for the registered name to
+    %% come back, then prove the next call reaches a fresh, healthy process
+    %% (the fault is one-shot, not stuck broken for the rest of the run).
+    ok = wait_for_compiler_server_restart(),
+    ?assertMatch({ok, _}, beamtalk_compiler_server:diagnostics(<<"1 + 2">>)).
+
+wait_for_compiler_server_restart() ->
+    wait_for_compiler_server_restart(100).
+
+wait_for_compiler_server_restart(0) ->
+    error(compiler_server_did_not_restart);
+wait_for_compiler_server_restart(Attempts) ->
+    case whereis(beamtalk_compiler_server) of
+        undefined ->
+            timer:sleep(10),
+            wait_for_compiler_server_restart(Attempts - 1);
+        Pid when is_pid(Pid) ->
+            ok
+    end.
+
+%%% ---------------------------------------------------------------
 %%% Helpers
 %%% ---------------------------------------------------------------
 
