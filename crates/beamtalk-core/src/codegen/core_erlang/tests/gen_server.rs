@@ -5602,7 +5602,10 @@ fn test_terminate_plain_module_uses_module_name_as_class_label() {
     // generate() uses module name 'bt_module'.
     let module = Module::new(Vec::new(), Span::new(0, 0));
     let result = generate(&module);
-    assert!(result.is_ok(), "codegen should succeed for plain module: {result:?}");
+    assert!(
+        result.is_ok(),
+        "codegen should succeed for plain module: {result:?}"
+    );
     let code = result.unwrap();
     assert!(
         code.contains("'terminate'/2"),
