@@ -16,6 +16,7 @@
 use std::collections::HashMap;
 
 use crate::ast::{Expression, Literal, TypeAnnotation};
+use crate::semantic_analysis::alias_registry::AliasRegistry;
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::semantic_analysis::receiver_knowledge;
@@ -1072,6 +1073,16 @@ impl TypeChecker {
                 .as_ref()
                 .and_then(|registry| registry.resolve_display_name(expected_ty))
                 .unwrap_or_else(|| InferredType::class_name_for_diagnostic(expected_ty.as_str()));
+            // BT-2953: `expected_display` above only fixed the diagnostic
+            // text (BT-2911's "display-only" scope). `is_type_compatible`
+            // below still has an "unknown declared class → conservatively
+            // compatible" escape hatch that fires on the unresolved bare
+            // alias name, making argument-type checking against an
+            // alias-typed parameter a silent no-op. Resolve to the
+            // structural expansion so the checks below actually validate.
+            let (expected_structural, alias_deps) =
+                Self::resolve_alias_structural(expected_ty, self.alias_registry.as_ref());
+            self.referenced_aliases.extend(alias_deps);
             let is_class_ref_arg = arg_exprs
                 .and_then(|exprs| exprs.get(i))
                 .is_some_and(|e| matches!(e, Expression::ClassReference { .. }));
@@ -1095,11 +1106,15 @@ impl TypeChecker {
                     let class_shortcut_applies =
                         expected_ty.as_str() == "Class" && !is_class_ref_arg;
                     let instance_compat = !class_shortcut_applies
-                        && Self::is_type_compatible(actual_ty, expected_ty, hierarchy);
+                        && Self::is_type_compatible(actual_ty, &expected_structural, hierarchy);
                     let class_literal_compat = !instance_compat
                         && is_class_ref_arg
                         && hierarchy.has_class(actual_ty)
-                        && Self::is_type_compatible(&metaclass_name, expected_ty, hierarchy);
+                        && Self::is_type_compatible(
+                            &metaclass_name,
+                            &expected_structural,
+                            hierarchy,
+                        );
                     if !instance_compat && !class_literal_compat {
                         let param_pos = i + 1;
                         // BT-1588: Use hint severity for generic type params (likely false positive)
@@ -1154,7 +1169,8 @@ impl TypeChecker {
                     // hierarchy walk, so e.g. `:: Behaviour` accepts it but
                     // `:: Integer` does not.
                     let class_name_ty: EcoString = "Class".into();
-                    let compat = Self::is_type_compatible(&class_name_ty, expected_ty, hierarchy);
+                    let compat =
+                        Self::is_type_compatible(&class_name_ty, &expected_structural, hierarchy);
                     if !compat {
                         let param_pos = i + 1;
                         let actual_display: EcoString = format!("{meta_class} class").into();
@@ -1177,7 +1193,7 @@ impl TypeChecker {
                     // BT-1832: Check all union members against the expected type.
                     let Some((compat, total, incompatible)) =
                         Self::classify_union_members(members, |m| {
-                            Self::is_type_compatible(m, expected_ty, hierarchy)
+                            Self::is_type_compatible(m, &expected_structural, hierarchy)
                         })
                     else {
                         continue; // Contains Dynamic — skip
@@ -1921,6 +1937,7 @@ impl TypeChecker {
     ///
     /// If the field has a type annotation in the class hierarchy and the inferred
     /// value type is known and incompatible, emits a warning.
+    #[allow(clippy::too_many_lines)] // BT-2953 added alias-structural resolution
     pub(super) fn check_field_assignment(
         &mut self,
         field: &crate::ast::Identifier,
@@ -1949,6 +1966,16 @@ impl TypeChecker {
             .as_ref()
             .and_then(|registry| registry.resolve_display_name(&declared_type))
             .unwrap_or_else(|| InferredType::class_name_for_diagnostic(declared_type.as_str()));
+        // BT-2953: `declared_type` above is still the bare, unresolved name —
+        // `declared_display` only fixed the diagnostic text (BT-2911's
+        // "display-only" scope). Resolve it to its structural expansion
+        // (e.g. `RestartStrategy` -> `#temporary | #transient | #permanent`)
+        // before it reaches `is_assignable_to`'s structural comparison below,
+        // or an alias-typed field falsely rejects every one of its own union
+        // members (no "unknown class" escape hatch in `is_assignable_to`).
+        let (declared_type, alias_deps) =
+            Self::resolve_alias_structural(&declared_type, self.alias_registry.as_ref());
+        self.referenced_aliases.extend(alias_deps);
         match value_ty {
             InferredType::Known {
                 class_name: value_type,
@@ -2186,12 +2213,20 @@ impl TypeChecker {
             .as_ref()
             .and_then(|registry| registry.resolve_display_name(declared_ty))
             .unwrap_or_else(|| InferredType::class_name_for_diagnostic(declared_ty.as_str()));
+        // BT-2953: mirror `check_field_assignment`'s structural resolution —
+        // `declared_display` above only fixed the diagnostic text (BT-2911's
+        // "display-only" scope); `is_assignable_to` below still needs the
+        // alias's structural expansion, not the opaque unresolved name, or a
+        // valid `spawnWith:` slot value falsely fails the check.
+        let (declared_structural, alias_deps) =
+            Self::resolve_alias_structural(declared_ty, self.alias_registry.as_ref());
+        self.referenced_aliases.extend(alias_deps);
         match &value_ty {
             InferredType::Known {
                 class_name: value_type,
                 ..
             } => {
-                if !Self::is_assignable_to(value_type, declared_ty, hierarchy) {
+                if !Self::is_assignable_to(value_type, &declared_structural, hierarchy) {
                     let value_display =
                         InferredType::class_name_for_diagnostic(value_type.as_str());
                     self.diagnostics.push(
@@ -2211,7 +2246,7 @@ impl TypeChecker {
             InferredType::Union { members, .. } => {
                 let Some((compat, total, incompatible)) =
                     Self::classify_union_members(members, |m| {
-                        Self::is_assignable_to(m, declared_ty, hierarchy)
+                        Self::is_assignable_to(m, &declared_structural, hierarchy)
                     })
                 else {
                     return; // Contains Dynamic — skip.
@@ -2604,6 +2639,76 @@ impl TypeChecker {
             "Nil" => Some(WellKnownClass::UndefinedObject.as_str().into()),
             _ => None,
         }
+    }
+
+    /// BT-2953 (ADR 0108): resolve a declared type name that refers to a
+    /// registered type alias (e.g. `"RestartStrategy"`) to its structural
+    /// expansion (e.g. `"#temporary | #transient | #permanent"`), so
+    /// [`Self::is_assignable_to`]/[`Self::is_type_compatible`]'s nominal
+    /// class-hierarchy comparison sees the alias's union members instead of
+    /// an opaque, never-registered class name.
+    ///
+    /// `ClassHierarchy::state_field_type`/`MethodInfo::param_types` store an
+    /// alias-typed declaration as the bare alias name —
+    /// `TypeAnnotation::type_name()` is purely syntactic and never resolves
+    /// through `AliasRegistry`. BT-2911 re-resolved the *display* string at
+    /// these same call sites (`declared_display`/`expected_display`) but its
+    /// own acceptance criteria left the string handed to the structural
+    /// comparison functions unresolved on purpose ("display-only"). This
+    /// closes that gap: `is_assignable_to` had no "unknown class" escape
+    /// hatch, so an unresolved alias name produced false-positive "Type
+    /// mismatch" warnings even for valid union members; `is_type_compatible`
+    /// has one, so an unresolved alias name made argument-type checking a
+    /// silent no-op instead.
+    ///
+    /// Reconstructs a `TypeAnnotation::Simple` reference to `name` (mirroring
+    /// [`AliasRegistry::resolve_display_name`]'s own approach) and routes it
+    /// through the shared [`super::type_resolver::resolve_type_annotation_with_alias_deps`]
+    /// resolver, so an alias-of-alias chain expands all the way down to a
+    /// plain structural type exactly like every other alias reference in the
+    /// checker. The second element of the returned pair is the (possibly
+    /// empty) set of alias names touched while resolving — callers fold this
+    /// into `self.referenced_aliases` (ADR 0108 hot-reload re-check trigger,
+    /// BT-2899) the same way every other alias-aware resolution site does.
+    ///
+    /// A name that is not a registered alias — an ordinary class name, a
+    /// singleton, or an annotation already spelled out as a union (e.g.
+    /// `"Integer | Symbol"` from a builtin) — is returned unchanged with no
+    /// alias deps, so non-alias assignability/compatibility behavior is
+    /// untouched.
+    ///
+    /// Deliberately not the more general `inference.rs::resolve_type_name_string`
+    /// (BT-2928, also alias-registry-aware): that helper additionally
+    /// re-parses keywords (`nil`/`true`/`false`), generics, and pre-spelled
+    /// unions, which would change what a *non-alias* declared type resolves
+    /// to here (e.g. `"Nil"` -> `"UndefinedObject"`) — a broader behavior
+    /// change than this ticket's scope, and it doesn't report alias deps for
+    /// hot-reload tracking. This function only ever touches a name that
+    /// `AliasRegistry::get` recognises, then reuses the same
+    /// `resolve_type_annotation_with_alias_deps`/`referenced_aliases`
+    /// convention `check_return_type`/`check_state_defaults` already use in
+    /// this file for their (AST-`TypeAnnotation`-sourced) alias resolution.
+    fn resolve_alias_structural(
+        name: &EcoString,
+        alias_registry: Option<&AliasRegistry>,
+    ) -> (EcoString, Vec<EcoString>) {
+        let Some(registry) = alias_registry else {
+            return (name.clone(), Vec::new());
+        };
+        let Some(alias_info) = registry.get(name) else {
+            return (name.clone(), Vec::new());
+        };
+        let reference = TypeAnnotation::Simple(crate::ast::Identifier {
+            name: alias_info.name.clone(),
+            span: alias_info.span,
+        });
+        let (resolved, deps) = super::type_resolver::resolve_type_annotation_with_alias_deps(
+            &reference,
+            &super::type_resolver::SubstitutionMap::new(),
+            None,
+            Some(registry),
+        );
+        (Self::inferred_type_to_string(&resolved), deps)
     }
 
     /// Emit a warning diagnostic for an unknown selector.
