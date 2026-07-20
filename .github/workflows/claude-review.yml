@@ -159,34 +159,52 @@ jobs:
           prompt: ${{ steps.load_prompt.outputs.prompt }}
 
       # Post the agent's line-anchored findings as ONE batched PR review (inline
-      # comments incl. ```suggestion fixes) instead of per-comment posts. Anchors are
-      # validated against the PR's real diff first, so one hallucinated line number
-      # can't 422-reject the whole review; findings that don't anchor are folded into
-      # the review body rather than dropped. Posting failures are warnings, not job
-      # failures — findings also appear (in short form) in the sticky summary, and
-      # merge blocking is the separate "Gate on verdict" step, so a red X here would
-      # only add noise. Each push posts a NEW review (submitted reviews can't be
-      # edited); GitHub marks superseded comments "outdated" automatically.
-      - name: Post inline review
-        if: always() && hashFiles('.claude-findings.json') != ''
+      # comments incl. ```suggestion fixes) instead of per-comment posts. The review
+      # event mirrors the verdict so branch protection can key off the bot's review
+      # state:
+      #   PASS       -> APPROVE          Requires "Allow GitHub Actions to create and
+      #                                  approve pull requests" (Settings → Actions →
+      #                                  General); without it GitHub 422s and this
+      #                                  step falls back to a COMMENT review + warning.
+      #   BLOCK      -> REQUEST_CHANGES  Superseded automatically by a later run's
+      #                                  APPROVE — GitHub keeps only the latest review
+      #                                  state per reviewer.
+      #   no verdict -> COMMENT          Agent died mid-run; never approve or
+      #                                  request-changes on an incomplete review (the
+      #                                  fail-closed gate below goes red anyway).
+      # Anchors are validated against the PR's real diff first, so one hallucinated
+      # line number can't 422-reject the whole review; findings that don't anchor are
+      # folded into the review body rather than dropped. Posting failures are
+      # warnings, not job failures — findings also appear (in short form) in the
+      # sticky summary, and merge blocking is the separate "Gate on verdict" step, so
+      # a red X here would only add noise. Each push posts a NEW review (submitted
+      # reviews can't be edited); GitHub marks superseded comments "outdated"
+      # automatically.
+      - name: Post PR review
+        if: always() && (hashFiles('.claude-verdict') != '' || hashFiles('.claude-findings.json') != '')
         uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
-            let findings;
-            try {
-              findings = JSON.parse(fs.readFileSync('.claude-findings.json', 'utf8'));
-            } catch (e) {
-              core.warning(`Unreadable .claude-findings.json: ${e.message}`);
-              return;
+            const read = (p) => { try { return fs.readFileSync(p, 'utf8').trim(); } catch { return null; } };
+
+            const verdict = read('.claude-verdict');
+            let findings = [];
+            const rawFindings = read('.claude-findings.json');
+            if (rawFindings !== null) {
+              try {
+                const parsed = JSON.parse(rawFindings);
+                if (Array.isArray(parsed)) {
+                  findings = parsed.filter((f) => f && typeof f.path === 'string' && typeof f.body === 'string');
+                } else {
+                  core.warning('.claude-findings.json is not a JSON array; treating as no findings');
+                }
+              } catch (e) {
+                core.warning(`Unparseable .claude-findings.json: ${e.message}`);
+              }
             }
-            if (!Array.isArray(findings)) {
-              core.warning('.claude-findings.json is not a JSON array; skipping inline review');
-              return;
-            }
-            findings = findings.filter((f) => f && typeof f.path === 'string' && typeof f.body === 'string');
-            if (findings.length === 0) {
-              core.info('No inline findings to post');
+            if (verdict === null && findings.length === 0) {
+              core.info('No verdict and no findings — nothing to post');
               return;
             }
 
@@ -236,7 +254,20 @@ jobs:
             }
 
             const count = (sev) => findings.filter((f) => f.severity === sev).length;
-            let body = `**Claude Review** — ${count('Blocker')} Blocker(s), ${count('Suggestion')} Suggestion(s), ${count('Nit')} Nit(s) as inline comments. Verdict and out-of-range findings are in the summary comment.`;
+            const counts = `${count('Blocker')} Blocker(s), ${count('Suggestion')} Suggestion(s), ${count('Nit')} Nit(s)`;
+            const event = verdict === 'PASS' ? 'APPROVE'
+                        : verdict === null ? 'COMMENT'
+                        : 'REQUEST_CHANGES';
+            let body;
+            if (event === 'APPROVE') {
+              body = findings.length === 0
+                ? '✅ **Claude Review** — no findings. Approved.'
+                : `✅ **Claude Review** — approved, with non-blocking feedback: ${counts} as inline comments.`;
+            } else if (event === 'REQUEST_CHANGES') {
+              body = `❌ **Claude Review** — changes requested: ${counts}. See the inline comments and the summary comment (which also carries any finding outside this push's diff).`;
+            } else {
+              body = `⚠️ **Claude Review** — the review agent did not complete (no verdict). Posting its findings (${counts}) without an approve / request-changes state.`;
+            }
             if (unanchored.length > 0) {
               body += '\n\nFindings that could not be anchored to a diff line:';
               for (const f of unanchored) {
@@ -245,27 +276,41 @@ jobs:
               }
             }
 
-            try {
-              await github.rest.pulls.createReview({
-                owner, repo, pull_number,
-                commit_id: context.payload.pull_request.head.sha,
-                event: 'COMMENT',
-                body,
-                comments: anchored,
-              });
-              core.info(`Posted review: ${anchored.length} inline comment(s), ${unanchored.length} unanchored`);
-            } catch (e) {
-              // GitHub can still reject an anchor the index considered valid (e.g. a
-              // multi-line span crossing hunks). Retry body-only so nothing is lost.
-              core.warning(`createReview with inline comments failed: ${e.message} — retrying body-only`);
-              let fallback = body + '\n\nInline anchors were rejected by GitHub; all findings as a list:';
-              for (const c of anchored) fallback += `\n\n---\n\`${c.path}:${c.line}\`\n\n${c.body}`;
+            // GitHub can still reject an anchor the index considered valid (e.g. a
+            // multi-line span crossing hunks) — fall back body-only so nothing is
+            // lost. An APPROVE additionally falls back to COMMENT for repos where
+            // "Allow GitHub Actions to create and approve pull requests" is off.
+            let bodyOnly = body + '\n\nInline anchors were rejected by GitHub; all findings as a list:';
+            for (const c of anchored) bodyOnly += `\n\n---\n\`${c.path}:${c.line}\`\n\n${c.body}`;
+
+            const attempts = [[event, body, anchored]];
+            if (anchored.length > 0) attempts.push([event, bodyOnly, []]);
+            if (event === 'APPROVE') {
+              attempts.push(['COMMENT', body, anchored]);
+              if (anchored.length > 0) attempts.push(['COMMENT', bodyOnly, []]);
+            }
+
+            let posted = false;
+            for (const [ev, b, cs] of attempts) {
               try {
-                await github.rest.pulls.createReview({ owner, repo, pull_number, event: 'COMMENT', body: fallback });
-              } catch (e2) {
-                core.warning(`Body-only review also failed: ${e2.message} — findings remain in the summary comment`);
+                await github.rest.pulls.createReview({
+                  owner, repo, pull_number,
+                  commit_id: context.payload.pull_request.head.sha,
+                  event: ev,
+                  body: b,
+                  comments: cs,
+                });
+                core.info(`Posted ${ev} review with ${cs.length} inline comment(s) (${unanchored.length} unanchored)`);
+                posted = true;
+                break;
+              } catch (e) {
+                core.warning(`createReview ${ev} with ${cs.length} inline comment(s) failed: ${e.message}`);
+                if (ev === 'APPROVE' && /approv/i.test(String(e.message))) {
+                  core.warning('To let this workflow approve PRs, enable Settings → Actions → General → "Allow GitHub Actions to create and approve pull requests".');
+                }
               }
             }
+            if (!posted) core.warning('All review submission attempts failed — findings remain in the sticky summary comment');
 
       - name: Post review summary
         if: always()
