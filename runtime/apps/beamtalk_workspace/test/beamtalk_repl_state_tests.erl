@@ -399,6 +399,40 @@ stdlib_alias_non_boolean_internal_drops_only_that_row_test() ->
         end
     ).
 
+%% Same row-level-isolation guarantee, this time for a field so malformed
+%% that `app_env_binary`/`app_env_doc` themselves throw (e.g. a `name` that
+%% is neither atom, binary, nor list) — not just a bad `internal` value.
+%% The inner `try/catch` in `stdlib_alias_fold/2` must catch this too, or
+%% it escapes to `stdlib_alias_table/0`'s outer `try/catch` and wipes every
+%% other well-formed row (review finding, Claude BeamTalk Review on this
+%% PR).
+stdlib_alias_unconvertible_field_drops_only_that_row_test() ->
+    with_stdlib_aliases(
+        [
+            #{
+                name => 'GoodStrategy',
+                expansion => "#a | #b",
+                doc => undefined,
+                source_file => "stdlib/src/Fixture.bt",
+                internal => false
+            },
+            #{
+                %% Neither atom, binary, nor list — app_env_binary/1 has no
+                %% catch-all clause for this, so it throws function_clause.
+                name => 42,
+                expansion => "#c | #d",
+                doc => undefined,
+                source_file => "stdlib/src/Fixture.bt",
+                internal => false
+            }
+        ],
+        fun() ->
+            State = beamtalk_repl_state:new(undefined, 0),
+            AliasTable = beamtalk_repl_state:get_alias_table(State),
+            ?assert(maps:is_key(<<"GoodStrategy">>, AliasTable))
+        end
+    ).
+
 %% A session-declared `type Name = ...` legally shadows a same-named stdlib
 %% entry (ADR 0108 Semantics' "current turn wins" precedent) rather than
 %% erroring or being ignored.

@@ -407,24 +407,31 @@ stdlib_type_aliases_env() ->
 %% treating as internal" convention, so a row shape this reader doesn't
 %% yet know about can't silently leak a should-be-internal alias into
 %% every fresh REPL session instead of just being dropped. The catch-all
-%% case arm also keeps this row-level-skip, not whole-table-wipe: without
-%% it, a non-boolean `internal` value (e.g. a hand-edited `.app` file)
-%% would throw `case_clause`, caught by `stdlib_alias_table/0`'s outer
-%% `try/catch` as an empty table — discarding every other, well-formed
-%% row along with this one bad row.
+%% case arm, and the inner `try/catch` around row construction, both keep
+%% this row-level-skip, not whole-table-wipe: without the case arm, a
+%% non-boolean `internal` value would throw `case_clause`; without the
+%% inner `try/catch`, a malformed `name`/`expansion`/`doc` (e.g. an
+%% improper charlist in a hand-edited `.app` file) would throw out of
+%% `app_env_binary`/`app_env_doc`. Either, uncaught here, would be caught
+%% by `stdlib_alias_table/0`'s outer `try/catch` as an *empty* table —
+%% discarding every other, well-formed row along with this one bad row.
 -spec stdlib_alias_fold(term(), #{binary() => alias_entry()}) -> #{binary() => alias_entry()}.
 stdlib_alias_fold(#{name := Name, expansion := Expansion} = Entry, Acc) ->
     case maps:get(internal, Entry, true) of
         true ->
             Acc;
         false ->
-            Acc#{
-                app_env_binary(Name) => #{
-                    expansion => app_env_binary(Expansion),
-                    doc_comment => app_env_doc(maps:get(doc, Entry, undefined)),
-                    declared_in => <<"stdlib">>
+            try
+                Acc#{
+                    app_env_binary(Name) => #{
+                        expansion => app_env_binary(Expansion),
+                        doc_comment => app_env_doc(maps:get(doc, Entry, undefined)),
+                        declared_in => <<"stdlib">>
+                    }
                 }
-            };
+            catch
+                _:_ -> Acc
+            end;
         _ ->
             Acc
     end;
