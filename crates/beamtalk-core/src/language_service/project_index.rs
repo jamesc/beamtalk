@@ -72,7 +72,11 @@ const STDLIB_PACKAGE_MARKER: &str = "stdlib";
 /// to dependency `<name>`. `None` for a file with no such path segment
 /// (a same-project file).
 fn dependency_package_for_path(file: &Utf8Path) -> Option<EcoString> {
-    let components: Vec<&str> = file.as_str().split('/').collect();
+    // `components()` (not `as_str().split('/')`) so this parses correctly on
+    // Windows too, where `Utf8Path` uses `\` — a raw `/`-split would never
+    // match `_build`/`deps` there and every dependency file would silently
+    // fall through to the project marker.
+    let components: Vec<&str> = file.components().map(|c| c.as_str()).collect();
     components
         .windows(2)
         .position(|w| w == ["_build", "deps"])
@@ -349,9 +353,16 @@ impl ProjectIndex {
     ///
     /// An empty `protocols` clears the file's prior entry (mirrors
     /// [`Self::update_file_aliases`]). No merged-registry rebuild needed
-    /// here — see [`Self::file_protocols`]'s doc for why.
+    /// here — see [`Self::file_protocols`]'s doc for why — so there is no
+    /// expensive step for the no-op-early-return below to actually save;
+    /// it exists purely so this method's shape mirrors
+    /// [`Self::update_file_aliases`]'s for a reader comparing the two.
     pub fn update_file_protocols(&mut self, file: Utf8PathBuf, protocols: Vec<ProtocolInfo>) {
+        let had_protocols = self.file_protocols.contains_key(&file);
         if protocols.is_empty() {
+            if !had_protocols {
+                return;
+            }
             self.file_protocols.remove(&file);
         } else {
             self.file_protocols.insert(file, protocols);

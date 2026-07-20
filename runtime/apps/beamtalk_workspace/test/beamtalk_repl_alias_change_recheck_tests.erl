@@ -862,3 +862,63 @@ class_definition_repl_inline_redefinition_preserves_file_local_alias_dependency_
                 end)
             ]
         end}}.
+
+%% BT-2955 protocol sibling of
+%% `class_definition_repl_inline_redefinition_preserves_file_local_alias_dependency_test_`
+%% above — same file-local-alias shape, but for `Protocol define: ...`
+%% (`compile_protocol_definition_result/2`'s `additive` branch).
+protocol_definition_repl_inline_redefinition_preserves_file_local_alias_dependency_test_() ->
+    {timeout, 30,
+        {setup, fun alias_recheck_setup/0, fun alias_recheck_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    %% Turn 1: `:load` a file declaring BOTH the alias and
+                    %% the protocol referencing it — registers the real
+                    %% alias-xref edge via the file-compile path (`replace`
+                    %% mode is correct here: this compile has the complete
+                    %% picture for its own file).
+                    FileSource =
+                        "type AliasChangeProtocolFileLocalDirection = #north | #south | #east\n"
+                        "\n"
+                        "Protocol define: AliasChangeProtocolFileLocalDirectional\n"
+                        "  heading: d :: AliasChangeProtocolFileLocalDirection -> Boolean\n",
+                    FilePath = filename:join(
+                        temp_dir(),
+                        io_lib:format("alias_recheck_protocol_file_local_~p.bt", [
+                            erlang:unique_integer([positive])
+                        ])
+                    ),
+                    ok = file:write_file(FilePath, FileSource),
+                    State0 = beamtalk_repl_state:new(undefined, 0),
+                    {ok, _, _State1} = beamtalk_repl_loader:handle_load(FilePath, State0),
+                    ?assertEqual(
+                        [<<"AliasChangeProtocolFileLocalDirectional">>],
+                        beamtalk_alias_xref:dependents_of(
+                            <<"AliasChangeProtocolFileLocalDirection">>
+                        )
+                    ),
+
+                    %% Turn 2: redefine the SAME protocol purely inline at
+                    %% the REPL — WITHOUT ever declaring
+                    %% `AliasChangeProtocolFileLocalDirection` at the REPL,
+                    %% so this compile's own AliasRegistry has no entry for
+                    %% it and `referenced_aliases` comes back without it.
+                    %% Before BT-2955 this would clobber the real edge above
+                    %% with `[]` (`compile_protocol_definition_result/2`'s
+                    %% then-unconditional whole-set-replace registration).
+                    ProtocolSource =
+                        "Protocol define: AliasChangeProtocolFileLocalDirectional\n"
+                        "  heading: d :: AliasChangeProtocolFileLocalDirection -> Boolean\n",
+                    ExprResult = beamtalk_repl_compiler:compile_expression(
+                        ProtocolSource, alias_recheck_protocol_file_local_expr, #{}
+                    ),
+                    ?assertMatch({ok, protocol_definition, _, _}, ExprResult),
+                    ?assertEqual(
+                        [<<"AliasChangeProtocolFileLocalDirectional">>],
+                        beamtalk_alias_xref:dependents_of(
+                            <<"AliasChangeProtocolFileLocalDirection">>
+                        )
+                    )
+                end)
+            ]
+        end}}.

@@ -2712,7 +2712,17 @@ impl CoreErlangGenerator {
         for protocol in &module.protocols {
             let name = protocol.name.name.to_string();
 
-            // Helper: build a Core Erlang list of method requirement maps
+            // Helper: build a Core Erlang list of method requirement maps.
+            // `referenced: None` on every `type_annotation_to_spec` call
+            // below is intentional, not an oversight: the pre-pass in
+            // `actor_codegen.rs::generate_module` already walked these same
+            // signatures with `Some(&referenced_aliases)` before the module
+            // header (and its named `-type` declarations) was assembled —
+            // by the time this closure runs, there is nothing left to
+            // record. Re-deriving the same Documents here (rather than
+            // reusing the pre-pass's, which are discarded) is redundant
+            // work, bounded by this protocol's own parameter/return-type
+            // count, not worth threading a stashed value through for.
             let build_method_list = |sigs: &[ProtocolMethodSignature]| -> Document<'static> {
                 let items: Vec<Document<'static>> = sigs
                     .iter()
