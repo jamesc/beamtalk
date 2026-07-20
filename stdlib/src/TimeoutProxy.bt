@@ -1,6 +1,11 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
+/// A `gen_server:call` timeout in milliseconds, or `#infinity` to wait forever.
+///
+/// @see Actor#withTimeout:
+type Timeout = Integer | #infinity
+
 /// TimeoutProxy — Transparent forwarding proxy with configurable timeout.
 ///
 /// Wraps an actor reference and forwards all messages to it using a custom
@@ -37,14 +42,13 @@
 /// @see Actor#withTimeout:
 typed Actor subclass: TimeoutProxy
   state: target :: Actor | Nil = nil
-  state: timeoutMs :: Integer | #infinity = 5000
+  state: timeoutMs :: Timeout = 5000
 
   /// Set the target actor to forward messages to.
   setTarget: newTarget :: Actor -> Actor => self.target := newTarget
 
   /// Set the timeout in milliseconds (or `#infinity`).
-  setTimeoutMs: ms :: Integer | #infinity -> Integer | #infinity =>
-    self.timeoutMs := ms
+  setTimeoutMs: ms :: Timeout -> Timeout => self.timeoutMs := ms
 
   /// Forward all unknown messages to the target with the configured timeout.
   ///

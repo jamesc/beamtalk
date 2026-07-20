@@ -319,27 +319,28 @@ Object subclass: Widget
 }
 
 #[test]
-fn field_assignment_of_a_valid_alias_member_currently_false_positives_bt2953() {
-    // KNOWN BUG, tracked as BT-2953 — pinned here deliberately, not silently
-    // left as a gap: `check_field_assignment` calls `is_assignable_to`
-    // (validation.rs) with the *bare* alias name (`"RestartStrategy"`,
-    // never expanded — `ClassHierarchy` predates ADR 0108 and has no
-    // `AliasRegistry` access). `is_assignable_to` has no "unknown declared
-    // class" escape hatch, so a bare alias name that never matches any
-    // registered class falls through to a superclass-chain walk that always
-    // returns `false` — meaning it currently reports EVERY value as
-    // incompatible with an alias-typed field, including values that ARE
-    // valid members of the alias (like `#transient` here).
+fn field_assignment_of_a_valid_alias_member_no_longer_false_positives_bt2953() {
+    // Was a KNOWN BUG, tracked as BT-2953: `check_field_assignment` called
+    // `is_assignable_to` (validation.rs) with the *bare* alias name (e.g.
+    // `"RestartStrategy"`), never expanded — `ClassHierarchy` predates ADR
+    // 0108 and has no `AliasRegistry` access. `is_assignable_to` has no
+    // "unknown declared class" escape hatch, so a bare alias name that never
+    // matches any registered class fell through to a superclass-chain walk
+    // that always returned `false` — reporting EVERY value as incompatible
+    // with an alias-typed field, including values that ARE valid members of
+    // the alias (like `#transient` here).
     //
-    // BT-2911 (this file's own issue) is display-only per its own
-    // acceptance criteria ("No regression to existing EcoString-based
-    // assignability logic") — it intentionally left `is_assignable_to`
-    // untouched, so it correctly makes the (already-wrong) message *name*
-    // the alias without fixing the underlying false positive. That's why
-    // the assertion below looks paradoxical: the message literally lists
-    // `#transient` inside the union it says `#transient` doesn't belong to.
-    // BT-2953 tracks fixing the compatibility check itself; when it lands,
-    // this test must be updated to assert NO diagnostic fires.
+    // Fixed under BT-2939 (surfaced while aliasing stdlib's own
+    // `RestartStrategy`/`Timeout` — `just build-stdlib` hit this exact false
+    // positive on `TimeoutProxy>>setTimeoutMs:`'s `self.timeoutMs := ms`):
+    // `check_field_assignment` now expands `declared_type` through the
+    // `AliasRegistry` to its structural form before any compatibility check,
+    // so it compares against the real union members instead of the bare
+    // alias name. This closes BT-2953's field-assignment case (case 1); its
+    // argument-type-checking case (case 2 — `is_type_compatible`'s
+    // "unknown declared class → conservatively compatible" escape hatch
+    // silently accepting *any* value for an alias-typed parameter) is a
+    // separate call site this fix does not touch.
     let source = r"
 type RestartStrategy = #temporary | #transient | #permanent
 
@@ -356,18 +357,42 @@ Actor subclass: Supervisor
         .collect();
     assert_eq!(
         hits.len(),
+        0,
+        "assigning a valid alias member should not warn, got: {diags:?}"
+    );
+}
+
+#[test]
+fn field_assignment_of_an_invalid_alias_member_still_flags_bt2953() {
+    // Companion negative case for the fix above: an assignment that is
+    // genuinely NOT a member of the alias's expansion must still be
+    // flagged — the fix expands the declared type for comparison, it must
+    // not turn the check into a no-op.
+    let source = r"
+type RestartStrategy = #temporary | #transient | #permanent
+
+Actor subclass: Supervisor
+  state: policy :: RestartStrategy = #temporary
+
+  reset =>
+    self.policy := #bogus
+";
+    let diags = analyse_diagnostics(source);
+    let hits: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("Type mismatch: field"))
+        .collect();
+    assert_eq!(
+        hits.len(),
         1,
-        "BT-2953: expected the known false-positive to still fire — if this \
-         now fails with 0 hits, BT-2953 has been fixed and this test (and \
-         its doc comment) should be rewritten to assert no diagnostic fires. \
-         Got: {diags:?}"
+        "assigning a value that is not a member of the alias should still \
+         warn, got: {diags:?}"
     );
     assert!(
         hits[0]
             .message
             .contains("RestartStrategy (#temporary | #transient | #permanent)"),
-        "display should still name the alias even while the underlying \
-         check is wrong (BT-2953), got: {}",
+        "display should still name the alias, got: {}",
         hits[0].message
     );
 }

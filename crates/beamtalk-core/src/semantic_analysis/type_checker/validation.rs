@@ -1075,6 +1075,39 @@ impl TypeChecker {
             let is_class_ref_arg = arg_exprs
                 .and_then(|exprs| exprs.get(i))
                 .is_some_and(|e| matches!(e, Expression::ClassReference { .. }));
+            // BT-2939: `arg_ty` can itself be a bare `InferredType::Known`
+            // naming a registered alias — e.g. a message send whose callee's
+            // `MethodInfo::return_type` is the raw alias name `RestartStrategy`
+            // (`substitute_return_type_with_self` has no `AliasRegistry` access
+            // and never expands it, unlike declared-annotation resolution via
+            // `resolve_type_annotation`). Structural compatibility below
+            // (`is_type_compatible` and the `InferredType::Union` arm's
+            // `classify_union_members`) only understands the *expansion*, not
+            // the alias name, so re-resolve `arg_ty` through the same
+            // `resolve_type_annotation` entry point every declared annotation
+            // uses when its class name is a known alias — this reuses the
+            // existing, tested `Known`/`Union` compatibility and diagnostic
+            // paths unchanged rather than special-casing alias names here.
+            let resolved_arg_ty = match arg_ty {
+                InferredType::Known { class_name, .. } => self
+                    .alias_registry
+                    .as_ref()
+                    .and_then(|registry| registry.get(class_name))
+                    .map(|info| {
+                        let reference = TypeAnnotation::Simple(crate::ast::Identifier {
+                            name: info.name.clone(),
+                            span: info.span,
+                        });
+                        super::type_resolver::resolve_type_annotation(
+                            &reference,
+                            &HashMap::new(),
+                            None,
+                            self.alias_registry.as_ref(),
+                        )
+                    }),
+                _ => None,
+            };
+            let arg_ty = resolved_arg_ty.as_ref().unwrap_or(arg_ty);
             match arg_ty {
                 InferredType::Known {
                     class_name: actual_ty,
@@ -1921,6 +1954,7 @@ impl TypeChecker {
     ///
     /// If the field has a type annotation in the class hierarchy and the inferred
     /// value type is known and incompatible, emits a warning.
+    #[allow(clippy::too_many_lines)] // BT-2939 alias-expansion addition pushed this over the limit
     pub(super) fn check_field_assignment(
         &mut self,
         field: &crate::ast::Identifier,
@@ -1949,6 +1983,20 @@ impl TypeChecker {
             .as_ref()
             .and_then(|registry| registry.resolve_display_name(&declared_type))
             .unwrap_or_else(|| InferredType::class_name_for_diagnostic(declared_type.as_str()));
+        // BT-2939: `declared_type` above is the bare alias name (e.g.
+        // `Timeout`), used verbatim only for the display string. Every
+        // compatibility check below (`is_assignable_to`, `classify_union_members`)
+        // is purely string-structural and has no `AliasRegistry` access, so a
+        // bare alias name never matches its own members (`Timeout` != `Integer`).
+        // Expand it to its structural expansion (`Integer | #infinity`) here —
+        // once, before any comparison — so aliased fields compare exactly like
+        // the equivalent hand-spelled union already does.
+        let declared_type: EcoString = self
+            .alias_registry
+            .as_ref()
+            .and_then(|registry| registry.get(&declared_type))
+            .map(|info| info.annotation.type_name())
+            .unwrap_or(declared_type);
         match value_ty {
             InferredType::Known {
                 class_name: value_type,
