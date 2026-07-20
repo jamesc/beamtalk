@@ -3585,13 +3585,17 @@ impl CoreErlangGenerator {
                 // block via generic dispatch. Guard against a Tier 2 (stateful)
                 // block hitting a raw arity crash instead of a clear error — see
                 // `generate_stateful_block_guard`.
+                //
+                // BT-2913: Dictionary's `doWithKey:`/`keysAndValuesDo:` have the
+                // same gap — a 2-arg-block selector, so the guard's expected
+                // "pure" arity is 2 (key, value), not 1.
                 let stateful_guard_block_param = match name {
-                    "do:" | "collect:" | "select:" | "reject:" => params.first(),
-                    "inject:into:" => params.get(1),
+                    "do:" | "collect:" | "select:" | "reject:" => Some((params.first(), 1)),
+                    "inject:into:" => Some((params.get(1), 2)),
+                    "doWithKey:" | "keysAndValuesDo:" => Some((params.first(), 2)),
                     _ => None,
                 };
-                if let Some(block_param) = stateful_guard_block_param {
-                    let pure_arity = if name == "inject:into:" { 2 } else { 1 };
+                if let Some((Some(block_param), pure_arity)) = stateful_guard_block_param {
                     return Ok(self.generate_stateful_block_guard(
                         block_param,
                         pure_arity,

@@ -72,6 +72,23 @@ TestCase subclass: DictionaryTest
       #{#a => 1, #b => 2} perform: #do: withArguments: #(statefulBlock)
     ] raise: #stateful_block_dispatch
 
+  testPerformOnStatefulDoWithKeyBlockRaisesClearErrorInsteadOfCrashing =>
+    // BT-2913: doWithKey:/keysAndValuesDo: are 2-arg-block selectors with the
+    // same stateful_block_dispatch gap do:/collect:/etc. had (BT-2888) — a
+    // Tier 2 (stateful) block reached via perform: must raise a clear error
+    // instead of a raw arity crash.
+    count := 0
+    statefulDoWithKeyBlock := [:k :v | count := count + v. k]
+    self should: [
+      #{#a => 1, #b => 2} perform: #doWithKey: withArguments: #(statefulDoWithKeyBlock)
+    ] raise: #stateful_block_dispatch
+
+    count := 0
+    statefulKeysAndValuesDoBlock := [:k :v | count := count + v. k]
+    self should: [
+      #{#a => 1, #b => 2} perform: #keysAndValuesDo: withArguments: #(statefulKeysAndValuesDoBlock)
+    ] raise: #stateful_block_dispatch
+
   testDowithkey =>
     // Returns nil
     self assert: (#{#a => 1} doWithKey: [:k :v | nil]) equals: nil
