@@ -3447,7 +3447,7 @@ mod tests {
     /// (BT-2957): protocol method signatures don't yet get Dialyzer
     /// `-spec`/`-type` treatment at all, aliased or not.
     #[test]
-    fn compile_protocol_cross_module_alias_reference_emits_user_type() {
+    fn compile_protocol_cross_module_alias_reference_emits_no_user_type() {
         let request = Map::from([
             (atom("command"), atom("compile")),
             (
@@ -3486,14 +3486,14 @@ mod tests {
         );
     }
 
-    /// BT-2941 sibling of `compile_protocol_cross_module_alias_reference_emits_user_type`
+    /// BT-2941 sibling of `compile_protocol_cross_module_alias_reference_emits_no_user_type`
     /// for the OTHER `handle_inline_protocol_definition` caller: the REPL-inline
     /// `compile_expression` path (`handle_compile_expression`'s protocol branch).
     /// Both call sites needed the same `.with_pre_loaded_aliases(...)` wiring.
     /// See the BT-2940 update note on the sibling test above — the same
     /// reasoning applies here.
     #[test]
-    fn compile_expression_protocol_cross_module_alias_reference_emits_user_type() {
+    fn compile_expression_protocol_cross_module_alias_reference_emits_no_user_type() {
         let request = Map::from([
             (atom("command"), atom("compile_expression")),
             (
