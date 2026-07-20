@@ -1481,7 +1481,11 @@ handle_type_alias_definition_success_test() ->
     ?assertMatch({ok, <<"Direction">>, <<>>, [], _}, Result),
     {ok, _, _, _, NewState} = Result,
     ?assertEqual(
-        #{expansion => <<"#north | #south | #east | #west">>, doc_comment => undefined},
+        #{
+            expansion => <<"#north | #south | #east | #west">>,
+            doc_comment => undefined,
+            declared_in => <<"REPL">>
+        },
         maps:get(<<"Direction">>, beamtalk_repl_state:get_alias_table(NewState))
     ).
 
@@ -1501,13 +1505,21 @@ handle_type_alias_definition_redefine_overwrites_test() ->
     },
     {ok, _, _, _, State2} = beamtalk_repl_eval:handle_type_alias_definition(Second, [], State1),
     ?assertEqual(
-        #{expansion => <<"#north | #south | #east | #west">>, doc_comment => undefined},
+        #{
+            expansion => <<"#north | #south | #east | #west">>,
+            doc_comment => undefined,
+            declared_in => <<"REPL">>
+        },
         maps:get(<<"Direction">>, beamtalk_repl_state:get_alias_table(State2))
     ).
 
 -doc "format_alias_help/2 omits the comment block when there is no doc comment.".
 format_alias_help_without_doc_comment_test() ->
-    Entry = #{expansion => <<"#north | #south | #east | #west">>, doc_comment => undefined},
+    Entry = #{
+        expansion => <<"#north | #south | #east | #west">>,
+        doc_comment => undefined,
+        declared_in => <<"REPL">>
+    },
     Result = beamtalk_repl_eval:format_alias_help(<<"Direction">>, Entry),
     ?assertEqual(
         <<"type Direction = #north | #south | #east | #west\n\nDeclared in: REPL">>,
@@ -1518,7 +1530,8 @@ format_alias_help_without_doc_comment_test() ->
 format_alias_help_with_doc_comment_test() ->
     Entry = #{
         expansion => <<"#temporary | #transient | #permanent">>,
-        doc_comment => <<"How a supervised child restarts after exit.">>
+        doc_comment => <<"How a supervised child restarts after exit.">>,
+        declared_in => <<"REPL">>
     },
     Result = beamtalk_repl_eval:format_alias_help(<<"RestartStrategy">>, Entry),
     ?assertEqual(
@@ -1530,10 +1543,25 @@ format_alias_help_with_doc_comment_test() ->
         Result
     ).
 
+-doc "format_alias_help/2 renders the stdlib provenance line (BT-2938).".
+format_alias_help_stdlib_declared_in_test() ->
+    Entry = #{
+        expansion => <<"#oneForOne | #oneForAll | #restForOne">>,
+        doc_comment => undefined,
+        declared_in => <<"stdlib">>
+    },
+    Result = beamtalk_repl_eval:format_alias_help(<<"SupervisionStrategy">>, Entry),
+    ?assertEqual(
+        <<"type SupervisionStrategy = #oneForOne | #oneForAll | #restForOne\n\nDeclared in: stdlib">>,
+        Result
+    ).
+
 -doc "maybe_help_for_alias/2 answers a bare `Beamtalk help: <Alias>` for a known alias.".
 maybe_help_for_alias_found_test() ->
     State0 = beamtalk_repl_state:new(undefined, 0),
-    Entry = #{expansion => <<"#north | #south">>, doc_comment => undefined},
+    Entry = #{
+        expansion => <<"#north | #south">>, doc_comment => undefined, declared_in => <<"REPL">>
+    },
     State = beamtalk_repl_state:put_alias(<<"Direction">>, Entry, State0),
     Result = beamtalk_repl_eval:maybe_help_for_alias("Beamtalk help: Direction", State),
     ?assertEqual(
@@ -1555,7 +1583,9 @@ which will report the usual does-not-understand/not-found error).
 """.
 maybe_help_for_alias_ignores_selector_and_class_forms_test() ->
     State0 = beamtalk_repl_state:new(undefined, 0),
-    Entry = #{expansion => <<"#north | #south">>, doc_comment => undefined},
+    Entry = #{
+        expansion => <<"#north | #south">>, doc_comment => undefined, declared_in => <<"REPL">>
+    },
     State = beamtalk_repl_state:put_alias(<<"Direction">>, Entry, State0),
     ?assertEqual(
         not_found,

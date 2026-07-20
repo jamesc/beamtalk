@@ -21,6 +21,9 @@
 //! - `start_link/0` — same
 //! - `init/1` — `simple_one_for_one` with `childClass`, `maxRestarts`, `restartWindow`
 
+use std::cell::RefCell;
+use std::collections::HashSet;
+
 use super::document::Document;
 use super::document::leaf::{atom, fname};
 use super::selector_mangler::safe_class_method_fn_name;
@@ -96,8 +99,17 @@ impl CoreErlangGenerator {
         // alias-named annotation resolves to a `user_type` reference (ADR
         // 0108) instead of falling through to `any()`, regardless of which
         // module declared the alias.
-        let spec_attrs =
-            spec_codegen::generate_class_specs(class, true, Some(&self.alias_registry));
+        // BT-2940: tracks which alias names the specs below actually
+        // reference, so `generate_alias_type_attrs` only emits `-type`
+        // declarations for those (plus transitive deps) instead of every
+        // pre-loaded alias in the compilation unit.
+        let referenced_aliases: RefCell<HashSet<_>> = RefCell::new(HashSet::new());
+        let spec_attrs = spec_codegen::generate_class_specs(
+            class,
+            true,
+            Some(&self.alias_registry),
+            Some(&referenced_aliases),
+        );
         let spec_suffix: Document<'static> = spec_codegen::format_spec_attributes(&spec_attrs)
             .map_or(Document::Nil, |s| docvec![",\n     ", s]);
         // BT-2909: every class module that could contain a `user_type`
@@ -105,7 +117,8 @@ impl CoreErlangGenerator {
         // module attribute list (an `erlc` compile error otherwise) — empty
         // for a module with no `type_aliases`, so this is a no-op change for
         // the common case.
-        let alias_type_attrs = spec_codegen::generate_alias_type_attrs(&self.alias_registry);
+        let alias_type_attrs =
+            spec_codegen::generate_alias_type_attrs(&self.alias_registry, &referenced_aliases);
         let alias_type_suffix: Document<'static> =
             spec_codegen::format_alias_type_attributes(&alias_type_attrs)
                 .map_or(Document::Nil, |s| docvec![",\n     ", s]);
@@ -190,8 +203,17 @@ impl CoreErlangGenerator {
         // alias-named annotation resolves to a `user_type` reference (ADR
         // 0108) instead of falling through to `any()`, regardless of which
         // module declared the alias.
-        let spec_attrs =
-            spec_codegen::generate_class_specs(class, true, Some(&self.alias_registry));
+        // BT-2940: tracks which alias names the specs below actually
+        // reference, so `generate_alias_type_attrs` only emits `-type`
+        // declarations for those (plus transitive deps) instead of every
+        // pre-loaded alias in the compilation unit.
+        let referenced_aliases: RefCell<HashSet<_>> = RefCell::new(HashSet::new());
+        let spec_attrs = spec_codegen::generate_class_specs(
+            class,
+            true,
+            Some(&self.alias_registry),
+            Some(&referenced_aliases),
+        );
         let spec_suffix: Document<'static> = spec_codegen::format_spec_attributes(&spec_attrs)
             .map_or(Document::Nil, |s| docvec![",\n     ", s]);
         // BT-2909: every class module that could contain a `user_type`
@@ -199,7 +221,8 @@ impl CoreErlangGenerator {
         // module attribute list (an `erlc` compile error otherwise) — empty
         // for a module with no `type_aliases`, so this is a no-op change for
         // the common case.
-        let alias_type_attrs = spec_codegen::generate_alias_type_attrs(&self.alias_registry);
+        let alias_type_attrs =
+            spec_codegen::generate_alias_type_attrs(&self.alias_registry, &referenced_aliases);
         let alias_type_suffix: Document<'static> =
             spec_codegen::format_alias_type_attributes(&alias_type_attrs)
                 .map_or(Document::Nil, |s| docvec![",\n     ", s]);

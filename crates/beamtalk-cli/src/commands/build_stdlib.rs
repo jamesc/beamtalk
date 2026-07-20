@@ -15,6 +15,8 @@
 use crate::beam_compiler::{
     BeamCompiler, ClassHierarchyContext, CompileContext, compile_source_with_bindings,
 };
+use crate::commands::app_file;
+use crate::commands::build::build_alias_metadata;
 use crate::commands::util;
 use beamtalk_core::semantic_analysis::alias_registry::AliasRegistry;
 use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
@@ -134,11 +136,33 @@ pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
         .compile_batch(&core_files)
         .wrap_err("Failed to compile stdlib Core Erlang to BEAM")?;
 
-    generate_app_file(&ebin_dir, &source_files, &class_metadata, &protocol_modules)?;
+    // BT-2938: `{type_aliases, [...]}` `.app`/`.app.src` env metadata — the
+    // same `build_alias_metadata` extraction the ordinary `beamtalk build`
+    // pipeline already uses (`build.rs`'s `ClassIndexResult::all_alias_infos`
+    // call site), independently re-parsing `source_files` for doc
+    // comments/display expansions `AliasSource`/`ClassHierarchyContext`
+    // above don't carry. This is what lets `beamtalk_repl_state:new/3` (the
+    // REPL/workspace session's alias-seeding path) and `browse-type-aliases`
+    // read stdlib's own aliases back via `application:get_env(beamtalk_stdlib,
+    // type_aliases)`.
+    let alias_metadata = build_alias_metadata(&source_files);
+
+    generate_app_file(
+        &ebin_dir,
+        &source_files,
+        &class_metadata,
+        &protocol_modules,
+        &alias_metadata,
+    )?;
     // Also update .app.src so rebar3 picks up the classes env
     let app_src_dir = Utf8PathBuf::from("runtime/apps/beamtalk_stdlib/src");
     if app_src_dir.exists() {
-        generate_app_src_file(&app_src_dir, &class_metadata, &protocol_modules)?;
+        generate_app_src_file(
+            &app_src_dir,
+            &class_metadata,
+            &protocol_modules,
+            &alias_metadata,
+        )?;
     }
 
     // Generate Rust builtins file from parsed class metadata and aliases.
@@ -1019,20 +1043,21 @@ fn format_stdlib_classes_list(class_metadata: &[ClassMeta], separator: &str) -> 
 /// Lists all modules and embeds class hierarchy metadata in the `env` section.
 /// The metadata is used by `beamtalk_stdlib` to load modules in dependency order.
 ///
-/// **No `type_aliases` env key (ADR 0108 Phase 8, BT-2903):** unlike
+/// **`type_aliases` env key (ADR 0108 Phase 8, BT-2903/BT-2938):** mirrors
 /// [`super::app_file::generate_app_file`] (the real `beamtalk build`
-/// pipeline, which now emits `{type_aliases, [...]}` via
-/// [`super::build::build_alias_metadata`]), this stdlib-specific writer does
-/// not — stdlib itself declares no `type` aliases yet. When the ADR's
-/// "Stdlib follow-through" work lands (`RestartStrategy`, `JsonValue`,
-/// tracked against BT-2618/BT-2827 in the ADR), this function needs the same
-/// `build_alias_metadata`/`format_type_aliases_entry` wiring, or
-/// `browse-type-aliases` will never show stdlib's own aliases.
+/// pipeline), which emits `{type_aliases, [...]}` via
+/// [`super::build::build_alias_metadata`] + [`app_file::format_type_aliases_entry`].
+/// Without this key, `application:get_env(beamtalk_stdlib, type_aliases)`
+/// returns `undefined` forever, so neither `browse-type-aliases`
+/// (`beamtalk_repl_ops_browse.erl`) nor the REPL/workspace session's
+/// alias-seeding path (`beamtalk_repl_state:new/3`, BT-2938) can ever learn
+/// stdlib's own `type Name = ...` declarations.
 fn generate_app_file(
     ebin_dir: &Utf8Path,
     source_files: &[Utf8PathBuf],
     class_metadata: &[ClassMeta],
     protocol_modules: &[String],
+    alias_metadata: &[app_file::AliasMetadata],
 ) -> Result<()> {
     let module_names: Vec<String> = source_files
         .iter()
@@ -1055,6 +1080,11 @@ fn generate_app_file(
         .collect::<Vec<_>>()
         .join(", ");
 
+    // BT-2938: same `{type_aliases, [...]}` entry the ordinary `beamtalk
+    // build` pipeline emits (`app_file::format_type_aliases_entry`) — empty
+    // string (no key at all) when stdlib declares no aliases.
+    let type_aliases_entry = app_file::format_type_aliases_entry(alias_metadata);
+
     let version = env!("BEAMTALK_VERSION");
     let app_content = format!(
         "{{application, beamtalk_stdlib, [\n\
@@ -1065,7 +1095,7 @@ fn generate_app_file(
          \x20   {{applications, [kernel, stdlib, beamtalk_runtime]}},\n\
          \x20   {{env, [\n\
          \x20       {{classes, [{classes_list}]}},\n\
-         \x20       {{protocol_modules, [{protocol_modules_list}]}}\n\
+         \x20       {{protocol_modules, [{protocol_modules_list}]}}{type_aliases_entry}\n\
          \x20   ]}}\n\
          ]}}.\n"
     );
@@ -1082,11 +1112,13 @@ fn generate_app_file(
 /// Generate/update the `.app.src` file so rebar3 picks up the classes metadata.
 ///
 /// The `.app.src` uses `{modules, []}` (rebar3 auto-fills modules) but embeds
-/// the `{classes, [...]}` env for the runtime to read via `application:get_env`.
+/// the `{classes, [...]}` and (BT-2938) `{type_aliases, [...]}` envs for the
+/// runtime to read via `application:get_env`.
 fn generate_app_src_file(
     src_dir: &Utf8Path,
     class_metadata: &[ClassMeta],
     protocol_modules: &[String],
+    alias_metadata: &[app_file::AliasMetadata],
 ) -> Result<()> {
     // ADR 0070 Phase 4: Generate extended class hierarchy entries for env
     let classes_list = format_stdlib_classes_list(class_metadata, ",\n            ");
@@ -1097,6 +1129,9 @@ fn generate_app_src_file(
         .map(|m| format!("'{m}'"))
         .collect::<Vec<_>>()
         .join(", ");
+
+    // BT-2938: see `generate_app_file`'s doc.
+    let type_aliases_entry = app_file::format_type_aliases_entry(alias_metadata);
 
     let app_src_content = format!(
         "{{application, beamtalk_stdlib, [\n\
@@ -1109,7 +1144,7 @@ fn generate_app_src_file(
          \x20       {{classes, [\n\
          \x20           {classes_list}\n\
          \x20       ]}},\n\
-         \x20       {{protocol_modules, [{protocol_modules_list}]}}\n\
+         \x20       {{protocol_modules, [{protocol_modules_list}]}}{type_aliases_entry}\n\
          \x20   ]}}\n\
          ]}}.\n"
     );
@@ -1900,7 +1935,7 @@ mod tests {
             Utf8PathBuf::from("lib/String.bt"),
         ];
 
-        generate_app_file(&ebin_dir, &source_files, &[], &[]).unwrap();
+        generate_app_file(&ebin_dir, &source_files, &[], &[], &[]).unwrap();
 
         let app_file = ebin_dir.join("beamtalk_stdlib.app");
         assert!(app_file.exists());
@@ -1916,10 +1951,13 @@ mod tests {
     fn test_generate_app_file_empty() {
         let (_temp, ebin_dir) = temp_utf8_dir();
 
-        generate_app_file(&ebin_dir, &[], &[], &[]).unwrap();
+        generate_app_file(&ebin_dir, &[], &[], &[], &[]).unwrap();
 
         let content = fs::read_to_string(ebin_dir.join("beamtalk_stdlib.app")).unwrap();
         assert!(content.contains("{modules, []}"));
+        // BT-2938: no type-alias metadata => no `type_aliases` env key at all
+        // (matches `format_type_aliases_entry`'s empty-input contract).
+        assert!(!content.contains("type_aliases"));
     }
 
     #[test]
@@ -1931,7 +1969,7 @@ mod tests {
             Utf8PathBuf::from("lib/my-bad-name.bt"),
         ];
 
-        let result = generate_app_file(&ebin_dir, &source_files, &[], &[]);
+        let result = generate_app_file(&ebin_dir, &source_files, &[], &[], &[]);
         assert!(result.is_err());
     }
 
@@ -1942,12 +1980,36 @@ mod tests {
         let source_files = vec![Utf8PathBuf::from("lib/Integer.bt")];
         let protocol_modules = vec!["bt@stdlib@printable".to_string()];
 
-        generate_app_file(&ebin_dir, &source_files, &[], &protocol_modules).unwrap();
+        generate_app_file(&ebin_dir, &source_files, &[], &protocol_modules, &[]).unwrap();
 
         let content = fs::read_to_string(ebin_dir.join("beamtalk_stdlib.app")).unwrap();
         assert!(
             content.contains("{protocol_modules, ['bt@stdlib@printable']}"),
             "Should contain protocol_modules env key. Got:\n{content}"
+        );
+    }
+
+    #[test]
+    fn test_generate_app_file_with_type_aliases() {
+        let (_temp, ebin_dir) = temp_utf8_dir();
+
+        let source_files = vec![Utf8PathBuf::from("lib/Supervisor.bt")];
+        let alias_metadata = vec![app_file::AliasMetadata {
+            name: "SupervisionStrategy".to_string(),
+            expansion: "#oneForOne | #oneForAll | #restForOne".to_string(),
+            doc: None,
+            source_file: "lib/Supervisor.bt".to_string(),
+            internal: false,
+        }];
+
+        generate_app_file(&ebin_dir, &source_files, &[], &[], &alias_metadata).unwrap();
+
+        let content = fs::read_to_string(ebin_dir.join("beamtalk_stdlib.app")).unwrap();
+        assert!(
+            content.contains("{type_aliases, [")
+                && content.contains("name => 'SupervisionStrategy'")
+                && content.contains("expansion => \"#oneForOne | #oneForAll | #restForOne\""),
+            "Should contain type_aliases env key with the alias entry. Got:\n{content}"
         );
     }
 

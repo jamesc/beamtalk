@@ -10,6 +10,12 @@
 //! suggestion, reusing `validation.rs`'s `edit_distance` "did you mean"
 //! machinery), and the core `TypeProvenance::Aliased` display mechanics that
 //! back both surfaces.
+//!
+//! BT-2953 also covers the *structural correctness* of the three `EcoString`-
+//! based compatibility checks BT-2911 deliberately left untouched
+//! (`check_field_assignment`, `check_spawn_with_value`,
+//! `check_argument_types`) — see the tests below asserting a valid alias
+//! member is no longer flagged, and an invalid one still is.
 
 /// Parses `source` and runs the full `analyse_with_options_and_classes`
 /// pipeline (alias registration + `check_module_with_protocols_and_aliases`,
@@ -222,22 +228,23 @@ Actor subclass: Supervisor
 fn argument_mismatch_on_alias_typed_parameter_names_the_alias() {
     // `check_argument_types` reads `expected_ty` as a bare `EcoString` from
     // `MethodInfo::param_types` — the same pre-ADR-0108 storage
-    // `check_field_assignment` sits on. Unlike that sibling, this path
-    // cannot be exercised through the *full* compile pipeline: an alias
-    // name is never registered as a class in `ClassHierarchy`
+    // `check_field_assignment` sits on. Before BT-2953, this path could not
+    // be exercised through the *full* compile pipeline: an alias name is
+    // never registered as a class in `ClassHierarchy`
     // (`hierarchy.has_class("RestartStrategy")` is always `false`), and
-    // `is_type_compatible`'s pre-existing, unrelated "unknown declared
-    // class → conservatively compatible" fallback (validation.rs, the
+    // `is_type_compatible`'s "unknown declared class → conservatively
+    // compatible" fallback (validation.rs, the
     // `!hierarchy.has_class(actual_base) || !hierarchy.has_class(expected_base)`
-    // check) absorbs *every* argument against a bare alias-typed parameter
-    // as compatible, so the mismatch branch this test targets never runs
-    // end-to-end today. That gap is pre-existing and out of BT-2911's
-    // display-only scope (its own acceptance criteria: no change to
-    // `is_assignable_to`/`is_type_compatible`) — fixing it would mean
-    // resolving `param_types` through the alias table before the
-    // compatibility check itself, a bigger change than display provenance.
+    // check) absorbed *every* argument against a bare alias-typed parameter
+    // as compatible, so the mismatch branch this test targets never ran
+    // end-to-end. BT-2953 closed that gap by resolving `expected_ty` to its
+    // structural expansion (`resolve_alias_structural`) before it ever
+    // reaches `is_type_compatible`, so the scenario is now also reachable
+    // through the full pipeline — see
+    // `argument_of_an_invalid_alias_member_type_is_flagged` below for that
+    // version.
     //
-    // So this test calls `check_argument_types` directly (mirroring
+    // This test keeps calling `check_argument_types` directly (mirroring
     // `local_annotations.rs`'s `register_test_alias` pattern) with a
     // hierarchy where a `RestartStrategy` *class* happens to also exist —
     // purely to satisfy `is_type_compatible`'s `has_class` guard and reach
@@ -245,9 +252,9 @@ fn argument_mismatch_on_alias_typed_parameter_names_the_alias() {
     // name is seeded independently via `register_test_alias`, bypassing
     // `AliasRegistry::register_module`'s namespace-collision check (which
     // would legitimately reject a real alias/class name collision — see
-    // that method's doc). This is an intentionally synthetic setup to reach
-    // otherwise-unreachable code; it does not assert anything about
-    // real-world alias/class collisions.
+    // that method's doc). This is an intentionally synthetic setup that
+    // isolates `check_argument_types` from the rest of the pipeline; it
+    // does not assert anything about real-world alias/class collisions.
     use crate::semantic_analysis::alias_registry::{AliasInfo, AliasRegistry};
 
     let source = r"
@@ -319,28 +326,23 @@ Object subclass: Widget
 }
 
 #[test]
-fn field_assignment_of_a_valid_alias_member_no_longer_false_positives_bt2953() {
-    // Was a KNOWN BUG, tracked as BT-2953: `check_field_assignment` called
-    // `is_assignable_to` (validation.rs) with the *bare* alias name (e.g.
-    // `"RestartStrategy"`), never expanded — `ClassHierarchy` predates ADR
-    // 0108 and has no `AliasRegistry` access. `is_assignable_to` has no
+fn field_assignment_of_a_valid_alias_member_is_not_flagged() {
+    // BT-2953 positive case: `check_field_assignment` used to call
+    // `is_assignable_to` (validation.rs) with the *bare* alias name
+    // (`"RestartStrategy"`, never expanded — `ClassHierarchy` predates ADR
+    // 0108 and has no `AliasRegistry` access). `is_assignable_to` has no
     // "unknown declared class" escape hatch, so a bare alias name that never
-    // matches any registered class fell through to a superclass-chain walk
+    // matched any registered class fell through to a superclass-chain walk
     // that always returned `false` — reporting EVERY value as incompatible
     // with an alias-typed field, including values that ARE valid members of
-    // the alias (like `#transient` here).
+    // the alias (like `#transient` here). BT-2953 fixed this by resolving
+    // the declared field type to its structural expansion
+    // (`resolve_alias_structural`) before it reaches `is_assignable_to`, so
+    // a valid member no longer produces a false "Type mismatch" warning.
     //
-    // Fixed under BT-2939 (surfaced while aliasing stdlib's own
-    // `RestartStrategy`/`Timeout` — `just build-stdlib` hit this exact false
-    // positive on `TimeoutProxy>>setTimeoutMs:`'s `self.timeoutMs := ms`):
-    // `check_field_assignment` now expands `declared_type` through the
-    // `AliasRegistry` to its structural form before any compatibility check,
-    // so it compares against the real union members instead of the bare
-    // alias name. This closes BT-2953's field-assignment case (case 1); its
-    // argument-type-checking case (case 2 — `is_type_compatible`'s
-    // "unknown declared class → conservatively compatible" escape hatch
-    // silently accepting *any* value for an alias-typed parameter) is a
-    // separate call site this fix does not touch.
+    // Surfaced under BT-2939 too — `just build-stdlib` hit this exact false
+    // positive on `TimeoutProxy>>setTimeoutMs:`'s `self.timeoutMs := ms`
+    // once `Timeout`/`RestartStrategy` became real cross-file aliases.
     let source = r"
 type RestartStrategy = #temporary | #transient | #permanent
 
@@ -355,44 +357,91 @@ Actor subclass: Supervisor
         .iter()
         .filter(|d| d.message.contains("Type mismatch: field"))
         .collect();
-    assert_eq!(
-        hits.len(),
-        0,
-        "assigning a valid alias member should not warn, got: {diags:?}"
+    assert!(
+        hits.is_empty(),
+        "valid alias member must not be flagged, got: {diags:?}"
     );
 }
 
 #[test]
-fn field_assignment_of_an_invalid_alias_member_still_flags_bt2953() {
-    // Companion negative case for the fix above: an assignment that is
-    // genuinely NOT a member of the alias's expansion must still be
-    // flagged — the fix expands the declared type for comparison, it must
-    // not turn the check into a no-op.
+fn spawn_with_value_of_a_valid_alias_member_is_not_flagged() {
+    // BT-2953 positive case, sibling to the field-assignment case above:
+    // `check_spawn_with_value` resolves the declared slot's alias type to
+    // its structural expansion before `is_assignable_to`, so a `spawnWith:`
+    // value that IS a member of the alias's union is not flagged.
     let source = r"
 type RestartStrategy = #temporary | #transient | #permanent
 
 Actor subclass: Supervisor
   state: policy :: RestartStrategy = #temporary
 
-  reset =>
-    self.policy := #bogus
+Supervisor spawnWith: #{#policy => #transient}
 ";
     let diags = analyse_diagnostics(source);
     let hits: Vec<_> = diags
         .iter()
-        .filter(|d| d.message.contains("Type mismatch: field"))
+        .filter(|d| d.message.contains("type mismatch for state key"))
         .collect();
-    assert_eq!(
-        hits.len(),
-        1,
-        "assigning a value that is not a member of the alias should still \
-         warn, got: {diags:?}"
-    );
     assert!(
-        hits[0]
-            .message
-            .contains("RestartStrategy (#temporary | #transient | #permanent)"),
-        "display should still name the alias, got: {}",
+        hits.is_empty(),
+        "valid alias member must not be flagged, got: {diags:?}"
+    );
+}
+
+#[test]
+fn argument_of_a_valid_alias_member_type_is_not_flagged() {
+    // BT-2953 positive case: an alias-typed parameter accepts a valid
+    // member of its union without a false "expects ... got ..." diagnostic,
+    // now that `check_argument_types` resolves `expected_ty` through the
+    // alias registry before `is_type_compatible`.
+    let source = r"
+type RestartStrategy = #temporary | #transient | #permanent
+
+Object subclass: Widget
+  restart: policy :: RestartStrategy => policy
+
+Widget new restart: #temporary
+";
+    let diags = analyse_diagnostics(source);
+    let hits: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("expects"))
+        .collect();
+    assert!(
+        hits.is_empty(),
+        "valid alias member argument must not be flagged, got: {diags:?}"
+    );
+}
+
+#[test]
+fn argument_of_an_invalid_alias_member_type_is_flagged() {
+    // BT-2953 negative case, now reachable through the full pipeline.
+    // Before the fix, `is_type_compatible`'s "unknown declared class"
+    // escape hatch absorbed every argument against a bare alias-typed
+    // parameter as compatible, so this scenario could only be reached via
+    // the synthetic direct-call setup in
+    // `argument_mismatch_on_alias_typed_parameter_names_the_alias` above.
+    // An incompatible argument (`Integer`) against an alias-typed
+    // parameter now actually rejects end-to-end.
+    let source = r"
+type RestartStrategy = #temporary | #transient | #permanent
+
+Object subclass: Widget
+  restart: policy :: RestartStrategy => policy
+
+Widget new restart: 42
+";
+    let diags = analyse_diagnostics(source);
+    let hits: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("expects"))
+        .collect();
+    assert_eq!(hits.len(), 1, "expected one diagnostic, got: {diags:?}");
+    assert!(
+        hits[0].message.contains(
+            "expects RestartStrategy (#temporary | #transient | #permanent), got Integer"
+        ),
+        "should name the alias with its expansion, got: {}",
         hits[0].message
     );
 }

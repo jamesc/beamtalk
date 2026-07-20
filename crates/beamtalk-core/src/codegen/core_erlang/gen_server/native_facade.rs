@@ -10,6 +10,9 @@
 //! and provides `has_method/1`, `__beamtalk_meta/0`, `register_class/0`, and
 //! dispatch functions for `self delegate` methods (BT-1210).
 
+use std::cell::RefCell;
+use std::collections::HashSet;
+
 use super::super::document::{Document, INDENT, join, leaf, line, nest};
 use super::super::spec_codegen;
 use super::super::{CodeGenContext, CoreErlangGenerator, Result};
@@ -49,11 +52,21 @@ impl CoreErlangGenerator {
         // alias-named annotation resolves to a `user_type` reference (ADR
         // 0108) instead of falling through to `any()`, regardless of which
         // module declared the alias.
+        // BT-2940: tracks which alias names the specs below actually
+        // reference, so `generate_alias_type_attrs` only emits `-type`
+        // declarations for those (plus transitive deps) instead of every
+        // pre-loaded alias in the compilation unit.
+        let referenced_aliases: RefCell<HashSet<_>> = RefCell::new(HashSet::new());
         let spec_attrs = module
             .classes
             .first()
             .map(|class| {
-                spec_codegen::generate_class_specs(class, false, Some(&self.alias_registry))
+                spec_codegen::generate_class_specs(
+                    class,
+                    false,
+                    Some(&self.alias_registry),
+                    Some(&referenced_aliases),
+                )
             })
             .unwrap_or_default();
         let spec_suffix: Document<'static> = spec_codegen::format_spec_attributes(&spec_attrs)
@@ -63,7 +76,8 @@ impl CoreErlangGenerator {
         // module attribute list (an `erlc` compile error otherwise) — empty
         // for a module with no `type_aliases`, so this is a no-op change for
         // the common case.
-        let alias_type_attrs = spec_codegen::generate_alias_type_attrs(&self.alias_registry);
+        let alias_type_attrs =
+            spec_codegen::generate_alias_type_attrs(&self.alias_registry, &referenced_aliases);
         let alias_type_suffix: Document<'static> =
             spec_codegen::format_alias_type_attributes(&alias_type_attrs)
                 .map_or(Document::Nil, |s| docvec![",\n     ", s]);
