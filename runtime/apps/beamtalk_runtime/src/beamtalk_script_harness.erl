@@ -2,6 +2,7 @@
 %% SPDX-License-Identifier: Apache-2.0
 
 -module(beamtalk_script_harness).
+-compile(nowarn_deprecated_catch).
 
 %%% **DDD Context:** Runtime Context — Program Execution
 

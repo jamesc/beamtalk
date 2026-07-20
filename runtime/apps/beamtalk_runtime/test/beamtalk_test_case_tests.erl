@@ -43,7 +43,10 @@ should_raise_matching_kind_test() ->
         error(#beamtalk_error{
             kind = does_not_understand,
             class = 'X',
-            message = <<"m">>
+            selector = undefined,
+            message = <<"m">>,
+            hint = undefined,
+            details = #{}
         })
     end,
     ?assertEqual(nil, beamtalk_test_case:should_raise(Block, does_not_understand)).
@@ -64,7 +67,10 @@ should_raise_wrong_kind_test() ->
         error(#beamtalk_error{
             kind = type_error,
             class = 'X',
-            message = <<"m">>
+            selector = undefined,
+            message = <<"m">>,
+            hint = undefined,
+            details = #{}
         })
     end,
     ?assertError(

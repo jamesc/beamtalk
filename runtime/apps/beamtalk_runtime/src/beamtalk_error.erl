@@ -13,7 +13,41 @@ to ensure consistent error messages and structure.
 
 See docs/internal/design-self-as-object.md Section 3.8 for error taxonomy.
 """.
--include("beamtalk.hrl").
+
+%% @doc Structured error record for runtime errors (OTP 29 native record,
+%% EEP 79 — BT-2962 spike).
+%%
+%% All Beamtalk errors use this consistent structure for better tooling
+%% and developer experience:
+%% - kind: Error category — one of:
+%%     does_not_understand | immutable_value | type_error | arity_mismatch |
+%%     future_not_awaited | timeout | instantiation_error | file_not_found |
+%%     permission_denied | io_error | class_not_found |
+%%     no_superclass | class_already_exists | internal_error | dispatch_error |
+%%     callback_failed | assertion_failed | runtime_error | erlang_exit |
+%%     erlang_throw | missing_parameter | stdlib_shadowing |
+%%     stateful_block_dispatch
+%% - class: The class name where the error occurred (e.g., 'Integer')
+%% - selector: The method that failed (if applicable)
+%% - message: Human-readable explanation using user-facing names
+%% - hint: Actionable suggestion for fixing the error
+%% - details: Additional context map (arity, expected types, etc.)
+%%
+%% This module owns the definition — native records are scoped to their
+%% defining module (BT-2962 finding), so `beamtalk.hrl` re-exports it via
+%% `-import_record(beamtalk_error, [beamtalk_error]).` for every other
+%% consumer instead of redeclaring it. This module must NOT include that
+%% header: importing a record into the module that declares it locally is
+%% a compile error.
+-record #beamtalk_error{
+    kind :: atom(),
+    class :: atom(),
+    selector :: atom() | undefined,
+    message :: binary(),
+    hint :: binary() | undefined,
+    details :: map()
+}.
+-export_record([beamtalk_error]).
 
 -export([
     new/2,

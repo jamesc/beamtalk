@@ -2,6 +2,7 @@
 %% SPDX-License-Identifier: Apache-2.0
 
 -module(beamtalk_actor_tests).
+-compile(nowarn_deprecated_catch).
 
 %%% **DDD Context:** Actor System Context
 

@@ -14,7 +14,7 @@ set -euo pipefail
 # setup-beam and the devcontainer Dockerfile, so the cloud toolchain never
 # drifts from what CI compiles with. (Previously this script apt-installed
 # OTP 27 + a hand-pinned Elixir/rebar3, which silently fell behind the
-# .tool-versions pin to OTP 28.5 / Elixir 1.20.1-otp-28 / rebar 3.27.0.)
+# .tool-versions pin to OTP 29.0.3 / Elixir 1.20.1-otp-29 / rebar 3.27.0.)
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/jamesc/beamtalk/main/scripts/setup-cloud.sh | bash
@@ -172,7 +172,7 @@ echo ""
 
 # --- BEAM toolchain (Erlang + Elixir + rebar3) via mise ---
 #
-# Pinned by repo-root .tool-versions (OTP 28.5 / Elixir 1.20.1-otp-28 /
+# Pinned by repo-root .tool-versions (OTP 29.0.3 / Elixir 1.20.1-otp-29 /
 # rebar 3.27.0 at time of writing). mise fetches precompiled BEAM builds — no
 # source compile — exactly like the Dockerfile. We never apt-install erlang or
 # the distro `elixir` package (it pins an old erlang).

@@ -18,6 +18,16 @@ Start the Beamtalk runtime application, initializing ETS tables and supervisor t
 """.
 -spec start(application:start_type(), term()) -> {ok, pid()} | {error, term()}.
 start(_StartType, _StartArgs) ->
+    %% BT-2962 spike finding: `#beamtalk_error{}` is an OTP 29 native record
+    %% (EEP 79) owned by the `beamtalk_error` module. Unlike an ordinary
+    %% function call, *constructing* an imported native record does NOT
+    %% trigger BEAM's on-demand code loading of the owning module — if
+    %% nothing has called into `beamtalk_error` yet, the first construction
+    %% anywhere else in the app crashes with `{badrecord,{beamtalk_error,
+    %% beamtalk_error}}`. Force it loaded before anything else runs so
+    %% record construction is safe regardless of call order.
+    code:ensure_loaded(beamtalk_error),
+
     %% BT-1424: Configure SASL before it starts (started as a beamtalk_workspace dep).
     %% Suppress the legacy SASL error logger — reports flow through the standard
     %% logger framework (OTP 21+) and are captured by the workspace file handler.

@@ -2,6 +2,7 @@
 %% SPDX-License-Identifier: Apache-2.0
 
 -module(beamtalk_stdlib_test).
+-include("beamtalk.hrl").
 
 %%% **DDD Context:** Object System Context
 
@@ -141,14 +142,14 @@ run_one({error, EvalMod, ExpectedKind, _VarName, Location}, Bindings) ->
         %% Wrapped Exception objects (ADR 0015)
         error:#{
             '$beamtalk_class' := _,
-            error := {beamtalk_error, Kind, _, _, _, _, _}
+            error := #beamtalk_error{kind = Kind}
         } ->
             check_error_kind(Kind, ExpectedKind, Location, Bindings);
         %% Direct #beamtalk_error{} records
-        error:{beamtalk_error, Kind, _, _, _, _, _} ->
+        error:#beamtalk_error{kind = Kind} ->
             check_error_kind(Kind, ExpectedKind, Location, Bindings);
         %% Future-rejected errors
-        throw:{future_rejected, {beamtalk_error, Kind, _, _, _, _, _}} ->
+        throw:{future_rejected, #beamtalk_error{kind = Kind}} ->
             check_error_kind(Kind, ExpectedKind, Location, Bindings);
         %% Plain atom errors (e.g., badarith, badarg)
         error:ExpectedKind ->
