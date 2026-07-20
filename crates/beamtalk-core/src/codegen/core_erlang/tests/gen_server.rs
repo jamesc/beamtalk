@@ -3379,6 +3379,62 @@ Actor subclass: Supervisor
 }
 
 #[test]
+fn test_unused_pre_loaded_alias_gets_no_type_declaration() {
+    // BT-2940: `generate_alias_type_attrs` used to emit a `-type` for every
+    // name in the pre-loaded `AliasRegistry` (BT-2932), regardless of
+    // whether this module's own specs referenced it — for a project with
+    // `A` aliases and `M` modules, every module's attribute list grew by
+    // `A` entries rather than just what it used. Two aliases are pre-loaded
+    // here; the consuming module references only one of them, so only that
+    // one's `-type` declaration (and `user_type` reference) may appear.
+    let alias_src = "
+type RestartStrategy = #temporary | #transient | #permanent
+type Timeout = Integer
+";
+    let alias_tokens = crate::source_analysis::lex_with_eof(alias_src);
+    let (alias_module, alias_diags) = crate::source_analysis::parse(alias_tokens);
+    assert!(
+        alias_diags.is_empty(),
+        "alias-declaring module parse should succeed: {alias_diags:?}"
+    );
+    let pre_loaded_aliases =
+        crate::semantic_analysis::AliasRegistry::extract_alias_infos(&alias_module);
+    assert_eq!(
+        pre_loaded_aliases.len(),
+        2,
+        "sanity: both pre-loaded aliases extracted"
+    );
+
+    let src = "
+Actor subclass: Supervisor
+  class defaultStrategy: policy :: RestartStrategy => policy
+";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, diags) = crate::source_analysis::parse(tokens);
+    assert!(diags.is_empty(), "parse should succeed: {diags:?}");
+
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@supervisor_unused_alias_scale")
+            .with_pre_loaded_aliases(pre_loaded_aliases),
+    )
+    .expect("codegen should succeed");
+
+    assert!(
+        code.contains("{'user_type', 0, 'restart_strategy', []}"),
+        "the referenced alias should still emit a user_type reference. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'restart_strategy'"),
+        "the referenced alias's named -type must be declared. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'timeout'"),
+        "an unreferenced pre-loaded alias must not get a -type declaration. Got:\n{code}"
+    );
+}
+
+#[test]
 fn test_alias_annotated_actor_module_compiles_through_erlc() {
     // BT-2909: the correctness trap this issue exists to close — a
     // `-spec`/`-type` referencing an undeclared local type is a hard `erlc`

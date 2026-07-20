@@ -3426,14 +3426,26 @@ mod tests {
     /// always the empty module-local registry — a protocol source file never
     /// declares its own `type Name = ...` (that's a separate top-level
     /// declaration), so every alias a protocol method signature could
-    /// reference is necessarily cross-module/pre-loaded. Mirrors the BT-2932
-    /// wiring pattern: `Wrapper`'s own alias body references `Base` (a
-    /// second, separately pre-loaded alias) by name, so the fix is only
-    /// observable if the *whole* pre-loaded registry reaches codegen, not
-    /// just semantic analysis (which already resolved both names before this
-    /// fix — see `compile_protocol_with_known_type_aliases_reports_referenced_aliases`
-    /// above, which passed even before this fix since it only checks
-    /// `referenced_aliases`, a semantic-analysis-only signal).
+    /// reference is necessarily cross-module/pre-loaded.
+    ///
+    /// BT-2940 update: this used to assert that `Wrapper`/`Base` got named
+    /// `-type` declarations, using `generate_alias_type_attrs`'s (at the
+    /// time) unconditional "emit every pre-loaded alias" behaviour as an
+    /// observable proxy for "the registry reached codegen". BT-2940 fixed
+    /// that over-emission — `-type` declarations are now scoped to aliases a
+    /// module's own `-spec`s/state fields actually reference — which
+    /// unmasks a separate, pre-existing gap: protocol method signatures
+    /// (`heading: d :: Wrapper -> Boolean`) never flow through
+    /// `generate_class_specs` at all (protocols have no standalone functions
+    /// to attach a `-spec` to), so no alias is ever "referenced" for a
+    /// protocol-only module regardless of `self.alias_registry`'s contents.
+    /// `pre_loaded_aliases` reaching `CodegenOptions` is now only observable
+    /// via successful compilation (a missing/unresolvable alias name would
+    /// have been a semantic-analysis diagnostic before codegen is even
+    /// reached — see `compile_protocol_with_known_type_aliases_reports_referenced_aliases`
+    /// above for that semantic-analysis-only signal). Tracked as a follow-up
+    /// (BT-2957): protocol method signatures don't yet get Dialyzer
+    /// `-spec`/`-type` treatment at all, aliased or not.
     #[test]
     fn compile_protocol_cross_module_alias_reference_emits_user_type() {
         let request = Map::from([
@@ -3464,16 +3476,13 @@ mod tests {
         let core_erlang = map_get(m, "core_erlang")
             .and_then(term_to_string)
             .expect("core_erlang field must be present");
+        // BT-2940: no alias `-type`/`user_type` should appear — protocol
+        // method signatures don't reach `generate_class_specs`, so nothing
+        // ever marks `Wrapper`/`Base` as referenced (see doc comment above).
         assert!(
-            core_erlang.contains("{'user_type', 0, 'base', []}"),
-            "Wrapper's alias body should resolve Base as a user_type reference \
-             now that pre_loaded_aliases reaches the protocol codegen path. \
-             Got:\n{core_erlang}"
-        );
-        assert!(
-            core_erlang.contains("'wrapper'") && core_erlang.contains("'base'"),
-            "module must declare named -type attributes for both pre-loaded \
-             aliases. Got:\n{core_erlang}"
+            !core_erlang.contains("user_type"),
+            "a protocol module has no spec surface that references pre-loaded \
+             aliases, so none should be emitted. Got:\n{core_erlang}"
         );
     }
 
@@ -3481,6 +3490,8 @@ mod tests {
     /// for the OTHER `handle_inline_protocol_definition` caller: the REPL-inline
     /// `compile_expression` path (`handle_compile_expression`'s protocol branch).
     /// Both call sites needed the same `.with_pre_loaded_aliases(...)` wiring.
+    /// See the BT-2940 update note on the sibling test above — the same
+    /// reasoning applies here.
     #[test]
     fn compile_expression_protocol_cross_module_alias_reference_emits_user_type() {
         let request = Map::from([
@@ -3513,10 +3524,9 @@ mod tests {
             .and_then(term_to_string)
             .expect("core_erlang field must be present");
         assert!(
-            core_erlang.contains("{'user_type', 0, 'base', []}"),
-            "Wrapper's alias body should resolve Base as a user_type reference \
-             now that pre_loaded_aliases reaches the REPL-inline protocol codegen \
-             path. Got:\n{core_erlang}"
+            !core_erlang.contains("user_type"),
+            "a protocol module has no spec surface that references pre-loaded \
+             aliases, so none should be emitted. Got:\n{core_erlang}"
         );
     }
 
