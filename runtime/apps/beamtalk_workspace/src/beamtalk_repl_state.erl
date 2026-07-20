@@ -399,13 +399,19 @@ stdlib_type_aliases_env() ->
 %% missing the `name`/`expansion` keys every `format_type_aliases_entry`
 %% row carries.
 %%
-%% Fails **safe**, not open, on a missing `internal` key (`maps:get(internal,
-%% Entry, true)` — should never happen, `format_type_aliases_entry` always
-%% emits it): mirrors `beamtalk_repl_ops_browse:alias_visible/2`'s explicit
-%% "no `internal` key at all... fail safe by treating as internal"
-%% convention, so a row shape this reader doesn't yet know about can't
-%% silently leak a should-be-internal alias into every fresh REPL session
-%% instead of just being dropped.
+%% Fails **safe**, not open, on a missing (or non-boolean) `internal` key
+%% (`maps:get(internal, Entry, true)` plus the catch-all `_ -> Acc` case
+%% arm below — should never happen, `format_type_aliases_entry` always
+%% emits a proper boolean): mirrors `beamtalk_repl_ops_browse:
+%% alias_visible/2`'s explicit "no `internal` key at all... fail safe by
+%% treating as internal" convention, so a row shape this reader doesn't
+%% yet know about can't silently leak a should-be-internal alias into
+%% every fresh REPL session instead of just being dropped. The catch-all
+%% case arm also keeps this row-level-skip, not whole-table-wipe: without
+%% it, a non-boolean `internal` value (e.g. a hand-edited `.app` file)
+%% would throw `case_clause`, caught by `stdlib_alias_table/0`'s outer
+%% `try/catch` as an empty table — discarding every other, well-formed
+%% row along with this one bad row.
 -spec stdlib_alias_fold(term(), #{binary() => alias_entry()}) -> #{binary() => alias_entry()}.
 stdlib_alias_fold(#{name := Name, expansion := Expansion} = Entry, Acc) ->
     case maps:get(internal, Entry, true) of
@@ -418,7 +424,9 @@ stdlib_alias_fold(#{name := Name, expansion := Expansion} = Entry, Acc) ->
                     doc_comment => app_env_doc(maps:get(doc, Entry, undefined)),
                     declared_in => <<"stdlib">>
                 }
-            }
+            };
+        _ ->
+            Acc
     end;
 stdlib_alias_fold(_Entry, Acc) ->
     Acc.

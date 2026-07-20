@@ -367,6 +367,38 @@ stdlib_alias_missing_internal_key_excluded_test() ->
         end
     ).
 
+%% A non-boolean `internal` value (hand-edited/corrupted `.app` file) must
+%% only drop this one row, not wipe every other well-formed alias in the
+%% same env — the `case` in `stdlib_alias_fold/2` needs its own catch-all
+%% arm, not just the outer `try/catch` in `stdlib_alias_table/0`, or a
+%% `case_clause` here would surface as an empty table (review finding,
+%% Claude BeamTalk Review on this PR).
+stdlib_alias_non_boolean_internal_drops_only_that_row_test() ->
+    with_stdlib_aliases(
+        [
+            #{
+                name => 'GoodStrategy',
+                expansion => "#a | #b",
+                doc => undefined,
+                source_file => "stdlib/src/Fixture.bt",
+                internal => false
+            },
+            #{
+                name => 'BadInternalStrategy',
+                expansion => "#c | #d",
+                doc => undefined,
+                source_file => "stdlib/src/Fixture.bt",
+                internal => not_a_boolean
+            }
+        ],
+        fun() ->
+            State = beamtalk_repl_state:new(undefined, 0),
+            AliasTable = beamtalk_repl_state:get_alias_table(State),
+            ?assert(maps:is_key(<<"GoodStrategy">>, AliasTable)),
+            ?assertNot(maps:is_key(<<"BadInternalStrategy">>, AliasTable))
+        end
+    ).
+
 %% A session-declared `type Name = ...` legally shadows a same-named stdlib
 %% entry (ADR 0108 Semantics' "current turn wins" precedent) rather than
 %% erroring or being ignored.
