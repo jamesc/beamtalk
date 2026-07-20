@@ -123,14 +123,17 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # The reviewer never mutates the repo directly: it reads code, runs
-          # read-only git, posts inline review comments (incl. ```suggestion fixes),
-          # and writes the verdict/summary files with the Write tool (a default-allowed
-          # file op). No commit/push or arbitrary Bash is granted — proposed fixes are
-          # delivered as applyable GitHub suggestions, not pushed commits.
-          # mcp__github_inline_comment__create_inline_comment is the action's own tool
-          # for line-anchored comments; it must be listed explicitly because
-          # --allowedTools REPLACES the action's default tool set rather than extending it.
-          claude_args: '--max-turns 50 --model ${{ steps.model.outputs.model }} --allowedTools "Read,Grep,Glob,Write,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(cat:*),Bash(ls:*),Bash(find:*),mcp__github_inline_comment__create_inline_comment"'
+          # read-only git, and writes findings/summary/verdict files with the Write
+          # tool (a default-allowed file op). No commit/push or arbitrary Bash is
+          # granted — proposed fixes are delivered as applyable GitHub suggestions,
+          # not pushed commits.
+          # The agent does NOT post to GitHub itself: it records line-anchored findings
+          # in .claude-findings.json and the "Post inline review" step below batches
+          # them into a single PR review. (The action's own
+          # mcp__github_inline_comment tool posts one separate review per comment and
+          # never worked in this automation-mode setup; batched reviews are an open
+          # feature request — anthropics/claude-code-action#1049.)
+          claude_args: '--max-turns 50 --model ${{ steps.model.outputs.model }} --allowedTools "Read,Grep,Glob,Write,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(cat:*),Bash(ls:*),Bash(find:*)"'
           prompt: ${{ steps.load_prompt.outputs.prompt }}
 
       # No verdict after the first attempt usually means the agent step died early
@@ -152,8 +155,117 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          claude_args: '--max-turns 50 --model ${{ steps.model.outputs.model }} --allowedTools "Read,Grep,Glob,Write,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(cat:*),Bash(ls:*),Bash(find:*),mcp__github_inline_comment__create_inline_comment"'
+          claude_args: '--max-turns 50 --model ${{ steps.model.outputs.model }} --allowedTools "Read,Grep,Glob,Write,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(cat:*),Bash(ls:*),Bash(find:*)"'
           prompt: ${{ steps.load_prompt.outputs.prompt }}
+
+      # Post the agent's line-anchored findings as ONE batched PR review (inline
+      # comments incl. ```suggestion fixes) instead of per-comment posts. Anchors are
+      # validated against the PR's real diff first, so one hallucinated line number
+      # can't 422-reject the whole review; findings that don't anchor are folded into
+      # the review body rather than dropped. Posting failures are warnings, not job
+      # failures — findings also appear (in short form) in the sticky summary, and
+      # merge blocking is the separate "Gate on verdict" step, so a red X here would
+      # only add noise. Each push posts a NEW review (submitted reviews can't be
+      # edited); GitHub marks superseded comments "outdated" automatically.
+      - name: Post inline review
+        if: always() && hashFiles('.claude-findings.json') != ''
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require('fs');
+            let findings;
+            try {
+              findings = JSON.parse(fs.readFileSync('.claude-findings.json', 'utf8'));
+            } catch (e) {
+              core.warning(`Unreadable .claude-findings.json: ${e.message}`);
+              return;
+            }
+            if (!Array.isArray(findings)) {
+              core.warning('.claude-findings.json is not a JSON array; skipping inline review');
+              return;
+            }
+            findings = findings.filter((f) => f && typeof f.path === 'string' && typeof f.body === 'string');
+            if (findings.length === 0) {
+              core.info('No inline findings to post');
+              return;
+            }
+
+            const { owner, repo } = context.repo;
+            const pull_number = context.payload.pull_request.number;
+
+            // Index which (path, side, line) tuples are commentable in the PR's actual
+            // diff. GitHub rejects the ENTIRE review if any single comment anchors
+            // outside the diff, so mis-anchored findings are demoted to the review body.
+            const files = await github.paginate(github.rest.pulls.listFiles, { owner, repo, pull_number, per_page: 100 });
+            const anchors = new Map();
+            for (const file of files) {
+              const sets = { RIGHT: new Set(), LEFT: new Set() };
+              anchors.set(file.filename, sets);
+              if (!file.patch) continue; // binary / too-large diff: nothing commentable
+              let oldLine = 0, newLine = 0;
+              for (const row of file.patch.split('\n')) {
+                const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(row);
+                if (hunk) { oldLine = Number(hunk[1]); newLine = Number(hunk[2]); continue; }
+                if (row.startsWith('+')) sets.RIGHT.add(newLine++);
+                else if (row.startsWith('-')) sets.LEFT.add(oldLine++);
+                else if (!row.startsWith('\\')) { sets.RIGHT.add(newLine++); sets.LEFT.add(oldLine++); }
+              }
+            }
+
+            const tag = (s) => s === 'Blocker' ? '🛑 **Blocker**' : s === 'Nit' ? '🔹 **Nit**' : '💡 **Suggestion**';
+            const anchored = [];
+            const unanchored = [];
+            for (const f of findings) {
+              const side = f.side === 'LEFT' ? 'LEFT' : 'RIGHT';
+              const sets = anchors.get(f.path);
+              if (!sets || !Number.isInteger(f.line) || !sets[side].has(f.line)) {
+                unanchored.push(f);
+                continue;
+              }
+              const comment = { path: f.path, line: f.line, side, body: `${tag(f.severity)}\n\n${f.body}` };
+              // Multi-line range only when every line in it is commentable; otherwise
+              // degrade to a single-line comment rather than losing the finding.
+              if (Number.isInteger(f.start_line) && f.start_line < f.line) {
+                let spanOk = true;
+                for (let l = f.start_line; l < f.line; l++) {
+                  if (!sets[side].has(l)) { spanOk = false; break; }
+                }
+                if (spanOk) { comment.start_line = f.start_line; comment.start_side = side; }
+              }
+              anchored.push(comment);
+            }
+
+            const count = (sev) => findings.filter((f) => f.severity === sev).length;
+            let body = `**Claude Review** — ${count('Blocker')} Blocker(s), ${count('Suggestion')} Suggestion(s), ${count('Nit')} Nit(s) as inline comments. Verdict and out-of-range findings are in the summary comment.`;
+            if (unanchored.length > 0) {
+              body += '\n\nFindings that could not be anchored to a diff line:';
+              for (const f of unanchored) {
+                const loc = Number.isInteger(f.line) ? `${f.path}:${f.line}` : f.path;
+                body += `\n\n---\n\`${loc}\` — ${tag(f.severity)}\n\n${f.body}`;
+              }
+            }
+
+            try {
+              await github.rest.pulls.createReview({
+                owner, repo, pull_number,
+                commit_id: context.payload.pull_request.head.sha,
+                event: 'COMMENT',
+                body,
+                comments: anchored,
+              });
+              core.info(`Posted review: ${anchored.length} inline comment(s), ${unanchored.length} unanchored`);
+            } catch (e) {
+              // GitHub can still reject an anchor the index considered valid (e.g. a
+              // multi-line span crossing hunks). Retry body-only so nothing is lost.
+              core.warning(`createReview with inline comments failed: ${e.message} — retrying body-only`);
+              let fallback = body + '\n\nInline anchors were rejected by GitHub; all findings as a list:';
+              for (const c of anchored) fallback += `\n\n---\n\`${c.path}:${c.line}\`\n\n${c.body}`;
+              try {
+                await github.rest.pulls.createReview({ owner, repo, pull_number, event: 'COMMENT', body: fallback });
+              } catch (e2) {
+                core.warning(`Body-only review also failed: ${e2.message} — findings remain in the summary comment`);
+              }
+            }
 
       - name: Post review summary
         if: always()
