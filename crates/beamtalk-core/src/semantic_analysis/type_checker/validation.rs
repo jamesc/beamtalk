@@ -1086,6 +1086,42 @@ impl TypeChecker {
             let is_class_ref_arg = arg_exprs
                 .and_then(|exprs| exprs.get(i))
                 .is_some_and(|e| matches!(e, Expression::ClassReference { .. }));
+            // BT-2939: complementary to the `expected_structural` resolution
+            // above (BT-2953, which only resolves the *declared/expected*
+            // side) — `arg_ty` itself can be a bare `InferredType::Known`
+            // naming a registered alias on the *actual* side, e.g. a message
+            // send whose callee's `MethodInfo::return_type` is the raw alias
+            // name `RestartStrategy` (`substitute_return_type_with_self` has
+            // no `AliasRegistry` access and never expands it, unlike
+            // declared-annotation resolution via `resolve_type_annotation`).
+            // Structural compatibility below (`is_type_compatible` and the
+            // `InferredType::Union` arm's `classify_union_members`) only
+            // understands the *expansion*, not the alias name, so re-resolve
+            // `arg_ty` through the same `resolve_type_annotation` entry point
+            // every declared annotation uses when its class name is a known
+            // alias — this reuses the existing, tested `Known`/`Union`
+            // compatibility and diagnostic paths unchanged rather than
+            // special-casing alias names here.
+            let resolved_arg_ty = match arg_ty {
+                InferredType::Known { class_name, .. } => self
+                    .alias_registry
+                    .as_ref()
+                    .and_then(|registry| registry.get(class_name))
+                    .map(|info| {
+                        let reference = TypeAnnotation::Simple(crate::ast::Identifier {
+                            name: info.name.clone(),
+                            span: info.span,
+                        });
+                        super::type_resolver::resolve_type_annotation(
+                            &reference,
+                            &HashMap::new(),
+                            None,
+                            self.alias_registry.as_ref(),
+                        )
+                    }),
+                _ => None,
+            };
+            let arg_ty = resolved_arg_ty.as_ref().unwrap_or(arg_ty);
             match arg_ty {
                 InferredType::Known {
                     class_name: actual_ty,
