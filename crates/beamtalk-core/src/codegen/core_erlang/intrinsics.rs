@@ -1220,32 +1220,24 @@ impl CoreErlangGenerator {
     /// `#beamtalk_error{}`s and non-local-return throws must not be masked);
     /// deferred as a separately-scoped follow-up rather than risking a rushed
     /// version of that here. See BT-2892.
-    pub(in crate::codegen::core_erlang) fn generate_block_value_structural_fallback(
+    /// Shared `#beamtalk_error{kind = stateful_block_dispatch}` construction used
+    /// by every structural-intrinsic fallback that can't tell (from an
+    /// `erlang:is_function/2` arity check alone) whether it's looking at a
+    /// genuine Tier 2 (stateful, ADR-0041) block or a Tier 1 block called with
+    /// the wrong argument count — see `generate_block_value_structural_fallback`'s
+    /// doc comment for why the hint is deliberately hedged rather than
+    /// asserting a specific cause.
+    pub(in crate::codegen::core_erlang) fn generate_stateful_block_dispatch_error(
         &mut self,
-        intrinsic_name: &str,
-        arity: usize,
         real_selector: &str,
         class_name: &str,
+        hint_text: &str,
     ) -> Document<'static> {
-        let self_var = if self.in_class_method() {
-            "ClassSelf"
-        } else {
-            "Self"
-        };
-        let params_doc = join(
-            self.current_method_params
-                .iter()
-                .map(|p| leaf::var(p.clone())),
-            &Document::Str(", "),
-        );
-
         let error_base = self.fresh_temp_var("Err");
         let error_sel = self.fresh_temp_var("Err");
         let error_hint = self.fresh_temp_var("Err");
-        let hint = leaf::binary_lit(
-            "Wrong argument count, or the block captures mutable state and must be invoked directly instead of via perform:",
-        );
-        let stateful_branch = docvec![
+        let hint = leaf::binary_lit(hint_text);
+        docvec![
             "let ",
             leaf::var(error_base.clone()),
             " = call 'beamtalk_error':'new'('stateful_block_dispatch', ",
@@ -1265,7 +1257,33 @@ impl CoreErlangGenerator {
             ") in call 'beamtalk_error':'raise'(",
             leaf::var(error_hint),
             ")",
-        ];
+        ]
+    }
+
+    pub(in crate::codegen::core_erlang) fn generate_block_value_structural_fallback(
+        &mut self,
+        intrinsic_name: &str,
+        arity: usize,
+        real_selector: &str,
+        class_name: &str,
+    ) -> Document<'static> {
+        let self_var = if self.in_class_method() {
+            "ClassSelf"
+        } else {
+            "Self"
+        };
+        let params_doc = join(
+            self.current_method_params
+                .iter()
+                .map(|p| leaf::var(p.clone())),
+            &Document::Str(", "),
+        );
+
+        let stateful_branch = self.generate_stateful_block_dispatch_error(
+            real_selector,
+            class_name,
+            "Wrong argument count, or the block captures mutable state and must be invoked directly instead of via perform:",
+        );
 
         let runtime_module =
             super::primitive_bindings::PrimitiveBindingTable::runtime_module_for_class(class_name);
@@ -1337,33 +1355,11 @@ impl CoreErlangGenerator {
         class_name: &str,
         tier1_doc: Document<'static>,
     ) -> Document<'static> {
-        let error_base = self.fresh_temp_var("Err");
-        let error_sel = self.fresh_temp_var("Err");
-        let error_hint = self.fresh_temp_var("Err");
-        let hint = leaf::binary_lit(
+        let stateful_branch = self.generate_stateful_block_dispatch_error(
+            real_selector,
+            class_name,
             "Wrong argument count, or the block captures mutable state and must be invoked directly instead of via perform:/dynamic dispatch",
         );
-        let stateful_branch = docvec![
-            "let ",
-            leaf::var(error_base.clone()),
-            " = call 'beamtalk_error':'new'('stateful_block_dispatch', ",
-            leaf::atom(class_name),
-            ") in let ",
-            leaf::var(error_sel.clone()),
-            " = call 'beamtalk_error':'with_selector'(",
-            leaf::var(error_base),
-            ", ",
-            leaf::atom(real_selector),
-            ") in let ",
-            leaf::var(error_hint.clone()),
-            " = call 'beamtalk_error':'with_hint'(",
-            leaf::var(error_sel),
-            ", ",
-            hint,
-            ") in call 'beamtalk_error':'raise'(",
-            leaf::var(error_hint),
-            ")",
-        ];
 
         docvec![
             "case call 'erlang':'is_function'(",

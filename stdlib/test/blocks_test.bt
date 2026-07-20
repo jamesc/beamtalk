@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Tests for block (closure) evaluation — argument passing, arity, whileTrue/False,
-// valueWithArguments:, closure variable capture, and early return with ^
+// valueWithArguments:, closure variable capture, early return with ^, and
+// perform:/perform:withArguments: on structural intrinsics (BT-2812, BT-2908)
 
 TestCase subclass: BlocksTest
 
@@ -132,3 +133,110 @@ TestCase subclass: BlocksTest
       statefulZeroArgBlock perform: #value: withArguments: #(42)
     ] on: Exception do: [:e | e]
     self assert: (caught isKindOf: Exception)
+
+  testPerformOnPureWhileTrueAndWhileFalseSelectors =>
+    // BT-2908: whileTrue:/whileFalse: reached via perform:withArguments:
+    // (bypassing the call-site interception) used to resolve to the wrong
+    // internal intrinsic name and raise a confusing does_not_understand.
+    // Pure (Tier 1) condition/body blocks now run a real generic loop.
+    self assert: ([
+      false
+    ] perform: #whileTrue: withArguments: #([42])) equals: nil
+    self assert: ([
+      true
+    ] perform: #whileFalse: withArguments: #([42])) equals: nil
+    counter := AtomicCounter new: #bt2908WhileTrueCounter
+    [
+      counter value < 3
+    ] perform: #whileTrue: withArguments: #([counter increment])
+    self assert: counter value equals: 3
+    counter delete
+
+  testPerformOnPureRepeatSelector =>
+    // BT-2908: repeat reached via perform:withArguments: — a pure receiver
+    // block now runs a real generic infinite loop, exited here via a raised
+    // exception (repeat has no other way to stop) rather than the
+    // wrong-selector does_not_understand it used to hit immediately.
+    counter := AtomicCounter new: #bt2908RepeatCounter
+    result := [
+      [
+        counter increment
+        (counter value >= 3) ifTrue: [Error signal: "done"]
+      ] perform: #repeat withArguments: #()
+    ] on: Error do: [:e | counter value]
+    self assert: result equals: 3
+    counter delete
+
+  testPerformOnPureOnDoSelector =>
+    // BT-2908: on:do: reached via perform:withArguments: now runs the same
+    // try/catch/matches_class semantics generate_on_do produces for a
+    // literal `on:do:` send, for pure (Tier 1) receiver/handler blocks.
+    self assert: ([
+      1 / 0
+    ] perform: #on:do: withArguments: #(Error, [:e |
+      "caught"
+    ])) equals: "caught"
+    self assert: ([
+      42
+    ] perform: #on:do: withArguments: #(Error, [:e | "unused"])) equals: 42
+    self assert: ([
+      1 / 0
+    ] perform: #on:do: withArguments: #(Error, [
+      "zero-arg handler"
+    ])) equals: "zero-arg handler"
+
+  testPerformOnPureEnsureSelector =>
+    // BT-2908: ensure: reached via perform:withArguments: now runs cleanup
+    // on both the success and error paths, matching generate_ensure's
+    // literal-send semantics, for pure (Tier 1) receiver/cleanup blocks.
+    counter := AtomicCounter new: #bt2908EnsureCounter
+    self assert: ([
+      42
+    ] perform: #ensure: withArguments: #([counter increment])) equals: 42
+    self assert: counter value equals: 1
+    caught := [
+      [1 / 0] perform: #ensure: withArguments: #([counter increment])
+    ] on: Exception do: [:e | "caught"]
+    self assert: caught equals: "caught"
+    self assert: counter value equals: 2
+    counter delete
+
+  testPerformOnStatefulLoopBlockRaisesClearError =>
+    // BT-2908: a stateful (Tier 2) condition or body block mutates captured
+    // state via a threaded StateAcc that only a call-site-aware caller can
+    // supply — perform: has no such state, so this raises a clear,
+    // purpose-built error instead of a wrong-selector does_not_understand.
+    // Exact repro from docs/beamtalk-language-features.md's former "known
+    // limitation" note.
+    i := 0
+    self should: [
+      [i < 3] perform: #whileTrue: withArguments: #([i := i + 1])
+    ] raise: #stateful_block_dispatch
+    count := 0
+    statefulBody := [count := count + 1]
+    self should: [
+      [false] perform: #whileTrue: withArguments: #(statefulBody)
+    ] raise: #stateful_block_dispatch
+    self should: [
+      statefulBody perform: #repeat withArguments: #()
+    ] raise: #stateful_block_dispatch
+
+  testPerformOnStatefulExceptionBlockRaisesClearError =>
+    // BT-2908: same Tier 2 gap as the loop family above, for on:do:/ensure:'s
+    // receiver, handler, and cleanup blocks.
+    count := 0
+    statefulReceiver := [count := count + 1]
+    self should: [
+      statefulReceiver perform: #on:do: withArguments: #(Error, [:e | "unused"])
+    ] raise: #stateful_block_dispatch
+    self should: [
+      [
+        1 / 0
+      ] perform: #on:do: withArguments: #(Error, [:e | count := count + 1])
+    ] raise: #stateful_block_dispatch
+    self should: [
+      statefulReceiver perform: #ensure: withArguments: #([nil])
+    ] raise: #stateful_block_dispatch
+    self should: [
+      [42] perform: #ensure: withArguments: #(statefulReceiver)
+    ] raise: #stateful_block_dispatch
