@@ -777,11 +777,16 @@ fn unparse_protocol_definition(protocol: &ProtocolDefinition) -> Document<'stati
         docs.push(docvec!["  extending: ", leaf::ident(&ext.name)]);
     }
 
-    // Instance method signatures (indented by 2 spaces)
+    // Instance and class method signatures (indented by 2 spaces). Tracked
+    // across both lists with a single `first_signature` flag so a blank
+    // line is preserved at the instance/class boundary too (a `class`
+    // signature immediately after an instance signature is just as much
+    // an "inter-signature gap" as two instance signatures).
+    let mut first_signature = true;
     for sig in &protocol.method_signatures {
         docs.push(nest(
             2,
-            docvec![line(), unparse_protocol_method_signature(sig, None)],
+            unparse_protocol_signature_entry(sig, None, &mut first_signature),
         ));
     }
 
@@ -789,13 +794,33 @@ fn unparse_protocol_definition(protocol: &ProtocolDefinition) -> Document<'stati
     for sig in &protocol.class_method_signatures {
         docs.push(nest(
             2,
-            docvec![
-                line(),
-                unparse_protocol_method_signature(sig, Some("class "))
-            ],
+            unparse_protocol_signature_entry(sig, Some("class "), &mut first_signature),
         ));
     }
 
+    concat(docs)
+}
+
+/// Builds the `Document` for a single protocol method signature entry
+/// within `unparse_protocol_definition`'s signature list — the separating
+/// `line()` before it, plus (BT-2946) an extra blank line re-emitted when
+/// the signature had one before it in the source. Skipped for the very
+/// first signature in the body — a blank line there (between the header/
+/// `extending:` clause and the first signature) is dropped, same as
+/// pre-existing behaviour and mirroring BT-2929's top-level-declaration
+/// fix; only inter-signature gaps are preserved.
+fn unparse_protocol_signature_entry(
+    sig: &ProtocolMethodSignature,
+    prefix: Option<&'static str>,
+    first_signature: &mut bool,
+) -> Document<'static> {
+    let mut docs: Vec<Document<'static>> = Vec::new();
+    if !*first_signature && sig.comments.leading_blank_line {
+        docs.push(line());
+    }
+    docs.push(line());
+    docs.push(unparse_protocol_method_signature(sig, prefix));
+    *first_signature = false;
     concat(docs)
 }
 
@@ -3763,6 +3788,99 @@ mod tests {
         let source = concat!(
             "Protocol define: Sortable  // comment\n",
             "  sortKey -> Object\n",
+        );
+        assert_identity(source);
+    }
+
+    // --- BT-2946 regression: blank lines between protocol method
+    // signatures must survive a `beamtalk fmt` round-trip, without being
+    // force-inserted when absent (mirrors BT-2929 for top-level
+    // declarations). ---
+
+    #[test]
+    fn protocol_blank_line_between_instance_signatures_round_trip() {
+        let source = concat!(
+            "Protocol define: Displayable\n",
+            "  asString -> String\n",
+            "\n",
+            "  displayString -> String\n",
+        );
+        assert_identity(source);
+    }
+
+    #[test]
+    fn protocol_no_blank_line_between_instance_signatures_not_inserted() {
+        let source = concat!(
+            "Protocol define: Displayable\n",
+            "  asString -> String\n",
+            "  displayString -> String\n",
+        );
+        assert_identity(source);
+    }
+
+    #[test]
+    fn protocol_blank_line_between_class_signatures_round_trip() {
+        let source = concat!(
+            "Protocol define: Creatable\n",
+            "  class create -> Self\n",
+            "\n",
+            "  class createEmpty -> Self\n",
+        );
+        assert_identity(source);
+    }
+
+    #[test]
+    fn protocol_blank_line_at_instance_class_boundary_round_trip() {
+        // Mix: a blank line between the last instance signature and the
+        // first class signature must also be preserved.
+        let source = concat!(
+            "Protocol define: Creatable\n",
+            "  asString -> String\n",
+            "\n",
+            "  class create -> Self\n",
+        );
+        assert_identity(source);
+    }
+
+    #[test]
+    fn protocol_no_blank_line_at_instance_class_boundary_not_inserted() {
+        let source = concat!(
+            "Protocol define: Creatable\n",
+            "  asString -> String\n",
+            "  class create -> Self\n",
+        );
+        assert_identity(source);
+    }
+
+    #[test]
+    fn protocol_blank_line_before_first_signature_not_preserved() {
+        // A blank line between the header and the very first signature is
+        // dropped, same as pre-existing behaviour for top-level
+        // declarations (BT-2929) — only inter-signature gaps are
+        // preserved.
+        let source = concat!(
+            "Protocol define: Displayable\n",
+            "\n",
+            "  asString -> String\n",
+        );
+        let formatted = format_source(source).expect("format_source must succeed");
+        assert_eq!(
+            formatted,
+            "Protocol define: Displayable\n  asString -> String\n"
+        );
+    }
+
+    #[test]
+    fn protocol_blank_line_with_leading_comment_round_trip() {
+        // Interaction with BT-2930: a blank line before a signature that
+        // also has a leading `//` comment must place the blank line before
+        // the comment, not between the comment and the signature.
+        let source = concat!(
+            "Protocol define: Displayable\n",
+            "  asString -> String\n",
+            "\n",
+            "  // Convert to display string.\n",
+            "  displayString -> String\n",
         );
         assert_identity(source);
     }
