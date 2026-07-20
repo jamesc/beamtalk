@@ -526,6 +526,20 @@ impl ProjectIndex {
         self.stdlib_files.contains(file)
     }
 
+    /// Marks `file` as a stdlib source, without indexing it (BT-2959).
+    ///
+    /// [`Self::with_stdlib`] is the only other way a file becomes
+    /// `is_stdlib_file`-true, but it is a separate constructor used by
+    /// `beamtalk-cli`'s build pipeline and tests — the real running LSP never
+    /// calls it, instead feeding every preloaded file (user and stdlib alike)
+    /// through the same [`Self::update_file`]/[`Self::update_file_aliases`]
+    /// path. Call this *before* [`Self::update_file_aliases`] for a stdlib
+    /// file so [`Self::alias_package_for_file`] stamps its aliases
+    /// [`STDLIB_PACKAGE_MARKER`] instead of the same-project marker.
+    pub fn mark_stdlib_file(&mut self, file: Utf8PathBuf) {
+        self.stdlib_files.insert(file);
+    }
+
     /// Returns cross-file `ClassInfo` entries for diagnostic computation (BT-2009).
     ///
     /// Returns all `ClassInfo` entries from the merged hierarchy that were NOT
@@ -1118,6 +1132,41 @@ mod tests {
             Some(EcoString::from(STDLIB_PACKAGE_MARKER)),
             "re-opening a stdlib file must keep its alias stamped `stdlib`, \
              not fall back to the same-project marker"
+        );
+    }
+
+    /// BT-2959: the real running LSP never calls `with_stdlib` — it preloads
+    /// every workspace file (user and stdlib alike) through `update_file`/
+    /// `update_file_aliases`, the same path `beamtalk-lsp`'s
+    /// `preload_workspace_source_files` now calls `mark_stdlib_file` before,
+    /// for stdlib files specifically. Without that call, `is_stdlib_file`
+    /// would return `false` and a stdlib `internal` alias would be stamped
+    /// the same-project marker instead of `STDLIB_PACKAGE_MARKER` — the exact
+    /// gap this issue closes.
+    #[test]
+    fn mark_stdlib_file_then_update_file_stamps_stdlib_package() {
+        let mut index = ProjectIndex::new();
+        let stdlib_file = Utf8PathBuf::from("stdlib/Direction.bt");
+
+        // Mirrors `beamtalk-lsp`'s preload loop: mark stdlib membership
+        // first, then run the same update_file/update_file_aliases pair
+        // every preloaded file (user or stdlib) goes through.
+        index.mark_stdlib_file(stdlib_file.clone());
+        assert!(index.is_stdlib_file(&stdlib_file));
+
+        let tokens = lex_with_eof("internal type Direction = #north | #south");
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        index.update_file(stdlib_file.clone(), &hierarchy);
+        let infos = crate::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
+        index.update_file_aliases(stdlib_file, infos);
+
+        let seen = index.cross_file_alias_infos_for(&Utf8PathBuf::from("elsewhere.bt"));
+        assert_eq!(
+            seen.iter().find(|i| i.name == "Direction").unwrap().package,
+            Some(EcoString::from(STDLIB_PACKAGE_MARKER)),
+            "a stdlib file marked via mark_stdlib_file must have its aliases \
+             stamped STDLIB_PACKAGE_MARKER, not the same-project marker"
         );
     }
 

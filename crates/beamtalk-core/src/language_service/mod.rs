@@ -293,6 +293,13 @@ impl SimpleLanguageService {
         &self.project_index
     }
 
+    /// Marks `file` as a stdlib source (BT-2959). Call before [`Self::update_file`]
+    /// for a stdlib file so its aliases are stamped with the stdlib package marker
+    /// instead of the same-project marker — see [`ProjectIndex::mark_stdlib_file`].
+    pub fn mark_stdlib_file(&mut self, file: Utf8PathBuf) {
+        self.project_index.mark_stdlib_file(file);
+    }
+
     /// Gets file data if it exists.
     fn get_file(&self, file: &Utf8PathBuf) -> Option<&FileData> {
         self.files.get(file)
