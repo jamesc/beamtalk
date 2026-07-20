@@ -72,6 +72,42 @@ TestCase subclass: DictionaryTest
       #{#a => 1, #b => 2} perform: #do: withArguments: #(statefulBlock)
     ] raise: #stateful_block_dispatch
 
+  testPerformOnStatefulDoWithKeyBlockRaisesClearErrorInsteadOfCrashing =>
+    // BT-2913: doWithKey:'s BIF-lowered body had no stateful_block_dispatch
+    // guard (unlike do:/collect:/select:/reject:/inject:into:, BT-2888) — a
+    // Tier 2 (stateful) block reaching it via perform: hit a raw arity crash
+    // in beamtalk_map:do_with_key/2 instead of a clear diagnostic.
+    // keysAndValuesDo: delegates to doWithKey: (`self doWithKey: block` in
+    // Dictionary.bt), so it inherits the same fix.
+    count := 0
+    statefulBlock := [:k :v | count := count + v]
+    self should: [
+      #{#a => 1, #b => 2} perform: #doWithKey: withArguments: #(statefulBlock)
+    ] raise: #stateful_block_dispatch
+
+    count := 0
+    statefulBlock2 := [:k :v | count := count + v]
+    self
+      should: [
+        #{
+          #a => 1,
+          #b => 2
+        } perform: #keysAndValuesDo: withArguments: #(statefulBlock2)
+      ]
+      raise: #stateful_block_dispatch
+
+  testPerformOnPureDoWithKeyBlockAlreadyWorked =>
+    // BT-2913: a Tier 1 (pure) block reached via perform: already worked
+    // correctly before this fix; pinned here as a baseline.
+    self assert: (#{
+      #a => 1,
+      #b => 2
+    } perform: #doWithKey: withArguments: #([:k :v | nil])) equals: nil
+    self assert: (#{
+      #a => 1,
+      #b => 2
+    } perform: #keysAndValuesDo: withArguments: #([:k :v | nil])) equals: nil
+
   testDowithkey =>
     // Returns nil
     self assert: (#{#a => 1} doWithKey: [:k :v | nil]) equals: nil
