@@ -89,10 +89,7 @@ fn type_annotation_to_spec(
     match annotation {
         TypeAnnotation::Simple(id) => {
             if aliases.is_some_and(|registry| registry.has_alias(id.name.as_str())) {
-                if let Some(tracker) = referenced {
-                    tracker.borrow_mut().insert(id.name.clone());
-                }
-                alias_type_reference(id.name.as_str())
+                alias_type_reference(id.name.as_str(), referenced)
             } else {
                 simple_type_to_spec(id.name.as_str())
             }
@@ -163,7 +160,19 @@ fn alias_erlang_type_name(alias_name: &str) -> String {
 /// reference it" rather than re-expanding inline). Aliases are never
 /// parametric (ADR 0108 defers `type Option(T) = ...`), so the argument list
 /// is always empty.
-fn alias_type_reference(alias_name: &str) -> Document<'static> {
+///
+/// This is the *only* place a `user_type` term is emitted, so recording
+/// `alias_name` into `referenced` (BT-2940) here — rather than as a
+/// separate statement at each of this function's call sites — makes it
+/// structurally impossible for a `user_type` emission to go untracked: any
+/// future call site automatically gets the bookkeeping for free.
+fn alias_type_reference(
+    alias_name: &str,
+    referenced: Option<&RefCell<HashSet<EcoString>>>,
+) -> Document<'static> {
+    if let Some(tracker) = referenced {
+        tracker.borrow_mut().insert(alias_name.into());
+    }
     docvec![
         "{'user_type', 0, ",
         atom(alias_erlang_type_name(alias_name)),
@@ -261,10 +270,7 @@ fn generic_type_to_spec(
         // unresolvable generic application.
         _ => {
             if aliases.is_some_and(|registry| registry.has_alias(base_name)) {
-                if let Some(tracker) = referenced {
-                    tracker.borrow_mut().insert(base_name.into());
-                }
-                alias_type_reference(base_name)
+                alias_type_reference(base_name, referenced)
             } else {
                 simple_type_to_spec(base_name)
             }
@@ -615,45 +621,45 @@ fn generate_alias_type_attr(
 /// full project's alias count (`A` aliases × `M` modules), growing Dialyzer's
 /// PLT scan well past the actual reference count at project scale.
 ///
-/// Transitive closure: `referenced` may grow while this function runs (e.g.
-/// `type B = A | #z` — a module referencing only `B` must also emit `A`'s
-/// `-type`, discovered by walking `B`'s own expansion) — so aliases already
-/// in `referenced` are walked too, feeding any further alias names they
-/// reference back into `referenced`, until a fixed point is reached.
+/// Transitive closure: an alias in `referenced` may itself reference further
+/// aliases (e.g. `type B = A | #z` — a module referencing only `B` must
+/// also emit `A`'s `-type`, discovered by walking `B`'s own expansion). Each
+/// alias is walked with its own fresh, throwaway tracker rather than the
+/// shared `referenced` accumulator, and only its newly-discovered
+/// dependencies are enqueued — an explicit worklist, so each alias is
+/// visited exactly once (linear in the closed reference set's size) rather
+/// than rescanning the whole accumulated set on every iteration.
 pub fn generate_alias_type_attrs(
     aliases: &AliasRegistry,
     referenced: &RefCell<HashSet<EcoString>>,
 ) -> Vec<Document<'static>> {
-    let mut processed: HashSet<EcoString> = HashSet::new();
-    loop {
-        let pending: Vec<EcoString> = referenced
-            .borrow()
-            .iter()
-            .filter(|name| !processed.contains(*name))
-            .cloned()
-            .collect();
-        if pending.is_empty() {
-            break;
-        }
-        for name in pending {
-            if let Some(info) = aliases.get(&name) {
-                // Walking the alias's own expansion records any further
-                // alias names it references into `referenced` too.
-                let _ = type_annotation_to_spec(&info.annotation, Some(aliases), Some(referenced));
+    let mut closure: HashSet<EcoString> = referenced.borrow().iter().cloned().collect();
+    let mut worklist: Vec<EcoString> = closure.iter().cloned().collect();
+
+    while let Some(name) = worklist.pop() {
+        if let Some(info) = aliases.get(&name) {
+            let direct_deps = RefCell::new(HashSet::new());
+            let _ = type_annotation_to_spec(&info.annotation, Some(aliases), Some(&direct_deps));
+            for dep in direct_deps.into_inner() {
+                if closure.insert(dep.clone()) {
+                    worklist.push(dep);
+                }
             }
-            processed.insert(name);
         }
     }
 
-    let mut names: Vec<EcoString> = referenced.borrow().iter().cloned().collect();
+    let mut names: Vec<EcoString> = closure.into_iter().collect();
     names.sort_unstable();
 
     names
         .into_iter()
         .filter_map(|name| {
-            aliases.get(&name).map(|info| {
-                generate_alias_type_attr(&name, &info.annotation, aliases, Some(referenced))
-            })
+            // `referenced` is not passed here: the closure loop above has
+            // already discovered every transitively-referenced name, so
+            // this render pass has nothing further to track.
+            aliases
+                .get(&name)
+                .map(|info| generate_alias_type_attr(&name, &info.annotation, aliases, None))
         })
         .collect()
 }
@@ -1901,6 +1907,79 @@ mod tests {
         assert!(
             !attrs.iter().any(|a| a.contains("'unrelated'")),
             "unrelated alias must not be emitted, got: {attrs:?}"
+        );
+    }
+
+    #[test]
+    fn generate_alias_type_attrs_diamond_dependency_emits_shared_alias_once() {
+        // BT-2940: `type C = A | #p`, `type D = A | #q` — both C and D are
+        // directly referenced, and both transitively depend on the same A.
+        // The worklist-based closure (BT-2940 review follow-up: rewritten
+        // from a full-set rescan to an explicit worklist for linear-time
+        // closure) must not emit A twice, nor loop, when two different
+        // referenced aliases converge on the same dependency.
+        let mut registry = AliasRegistry::new();
+        registry.register_test_alias(AliasInfo {
+            name: "A".into(),
+            annotation: TypeAnnotation::simple("Integer", span()),
+            is_internal: false,
+            package: None,
+            span: span(),
+        });
+        registry.register_test_alias(AliasInfo {
+            name: "C".into(),
+            annotation: TypeAnnotation::union(
+                vec![
+                    TypeAnnotation::simple("A", span()),
+                    TypeAnnotation::singleton("p", span()),
+                ],
+                span(),
+            ),
+            is_internal: false,
+            package: None,
+            span: span(),
+        });
+        registry.register_test_alias(AliasInfo {
+            name: "D".into(),
+            annotation: TypeAnnotation::union(
+                vec![
+                    TypeAnnotation::simple("A", span()),
+                    TypeAnnotation::singleton("q", span()),
+                ],
+                span(),
+            ),
+            is_internal: false,
+            package: None,
+            span: span(),
+        });
+
+        // Both C and D are directly referenced by the module's own specs.
+        let referenced = RefCell::new(HashSet::from(["C".into(), "D".into()]));
+        let attrs: Vec<String> = generate_alias_type_attrs(&registry, &referenced)
+            .iter()
+            .map(render)
+            .collect();
+        assert_eq!(
+            attrs.len(),
+            3,
+            "C, D, and their shared dependency A should each be emitted exactly once, got: {attrs:?}"
+        );
+        // Match each alias's own `-type` declaration head (`[{'name', `) —
+        // not just any substring — since C's and D's bodies also legitimately
+        // contain `'a'` as their nested `user_type` reference to A.
+        assert_eq!(
+            attrs.iter().filter(|a| a.contains("[{'a', ")).count(),
+            1,
+            "A's own -type declaration must appear exactly once despite being \
+             reached via both C and D, got: {attrs:?}"
+        );
+        assert!(
+            attrs.iter().any(|a| a.contains("[{'c', ")),
+            "got: {attrs:?}"
+        );
+        assert!(
+            attrs.iter().any(|a| a.contains("[{'d', ")),
+            "got: {attrs:?}"
         );
     }
 
