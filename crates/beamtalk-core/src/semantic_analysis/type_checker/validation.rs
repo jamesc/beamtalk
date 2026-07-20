@@ -1112,12 +1112,15 @@ impl TypeChecker {
                             name: info.name.clone(),
                             span: info.span,
                         });
-                        super::type_resolver::resolve_type_annotation(
-                            &reference,
-                            &HashMap::new(),
-                            None,
-                            self.alias_registry.as_ref(),
-                        )
+                        let (resolved, arg_alias_deps) =
+                            super::type_resolver::resolve_type_annotation_with_alias_deps(
+                                &reference,
+                                &HashMap::new(),
+                                None,
+                                self.alias_registry.as_ref(),
+                            );
+                        self.referenced_aliases.extend(arg_alias_deps);
+                        resolved
                     }),
                 _ => None,
             };
