@@ -43,6 +43,20 @@ use std::collections::{HashMap, HashSet};
 /// a valid character in a Hex/`beamtalk.toml` package name, so this can
 /// never collide with a real dependency's directory-derived stamp (see
 /// [`dependency_package_for_path`]).
+///
+/// **Known limitation — multi-root workspaces (tracked as BT-2960):** one
+/// `ProjectIndex` is shared across an entire LSP session, including a
+/// multi-root workspace where each root is genuinely a *different* package.
+/// Every non-dependency file in every root gets this same fixed marker, so
+/// two distinct real packages opened as sibling roots are indistinguishable
+/// from each other's perspective — an `internal` alias in root A's package
+/// would resolve (not be excluded) for a file in root B, the same class of
+/// leak this marker exists to prevent across the project-vs-*dependency*
+/// boundary, just not yet closed across the project-vs-*sibling-root*
+/// boundary. Still strictly better than the pre-BT-2951 baseline (which
+/// excluded nothing at all), and closing this fully needs the same
+/// `beamtalk.toml`-derived real package name per root that this marker
+/// deliberately avoids reading (see above) — see BT-2960 for the fix design.
 const CURRENT_PROJECT_PACKAGE_MARKER: &str = "$project";
 
 /// Package stamp for a stdlib file's `AliasInfo.package`, mirroring the CLI

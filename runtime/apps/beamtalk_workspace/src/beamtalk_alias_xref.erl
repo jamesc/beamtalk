@@ -233,47 +233,10 @@ handle_call(clear, _From, _State) ->
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
-handle_cast(
-    {register_class, ClassNameBin, NewAliasSet},
-    State = #state{alias_to_classes = AliasToClasses, class_to_aliases = ClassToAliases}
-) ->
-    OldAliasSet = maps:get(ClassNameBin, ClassToAliases, sets:new()),
-    RemovedAliases = sets:to_list(sets:subtract(OldAliasSet, NewAliasSet)),
-    AddedAliases = sets:to_list(sets:subtract(NewAliasSet, OldAliasSet)),
-    AliasToClasses1 = lists:foldl(
-        fun(AliasName, Acc) -> remove_dependent(AliasName, ClassNameBin, Acc) end,
-        AliasToClasses,
-        RemovedAliases
-    ),
-    AliasToClasses2 = lists:foldl(
-        fun(AliasName, Acc) -> add_dependent(AliasName, ClassNameBin, Acc) end,
-        AliasToClasses1,
-        AddedAliases
-    ),
-    ClassToAliases1 =
-        case sets:is_empty(NewAliasSet) of
-            true -> maps:remove(ClassNameBin, ClassToAliases);
-            false -> ClassToAliases#{ClassNameBin => NewAliasSet}
-        end,
-    {noreply, State#state{alias_to_classes = AliasToClasses2, class_to_aliases = ClassToAliases1}};
-handle_cast(
-    {register_class_additive, ClassNameBin, NewAliasSet},
-    State = #state{alias_to_classes = AliasToClasses, class_to_aliases = ClassToAliases}
-) ->
-    OldAliasSet = maps:get(ClassNameBin, ClassToAliases, sets:new()),
-    AddedAliases = sets:to_list(sets:subtract(NewAliasSet, OldAliasSet)),
-    AliasToClasses1 = lists:foldl(
-        fun(AliasName, Acc) -> add_dependent(AliasName, ClassNameBin, Acc) end,
-        AliasToClasses,
-        AddedAliases
-    ),
-    MergedAliasSet = sets:union(OldAliasSet, NewAliasSet),
-    ClassToAliases1 =
-        case sets:is_empty(MergedAliasSet) of
-            true -> ClassToAliases;
-            false -> ClassToAliases#{ClassNameBin => MergedAliasSet}
-        end,
-    {noreply, State#state{alias_to_classes = AliasToClasses1, class_to_aliases = ClassToAliases1}};
+handle_cast({register_class, ClassNameBin, NewAliasSet}, State) ->
+    {noreply, apply_class_registration(replace, ClassNameBin, NewAliasSet, State)};
+handle_cast({register_class_additive, ClassNameBin, NewAliasSet}, State) ->
+    {noreply, apply_class_registration(additive, ClassNameBin, NewAliasSet, State)};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -289,6 +252,52 @@ code_change(_OldVsn, State, _Extra) ->
 %%====================================================================
 %% Internal functions
 %%====================================================================
+
+%% Shared forward/reverse-index bookkeeping for `register_class/2` (`replace`)
+%% and `register_class_additive/2` (`additive`) — the two modes differ only
+%% in whether a name present in the class's *old* alias set but absent from
+%% `NewAliasSet` is retired: `replace` computes and removes it (whole-set
+%% replacement); `additive` never does (the final set is the union of old
+%% and new, so an edge can only grow). See those two functions' docs for the
+%% full rationale.
+-spec apply_class_registration(replace | additive, binary(), sets:set(binary()), #state{}) ->
+    #state{}.
+apply_class_registration(
+    Mode,
+    ClassNameBin,
+    NewAliasSet,
+    State = #state{alias_to_classes = AliasToClasses, class_to_aliases = ClassToAliases}
+) ->
+    OldAliasSet = maps:get(ClassNameBin, ClassToAliases, sets:new()),
+    AddedAliases = sets:to_list(sets:subtract(NewAliasSet, OldAliasSet)),
+    AliasToClasses1 =
+        case Mode of
+            replace ->
+                RemovedAliases = sets:to_list(sets:subtract(OldAliasSet, NewAliasSet)),
+                lists:foldl(
+                    fun(AliasName, Acc) -> remove_dependent(AliasName, ClassNameBin, Acc) end,
+                    AliasToClasses,
+                    RemovedAliases
+                );
+            additive ->
+                AliasToClasses
+        end,
+    AliasToClasses2 = lists:foldl(
+        fun(AliasName, Acc) -> add_dependent(AliasName, ClassNameBin, Acc) end,
+        AliasToClasses1,
+        AddedAliases
+    ),
+    FinalAliasSet =
+        case Mode of
+            replace -> NewAliasSet;
+            additive -> sets:union(OldAliasSet, NewAliasSet)
+        end,
+    ClassToAliases1 =
+        case sets:is_empty(FinalAliasSet) of
+            true -> maps:remove(ClassNameBin, ClassToAliases);
+            false -> ClassToAliases#{ClassNameBin => FinalAliasSet}
+        end,
+    State#state{alias_to_classes = AliasToClasses2, class_to_aliases = ClassToAliases1}.
 
 -spec add_dependent(binary(), binary(), #{binary() => sets:set(binary())}) ->
     #{binary() => sets:set(binary())}.

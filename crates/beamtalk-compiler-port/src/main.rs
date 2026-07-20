@@ -3509,6 +3509,12 @@ mod tests {
             "expected the protocol method's Wrapper-typed parameter to embed a \
              user_type reference in its register_protocol metadata: {core_erlang}"
         );
+        assert!(
+            core_erlang.matches("'wrapper'").count() >= 2,
+            "expected the module attribute list to also declare the named -type \
+             'wrapper' the user_type reference points at (one occurrence for the \
+             -type declaration, at least one more for the reference): {core_erlang}"
+        );
     }
 
     /// The concrete BT-2912 repro, exercised through the compiler port

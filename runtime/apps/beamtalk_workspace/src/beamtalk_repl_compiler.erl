@@ -84,7 +84,7 @@ compile_expression(Expression, ModuleName, Bindings, KnownTypeAliasSources) ->
 Compile a Beamtalk expression the same way `compile_expression/3` does, but
 without the `beamtalk_alias_xref` registration (or the bytecode compile that
 triggers it) `compile_class_definition_result/2`/
-`compile_protocol_definition_result/1` normally perform for a
+`compile_protocol_definition_result/2` normally perform for a
 `class_definition`/`protocol_definition` result (BT-2956).
 
 For callers — currently only `beamtalk_repl_eval:eval_with_self/2`
@@ -434,15 +434,23 @@ compile_method_reload(ClassSource, MethodSource, Options) ->
                     case beamtalk_compiler:compile_core_erlang(CoreErlang) of
                         {ok, _CompiledMod, Binary} ->
                             Classes = maps:get(classes, CR, []),
-                            %% ADR 0108 hot-reload re-check trigger (BT-2899):
-                            %% see compile_file_core/4's identical registration.
-                            %% `replace` (BT-2955): `ClassSource` here is the
-                            %% class's full reconstructed source (see this
-                            %% function's moduledoc), not a bare REPL-typed
-                            %% fragment, so it has the same complete alias
-                            %% picture the file-compile path does.
+                            %% ADR 0108 hot-reload re-check trigger (BT-2899).
+                            %% `additive` (BT-2955 follow-up): `ClassSource`
+                            %% here is the class's own reconstructed source —
+                            %% `beamtalk_workspace_meta:get_class_source/1` is
+                            %% keyed by class name and stores only that
+                            %% class's subclass-definition text, not the
+                            %% originating file's other top-level
+                            %% declarations. A `type Name = ...` alias
+                            %% declared as a *sibling* of this class in the
+                            %% same source file (the exact `stdlib/src/Ets.bt`
+                            %% shape BT-2955 fixed for the other REPL-inline
+                            %% paths) is therefore just as invisible to this
+                            %% compile as it is to `compile_class_definition_result/2`
+                            %% — `replace` here would silently clobber a real
+                            %% edge a prior `:load` registered.
                             ReferencedAliases = maps:get(referenced_aliases, CR, []),
-                            register_alias_xref_for_classes(Classes, ReferencedAliases, replace),
+                            register_alias_xref_for_classes(Classes, ReferencedAliases, additive),
                             {ok, #{
                                 binary => Binary,
                                 module_name => ModName,

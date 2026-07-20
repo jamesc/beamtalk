@@ -340,6 +340,73 @@ compile_method_patch_registers_alias_dependency_test_() ->
             ]
         end}}.
 
+%% BT-2955 follow-up: `compile_method_reload/3`'s `ClassSource` is the
+%% class's own reconstructed source (`beamtalk_workspace_meta:get_class_source/1`,
+%% keyed by class name) — it does NOT include a `type Name = ...` alias
+%% declared as a *sibling* of the class in its originating source file (the
+%% same `stdlib/src/Ets.bt` shape `compile_class_definition_result/2` and
+%% `compile_protocol_definition_result/2` were fixed for). A method-reload
+%% compile must not clobber the real alias-xref edge a prior `:load`
+%% registered, even though this compile's own `referenced_aliases` omits
+%% the file-local alias.
+compile_method_patch_preserves_file_local_alias_dependency_test_() ->
+    {timeout, 30,
+        {setup, fun alias_recheck_setup/0, fun alias_recheck_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    %% Turn 1: `:load` a file declaring BOTH the alias and
+                    %% the class referencing it.
+                    FileSource =
+                        "type AliasChangeMethodPatchFileLocalDirection = #north | #south\n"
+                        "\n"
+                        "Object subclass: AliasChangeMethodPatchFileLocalUser\n"
+                        "  heading: d :: AliasChangeMethodPatchFileLocalDirection => d\n"
+                        "  hello => 42\n",
+                    FilePath = filename:join(
+                        temp_dir(),
+                        io_lib:format("alias_recheck_method_patch_file_local_~p.bt", [
+                            erlang:unique_integer([positive])
+                        ])
+                    ),
+                    ok = file:write_file(FilePath, FileSource),
+                    State0 = beamtalk_repl_state:new(undefined, 0),
+                    {ok, _, _State1} = beamtalk_repl_loader:handle_load(FilePath, State0),
+                    ?assertEqual(
+                        [<<"AliasChangeMethodPatchFileLocalUser">>],
+                        beamtalk_alias_xref:dependents_of(
+                            <<"AliasChangeMethodPatchFileLocalDirection">>
+                        )
+                    ),
+
+                    %% Turn 2: patch an UNRELATED method on the same class
+                    %% via compile_method_reload/3 — WITHOUT the alias in
+                    %% session state (no declare_alias/3 call), so this
+                    %% compile's ClassSource/referenced_aliases has no way
+                    %% to see `AliasChangeMethodPatchFileLocalDirection`.
+                    %% Before this fix, `replace` mode here would clobber
+                    %% the real edge above with `[]`.
+                    ClassSource =
+                        <<"Object subclass: AliasChangeMethodPatchFileLocalUser\n  hello => 42\n">>,
+                    MethodSource = <<"hello => 43\n">>,
+                    Options = #{
+                        class_name => <<"AliasChangeMethodPatchFileLocalUser">>,
+                        is_class_method => false,
+                        workspace_mode => true
+                    },
+                    Result = beamtalk_repl_compiler:compile_method_reload(
+                        ClassSource, MethodSource, Options
+                    ),
+                    ?assertMatch({ok, _}, Result),
+                    ?assertEqual(
+                        [<<"AliasChangeMethodPatchFileLocalUser">>],
+                        beamtalk_alias_xref:dependents_of(
+                            <<"AliasChangeMethodPatchFileLocalDirection">>
+                        )
+                    )
+                end)
+            ]
+        end}}.
+
 %%====================================================================
 %% End-to-end (BT-2916, BT-2899 follow-up): a live redefinition of a
 %% *deeply* (3-level) transitively referenced alias still fires the
