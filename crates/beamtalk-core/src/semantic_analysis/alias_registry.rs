@@ -501,6 +501,25 @@ impl AliasRegistry {
     /// open-world context, where there is no package boundary to enforce at
     /// all — mirrors [`crate::semantic_analysis::class_hierarchy::ClassHierarchy::add_from_beam_meta`]'s
     /// unconditional accept in that context).
+    ///
+    /// **Cross-batch cycle detection** (ADR 0108 "No recursion", BT-2896,
+    /// BT-2954): like [`Self::register_module`], this method finishes by
+    /// running [`find_cycles`] over the *whole* accumulated `self.aliases`
+    /// map (module-local declarations already registered, plus every
+    /// pre-loaded batch seeded so far, including this one) and reporting any
+    /// cycle found, deduplicated against [`Self::reported_cycles`] the same
+    /// way `register_module` is. Without this, a cycle spanning aliases from
+    /// two separately-compiled files — each half only visible to the other
+    /// via `pre_loaded_aliases` — could go entirely unreported: relying on a
+    /// *later* `register_module` call to re-scan the merged map doesn't
+    /// cover every caller, since `register_module` only runs when the
+    /// current module declares at least one alias of its own (see
+    /// `semantic_analysis::mod.rs`'s `analyse_full`), and some callers (e.g.
+    /// `project_index.rs`, `lint.rs`) call `add_pre_loaded` without ever
+    /// calling `register_module` on that registry at all. Non-fatal, exactly
+    /// like `register_module`'s check: a cyclic alias still seeds into the
+    /// table (`resolve_type_annotation`'s `expanding` guard, BT-2895, keeps
+    /// expansion safe either way).
     pub fn add_pre_loaded(
         &mut self,
         aliases: Vec<AliasInfo>,
@@ -583,6 +602,23 @@ impl AliasRegistry {
 
             self.aliases.entry(info.name.clone()).or_insert(info);
         }
+
+        // ADR 0108 "No recursion" / BT-2896 / BT-2954: cycle detection over
+        // the whole accumulated `self.aliases` map, mirroring
+        // `register_module`'s own `find_cycles` call (see its doc) — see
+        // this method's doc for why `add_pre_loaded` cannot simply rely on a
+        // later `register_module` call to do this instead. Deduplicated
+        // against `self.reported_cycles`, the same set `register_module`
+        // shares, so a cycle already reported here is not reported again if
+        // a subsequent `register_module` (or `add_pre_loaded`) call re-scans
+        // the same still-unresolved cycle.
+        let (cycles, _resolution_order) = find_cycles(&self.aliases);
+        for (cycle, cycle_span) in cycles {
+            if self.reported_cycles.insert(canonical_cycle_key(&cycle)) {
+                diagnostics.push(cycle_diagnostic(&cycle, cycle_span));
+            }
+        }
+
         diagnostics
     }
 
@@ -2318,6 +2354,134 @@ mod tests {
             registry.get("Id").unwrap().annotation,
             TypeAnnotation::Simple(ident("String"))
         );
+    }
+
+    #[test]
+    fn add_pre_loaded_detects_cross_file_cycle() {
+        // BT-2954: two separately-compiled files each declare one half of
+        // the ADR 0108 Error-example cycle:
+        //   file A: type Ab = Bc | Integer
+        //   file B: type Bc = Ab | Symbol
+        // Neither file's own `register_module` call ever sees the other
+        // half, so the only place this cross-file cycle can be caught is
+        // where the two are merged — `add_pre_loaded`, seeded from a second
+        // file/package's collected `AliasInfo`s (mirrors
+        // `repeated_register_module_calls_report_the_same_cycle_only_once`'s
+        // two-call shape, but via `add_pre_loaded` instead of
+        // `register_module`, since neither half is a module-local
+        // declaration here).
+        let hierarchy = ClassHierarchy::with_builtins();
+        let protocol_registry = ProtocolRegistry::new();
+        let mut registry = AliasRegistry::new();
+
+        let ab = alias_info(
+            "Ab",
+            TypeAnnotation::Union {
+                types: vec![
+                    TypeAnnotation::Simple(ident("Bc")),
+                    TypeAnnotation::Simple(ident("Integer")),
+                ],
+                span: span(),
+            },
+            false,
+        );
+        let bc = alias_info(
+            "Bc",
+            TypeAnnotation::Union {
+                types: vec![
+                    TypeAnnotation::Simple(ident("Ab")),
+                    TypeAnnotation::Simple(ident("Symbol")),
+                ],
+                span: span(),
+            },
+            false,
+        );
+
+        // First batch: only `Ab` is known yet — `Bc` isn't registered, so
+        // there is no back-edge to close a cycle on.
+        let diags1 = registry.add_pre_loaded(vec![ab], &hierarchy, &protocol_registry, None);
+        assert!(
+            diags1.is_empty(),
+            "no cycle possible before Bc is seeded: {diags1:?}"
+        );
+
+        // Second batch closes the cycle.
+        let diags2 = registry.add_pre_loaded(vec![bc], &hierarchy, &protocol_registry, None);
+        assert_eq!(
+            diags2.len(),
+            1,
+            "expected exactly one cycle diagnostic: {diags2:?}"
+        );
+        assert!(
+            diags2[0]
+                .message
+                .contains("type alias cycle: `Ab` \u{2192} `Bc` \u{2192} `Ab`"),
+            "unexpected message: {}",
+            diags2[0].message
+        );
+        // Both aliases still seed — non-fatal, mirroring
+        // `two_alias_cycle_is_detected`'s same-file behaviour.
+        assert!(registry.has_alias("Ab"));
+        assert!(registry.has_alias("Bc"));
+    }
+
+    #[test]
+    fn add_pre_loaded_cycle_is_not_double_reported_by_a_later_register_module_call() {
+        // BT-2954: `add_pre_loaded` and `register_module` now share
+        // `reported_cycles` (see its doc) — a cycle already reported when
+        // `add_pre_loaded` seeds the second half must not be re-reported
+        // when a later `register_module` call re-scans the same
+        // still-unresolved cycle over the merged map, mirroring
+        // `repeated_register_module_calls_report_the_same_cycle_only_once`'s
+        // existing same-file dedup guarantee — this is the cross-method
+        // extension of that guarantee, not a new mechanism.
+        let hierarchy = ClassHierarchy::with_builtins();
+        let protocol_registry = ProtocolRegistry::new();
+        let mut registry = AliasRegistry::new();
+
+        let ab = alias_info(
+            "Ab",
+            TypeAnnotation::Union {
+                types: vec![
+                    TypeAnnotation::Simple(ident("Bc")),
+                    TypeAnnotation::Simple(ident("Integer")),
+                ],
+                span: span(),
+            },
+            false,
+        );
+        let bc = alias_info(
+            "Bc",
+            TypeAnnotation::Union {
+                types: vec![
+                    TypeAnnotation::Simple(ident("Ab")),
+                    TypeAnnotation::Simple(ident("Symbol")),
+                ],
+                span: span(),
+            },
+            false,
+        );
+
+        let diags1 = registry.add_pre_loaded(vec![ab, bc], &hierarchy, &protocol_registry, None);
+        assert_eq!(diags1.len(), 1, "expected one cycle diagnostic: {diags1:?}");
+
+        // A later `register_module` call (e.g. registering an unrelated
+        // module-local alias in the same compile) re-scans the whole
+        // accumulated map — including the still-present Ab/Bc cycle — and
+        // must not resurface it.
+        let unrelated_file = Module {
+            type_aliases: vec![alias_def(
+                "Unrelated",
+                TypeAnnotation::Simple(ident("Integer")),
+            )],
+            ..empty_module()
+        };
+        let diags2 = registry.register_module(&unrelated_file, &hierarchy, &protocol_registry);
+        assert!(
+            diags2.is_empty(),
+            "the already-reported Ab/Bc cycle must not resurface: {diags2:?}"
+        );
+        assert!(registry.has_alias("Unrelated"));
     }
 
     #[test]
