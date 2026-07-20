@@ -342,6 +342,21 @@ Deliberately omits the doc comment — round-tripping it is unnecessary
 (`known_type_aliases` only feeds `resolve_type_annotation`'s structural
 lookup, never `:help`, which reads `alias_table` directly) and would risk a
 multi-line doc comment corrupting the single-line reparse.
+
+**BT-2958 perf note:** this re-derives the full list (now including every
+public stdlib-seeded alias, BT-2938) on every call, and the compiler port
+re-lexes each returned line from scratch (`extract_known_type_aliases` in
+`beamtalk-compiler-port/src/main.rs`) with no cross-request cache — there is
+no memoization here or on the port side. Deliberately left unoptimized:
+`maps:to_list/1` plus a short list comprehension over stdlib's current ~5
+aliases (plausibly 30-50 as stdlib grows) is a handful of cheap re-lexes of
+one-line sources, not observable against REPL round-trip latency. The
+compiler port is also a stateless-per-request OS process today — caching
+`AliasInfo` there would mean adding session-keyed state to a process that
+currently has none, a materially bigger change than this table's size
+justifies. Revisit if the combined stdlib+session alias count crosses
+roughly 200-300 (an order of magnitude beyond today's growth trajectory) or
+profiling shows this path is actually hot.
 """.
 -spec known_type_alias_sources(state()) -> [binary()].
 known_type_alias_sources(#state{alias_table = AliasTable}) ->
