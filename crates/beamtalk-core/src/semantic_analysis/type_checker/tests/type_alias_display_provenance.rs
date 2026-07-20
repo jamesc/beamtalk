@@ -517,3 +517,117 @@ Supervisor spawnWith: #{#policy => 42}
         hits[0].message
     );
 }
+
+#[test]
+fn instance_arg_rejected_for_class_typed_alias_parameter() {
+    // Claude review on PR #3082 (BT-2953): `check_argument_types`'s
+    // `class_shortcut_applies` guard (validation.rs, `expected_ty.as_str()
+    // == "Class"`) gated the BT-1877 shortcut on the *bare* declared type,
+    // not `expected_structural`. For `type ClassAlias = Class`,
+    // `expected_ty` is `"ClassAlias"` (never `"Class"`) while
+    // `expected_structural` resolves to `"Class"` — so the guard never
+    // fired, `is_type_compatible`'s own `expected == "Class"` shortcut
+    // absorbed *any* known class instance unconditionally, and a plain
+    // `TestCase` instance (not a class literal) wrongly satisfied a `::
+    // ClassAlias` parameter. Sibling to `unions_checking`'s
+    // `instance_identifier_still_rejected_for_class_param`, through the
+    // alias.
+    use crate::semantic_analysis::alias_registry::{AliasInfo, AliasRegistry};
+    use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, ClassInfo, MethodInfo};
+
+    let mut hierarchy = ClassHierarchy::with_builtins();
+    hierarchy.add_from_beam_meta(vec![
+        ClassInfo {
+            surface_incomplete: false,
+            name: "TestCase".into(),
+            superclass: Some("Value".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_internal: false,
+            package: None,
+            is_value: true,
+            is_native: false,
+            handle_scope: None,
+            state: vec![],
+            state_types: std::collections::HashMap::new(),
+            state_has_default: std::collections::HashMap::new(),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+        ClassInfo {
+            surface_incomplete: false,
+            name: "ClassChecker".into(),
+            superclass: Some("Object".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_internal: false,
+            package: None,
+            is_value: false,
+            is_native: false,
+            handle_scope: None,
+            state: vec![],
+            state_types: std::collections::HashMap::new(),
+            state_has_default: std::collections::HashMap::new(),
+            methods: vec![MethodInfo {
+                selector: "accept:".into(),
+                arity: 1,
+                kind: crate::ast::MethodKind::Primary,
+                defined_in: "ClassChecker".into(),
+                is_sealed: false,
+                is_internal: false,
+                spawns_block: false,
+                return_type: Some("Boolean".into()),
+                param_types: vec![Some("ClassAlias".into())],
+                doc: None,
+            }],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    ]);
+
+    let mut alias_registry = AliasRegistry::new();
+    alias_registry.register_test_alias(AliasInfo {
+        name: "ClassAlias".into(),
+        annotation: crate::ast::TypeAnnotation::Simple(crate::ast::Identifier {
+            name: "Class".into(),
+            span: crate::source_analysis::Span::new(0, 1),
+        }),
+        is_internal: false,
+        package: None,
+        span: crate::source_analysis::Span::new(0, 1),
+    });
+
+    let mut checker = crate::semantic_analysis::type_checker::TypeChecker::new();
+    checker.set_alias_registry(alias_registry);
+    checker.check_argument_types(
+        &"ClassChecker".into(),
+        "accept:",
+        &[crate::semantic_analysis::InferredType::known("TestCase")],
+        crate::source_analysis::Span::new(0, 1),
+        &hierarchy,
+        false,
+        None,
+        None,
+    );
+    let diags = checker.diagnostics();
+    assert_eq!(
+        diags.len(),
+        1,
+        "a TestCase instance (not a class literal) must not satisfy a \
+         Class-aliased parameter, got: {diags:?}"
+    );
+    assert!(
+        diags[0].message.contains("expects ClassAlias (Class)"),
+        "should name the alias with its expansion, got: {}",
+        diags[0].message
+    );
+}
