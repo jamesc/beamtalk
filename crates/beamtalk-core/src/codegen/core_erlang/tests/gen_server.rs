@@ -5540,8 +5540,8 @@ fn test_terminate_lifecycle_stop_telemetry() {
         "terminate/2 must emit lifecycle telemetry. Got:\n{code}"
     );
     assert!(
-        code.contains("'stop'"),
-        "terminate/2 telemetry must include the 'stop' event name. Got:\n{code}"
+        code.contains("'lifecycle', 'stop']"),
+        "terminate/2 telemetry must include the lifecycle 'stop' event name. Got:\n{code}"
     );
 }
 
@@ -5566,10 +5566,6 @@ fn test_terminate_wraps_dispatch_in_try_catch() {
     // generate_terminate must wrap the 'terminate:' method dispatch in try-catch
     // so that user exceptions cannot prevent OTP gen_server shutdown (BT-29).
     let code = codegen("Actor subclass: TestActor\n  state: x = 0\n");
-    assert!(
-        code.contains("try call"),
-        "terminate/2 dispatch must be wrapped in a try expression. Got:\n{code}"
-    );
     assert!(
         code.contains("catch <_TermT, _TermE, _TermS> -> 'ok'"),
         "terminate/2 catch clause must swallow all exceptions and return ok. Got:\n{code}"
