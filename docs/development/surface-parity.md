@@ -238,7 +238,7 @@ These MCP tools provide AI-assistant-specific capabilities that have no direct R
 | `search_classes` | `surface-specific: offline class discovery by keyword` |
 | `list_packages` | `surface-specific: list loaded Beamtalk packages` |
 | `package_classes` | `surface-specific: list classes in a named package` |
-| `docs` | Wraps `Beamtalk help: ClassName` (optionally `selector: #sel` for instance- or class-side methods) — REPL `docs` op was hard-removed (BT-2091). **BT-2902 (ADR 0108 Phase 8):** when `ClassName` names a `type Name = ...` alias declared earlier in *this session*, the eval layer (`beamtalk_repl_eval:maybe_help_for_alias/2`) answers from the session's alias table before the expression ever reaches `Beamtalk help:` — aliases erase entirely at compile time, so there is no live class/process for the global `beamtalk_class_registry` lookup `Beamtalk help:` normally does to ever see. Renders `type Name = <expansion>`, the doc comment (if any), and `Declared in: REPL`. Since MCP tool calls run through the same per-session `beamtalk_repl_shell`/`do_eval` pipeline as the CLI REPL, this is automatic cross-surface parity, not a separate implementation — a session-local alias is visible identically from whichever surface opened that session. Cross-package/exported aliases (visible regardless of which session declared them) are BT-2898's seeding mechanism, not yet wired into this lookup. |
+| `docs` | Wraps `Beamtalk help: ClassName` (optionally `selector: #sel` for instance- or class-side methods) — REPL `docs` op was hard-removed (BT-2091). **BT-2902 (ADR 0108 Phase 8):** when `ClassName` names a `type Name = ...` alias declared earlier in *this session*, the eval layer (`beamtalk_repl_eval:maybe_help_for_alias/2`) answers from the session's alias table before the expression ever reaches `Beamtalk help:` — aliases erase entirely at compile time, so there is no live class/process for the global `beamtalk_class_registry` lookup `Beamtalk help:` normally does to ever see. Renders `type Name = <expansion>`, the doc comment (if any), and `Declared in: REPL`. Since MCP tool calls run through the same per-session `beamtalk_repl_shell`/`do_eval` pipeline as the CLI REPL, this is automatic cross-surface parity, not a separate implementation — a session-local alias is visible identically from whichever surface opened that session. **BT-2938:** the same session alias table (`beamtalk_repl_state`) is now also seeded, at session creation, with every public `type Name = ...` alias stdlib itself declares (`beamtalk_repl_state:stdlib_alias_table/0`, reading `beamtalk_stdlib`'s compiled `.app` `{type_aliases, [...]}` env key — the same durable record `browse-type-aliases` reads) — a fresh session's `:help SupervisionStrategy` (`stdlib/src/Supervisor.bt`) and a `::`-typed local referencing it both resolve without the session ever declaring it itself, mirroring how a compiled-in stdlib *class* is already known out of the box. Renders `Declared in: stdlib` (not `REPL`) for one of these — see the Declaration-echo-values section below. A stdlib entry is shadowed by a same-named session-local `type` redeclaration (ADR 0108 Semantics' "current turn wins"). Cross-package/exported *project or dependency* aliases (visible regardless of which session declared them) remain BT-2898's seeding mechanism, not yet wired into this lookup. |
 | `load_file` | Wraps `Workspace load: "path"` — REPL `load-file` op was hard-removed (BT-2091) |
 | `reload_class` | Wraps `ClassName reload` — REPL `reload` op was hard-removed (BT-2091) |
 | `try_method` | Ephemeral counterpart of `save_method` (ADR 0082 Phase 3, BT-2288). Wraps `aClass tryCompile: #sel source: body` — installs in memory and logs an ephemeral ChangeLog entry that does not flush. Listed here because the `live-edit-method` REPL op row only carries one MCP binding (`save_method`, the durable path); humans typing `>>` at the REPL reach the same install chokepoint without a separate token. Promote a successful spike by calling `save_method` with the same body. |
@@ -351,6 +351,16 @@ the LSP has no eval affordance and is unaffected).
   new display text with no prior precedent, also pinned by the same
   `.btscript` test. A file-declared alias's `:help` shows its real
   `source_file` path instead (see the `docs` row in Core Operations).
+- **BT-2938:** an alias seeded from stdlib's own compiled declarations
+  (never declared by this session at all) instead reads **`Declared in:
+  stdlib`** — chosen to match `package => 'stdlib'`'s existing convention
+  elsewhere (e.g. `build_stdlib.rs`'s `format_stdlib_class_entry`) rather
+  than stdlib's real `source_file` path (e.g. `stdlib/src/Supervisor.bt`),
+  since that path is an implementation detail no Beamtalk user program can
+  `:load`. Same maintainer-sign-off caveat as `Declared in: REPL` above —
+  flagged in BT-2938's own PR description, not yet a closed decision.
+  Pinned by `tests/repl-protocol/cases/type_alias_repl.btscript`'s
+  `:help SupervisionStrategy` section.
 
 ## Drift Check (CI)
 
