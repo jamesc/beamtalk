@@ -34,15 +34,16 @@
 //! `protocol_registry.has_protocol` check already catches the collision.
 //!
 //! **Cycle detection + topological sort** (ADR 0108 "No recursion",
-//! BT-2896): [`register_module`](AliasRegistry::register_module) and
-//! [`redefine_alias`](AliasRegistry::redefine_alias) both run a single DFS
+//! BT-2896): [`register_module`](AliasRegistry::register_module),
+//! [`add_pre_loaded`](AliasRegistry::add_pre_loaded) (BT-2954), and
+//! [`redefine_alias`](AliasRegistry::redefine_alias) all run a single DFS
 //! ([`find_cycles`]) over the alias dependency graph — edges are RHS
 //! references to other registered alias names — that detects reference
 //! cycles (including self-reference) and produces a topological resolution
-//! order as its post-order, in one walk. A batch-time cycle is a non-fatal
-//! diagnostic (the alias still registers); a live redefinition that would
-//! introduce a cycle is rejected outright, leaving the alias table
-//! unchanged.
+//! order as its post-order, in one walk. A batch-time cycle (via
+//! `register_module` or `add_pre_loaded`) is a non-fatal diagnostic (the
+//! alias still registers); a live redefinition that would introduce a cycle
+//! is rejected outright, leaving the alias table unchanged.
 //!
 //! **References:**
 //! - `docs/ADR/0108-named-union-type-aliases.md` — Semantics (Namespace,
