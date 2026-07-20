@@ -664,13 +664,33 @@ init(_Args) ->
 
 handle_call({compile_expression, Source, ModuleName, KnownVars, Options}, _From, State) ->
     %% ADR 0050 Phase 4: Inject class cache so the Rust compiler sees REPL-session classes.
-    Options1 = Options#{class_hierarchy => State#state.classes},
+    %% BT-2956: default known_type_aliases to the ambient alias cache, the
+    %% same backstop `compile`/`compile_method` apply unconditionally below —
+    %% but via `maps:merge/2` so an explicit caller-supplied value wins,
+    %% rather than an unconditional overwrite. `do_eval/3` (the only
+    %% production caller that reaches class/protocol-definition responses)
+    %% always threads `beamtalk_repl_state:known_type_alias_sources/1`'s
+    %% *full* session list (session-declared aliases plus every
+    %% stdlib-seeded one, BT-2938) explicitly; this ambient cache only ever
+    %% reflects session-declared aliases (`register_aliases/1`), so an
+    %% unconditional overwrite here would silently drop stdlib aliases from
+    %% that caller's more complete list. This is purely a backstop for a
+    %% caller that doesn't bother passing one.
+    Options1 = maps:merge(
+        #{known_type_aliases => alias_source_list(State#state.aliases)},
+        Options#{class_hierarchy => State#state.classes}
+    ),
     Result = beamtalk_compiler_port:compile_expression(
         State#state.port, Source, ModuleName, KnownVars, Options1
     ),
     {reply, Result, State};
 handle_call({compile_expression_trace, Source, ModuleName, KnownVars, Options}, _From, State) ->
-    Options1 = Options#{class_hierarchy => State#state.classes},
+    %% BT-2956: see the identical `maps:merge/2` backstop on the
+    %% `compile_expression` clause above — same reasoning applies here.
+    Options1 = maps:merge(
+        #{known_type_aliases => alias_source_list(State#state.aliases)},
+        Options#{class_hierarchy => State#state.classes}
+    ),
     Result = beamtalk_compiler_port:compile_expression_trace(
         State#state.port, Source, ModuleName, KnownVars, Options1
     ),

@@ -16,6 +16,7 @@ Uses the beamtalk_compiler OTP application (ADR 0022) exclusively.
 -export([
     compile_expression/3,
     compile_expression/4,
+    compile_expression_no_registration/3,
     compile_expression_trace/3,
     compile_file/4,
     compile_file/5,
@@ -78,6 +79,56 @@ Compile a Beamtalk expression to bytecode, with earlier-turn type aliases.
     | {error, term()}.
 compile_expression(Expression, ModuleName, Bindings, KnownTypeAliasSources) ->
     compile_expression_via_port(Expression, ModuleName, Bindings, KnownTypeAliasSources).
+
+-doc """
+Compile a Beamtalk expression the same way `compile_expression/3` does, but
+without the `beamtalk_alias_xref` registration (or the bytecode compile that
+triggers it) `compile_class_definition_result/2`/
+`compile_protocol_definition_result/1` normally perform for a
+`class_definition`/`protocol_definition` result (BT-2956).
+
+For callers — currently only `beamtalk_repl_eval:eval_with_self/2`
+(`evaluate:`) — that always reject a `class_definition`/`method_definition`/
+`protocol_definition`/`type_alias_definition` result outright and never look
+at its payload: registering an alias_xref edge (or even compiling the
+definition to bytecode) for a result about to be discarded is pure
+side-effect work with no reader. The four definition variants return an
+empty payload map/warnings list here — safe, since no caller of this
+function inspects them (unlike `compile_expression/3,4`, whose callers do).
+""".
+-spec compile_expression_no_registration(string(), atom(), map()) ->
+    {ok, binary(), term(), [binary()]}
+    | {ok, class_definition, map(), [binary()]}
+    | {ok, method_definition, map(), [binary()]}
+    | {ok, protocol_definition, map(), [binary()]}
+    | {ok, type_alias_definition, map(), [binary()]}
+    | {error, term()}.
+compile_expression_no_registration(Expression, ModuleName, Bindings) ->
+    SourceBin = list_to_binary(Expression),
+    ModNameBin = atom_to_binary(ModuleName, utf8),
+    KnownVars = known_vars(Bindings),
+    CompileOpts = add_class_indexes(#{}),
+    wrap_compiler_errors(
+        fun() ->
+            case
+                beamtalk_compiler:compile_expression(SourceBin, ModNameBin, KnownVars, CompileOpts)
+            of
+                {ok, class_definition, _ClassInfo} ->
+                    {ok, class_definition, #{}, []};
+                {ok, method_definition, _MethodInfo} ->
+                    {ok, method_definition, #{}, []};
+                {ok, protocol_definition, _ProtocolInfo} ->
+                    {ok, protocol_definition, #{}, []};
+                {ok, type_alias_definition, _AliasInfo} ->
+                    {ok, type_alias_definition, #{}, []};
+                {ok, CoreErlang, Warnings} ->
+                    compile_standard_expression(CoreErlang, Warnings);
+                {error, Diagnostics} ->
+                    {error, Diagnostics}
+            end
+        end,
+        direct
+    ).
 
 -doc """
 Compile a Beamtalk expression in trace mode (BT-1238).

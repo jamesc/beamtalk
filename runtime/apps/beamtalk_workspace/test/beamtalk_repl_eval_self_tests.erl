@@ -23,6 +23,43 @@ no-op reverse).
 eval_with_self_returns_bound_self_test() ->
     ?assertEqual({ok, 42}, beamtalk_repl_eval:eval_with_self(42, <<"self">>)).
 
+%% BT-2956: `eval_with_self/2` always rejects a class-definition-shaped
+%% source via `eval_not_an_expression_error/0` — it must not register (or,
+%% worse, clobber) a `beamtalk_alias_xref` edge along the way, since nothing
+%% ever reads the ClassInfo that would drive that registration. A pre-existing
+%% edge for the same class name (as a prior real `:load` would have left
+%% behind) must survive the rejected `evaluate:` call completely untouched —
+%% before this fix, `compile_class_definition_result/2`'s unconditional
+%% `register_class(ClassNameBin, ReferencedAliases)` (whole-set replacement,
+%% not a delta) would have stomped it to `[]`.
+eval_with_self_class_definition_does_not_touch_alias_xref_test_() ->
+    {setup, fun alias_xref_setup/0, fun alias_xref_teardown/1, fun() ->
+        ok = beamtalk_alias_xref:register_class(<<"EvalSelfXrefClass">>, [
+            <<"EvalSelfXrefAlias">>
+        ]),
+        Source = <<"Object subclass: EvalSelfXrefClass\n\n  bar => 1\n">>,
+        ?assertMatch({error, _}, beamtalk_repl_eval:eval_with_self(nil, Source)),
+        ?assertEqual(
+            [<<"EvalSelfXrefClass">>],
+            beamtalk_alias_xref:dependents_of(<<"EvalSelfXrefAlias">>)
+        )
+    end}.
+
+alias_xref_setup() ->
+    application:ensure_all_started(compiler),
+    case application:ensure_all_started(beamtalk_compiler) of
+        {ok, _} -> ok;
+        {error, {already_started, _}} -> ok
+    end,
+    case whereis(beamtalk_alias_xref) of
+        undefined -> {ok, _} = beamtalk_alias_xref:start_link();
+        _Pid -> ok
+    end,
+    ok = beamtalk_alias_xref:clear().
+
+alias_xref_teardown(_) ->
+    ok = beamtalk_alias_xref:clear().
+
 %% Repeated `evaluate:` calls in one process reuse a single module-name atom
 %% (cached in the process dictionary), so a tight loop cannot exhaust the atom
 %% table, and each transient module is fully unloaded after its call. EUnit runs

@@ -252,7 +252,9 @@ alias_cache_test_() ->
         {"two sessions' aliases merge, neither wipes the other",
             fun register_aliases_concurrent_sessions_merge/0},
         {"clear_classes → alias cache emptied too", fun clear_classes_empties_aliases/0},
-        {"register_aliases when server down → no crash", fun register_aliases_when_down/0}
+        {"register_aliases when server down → no crash", fun register_aliases_when_down/0},
+        {"compile_expression/3 backstops the ambient alias cache (BT-2956)",
+            fun compile_expression_ambient_alias_backstop/0}
     ]}.
 
 register_aliases_visible() ->
@@ -300,6 +302,21 @@ register_aliases_when_down() ->
     application:stop(beamtalk_compiler),
     ?assertEqual(ok, beamtalk_compiler_server:register_aliases([<<"type Down = Integer">>])),
     application:start(beamtalk_compiler).
+
+%% BT-2956: `compile_expression/3` (no explicit `known_type_aliases`) must
+%% still resolve an earlier-turn alias via the ambient cache — proving the
+%% `{compile_expression}` handler now defaults `known_type_aliases` the same
+%% way `{compile}`/`{compile_method}` already do, instead of only ever
+%% seeing whatever (if anything) the caller happened to pass in `Options`.
+compile_expression_ambient_alias_backstop() ->
+    beamtalk_compiler_server:clear_classes(),
+    ok = beamtalk_compiler_server:register_aliases([<<"type Direction = #north | #south">>]),
+    {ok, protocol_definition, ProtocolInfo} = beamtalk_compiler_server:compile_expression(
+        <<"Protocol define: Directional\n  heading: d :: Direction -> Boolean\n">>,
+        <<"bt@ambient_backstop">>,
+        []
+    ),
+    ?assertEqual([<<"Direction">>], maps:get(referenced_aliases, ProtocolInfo)).
 
 %%% ---------------------------------------------------------------
 %%% gen_server edge cases (via running server)

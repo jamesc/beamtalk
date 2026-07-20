@@ -662,7 +662,11 @@ eval_with_self(Self, Source) ->
     %% one process cannot exhaust the never-reclaimed atom table (BT-2503).
     ModuleName = eval_module_name(),
     Bindings = #{self => Self},
-    case beamtalk_repl_compiler:compile_expression(SourceStr, ModuleName, Bindings) of
+    %% BT-2956: use the no-registration variant — every definition-shaped
+    %% result below is rejected immediately via eval_not_an_expression_error/0,
+    %% so there is no reader for a beamtalk_alias_xref edge (or even a wasted
+    %% bytecode compile) that compile_expression/3 would otherwise trigger.
+    case beamtalk_repl_compiler:compile_expression_no_registration(SourceStr, ModuleName, Bindings) of
         {ok, class_definition, _Info, _Warnings} ->
             eval_not_an_expression_error();
         {ok, method_definition, _Info, _Warnings} ->
