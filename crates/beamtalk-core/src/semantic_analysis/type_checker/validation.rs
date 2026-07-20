@@ -705,8 +705,23 @@ impl TypeChecker {
         // Singleton types: #foo is a subtype of Symbol, not the reverse.
         // Symbol is NOT compatible with a singleton like #ok.
         // Generic type params (K, V, T, etc.) are always compatible (conservative).
+        //
+        // BT-2949: `actual == "Dynamic"` is also always compatible here, same
+        // as it already is everywhere else `is_type_compatible` reasons about
+        // an unresolved argument — every other branch in this function falls
+        // through to the "unknown declared/actual class -> conservatively
+        // compatible" escape hatch below, since `Dynamic` is never a
+        // registered hierarchy class, but this singleton branch returns
+        // before ever reaching it. Surfaced by BT-2949's class-type-param
+        // substitution: a method-local type param the substitution can't
+        // resolve (e.g. `andThen:`'s `R` in `Block(T, Result(R, E))`, not
+        // bound by the receiver's own type args) becomes literal `Dynamic`,
+        // and comparing it against a substituted singleton E (e.g. `#x`)
+        // previously — wrongly — failed.
         if expected.starts_with('#') && !expected.contains('|') {
-            return actual == expected || super::is_generic_type_param(actual);
+            return actual == expected
+                || super::is_generic_type_param(actual)
+                || WellKnownClass::from_str(actual) == Some(WellKnownClass::Dynamic);
         }
         if actual.starts_with('#') && !actual.contains('|') {
             // Singletons are subtypes of Symbol — check if expected is Symbol
@@ -1001,6 +1016,7 @@ impl TypeChecker {
         is_class_side: bool,
         arg_exprs: Option<&[Expression]>,
         env: Option<&super::TypeEnv>,
+        receiver_type_args: &[InferredType],
     ) {
         // ADR 0103: sendability of actor message arguments and `spawnWith:`
         // map values. Independent of the handler's declared parameter types, so
@@ -1036,9 +1052,70 @@ impl TypeChecker {
         // constant across all arguments.
         let metaclass_name: EcoString = "Metaclass".into();
 
+        // BT-2949: substitution map from `class_name`'s (or its declaring
+        // superclass's, if `method` is inherited) generic type-param names
+        // to the receiver's concrete `receiver_type_args` — e.g. `Dictionary
+        // (Symbol, JsonValue)` gives `{K -> Symbol, V -> JsonValue}`. Empty
+        // (a no-op below) when the receiver has no type args or the class
+        // has no type params, so a non-generic call is entirely unaffected.
+        // Hoisted out of the loop since, like `metaclass_name`, it's
+        // constant across all arguments.
+        let mut class_subst = super::TypeChecker::build_inherited_substitution_map(
+            hierarchy,
+            class_name,
+            receiver_type_args,
+            &method.defined_in,
+        );
+        // BT-2949: never substitute the conventional "key" type-param slot
+        // (`K`, e.g. `Dictionary(K, V)`/`Ets(K, V)`). A dict/table literal's
+        // key(s) infer as narrow *singleton* types (`#{#a => 1}` gives
+        // `Dictionary(#a, Integer)`, not `Dictionary(Symbol, Integer)`), so
+        // substituting `K` makes every subsequent differently-keyed
+        // `at:`/`at:ifAbsent:`/`includesKey:`/`merge:` call — extremely
+        // common, entirely correct code — look like a type-arg mismatch.
+        // Element-position params (`V`, `E`) don't have this problem: a
+        // container literal's non-key elements aren't singleton-inferred the
+        // same way, so this fix stays scoped to the one param name that
+        // actually causes false positives, per BT-2949's own investigation.
+        class_subst.remove("K");
+
         for (i, (arg_ty, expected)) in arg_types.iter().zip(method.param_types.iter()).enumerate() {
             let Some(expected_ty) = expected else {
                 continue;
+            };
+            // BT-2949: resolve a declared parameter type that names one of
+            // the receiver's own generic type params — bare (`V`) or nested
+            // (`List(E)`, `Dictionary(K, V)`) — to its concrete substituted
+            // type before any of the compatibility checks below. Without
+            // this, `at:put:`/`++`/etc. on a `Dictionary(K, V)`/`List(E)`
+            // instance always passed any element argument: `V`/`E`/`K` are
+            // never registered hierarchy classes, so `is_type_compatible`'s
+            // "unknown declared class -> conservatively compatible" escape
+            // hatch (and `type_args_match`'s generic-placeholder shortcut)
+            // fired unconditionally.
+            //
+            // Only substitutes when `expected_ty` actually references one
+            // of `class_subst`'s keys — every other declared type (plain
+            // classes, unions, and in particular alias names like
+            // `RestartStrategy`, which also aren't registered hierarchy
+            // classes) is left byte-for-byte untouched, so this can't
+            // regress the alias/protocol/union handling below by feeding
+            // `resolve_type_param` an unrelated string it would otherwise
+            // resolve to `Dynamic`.
+            let substituted_expected;
+            let expected_ty: &EcoString = if !class_subst.is_empty()
+                && Self::type_string_references_class_param(expected_ty, &class_subst)
+            {
+                substituted_expected = super::TypeChecker::resolve_type_param(
+                    expected_ty,
+                    &class_subst,
+                    &HashMap::new(),
+                    hierarchy,
+                )
+                .display_name();
+                &substituted_expected
+            } else {
+                expected_ty
             };
             // BT-2784: a protocol-typed parameter is registered as a synthetic
             // sealed-abstract class entry by `register_protocol_classes`
@@ -2659,6 +2736,32 @@ impl TypeChecker {
             })
             .unwrap_or_default();
         (base.to_string(), args)
+    }
+
+    /// BT-2949: does `type_str` reference one of `params`'s keys — a class's
+    /// own generic type-param names — either bare (`"V"`) or nested inside a
+    /// generic (`"List(E)"`, `"Dictionary(K, V)"`, recursing through deeper
+    /// nesting like `"Pair(K, List(V))"`)?
+    ///
+    /// Deliberately conservative: top-level union syntax (`"V | Nil"`) is
+    /// left unrecognized (returns `false`) rather than guessing which member
+    /// substitution should apply to — no builtin generic collection method
+    /// declares a union-shaped parameter naming a class type param today, so
+    /// this only means such a signature would keep the pre-BT-2949
+    /// (unsubstituted) behavior rather than risk a wrong substitution.
+    pub(super) fn type_string_references_class_param(
+        type_str: &str,
+        params: &HashMap<EcoString, InferredType>,
+    ) -> bool {
+        if params.contains_key(type_str) {
+            return true;
+        }
+        if type_str.contains(" | ") {
+            return false;
+        }
+        let (_, args) = Self::parse_generic_type_string(type_str);
+        args.iter()
+            .any(|arg| Self::type_string_references_class_param(arg, params))
     }
 
     /// Resolves type-position keywords to their class names (static version).

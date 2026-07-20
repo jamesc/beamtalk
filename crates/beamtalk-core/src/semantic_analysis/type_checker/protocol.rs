@@ -10,6 +10,8 @@
 //! - Type parameter bounds validation (ADR 0068 Phase 2d)
 //! - Generic variance checking (ADR 0068 Phase 2f)
 
+use std::collections::HashMap;
+
 use crate::ast::{Module, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
@@ -645,6 +647,7 @@ impl TypeChecker {
     }
 
     /// Recursively check variance in expressions (for message send arguments).
+    #[allow(clippy::too_many_lines)] // BT-2949 adds class-type-param substitution
     fn check_variance_in_expr(
         &mut self,
         expr: &crate::ast::Expression,
@@ -663,12 +666,63 @@ impl TypeChecker {
             } => {
                 // Check if any argument has generic type args that need variance checking
                 if let Some(receiver_type) = self.type_map.get(receiver.span()) {
-                    if let InferredType::Known { class_name, .. } = receiver_type.clone() {
+                    if let InferredType::Known {
+                        class_name,
+                        type_args: ref receiver_type_args,
+                        ..
+                    } = receiver_type.clone()
+                    {
                         let sel_name = selector.name();
                         let method = hierarchy.find_method(&class_name, &sel_name);
                         if let Some(method) = method {
+                            // BT-2949: substitution map from the receiver's own
+                            // class-level generic type-param names (e.g. `E` in
+                            // `List(E)`) to its concrete `receiver_type_args`
+                            // (e.g. `List(Integer)` gives `{E -> Integer}`).
+                            // Without this, a declared parameter type naming a
+                            // class type param (`List(E)`, `Dictionary(K, V)`)
+                            // never matched `class_subst`'s keys below and
+                            // `is_assignable_to_with_variance` compared the
+                            // argument against the literal unresolved param
+                            // name, which — like a bare `E`/`V`/`K` anywhere
+                            // else in the checker — is treated as a wildcard
+                            // and always passes.
+                            let mut class_subst = TypeChecker::build_inherited_substitution_map(
+                                hierarchy,
+                                &class_name,
+                                receiver_type_args,
+                                &method.defined_in,
+                            );
+                            // BT-2949: never substitute the conventional "key"
+                            // type-param slot (`K`, e.g. `Dictionary(K, V)`/
+                            // `Ets(K, V)`) — see the identical guard and its
+                            // doc in `validation.rs`'s `check_argument_types`.
+                            // A dict/table literal's key(s) infer as narrow
+                            // singleton types, so substituting `K` would flag
+                            // e.g. `d1 merge: d2` as a type-arg mismatch
+                            // whenever `d1`/`d2` were built from literals
+                            // with different keys — extremely common,
+                            // entirely correct code.
+                            class_subst.remove("K");
                             for (i, arg) in arguments.iter().enumerate() {
                                 if let Some(Some(expected_ty)) = method.param_types.get(i) {
+                                    let substituted_expected;
+                                    let expected_ty = if !class_subst.is_empty()
+                                        && TypeChecker::type_string_references_class_param(
+                                            expected_ty,
+                                            &class_subst,
+                                        ) {
+                                        substituted_expected = TypeChecker::resolve_type_param(
+                                            expected_ty,
+                                            &class_subst,
+                                            &HashMap::new(),
+                                            hierarchy,
+                                        )
+                                        .display_name();
+                                        &substituted_expected
+                                    } else {
+                                        expected_ty
+                                    };
                                     // Only check when expected type is generic
                                     if expected_ty.contains('(') {
                                         if let Some(arg_type) = self.type_map.get(arg.span()) {
