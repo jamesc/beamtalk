@@ -30,6 +30,7 @@ use beamtalk_core::semantic_analysis::ClassHierarchy;
 use beamtalk_core::source_analysis::{Severity, Span};
 use beamtalk_core::unparse::{escape_string_literal, format_source};
 use camino::Utf8PathBuf;
+use ecow::EcoString;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
     CallHierarchyIncomingCall, CallHierarchyIncomingCallsParams, CallHierarchyItem,
@@ -923,6 +924,49 @@ impl Backend {
         svc.set_diagnostics_overrides(table);
     }
 
+    /// Reads each workspace root's real `beamtalk.toml` `[package] name` and
+    /// registers it with the `ProjectIndex` (BT-2960), so two distinct real
+    /// packages opened as sibling workspace roots get distinct alias-package
+    /// stamps instead of colliding on the same-project marker (BT-2951).
+    ///
+    /// A root with no manifest, an unparseable manifest, or no `[package]
+    /// name` is simply omitted — [`ProjectIndex::package_for_alias_stamping`]
+    /// falls back to the same-project marker for any file under an
+    /// unregistered root, matching the pre-BT-2960 behavior for that root.
+    ///
+    /// Must run *before* [`Self::preload_workspace_source_files`] — unlike
+    /// [`Self::load_diagnostics_table`] (applied per-request at
+    /// diagnostic-computation time), alias package stamping happens once, at
+    /// indexing time.
+    async fn load_root_packages(&self, roots: &[PathBuf]) {
+        use beamtalk_core::compilation::parse_package_name_from_manifest_toml;
+
+        let roots_owned: Vec<PathBuf> = roots.to_vec();
+        let root_packages: Vec<(Utf8PathBuf, EcoString)> = tokio::task::spawn_blocking(move || {
+            roots_owned
+                .into_iter()
+                .filter_map(|root| {
+                    let manifest_path = root.join("beamtalk.toml");
+                    let content = std::fs::read_to_string(&manifest_path).ok()?;
+                    let name = parse_package_name_from_manifest_toml(&content)?;
+                    let utf8_root = Utf8PathBuf::from_path_buf(root).ok()?;
+                    Some((utf8_root, EcoString::from(name)))
+                })
+                .collect()
+        })
+        .await
+        .unwrap_or_default();
+
+        if !root_packages.is_empty() {
+            debug!(
+                "Loaded {} workspace root package name(s) from beamtalk.toml",
+                root_packages.len()
+            );
+        }
+        let mut svc = self.service.lock().expect("service lock poisoned");
+        svc.set_root_packages(root_packages);
+    }
+
     async fn preload_workspace_source_files(&self, config: PreloadConfig) {
         let loaded = tokio::task::spawn_blocking(move || collect_preload_files(config))
             .await
@@ -1530,6 +1574,13 @@ impl LanguageServer for Backend {
             preload_config.take()
         };
         if let Some(ref config) = preload_config {
+            // BT-2960: each workspace root's real beamtalk.toml [package] name
+            // must be known *before* preload indexes any file under that root
+            // — alias package stamping happens once, at indexing time
+            // (update_file_aliases), unlike the [diagnostics] table below
+            // (applied per-request at diagnostic-computation time, so load
+            // order relative to preload doesn't matter for it).
+            self.load_root_packages(&config.roots).await;
             self.preload_workspace_source_files(config.clone()).await;
             // ADR 0075: Load type cache from _build/type_cache/ for typed completions.
             self.load_type_cache(&config.roots).await;
@@ -5363,6 +5414,61 @@ mod tests {
                 .any(|d| d.category == Some(DiagnosticCategory::Dnu)
                     && d.severity == Severity::Error),
             "the later root (b, dnu = error) must win the whole-session merge: {diags:?}"
+        );
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    /// BT-2960: two sibling workspace roots, each a genuinely different real
+    /// package (per its own `beamtalk.toml` `[package] name`), each
+    /// declaring an `internal type Foo = ...` with a different expansion.
+    /// Before this fix, every same-project file in every root shared the
+    /// same fixed `$project` marker, so root B's file would resolve root A's
+    /// `internal` alias instead of it being excluded. Confirms the two
+    /// roots' `Foo` aliases now carry distinct, root-derived package stamps.
+    #[tokio::test]
+    async fn load_root_packages_gives_sibling_roots_distinct_alias_package_stamps() {
+        let temp = unique_temp_dir("beamtalk_lsp_root_packages_multi_root");
+        let root_a = temp.join("a");
+        let root_b = temp.join("b");
+        fs::create_dir_all(&root_a).expect("create root a");
+        fs::create_dir_all(&root_b).expect("create root b");
+        fs::write(
+            root_a.join("beamtalk.toml"),
+            "[package]\nname = \"pkg_a\"\nversion = \"0.1.0\"\n",
+        )
+        .expect("write root a manifest");
+        fs::write(
+            root_b.join("beamtalk.toml"),
+            "[package]\nname = \"pkg_b\"\nversion = \"0.1.0\"\n",
+        )
+        .expect("write root b manifest");
+
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+        backend
+            .load_root_packages(&[root_a.clone(), root_b.clone()])
+            .await;
+
+        let file_a = Utf8PathBuf::from_path_buf(root_a.join("Foo.bt")).unwrap();
+        let file_b = Utf8PathBuf::from_path_buf(root_b.join("Foo.bt")).unwrap();
+        {
+            let mut svc = backend.service.lock().expect("service lock poisoned");
+            svc.update_file(file_a.clone(), "internal type Foo = Integer".to_string());
+            svc.update_file(file_b.clone(), "internal type Foo = String".to_string());
+        }
+
+        let svc = backend.service.lock().expect("service lock poisoned");
+        assert_eq!(
+            svc.project_index().alias_package_for_file(&file_a),
+            EcoString::from("pkg_a"),
+            "root a's file must be stamped with root a's real package name"
+        );
+        assert_eq!(
+            svc.project_index().alias_package_for_file(&file_b),
+            EcoString::from("pkg_b"),
+            "root b's file must be stamped with root b's real package name, \
+             not root a's or the shared same-project marker"
         );
 
         let _ = fs::remove_dir_all(&temp);

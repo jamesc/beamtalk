@@ -28,35 +28,26 @@ use camino::{Utf8Path, Utf8PathBuf};
 use ecow::EcoString;
 use std::collections::{HashMap, HashSet};
 
-/// Package stamp used for a same-project (non-dependency, non-stdlib) file's
-/// `AliasInfo.package` (BT-2951).
+/// Package stamp used for a same-project (non-dependency, non-stdlib) file
+/// under no known workspace root's `AliasInfo.package` (BT-2951).
 ///
-/// The language service has no access to a workspace's `beamtalk.toml`
-/// package name — parsing manifests is deliberately `beamtalk-lsp`'s concern,
-/// not `beamtalk-core`'s (mirrors why `beamtalk-lsp/src/server.rs`'s
-/// dependency preload is filesystem-driven rather than manifest-driven — see
-/// that module's `dependency_src_dirs` doc). This fixed marker stands in for
-/// "this project's own package": not a real package name, but stable and
-/// consistent within one [`ProjectIndex`], which is all
-/// [`AliasRegistry::add_pre_loaded`]'s internal/cross-package exclusion
-/// needs to tell a same-project alias apart from a dependency's. `$` is not
-/// a valid character in a Hex/`beamtalk.toml` package name, so this can
-/// never collide with a real dependency's directory-derived stamp (see
-/// [`dependency_package_for_path`]).
-///
-/// **Known limitation — multi-root workspaces (tracked as BT-2960):** one
-/// `ProjectIndex` is shared across an entire LSP session, including a
-/// multi-root workspace where each root is genuinely a *different* package.
-/// Every non-dependency file in every root gets this same fixed marker, so
-/// two distinct real packages opened as sibling roots are indistinguishable
-/// from each other's perspective — an `internal` alias in root A's package
-/// would resolve (not be excluded) for a file in root B, the same class of
-/// leak this marker exists to prevent across the project-vs-*dependency*
-/// boundary, just not yet closed across the project-vs-*sibling-root*
-/// boundary. Still strictly better than the pre-BT-2951 baseline (which
-/// excluded nothing at all), and closing this fully needs the same
-/// `beamtalk.toml`-derived real package name per root that this marker
-/// deliberately avoids reading (see above) — see BT-2960 for the fix design.
+/// The language service has no manifest parser of its own — parsing
+/// `beamtalk.toml` is deliberately `beamtalk-lsp`'s concern, not
+/// `beamtalk-core`'s (mirrors why `beamtalk-lsp/src/server.rs`'s dependency
+/// preload is filesystem-driven rather than manifest-driven — see that
+/// module's `dependency_src_dirs` doc). `beamtalk-lsp` reads each workspace
+/// root's real `beamtalk.toml` `[package] name` and passes it in via
+/// [`ProjectIndex::set_root_packages`] (BT-2960) — [`Self::package_for_alias_stamping`]
+/// consults that map first, so two distinct real packages opened as sibling
+/// workspace roots get distinct stamps instead of colliding. This fixed
+/// marker is only the fallback for a file under no registered root (a
+/// REPL/script file, or a workspace with no `[package] name` set) — not a
+/// real package name, but stable and consistent within one [`ProjectIndex`],
+/// which is all [`AliasRegistry::add_pre_loaded`]'s internal/cross-package
+/// exclusion needs to tell a same-project alias apart from a dependency's.
+/// `$` is not a valid character in a Hex/`beamtalk.toml` package name, so
+/// this can never collide with a real dependency's directory-derived stamp
+/// (see [`dependency_package_for_path`]) or a real root package name.
 const CURRENT_PROJECT_PACKAGE_MARKER: &str = "$project";
 
 /// Package stamp for a stdlib file's `AliasInfo.package`, mirroring the CLI
@@ -82,15 +73,6 @@ fn dependency_package_for_path(file: &Utf8Path) -> Option<EcoString> {
         .position(|w| w == ["_build", "deps"])
         .and_then(|i| components.get(i + 2))
         .map(|name| EcoString::from(*name))
-}
-
-/// The package to stamp on every [`AliasInfo`] extracted from `file`
-/// (BT-2951): the dependency name if `file` is under a
-/// `_build/deps/<name>/src/` directory (see [`dependency_package_for_path`]),
-/// otherwise [`CURRENT_PROJECT_PACKAGE_MARKER`].
-fn package_for_alias_stamping(file: &Utf8Path) -> EcoString {
-    dependency_package_for_path(file)
-        .unwrap_or_else(|| EcoString::from(CURRENT_PROJECT_PACKAGE_MARKER))
 }
 
 /// Cross-file project index holding a merged class hierarchy.
@@ -138,6 +120,17 @@ pub struct ProjectIndex {
     /// every declared protocol is exported project-wide with no
     /// collision/visibility bookkeeping needed here.
     file_protocols: HashMap<Utf8PathBuf, Vec<ProtocolInfo>>,
+    /// Per-workspace-root real package name, keyed by root directory (BT-2960).
+    ///
+    /// Populated by [`Self::set_root_packages`] — `beamtalk-lsp` reads each
+    /// root's `beamtalk.toml` `[package] name` (mirroring its existing
+    /// `[diagnostics]`-table precedent, `Backend::load_diagnostics_table`)
+    /// and passes the result in, since `beamtalk-core` deliberately has no
+    /// manifest parser of its own (see [`CURRENT_PROJECT_PACKAGE_MARKER`]'s
+    /// doc). Consulted by [`Self::package_for_alias_stamping`] so two
+    /// distinct real packages opened as sibling workspace roots get distinct
+    /// stamps instead of colliding on the same fixed marker.
+    root_packages: Vec<(Utf8PathBuf, EcoString)>,
 }
 
 impl ProjectIndex {
@@ -154,6 +147,7 @@ impl ProjectIndex {
             merged_aliases: AliasRegistry::new(),
             file_aliases: HashMap::new(),
             file_protocols: HashMap::new(),
+            root_packages: Vec::new(),
         }
     }
 
@@ -526,6 +520,44 @@ impl ProjectIndex {
         self.stdlib_files.contains(file)
     }
 
+    /// Sets the real package name for each known workspace root (BT-2960).
+    ///
+    /// Replaces the entire root->package map — call once at startup with
+    /// every workspace root's `beamtalk.toml` `[package] name` (mirrors
+    /// [`Self::set_root_packages`]'s sibling, `set_diagnostics_overrides`, on
+    /// `SimpleLanguageService`). A root with no resolvable package name
+    /// should simply be omitted; [`Self::package_for_alias_stamping`] falls
+    /// back to [`CURRENT_PROJECT_PACKAGE_MARKER`] for any file that doesn't
+    /// fall under a known root.
+    pub fn set_root_packages(&mut self, root_packages: Vec<(Utf8PathBuf, EcoString)>) {
+        self.root_packages = root_packages;
+    }
+
+    /// The package to stamp on every [`AliasInfo`] extracted from `file`
+    /// (BT-2951/BT-2960): the dependency name if `file` is under a
+    /// `_build/deps/<name>/src/` directory (see [`dependency_package_for_path`]);
+    /// otherwise the real package name of the most specific known workspace
+    /// root containing `file` (see [`Self::set_root_packages`]); otherwise
+    /// [`CURRENT_PROJECT_PACKAGE_MARKER`] (no root registered, or a
+    /// REPL/script file under no root at all).
+    ///
+    /// "Most specific" = longest matching root path, so a root nested inside
+    /// another root's directory tree resolves to its own package, not the
+    /// outer root's.
+    fn package_for_alias_stamping(&self, file: &Utf8Path) -> EcoString {
+        if let Some(package) = dependency_package_for_path(file) {
+            return package;
+        }
+        self.root_packages
+            .iter()
+            .filter(|(root, _)| file.starts_with(root))
+            .max_by_key(|(root, _)| root.as_str().len())
+            .map_or_else(
+                || EcoString::from(CURRENT_PROJECT_PACKAGE_MARKER),
+                |(_, package)| package.clone(),
+            )
+    }
+
     /// Marks `file` as a stdlib source, without indexing it (BT-2959).
     ///
     /// [`Self::with_stdlib`] is the only other way a file becomes
@@ -631,7 +663,7 @@ impl ProjectIndex {
         if self.is_stdlib_file(file) {
             EcoString::from(STDLIB_PACKAGE_MARKER)
         } else {
-            package_for_alias_stamping(file)
+            self.package_for_alias_stamping(file)
         }
     }
 
@@ -1167,6 +1199,68 @@ mod tests {
             Some(EcoString::from(STDLIB_PACKAGE_MARKER)),
             "a stdlib file marked via mark_stdlib_file must have its aliases \
              stamped STDLIB_PACKAGE_MARKER, not the same-project marker"
+        );
+    }
+
+    /// BT-2960: two sibling workspace roots, each a genuinely different real
+    /// package, must not share the fixed same-project marker — each file's
+    /// alias should be stamped with its own root's real package name.
+    #[test]
+    fn set_root_packages_gives_sibling_roots_distinct_alias_package_stamps() {
+        let mut index = ProjectIndex::new();
+        let root_a = Utf8PathBuf::from("/workspace/a");
+        let root_b = Utf8PathBuf::from("/workspace/b");
+        index.set_root_packages(vec![
+            (root_a.clone(), EcoString::from("pkg_a")),
+            (root_b.clone(), EcoString::from("pkg_b")),
+        ]);
+
+        let file_a = root_a.join("Foo.bt");
+        let file_b = root_b.join("Foo.bt");
+
+        let tokens = lex_with_eof("internal type Foo = Integer");
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        index.update_file(file_a.clone(), &hierarchy);
+        let infos = crate::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
+        index.update_file_aliases(file_a.clone(), infos);
+
+        let tokens = lex_with_eof("internal type Foo = String");
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        index.update_file(file_b.clone(), &hierarchy);
+        let infos = crate::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
+        index.update_file_aliases(file_b.clone(), infos);
+
+        assert_eq!(
+            index.alias_package_for_file(&file_a),
+            EcoString::from("pkg_a"),
+            "root a's file must be stamped with root a's real package name"
+        );
+        assert_eq!(
+            index.alias_package_for_file(&file_b),
+            EcoString::from("pkg_b"),
+            "root b's file must be stamped with root b's real package name, \
+             not root a's or the shared same-project marker"
+        );
+    }
+
+    /// BT-2960: a file under no registered root (e.g. a REPL/script file, or
+    /// a workspace with no `[package] name`) must keep falling back to
+    /// `CURRENT_PROJECT_PACKAGE_MARKER` — registering roots for *other*
+    /// workspaces must not regress this case.
+    #[test]
+    fn set_root_packages_file_outside_any_root_keeps_same_project_marker() {
+        let mut index = ProjectIndex::new();
+        index.set_root_packages(vec![(
+            Utf8PathBuf::from("/workspace/a"),
+            EcoString::from("pkg_a"),
+        )]);
+
+        let unrooted_file = Utf8PathBuf::from("/elsewhere/Scratch.bt");
+        assert_eq!(
+            index.alias_package_for_file(&unrooted_file),
+            EcoString::from(CURRENT_PROJECT_PACKAGE_MARKER)
         );
     }
 

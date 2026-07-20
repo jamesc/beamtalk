@@ -249,6 +249,28 @@ pub fn parse_diagnostics_table_from_manifest_toml(
     parse_diagnostics_table(value.get("diagnostics"))
 }
 
+/// Parse `[package] name` directly out of a `beamtalk.toml` file's raw TOML
+/// content (BT-2960), for the same reason
+/// [`parse_diagnostics_table_from_manifest_toml`] exists: the LSP has no
+/// `Manifest`/`PackageManifest` struct of its own to deserialize into and
+/// must not depend on `beamtalk-cli` just to read one field of
+/// `beamtalk.toml`.
+///
+/// Returns `None` for invalid TOML, a missing `[package]` table, or a
+/// missing/non-string `name` key — every case is a "no known package name
+/// for this root" signal to the caller, not a hard error; `beamtalk-lsp`
+/// must keep working with the `CURRENT_PROJECT_PACKAGE_MARKER` fallback for
+/// a workspace root with a malformed or absent manifest.
+#[must_use]
+pub fn parse_package_name_from_manifest_toml(manifest_toml: &str) -> Option<String> {
+    let value: toml::Value = toml::from_str(manifest_toml).ok()?;
+    value
+        .get("package")?
+        .get("name")?
+        .as_str()
+        .map(str::to_string)
+}
+
 /// Apply a package's `[diagnostics]` severity-override table (ADR 0100 Rule 3)
 /// to a list of diagnostics.
 ///
@@ -434,6 +456,39 @@ dnu = "error"
         assert!(
             matches!(err, DiagnosticsTableError::InvalidToml(_)),
             "expected InvalidToml, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn parse_package_name_from_manifest_toml_extracts_name() {
+        let manifest = "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n";
+        assert_eq!(
+            parse_package_name_from_manifest_toml(manifest),
+            Some("my_app".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_package_name_from_manifest_toml_missing_package_table_is_none() {
+        assert_eq!(
+            parse_package_name_from_manifest_toml("[diagnostics]\ndnu = \"error\"\n"),
+            None
+        );
+    }
+
+    #[test]
+    fn parse_package_name_from_manifest_toml_non_string_name_is_none() {
+        assert_eq!(
+            parse_package_name_from_manifest_toml("[package]\nname = 42\n"),
+            None
+        );
+    }
+
+    #[test]
+    fn parse_package_name_from_manifest_toml_invalid_toml_is_none() {
+        assert_eq!(
+            parse_package_name_from_manifest_toml("not [ valid toml"),
+            None
         );
     }
 
