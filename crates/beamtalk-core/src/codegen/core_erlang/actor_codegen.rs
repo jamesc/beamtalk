@@ -171,7 +171,9 @@ impl CoreErlangGenerator {
             {
                 for param in &sig.parameters {
                     if let Some(ann) = &param.type_annotation {
-                        spec_codegen::type_annotation_to_spec(
+                        // Document discarded — this call's only purpose is the
+                        // `referenced_aliases` side effect recorded above.
+                        let _ = spec_codegen::type_annotation_to_spec(
                             ann,
                             Some(&self.alias_registry),
                             Some(&referenced_aliases),
@@ -179,7 +181,8 @@ impl CoreErlangGenerator {
                     }
                 }
                 if let Some(ann) = &sig.return_type {
-                    spec_codegen::type_annotation_to_spec(
+                    // Document discarded — same reasoning as the param loop above.
+                    let _ = spec_codegen::type_annotation_to_spec(
                         ann,
                         Some(&self.alias_registry),
                         Some(&referenced_aliases),

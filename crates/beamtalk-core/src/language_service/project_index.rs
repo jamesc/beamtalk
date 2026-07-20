@@ -333,7 +333,7 @@ impl ProjectIndex {
             }
             self.file_aliases.remove(&file);
         } else {
-            let package = package_for_alias_stamping(&file);
+            let package = self.alias_package_for_file(&file);
             let stamped: Vec<AliasInfo> = aliases
                 .into_iter()
                 .map(|mut info| {
@@ -389,7 +389,9 @@ impl ProjectIndex {
     /// BT-2951: seeds with `current_package =
     /// Some(`[`CURRENT_PROJECT_PACKAGE_MARKER`]`)` — every same-project
     /// file's aliases were stamped with that same marker by
-    /// [`Self::update_file_aliases`]/[`Self::with_stdlib`], so
+    /// [`Self::update_file_aliases`] (stdlib/dependency files get
+    /// [`STDLIB_PACKAGE_MARKER`]/a dependency's directory-derived name
+    /// instead, via [`Self::alias_package_for_file`]), so
     /// [`AliasRegistry::add_pre_loaded`]'s exclusion correctly drops an
     /// `internal` alias stamped with a *different* package (a dependency's
     /// directory-derived name, or [`STDLIB_PACKAGE_MARKER`]) from this
@@ -1071,6 +1073,51 @@ mod tests {
                 .package,
             Some(EcoString::from(CURRENT_PROJECT_PACKAGE_MARKER)),
             "a same-project file's alias should be stamped with the same-project marker"
+        );
+    }
+
+    /// Review-bot finding on PR #3086: `update_file_aliases` used to call
+    /// path-only `package_for_alias_stamping` directly instead of
+    /// `Self::alias_package_for_file` (which checks `is_stdlib_file` first).
+    /// A stdlib file re-opened through the LSP's normal `update_file`/
+    /// `update_file_aliases` flow (e.g. via go-to-definition navigating into
+    /// a stdlib source) would overwrite `with_stdlib`'s `STDLIB_PACKAGE_MARKER`
+    /// stamp with `CURRENT_PROJECT_PACKAGE_MARKER`, leaking the stdlib file's
+    /// `internal` aliases into the project-wide merged view and — for the
+    /// stdlib file's own diagnostics, whose `current_package` comes from
+    /// `alias_package_for_file` and still says `stdlib` — excluding its own
+    /// aliases as if they belonged to a different package.
+    #[test]
+    fn update_file_aliases_reopen_preserves_stdlib_package_stamp() {
+        let stdlib_file = Utf8PathBuf::from("stdlib/Direction.bt");
+        let (index_result, _) = ProjectIndex::with_stdlib(&[(
+            stdlib_file.clone(),
+            "internal type Direction = #north | #south".to_string(),
+        )]);
+        let mut index = index_result.unwrap();
+        assert!(index.is_stdlib_file(&stdlib_file));
+
+        // Simulate the LSP re-indexing the same stdlib file after a
+        // `textDocument/didOpen` (e.g. the user navigated to it via
+        // go-to-definition) — this goes through the same `update_file`/
+        // `update_file_aliases` pair as any project file.
+        let tokens = lex_with_eof("internal type Direction = #north | #south");
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        index.update_file(stdlib_file.clone(), &hierarchy);
+        let infos = crate::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
+        index.update_file_aliases(stdlib_file.clone(), infos);
+
+        let reindexed = index.cross_file_alias_infos_for(&Utf8PathBuf::from("elsewhere.bt"));
+        assert_eq!(
+            reindexed
+                .iter()
+                .find(|i| i.name == "Direction")
+                .unwrap()
+                .package,
+            Some(EcoString::from(STDLIB_PACKAGE_MARKER)),
+            "re-opening a stdlib file must keep its alias stamped `stdlib`, \
+             not fall back to the same-project marker"
         );
     }
 

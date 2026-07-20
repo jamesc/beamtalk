@@ -98,6 +98,14 @@ populate them is pure side-effect avoidance for a result about to be
 discarded. Do NOT reuse this function for a new caller that reads the
 payload of a definition-shaped result — call `compile_expression/3,4`
 instead, or extend this function's registration behaviour first.
+
+This function is NOT alias-unaware: `CompileOpts` below never sets
+`known_type_aliases`, so `::` annotations in the expression still resolve
+via `beamtalk_compiler_server`'s ambient-alias `maps:merge` backstop
+(BT-2956) — the same one `compile_expression/3,4` relies on when its own
+caller omits `known_type_aliases`. Skipping registration only skips the
+`beamtalk_alias_xref` write and bytecode compile for definition-shaped
+results; it does not skip alias *resolution* for the expression itself.
 """.
 -spec compile_expression_no_registration(string(), atom(), map()) ->
     {ok, binary(), term(), [binary()]}
