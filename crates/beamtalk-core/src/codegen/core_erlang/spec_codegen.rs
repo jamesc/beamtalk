@@ -81,7 +81,12 @@ use crate::semantic_analysis::alias_registry::AliasRegistry;
 /// emits a `user_type` reference for (BT-2940) — callers use this to scope
 /// [`generate_alias_type_attrs`]'s emission to only the aliases a module's
 /// specs/state fields reference, instead of every pre-loaded alias.
-fn type_annotation_to_spec(
+///
+/// `pub(super)`: BT-2957 also calls this directly from `gen_server::methods`
+/// to embed type metadata in `register_protocol` maps — protocol methods
+/// have no standalone function to attach a real `-spec` to, so they never go
+/// through [`generate_method_spec`]/[`generate_class_specs`].
+pub(super) fn type_annotation_to_spec(
     annotation: &TypeAnnotation,
     aliases: Option<&AliasRegistry>,
     referenced: Option<&RefCell<HashSet<EcoString>>>,

@@ -11,11 +11,12 @@
 use super::super::document::leaf::fname;
 use super::super::document::{Document, INDENT, join, leaf, line, nest};
 use super::super::selector_mangler::safe_class_method_fn_name;
+use super::super::spec_codegen;
 use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{
     Block, CascadeMessage, ClassDefinition, ClassKind, Expression, Identifier, Literal, MapPair,
-    MessageSelector, MethodDefinition, MethodKind, Module, ParameterDefinition, StateDeclaration,
-    TypeAnnotation, TypeParamDecl, WellKnownSelector,
+    MessageSelector, MethodDefinition, MethodKind, Module, ParameterDefinition,
+    ProtocolMethodSignature, StateDeclaration, TypeAnnotation, TypeParamDecl, WellKnownSelector,
 };
 use crate::docvec;
 use crate::unparse::{unparse_method_display_signature, unparse_type_annotation_display};
@@ -2682,7 +2683,25 @@ impl CoreErlangGenerator {
     /// module, which carries no package or source, so without this the browser
     /// cannot tell a stdlib protocol from a project one.
     ///
+    /// BT-2957: each method requirement map also carries `param_types` (a list,
+    /// one entry per parameter) and `return_type`, using the same Core Erlang
+    /// abstract type representation `-spec`s use elsewhere
+    /// (`spec_codegen::type_annotation_to_spec`) — including `user_type`
+    /// references for cross-module alias-typed signatures. Protocol methods
+    /// have no standalone function to attach a real `-spec`/Dialyzer contract
+    /// to (they're pure metadata consumed by
+    /// `beamtalk_protocol_registry:register_protocol/1`), so this is the
+    /// closest equivalent: type-precise data for any consumer that wants it,
+    /// rather than silently dropping alias-typed signatures to untyped
+    /// `any()`. `self.alias_registry` must already have accumulated every
+    /// alias this walk references into the module's `referenced_aliases` set
+    /// — done by the pass in `actor_codegen.rs::generate_module` that runs
+    /// before `generate_alias_type_attrs`, so the named `-type` this
+    /// `user_type` reference points at is actually declared in the module
+    /// header.
+    ///
     /// Returns `Document::Nil` if the module has no protocol definitions.
+    #[allow(clippy::too_many_lines)]
     fn generate_protocol_registrations(&self, module: &Module) -> Document<'static> {
         if module.protocols.is_empty() {
             return Document::Nil;
@@ -2694,38 +2713,73 @@ impl CoreErlangGenerator {
             let name = protocol.name.name.to_string();
 
             // Helper: build a Core Erlang list of method requirement maps
-            let build_method_list =
-                |sigs: &[crate::ast::ProtocolMethodSignature]| -> Document<'static> {
-                    let items: Vec<Document<'static>> = sigs
-                        .iter()
-                        .map(|sig| {
-                            let selector = sig.selector.name().to_string();
-                            let arity = sig.selector.arity();
-                            docvec![
-                                "~{'selector' => ",
-                                leaf::atom(selector),
-                                ", 'arity' => ",
-                                leaf::int_lit(i64::try_from(arity).unwrap_or(0)),
-                                "}~"
-                            ]
-                        })
-                        .collect();
-
-                    if items.is_empty() {
-                        Document::Str("[]")
-                    } else {
-                        let mut list_parts: Vec<Document<'static>> = Vec::new();
-                        list_parts.push(Document::Str("["));
-                        for (i, m) in items.into_iter().enumerate() {
-                            if i > 0 {
-                                list_parts.push(Document::Str(", "));
+            let build_method_list = |sigs: &[ProtocolMethodSignature]| -> Document<'static> {
+                let items: Vec<Document<'static>> = sigs
+                    .iter()
+                    .map(|sig| {
+                        let selector = sig.selector.name().to_string();
+                        let arity = sig.selector.arity();
+                        let param_types_doc: Document<'static> = if sig.parameters.is_empty() {
+                            Document::Str("[]")
+                        } else {
+                            let mut pt_parts: Vec<Document<'static>> = vec![Document::Str("[")];
+                            for (i, param) in sig.parameters.iter().enumerate() {
+                                if i > 0 {
+                                    pt_parts.push(Document::Str(", "));
+                                }
+                                pt_parts.push(param.type_annotation.as_ref().map_or(
+                                    Document::Str("{'type', 0, 'any', []}"),
+                                    |ann| {
+                                        spec_codegen::type_annotation_to_spec(
+                                            ann,
+                                            Some(&self.alias_registry),
+                                            None,
+                                        )
+                                    },
+                                ));
                             }
-                            list_parts.push(m);
+                            pt_parts.push(Document::Str("]"));
+                            Document::Vec(pt_parts)
+                        };
+                        let return_type_doc: Document<'static> = sig.return_type.as_ref().map_or(
+                            Document::Str("{'type', 0, 'any', []}"),
+                            |ann| {
+                                spec_codegen::type_annotation_to_spec(
+                                    ann,
+                                    Some(&self.alias_registry),
+                                    None,
+                                )
+                            },
+                        );
+                        docvec![
+                            "~{'selector' => ",
+                            leaf::atom(selector),
+                            ", 'arity' => ",
+                            leaf::int_lit(i64::try_from(arity).unwrap_or(0)),
+                            ", 'param_types' => ",
+                            param_types_doc,
+                            ", 'return_type' => ",
+                            return_type_doc,
+                            "}~"
+                        ]
+                    })
+                    .collect();
+
+                if items.is_empty() {
+                    Document::Str("[]")
+                } else {
+                    let mut list_parts: Vec<Document<'static>> = Vec::new();
+                    list_parts.push(Document::Str("["));
+                    for (i, m) in items.into_iter().enumerate() {
+                        if i > 0 {
+                            list_parts.push(Document::Str(", "));
                         }
-                        list_parts.push(Document::Str("]"));
-                        Document::Vec(list_parts)
+                        list_parts.push(m);
                     }
-                };
+                    list_parts.push(Document::Str("]"));
+                    Document::Vec(list_parts)
+                }
+            };
 
             // Build the required_methods and required_class_methods lists
             let methods_doc = build_method_list(&protocol.method_signatures);
