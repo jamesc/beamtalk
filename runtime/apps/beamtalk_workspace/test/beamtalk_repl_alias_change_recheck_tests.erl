@@ -19,7 +19,7 @@ not a whole-image sweep: the dependent class is actually loaded/compiled
 (`beamtalk_repl_loader:handle_load/2`), not just registered via
 `beamtalk_workspace_meta:set_class_source/2`, because populating
 `beamtalk_alias_xref`'s index requires a real compile (see
-`beamtalk_repl_compiler:register_alias_xref_for_classes/2`).
+`beamtalk_repl_compiler:register_alias_xref_for_classes/3`).
 
 The regression pin ADR 0108's Implementation section calls for directly: "a
 live image holding a `matchExhaustive:` proof against a stale alias member
@@ -334,6 +334,73 @@ compile_method_patch_registers_alias_dependency_test_() ->
                         [<<"AliasChangeMethodPatchUser">>],
                         beamtalk_alias_xref:dependents_of(
                             <<"AliasChangeMethodPatchDirection">>
+                        )
+                    )
+                end)
+            ]
+        end}}.
+
+%% BT-2955 follow-up: `compile_method_reload/3`'s `ClassSource` is the
+%% class's own reconstructed source (`beamtalk_workspace_meta:get_class_source/1`,
+%% keyed by class name) — it does NOT include a `type Name = ...` alias
+%% declared as a *sibling* of the class in its originating source file (the
+%% same `stdlib/src/Ets.bt` shape `compile_class_definition_result/2` and
+%% `compile_protocol_definition_result/2` were fixed for). A method-reload
+%% compile must not clobber the real alias-xref edge a prior `:load`
+%% registered, even though this compile's own `referenced_aliases` omits
+%% the file-local alias.
+compile_method_patch_preserves_file_local_alias_dependency_test_() ->
+    {timeout, 30,
+        {setup, fun alias_recheck_setup/0, fun alias_recheck_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    %% Turn 1: `:load` a file declaring BOTH the alias and
+                    %% the class referencing it.
+                    FileSource =
+                        "type AliasChangeMethodPatchFileLocalDirection = #north | #south\n"
+                        "\n"
+                        "Object subclass: AliasChangeMethodPatchFileLocalUser\n"
+                        "  heading: d :: AliasChangeMethodPatchFileLocalDirection => d\n"
+                        "  hello => 42\n",
+                    FilePath = filename:join(
+                        temp_dir(),
+                        io_lib:format("alias_recheck_method_patch_file_local_~p.bt", [
+                            erlang:unique_integer([positive])
+                        ])
+                    ),
+                    ok = file:write_file(FilePath, FileSource),
+                    State0 = beamtalk_repl_state:new(undefined, 0),
+                    {ok, _, _State1} = beamtalk_repl_loader:handle_load(FilePath, State0),
+                    ?assertEqual(
+                        [<<"AliasChangeMethodPatchFileLocalUser">>],
+                        beamtalk_alias_xref:dependents_of(
+                            <<"AliasChangeMethodPatchFileLocalDirection">>
+                        )
+                    ),
+
+                    %% Turn 2: patch an UNRELATED method on the same class
+                    %% via compile_method_reload/3 — WITHOUT the alias in
+                    %% session state (no declare_alias/3 call), so this
+                    %% compile's ClassSource/referenced_aliases has no way
+                    %% to see `AliasChangeMethodPatchFileLocalDirection`.
+                    %% Before this fix, `replace` mode here would clobber
+                    %% the real edge above with `[]`.
+                    ClassSource =
+                        <<"Object subclass: AliasChangeMethodPatchFileLocalUser\n  hello => 42\n">>,
+                    MethodSource = <<"hello => 43\n">>,
+                    Options = #{
+                        class_name => <<"AliasChangeMethodPatchFileLocalUser">>,
+                        is_class_method => false,
+                        workspace_mode => true
+                    },
+                    Result = beamtalk_repl_compiler:compile_method_reload(
+                        ClassSource, MethodSource, Options
+                    ),
+                    ?assertMatch({ok, _}, Result),
+                    ?assertEqual(
+                        [<<"AliasChangeMethodPatchFileLocalUser">>],
+                        beamtalk_alias_xref:dependents_of(
+                            <<"AliasChangeMethodPatchFileLocalDirection">>
                         )
                     )
                 end)
@@ -727,6 +794,129 @@ protocol_definition_repl_inline_registers_alias_dependency_test_() ->
                         [<<"AliasChangeInlineProtocolDirectional">>],
                         beamtalk_alias_xref:dependents_of(
                             <<"AliasChangeInlineProtocolDirection">>
+                        )
+                    )
+                end)
+            ]
+        end}}.
+
+%%====================================================================
+%% BT-2955: a REPL-inline class/protocol redefinition must not clobber a
+%% beamtalk_alias_xref edge that came from a FILE-LOCAL type alias — one
+%% declared in the same source file as the class/protocol, never entered
+%% into the REPL session's own known_type_alias_sources (mirrors the real
+%% `stdlib/src/Ets.bt` shape: a `type Name = ...` alias and a class
+%% referencing it, both declared in the same file).
+%%====================================================================
+
+class_definition_repl_inline_redefinition_preserves_file_local_alias_dependency_test_() ->
+    {timeout, 30,
+        {setup, fun alias_recheck_setup/0, fun alias_recheck_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    %% Turn 1: `:load` a file declaring BOTH the alias and
+                    %% the class referencing it — registers the real
+                    %% alias-xref edge via the file-compile path (`replace`
+                    %% mode is correct here: this compile has the complete
+                    %% picture for its own file).
+                    FileSource =
+                        "type AliasChangeFileLocalDirection = #north | #south | #east\n"
+                        "\n"
+                        "Object subclass: AliasChangeFileLocalUser\n"
+                        "  heading: d :: AliasChangeFileLocalDirection => d\n",
+                    FilePath = filename:join(
+                        temp_dir(),
+                        io_lib:format("alias_recheck_file_local_~p.bt", [
+                            erlang:unique_integer([positive])
+                        ])
+                    ),
+                    ok = file:write_file(FilePath, FileSource),
+                    State0 = beamtalk_repl_state:new(undefined, 0),
+                    {ok, _, _State1} = beamtalk_repl_loader:handle_load(FilePath, State0),
+                    ?assertEqual(
+                        [<<"AliasChangeFileLocalUser">>],
+                        beamtalk_alias_xref:dependents_of(<<"AliasChangeFileLocalDirection">>)
+                    ),
+
+                    %% Turn 2: redefine the SAME class purely inline at the
+                    %% REPL — WITHOUT ever declaring
+                    %% `AliasChangeFileLocalDirection` at the REPL (no
+                    %% known_type_alias_sources passed; a fresh session that
+                    %% never called declare_alias/3 wouldn't have it either),
+                    %% so this compile's own AliasRegistry has no entry for
+                    %% it and `referenced_aliases` comes back without it.
+                    %% Before BT-2955 this would clobber the real edge above
+                    %% with `[]` (`compile_class_definition_result/2`'s
+                    %% then-unconditional whole-set-replace registration).
+                    ClassSource =
+                        "Object subclass: AliasChangeFileLocalUser\n"
+                        "  heading: d :: AliasChangeFileLocalDirection => d\n",
+                    ExprResult = beamtalk_repl_compiler:compile_expression(
+                        ClassSource, alias_recheck_file_local_expr, #{}
+                    ),
+                    ?assertMatch({ok, class_definition, _, _}, ExprResult),
+                    ?assertEqual(
+                        [<<"AliasChangeFileLocalUser">>],
+                        beamtalk_alias_xref:dependents_of(<<"AliasChangeFileLocalDirection">>)
+                    )
+                end)
+            ]
+        end}}.
+
+%% BT-2955 protocol sibling of
+%% `class_definition_repl_inline_redefinition_preserves_file_local_alias_dependency_test_`
+%% above — same file-local-alias shape, but for `Protocol define: ...`
+%% (`compile_protocol_definition_result/2`'s `additive` branch).
+protocol_definition_repl_inline_redefinition_preserves_file_local_alias_dependency_test_() ->
+    {timeout, 30,
+        {setup, fun alias_recheck_setup/0, fun alias_recheck_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    %% Turn 1: `:load` a file declaring BOTH the alias and
+                    %% the protocol referencing it — registers the real
+                    %% alias-xref edge via the file-compile path (`replace`
+                    %% mode is correct here: this compile has the complete
+                    %% picture for its own file).
+                    FileSource =
+                        "type AliasChangeProtocolFileLocalDirection = #north | #south | #east\n"
+                        "\n"
+                        "Protocol define: AliasChangeProtocolFileLocalDirectional\n"
+                        "  heading: d :: AliasChangeProtocolFileLocalDirection -> Boolean\n",
+                    FilePath = filename:join(
+                        temp_dir(),
+                        io_lib:format("alias_recheck_protocol_file_local_~p.bt", [
+                            erlang:unique_integer([positive])
+                        ])
+                    ),
+                    ok = file:write_file(FilePath, FileSource),
+                    State0 = beamtalk_repl_state:new(undefined, 0),
+                    {ok, _, _State1} = beamtalk_repl_loader:handle_load(FilePath, State0),
+                    ?assertEqual(
+                        [<<"AliasChangeProtocolFileLocalDirectional">>],
+                        beamtalk_alias_xref:dependents_of(
+                            <<"AliasChangeProtocolFileLocalDirection">>
+                        )
+                    ),
+
+                    %% Turn 2: redefine the SAME protocol purely inline at
+                    %% the REPL — WITHOUT ever declaring
+                    %% `AliasChangeProtocolFileLocalDirection` at the REPL,
+                    %% so this compile's own AliasRegistry has no entry for
+                    %% it and `referenced_aliases` comes back without it.
+                    %% Before BT-2955 this would clobber the real edge above
+                    %% with `[]` (`compile_protocol_definition_result/2`'s
+                    %% then-unconditional whole-set-replace registration).
+                    ProtocolSource =
+                        "Protocol define: AliasChangeProtocolFileLocalDirectional\n"
+                        "  heading: d :: AliasChangeProtocolFileLocalDirection -> Boolean\n",
+                    ExprResult = beamtalk_repl_compiler:compile_expression(
+                        ProtocolSource, alias_recheck_protocol_file_local_expr, #{}
+                    ),
+                    ?assertMatch({ok, protocol_definition, _, _}, ExprResult),
+                    ?assertEqual(
+                        [<<"AliasChangeProtocolFileLocalDirectional">>],
+                        beamtalk_alias_xref:dependents_of(
+                            <<"AliasChangeProtocolFileLocalDirection">>
                         )
                     )
                 end)

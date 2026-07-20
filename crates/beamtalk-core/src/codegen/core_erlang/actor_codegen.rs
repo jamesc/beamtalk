@@ -153,6 +153,43 @@ impl CoreErlangGenerator {
             .unwrap_or_default();
         let spec_suffix: Document<'static> = spec_codegen::format_spec_attributes(&spec_attrs)
             .map_or(Document::Nil, |s| docvec![",\n     ", s]);
+        // BT-2957: protocol method signatures have no standalone function to
+        // attach a real `-spec` to, so they never reach `generate_class_specs`
+        // above — but a signature referencing a cross-module alias must still
+        // mark that alias as referenced *before* `generate_alias_type_attrs`
+        // runs below, or the module header never declares the named `-type`
+        // that `generate_protocol_registrations` (gen_server/methods.rs)
+        // later embeds a matching `user_type` reference for. This pass exists
+        // solely for that `referenced_aliases` side effect — the resulting
+        // Documents are discarded and rebuilt for real when the protocol
+        // registration calls are generated.
+        for protocol in &module.protocols {
+            for sig in protocol
+                .method_signatures
+                .iter()
+                .chain(protocol.class_method_signatures.iter())
+            {
+                for param in &sig.parameters {
+                    if let Some(ann) = &param.type_annotation {
+                        // Document discarded — this call's only purpose is the
+                        // `referenced_aliases` side effect recorded above.
+                        let _ = spec_codegen::type_annotation_to_spec(
+                            ann,
+                            Some(&self.alias_registry),
+                            Some(&referenced_aliases),
+                        );
+                    }
+                }
+                if let Some(ann) = &sig.return_type {
+                    // Document discarded — same reasoning as the param loop above.
+                    let _ = spec_codegen::type_annotation_to_spec(
+                        ann,
+                        Some(&self.alias_registry),
+                        Some(&referenced_aliases),
+                    );
+                }
+            }
+        }
         // BT-2909: every class module that could contain a `user_type`
         // reference must also declare the matching named `-type` in the same
         // module attribute list (an `erlc` compile error otherwise) — empty

@@ -21,12 +21,77 @@
 
 use crate::compilation::extension_index::ExtensionIndex;
 use crate::semantic_analysis::{
-    AliasInfo, AliasRegistry, ClassHierarchy, ProtocolRegistry, SemanticError,
+    AliasInfo, AliasRegistry, ClassHierarchy, ProtocolInfo, ProtocolRegistry, SemanticError,
 };
 use crate::source_analysis::{Diagnostic, lex_with_eof, parse};
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use ecow::EcoString;
 use std::collections::{HashMap, HashSet};
+
+/// Package stamp used for a same-project (non-dependency, non-stdlib) file's
+/// `AliasInfo.package` (BT-2951).
+///
+/// The language service has no access to a workspace's `beamtalk.toml`
+/// package name — parsing manifests is deliberately `beamtalk-lsp`'s concern,
+/// not `beamtalk-core`'s (mirrors why `beamtalk-lsp/src/server.rs`'s
+/// dependency preload is filesystem-driven rather than manifest-driven — see
+/// that module's `dependency_src_dirs` doc). This fixed marker stands in for
+/// "this project's own package": not a real package name, but stable and
+/// consistent within one [`ProjectIndex`], which is all
+/// [`AliasRegistry::add_pre_loaded`]'s internal/cross-package exclusion
+/// needs to tell a same-project alias apart from a dependency's. `$` is not
+/// a valid character in a Hex/`beamtalk.toml` package name, so this can
+/// never collide with a real dependency's directory-derived stamp (see
+/// [`dependency_package_for_path`]).
+///
+/// **Known limitation — multi-root workspaces (tracked as BT-2960):** one
+/// `ProjectIndex` is shared across an entire LSP session, including a
+/// multi-root workspace where each root is genuinely a *different* package.
+/// Every non-dependency file in every root gets this same fixed marker, so
+/// two distinct real packages opened as sibling roots are indistinguishable
+/// from each other's perspective — an `internal` alias in root A's package
+/// would resolve (not be excluded) for a file in root B, the same class of
+/// leak this marker exists to prevent across the project-vs-*dependency*
+/// boundary, just not yet closed across the project-vs-*sibling-root*
+/// boundary. Still strictly better than the pre-BT-2951 baseline (which
+/// excluded nothing at all), and closing this fully needs the same
+/// `beamtalk.toml`-derived real package name per root that this marker
+/// deliberately avoids reading (see above) — see BT-2960 for the fix design.
+const CURRENT_PROJECT_PACKAGE_MARKER: &str = "$project";
+
+/// Package stamp for a stdlib file's `AliasInfo.package`, mirroring the CLI
+/// build pipeline's convention (`build_stdlib.rs`'s `generate_app_file`,
+/// `class_hierarchy/builtins.rs`'s `ClassInfo.package` stamping) — stdlib is
+/// always its own package, distinct from both a project's own aliases and
+/// any fetched dependency's.
+const STDLIB_PACKAGE_MARKER: &str = "stdlib";
+
+/// Derives the dependency package name for `file` from its path (BT-2951):
+/// mirrors `beamtalk-lsp/src/server.rs`'s `dependency_src_dirs` filesystem
+/// convention — any file under a `_build/deps/<name>/src/` directory belongs
+/// to dependency `<name>`. `None` for a file with no such path segment
+/// (a same-project file).
+fn dependency_package_for_path(file: &Utf8Path) -> Option<EcoString> {
+    // `components()` (not `as_str().split('/')`) so this parses correctly on
+    // Windows too, where `Utf8Path` uses `\` — a raw `/`-split would never
+    // match `_build`/`deps` there and every dependency file would silently
+    // fall through to the project marker.
+    let components: Vec<&str> = file.components().map(|c| c.as_str()).collect();
+    components
+        .windows(2)
+        .position(|w| w == ["_build", "deps"])
+        .and_then(|i| components.get(i + 2))
+        .map(|name| EcoString::from(*name))
+}
+
+/// The package to stamp on every [`AliasInfo`] extracted from `file`
+/// (BT-2951): the dependency name if `file` is under a
+/// `_build/deps/<name>/src/` directory (see [`dependency_package_for_path`]),
+/// otherwise [`CURRENT_PROJECT_PACKAGE_MARKER`].
+fn package_for_alias_stamping(file: &Utf8Path) -> EcoString {
+    dependency_package_for_path(file)
+        .unwrap_or_else(|| EcoString::from(CURRENT_PROJECT_PACKAGE_MARKER))
+}
 
 /// Cross-file project index holding a merged class hierarchy.
 ///
@@ -63,6 +128,16 @@ pub struct ProjectIndex {
     /// recompute `merged_aliases` deterministically after an incremental
     /// update or removal.
     file_aliases: HashMap<Utf8PathBuf, Vec<AliasInfo>>,
+    /// Per-file tracking of which [`ProtocolInfo`] declarations came from
+    /// which file (BT-2950) — the protocol-namespace counterpart to
+    /// `file_classes`/`file_aliases`, feeding
+    /// [`Self::cross_file_protocol_infos_for`]. Unlike `file_aliases`, there
+    /// is no merged registry to rebuild: `ProtocolInfo` carries no `package`
+    /// field and protocols have no `internal` modifier at the AST level (see
+    /// `beamtalk-cli`'s `collect_project_protocol_and_alias_infos` doc), so
+    /// every declared protocol is exported project-wide with no
+    /// collision/visibility bookkeeping needed here.
+    file_protocols: HashMap<Utf8PathBuf, Vec<ProtocolInfo>>,
 }
 
 impl ProjectIndex {
@@ -78,6 +153,7 @@ impl ProjectIndex {
             file_extensions: HashMap::new(),
             merged_aliases: AliasRegistry::new(),
             file_aliases: HashMap::new(),
+            file_protocols: HashMap::new(),
         }
     }
 
@@ -142,9 +218,23 @@ impl ProjectIndex {
             // have been merged), not per-file here, so a stdlib alias
             // colliding with a class declared in a *later* stdlib file is
             // still caught.
-            let alias_infos = AliasRegistry::extract_alias_infos(&module);
+            // BT-2951: stdlib aliases are stamped `stdlib`, not the
+            // same-project marker — see `STDLIB_PACKAGE_MARKER`'s doc.
+            let mut alias_infos = AliasRegistry::extract_alias_infos(&module);
+            for info in &mut alias_infos {
+                info.package = Some(EcoString::from(STDLIB_PACKAGE_MARKER));
+            }
             if !alias_infos.is_empty() {
                 index.file_aliases.insert(path.clone(), alias_infos);
+            }
+
+            // BT-2950: track stdlib `Protocol define: ...` declarations too,
+            // so a stdlib-defined protocol resolves cross-file (`extending:`/
+            // conformance checks) the same as any project-file protocol —
+            // mirrors the alias tracking immediately above.
+            let protocol_infos = ProtocolRegistry::extract_protocol_infos(&module);
+            if !protocol_infos.is_empty() {
+                index.file_protocols.insert(path.clone(), protocol_infos);
             }
         }
         index.rebuild_alias_registry();
@@ -228,6 +318,13 @@ impl ProjectIndex {
     /// `ClassHierarchy::merge`, which is bounded by the *incoming* file's
     /// own class count, `rebuild_alias_registry` has no incremental API and
     /// must re-walk every alias-bearing file from scratch — see its doc).
+    ///
+    /// BT-2951: stamps each entry's `AliasInfo.package` from `file`'s own
+    /// path (overwriting whatever the caller passed in, if anything) — see
+    /// [`package_for_alias_stamping`] — so [`Self::cross_file_alias_infos_for`]
+    /// and [`Self::rebuild_alias_registry`] both have real package data for
+    /// [`AliasRegistry::add_pre_loaded`]'s internal/cross-package exclusion
+    /// to act on, instead of every entry looking package-less.
     pub fn update_file_aliases(&mut self, file: Utf8PathBuf, aliases: Vec<AliasInfo>) {
         let had_aliases = self.file_aliases.contains_key(&file);
         if aliases.is_empty() {
@@ -236,9 +333,40 @@ impl ProjectIndex {
             }
             self.file_aliases.remove(&file);
         } else {
-            self.file_aliases.insert(file, aliases);
+            let package = self.alias_package_for_file(&file);
+            let stamped: Vec<AliasInfo> = aliases
+                .into_iter()
+                .map(|mut info| {
+                    info.package = Some(package.clone());
+                    info
+                })
+                .collect();
+            self.file_aliases.insert(file, stamped);
         }
         self.rebuild_alias_registry();
+    }
+
+    /// Add or update a file's protocol declarations in the project index
+    /// (BT-2950) — the protocol-namespace counterpart to
+    /// [`Self::update_file_aliases`]. Call after [`Self::update_file`], same
+    /// ordering rationale.
+    ///
+    /// An empty `protocols` clears the file's prior entry (mirrors
+    /// [`Self::update_file_aliases`]). No merged-registry rebuild needed
+    /// here — see [`Self::file_protocols`]'s doc for why — so there is no
+    /// expensive step for the no-op-early-return below to actually save;
+    /// it exists purely so this method's shape mirrors
+    /// [`Self::update_file_aliases`]'s for a reader comparing the two.
+    pub fn update_file_protocols(&mut self, file: Utf8PathBuf, protocols: Vec<ProtocolInfo>) {
+        let had_protocols = self.file_protocols.contains_key(&file);
+        if protocols.is_empty() {
+            if !had_protocols {
+                return;
+            }
+            self.file_protocols.remove(&file);
+        } else {
+            self.file_protocols.insert(file, protocols);
+        }
     }
 
     /// Rebuilds [`Self::merged_aliases`] from scratch across every indexed
@@ -257,6 +385,18 @@ impl ProjectIndex {
     /// the full semantic-analysis pipeline behind `diagnostics()`; this
     /// rebuild only needs the resulting table, not a second round of
     /// diagnostics.
+    ///
+    /// BT-2951: seeds with `current_package =
+    /// Some(`[`CURRENT_PROJECT_PACKAGE_MARKER`]`)` — every same-project
+    /// file's aliases were stamped with that same marker by
+    /// [`Self::update_file_aliases`] (stdlib/dependency files get
+    /// [`STDLIB_PACKAGE_MARKER`]/a dependency's directory-derived name
+    /// instead, via [`Self::alias_package_for_file`]), so
+    /// [`AliasRegistry::add_pre_loaded`]'s exclusion correctly drops an
+    /// `internal` alias stamped with a *different* package (a dependency's
+    /// directory-derived name, or [`STDLIB_PACKAGE_MARKER`]) from this
+    /// project-wide merged view, while keeping every same-project `internal`
+    /// alias visible throughout the project.
     fn rebuild_alias_registry(&mut self) {
         let mut registry = AliasRegistry::new();
         let mut sorted_paths: Vec<&Utf8PathBuf> = self.file_aliases.keys().collect();
@@ -264,7 +404,12 @@ impl ProjectIndex {
         let empty_protocols = ProtocolRegistry::new();
         for path in sorted_paths {
             let infos = self.file_aliases[path].clone();
-            let _ = registry.add_pre_loaded(infos, &self.merged_hierarchy, &empty_protocols, None);
+            let _ = registry.add_pre_loaded(
+                infos,
+                &self.merged_hierarchy,
+                &empty_protocols,
+                Some(CURRENT_PROJECT_PACKAGE_MARKER),
+            );
         }
         self.merged_aliases = registry;
     }
@@ -326,6 +471,10 @@ impl ProjectIndex {
         if had_aliases || (classes_changed && !self.file_aliases.is_empty()) {
             self.rebuild_alias_registry();
         }
+        // BT-2950: drop this file's protocols too, mirroring the alias
+        // removal above — no rebuild needed (no merged registry; see
+        // `file_protocols`'s doc).
+        self.file_protocols.remove(file);
     }
 
     /// Re-merge class definitions from remaining files for the given class names.
@@ -410,6 +559,18 @@ impl ProjectIndex {
     /// `ProjectDiagnosticContext::pre_loaded_aliases` so a `type Name = ...`
     /// declared in a different project file resolves during LSP diagnostics
     /// the same way a cross-file class reference already does.
+    ///
+    /// BT-2951: every returned entry's `package` is populated (by
+    /// [`Self::update_file_aliases`]/[`Self::with_stdlib`] at insertion time,
+    /// not here) — an `internal` entry from a different package than `file`'s
+    /// own is *not* filtered out by this method; the caller must pass
+    /// [`Self::alias_package_for_file`]`(file)` as `current_package` to
+    /// [`AliasRegistry::add_pre_loaded`] (via `CompilerOptions::current_package`)
+    /// so that existing seeding-boundary exclusion — which already runs
+    /// downstream wherever these entries are seeded — has real package data
+    /// to filter on, mirroring how the file-classes analogue,
+    /// [`Self::cross_file_class_infos_for`], relies on the type checker's own
+    /// downstream `internal` visibility check rather than filtering here.
     #[must_use]
     pub fn cross_file_alias_infos_for(&self, file: &Utf8PathBuf) -> Vec<AliasInfo> {
         self.file_aliases
@@ -417,6 +578,47 @@ impl ProjectIndex {
             .filter(|(path, _)| *path != file)
             .flat_map(|(_, infos)| infos.iter().cloned())
             .collect()
+    }
+
+    /// Returns cross-file `ProtocolInfo` entries for diagnostic computation
+    /// (BT-2950) — the protocol-namespace analogue of
+    /// [`Self::cross_file_alias_infos_for`]. Returns every tracked protocol
+    /// declaration from files other than `file` (same-project or indexed
+    /// `_build/deps/*/src/` dependency files), for seeding into
+    /// `ProjectDiagnosticContext::pre_loaded_protocols` so a `Protocol
+    /// define: Name ...` declared in a different project file or dependency
+    /// resolves during LSP diagnostics (`extending:`/conformance checks) the
+    /// same way `beamtalk build`/`beamtalk lint` already do (BT-2910). No
+    /// package filtering — protocols have no `internal` modifier, so every
+    /// declared protocol is exported project-wide (see [`Self::file_protocols`]'s
+    /// doc).
+    #[must_use]
+    pub fn cross_file_protocol_infos_for(&self, file: &Utf8PathBuf) -> Vec<ProtocolInfo> {
+        self.file_protocols
+            .iter()
+            .filter(|(path, _)| *path != file)
+            .flat_map(|(_, infos)| infos.iter().cloned())
+            .collect()
+    }
+
+    /// The package identity to pass as `current_package` when seeding `file`'s
+    /// diagnostics/analysis with cross-file aliases (BT-2951) — pairs with
+    /// [`Self::cross_file_alias_infos_for`]'s entries, which were stamped
+    /// with the exact same derivation at insertion time (see
+    /// [`package_for_alias_stamping`]), so `AliasRegistry::add_pre_loaded`'s
+    /// `info.package.as_deref() != current_package` comparison lines up.
+    ///
+    /// Checks [`Self::is_stdlib_file`] first (like [`Self::with_stdlib`]
+    /// stamps stdlib aliases [`STDLIB_PACKAGE_MARKER`] regardless of path
+    /// shape) before falling back to the same path-based derivation
+    /// [`Self::update_file_aliases`] uses for every other file.
+    #[must_use]
+    pub fn alias_package_for_file(&self, file: &Utf8PathBuf) -> EcoString {
+        if self.is_stdlib_file(file) {
+            EcoString::from(STDLIB_PACKAGE_MARKER)
+        } else {
+            package_for_alias_stamping(file)
+        }
     }
 
     /// Returns the package name for a file, if determinable.
@@ -825,6 +1027,97 @@ mod tests {
         assert!(
             !index.alias_registry().has_alias("Foo"),
             "stale alias from the previous version of the file must be dropped"
+        );
+    }
+
+    /// BT-2951: `update_file_aliases` must stamp `AliasInfo.package` from the
+    /// file's own path — a dependency file (under `_build/deps/<name>/src/`)
+    /// gets `<name>`, a same-project file gets the same-project marker.
+    /// `AliasRegistry::add_pre_loaded`'s seeding-boundary exclusion (ADR 0108
+    /// Phase 5) has nothing to filter on without this — every entry looked
+    /// package-less before this fix.
+    #[test]
+    fn update_file_aliases_stamps_package_from_file_path() {
+        let mut index = ProjectIndex::new();
+        let dep_file = Utf8PathBuf::from("_build/deps/http/src/Types.bt");
+        let project_file = Utf8PathBuf::from("src/Types.bt");
+
+        let tokens = lex_with_eof("type Foo = Integer");
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        index.update_file(dep_file.clone(), &hierarchy);
+        let infos = crate::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
+        index.update_file_aliases(dep_file.clone(), infos);
+
+        let dep_infos = index.cross_file_alias_infos_for(&Utf8PathBuf::from("elsewhere.bt"));
+        assert_eq!(
+            dep_infos.iter().find(|i| i.name == "Foo").unwrap().package,
+            Some(EcoString::from("http")),
+            "a dependency file's alias should be stamped with its directory-derived package name"
+        );
+
+        index.remove_file(&dep_file);
+        let tokens = lex_with_eof("type Foo = Integer");
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        index.update_file(project_file.clone(), &hierarchy);
+        let infos = crate::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
+        index.update_file_aliases(project_file, infos);
+
+        let project_infos = index.cross_file_alias_infos_for(&Utf8PathBuf::from("elsewhere.bt"));
+        assert_eq!(
+            project_infos
+                .iter()
+                .find(|i| i.name == "Foo")
+                .unwrap()
+                .package,
+            Some(EcoString::from(CURRENT_PROJECT_PACKAGE_MARKER)),
+            "a same-project file's alias should be stamped with the same-project marker"
+        );
+    }
+
+    /// Review-bot finding on PR #3086: `update_file_aliases` used to call
+    /// path-only `package_for_alias_stamping` directly instead of
+    /// `Self::alias_package_for_file` (which checks `is_stdlib_file` first).
+    /// A stdlib file re-opened through the LSP's normal `update_file`/
+    /// `update_file_aliases` flow (e.g. via go-to-definition navigating into
+    /// a stdlib source) would overwrite `with_stdlib`'s `STDLIB_PACKAGE_MARKER`
+    /// stamp with `CURRENT_PROJECT_PACKAGE_MARKER`, leaking the stdlib file's
+    /// `internal` aliases into the project-wide merged view and — for the
+    /// stdlib file's own diagnostics, whose `current_package` comes from
+    /// `alias_package_for_file` and still says `stdlib` — excluding its own
+    /// aliases as if they belonged to a different package.
+    #[test]
+    fn update_file_aliases_reopen_preserves_stdlib_package_stamp() {
+        let stdlib_file = Utf8PathBuf::from("stdlib/Direction.bt");
+        let (index_result, _) = ProjectIndex::with_stdlib(&[(
+            stdlib_file.clone(),
+            "internal type Direction = #north | #south".to_string(),
+        )]);
+        let mut index = index_result.unwrap();
+        assert!(index.is_stdlib_file(&stdlib_file));
+
+        // Simulate the LSP re-indexing the same stdlib file after a
+        // `textDocument/didOpen` (e.g. the user navigated to it via
+        // go-to-definition) — this goes through the same `update_file`/
+        // `update_file_aliases` pair as any project file.
+        let tokens = lex_with_eof("internal type Direction = #north | #south");
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        index.update_file(stdlib_file.clone(), &hierarchy);
+        let infos = crate::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
+        index.update_file_aliases(stdlib_file.clone(), infos);
+
+        let reindexed = index.cross_file_alias_infos_for(&Utf8PathBuf::from("elsewhere.bt"));
+        assert_eq!(
+            reindexed
+                .iter()
+                .find(|i| i.name == "Direction")
+                .unwrap()
+                .package,
+            Some(EcoString::from(STDLIB_PACKAGE_MARKER)),
+            "re-opening a stdlib file must keep its alias stamped `stdlib`, \
+             not fall back to the same-project marker"
         );
     }
 
