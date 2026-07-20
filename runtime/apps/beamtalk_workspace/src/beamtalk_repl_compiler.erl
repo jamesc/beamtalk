@@ -87,14 +87,17 @@ triggers it) `compile_class_definition_result/2`/
 `compile_protocol_definition_result/2` normally perform for a
 `class_definition`/`protocol_definition` result (BT-2956).
 
-For callers — currently only `beamtalk_repl_eval:eval_with_self/2`
-(`evaluate:`) — that always reject a `class_definition`/`method_definition`/
-`protocol_definition`/`type_alias_definition` result outright and never look
-at its payload: registering an alias_xref edge (or even compiling the
-definition to bytecode) for a result about to be discarded is pure
-side-effect work with no reader. The four definition variants return an
-empty payload map/warnings list here — safe, since no caller of this
-function inspects them (unlike `compile_expression/3,4`, whose callers do).
+CONTRACT WARNING: the `class_definition`/`method_definition`/
+`protocol_definition`/`type_alias_definition` payload maps and warnings
+lists returned here are always empty (`#{}`/`[]`), never the real compiled
+payload. That is safe ONLY because the current, sole caller —
+`beamtalk_repl_eval:eval_with_self/2` (`evaluate:`) — always rejects those
+four result shapes outright and never inspects the payload; skipping
+alias_xref registration and the bytecode compile that would normally
+populate them is pure side-effect avoidance for a result about to be
+discarded. Do NOT reuse this function for a new caller that reads the
+payload of a definition-shaped result — call `compile_expression/3,4`
+instead, or extend this function's registration behaviour first.
 """.
 -spec compile_expression_no_registration(string(), atom(), map()) ->
     {ok, binary(), term(), [binary()]}

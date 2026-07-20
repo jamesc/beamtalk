@@ -254,7 +254,9 @@ alias_cache_test_() ->
         {"clear_classes → alias cache emptied too", fun clear_classes_empties_aliases/0},
         {"register_aliases when server down → no crash", fun register_aliases_when_down/0},
         {"compile_expression/3 backstops the ambient alias cache (BT-2956)",
-            fun compile_expression_ambient_alias_backstop/0}
+            fun compile_expression_ambient_alias_backstop/0},
+        {"compile_expression_trace/3 backstops the ambient alias cache too (BT-2956)",
+            fun compile_expression_trace_ambient_alias_backstop/0}
     ]}.
 
 register_aliases_visible() ->
@@ -317,6 +319,40 @@ compile_expression_ambient_alias_backstop() ->
         []
     ),
     ?assertEqual([<<"Direction">>], maps:get(referenced_aliases, ProtocolInfo)).
+
+%% `compile_expression_trace/3,4` hits the identical `maps:merge/2` ambient-alias
+%% backstop as `compile_expression/3,4` (see the matching comment on both
+%% `handle_call` clauses), but it rejects class/protocol definitions outright, so
+%% it can't reuse `compile_expression_ambient_alias_backstop/0`'s
+%% `referenced_aliases` payload assertion above. Instead this proves the same
+%% thing observably: a plain expression's `matchExhaustive:` only sees `Direction`
+%% resolve to the closed 4-member union (and so reports the `#west` gap as a
+%% compile error) when the ambient alias cache actually reached the trace-mode
+%% compile — without it, `Direction` falls back to an unresolved type and
+%% `matchExhaustive:` has nothing closed to check against.
+compile_expression_trace_ambient_alias_backstop() ->
+    beamtalk_compiler_server:clear_classes(),
+    ok = beamtalk_compiler_server:register_aliases([
+        <<"type Direction = #north | #south | #east | #west">>
+    ]),
+    {error, Diagnostics} = beamtalk_compiler_server:compile_expression_trace(
+        <<
+            "scrutinee :: Direction := #north. "
+            "scrutinee matchExhaustive: [#north -> 0; #south -> 1; #east -> 2]"
+        >>,
+        <<"bt@trace_ambient_backstop">>,
+        []
+    ),
+    ?assert(
+        lists:any(
+            fun(D) ->
+                Msg = maps:get(message, D),
+                binary:match(Msg, <<"non-exhaustive matchExhaustive:">>) =/= nomatch andalso
+                    binary:match(Msg, <<"#west">>) =/= nomatch
+            end,
+            Diagnostics
+        )
+    ).
 
 %%% ---------------------------------------------------------------
 %%% gen_server edge cases (via running server)

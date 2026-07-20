@@ -224,10 +224,20 @@ compile_expression_trace(Port, Source, ModuleName, KnownVars, Options) ->
             0 -> Request1;
             _ -> Request1#{class_module_index => ModuleIndex}
         end,
-    Request =
+    Request3 =
         case map_size(ClassHierarchy) of
             0 -> Request2;
             _ -> Request2#{class_hierarchy => ClassHierarchy}
+        end,
+    %% ADR 0108 Phase 8 (BT-2902), BT-2956: forward earlier-turn/ambient alias
+    %% declarations, mirroring `compile_expression/5` above — without this,
+    %% `::` annotations in traced expressions can never resolve an alias
+    %% declared in an earlier REPL turn.
+    KnownTypeAliases = maps:get(known_type_aliases, Options, []),
+    Request =
+        case KnownTypeAliases of
+            [] -> Request3;
+            _ -> Request3#{known_type_aliases => KnownTypeAliases}
         end,
     RequestBin = term_to_binary(Request),
     try port_command(Port, RequestBin) of
