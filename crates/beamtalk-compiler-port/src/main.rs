@@ -773,20 +773,6 @@ fn error_response(diagnostics: &[String]) -> Term {
     ]))
 }
 
-/// Compute 1-based line number for a byte offset in source text.
-/// Uses byte scanning (`\n` is always 0x0A in UTF-8) so there is no panic
-/// risk from non-char-boundary offsets.
-fn byte_offset_to_line(source: &str, offset: u32) -> u32 {
-    let offset_clamped = (offset as usize).min(source.len());
-    let mut newlines: u32 = 0;
-    for &b in &source.as_bytes()[..offset_clamped] {
-        if b == b'\n' {
-            newlines = newlines.saturating_add(1);
-        }
-    }
-    newlines.saturating_add(1)
-}
-
 /// Compute 1-based column number for a byte offset in source text.
 ///
 /// Counts Unicode characters (not bytes) from the start of the line,
@@ -820,7 +806,7 @@ fn format_codegen_error(e: &beamtalk_core::erlang::CodeGenError, source: &str) -
             feature,
             span: Some(span),
         } => {
-            let line = byte_offset_to_line(source, span.start());
+            let line = span.line_number(source);
             let col = byte_offset_to_col(source, span.start());
             format!(
                 "Code generation failed: unsupported feature: {feature} at line {line}, col {col}"
@@ -839,7 +825,7 @@ fn diagnostic_error_response(
     let diag_terms: Vec<Term> = diagnostics
         .iter()
         .map(|d| {
-            let line = byte_offset_to_line(source, d.span.start());
+            let line = d.span.line_number(source);
             let line_term = Term::from(eetf::FixInteger::from(
                 i32::try_from(line).unwrap_or(i32::MAX),
             ));
@@ -879,10 +865,10 @@ fn compile_method_diagnostic_response(
     let diag_terms: Vec<Term> = diagnostics
         .iter()
         .map(|d| {
-            let abs_line = byte_offset_to_line(merged_class_source, d.span.start());
+            let abs_line = d.span.line_number(merged_class_source);
             let line = match patched_method_span {
                 Some(ms) if ms.contains(d.span) => {
-                    let method_start_line = byte_offset_to_line(merged_class_source, ms.start());
+                    let method_start_line = ms.line_number(merged_class_source);
                     abs_line.saturating_sub(method_start_line).saturating_add(1)
                 }
                 _ => abs_line,
