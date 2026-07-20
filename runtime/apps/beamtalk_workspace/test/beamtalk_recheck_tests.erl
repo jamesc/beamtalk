@@ -1329,3 +1329,108 @@ trigger_image_empty_when_no_classes_test_() ->
                 )
             ]
         end}}.
+
+%%====================================================================
+%% Compiler-port exit-catch coverage (BT-2806, trigger_image/0 and
+%% trigger_leaf_change/1)
+%%
+%% Both `recheck_image_class/2` and `recheck_owner_for_leaf_change/3` wrap
+%% their `diagnostics/3` round trip in `try ... catch Class:Reason:Stack ->
+%% {failed, []} end` — not just the `{error, Reason}` case every other
+%% `recheck_owner*` function already handles, but the compiler port's
+%% `gen_server:call` itself exiting (`noproc`/`timeout` in production). Prior
+%% to BT-2806 that `catch` clause had no regression test: BT-2832's
+%% `inject_diagnostics_failure/1` only forces an ordinary `{error, _}`
+%% *return* from a live call, never an actual exit.
+%%
+%% `beamtalk_compiler_server:inject_diagnostics_exit/0` (BT-2806) instead
+%% stops the compiler server without replying, so the pending
+%% `gen_server:call` raises — deterministically exercising the `catch`
+%% clause. Each test below is split into two sequential top-level calls
+%% (fault, then a later recovered call) rather than one sweep over two
+%% classes: `beamtalk_compiler_sup` (one_for_one/permanent) restarts the
+%% server asynchronously, so a *second class in the same synchronous sweep*
+%% would race the restart. Waiting for the restart between two separate
+%% calls sidesteps that race while still proving both halves of the
+%% guarantee: the sweep degrades gracefully (does not crash/abort) on the
+%% exit, and it is not left permanently broken afterward.
+%%====================================================================
+
+recheck_exit_fault_source() ->
+    <<"Object subclass: ReCheckExitFaultClass\n  ok -> Integer => 42\n">>.
+
+wait_for_compiler_server_restart() ->
+    wait_for_compiler_server_restart(100).
+
+wait_for_compiler_server_restart(0) ->
+    error(compiler_server_did_not_restart);
+wait_for_compiler_server_restart(Attempts) ->
+    case whereis(beamtalk_compiler_server) of
+        undefined ->
+            timer:sleep(10),
+            wait_for_compiler_server_restart(Attempts - 1);
+        Pid when is_pid(Pid) ->
+            ok
+    end.
+
+trigger_image_degrades_on_compiler_port_exit_without_aborting_test_() ->
+    {timeout, 30,
+        {setup, fun recheck_setup/0, fun recheck_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    ok = beamtalk_workspace_meta:set_class_source(
+                        <<"ReCheckExitFaultClass">>, recheck_exit_fault_source()
+                    ),
+                    ok = beamtalk_compiler_server:inject_diagnostics_exit(),
+
+                    %% The injected exit degrades this class to `failed`
+                    %% (recheck_image_class/2's catch clause) — trigger_image/0
+                    %% itself must not crash or propagate the exit.
+                    ?assertEqual(
+                        #{findings => [], checked => 0, stale => 0},
+                        beamtalk_recheck:trigger_image()
+                    ),
+
+                    %% Not left permanently broken: after the supervisor
+                    %% restarts the server, the same class checks clean.
+                    ok = wait_for_compiler_server_restart(),
+                    Recovered = beamtalk_recheck:trigger_image(),
+                    ?assertEqual(1, maps:get(checked, Recovered)),
+                    ?assertEqual([], maps:get(findings, Recovered))
+                end)
+            ]
+        end}}.
+
+trigger_leaf_change_degrades_on_compiler_port_exit_without_aborting_test_() ->
+    {timeout, 30,
+        {setup, fun recheck_setup/0, fun recheck_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    ok = beamtalk_workspace_meta:set_class_source(
+                        <<"ReCheckExitFaultClass">>, recheck_exit_fault_source()
+                    ),
+                    ok = beamtalk_compiler_server:inject_diagnostics_exit(),
+
+                    %% The injected exit degrades this class to `failed`
+                    %% (recheck_owner_for_leaf_change/3's catch clause) —
+                    %% trigger_leaf_change/1 itself must not crash or
+                    %% propagate the exit. Never checked, so it lands in
+                    %% not_verified_owners (BT-2828's widened bucket) rather
+                    %% than being silently dropped.
+                    Result = beamtalk_recheck:trigger_leaf_change([<<"SomeSuperclass">>]),
+                    ?assertEqual([], maps:get(findings, Result)),
+                    ?assertEqual(0, maps:get(checked, Result)),
+                    ?assertEqual([], maps:get(checked_owners, Result)),
+                    ?assertEqual(
+                        [<<"ReCheckExitFaultClass">>], maps:get(not_verified_owners, Result)
+                    ),
+
+                    %% Not left permanently broken: after the supervisor
+                    %% restarts the server, the same class checks clean.
+                    ok = wait_for_compiler_server_restart(),
+                    Recovered = beamtalk_recheck:trigger_leaf_change([<<"SomeSuperclass">>]),
+                    ?assertEqual(1, maps:get(checked, Recovered)),
+                    ?assertEqual([<<"ReCheckExitFaultClass">>], maps:get(checked_owners, Recovered))
+                end)
+            ]
+        end}}.
