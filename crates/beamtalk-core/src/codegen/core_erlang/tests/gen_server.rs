@@ -5567,6 +5567,10 @@ fn test_terminate_wraps_dispatch_in_try_catch() {
     // so that user exceptions cannot prevent OTP gen_server shutdown (BT-29).
     let code = codegen("Actor subclass: TestActor\n  state: x = 0\n");
     assert!(
+        code.contains("let _TermDisp = try call"),
+        "terminate: dispatch must be the body of the try expression. Got:\n{code}"
+    );
+    assert!(
         code.contains("catch <_TermT, _TermE, _TermS> -> 'ok'"),
         "terminate/2 catch clause must swallow all exceptions and return ok. Got:\n{code}"
     );
