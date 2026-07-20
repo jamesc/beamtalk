@@ -30,7 +30,7 @@ proxy class
 // @load tests/repl-protocol/fixtures/erlang_user.bt
 
 eu := ErlangUser spawn
-// => _
+// => Actor(ErlangUser, _)
 
 // Actor method calls Erlang internally and stores the result in state
 // callErlang assigns self.result := Erlang lists reverse: #(1,2,3), returning [3,2,1]

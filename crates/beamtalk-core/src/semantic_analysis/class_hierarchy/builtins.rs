@@ -18,6 +18,7 @@ use super::ClassInfo;
 use super::MethodInfo;
 #[cfg(test)]
 use crate::ast::MethodKind;
+use crate::semantic_analysis::alias_registry::{AliasInfo, AliasRegistry};
 use ecow::EcoString;
 use std::collections::HashMap;
 
@@ -112,6 +113,36 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
     classes
 }
 
+/// Returns every stdlib type alias (`type Name = ...`), reconstructed from
+/// `generated_builtins.rs`'s persisted declaration-text table (BT-2935).
+///
+/// Mirrors [`builtin_classes`] immediately above — both are a bootstrap read
+/// of data `beamtalk build-stdlib` snapshotted at the end of its *previous*
+/// successful run, baked into this binary at compile time. Unlike
+/// [`builtin_classes`], which stores each `ClassInfo` as a fully-materialised
+/// Rust struct literal, each alias is stored as its exact `type Name = ...`
+/// declaration source text (`generated::generated_stdlib_alias_sources`) and
+/// reconstructed here via [`AliasRegistry::from_source_text`] — see that
+/// generator's module doc (`build_stdlib.rs`) for the tradeoff behind that
+/// choice. A string that fails to parse into an alias (should not happen for
+/// generator-produced text, but defensive against a hand-edited or corrupted
+/// file) is silently skipped rather than panicking.
+///
+/// Every returned entry has `package` set to `Some("stdlib")`, matching
+/// `build_stdlib.rs`'s `generate_class_entry`, which hardcodes the same
+/// `package: Some("stdlib".into())` for generated `ClassInfo` entries — the
+/// whole generated table is, by construction, one package.
+pub(super) fn stdlib_aliases() -> Vec<AliasInfo> {
+    generated::generated_stdlib_alias_sources()
+        .into_iter()
+        .filter_map(AliasRegistry::from_source_text)
+        .map(|mut info| {
+            info.package = Some("stdlib".into());
+            info
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -184,5 +215,28 @@ mod tests {
         let classes = super::builtin_classes();
         let value = &classes["Value"];
         assert!(!value.is_sealed, "Value should not be sealed");
+    }
+
+    // ---- BT-2935: stdlib_aliases() ----
+
+    #[test]
+    fn stdlib_aliases_reconstructs_known_generated_entries() {
+        // Every entry generated_builtins.rs currently carries should
+        // reconstruct into a real AliasInfo with `package` stamped "stdlib" —
+        // proves the generated-table round trip end to end (as opposed to
+        // unit-testing `AliasRegistry::from_source_text` in isolation, which
+        // `alias_registry.rs`'s own tests already do).
+        let aliases = super::stdlib_aliases();
+        assert!(
+            !aliases.is_empty(),
+            "expected at least one generated stdlib alias (e.g. SupervisionStrategy)"
+        );
+        for info in &aliases {
+            assert_eq!(
+                info.package.as_deref(),
+                Some("stdlib"),
+                "every generated stdlib alias should be stamped package \"stdlib\", got: {info:?}"
+            );
+        }
     }
 }

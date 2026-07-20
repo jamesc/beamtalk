@@ -391,7 +391,17 @@ pub(crate) fn unparse_module_doc(module: &Module) -> Document<'static> {
     }
 
     // Standalone method definitions
-    for smd in &module.method_definitions {
+    for (i, smd) in module.method_definitions.iter().enumerate() {
+        // BT-2943: re-emit the blank line the author placed before this
+        // standalone method — either separating it from the previous
+        // standalone method (i > 0), or separating the whole
+        // standalone-methods section from the class/protocol/type-alias
+        // declarations above it (i == 0, but `docs` already has content).
+        // Dropped when nothing precedes it (same first-item convention as
+        // the declarations loop above, BT-2929).
+        if (i > 0 || !docs.is_empty()) && smd.method.comments.leading_blank_line {
+            docs.push(line());
+        }
         docs.push(unparse_standalone_method_definition(smd));
         docs.push(line());
     }
@@ -403,6 +413,14 @@ pub(crate) fn unparse_module_doc(module: &Module) -> Document<'static> {
             if stmt.preceding_blank_line {
                 docs.push(line());
             }
+            docs.push(line());
+        } else if !docs.is_empty() && stmt.preceding_blank_line {
+            // BT-2943: preserve a blank line separating the first top-level
+            // expression from the declarations/standalone-methods section(s)
+            // above it. The i > 0 branch above already provides its own
+            // separator `line()` between expressions; here, the previous
+            // section's trailing `line()` already plays that role, so a
+            // single extra `line()` is enough to open up the blank line.
             docs.push(line());
         }
         docs.push(unparse_expression_statement(stmt));
@@ -432,8 +450,14 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
     // Non-doc leading comments
     docs.extend(unparse_comment_attachment_leading(&class.comments));
 
-    // Blank line between leading comments (e.g. license block) and doc/header
-    if !class.comments.leading.is_empty() {
+    // Blank line between leading comments (e.g. license block) and doc/header:
+    // either because the source actually had one there (BT-2945), or because
+    // the last leading entry is an orphaned `///` block that must, by
+    // construction, always be separated from what follows (BT-2924) — see
+    // `leading_ends_with_orphaned_doc_comment`.
+    if leading_ends_with_orphaned_doc_comment(&class.comments)
+        || class.comments.blank_line_after_comments
+    {
         docs.push(line());
     }
 
@@ -526,6 +550,18 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
         header
     };
 
+    // `handleScope: #symbol` (ADR 0103) — canonical style puts it on its own
+    // indented line following the class header (and its trailing comment, if
+    // any), mirroring `docs/ADR/0103-sendability-typing-from-class-kinds.md`.
+    let header = if let Some(hs) = &class.handle_scope {
+        docvec![
+            header,
+            nest(2, docvec![line(), "handleScope: #", leaf::ident(&hs.name)])
+        ]
+    } else {
+        header
+    };
+
     docs.push(header);
 
     // State declarations — use nest(2, ...) so that leading comments and
@@ -591,6 +627,18 @@ pub(crate) fn unparse_standalone_method_definition(
     smd: &StandaloneMethodDefinition,
 ) -> Document<'static> {
     let class = leaf::ident(&smd.class_name.name);
+    // Cross-package extension methods (ADR 0070): `package@ClassName >> ...`.
+    // Found while adding BT-2943's package-qualified regression test:
+    // `smd.package` was previously never consulted here, so `beamtalk fmt`
+    // silently dropped the package qualifier from any cross-package
+    // standalone method — a pre-existing, unrelated bug, fixed alongside
+    // this issue since the fix is a one-line addition and the test that
+    // caught it already lives in this file.
+    let class = if let Some(package) = &smd.package {
+        docvec![leaf::ident(&package.name), "@", class]
+    } else {
+        class
+    };
     let separator = if smd.is_class_method {
         Document::Str(" class >> ")
     } else {
@@ -610,10 +658,14 @@ fn unparse_type_alias_definition(type_alias: &TypeAliasDefinition) -> Document<'
     // Non-doc leading comments
     docs.extend(unparse_comment_attachment_leading(&type_alias.comments));
 
-    // Blank line between a preserved, earlier `///` block that broke away
-    // from a different declaration (BT-2924) and this alias's own doc
-    // comment — see `leading_ends_with_orphaned_doc_comment`.
-    if leading_ends_with_orphaned_doc_comment(&type_alias.comments) {
+    // Blank line between this alias's leading comments and its own doc
+    // comment/header: either because the source actually had one there
+    // (BT-2945), or because the last leading entry is a preserved, earlier
+    // `///` block that broke away from a different declaration (BT-2924) —
+    // see `leading_ends_with_orphaned_doc_comment`.
+    if leading_ends_with_orphaned_doc_comment(&type_alias.comments)
+        || type_alias.comments.blank_line_after_comments
+    {
         docs.push(line());
     }
 
@@ -667,10 +719,14 @@ fn unparse_protocol_definition(protocol: &ProtocolDefinition) -> Document<'stati
     // Non-doc leading comments
     docs.extend(unparse_comment_attachment_leading(&protocol.comments));
 
-    // Blank line between a preserved, earlier `///` block that broke away
-    // from a different declaration (BT-2924) and this protocol's own doc
-    // comment — see `leading_ends_with_orphaned_doc_comment`.
-    if leading_ends_with_orphaned_doc_comment(&protocol.comments) {
+    // Blank line between this protocol's leading comments and its own doc
+    // comment/header: either because the source actually had one there
+    // (BT-2945), or because the last leading entry is a preserved, earlier
+    // `///` block that broke away from a different declaration (BT-2924) —
+    // see `leading_ends_with_orphaned_doc_comment`.
+    if leading_ends_with_orphaned_doc_comment(&protocol.comments)
+        || protocol.comments.blank_line_after_comments
+    {
         docs.push(line());
     }
 
@@ -721,11 +777,16 @@ fn unparse_protocol_definition(protocol: &ProtocolDefinition) -> Document<'stati
         docs.push(docvec!["  extending: ", leaf::ident(&ext.name)]);
     }
 
-    // Instance method signatures (indented by 2 spaces)
+    // Instance and class method signatures (indented by 2 spaces). Tracked
+    // across both lists with a single `first_signature` flag so a blank
+    // line is preserved at the instance/class boundary too (a `class`
+    // signature immediately after an instance signature is just as much
+    // an "inter-signature gap" as two instance signatures).
+    let mut first_signature = true;
     for sig in &protocol.method_signatures {
         docs.push(nest(
             2,
-            docvec![line(), unparse_protocol_method_signature(sig, None)],
+            unparse_protocol_signature_entry(sig, None, &mut first_signature),
         ));
     }
 
@@ -733,13 +794,33 @@ fn unparse_protocol_definition(protocol: &ProtocolDefinition) -> Document<'stati
     for sig in &protocol.class_method_signatures {
         docs.push(nest(
             2,
-            docvec![
-                line(),
-                unparse_protocol_method_signature(sig, Some("class "))
-            ],
+            unparse_protocol_signature_entry(sig, Some("class "), &mut first_signature),
         ));
     }
 
+    concat(docs)
+}
+
+/// Builds the `Document` for a single protocol method signature entry
+/// within `unparse_protocol_definition`'s signature list — the separating
+/// `line()` before it, plus (BT-2946) an extra blank line re-emitted when
+/// the signature had one before it in the source. Skipped for the very
+/// first signature in the body — a blank line there (between the header/
+/// `extending:` clause and the first signature) is dropped, same as
+/// pre-existing behaviour and mirroring BT-2929's top-level-declaration
+/// fix; only inter-signature gaps are preserved.
+fn unparse_protocol_signature_entry(
+    sig: &ProtocolMethodSignature,
+    prefix: Option<&'static str>,
+    first_signature: &mut bool,
+) -> Document<'static> {
+    let mut docs: Vec<Document<'static>> = Vec::new();
+    if !*first_signature && sig.comments.leading_blank_line {
+        docs.push(line());
+    }
+    docs.push(line());
+    docs.push(unparse_protocol_method_signature(sig, prefix));
+    *first_signature = false;
     concat(docs)
 }
 
@@ -2303,6 +2384,7 @@ mod tests {
                 leading: vec![Comment::line("This is 42", span())],
                 trailing: None,
                 leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Expression::Literal(Literal::Integer(42), span()),
             preceding_blank_line: false,
@@ -2318,6 +2400,7 @@ mod tests {
                 leading: Vec::new(),
                 trailing: Some(Comment::line("trailing", span())),
                 leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Expression::Literal(Literal::Integer(1), span()),
             preceding_blank_line: false,
@@ -2333,6 +2416,7 @@ mod tests {
                 leading: vec![Comment::line("before", span())],
                 trailing: Some(Comment::line("after", span())),
                 leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Expression::Literal(Literal::Integer(99), span()),
             preceding_blank_line: false,
@@ -2374,6 +2458,7 @@ mod tests {
             leading: vec![Comment::line("Returns the current value", span())],
             trailing: None,
             leading_blank_line: false,
+            blank_line_after_comments: false,
         };
         let output = unparse_method_definition(&method).to_pretty_string();
         assert_eq!(output, "// Returns the current value\ngetValue => 0");
@@ -2676,6 +2761,7 @@ mod tests {
                 leading: vec![Comment::line("the result", span())],
                 trailing: None,
                 leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Expression::Identifier(Identifier::new("x", span())),
             preceding_blank_line: false,
@@ -2742,6 +2828,7 @@ mod tests {
                 leading: vec![Comment::line("do the thing", span())],
                 trailing: None,
                 leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Expression::Identifier(Identifier::new("x", span())),
             preceding_blank_line: false,
@@ -2766,6 +2853,7 @@ mod tests {
                 ],
                 trailing: None,
                 leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Expression::Literal(Literal::Integer(42), span()),
             preceding_blank_line: false,
@@ -3704,6 +3792,99 @@ mod tests {
         assert_identity(source);
     }
 
+    // --- BT-2946 regression: blank lines between protocol method
+    // signatures must survive a `beamtalk fmt` round-trip, without being
+    // force-inserted when absent (mirrors BT-2929 for top-level
+    // declarations). ---
+
+    #[test]
+    fn protocol_blank_line_between_instance_signatures_round_trip() {
+        let source = concat!(
+            "Protocol define: Displayable\n",
+            "  asString -> String\n",
+            "\n",
+            "  displayString -> String\n",
+        );
+        assert_identity(source);
+    }
+
+    #[test]
+    fn protocol_no_blank_line_between_instance_signatures_not_inserted() {
+        let source = concat!(
+            "Protocol define: Displayable\n",
+            "  asString -> String\n",
+            "  displayString -> String\n",
+        );
+        assert_identity(source);
+    }
+
+    #[test]
+    fn protocol_blank_line_between_class_signatures_round_trip() {
+        let source = concat!(
+            "Protocol define: Creatable\n",
+            "  class create -> Self\n",
+            "\n",
+            "  class createEmpty -> Self\n",
+        );
+        assert_identity(source);
+    }
+
+    #[test]
+    fn protocol_blank_line_at_instance_class_boundary_round_trip() {
+        // Mix: a blank line between the last instance signature and the
+        // first class signature must also be preserved.
+        let source = concat!(
+            "Protocol define: Creatable\n",
+            "  asString -> String\n",
+            "\n",
+            "  class create -> Self\n",
+        );
+        assert_identity(source);
+    }
+
+    #[test]
+    fn protocol_no_blank_line_at_instance_class_boundary_not_inserted() {
+        let source = concat!(
+            "Protocol define: Creatable\n",
+            "  asString -> String\n",
+            "  class create -> Self\n",
+        );
+        assert_identity(source);
+    }
+
+    #[test]
+    fn protocol_blank_line_before_first_signature_not_preserved() {
+        // A blank line between the header and the very first signature is
+        // dropped, same as pre-existing behaviour for top-level
+        // declarations (BT-2929) — only inter-signature gaps are
+        // preserved.
+        let source = concat!(
+            "Protocol define: Displayable\n",
+            "\n",
+            "  asString -> String\n",
+        );
+        let formatted = format_source(source).expect("format_source must succeed");
+        assert_eq!(
+            formatted,
+            "Protocol define: Displayable\n  asString -> String\n"
+        );
+    }
+
+    #[test]
+    fn protocol_blank_line_with_leading_comment_round_trip() {
+        // Interaction with BT-2930: a blank line before a signature that
+        // also has a leading `//` comment must place the blank line before
+        // the comment, not between the comment and the signature.
+        let source = concat!(
+            "Protocol define: Displayable\n",
+            "  asString -> String\n",
+            "\n",
+            "  // Convert to display string.\n",
+            "  displayString -> String\n",
+        );
+        assert_identity(source);
+    }
+
     // --- Type alias round-trip (ADR 0108, Phase 1, BT-2894) ---
 
     #[test]
@@ -3808,6 +3989,69 @@ mod tests {
             "  state: count :: Integer = 0\n",
             "\n",
             "  increment => count := count + 1\n",
+        );
+        assert_identity(source);
+    }
+
+    // --- `handleScope:` unparse emission + header trailing comment (BT-2942) ---
+
+    #[test]
+    fn handle_scope_round_trip() {
+        // BT-2942: the unparser never emitted `handleScope:` at all, so a
+        // class declaring it didn't round-trip. Canonical style (ADR 0103)
+        // puts the clause on its own indented line following the header.
+        let source = concat!(
+            "sealed typed Object subclass: MetricsTable\n",
+            "  handleScope: #node\n",
+        );
+        assert_identity(source);
+    }
+
+    #[test]
+    fn handle_scope_with_state_and_methods_round_trip() {
+        // BT-2942: `handleScope:` alongside a state declaration and a method,
+        // exercising the blank-line-before-first-method logic together with
+        // the new `handleScope:` line.
+        let source = concat!(
+            "Object subclass: Registry\n",
+            "  handleScope: #process\n",
+            "  state: count :: Integer = 0\n",
+            "\n",
+            "  increment => count := count + 1\n",
+        );
+        assert_identity(source);
+    }
+
+    #[test]
+    fn handle_scope_on_new_line_with_header_trailing_comment_round_trip() {
+        // BT-2942: when `handleScope:` sits on its own line (the canonical
+        // style), a trailing comment on the class header line itself (e.g.
+        // `Object subclass: Foo  // comment`) lives in the class-name
+        // token's trailing trivia, not `handleScope:`'s `#symbol` token's.
+        // Before the fix, `collect_trailing_comment()` unconditionally
+        // inspected `current - 1` *after* parsing `handleScope:`, landing on
+        // the `#symbol` token and silently dropping the header comment.
+        let source = concat!(
+            "Object subclass: Foo  // header comment\n",
+            "  handleScope: #node\n",
+            "\n",
+            "  x => 1\n",
+        );
+        assert_identity(source);
+    }
+
+    #[test]
+    fn handle_scope_with_native_and_header_trailing_comment_round_trip() {
+        // BT-2942: header clauses are parsed in a fixed order — `native:`
+        // then `handleScope:` (ADR 0103) — so the trailing-comment anchor
+        // must still be the `native:` module token, not the class name,
+        // when both a `native:` clause and a following-line `handleScope:`
+        // are present.
+        let source = concat!(
+            "Object subclass: Foo native: my_module  // header comment\n",
+            "  handleScope: #node\n",
+            "\n",
+            "  x => 1\n",
         );
         assert_identity(source);
     }
@@ -4129,6 +4373,256 @@ mod tests {
             "Object subclass: Server\n",
             "\n",
             "  start => 1\n",
+            "\n",
+            "type Timeout = Integer\n",
+        ));
+    }
+
+    // --- Blank line at section boundaries: declarations / standalone methods
+    // / expressions (BT-2943) ---
+    //
+    // BT-2929 only fixed blank-line preservation *within* the interleaved
+    // class/protocol/type-alias declaration section. `Module`'s other two
+    // sections — standalone methods (`Class >> method => body`) and top-level
+    // expressions — are always rendered after it, in that fixed order. These
+    // tests cover the three section *boundaries* where a blank line was still
+    // silently dropped: declarations→standalone-methods,
+    // standalone-method→standalone-method, and
+    // standalone-methods→expressions.
+
+    #[test]
+    fn blank_line_preserved_between_declaration_and_standalone_method() {
+        assert_identity(concat!(
+            "Object subclass: Foo\n",
+            "\n",
+            "  m => 1\n",
+            "\n",
+            "Foo >> bar => 2\n",
+        ));
+    }
+
+    #[test]
+    fn no_blank_line_between_declaration_and_standalone_method_stays_absent() {
+        assert_identity(concat!(
+            "Object subclass: Foo\n",
+            "\n",
+            "  m => 1\n",
+            "Foo >> bar => 2\n",
+        ));
+    }
+
+    #[test]
+    fn blank_line_preserved_between_standalone_methods() {
+        assert_identity(concat!(
+            "Counter >> increment => self.value := self.value + 1\n",
+            "\n",
+            "Counter >> decrement => self.value := self.value - 1\n",
+        ));
+    }
+
+    #[test]
+    fn no_blank_line_between_standalone_methods_stays_absent() {
+        assert_identity(concat!(
+            "Counter >> increment => self.value := self.value + 1\n",
+            "Counter >> decrement => self.value := self.value - 1\n",
+        ));
+    }
+
+    #[test]
+    fn blank_line_before_first_standalone_method_is_dropped() {
+        // Mirrors `blank_line_before_first_top_level_declaration_is_dropped`:
+        // a blank line before the very first construct in the file — here, a
+        // standalone method with no preceding declaration section — is
+        // dropped, not preserved. Two leading newlines are required (see that
+        // test's comment for why one is not enough).
+        let source = "\n\nCounter >> increment => self.value := self.value + 1\n";
+        let formatted = format_source(source).expect("format_source must succeed");
+        assert_eq!(
+            formatted,
+            "Counter >> increment => self.value := self.value + 1\n"
+        );
+    }
+
+    #[test]
+    fn blank_line_preserved_between_standalone_method_and_expression() {
+        assert_identity(concat!(
+            "Counter >> increment => self.value := self.value + 1\n",
+            "\n",
+            "x := 1\n",
+        ));
+    }
+
+    #[test]
+    fn no_blank_line_between_standalone_method_and_expression_stays_absent() {
+        assert_identity(concat!(
+            "Counter >> increment => self.value := self.value + 1\n",
+            "x := 1\n",
+        ));
+    }
+
+    #[test]
+    fn blank_line_preserved_across_all_three_section_boundaries() {
+        // Full combination: declaration, two standalone methods, and an
+        // expression, each separated by a blank line — every boundary from
+        // BT-2943's acceptance criteria in one round-trip.
+        assert_identity(concat!(
+            "Object subclass: Foo\n",
+            "\n",
+            "  m => 1\n",
+            "\n",
+            "Foo >> bar => 2\n",
+            "\n",
+            "Foo >> baz => 3\n",
+            "\n",
+            "x := 1\n",
+        ));
+    }
+
+    #[test]
+    fn blank_line_before_class_name_wins_over_internal_selector_comment_blank_line() {
+        // BT-2943 regression: when a standalone method has no leading comment
+        // before its class name, but does have one wedged between `>>` and
+        // the selector (unusual, but the parser doesn't reject it), the
+        // blank-line signal used for module-level section-boundary spacing
+        // must still come from the position right before the class-name
+        // token — the true start of the construct — not from
+        // `parse_method_definition()`'s own, unrelated collect for that
+        // inner comment (which, on its own, sees no blank line here).
+        let source = concat!(
+            "Counter >> increment => self.value := self.value + 1\n",
+            "\n",
+            "Counter >> // note\n",
+            "  decrement => self.value := self.value - 1\n",
+        );
+        let module = parse_source(source);
+        assert_eq!(module.method_definitions.len(), 2);
+        assert!(
+            module.method_definitions[1]
+                .method
+                .comments
+                .leading_blank_line,
+            "expected the blank line before the second standalone method's \
+             class name to be preserved: {:#?}",
+            module.method_definitions[1].method.comments
+        );
+    }
+
+    #[test]
+    fn blank_line_preserved_between_protocol_and_standalone_method() {
+        // The declarations→standalone-methods boundary must round-trip for
+        // every declaration kind, not just `Object subclass:` — protocols and
+        // type aliases go through the same `TopLevelDecl` interleaving.
+        assert_identity(concat!(
+            "Protocol define: Startable\n",
+            "  start -> Integer\n",
+            "\n",
+            "Counter >> start => 1\n",
+        ));
+    }
+
+    #[test]
+    fn blank_line_preserved_between_type_alias_and_expression_directly() {
+        // Declarations→expressions with no standalone-methods section in
+        // between — exercises the same `is_first_module_item` check in
+        // `parse_module`, but with `method_definitions` empty rather than
+        // `classes`/`protocols`/`type_aliases`.
+        assert_identity(concat!("type Port = Integer\n", "\n", "x := 1\n",));
+    }
+
+    #[test]
+    fn blank_line_preserved_before_class_side_standalone_method() {
+        // The blank-line signal is captured before the class-name token,
+        // ahead of the optional `class` modifier — must still work for
+        // class-side standalone methods (`Counter class >> ...`).
+        assert_identity(concat!(
+            "Counter >> increment => self.value := self.value + 1\n",
+            "\n",
+            "Counter class >> withInitial: n => n\n",
+        ));
+    }
+
+    #[test]
+    fn blank_line_preserved_before_package_qualified_standalone_method() {
+        // Same, for a package-qualified standalone method
+        // (`package@Class >> ...`, ADR 0070) — the blank line must be
+        // captured before the package identifier, not lost when the
+        // `identifier @ Identifier` pair is parsed.
+        assert_identity(concat!(
+            "Counter >> increment => self.value := self.value + 1\n",
+            "\n",
+            "json@Parser >> lenientParse: input => input\n",
+        ));
+    }
+
+    // --- Blank line between a leading comment and its declaration (BT-2945) ---
+    //
+    // `has_blank_line_before_first_comment` (BT-2929's `leading_blank_line`)
+    // only detects a blank line *before* the whole leading-comment block; it
+    // has no way to represent a blank line *inside* that block, between the
+    // last comment and the declaration itself. `blank_line_after_comments`
+    // fills that gap.
+
+    #[test]
+    fn blank_line_preserved_between_leading_comment_and_type_alias() {
+        assert_identity(concat!("// note\n", "\n", "type Foo = Bar\n"));
+    }
+
+    #[test]
+    fn blank_line_preserved_between_leading_comment_and_protocol() {
+        assert_identity(concat!(
+            "// note\n",
+            "\n",
+            "Protocol define: Startable\n",
+            "  start -> Integer\n",
+        ));
+    }
+
+    #[test]
+    fn blank_line_preserved_between_leading_comment_and_class() {
+        assert_identity(concat!(
+            "// note\n",
+            "\n",
+            "Object subclass: Foo\n",
+            "\n",
+            "  m => 1\n",
+        ));
+    }
+
+    #[test]
+    fn no_blank_line_between_leading_comment_and_declaration_stays_absent() {
+        // The converse of the three tests above, for all three declaration
+        // kinds: no blank line in source between the comment and the
+        // declaration must not gain one. This also guards against
+        // `unparse_class_definition`'s pre-fix behaviour, which used to
+        // unconditionally insert a blank line after any non-empty leading
+        // comment regardless of what the source actually had.
+        assert_identity("// note\ntype Foo = Bar\n");
+        assert_identity(concat!(
+            "// note\n",
+            "Protocol define: Startable\n",
+            "  start -> Integer\n",
+        ));
+        assert_identity(concat!(
+            "// note\n",
+            "Object subclass: Foo\n",
+            "\n",
+            "  m => 1\n",
+        ));
+    }
+
+    #[test]
+    fn blank_line_before_comment_block_and_after_it_are_independent_signals() {
+        // A blank line before the whole comment block (BT-2929's
+        // `leading_blank_line`) and a blank line after the last comment,
+        // before the declaration (BT-2945's `blank_line_after_comments`) are
+        // tracked independently and must both round-trip when both are
+        // present in the same source, between two top-level declarations
+        // (blank-before-the-first-declaration-in-a-section is dropped by
+        // design, so this needs a preceding declaration to attach to).
+        assert_identity(concat!(
+            "type Port = Integer\n",
+            "\n",
+            "// note\n",
             "\n",
             "type Timeout = Integer\n",
         ));

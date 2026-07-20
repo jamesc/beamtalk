@@ -602,6 +602,16 @@ impl TypeChecker {
         // the `protocol_registry` parameter directly, not `self`.
         self.protocol_registry = None;
 
+        // Phase 2a (ADR 0108 hot-reload re-check trigger, BT-2899 / BT-2917
+        // follow-up): record every alias name a protocol's own declared
+        // method signatures transitively depend on. Protocol method
+        // signatures have no body, so the main `check_module` pass above —
+        // which normally records `referenced_aliases` while resolving a
+        // class method's `::`-annotated parameters/return type — never
+        // visits them. See `record_protocol_signature_referenced_aliases`'s
+        // doc for why this dedicated walk is needed.
+        self.record_protocol_signature_referenced_aliases(module, protocol_registry);
+
         // Phase 2b: Protocol conformance checking on type annotations.
         // When a parameter type annotation resolves to a protocol name, check
         // that the argument type (if known) conforms structurally.

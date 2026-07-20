@@ -1221,6 +1221,50 @@ fn declaration_level_expect_does_not_strand_preceding_plain_comment() {
 }
 
 #[test]
+fn declaration_level_expect_preserves_leading_blank_line_with_own_comment() {
+    // BT-2944 regression test for `PendingDeclarationExpect::apply_to`.
+    // When the destination declaration has its *own* leading comment
+    // sandwiched between `@expect` and itself, `comments.is_empty()` is
+    // `false`, so `apply_to` keeps the destination's own `CommentAttachment`
+    // instead of replacing it wholesale with the `@expect` token's. Before
+    // the BT-2944 fix, that meant the blank line preceding `@expect` (i.e.
+    // separating the whole `@expect`-annotated method from the previous
+    // one) was silently discarded along with the rest of `self.comments`.
+    //
+    // No unparser reads `leading_blank_line` on a class-member
+    // `CommentAttachment` yet (only top-level class/protocol/type-alias
+    // declarations — see BT-2944), so this asserts directly on the parsed
+    // AST rather than through a format round-trip.
+    let module = parse_ok(
+        "typed Object subclass: Foo\n\
+         \x20\x20first => 1\n\
+         \n\
+         \x20\x20@expect type\n\
+         \x20\x20// trailing note\n\
+         \x20\x20second -> String => 2",
+    );
+    assert_eq!(module.classes.len(), 1);
+    let class = &module.classes[0];
+    assert_eq!(class.methods.len(), 2);
+
+    let second = &class.methods[1];
+    assert_eq!(second.selector.name(), "second");
+    assert_eq!(
+        second.comments.leading.len(),
+        1,
+        "the comment between `@expect` and `second` must still attach: {:?}",
+        second.comments
+    );
+    assert!(
+        second.comments.leading_blank_line,
+        "the blank line before `@expect` must survive the merge even when \
+         the destination keeps its own (otherwise non-empty) leading \
+         comments: {:?}",
+        second.comments
+    );
+}
+
+#[test]
 fn statement_level_expect_inside_body_still_works() {
     // Companion case: `@expect` as the first statement *inside* a method body
     // (deeper than col 2) must keep working exactly as before — it is not a

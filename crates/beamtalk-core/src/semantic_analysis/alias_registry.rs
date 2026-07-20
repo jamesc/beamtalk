@@ -34,15 +34,16 @@
 //! `protocol_registry.has_protocol` check already catches the collision.
 //!
 //! **Cycle detection + topological sort** (ADR 0108 "No recursion",
-//! BT-2896): [`register_module`](AliasRegistry::register_module) and
-//! [`redefine_alias`](AliasRegistry::redefine_alias) both run a single DFS
+//! BT-2896): [`register_module`](AliasRegistry::register_module),
+//! [`add_pre_loaded`](AliasRegistry::add_pre_loaded) (BT-2954), and
+//! [`redefine_alias`](AliasRegistry::redefine_alias) all run a single DFS
 //! ([`find_cycles`]) over the alias dependency graph — edges are RHS
 //! references to other registered alias names — that detects reference
 //! cycles (including self-reference) and produces a topological resolution
-//! order as its post-order, in one walk. A batch-time cycle is a non-fatal
-//! diagnostic (the alias still registers); a live redefinition that would
-//! introduce a cycle is rejected outright, leaving the alias table
-//! unchanged.
+//! order as its post-order, in one walk. A batch-time cycle (via
+//! `register_module` or `add_pre_loaded`) is a non-fatal diagnostic (the
+//! alias still registers); a live redefinition that would introduce a cycle
+//! is rejected outright, leaving the alias table unchanged.
 //!
 //! **References:**
 //! - `docs/ADR/0108-named-union-type-aliases.md` — Semantics (Namespace,
@@ -54,10 +55,10 @@ use std::collections::HashMap;
 
 use ecow::EcoString;
 
-use crate::ast::{Module, TypeAliasDefinition, TypeAnnotation};
+use crate::ast::{Identifier, Module, TypeAliasDefinition, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
-use crate::semantic_analysis::type_checker::is_generic_type_param;
+use crate::semantic_analysis::type_checker::{is_generic_type_param, resolve_type_annotation};
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
 /// Information about a type alias in the registry.
@@ -432,6 +433,35 @@ impl AliasRegistry {
             .collect()
     }
 
+    /// Reconstructs a single [`AliasInfo`] from a standalone declaration
+    /// string (e.g. `"type RestartStrategy = #temporary | #transient |
+    /// #permanent"` or `"internal type Foo = Integer"`) — BT-2935.
+    ///
+    /// Lexes and parses `text` as its own tiny module and delegates to
+    /// [`Self::extract_alias_infos`], returning the first (and expected only)
+    /// entry. This is the read-side counterpart of `build_stdlib.rs`'s
+    /// generator, which persists each stdlib alias as exactly this kind of
+    /// verbatim declaration text into `generated_builtins.rs` — see that
+    /// generator's module doc for why source text (re-parsed here with the
+    /// same lexer/parser every other caller already trusts) was chosen over
+    /// adding `serde` derives to the recursive [`TypeAnnotation`] AST or
+    /// hand-rolling a literal-Rust-construction emitter for it.
+    ///
+    /// Returns `None` if `text` contains no parseable `type Name = ...`
+    /// declaration (e.g. empty input, or a caller passing malformed text) —
+    /// non-fatal by design, mirroring [`Self::extract_alias_infos`]'s own
+    /// "always returns whatever was found, however much that is" contract.
+    /// The returned `AliasInfo`'s `span` describes an offset into `text`
+    /// alone, not any original file — fine for a pre-loaded alias, whose
+    /// span is already "foreign" to the module currently being compiled (see
+    /// [`Self::add_pre_loaded`]'s doc).
+    #[must_use]
+    pub fn from_source_text(text: &str) -> Option<AliasInfo> {
+        let tokens = crate::source_analysis::lex_with_eof(text);
+        let (module, _diagnostics) = crate::source_analysis::parse(tokens);
+        Self::extract_alias_infos(&module).into_iter().next()
+    }
+
     /// Seed the registry with aliases pre-compiled from other source files or
     /// packages, or carried over from earlier turns of the same REPL session.
     ///
@@ -472,6 +502,25 @@ impl AliasRegistry {
     /// open-world context, where there is no package boundary to enforce at
     /// all — mirrors [`crate::semantic_analysis::class_hierarchy::ClassHierarchy::add_from_beam_meta`]'s
     /// unconditional accept in that context).
+    ///
+    /// **Cross-batch cycle detection** (ADR 0108 "No recursion", BT-2896,
+    /// BT-2954): like [`Self::register_module`], this method finishes by
+    /// running [`find_cycles`] over the *whole* accumulated `self.aliases`
+    /// map (module-local declarations already registered, plus every
+    /// pre-loaded batch seeded so far, including this one) and reporting any
+    /// cycle found, deduplicated against [`Self::reported_cycles`] the same
+    /// way `register_module` is. Without this, a cycle spanning aliases from
+    /// two separately-compiled files — each half only visible to the other
+    /// via `pre_loaded_aliases` — could go entirely unreported: relying on a
+    /// *later* `register_module` call to re-scan the merged map doesn't
+    /// cover every caller, since `register_module` only runs when the
+    /// current module declares at least one alias of its own (see
+    /// `semantic_analysis::mod.rs`'s `analyse_full`), and some callers (e.g.
+    /// `project_index.rs`, `lint.rs`) call `add_pre_loaded` without ever
+    /// calling `register_module` on that registry at all. Non-fatal, exactly
+    /// like `register_module`'s check: a cyclic alias still seeds into the
+    /// table (`resolve_type_annotation`'s `expanding` guard, BT-2895, keeps
+    /// expansion safe either way).
     pub fn add_pre_loaded(
         &mut self,
         aliases: Vec<AliasInfo>,
@@ -554,6 +603,23 @@ impl AliasRegistry {
 
             self.aliases.entry(info.name.clone()).or_insert(info);
         }
+
+        // ADR 0108 "No recursion" / BT-2896 / BT-2954: cycle detection over
+        // the whole accumulated `self.aliases` map, mirroring
+        // `register_module`'s own `find_cycles` call (see its doc) — see
+        // this method's doc for why `add_pre_loaded` cannot simply rely on a
+        // later `register_module` call to do this instead. Deduplicated
+        // against `self.reported_cycles`, the same set `register_module`
+        // shares, so a cycle already reported here is not reported again if
+        // a subsequent `register_module` (or `add_pre_loaded`) call re-scans
+        // the same still-unresolved cycle.
+        let (cycles, _resolution_order) = find_cycles(&self.aliases);
+        for (cycle, cycle_span) in cycles {
+            if self.reported_cycles.insert(canonical_cycle_key(&cycle)) {
+                diagnostics.push(cycle_diagnostic(&cycle, cycle_span));
+            }
+        }
+
         diagnostics
     }
 
@@ -561,6 +627,46 @@ impl AliasRegistry {
     #[must_use]
     pub fn get(&self, name: &str) -> Option<&AliasInfo> {
         self.aliases.get(name)
+    }
+
+    /// Best-effort alias-aware display for a bare type name pulled from
+    /// [`ClassHierarchy`]'s pre-ADR-0108 `EcoString` storage (state field
+    /// types via `state_field_type`, method parameter types via
+    /// `MethodInfo::param_types`) — BT-2911, closing the gap BT-2897's
+    /// `TypeProvenance::Aliased` left in diagnostic paths that never touch
+    /// `InferredType` at all: `hover_provider.rs`'s `Expression::FieldAccess`
+    /// branch, and `type_checker::validation`'s `check_field_assignment` /
+    /// `check_argument_types`.
+    ///
+    /// Returns `Some("AliasName (expansion)")` when `name` is *exactly* a
+    /// registered alias name — built by re-resolving a synthetic `Simple`
+    /// reference to `name` through [`resolve_type_annotation`] with `self`
+    /// as the alias registry, then
+    /// [`InferredType::display_for_diagnostic`](crate::semantic_analysis::type_checker::InferredType::display_for_diagnostic).
+    /// That is the exact same path production `InferredType`-based
+    /// diagnostics already use (see `type_resolver.rs`'s
+    /// `resolve_type_annotation_inner`, which tags the resolved value via
+    /// `InferredType::tag_alias_expansion` on every alias reference), so the
+    /// returned string is byte-identical to what hovering a parameter/local
+    /// declared with the same alias type already renders.
+    ///
+    /// Returns `None` when `name` is not a registered alias name —
+    /// including when `name` is a flattened multi-token annotation string
+    /// (a union or generic, e.g. `"RestartStrategy | Foo"`) that merely
+    /// *contains* an alias name as a substring: `ClassHierarchy`'s current
+    /// storage is a single opaque `EcoString` per field/param with no
+    /// re-parseable structure, so only the common bare-alias-reference case
+    /// (`field :: AliasName`) is recognised. Callers should fall back to
+    /// their existing plain-name display in that case.
+    #[must_use]
+    pub fn resolve_display_name(&self, name: &str) -> Option<EcoString> {
+        let info = self.aliases.get(name)?;
+        let reference = TypeAnnotation::Simple(Identifier {
+            name: info.name.clone(),
+            span: info.span,
+        });
+        let resolved = resolve_type_annotation(&reference, &HashMap::new(), None, Some(self));
+        resolved.display_for_diagnostic()
     }
 
     /// Checks if an alias exists in the registry.
@@ -2086,6 +2192,55 @@ mod tests {
         );
     }
 
+    // ---- BT-2935: from_source_text (build_stdlib.rs's generated-table
+    //      read-side reparse) ----
+
+    #[test]
+    fn from_source_text_reconstructs_simple_alias() {
+        let info = AliasRegistry::from_source_text("type TimeoutMs = Integer")
+            .expect("should parse a simple alias declaration");
+        assert_eq!(info.name.as_str(), "TimeoutMs");
+        assert!(!info.is_internal);
+        // Spans are relative to `text` alone (not any original file), so
+        // compare structurally via `type_name()` rather than full `PartialEq`
+        // (which would also compare the — necessarily different — spans).
+        assert_eq!(info.annotation.type_name(), "Integer");
+        assert!(matches!(info.annotation, TypeAnnotation::Simple(_)));
+    }
+
+    #[test]
+    fn from_source_text_reconstructs_union_alias() {
+        let info = AliasRegistry::from_source_text(
+            "type RestartStrategy = #temporary | #transient | #permanent",
+        )
+        .expect("should parse a union alias declaration");
+        assert_eq!(info.name.as_str(), "RestartStrategy");
+        let TypeAnnotation::Union { types, .. } = &info.annotation else {
+            panic!("expected a Union annotation, got: {:?}", info.annotation);
+        };
+        let names: Vec<&str> = types
+            .iter()
+            .map(|t| match t {
+                TypeAnnotation::Singleton { name, .. } => name.as_str(),
+                other => panic!("expected a Singleton member, got: {other:?}"),
+            })
+            .collect();
+        assert_eq!(names, vec!["temporary", "transient", "permanent"]);
+    }
+
+    #[test]
+    fn from_source_text_preserves_internal_modifier() {
+        let info = AliasRegistry::from_source_text("internal type Scratch = Integer")
+            .expect("should parse an internal alias declaration");
+        assert!(info.is_internal);
+    }
+
+    #[test]
+    fn from_source_text_returns_none_for_non_alias_text() {
+        assert!(AliasRegistry::from_source_text("").is_none());
+        assert!(AliasRegistry::from_source_text("Object subclass: Foo").is_none());
+    }
+
     // ---- BT-2898: add_pre_loaded (pattern to mirror:
     //      ProtocolRegistry::add_pre_loaded, BT-2006) ----
 
@@ -2200,6 +2355,134 @@ mod tests {
             registry.get("Id").unwrap().annotation,
             TypeAnnotation::Simple(ident("String"))
         );
+    }
+
+    #[test]
+    fn add_pre_loaded_detects_cross_file_cycle() {
+        // BT-2954: two separately-compiled files each declare one half of
+        // the ADR 0108 Error-example cycle:
+        //   file A: type Ab = Bc | Integer
+        //   file B: type Bc = Ab | Symbol
+        // Neither file's own `register_module` call ever sees the other
+        // half, so the only place this cross-file cycle can be caught is
+        // where the two are merged — `add_pre_loaded`, seeded from a second
+        // file/package's collected `AliasInfo`s (mirrors
+        // `repeated_register_module_calls_report_the_same_cycle_only_once`'s
+        // two-call shape, but via `add_pre_loaded` instead of
+        // `register_module`, since neither half is a module-local
+        // declaration here).
+        let hierarchy = ClassHierarchy::with_builtins();
+        let protocol_registry = ProtocolRegistry::new();
+        let mut registry = AliasRegistry::new();
+
+        let ab = alias_info(
+            "Ab",
+            TypeAnnotation::Union {
+                types: vec![
+                    TypeAnnotation::Simple(ident("Bc")),
+                    TypeAnnotation::Simple(ident("Integer")),
+                ],
+                span: span(),
+            },
+            false,
+        );
+        let bc = alias_info(
+            "Bc",
+            TypeAnnotation::Union {
+                types: vec![
+                    TypeAnnotation::Simple(ident("Ab")),
+                    TypeAnnotation::Simple(ident("Symbol")),
+                ],
+                span: span(),
+            },
+            false,
+        );
+
+        // First batch: only `Ab` is known yet — `Bc` isn't registered, so
+        // there is no back-edge to close a cycle on.
+        let diags1 = registry.add_pre_loaded(vec![ab], &hierarchy, &protocol_registry, None);
+        assert!(
+            diags1.is_empty(),
+            "no cycle possible before Bc is seeded: {diags1:?}"
+        );
+
+        // Second batch closes the cycle.
+        let diags2 = registry.add_pre_loaded(vec![bc], &hierarchy, &protocol_registry, None);
+        assert_eq!(
+            diags2.len(),
+            1,
+            "expected exactly one cycle diagnostic: {diags2:?}"
+        );
+        assert!(
+            diags2[0]
+                .message
+                .contains("type alias cycle: `Ab` \u{2192} `Bc` \u{2192} `Ab`"),
+            "unexpected message: {}",
+            diags2[0].message
+        );
+        // Both aliases still seed — non-fatal, mirroring
+        // `two_alias_cycle_is_detected`'s same-file behaviour.
+        assert!(registry.has_alias("Ab"));
+        assert!(registry.has_alias("Bc"));
+    }
+
+    #[test]
+    fn add_pre_loaded_cycle_is_not_double_reported_by_a_later_register_module_call() {
+        // BT-2954: `add_pre_loaded` and `register_module` now share
+        // `reported_cycles` (see its doc) — a cycle already reported when
+        // `add_pre_loaded` seeds the second half must not be re-reported
+        // when a later `register_module` call re-scans the same
+        // still-unresolved cycle over the merged map, mirroring
+        // `repeated_register_module_calls_report_the_same_cycle_only_once`'s
+        // existing same-file dedup guarantee — this is the cross-method
+        // extension of that guarantee, not a new mechanism.
+        let hierarchy = ClassHierarchy::with_builtins();
+        let protocol_registry = ProtocolRegistry::new();
+        let mut registry = AliasRegistry::new();
+
+        let ab = alias_info(
+            "Ab",
+            TypeAnnotation::Union {
+                types: vec![
+                    TypeAnnotation::Simple(ident("Bc")),
+                    TypeAnnotation::Simple(ident("Integer")),
+                ],
+                span: span(),
+            },
+            false,
+        );
+        let bc = alias_info(
+            "Bc",
+            TypeAnnotation::Union {
+                types: vec![
+                    TypeAnnotation::Simple(ident("Ab")),
+                    TypeAnnotation::Simple(ident("Symbol")),
+                ],
+                span: span(),
+            },
+            false,
+        );
+
+        let diags1 = registry.add_pre_loaded(vec![ab, bc], &hierarchy, &protocol_registry, None);
+        assert_eq!(diags1.len(), 1, "expected one cycle diagnostic: {diags1:?}");
+
+        // A later `register_module` call (e.g. registering an unrelated
+        // module-local alias in the same compile) re-scans the whole
+        // accumulated map — including the still-present Ab/Bc cycle — and
+        // must not resurface it.
+        let unrelated_file = Module {
+            type_aliases: vec![alias_def(
+                "Unrelated",
+                TypeAnnotation::Simple(ident("Integer")),
+            )],
+            ..empty_module()
+        };
+        let diags2 = registry.register_module(&unrelated_file, &hierarchy, &protocol_registry);
+        assert!(
+            diags2.is_empty(),
+            "the already-reported Ab/Bc cycle must not resurface: {diags2:?}"
+        );
+        assert!(registry.has_alias("Unrelated"));
     }
 
     #[test]

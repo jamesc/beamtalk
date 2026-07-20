@@ -24,6 +24,7 @@ use ecow::EcoString;
 
 use crate::ast::{Block, ClassKind, Expression, Module};
 use crate::ast_walker::walk_expression;
+use crate::semantic_analysis::alias_registry::AliasRegistry;
 use crate::semantic_analysis::type_checker::TypeMap;
 use crate::semantic_analysis::type_checker::sendability::{self, HandleScope, Tier};
 use crate::semantic_analysis::{BlockInfo, ClassHierarchy};
@@ -39,11 +40,16 @@ use crate::state_threading_selectors::is_state_threading_keyword_selector;
 /// a non-self, non-state-threading message to an actor. Blocks in local
 /// positions (`do:`, `collect:`, `ifTrue:`, `whileTrue:`, self-sends) stay
 /// silent. `#node`-scoped and `Dynamic` captures are silent in v1.
+///
+/// `alias_registry` (BT-2936, ADR 0108 follow-up to BT-2928) lets a captured
+/// alias-typed field's tier compose through the alias's expansion instead of
+/// falling back to `Tier::Unknown` for the opaque alias name.
 pub(crate) fn check_block_capture_sendability(
     module: &Module,
     hierarchy: &ClassHierarchy,
     type_map: &TypeMap,
     block_info: &HashMap<Span, BlockInfo>,
+    alias_registry: Option<&AliasRegistry>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let mut visit = |expr: &Expression| {
@@ -63,7 +69,14 @@ pub(crate) fn check_block_capture_sendability(
         }
         for arg in arguments {
             if let Expression::Block(block) = arg {
-                check_block_captures(block, hierarchy, type_map, block_info, diagnostics);
+                check_block_captures(
+                    block,
+                    hierarchy,
+                    type_map,
+                    block_info,
+                    alias_registry,
+                    diagnostics,
+                );
             }
         }
     };
@@ -137,6 +150,7 @@ fn check_block_captures(
     hierarchy: &ClassHierarchy,
     type_map: &TypeMap,
     block_info: &HashMap<Span, BlockInfo>,
+    alias_registry: Option<&AliasRegistry>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let Some(info) = block_info.get(&block.span) else {
@@ -149,7 +163,9 @@ fn check_block_captures(
         let Some(ty) = type_map.get(use_span) else {
             continue;
         };
-        let Tier::HandleScoped(HandleScope::Process) = sendability::tier_of(ty, hierarchy) else {
+        let Tier::HandleScoped(HandleScope::Process) =
+            sendability::tier_of(ty, hierarchy, alias_registry)
+        else {
             continue;
         };
         let ty_name = ty

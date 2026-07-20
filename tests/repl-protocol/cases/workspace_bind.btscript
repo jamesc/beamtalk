@@ -79,7 +79,7 @@ globals2 includesKey: #MyValue
 
 // Register an actor reference
 counter := Counter spawn
-// => _
+// => Actor(Counter, _)
 
 Workspace bind: counter as: #SharedCounter
 // => nil

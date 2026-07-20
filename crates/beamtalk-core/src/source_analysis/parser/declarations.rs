@@ -79,25 +79,37 @@ impl PendingDeclarationExpect {
         doc_comment: &mut Option<String>,
         comments: &mut CommentAttachment,
     ) {
-        if self.expect.is_some() {
+        let had_expect = self.expect.is_some();
+        if had_expect {
             *expect = self.expect;
         }
         if doc_comment.is_none() {
             *doc_comment = self.doc_comment;
         }
+        // BT-2944: decide `leading_blank_line` explicitly, independently of
+        // whether `leading`/`trailing` get replaced below, rather than
+        // piggybacking on the `comments.is_empty()` check below (which only
+        // ever looks at `leading`/`trailing`). When an `@expect` was
+        // actually present, it — and anything directly above it — is the
+        // true start of this declaration's leading trivia, so the
+        // blank-line-before-`@expect` signal always wins over the
+        // destination's own signal, which only reflects the (usually
+        // nonexistent) gap between `@expect` and the declaration keyword.
+        // Without this, a declaration with its own leading comment
+        // sandwiched between `@expect` and itself would keep its own
+        // (typically `false`) `leading_blank_line` and silently drop the
+        // fact that a blank line separated the whole `@expect`-annotated
+        // declaration from the previous one. No unparser reads
+        // `leading_blank_line` on class-member-level `CommentAttachment`s
+        // yet (state/class-var/method — only top-level class/protocol/
+        // type-alias declarations), but the correct merge is captured now
+        // so it doesn't need rediscovering once that changes.
+        let expect_leading_blank_line = self.comments.leading_blank_line;
         if comments.is_empty() {
-            // `CommentAttachment::is_empty()` only looks at `leading`/
-            // `trailing`, so this deliberately ignores `leading_blank_line`
-            // on both sides (BT-2929) — the declaration's own (usually
-            // `false`, since it directly follows `@expect` with no blank
-            // line) `leading_blank_line` is kept when `comments` is
-            // otherwise non-empty, and overwritten by `self.comments`'s
-            // value when it's replaced wholesale. Harmless today because no
-            // unparser reads `leading_blank_line` on class-member-level
-            // `CommentAttachment`s (state/class-var/method) — only on
-            // top-level class/protocol/type-alias declarations. Tracked as
-            // BT-2944: revisit this overwrite if that ever changes.
             *comments = self.comments;
+        }
+        if had_expect {
+            comments.leading_blank_line = expect_leading_blank_line;
         }
     }
 }
@@ -231,15 +243,47 @@ impl Parser {
             None
         };
 
+        // Anchor for a trailing comment on the class header line itself
+        // (e.g. `Object subclass: Foo  // comment`) — the last token consumed
+        // so far (class name, type params, or `native:` module). Captured
+        // *before* parsing `handleScope:` because that clause conventionally
+        // sits on its own indented line (ADR 0103); if we let
+        // `collect_trailing_comment()` look at `current - 1` unconditionally
+        // after parsing it, it would inspect the `#symbol` token's own
+        // trailing trivia instead of the header line's, silently dropping a
+        // header-line comment (BT-2942).
+        let header_line_end = self.current.saturating_sub(1);
+        let handle_scope_on_new_line = matches!(
+            self.current_kind(),
+            TokenKind::Keyword(k) if k == "handleScope:"
+        ) && self.current_token().has_leading_newline();
+
         // Parse optional `handleScope: #symbol` clause (ADR 0103). Appears at
         // the head of the class body, like `native:` is a header clause.
         let handle_scope = self.parse_optional_handle_scope();
 
         // Collect a trailing end-of-line comment on the class header line
-        // (after the last header token — class name, type params, `native:`
-        // module, or `handleScope:` symbol, whichever comes last), mirroring
-        // the identical fix for type alias/protocol declarations (BT-2906).
-        comments.trailing = self.collect_trailing_comment();
+        // (after the last header token — class name, type params, or
+        // `native:` module — or, when `handleScope:` follows on the same
+        // line, its `#symbol`), mirroring the identical fix for type
+        // alias/protocol declarations (BT-2906). When `handleScope:` is on
+        // its own line, prefer a comment on the header line itself, but fall
+        // back to the post-`handleScope:` check (its old, only behavior) so
+        // a comment trailing the `handleScope: #symbol` line is still
+        // captured instead of silently dropped.
+        //
+        // `comments.trailing` is a single slot, so if *both* the header line
+        // and the `handleScope:` line carry a trailing comment, only the
+        // header-line one survives — the `handleScope:`-line comment is
+        // discarded. This is a deliberate choice (the header-line comment is
+        // the more prominent of the two), not an oversight; see
+        // `parse_handle_scope_on_new_line_prefers_header_over_scope_comment_when_both_present`.
+        comments.trailing = if handle_scope.is_some() && handle_scope_on_new_line {
+            self.collect_trailing_comment_at(header_line_end)
+                .or_else(|| self.collect_trailing_comment())
+        } else {
+            self.collect_trailing_comment()
+        };
 
         // Parse class body (state declarations, instance methods, class methods, class variables)
         let (state, methods, class_methods, class_variables) = self.parse_class_body();
@@ -1756,8 +1800,18 @@ impl Parser {
 
         // Collect leading comments from the class-name token's leading trivia.
         // parse_identifier() advances past the class name without reading trivia,
-        // so we must collect here before the token is consumed.
-        let mut class_leading_comments = self.collect_comment_attachment().leading;
+        // so we must collect here before the token is consumed. Also remember
+        // whether a blank line preceded the whole construct (before any leading
+        // comment, or before the class-name token itself if it has none) — this
+        // is the accurate signal for "was there a blank line before this
+        // standalone method", mirroring how classes/protocols/type-aliases
+        // capture `leading_blank_line` once at the start of their own construct
+        // (BT-2929). The later `collect_comment_attachment()` inside
+        // `parse_method_definition()` looks at the selector token instead, which
+        // would otherwise silently lose this signal (BT-2943).
+        let initial_comments = self.collect_comment_attachment();
+        let leading_blank_line = initial_comments.leading_blank_line;
+        let mut class_leading_comments = initial_comments.leading;
 
         // Parse class name, with optional package qualifier (ADR 0070).
         // Pattern: `identifier @ Identifier` or just `Identifier`.
@@ -1813,6 +1867,19 @@ impl Parser {
             class_leading_comments.append(&mut method.comments.leading);
             method.comments.leading = class_leading_comments;
         }
+        // BT-2943: `leading_blank_line` is consulted only by the module-level
+        // unparser, to decide whether to re-emit a blank line before this
+        // whole standalone-method construct (mirroring
+        // `TopLevelDecl::preceding_blank_line` for classes/protocols/type
+        // aliases, BT-2929) — never to control spacing *within* the leading
+        // comment block, which `unparse_comment_attachment_leading` handles
+        // itself via each comment's own `preceding_blank_line`. So the value
+        // captured before the class-name token — the true start of this
+        // construct — always wins here, even in the obscure case of a
+        // comment sitting between `>>` and the selector (whose own,
+        // internally-computed `leading_blank_line` describes a different gap
+        // that nothing renders).
+        method.comments.leading_blank_line = leading_blank_line;
 
         let span = start.merge(method.span);
 

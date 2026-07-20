@@ -1013,6 +1013,16 @@ impl Parser {
         // consecutive leading comments (BT-2929).
         let leading_blank_line = self.current_token().has_blank_line_before_first_comment();
         let mut leading = Vec::new();
+        // Tracks blank lines *between* consecutive leading comments (BT-2929)
+        // as the loop below walks the trivia. Its value when the loop ends
+        // additionally doubles as "is there a blank line after the very last
+        // leading comment, before whatever follows" (BT-2945) — see
+        // `blank_line_after_comments` below, which reads it in that final
+        // state. An already-attached `///` doc-comment trivia item (handled
+        // in the `DocComment` arm) does not reset this flag, so a blank line
+        // detected right after the last non-doc-comment leading comment
+        // survives untouched through any attached doc-comment trivia that
+        // follows, correctly describing the gap before that doc comment too.
         let mut saw_blank_line = false;
         // Positions (within this token's leading trivia) already captured by
         // the immediately-preceding `collect_doc_comment()` call, if any —
@@ -1083,10 +1093,16 @@ impl Parser {
                 }
             }
         }
+        // BT-2945: a blank line after the *last* leading comment (before the
+        // declaration's own doc comment, or the declaration itself when it
+        // has none) — meaningless without a leading comment to have a gap
+        // after, hence gated on `leading` being non-empty.
+        let blank_line_after_comments = !leading.is_empty() && saw_blank_line;
         CommentAttachment {
             leading,
             trailing: None,
             leading_blank_line,
+            blank_line_after_comments,
         }
     }
 
@@ -1104,7 +1120,26 @@ impl Parser {
         if self.current == 0 {
             return None;
         }
-        let last_token = &self.tokens[self.current - 1];
+        self.collect_trailing_comment_at(self.current - 1)
+    }
+
+    /// Collects a trailing end-of-line comment from the trailing trivia of a
+    /// specific, already-consumed token (`token_idx < self.current`).
+    ///
+    /// Use this instead of [`Self::collect_trailing_comment`] when one or more
+    /// tokens have been consumed *after* the line whose trailing comment you
+    /// want to check — e.g. a class header's `handleScope: #symbol` clause
+    /// (BT-2942) can follow the header on its own line, in which case
+    /// `current - 1` would point at the `#symbol` token rather than the
+    /// header line's last token.
+    pub(super) fn collect_trailing_comment_at(&self, token_idx: usize) -> Option<Comment> {
+        assert!(
+            token_idx < self.current && token_idx < self.tokens.len(),
+            "collect_trailing_comment_at: token_idx {token_idx} must be < current ({}) and < tokens.len() ({})",
+            self.current,
+            self.tokens.len()
+        );
+        let last_token = &self.tokens[token_idx];
         for trivia in last_token.trailing_trivia() {
             if let super::Trivia::LineComment(text) = trivia {
                 let s = text.as_str();
@@ -1254,8 +1289,18 @@ impl Parser {
                 method_definitions.push(method_def);
             } else {
                 let pos_before = self.current;
-                // BT-987: detect blank lines (2+ newlines) before this statement
-                let has_blank_line = !expressions.is_empty()
+                // BT-987: detect blank lines (2+ newlines) before this statement.
+                // BT-2943: this must also fire for the *first* expression when it
+                // follows a class/protocol/type-alias declaration or a standalone
+                // method — not only when it follows another expression — so the
+                // blank line separating the expressions section from whatever
+                // section precedes it round-trips through `beamtalk fmt`.
+                let is_first_module_item = classes.is_empty()
+                    && method_definitions.is_empty()
+                    && protocols.is_empty()
+                    && type_aliases.is_empty()
+                    && expressions.is_empty();
+                let has_blank_line = !is_first_module_item
                     && self.current_token().has_blank_line_before_first_comment();
                 let mut comments = self.collect_comment_attachment();
                 let expr = self.parse_expression();

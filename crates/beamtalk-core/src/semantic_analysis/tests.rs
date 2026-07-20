@@ -4553,6 +4553,36 @@ fn referenced_aliases_records_a_seeded_cross_package_alias_and_excludes_a_foreig
     );
 }
 
+// BT-2917 (BT-2899 follow-up, ADR 0108 hot-reload re-check trigger): a
+// protocol's own declared method-signature annotations must record
+// `referenced_aliases` dependency edges exactly like a class method's do —
+// confirmed missing by inspection before this fix (protocol method
+// signatures have no body, so the class-method-body-only call sites that
+// normally populate this field never visit them). Both an instance-side
+// parameter annotation (`heading:`) and a class-side return-type annotation
+// (`class default`) are covered, since `beamtalk_alias_xref` needs edges for
+// both sides of a protocol's signature.
+#[test]
+fn protocol_method_signature_records_referenced_aliases() {
+    let src = "type Direction = #north | #south | #east | #west\n\n\
+               Protocol define: Directional\n  \
+               heading: d :: Direction -> Boolean\n  \
+               class default -> Direction\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _parse_diags) = crate::source_analysis::parse(tokens);
+
+    let result = analyse(&module);
+
+    assert!(
+        result
+            .referenced_aliases
+            .contains(&EcoString::from("Direction")),
+        "expected Direction in referenced_aliases from the protocol's own \
+         method signatures, got: {:?}",
+        result.referenced_aliases
+    );
+}
+
 // BT-2898: end-to-end wiring check — the E0402 alias-leak checks (Phase 8)
 // must fire through the full `analyse_with_options` pipeline, not just when
 // the validator functions are called directly in `visibility_validators.rs`.
