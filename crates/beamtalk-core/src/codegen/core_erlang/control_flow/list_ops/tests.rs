@@ -461,8 +461,8 @@ fn test_sort_with_mutation_compiles() {
         "sort: with mutation should use lists:sort. Got:\n{code}"
     );
     assert!(
-        code.contains("'$bt_sort_state'"),
-        "sort: should use process dictionary for state. Got:\n{code}"
+        code.contains("'erlang':'make_ref'"),
+        "sort: should use a fresh per-invocation process dictionary key (BT-2948). Got:\n{code}"
     );
 }
 
@@ -2447,9 +2447,9 @@ fn test_sort_with_local_mutation_uses_process_dict() {
     // generate_local_var_assignment_in_loop instead of generate_field_assignment_open.
     // The local var is threaded via maps:put with key '__local__n' (not bare 'n').
     //
-    // KNOWN LIMITATION (BT-2948): the process-dict key '$bt_sort_state' is fixed,
-    // not unique per call site. Nested mutating sort: calls in the same process
-    // can stomp each other's state — this test blesses only the single-call case.
+    // BT-2948: the process-dict key is a fresh `erlang:make_ref/0` generated at the
+    // start of each invocation (not a fixed atom), so nested/recursive mutating
+    // sort: calls in the same process can't stomp each other's state.
     let src = concat!(
         "Actor subclass: Ctr\n",
         "  state: x = 0\n\n",
@@ -2463,11 +2463,34 @@ fn test_sort_with_local_mutation_uses_process_dict() {
         "sort: with local mutation should use lists:sort. Got:\n{code}"
     );
     assert!(
-        code.contains("'$bt_sort_state'"),
-        "sort: should use process dictionary with '$bt_sort_state' key. Got:\n{code}"
+        code.contains("'erlang':'make_ref'"),
+        "sort: should use a fresh per-invocation process dictionary key (BT-2948). Got:\n{code}"
     );
     assert!(
         code.contains("'__local__n'"),
         "sort: local var mutation should thread '__local__n' via maps:put. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_nested_sort_with_mutations_uses_distinct_state_keys() {
+    // BT-2948: a mutating sort: comparator that itself performs a nested mutating
+    // sort: must not have its process-dict state stomped by the inner call. Each
+    // `generate_list_sort_with_mutations` invocation now binds its own fresh
+    // `erlang:make_ref/0`-derived key, so the two calls never share process-dict state.
+    let src = concat!(
+        "Actor subclass: Ctr\n",
+        "  state: n = 0\n\n",
+        "  run: items =>\n",
+        "    items sort: [:a :b |\n",
+        "      self.n := self.n + 1.\n",
+        "      #(3, 1, 2) sort: [:c :d | self.n := self.n + 1. c < d].\n",
+        "      a < b]\n",
+    );
+    let code = codegen(src);
+    let make_ref_count = code.matches("'erlang':'make_ref'").count();
+    assert_eq!(
+        make_ref_count, 2,
+        "nested sort: with mutations should generate one fresh state key per call site (outer + inner). Got:\n{code}"
     );
 }

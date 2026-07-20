@@ -1904,7 +1904,10 @@ impl CoreErlangGenerator {
     /// BT-1487: Generates stateful `sort:` using process dictionary for state threading.
     ///
     /// Strategy:
-    /// 1. Pack current state into process dictionary key `'$bt_sort_state'`
+    /// 1. Pack current state into a process dictionary key unique to this invocation
+    ///    (BT-2948: a fresh `erlang:make_ref/0`, not a fixed atom — nested/recursive
+    ///    calls to the same call site each get their own key, so they can't stomp
+    ///    each other's state).
     /// 2. Build a wrapper comparator that reads state, calls the block body,
     ///    writes updated state back, returns boolean result
     /// 3. Call `lists:sort/2` with the wrapper
@@ -1934,7 +1937,8 @@ impl CoreErlangGenerator {
         let var_a = Self::to_core_erlang_var(param_a);
         let var_b = Self::to_core_erlang_var(param_b);
 
-        let state_key = "'$bt_sort_state'";
+        let state_key_var = self.fresh_temp_var("SortStateKey");
+        let state_key = leaf::var(state_key_var.clone());
 
         // Map-accumulator path (always used for sort — see doc comment above).
         let (pack_doc, init_state) = plan.generate_pack_prefix(self);
@@ -1947,8 +1951,10 @@ impl CoreErlangGenerator {
             safe_list_var.clone(),
         ));
         docs.push(docvec![
-            "let _ = call 'erlang':'put'(",
-            state_key,
+            "let ",
+            leaf::var(state_key_var),
+            " = call 'erlang':'make_ref'() in let _ = call 'erlang':'put'(",
+            state_key.clone(),
             ", ",
             leaf::var(init_state),
             ") in let ",
@@ -1958,7 +1964,7 @@ impl CoreErlangGenerator {
             ", ",
             leaf::var(var_b.clone()),
             ") -> let StateAcc = call 'erlang':'get'(",
-            state_key,
+            state_key.clone(),
             ") in ",
         ]);
 
@@ -1989,7 +1995,7 @@ impl CoreErlangGenerator {
                     let current = self.current_state_var();
                     docs.push(docvec![
                         "let _ = call 'erlang':'put'(",
-                        state_key,
+                        state_key.clone(),
                         ", ",
                         leaf::var(current),
                         ") in 'true'",
@@ -2002,7 +2008,7 @@ impl CoreErlangGenerator {
                     let current = self.current_state_var();
                     docs.push(docvec![
                         "let _ = call 'erlang':'put'(",
-                        state_key,
+                        state_key.clone(),
                         ", ",
                         leaf::var(current),
                         ") in 'true'",
@@ -2018,7 +2024,7 @@ impl CoreErlangGenerator {
                     " = ",
                     expr_code,
                     " in let _ = call 'erlang':'put'(",
-                    state_key,
+                    state_key.clone(),
                     ", ",
                     leaf::var(current),
                     ") in ",
@@ -2048,7 +2054,7 @@ impl CoreErlangGenerator {
             ") in let ",
             leaf::var(state_out.clone()),
             " = call 'erlang':'get'(",
-            state_key,
+            state_key.clone(),
             ") in let _ = call 'erlang':'erase'(",
             state_key,
             ") in ",
