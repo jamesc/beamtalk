@@ -78,16 +78,32 @@ TestCase subclass: DictionaryTest
     // Tier 2 (stateful) block reached via perform: must raise a clear error
     // instead of a raw arity crash.
     count := 0
-    statefulDoWithKeyBlock := [:k :v | count := count + v. k]
-    self should: [
-      #{#a => 1, #b => 2} perform: #doWithKey: withArguments: #(statefulDoWithKeyBlock)
-    ] raise: #stateful_block_dispatch
+    statefulDoWithKeyBlock := [:k :v |
+      count := count + v
+      k
+    ]
+    self
+      should: [
+        #{
+          #a => 1,
+          #b => 2
+        } perform: #doWithKey: withArguments: #(statefulDoWithKeyBlock)
+      ]
+      raise: #stateful_block_dispatch
 
     count := 0
-    statefulKeysAndValuesDoBlock := [:k :v | count := count + v. k]
-    self should: [
-      #{#a => 1, #b => 2} perform: #keysAndValuesDo: withArguments: #(statefulKeysAndValuesDoBlock)
-    ] raise: #stateful_block_dispatch
+    statefulKeysAndValuesDoBlock := [:k :v |
+      count := count + v
+      k
+    ]
+    self
+      should: [
+        #{
+          #a => 1,
+          #b => 2
+        } perform: #keysAndValuesDo: withArguments: #(statefulKeysAndValuesDoBlock)
+      ]
+      raise: #stateful_block_dispatch
 
   testDowithkey =>
     // Returns nil
