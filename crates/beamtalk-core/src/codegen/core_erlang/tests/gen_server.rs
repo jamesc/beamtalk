@@ -5501,3 +5501,115 @@ fn test_actor_with_parent_init_and_initialize_defers_to_handle_continue() {
         "handle_continue must dispatch initialize via safe_dispatch. Got:\n{code}"
     );
 }
+
+// ── code_change / terminate codegen coverage ─────────────────────────────────
+//
+// Target: gen_server/callbacks.rs generate_code_change (lines 1583-1599) and
+// generate_terminate (lines 1618-1675) — zero coverage in the 2026-07-20 CI run.
+//
+// Strategy: exercise both functions via generate_module on a minimal Actor class
+// and via generate() on the plain-module path, asserting on the key fragments
+// that each function is responsible for emitting.
+
+#[test]
+fn test_code_change_delegates_to_beamtalk_hot_reload() {
+    // generate_code_change must emit 'code_change'/3 that delegates entirely to
+    // beamtalk_hot_reload:code_change/3 for OTP hot-code-reload state migration.
+    let code = codegen("Actor subclass: TestActor\n  state: x = 0\n");
+    assert!(
+        code.contains("'code_change'/3"),
+        "Module must export code_change/3. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'beamtalk_hot_reload':'code_change'(OldVsn, State, Extra)"),
+        "code_change/3 must delegate to beamtalk_hot_reload:code_change/3. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_terminate_lifecycle_stop_telemetry() {
+    // generate_terminate must emit lifecycle-stop telemetry (BT-1638) via
+    // beamtalk_actor:maybe_execute_telemetry with the 'stop' event path.
+    let code = codegen("Actor subclass: TestActor\n  state: x = 0\n");
+    assert!(
+        code.contains("'terminate'/2"),
+        "Module must export terminate/2. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'beamtalk_actor':'maybe_execute_telemetry'("),
+        "terminate/2 must emit lifecycle telemetry. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'stop'"),
+        "terminate/2 telemetry must include the 'stop' event name. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_terminate_uses_class_name_for_telemetry_metadata() {
+    // BT-1642: terminate/2 telemetry 'class' metadata must use the clean Beamtalk
+    // class name (e.g. 'EventStore'), not the compiled module name (e.g.
+    // 'bt@event_store'). This matches how dispatch traces report class names.
+    let src = "Actor subclass: EventStore\n  state: count = 0\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let code = generate_module(&module, CodegenOptions::new("bt@event_store"))
+        .expect("codegen should succeed");
+    assert!(
+        code.contains("'class' => 'EventStore'"),
+        "terminate/2 must use class name 'EventStore' in telemetry metadata. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_terminate_wraps_dispatch_in_try_catch() {
+    // generate_terminate must wrap the 'terminate:' method dispatch in try-catch
+    // so that user exceptions cannot prevent OTP gen_server shutdown (BT-29).
+    let code = codegen("Actor subclass: TestActor\n  state: x = 0\n");
+    assert!(
+        code.contains("try call"),
+        "terminate/2 dispatch must be wrapped in a try expression. Got:\n{code}"
+    );
+    assert!(
+        code.contains("catch <_TermT, _TermE, _TermS> -> 'ok'"),
+        "terminate/2 catch clause must swallow all exceptions and return ok. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'terminate:'"),
+        "terminate/2 must dispatch the 'terminate:' method. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_terminate_calls_make_self_before_dispatch() {
+    // terminate/2 must build a self-object via beamtalk_actor:make_self before
+    // calling dispatch so the Beamtalk object is available to terminate: handlers.
+    let code = codegen("Actor subclass: TestActor\n  state: x = 0\n");
+    assert!(
+        code.contains("call 'beamtalk_actor':'make_self'(State)"),
+        "terminate/2 must call beamtalk_actor:make_self/1 to build the self-object. Got:\n{code}"
+    );
+    assert!(
+        code.contains("in 'ok'"),
+        "terminate/2 must end with 'ok' as its return value. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_terminate_plain_module_uses_module_name_as_class_label() {
+    // When the module has no explicit class definition, generate_terminate falls
+    // back to the module name as the class label in telemetry metadata.
+    // generate() uses module name 'bt_module'.
+    let module = Module::new(Vec::new(), Span::new(0, 0));
+    let result = generate(&module);
+    assert!(result.is_ok(), "codegen should succeed for plain module: {result:?}");
+    let code = result.unwrap();
+    assert!(
+        code.contains("'terminate'/2"),
+        "Plain module must still export terminate/2. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'class' => 'bt_module'"),
+        "Plain module terminate/2 must use module name 'bt_module' as class label. Got:\n{code}"
+    );
+}
