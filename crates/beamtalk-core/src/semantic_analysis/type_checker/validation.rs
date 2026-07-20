@@ -1060,24 +1060,33 @@ impl TypeChecker {
         // has no type params, so a non-generic call is entirely unaffected.
         // Hoisted out of the loop since, like `metaclass_name`, it's
         // constant across all arguments.
-        let mut class_subst = super::TypeChecker::build_inherited_substitution_map(
-            hierarchy,
-            class_name,
-            receiver_type_args,
-            &method.defined_in,
-        );
-        // BT-2949: never substitute the conventional "key" type-param slot
-        // (`K`, e.g. `Dictionary(K, V)`/`Ets(K, V)`). A dict/table literal's
-        // key(s) infer as narrow *singleton* types (`#{#a => 1}` gives
-        // `Dictionary(#a, Integer)`, not `Dictionary(Symbol, Integer)`), so
-        // substituting `K` makes every subsequent differently-keyed
-        // `at:`/`at:ifAbsent:`/`includesKey:`/`merge:` call — extremely
-        // common, entirely correct code — look like a type-arg mismatch.
-        // Element-position params (`V`, `E`) don't have this problem: a
-        // container literal's non-key elements aren't singleton-inferred the
-        // same way, so this fix stays scoped to the one param name that
-        // actually causes false positives, per BT-2949's own investigation.
-        class_subst.remove("K");
+        //
+        // Adversarial-review follow-up: an earlier version of this fix
+        // special-cased `class_subst.remove("K")` (Dictionary/Ets's
+        // conventional key slot), reasoning that only *keys* infer as narrow
+        // singleton types from literals. That was wrong on two counts: (1)
+        // ANY type-arg position singleton-narrows from a literal — a `List`
+        // built from symbol-literal elements (`#(#a, #b)`) or a `Result`
+        // built from a symbol ok/error value (`Result ok: #active`) narrows
+        // its `E`/`T` the same way `Dictionary`'s `K` does, so a name-only
+        // exclusion of `"K"` still false-positived on `#(#a, #b) ++ #(#c,
+        // #d)` and `(Result ok: #active) valueOr: #inactive`; (2) excluding
+        // by bare param name regardless of class permanently under-checks
+        // any *user-defined* generic class that happens to name a type
+        // param `K` for something that isn't a key at all. `widen_singleton_type_arg`
+        // below fixes the actual root cause (singleton-narrowed substitution
+        // targets) for every position uniformly, so no name-based exclusion
+        // is needed at all.
+        let class_subst: HashMap<EcoString, InferredType> =
+            super::TypeChecker::build_inherited_substitution_map(
+                hierarchy,
+                class_name,
+                receiver_type_args,
+                &method.defined_in,
+            )
+            .into_iter()
+            .map(|(param, ty)| (param, Self::widen_singleton_type_arg(&ty)))
+            .collect();
 
         for (i, (arg_ty, expected)) in arg_types.iter().zip(method.param_types.iter()).enumerate() {
             let Some(expected_ty) = expected else {
@@ -2762,6 +2771,48 @@ impl TypeChecker {
         let (_, args) = Self::parse_generic_type_string(type_str);
         args.iter()
             .any(|arg| Self::type_string_references_class_param(arg, params))
+    }
+
+    /// BT-2949: widen a singleton (or union-of-singletons) type arg to
+    /// `Symbol` before using it as a class-type-param substitution target
+    /// for argument checking.
+    ///
+    /// A container/value class's type args, when *inferred* from literal
+    /// instances rather than declared, narrow to the literal's singleton
+    /// type — `#{#a => 1}` infers `Dictionary(#a, Integer)`, `#(#a, #b)`
+    /// infers `List(#a | #b)`, `Result ok: #active` infers
+    /// `Result(#active, Dynamic)`. Using that narrow substitution target
+    /// invariantly against a *different* literal's singleton (a different
+    /// dict key, list element, or Result value — all extremely common,
+    /// entirely correct code) would flag a type-arg mismatch that isn't
+    /// one. Widening to `Symbol` matches this checker's own existing
+    /// singleton/`Symbol` subtyping rule (see [`Self::is_type_compatible`]'s
+    /// singleton branch: singletons are subtypes of `Symbol`, so any other
+    /// singleton — or any symbol at all — is compatible with a `Symbol`
+    /// substitution target).
+    ///
+    /// This is deliberately scoped to argument-checking substitution only
+    /// (called from [`Self::check_argument_types`] and
+    /// `check_variance_in_expr`, not from inside
+    /// `build_substitution_map`/`build_inherited_substitution_map`
+    /// themselves), since those are also used for *return*-type inference
+    /// (e.g. `class_method_substitution`), which wants the precise
+    /// singleton preserved for narrowing/exhaustiveness — widening there
+    /// would lose real information a caller might depend on.
+    pub(super) fn widen_singleton_type_arg(ty: &InferredType) -> InferredType {
+        let is_singleton = |t: &InferredType| matches!(t, InferredType::Known { class_name, .. } if class_name.starts_with('#'));
+        let widens = match ty {
+            InferredType::Known { .. } => is_singleton(ty),
+            InferredType::Union { members, .. } => {
+                !members.is_empty() && members.iter().all(is_singleton)
+            }
+            _ => false,
+        };
+        if widens {
+            InferredType::known("Symbol")
+        } else {
+            ty.clone()
+        }
     }
 
     /// Resolves type-position keywords to their class names (static version).

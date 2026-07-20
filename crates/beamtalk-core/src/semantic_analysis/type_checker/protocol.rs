@@ -687,23 +687,30 @@ impl TypeChecker {
                             // name, which — like a bare `E`/`V`/`K` anywhere
                             // else in the checker — is treated as a wildcard
                             // and always passes.
-                            let mut class_subst = TypeChecker::build_inherited_substitution_map(
-                                hierarchy,
-                                &class_name,
-                                receiver_type_args,
-                                &method.defined_in,
-                            );
-                            // BT-2949: never substitute the conventional "key"
-                            // type-param slot (`K`, e.g. `Dictionary(K, V)`/
-                            // `Ets(K, V)`) — see the identical guard and its
-                            // doc in `validation.rs`'s `check_argument_types`.
-                            // A dict/table literal's key(s) infer as narrow
-                            // singleton types, so substituting `K` would flag
-                            // e.g. `d1 merge: d2` as a type-arg mismatch
-                            // whenever `d1`/`d2` were built from literals
-                            // with different keys — extremely common,
-                            // entirely correct code.
-                            class_subst.remove("K");
+                            // BT-2949: widen singleton (or union-of-singleton)
+                            // substitution values to `Symbol` — see the
+                            // identical widening and its doc in
+                            // `validation.rs`'s `check_argument_types`
+                            // (`widen_singleton_type_arg`). Without this, a
+                            // `Dictionary`/`List`/`Result` inferred from
+                            // symbol literals (`d1 merge: d2` with
+                            // differently-keyed dict literals, `#(#a, #b) ++
+                            // #(#c, #d)`, `Result ok: #active`) would compare
+                            // its narrow substituted type arg invariantly
+                            // against a different literal's singleton and
+                            // flag entirely correct code as a mismatch.
+                            let class_subst: HashMap<EcoString, InferredType> =
+                                TypeChecker::build_inherited_substitution_map(
+                                    hierarchy,
+                                    &class_name,
+                                    receiver_type_args,
+                                    &method.defined_in,
+                                )
+                                .into_iter()
+                                .map(|(param, ty)| {
+                                    (param, TypeChecker::widen_singleton_type_arg(&ty))
+                                })
+                                .collect();
                             for (i, arg) in arguments.iter().enumerate() {
                                 if let Some(Some(expected_ty)) = method.param_types.get(i) {
                                     let substituted_expected;

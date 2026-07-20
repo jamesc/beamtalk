@@ -112,12 +112,43 @@ fn dictionary_at_put_with_no_receiver_type_args_stays_conservative() {
     assert_no_expects_diagnostic(checker.diagnostics());
 }
 
+/// `Ets(K, V)` has the identical `K`/`V` shape as `Dictionary` (and is the
+/// only other builtin using that naming) — confirms the fix isn't
+/// accidentally Dictionary-specific.
+#[test]
+fn ets_at_put_incompatible_value_warns() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.check_argument_types(
+        &eco_string("Ets"),
+        "at:put:",
+        &[InferredType::known("String"), InferredType::known("String")],
+        span(),
+        &hierarchy,
+        false,
+        None,
+        None,
+        &[
+            InferredType::known("String"),
+            InferredType::known("Integer"),
+        ],
+    );
+    assert_one_expects_diagnostic(checker.diagnostics(), "Integer", "String");
+}
+
 /// BT-2949 investigation: a `Dictionary` literal's key(s) infer as narrow
 /// *singleton* types (`#{#a => 1}` gives `Dictionary(#a, Integer)`, not
-/// `Dictionary(Symbol, Integer)`). Substituting `K` (like `V`) would make
-/// `at:ifAbsent:` with any differently-keyed lookup — extremely common,
-/// correct code — look like a type-arg mismatch. `check_argument_types`
-/// must never substitute `K`, only `V`.
+/// `Dictionary(Symbol, Integer)`). Substituting that narrow singleton
+/// invariantly would make `at:ifAbsent:` with any differently-keyed lookup
+/// — extremely common, correct code — look like a type-arg mismatch.
+/// `check_argument_types` must widen the singleton substitution target to
+/// `Symbol` (see `widen_singleton_type_arg`) rather than skip substituting
+/// `K` outright — an earlier version of this fix special-cased `K` by bare
+/// param name, which (a) still false-positived on `List`/`Result`'s
+/// singleton-narrowed `E`/`T` (see `list_concat_*_singleton_elements_*` and
+/// `result_value_or_different_singleton_*` below) and (b) permanently
+/// under-checked a user-defined generic class using `K` for something that
+/// isn't a key at all (see `user_defined_class_k_param_not_a_key_still_checked`).
 #[test]
 fn dictionary_at_ifabsent_different_singleton_key_no_warning() {
     let hierarchy = ClassHierarchy::with_builtins();
@@ -205,6 +236,64 @@ fn list_concat_incompatible_element_warns() {
 fn list_concat_compatible_element_no_warning() {
     let diags = run_with_protocols(&list_concat_source("#(1, 2, 3)"));
     assert_no_expects_diagnostic(&diags);
+}
+
+/// Adversarial-review finding: element positions singleton-narrow from
+/// literals exactly like Dictionary's key position does — `#(#a, #b)`
+/// infers `List(#a | #b)`, not `List(Symbol)`. Concatenating with a
+/// *different* set of symbol elements must not warn (this false-positived
+/// under the earlier `class_subst.remove("K")`-only fix, since `E` was
+/// never excluded).
+#[test]
+fn list_concat_different_singleton_elements_no_warning() {
+    let source = r"Object subclass: Probe
+  check -> Nil =>
+    l := #(#a, #b) ++ #(#c, #d)
+    _u := l
+    nil
+";
+    let diags = run_with_protocols(source);
+    assert_no_expects_diagnostic(&diags);
+}
+
+/// Adversarial-review finding: `Result(T, E)`'s `T`/`E` singleton-narrow
+/// from a symbol ok/error value the same way — `Result ok: #active` infers
+/// `Result(#active, Dynamic)`. `valueOr:`'s declared param is bare `T`
+/// (goes through `check_argument_types`'s main path, not just
+/// `check_variance_in_expr`), so a *different* singleton default value
+/// must not warn.
+#[test]
+fn result_value_or_different_singleton_no_warning() {
+    let source = r"Object subclass: Probe
+  check -> Nil =>
+    r := (Result ok: #active) valueOr: #inactive
+    _u := r
+    nil
+";
+    let diags = run_with_protocols(source);
+    assert_no_expects_diagnostic(&diags);
+}
+
+/// Adversarial-review finding: excluding substitution by the bare param
+/// name `"K"` (the earlier version of this fix) permanently under-checked
+/// any user-defined generic class using `K` for something that isn't a
+/// dictionary/table key at all — a false *negative* with no
+/// dictionary/singleton semantics involved. Widening singleton values to
+/// `Symbol` instead of skipping `K` outright means a real type mismatch on
+/// a `K`-typed argument is still caught.
+#[test]
+fn user_defined_class_k_param_not_a_key_still_checked() {
+    let source = r#"Object subclass: Pair(K, V)
+  setK: x :: K =>
+    nil
+
+Object subclass: Probe
+  check: p :: Pair(Integer, Integer) -> Nil =>
+    p setK: "not an integer"
+    nil
+"#;
+    let diags = run_with_protocols(source);
+    assert_one_expects_diagnostic(&diags, "Integer", "String");
 }
 
 /// BT-2949's motivating repro used `Dictionary(Symbol, JsonValue)`, an
