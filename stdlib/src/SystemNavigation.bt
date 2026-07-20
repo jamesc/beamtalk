@@ -68,9 +68,15 @@ sealed typed Object subclass: SystemNavigation
   actorClasses -> List(Behaviour) =>
     actorClass := self findClass: #Actor
     actorClass isNil ifTrue: [^List new]
-    actors := self allClasses select: [:c |
-      c superclassChain includes: actorClass
-    ]
+    actors := self allClasses
+      select: [:c |
+        // findClass:'s declared return type is Object (BT-2223) — a class or
+        // metaclass object at runtime, but no narrower nominal type is safe
+        // to declare across all five of its callers. The isNil guard above
+        // proves actorClass is a real class object here.
+        @expect type
+        c superclassChain includes: actorClass
+      ]
     actors sort: [:a :b | a name asString < b name asString]
 
   /// Return every class that overrides the does-not-understand handler — i.e.

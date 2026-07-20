@@ -146,7 +146,7 @@ sealed typed Collection(E) subclass: List(E)
   /// ```beamtalk
   /// #(1, 2) detect: [:x | x > 5] ifNone: [0]   // => 0
   /// ```
-  detect: block :: Block(E, Boolean) ifNone: default :: Block(E) -> E =>
+  detect: block :: Block(E, Boolean) ifNone: default :: Block(Object) -> E | Object =>
     @primitive
 
   /// Iterate over each element, evaluating `block` with each one.

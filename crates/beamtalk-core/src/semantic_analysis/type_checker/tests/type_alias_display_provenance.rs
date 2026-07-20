@@ -309,6 +309,7 @@ Object subclass: Widget
         false,
         None,
         None,
+        &[],
     );
     let diags = checker.diagnostics();
     let hits: Vec<_> = diags
@@ -617,6 +618,7 @@ fn instance_arg_rejected_for_class_typed_alias_parameter() {
         false,
         None,
         None,
+        &[],
     );
     let diags = checker.diagnostics();
     assert_eq!(
@@ -723,6 +725,7 @@ fn arg_ty_side_alias_name_is_recorded_in_referenced_aliases() {
         false,
         None,
         None,
+        &[],
     );
     assert!(
         checker.diagnostics().is_empty(),

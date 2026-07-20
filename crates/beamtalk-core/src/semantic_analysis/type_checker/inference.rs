@@ -941,6 +941,7 @@ impl TypeChecker {
                                 true,
                                 Some(&msg.arguments),
                                 Some(env),
+                                &[],
                             );
                             // BT-2850: ADR 0104 Phase 2 (BT-2750) `C spawnWith:
                             // #{...}` literal-map key check, mirroring the
@@ -991,6 +992,7 @@ impl TypeChecker {
                                 true,
                                 Some(&msg.arguments),
                                 Some(env),
+                                &[],
                             );
                             self.check_spawn_with_map_keys(
                                 meta_class,
@@ -1006,7 +1008,12 @@ impl TypeChecker {
                                 &[], // cascade return type is receiver, not send result
                             );
                         }
-                    } else if let InferredType::Known { ref class_name, .. } = dispatch_ty {
+                    } else if let InferredType::Known {
+                        ref class_name,
+                        ref type_args,
+                        ..
+                    } = dispatch_ty
+                    {
                         if env.in_class_method && Self::is_self_receiver(unwrapped_target) {
                             if !in_abstract_method {
                                 self.check_argument_types(
@@ -1018,6 +1025,7 @@ impl TypeChecker {
                                     true,
                                     Some(&msg.arguments),
                                     Some(env),
+                                    &[],
                                 );
                                 // BT-2850: ADR 0104 Phase 2 (BT-2750)
                                 // `spawnWith: #{...}` literal-map key check,
@@ -1063,6 +1071,7 @@ impl TypeChecker {
                                 false,
                                 Some(&msg.arguments),
                                 Some(env),
+                                type_args,
                             );
                             self.check_instance_selector(
                                 class_name,
@@ -1803,6 +1812,7 @@ impl TypeChecker {
                 true,
                 Some(arguments),
                 Some(env),
+                &[],
             );
             // ADR 0104 Phase 2 (BT-2750): `C spawnWith: #{...}` literal-map key check.
             self.check_spawn_with_map_keys(class_name, &selector_name, arguments, hierarchy);
@@ -1859,6 +1869,7 @@ impl TypeChecker {
                 true,
                 Some(arguments),
                 Some(env),
+                &[],
             );
             // ADR 0104 Phase 2 (BT-2750): type-driven `cls spawnWith: #{...}`
             // (receiver typed `Meta{C}`) literal-map key check.
@@ -1914,6 +1925,7 @@ impl TypeChecker {
                         true,
                         Some(arguments),
                         Some(env),
+                        &[],
                     );
                     return self.check_class_side_send(
                         class_name,
@@ -2008,6 +2020,7 @@ impl TypeChecker {
                     false,
                     Some(arguments),
                     Some(env),
+                    type_args,
                 );
             }
 
@@ -4945,7 +4958,7 @@ impl TypeChecker {
     ///
     /// BT-2023(B): Handles nested generics (e.g., `List(E)`) by delegating to
     /// `substitute_return_type_with_self`, which recursively resolves inner type params.
-    fn resolve_type_param(
+    pub(super) fn resolve_type_param(
         param: &str,
         class_subst: &HashMap<EcoString, InferredType>,
         method_subst: &HashMap<EcoString, InferredType>,
@@ -5395,7 +5408,7 @@ impl TypeChecker {
     /// `method_class == receiver_class` (no inheritance to compose through).
     ///
     /// **References:** ADR 0068 Challenge 4 (BT-1577)
-    fn build_inherited_substitution_map(
+    pub(super) fn build_inherited_substitution_map(
         hierarchy: &ClassHierarchy,
         receiver_class: &str,
         receiver_type_args: &[InferredType],

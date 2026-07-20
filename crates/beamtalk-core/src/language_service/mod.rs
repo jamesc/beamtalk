@@ -293,6 +293,20 @@ impl SimpleLanguageService {
         &self.project_index
     }
 
+    /// Marks `file` as a stdlib source (BT-2959). Call before [`Self::update_file`]
+    /// for a stdlib file so its aliases are stamped with the stdlib package marker
+    /// instead of the same-project marker — see [`ProjectIndex::mark_stdlib_file`].
+    pub fn mark_stdlib_file(&mut self, file: Utf8PathBuf) {
+        self.project_index.mark_stdlib_file(file);
+    }
+
+    /// Sets the real package name for each known workspace root (BT-2960).
+    /// Call before preloading any file under that root — see
+    /// [`ProjectIndex::set_root_packages`].
+    pub fn set_root_packages(&mut self, root_packages: Vec<(Utf8PathBuf, EcoString)>) {
+        self.project_index.set_root_packages(root_packages);
+    }
+
     /// Gets file data if it exists.
     fn get_file(&self, file: &Utf8PathBuf) -> Option<&FileData> {
         self.files.get(file)

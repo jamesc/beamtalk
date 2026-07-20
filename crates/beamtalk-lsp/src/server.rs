@@ -30,6 +30,7 @@ use beamtalk_core::semantic_analysis::ClassHierarchy;
 use beamtalk_core::source_analysis::{Severity, Span};
 use beamtalk_core::unparse::{escape_string_literal, format_source};
 use camino::Utf8PathBuf;
+use ecow::EcoString;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
     CallHierarchyIncomingCall, CallHierarchyIncomingCallsParams, CallHierarchyItem,
@@ -923,6 +924,49 @@ impl Backend {
         svc.set_diagnostics_overrides(table);
     }
 
+    /// Reads each workspace root's real `beamtalk.toml` `[package] name` and
+    /// registers it with the `ProjectIndex` (BT-2960), so two distinct real
+    /// packages opened as sibling workspace roots get distinct alias-package
+    /// stamps instead of colliding on the same-project marker (BT-2951).
+    ///
+    /// A root with no manifest, an unparseable manifest, or no `[package]
+    /// name` is simply omitted — [`ProjectIndex::package_for_alias_stamping`]
+    /// falls back to the same-project marker for any file under an
+    /// unregistered root, matching the pre-BT-2960 behavior for that root.
+    ///
+    /// Must run *before* [`Self::preload_workspace_source_files`] — unlike
+    /// [`Self::load_diagnostics_table`] (applied per-request at
+    /// diagnostic-computation time), alias package stamping happens once, at
+    /// indexing time.
+    async fn load_root_packages(&self, roots: &[PathBuf]) {
+        use beamtalk_core::compilation::parse_package_name_from_manifest_toml;
+
+        let roots_owned: Vec<PathBuf> = roots.to_vec();
+        let root_packages: Vec<(Utf8PathBuf, EcoString)> = tokio::task::spawn_blocking(move || {
+            roots_owned
+                .into_iter()
+                .filter_map(|root| {
+                    let manifest_path = root.join("beamtalk.toml");
+                    let content = std::fs::read_to_string(&manifest_path).ok()?;
+                    let name = parse_package_name_from_manifest_toml(&content)?;
+                    let utf8_root = Utf8PathBuf::from_path_buf(root).ok()?;
+                    Some((utf8_root, EcoString::from(name)))
+                })
+                .collect()
+        })
+        .await
+        .unwrap_or_default();
+
+        if !root_packages.is_empty() {
+            debug!(
+                "Loaded {} workspace root package name(s) from beamtalk.toml",
+                root_packages.len()
+            );
+        }
+        let mut svc = self.service.lock().expect("service lock poisoned");
+        svc.set_root_packages(root_packages);
+    }
+
     async fn preload_workspace_source_files(&self, config: PreloadConfig) {
         let loaded = tokio::task::spawn_blocking(move || collect_preload_files(config))
             .await
@@ -947,10 +991,23 @@ impl Backend {
         let mut svc = self.service.lock().expect("service lock poisoned");
         let budget_exhausted = loaded.budget_exhausted;
         let deps_present = loaded.deps_present;
-        for (path, content) in loaded.user_files.into_iter().chain(loaded.stdlib_files) {
+        for (path, content) in loaded.user_files {
             let Ok(utf8_path) = Utf8PathBuf::from_path_buf(path) else {
                 continue;
             };
+            svc.update_file(utf8_path, content);
+        }
+        // BT-2959: stdlib files must be marked in the ProjectIndex before
+        // indexing, not chained into the same loop as user_files above —
+        // otherwise `is_stdlib_file` never returns true for them in the real
+        // running LSP (only `ProjectIndex::with_stdlib`, a separate
+        // constructor used by beamtalk-cli's build pipeline, did this), and
+        // BT-2951's package stamping mis-tags stdlib aliases as same-project.
+        for (path, content) in loaded.stdlib_files {
+            let Ok(utf8_path) = Utf8PathBuf::from_path_buf(path) else {
+                continue;
+            };
+            svc.mark_stdlib_file(utf8_path.clone());
             svc.update_file(utf8_path, content);
         }
         // BT-2796: With every workspace source file indexed, the ProjectIndex
@@ -1517,6 +1574,13 @@ impl LanguageServer for Backend {
             preload_config.take()
         };
         if let Some(ref config) = preload_config {
+            // BT-2960: each workspace root's real beamtalk.toml [package] name
+            // must be known *before* preload indexes any file under that root
+            // — alias package stamping happens once, at indexing time
+            // (update_file_aliases), unlike the [diagnostics] table below
+            // (applied per-request at diagnostic-computation time, so load
+            // order relative to preload doesn't matter for it).
+            self.load_root_packages(&config.roots).await;
             self.preload_workspace_source_files(config.clone()).await;
             // ADR 0075: Load type cache from _build/type_cache/ for typed completions.
             self.load_type_cache(&config.roots).await;
@@ -5355,6 +5419,61 @@ mod tests {
         let _ = fs::remove_dir_all(&temp);
     }
 
+    /// BT-2960: two sibling workspace roots, each a genuinely different real
+    /// package (per its own `beamtalk.toml` `[package] name`), each
+    /// declaring an `internal type Foo = ...` with a different expansion.
+    /// Before this fix, every same-project file in every root shared the
+    /// same fixed `$project` marker, so root B's file would resolve root A's
+    /// `internal` alias instead of it being excluded. Confirms the two
+    /// roots' `Foo` aliases now carry distinct, root-derived package stamps.
+    #[tokio::test]
+    async fn load_root_packages_gives_sibling_roots_distinct_alias_package_stamps() {
+        let temp = unique_temp_dir("beamtalk_lsp_root_packages_multi_root");
+        let root_a = temp.join("a");
+        let root_b = temp.join("b");
+        fs::create_dir_all(&root_a).expect("create root a");
+        fs::create_dir_all(&root_b).expect("create root b");
+        fs::write(
+            root_a.join("beamtalk.toml"),
+            "[package]\nname = \"pkg_a\"\nversion = \"0.1.0\"\n",
+        )
+        .expect("write root a manifest");
+        fs::write(
+            root_b.join("beamtalk.toml"),
+            "[package]\nname = \"pkg_b\"\nversion = \"0.1.0\"\n",
+        )
+        .expect("write root b manifest");
+
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+        backend
+            .load_root_packages(&[root_a.clone(), root_b.clone()])
+            .await;
+
+        let file_a = Utf8PathBuf::from_path_buf(root_a.join("Foo.bt")).unwrap();
+        let file_b = Utf8PathBuf::from_path_buf(root_b.join("Foo.bt")).unwrap();
+        {
+            let mut svc = backend.service.lock().expect("service lock poisoned");
+            svc.update_file(file_a.clone(), "internal type Foo = Integer".to_string());
+            svc.update_file(file_b.clone(), "internal type Foo = String".to_string());
+        }
+
+        let svc = backend.service.lock().expect("service lock poisoned");
+        assert_eq!(
+            svc.project_index().alias_package_for_file(&file_a),
+            EcoString::from("pkg_a"),
+            "root a's file must be stamped with root a's real package name"
+        );
+        assert_eq!(
+            svc.project_index().alias_package_for_file(&file_b),
+            EcoString::from("pkg_b"),
+            "root b's file must be stamped with root b's real package name, \
+             not root a's or the shared same-project marker"
+        );
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
     #[test]
     fn collect_preload_files_classifies_overlapping_path_as_stdlib() {
         // When the same .bt file appears in both a workspace src/ dir and a
@@ -5516,6 +5635,61 @@ mod tests {
                 .any(|(p, _)| p.ends_with("JSONParser.bt")),
             "dependency class JSONParser must be preloaded, got {:?}",
             loaded.user_files
+        );
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    /// BT-2959: the real running LSP chains `user_files`/`stdlib_files` into
+    /// one generic `update_file` loop, which never marked a preloaded
+    /// stdlib file's `ProjectIndex::is_stdlib_file` — only the separate
+    /// `ProjectIndex::with_stdlib` constructor (used by beamtalk-cli's build
+    /// pipeline, not the LSP) did that. Confirms
+    /// `preload_workspace_source_files` now marks stdlib files before
+    /// indexing them, so `is_stdlib_file` is true after a real preload.
+    #[tokio::test]
+    async fn preload_workspace_source_files_marks_stdlib_files_in_project_index() {
+        let temp = unique_temp_dir("beamtalk_lsp_preload_marks_stdlib");
+        let project_root = temp.join("project");
+        let src_dir = project_root.join("src");
+        let stdlib_dir = temp.join("stdlib");
+
+        fs::create_dir_all(&src_dir).expect("create src dir");
+        fs::create_dir_all(&stdlib_dir).expect("create stdlib dir");
+
+        fs::write(src_dir.join("App.bt"), "Object subclass: App").expect("write user file");
+        let stdlib_direction = stdlib_dir.join("Direction.bt");
+        fs::write(
+            &stdlib_direction,
+            "internal type Direction = #north | #south",
+        )
+        .expect("write stdlib file");
+
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+        let config = PreloadConfig {
+            roots: vec![project_root],
+            stdlib_dirs: vec![stdlib_dir],
+        };
+        backend.preload_workspace_source_files(config).await;
+
+        let utf8_stdlib_direction =
+            Utf8PathBuf::from_path_buf(stdlib_direction).expect("temp path is UTF-8");
+        let svc = backend.service.lock().expect("service lock poisoned");
+        assert!(
+            svc.project_index().is_stdlib_file(&utf8_stdlib_direction),
+            "a stdlib file walked by the real preload path must be marked \
+             stdlib in the ProjectIndex"
+        );
+
+        let seen = svc
+            .project_index()
+            .cross_file_alias_infos_for(&Utf8PathBuf::from("elsewhere.bt"));
+        assert_eq!(
+            seen.iter().find(|i| i.name == "Direction").unwrap().package,
+            Some("stdlib".into()),
+            "a stdlib file's alias must be stamped the stdlib package marker \
+             after a real preload, not the same-project marker"
         );
 
         let _ = fs::remove_dir_all(&temp);
