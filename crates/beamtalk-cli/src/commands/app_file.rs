@@ -239,7 +239,13 @@ fn format_native_modules_entry(native_module_names: &[String]) -> String {
 /// [`format_native_modules_entry`] — packages with no `type` declarations
 /// are unaffected (no `type_aliases` key at all, distinct from an empty
 /// list, matching the `native_modules` precedent).
-fn format_type_aliases_entry(alias_metadata: &[AliasMetadata]) -> String {
+///
+/// `pub(crate)` (not private): reused by
+/// [`super::build_stdlib::generate_app_file`]/`generate_app_src_file`
+/// (BT-2938) so `beamtalk_stdlib.app`'s `env` gets the same `{type_aliases,
+/// [...]}` key the ordinary `beamtalk build` pipeline already emits here —
+/// see this module's `AliasMetadata` doc for why that key exists.
+pub(crate) fn format_type_aliases_entry(alias_metadata: &[AliasMetadata]) -> String {
     if alias_metadata.is_empty() {
         return String::new();
     }

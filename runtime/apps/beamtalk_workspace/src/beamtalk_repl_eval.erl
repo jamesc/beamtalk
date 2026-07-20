@@ -212,31 +212,38 @@ maybe_help_for_alias(Expression, State) ->
     end.
 
 -doc """
-Render `:help <Alias>` output (ADR 0108 Phase 8, BT-2902).
+Render `:help <Alias>` output (ADR 0108 Phase 8, BT-2902; stdlib
+provenance BT-2938).
 
 `type Name = <expansion>`, then — only when a doc comment is present — a
 blank line and the indented doc text, then a blank line and
-`Declared in: REPL`. A session-declared alias has no source file, so `REPL`
-is this issue's chosen convention (flagged in the PR description for
-maintainer sign-off per CLAUDE.md's REPL-output rule, alongside the
-`type` declaration's own echo-value decision).
+`Declared in: <declared_in>`. `declared_in` is `<<"REPL">>` for a
+session-declared alias (this issue's chosen convention, flagged in the PR
+description for maintainer sign-off per CLAUDE.md's REPL-output rule,
+alongside the `type` declaration's own echo-value decision) or
+`<<"stdlib">>` for one seeded from stdlib's own compiled declarations
+(`beamtalk_repl_state:stdlib_alias_table/0`) — same sign-off flag, chosen to
+match `package => 'stdlib'`'s existing convention elsewhere (e.g.
+`format_stdlib_class_entry`) rather than a full `source_file` path.
 """.
 -spec format_alias_help(binary(), beamtalk_repl_state:alias_entry()) -> binary().
-format_alias_help(Name, #{expansion := Expansion, doc_comment := DocComment}) ->
+format_alias_help(Name, #{
+    expansion := Expansion, doc_comment := DocComment, declared_in := DeclaredIn
+}) ->
     Header = <<"type ", Name/binary, " = ", Expansion/binary>>,
     CommentBlock =
         case DocComment of
             undefined -> <<>>;
             Doc -> <<"\n\n  ", Doc/binary>>
         end,
-    <<Header/binary, CommentBlock/binary, "\n\nDeclared in: REPL">>.
+    <<Header/binary, CommentBlock/binary, "\n\nDeclared in: ", DeclaredIn/binary>>.
 
 -doc "Handle a `type Name = ...` declaration (ADR 0108 Phase 8, BT-2902).".
 -spec handle_type_alias_definition(map(), [binary()], beamtalk_repl_state:state()) ->
     eval_result().
 handle_type_alias_definition(AliasInfo, Warnings, State) ->
     #{alias_name := Name, expansion := Expansion, doc_comment := DocComment} = AliasInfo,
-    Entry = #{expansion => Expansion, doc_comment => DocComment},
+    Entry = #{expansion => Expansion, doc_comment => DocComment, declared_in => <<"REPL">>},
     NewState = beamtalk_repl_state:put_alias(Name, Entry, State),
     %% ADR 0108 hot-reload re-check trigger (BT-2899): keep the compiler
     %% server's ambient alias cache in sync with session state so a later

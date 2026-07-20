@@ -99,18 +99,27 @@ for manipulating state during REPL sessions.
     | {clear, undefined, undefined}.
 
 -doc """
-A session-local type alias entry (ADR 0108 Phase 8, BT-2902).
+A session-visible type alias entry (ADR 0108 Phase 8, BT-2902; stdlib
+seeding BT-2938).
 
 `expansion` is the alias's unparsed `TypeAnnotation` display form (e.g.
-`<<"#north | #south | #east | #west">>`), exactly as returned by the
-compiler port's `type_alias_definition` response — both what `:help`
-renders and what round-trips through `known_type_alias_sources/1` as a
-reparseable `type Name = <expansion>` line. `doc_comment` is `undefined`
-when the declaration had no `///` doc comment.
+`<<"#north | #south | #east | #west">>`) — both what `:help` renders and
+what round-trips through `known_type_alias_sources/1` as a reparseable
+`type Name = <expansion>` line. `doc_comment` is `undefined` when the
+declaration had no `///` doc comment.
+
+`declared_in` is `:help`'s provenance line (`format_alias_help/2` in
+`beamtalk_repl_eval.erl`): `<<"REPL">>` for a `type Name = ...` this
+session declared itself (exactly as returned by the compiler port's
+`type_alias_definition` response), or `<<"stdlib">>` for an alias seeded
+from stdlib's own compiled declarations (`stdlib_alias_table/0`) — a
+session never has to declare `SupervisionStrategy` etc. itself for `:help`
+or a `::` annotation to resolve it.
 """.
 -type alias_entry() :: #{
     expansion := binary(),
-    doc_comment := binary() | undefined
+    doc_comment := binary() | undefined,
+    declared_in := binary()
 }.
 
 -opaque state() :: #state{}.
@@ -147,7 +156,13 @@ new(ListenSocket, Port, Options) ->
         module_tracker = beamtalk_repl_modules:new(),
         pending_module_removals = [],
         pending_mutations = [],
-        alias_table = #{}
+        %% BT-2938: seed with stdlib's own compiled aliases so `:help
+        %% <StdlibAlias>` and `::`-typed locals referencing one resolve in a
+        %% fresh session — see `stdlib_alias_table/0`. A later `type Name =
+        %% ...` declaration at this session's REPL prompt (`put_alias/3`)
+        %% legally shadows a same-named stdlib entry (ADR 0108 Semantics'
+        %% "current turn wins" precedent).
+        alias_table = stdlib_alias_table()
     }.
 
 -doc "Get current variable bindings.".
@@ -334,3 +349,115 @@ known_type_alias_sources(#state{alias_table = AliasTable}) ->
         <<"type ", Name/binary, " = ", (maps:get(expansion, Entry))/binary>>
      || {Name, Entry} <- maps:to_list(AliasTable)
     ].
+
+-doc """
+Seed a fresh session's alias table from stdlib's own compiled `type Name =
+...` declarations (BT-2938).
+
+Reads `beamtalk_stdlib`'s `.app` `{type_aliases, [...]}` env key (ADR 0108
+Phase 8/BT-2903, written by `build_stdlib.rs`'s `generate_app_file`/
+`generate_app_src_file` from `app_file::AliasMetadata`) — the same durable
+record `beamtalk_repl_ops_browse:package_type_aliases/1` reads for
+`browse-type-aliases`. Without this, a stdlib alias like `SupervisionStrategy`
+(`stdlib/src/Supervisor.bt`) has no live BEAM class/process the way a stdlib
+*class* does (`beamtalk_class_registry`, populated at boot from the same
+`.app`'s `{classes, [...]}` env) for a fresh session to already know about —
+aliases erase entirely at compile time, so this session-state table is the
+only place a bare `:help SupervisionStrategy` or a `::`-typed local
+referencing it can resolve from.
+
+Only public (non-`internal`) aliases are seeded: an `internal type Foo =
+...` stdlib alias is usable only *within* stdlib itself (ADR 0108
+Semantics), and a REPL session is never "inside" the stdlib package —
+mirrors the seeding-boundary exclusion `beamtalk_repl_ops_browse:
+alias_visible/2` applies to every non-project package's internal aliases.
+
+Best-effort: `[]`/`#{}` (an empty seed, not a crash) if `beamtalk_stdlib`'s
+env is missing/malformed or a row doesn't have the shape
+`format_type_aliases_entry` always emits — a corrupted or
+toolchain-mismatched `.app` file must not prevent a session from starting.
+""".
+-spec stdlib_alias_table() -> #{binary() => alias_entry()}.
+stdlib_alias_table() ->
+    try
+        lists:foldl(fun stdlib_alias_fold/2, #{}, stdlib_type_aliases_env())
+    catch
+        _:_ -> #{}
+    end.
+
+%% `beamtalk_stdlib`'s `.app` `{type_aliases, [...]}` env key, `[]` if
+%% absent (older `.app` build) or malformed.
+-spec stdlib_type_aliases_env() -> [map()].
+stdlib_type_aliases_env() ->
+    case application:get_env(beamtalk_stdlib, type_aliases) of
+        {ok, Aliases} when is_list(Aliases) -> Aliases;
+        _ -> []
+    end.
+
+%% Fold one `.app`-env alias row into the session alias table being built,
+%% dropping internal rows (see `stdlib_alias_table/0` doc) and any row
+%% missing the `name`/`expansion` keys every `format_type_aliases_entry`
+%% row carries.
+%%
+%% Fails **safe**, not open, on a missing (or non-boolean) `internal` key
+%% (`maps:get(internal, Entry, true)` plus the catch-all `_ -> Acc` case
+%% arm below — should never happen, `format_type_aliases_entry` always
+%% emits a proper boolean): mirrors `beamtalk_repl_ops_browse:
+%% alias_visible/2`'s explicit "no `internal` key at all... fail safe by
+%% treating as internal" convention, so a row shape this reader doesn't
+%% yet know about can't silently leak a should-be-internal alias into
+%% every fresh REPL session instead of just being dropped. The catch-all
+%% case arm, and the inner `try/catch` around row construction, both keep
+%% this row-level-skip, not whole-table-wipe: without the case arm, a
+%% non-boolean `internal` value would throw `case_clause`; without the
+%% inner `try/catch`, a malformed `name`/`expansion`/`doc` (e.g. an
+%% improper charlist in a hand-edited `.app` file) would throw out of
+%% `app_env_binary`/`app_env_doc`. Either, uncaught here, would be caught
+%% by `stdlib_alias_table/0`'s outer `try/catch` as an *empty* table —
+%% discarding every other, well-formed row along with this one bad row.
+-spec stdlib_alias_fold(term(), #{binary() => alias_entry()}) -> #{binary() => alias_entry()}.
+stdlib_alias_fold(#{name := Name, expansion := Expansion} = Entry, Acc) ->
+    case maps:get(internal, Entry, true) of
+        true ->
+            Acc;
+        false ->
+            try
+                Acc#{
+                    app_env_binary(Name) => #{
+                        expansion => app_env_binary(Expansion),
+                        doc_comment => app_env_doc(maps:get(doc, Entry, undefined)),
+                        declared_in => <<"stdlib">>
+                    }
+                }
+            catch
+                _:_ -> Acc
+            end;
+        _ ->
+            Acc
+    end;
+stdlib_alias_fold(_Entry, Acc) ->
+    Acc.
+
+%% Normalise a `.app`-file alias field (atom | Erlang string() | binary(),
+%% never JSON — `app_file.rs` emits a literal `.app` Erlang term consulted
+%% via `application:get_env/2`, not a wire payload) to the binary
+%% `alias_entry()` uses. Deliberately not shared with
+%% `beamtalk_repl_ops_browse:alias_field_binary/1` (that helper is
+%% `-ifdef(TEST)`-exported only, and maps an absent `doc` to `null`, a
+%% term-op/JSON convention this module's `undefined` doesn't want).
+-spec app_env_binary(atom() | string() | binary()) -> binary().
+app_env_binary(V) when is_binary(V) ->
+    V;
+app_env_binary(V) when is_atom(V) ->
+    atom_to_binary(V, utf8);
+app_env_binary(V) when is_list(V) ->
+    case unicode:characters_to_binary(V) of
+        B when is_binary(B) -> B;
+        _ -> list_to_binary(V)
+    end.
+
+-spec app_env_doc(undefined | atom() | string() | binary()) -> binary() | undefined.
+app_env_doc(undefined) ->
+    undefined;
+app_env_doc(V) ->
+    app_env_binary(V).
