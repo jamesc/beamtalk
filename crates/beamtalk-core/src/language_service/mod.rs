@@ -1637,6 +1637,17 @@ impl LanguageService for SimpleLanguageService {
             let alias_infos = crate::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
             self.project_index
                 .update_file_aliases(file.clone(), alias_infos);
+
+            // BT-2950: track this file's `Protocol define: ...` declarations
+            // too, so `extending:`/conformance checks against a protocol
+            // declared in a different project file or indexed dependency
+            // resolve during LSP diagnostics — mirrors the alias tracking
+            // immediately above (BT-2910 already wired the CLI `build`/`lint`
+            // side of this; this closes the LSP parity gap).
+            let protocol_infos =
+                crate::semantic_analysis::ProtocolRegistry::extract_protocol_infos(&module);
+            self.project_index
+                .update_file_protocols(file.clone(), protocol_infos);
         } else {
             // Hierarchy build failed: store the file with merged diagnostics
             // but do not update the project index for this file.
@@ -1712,9 +1723,17 @@ impl LanguageService for SimpleLanguageService {
                 // instead of leaving `Dynamic (dynamic receiver)` behind —
                 // mirrors `cross_file_classes` immediately above.
                 let pre_loaded_aliases = self.project_index.cross_file_alias_infos_for(file);
+                // BT-2950: Cross-file protocol declarations from the
+                // ProjectIndex, so `extending:`/conformance checks against a
+                // `Protocol define: Name ...` declared in another project
+                // file or dependency resolve instead of degrading to
+                // "unknown protocol" — parity with the CLI's `build`/`lint`
+                // wiring (BT-2910), mirrors `cross_file_classes` above.
+                let pre_loaded_protocols = self.project_index.cross_file_protocol_infos_for(file);
                 let ctx = crate::queries::diagnostic_provider::ProjectDiagnosticContext {
                     options,
                     cross_file_classes,
+                    pre_loaded_protocols,
                     pre_loaded_aliases,
                     cross_file_extensions,
                     native_type_registry: self.native_types.clone(),
@@ -4363,6 +4382,72 @@ mod tests {
         let def = service.goto_definition(&consumer_file, Position::new(1, 20));
         let loc = def.expect("a same-project internal alias should resolve (navigate) cross-file");
         assert_eq!(loc.file, alias_file);
+    }
+
+    /// BT-2950: `pre_loaded_protocols` was never populated on the LSP
+    /// surface at all — a protocol declared in a different project file was
+    /// invisible to LSP diagnostics, so an `extending:` clause naming it
+    /// produced a false "extends unknown protocol" error even though
+    /// `beamtalk build`/`beamtalk lint` already resolve it correctly
+    /// (BT-2910). Mirrors `diagnostics_resolve_cross_file_class_via_project_index`
+    /// above, but for protocols.
+    #[test]
+    fn diagnostics_resolve_cross_file_protocol_via_project_index() {
+        let mut service = SimpleLanguageService::new();
+        let base_file = Utf8PathBuf::from("src/Base.bt");
+        let extending_file = Utf8PathBuf::from("src/Extended.bt");
+
+        service.update_file(
+            base_file,
+            "Protocol define: BaseProto\n  base => Boolean\n".to_string(),
+        );
+        service.update_file(
+            extending_file.clone(),
+            "Protocol define: ExtendedProto\n  extending: BaseProto\n  extra => Boolean\n"
+                .to_string(),
+        );
+
+        let diags = service.diagnostics(&extending_file);
+        let unknown_protocol: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("extends unknown protocol"))
+            .collect();
+        assert!(
+            unknown_protocol.is_empty(),
+            "cross-file protocol `BaseProto` should resolve via ProjectIndex, got: {unknown_protocol:?}"
+        );
+    }
+
+    /// BT-2950 sibling: a protocol exported by an indexed path dependency
+    /// (under `_build/deps/<name>/src/`, mirroring how the alias-resolution
+    /// path already covers dependency files) must resolve in a consumer
+    /// file — parity with `beamtalk-cli`'s dependency-side test for the same
+    /// wiring (BT-2910).
+    #[test]
+    fn diagnostics_resolve_dependency_protocol_via_project_index() {
+        let mut service = SimpleLanguageService::new();
+        let dep_file = Utf8PathBuf::from("_build/deps/http/src/Base.bt");
+        let consumer_file = Utf8PathBuf::from("src/Extended.bt");
+
+        service.update_file(
+            dep_file,
+            "Protocol define: BaseProto\n  base => Boolean\n".to_string(),
+        );
+        service.update_file(
+            consumer_file.clone(),
+            "Protocol define: ExtendedProto\n  extending: BaseProto\n  extra => Boolean\n"
+                .to_string(),
+        );
+
+        let diags = service.diagnostics(&consumer_file);
+        let unknown_protocol: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("extends unknown protocol"))
+            .collect();
+        assert!(
+            unknown_protocol.is_empty(),
+            "a dependency-exported protocol should resolve via ProjectIndex, got: {unknown_protocol:?}"
+        );
     }
 
     /// BT-2800 (ADR 0100 Rule 3 surface-parity gap): `SimpleLanguageService`

@@ -21,7 +21,7 @@
 
 use crate::compilation::extension_index::ExtensionIndex;
 use crate::semantic_analysis::{
-    AliasInfo, AliasRegistry, ClassHierarchy, ProtocolRegistry, SemanticError,
+    AliasInfo, AliasRegistry, ClassHierarchy, ProtocolInfo, ProtocolRegistry, SemanticError,
 };
 use crate::source_analysis::{Diagnostic, lex_with_eof, parse};
 use camino::{Utf8Path, Utf8PathBuf};
@@ -110,6 +110,16 @@ pub struct ProjectIndex {
     /// recompute `merged_aliases` deterministically after an incremental
     /// update or removal.
     file_aliases: HashMap<Utf8PathBuf, Vec<AliasInfo>>,
+    /// Per-file tracking of which [`ProtocolInfo`] declarations came from
+    /// which file (BT-2950) — the protocol-namespace counterpart to
+    /// `file_classes`/`file_aliases`, feeding
+    /// [`Self::cross_file_protocol_infos_for`]. Unlike `file_aliases`, there
+    /// is no merged registry to rebuild: `ProtocolInfo` carries no `package`
+    /// field and protocols have no `internal` modifier at the AST level (see
+    /// `beamtalk-cli`'s `collect_project_protocol_and_alias_infos` doc), so
+    /// every declared protocol is exported project-wide with no
+    /// collision/visibility bookkeeping needed here.
+    file_protocols: HashMap<Utf8PathBuf, Vec<ProtocolInfo>>,
 }
 
 impl ProjectIndex {
@@ -125,6 +135,7 @@ impl ProjectIndex {
             file_extensions: HashMap::new(),
             merged_aliases: AliasRegistry::new(),
             file_aliases: HashMap::new(),
+            file_protocols: HashMap::new(),
         }
     }
 
@@ -197,6 +208,15 @@ impl ProjectIndex {
             }
             if !alias_infos.is_empty() {
                 index.file_aliases.insert(path.clone(), alias_infos);
+            }
+
+            // BT-2950: track stdlib `Protocol define: ...` declarations too,
+            // so a stdlib-defined protocol resolves cross-file (`extending:`/
+            // conformance checks) the same as any project-file protocol —
+            // mirrors the alias tracking immediately above.
+            let protocol_infos = ProtocolRegistry::extract_protocol_infos(&module);
+            if !protocol_infos.is_empty() {
+                index.file_protocols.insert(path.clone(), protocol_infos);
             }
         }
         index.rebuild_alias_registry();
@@ -308,6 +328,22 @@ impl ProjectIndex {
         self.rebuild_alias_registry();
     }
 
+    /// Add or update a file's protocol declarations in the project index
+    /// (BT-2950) — the protocol-namespace counterpart to
+    /// [`Self::update_file_aliases`]. Call after [`Self::update_file`], same
+    /// ordering rationale.
+    ///
+    /// An empty `protocols` clears the file's prior entry (mirrors
+    /// [`Self::update_file_aliases`]). No merged-registry rebuild needed
+    /// here — see [`Self::file_protocols`]'s doc for why.
+    pub fn update_file_protocols(&mut self, file: Utf8PathBuf, protocols: Vec<ProtocolInfo>) {
+        if protocols.is_empty() {
+            self.file_protocols.remove(&file);
+        } else {
+            self.file_protocols.insert(file, protocols);
+        }
+    }
+
     /// Rebuilds [`Self::merged_aliases`] from scratch across every indexed
     /// file's tracked [`AliasInfo`] entries, in deterministic (sorted-path)
     /// iteration order — mirrors [`Self::remerge_classes`]'s determinism
@@ -408,6 +444,10 @@ impl ProjectIndex {
         if had_aliases || (classes_changed && !self.file_aliases.is_empty()) {
             self.rebuild_alias_registry();
         }
+        // BT-2950: drop this file's protocols too, mirroring the alias
+        // removal above — no rebuild needed (no merged registry; see
+        // `file_protocols`'s doc).
+        self.file_protocols.remove(file);
     }
 
     /// Re-merge class definitions from remaining files for the given class names.
@@ -507,6 +547,27 @@ impl ProjectIndex {
     #[must_use]
     pub fn cross_file_alias_infos_for(&self, file: &Utf8PathBuf) -> Vec<AliasInfo> {
         self.file_aliases
+            .iter()
+            .filter(|(path, _)| *path != file)
+            .flat_map(|(_, infos)| infos.iter().cloned())
+            .collect()
+    }
+
+    /// Returns cross-file `ProtocolInfo` entries for diagnostic computation
+    /// (BT-2950) — the protocol-namespace analogue of
+    /// [`Self::cross_file_alias_infos_for`]. Returns every tracked protocol
+    /// declaration from files other than `file` (same-project or indexed
+    /// `_build/deps/*/src/` dependency files), for seeding into
+    /// `ProjectDiagnosticContext::pre_loaded_protocols` so a `Protocol
+    /// define: Name ...` declared in a different project file or dependency
+    /// resolves during LSP diagnostics (`extending:`/conformance checks) the
+    /// same way `beamtalk build`/`beamtalk lint` already do (BT-2910). No
+    /// package filtering — protocols have no `internal` modifier, so every
+    /// declared protocol is exported project-wide (see [`Self::file_protocols`]'s
+    /// doc).
+    #[must_use]
+    pub fn cross_file_protocol_infos_for(&self, file: &Utf8PathBuf) -> Vec<ProtocolInfo> {
+        self.file_protocols
             .iter()
             .filter(|(path, _)| *path != file)
             .flat_map(|(_, infos)| infos.iter().cloned())
