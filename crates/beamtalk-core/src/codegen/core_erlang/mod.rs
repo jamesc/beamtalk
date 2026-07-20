@@ -3591,9 +3591,8 @@ impl CoreErlangGenerator {
                 // doWithKey: block` (Dictionary.bt), so it inherits the fix
                 // once `doWithKey:` itself is guarded.
                 let stateful_guard_block_param = match name {
-                    "do:" | "collect:" | "select:" | "reject:" => params.first(),
+                    "do:" | "collect:" | "select:" | "reject:" | "doWithKey:" => params.first(),
                     "inject:into:" => params.get(1),
-                    "doWithKey:" => params.first(),
                     _ => None,
                 };
                 if let Some(block_param) = stateful_guard_block_param {
