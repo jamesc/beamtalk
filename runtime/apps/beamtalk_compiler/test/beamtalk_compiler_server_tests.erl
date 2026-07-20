@@ -447,7 +447,7 @@ exit_fault_makes_next_call_exit() ->
     %% Let beamtalk_compiler_sup finish restarting before the next test in
     %% this group runs — otherwise its own inject call could race the
     %% not-yet-re-registered name.
-    ok = wait_for_compiler_server_restart().
+    ok = beamtalk_compiler_test_helper:wait_for_compiler_server_restart().
 
 exit_fault_recovers_after_restart() ->
     ok = beamtalk_compiler_server:inject_diagnostics_exit(),
@@ -456,22 +456,8 @@ exit_fault_recovers_after_restart() ->
     %% immediately after the injected stop — wait for the registered name to
     %% come back, then prove the next call reaches a fresh, healthy process
     %% (the fault is one-shot, not stuck broken for the rest of the run).
-    ok = wait_for_compiler_server_restart(),
+    ok = beamtalk_compiler_test_helper:wait_for_compiler_server_restart(),
     ?assertMatch({ok, _}, beamtalk_compiler_server:diagnostics(<<"1 + 2">>)).
-
-wait_for_compiler_server_restart() ->
-    wait_for_compiler_server_restart(100).
-
-wait_for_compiler_server_restart(0) ->
-    error(compiler_server_did_not_restart);
-wait_for_compiler_server_restart(Attempts) ->
-    case whereis(beamtalk_compiler_server) of
-        undefined ->
-            timer:sleep(10),
-            wait_for_compiler_server_restart(Attempts - 1);
-        Pid when is_pid(Pid) ->
-            ok
-    end.
 
 %%% ---------------------------------------------------------------
 %%% Helpers

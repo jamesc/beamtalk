@@ -142,6 +142,12 @@ sealed typed Collection(E) subclass: List(E)
 
   /// Find the first element matching `block`, or evaluate `default` if none.
   ///
+  /// `default` is deliberately `Block(Object)`, not `Block(E)` — matching the
+  /// `Collection` ancestor. The fallback commonly produces a value outside the
+  /// element type (`ifNone: [nil]`, `ifNone: [#missing]`), so narrowing it to
+  /// `E` would reject those legitimate uses; a wrong-typed default going
+  /// unflagged is the accepted trade-off, hence the `E | Object` return type.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// #(1, 2) detect: [:x | x > 5] ifNone: [0]   // => 0
