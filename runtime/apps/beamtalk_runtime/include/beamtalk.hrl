@@ -49,37 +49,20 @@
 
 %% @doc Structured error record for runtime errors.
 %%
-%% All Beamtalk errors use this consistent structure for better tooling
-%% and developer experience:
-%% - kind: Error category — one of:
-%%     does_not_understand | immutable_value | type_error | arity_mismatch |
-%%     future_not_awaited | timeout | instantiation_error | file_not_found |
-%%     permission_denied | io_error | class_not_found |
-%%     no_superclass | class_already_exists | internal_error | dispatch_error |
-%%     callback_failed | assertion_failed | runtime_error | erlang_exit |
-%%     erlang_throw | missing_parameter | stdlib_shadowing |
-%%     stateful_block_dispatch
-%% - class: The class name where the error occurred (e.g., 'Integer')
-%% - selector: The method that failed (if applicable)
-%% - message: Human-readable explanation using user-facing names
-%% - hint: Actionable suggestion for fixing the error
-%% - details: Additional context map (arity, expected types, etc.)
-%%
-%% See docs/internal/design-self-as-object.md Section 3.8 for full taxonomy.
--record(beamtalk_error, {
-    % Error category (see doc above)
-    kind :: atom(),
-    % 'Integer', 'Counter', 'String'
-    class :: atom(),
-    % method that failed
-    selector :: atom() | undefined,
-    % human-readable explanation
-    message :: binary(),
-    % actionable suggestion
-    hint :: binary() | undefined,
-    % additional context (arity, expected types, etc.)
-    details :: map()
-}).
+%% BT-2962 spike: `#beamtalk_error{}` is defined as an OTP 29 native record
+%% (EEP 79), owned by `beamtalk_error` (see that module for the field list
+%% and full documentation) rather than declared here. Native records are
+%% scoped to their defining module — a `-record #beamtalk_error{...}.` in
+%% this shared header would silently produce a distinct, mutually
+%% incompatible record per including module (confirmed empirically during
+%% the BT-2962 spike). The `-import_record` below re-exports the single
+%% `beamtalk_error`-owned definition to every module that includes this
+%% header, so `#beamtalk_error{}` construction/pattern-match/update/type-ref
+%% all resolve to the same record identity everywhere. `beamtalk_error.erl`
+%% itself does NOT include this header — importing a record into the module
+%% that already declares it locally is a compile error, so it declares
+%% `#beamtalk_error{}` standalone.
+-import_record(beamtalk_error, [beamtalk_error]).
 
 %% @doc Located error wrapper for compile-time errors with source spans.
 %%

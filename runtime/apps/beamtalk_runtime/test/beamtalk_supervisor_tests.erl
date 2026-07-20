@@ -4,6 +4,7 @@
 %%% **DDD Context:** Actor System Context
 %%%
 -module(beamtalk_supervisor_tests).
+-compile(nowarn_deprecated_catch).
 
 -moduledoc """
 Unit tests for beamtalk_supervisor runtime helper.

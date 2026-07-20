@@ -3,6 +3,7 @@
 %%% **DDD Context:** Object System Context
 
 -module(beamtalk_object_class_tests).
+-compile(nowarn_deprecated_catch).
 
 -moduledoc """
 EUnit tests for beamtalk_object_class module.
@@ -1205,7 +1206,9 @@ update_class_stdlib_shadowing_returns_error_test_() ->
         [
             ?_test(begin
                 %% Ensure the pending errors ETS table exists and is clean
-                beamtalk_class_registry:record_pending_load_error('__warmup__', #beamtalk_error{}),
+                beamtalk_class_registry:record_pending_load_error(
+                    '__warmup__', beamtalk_error:new(internal_error, 'Warmup')
+                ),
                 ets:delete_all_objects(beamtalk_pending_load_errors),
 
                 %% Register a class with a stdlib module (simulating a loaded stdlib class)
@@ -1242,7 +1245,9 @@ update_class_stdlib_to_stdlib_no_error_test_() ->
         [
             ?_test(begin
                 %% Ensure the pending errors ETS table exists and is clean
-                beamtalk_class_registry:record_pending_load_error('__warmup__', #beamtalk_error{}),
+                beamtalk_class_registry:record_pending_load_error(
+                    '__warmup__', beamtalk_error:new(internal_error, 'Warmup')
+                ),
                 ets:delete_all_objects(beamtalk_pending_load_errors),
 
                 %% Register a class with a stdlib module
@@ -1279,7 +1284,9 @@ update_class_non_stdlib_no_shadowing_test_() ->
                 %% Ensure ETS tables are clean
                 beamtalk_class_registry:ensure_class_warnings_table(),
                 ets:delete_all_objects(beamtalk_class_warnings),
-                beamtalk_class_registry:record_pending_load_error('__warmup__', #beamtalk_error{}),
+                beamtalk_class_registry:record_pending_load_error(
+                    '__warmup__', beamtalk_error:new(internal_error, 'Warmup')
+                ),
                 ets:delete_all_objects(beamtalk_pending_load_errors),
 
                 %% Register a class with a non-stdlib module
@@ -1323,7 +1330,9 @@ multi_class_stdlib_shadowing_short_circuits_test_() ->
         [
             ?_test(begin
                 %% Ensure ETS tables exist and are clean
-                beamtalk_class_registry:record_pending_load_error('__warmup__', #beamtalk_error{}),
+                beamtalk_class_registry:record_pending_load_error(
+                    '__warmup__', beamtalk_error:new(internal_error, 'Warmup')
+                ),
                 ets:delete_all_objects(beamtalk_pending_load_errors),
 
                 %% --- Pre-condition: register a fake stdlib class for Integer ---

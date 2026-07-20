@@ -226,6 +226,34 @@ load_atom_error_eval(Mod, Kind) ->
     {ok, Mod, Bin} = compile:forms(Forms),
     {module, Mod} = code:load_binary(Mod, [], Bin).
 
+%% BT-2962 spike: `erl_parse:abstract/2` has no clause for native records
+%% (OTP 29.0.3) — it can turn atoms/tuples/maps/binaries into literal AST,
+%% but not `#beamtalk_error{}` values, since native records are a new
+%% runtime type it predates. Build the equivalent `{record, ...}` AST node
+%% by hand instead; synthesized Forms using it also need the
+%% `import_record` attribute so the compiled module can resolve the field
+%% names (matching the real `-import_record(beamtalk_error, [beamtalk_error])`
+%% every other consumer module now carries via `beamtalk.hrl`).
+abstract_beamtalk_error(#beamtalk_error{
+    kind = Kind,
+    class = Class,
+    selector = Selector,
+    message = Message,
+    hint = Hint,
+    details = Details
+}) ->
+    {record, 1, beamtalk_error, [
+        {record_field, 1, {atom, 1, kind}, erl_parse:abstract(Kind)},
+        {record_field, 1, {atom, 1, class}, erl_parse:abstract(Class)},
+        {record_field, 1, {atom, 1, selector}, erl_parse:abstract(Selector)},
+        {record_field, 1, {atom, 1, message}, erl_parse:abstract(Message)},
+        {record_field, 1, {atom, 1, hint}, erl_parse:abstract(Hint)},
+        {record_field, 1, {atom, 1, details}, erl_parse:abstract(Details)}
+    ]}.
+
+beamtalk_error_import_record_attr() ->
+    {attribute, 1, import_record, {beamtalk_error, [beamtalk_error]}}.
+
 load_bt_error_eval(Mod, Kind) ->
     %% Raise a #beamtalk_error{} record — matched by run_one's direct-record clause.
     %% Use record syntax so the compiler catches field-order changes in beamtalk.hrl.
@@ -237,9 +265,10 @@ load_bt_error_eval(Mod, Kind) ->
         hint = undefined,
         details = #{}
     },
-    ErrTuple = erl_parse:abstract(ErrRecord),
+    ErrTuple = abstract_beamtalk_error(ErrRecord),
     Forms = [
         {attribute, 1, module, Mod},
+        beamtalk_error_import_record_attr(),
         {attribute, 1, export, [{eval, 1}]},
         {function, 1, eval, 1, [
             {clause, 1, [{var, 1, 'Bindings'}], [], [{call, 1, {atom, 1, error}, [ErrTuple]}]}
@@ -259,7 +288,7 @@ load_wrapped_bt_error_eval(Mod, Kind) ->
         hint = undefined,
         details = #{}
     },
-    ErrTuple = erl_parse:abstract(ErrRecord),
+    ErrTuple = abstract_beamtalk_error(ErrRecord),
     WrappedMap = erl_parse:abstract(#{'$beamtalk_class' => 'RuntimeError', error => placeholder}),
     %% Patch the 'error' field in the abstract form to point to ErrTuple.
     {map, L, Fields} = WrappedMap,
@@ -275,6 +304,7 @@ load_wrapped_bt_error_eval(Mod, Kind) ->
     PatchedMap = {map, L, PatchedFields},
     Forms = [
         {attribute, 1, module, Mod},
+        beamtalk_error_import_record_attr(),
         {attribute, 1, export, [{eval, 1}]},
         {function, 1, eval, 1, [
             {clause, 1, [{var, 1, 'Bindings'}], [], [{call, 1, {atom, 1, error}, [PatchedMap]}]}
@@ -294,10 +324,11 @@ load_future_rejected_eval(Mod, Kind) ->
         hint = undefined,
         details = #{}
     },
-    ErrTuple = erl_parse:abstract(ErrRecord),
+    ErrTuple = abstract_beamtalk_error(ErrRecord),
     ThrowArg = {tuple, 1, [{atom, 1, future_rejected}, ErrTuple]},
     Forms = [
         {attribute, 1, module, Mod},
+        beamtalk_error_import_record_attr(),
         {attribute, 1, export, [{eval, 1}]},
         {function, 1, eval, 1, [
             {clause, 1, [{var, 1, 'Bindings'}], [], [{call, 1, {atom, 1, throw}, [ThrowArg]}]}

@@ -3,6 +3,7 @@
 %%% **DDD Context:** Object System Context
 
 -module(beamtalk_class_registry_tests).
+-compile(nowarn_deprecated_catch).
 
 -moduledoc """
 EUnit tests for beamtalk_class_registry (BT-708).

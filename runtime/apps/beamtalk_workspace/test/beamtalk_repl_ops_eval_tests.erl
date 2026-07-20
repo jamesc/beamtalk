@@ -2,6 +2,7 @@
 %% SPDX-License-Identifier: Apache-2.0
 
 -module(beamtalk_repl_ops_eval_tests).
+-compile(nowarn_deprecated_catch).
 
 %%% **DDD Context:** REPL Session Context
 

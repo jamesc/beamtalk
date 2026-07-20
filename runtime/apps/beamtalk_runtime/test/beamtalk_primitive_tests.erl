@@ -692,7 +692,9 @@ print_string_beamtalk_error_test() ->
         kind = does_not_understand,
         class = 'Integer',
         selector = 'foo',
-        message = <<"Integer does not understand 'foo'">>
+        message = <<"Integer does not understand 'foo'">>,
+        hint = undefined,
+        details = #{}
     },
     Result = beamtalk_primitive:print_string(Error),
     ?assert(is_binary(Result)),

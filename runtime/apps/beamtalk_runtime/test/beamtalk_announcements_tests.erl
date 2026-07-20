@@ -2,6 +2,7 @@
 %% SPDX-License-Identifier: Apache-2.0
 
 -module(beamtalk_announcements_tests).
+-compile(nowarn_deprecated_catch).
 
 -moduledoc """
 EUnit tests for `beamtalk_announcements` (BT-2439 / BT-2440 / BT-2441 / BT-2442 /

@@ -89,6 +89,7 @@ do_handle_term(<<"export-traces">>, Params, _Msg, _SessionPid) ->
             error(#beamtalk_error{
                 kind = io_error,
                 class = 'Tracing',
+                selector = undefined,
                 message = ErrMsg,
                 hint = <<"Check file path and permissions.">>,
                 details = #{}
@@ -150,6 +151,7 @@ build_trace_filter_opts(Params) ->
             error(#beamtalk_error{
                 kind = invalid_argument,
                 class = 'Tracing',
+                selector = undefined,
                 message = iolist_to_binary(
                     io_lib:format("Invalid min_duration_ns: ~p", [BadNs])
                 ),
@@ -188,6 +190,7 @@ parse_pid(PidBin) when is_binary(PidBin) ->
             error(#beamtalk_error{
                 kind = invalid_argument,
                 class = 'Tracing',
+                selector = undefined,
                 message = iolist_to_binary(
                     [<<"Invalid actor PID: ">>, PidBin]
                 ),
@@ -210,6 +213,7 @@ parse_selector(SelectorBin) ->
             error(#beamtalk_error{
                 kind = invalid_argument,
                 class = 'Tracing',
+                selector = undefined,
                 message = iolist_to_binary(
                     [<<"Unknown selector: ">>, SelectorBin]
                 ),
@@ -232,6 +236,7 @@ parse_class(ClassBin) ->
             error(#beamtalk_error{
                 kind = invalid_argument,
                 class = 'Tracing',
+                selector = undefined,
                 message = iolist_to_binary(
                     [<<"Unknown class: ">>, ClassBin]
                 ),
@@ -256,6 +261,7 @@ parse_outcome(OutcomeBin) ->
     error(#beamtalk_error{
         kind = invalid_argument,
         class = 'Tracing',
+        selector = undefined,
         message = iolist_to_binary(
             [<<"Invalid outcome: ">>, OutcomeBin]
         ),

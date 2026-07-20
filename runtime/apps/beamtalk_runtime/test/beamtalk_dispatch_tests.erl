@@ -1200,21 +1200,26 @@ test_invoke_method_module_undefined_continues() ->
 test_compiled_dispatch_returns_error_tuple() ->
     Forms = [
         {attribute, 1, module, bt_test_dispatch_err_stub},
+        %% BT-2962: `#beamtalk_error{}` is an OTP 29 native record, not a
+        %% plain tuple — synthesized modules that build one as a hand-written
+        %% AST literal need this attribute to resolve the field names, same
+        %% as the real `-import_record(beamtalk_error, [beamtalk_error])`
+        %% every consumer module carries via `beamtalk.hrl`.
+        {attribute, 1, import_record, {beamtalk_error, [beamtalk_error]}},
         {attribute, 2, export, [{dispatch, 4}]},
         {function, 3, dispatch, 4, [
             {clause, 3, [{var, 3, '_Sel'}, {var, 3, '_Args'}, {var, 3, '_Self'}, {var, 3, 'State'}],
                 [], [
-                    %% Return {error, {beamtalk_error, does_not_understand, fake, sel, <<>>, <<>>, #{}}, State}
+                    %% Return {error, #beamtalk_error{...}, State}
                     {tuple, 3, [
                         {atom, 3, error},
-                        {tuple, 3, [
-                            {atom, 3, beamtalk_error},
-                            {atom, 3, does_not_understand},
-                            {atom, 3, fake_class},
-                            {atom, 3, fake_sel},
-                            {bin, 3, []},
-                            {bin, 3, []},
-                            {map, 3, []}
+                        {record, 3, beamtalk_error, [
+                            {record_field, 3, {atom, 3, kind}, {atom, 3, does_not_understand}},
+                            {record_field, 3, {atom, 3, class}, {atom, 3, fake_class}},
+                            {record_field, 3, {atom, 3, selector}, {atom, 3, fake_sel}},
+                            {record_field, 3, {atom, 3, message}, {bin, 3, []}},
+                            {record_field, 3, {atom, 3, hint}, {bin, 3, []}},
+                            {record_field, 3, {atom, 3, details}, {map, 3, []}}
                         ]},
                         {var, 3, 'State'}
                     ]}

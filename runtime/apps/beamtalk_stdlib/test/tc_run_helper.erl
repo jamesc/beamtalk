@@ -24,10 +24,22 @@ dispatch(testSkip, [], _Instance) ->
     throw({bunit_skip, <<"skip reason">>});
 dispatch(testAssertFail, [], _Instance) ->
     error(#beamtalk_error{
-        kind = assertion_failed, class = 'TestCase', message = <<"assert failed">>
+        kind = assertion_failed,
+        class = 'TestCase',
+        selector = undefined,
+        message = <<"assert failed">>,
+        hint = undefined,
+        details = #{}
     });
 dispatch(testBeamtalkError, [], _Instance) ->
-    error(#beamtalk_error{kind = type_error, class = 'TestCase', message = <<"generic error">>});
+    error(#beamtalk_error{
+        kind = type_error,
+        class = 'TestCase',
+        selector = undefined,
+        message = <<"generic error">>,
+        hint = undefined,
+        details = #{}
+    });
 dispatch(testUndef, [], _Instance) ->
     nonexistent_module_xyz_bt2391:'nope'();
 %% BT-2404: BEAM error-shape dispatchers for decode_beam_error/1 coverage.
@@ -44,12 +56,26 @@ dispatch(testExceptionMap, [], _Instance) ->
     error(#{
         class => 'Exception',
         '$beamtalk_class' => 'Exception',
-        error => #beamtalk_error{kind = type_error, class = 'TestCase', message = <<"exc msg">>}
+        error => #beamtalk_error{
+            kind = type_error,
+            class = 'TestCase',
+            selector = undefined,
+            message = <<"exc msg">>,
+            hint = undefined,
+            details = #{}
+        }
     });
 dispatch(testClassMap, [], _Instance) ->
     error(#{
         '$beamtalk_class' => 'RuntimeError',
-        error => #beamtalk_error{kind = type_error, class = 'TestCase', message = <<"cls msg">>}
+        error => #beamtalk_error{
+            kind = type_error,
+            class = 'TestCase',
+            selector = undefined,
+            message = <<"cls msg">>,
+            hint = undefined,
+            details = #{}
+        }
     });
 dispatch(testBadKey, [], _Instance) ->
     error({badkey, my_key});

@@ -2,6 +2,7 @@
 %% SPDX-License-Identifier: Apache-2.0
 
 -module(beamtalk_xref_tests).
+-compile(nowarn_deprecated_catch).
 
 -moduledoc """
 EUnit tests for `beamtalk_xref` (BT-2297 / ADR 0087 Phase 1).
