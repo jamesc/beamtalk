@@ -87,19 +87,26 @@ TestCase subclass: DictionaryTest
 
     count := 0
     statefulBlock2 := [:k :v | count := count + v]
-    self should: [
-      #{#a => 1, #b => 2} perform: #keysAndValuesDo: withArguments: #(statefulBlock2)
-    ] raise: #stateful_block_dispatch
+    self
+      should: [
+        #{
+          #a => 1,
+          #b => 2
+        } perform: #keysAndValuesDo: withArguments: #(statefulBlock2)
+      ]
+      raise: #stateful_block_dispatch
 
   testPerformOnPureDoWithKeyBlockAlreadyWorked =>
     // BT-2913: a Tier 1 (pure) block reached via perform: already worked
     // correctly before this fix; pinned here as a baseline.
-    self assert: (#{#a => 1, #b => 2} perform: #doWithKey: withArguments: #([:k :v |
-      nil
-    ])) equals: nil
-    self assert: (#{#a => 1, #b => 2} perform: #keysAndValuesDo: withArguments: #([:k :v |
-      nil
-    ])) equals: nil
+    self assert: (#{
+      #a => 1,
+      #b => 2
+    } perform: #doWithKey: withArguments: #([:k :v | nil])) equals: nil
+    self assert: (#{
+      #a => 1,
+      #b => 2
+    } perform: #keysAndValuesDo: withArguments: #([:k :v | nil])) equals: nil
 
   testDowithkey =>
     // Returns nil
