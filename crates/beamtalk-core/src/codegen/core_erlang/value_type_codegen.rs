@@ -9,6 +9,8 @@
 //! terms (maps) with no process. They are created with `new` and `new:`,
 //! not `spawn`, and methods are synchronous functions operating on maps.
 
+use std::cell::RefCell;
+use std::collections::HashSet;
 use std::fmt::Write as FmtWrite;
 
 use super::document::{Document, concat, join, leaf};
@@ -431,8 +433,17 @@ impl CoreErlangGenerator {
         // alias-named annotation resolves to a `user_type` reference (ADR
         // 0108) instead of falling through to `any()`, regardless of which
         // module declared the alias.
-        let spec_attrs =
-            spec_codegen::generate_class_specs(class, true, Some(&self.alias_registry));
+        // BT-2940: tracks which alias names the specs/type alias below
+        // actually reference, so `generate_alias_type_attrs` only emits
+        // `-type` declarations for those (plus transitive deps) instead of
+        // every pre-loaded alias in the compilation unit.
+        let referenced_aliases: RefCell<HashSet<_>> = RefCell::new(HashSet::new());
+        let spec_attrs = spec_codegen::generate_class_specs(
+            class,
+            true,
+            Some(&self.alias_registry),
+            Some(&referenced_aliases),
+        );
         let spec_suffix: Document<'static> = spec_codegen::format_spec_attributes(&spec_attrs)
             .map_or(Document::Nil, |s| docvec![",\n     ", s]);
 
@@ -442,6 +453,7 @@ impl CoreErlangGenerator {
             class,
             &class_name_for_type,
             Some(&self.alias_registry),
+            Some(&referenced_aliases),
         );
         let export_type_suffix: Document<'static> = if type_alias_opt.is_some() {
             Document::Str(",\n     'export_type' = [{'t', 0}]")
@@ -456,7 +468,8 @@ impl CoreErlangGenerator {
         // module attribute list (an `erlc` compile error otherwise) — empty
         // for a module with no `type_aliases`, so this is a no-op change for
         // the common case.
-        let alias_type_attrs = spec_codegen::generate_alias_type_attrs(&self.alias_registry);
+        let alias_type_attrs =
+            spec_codegen::generate_alias_type_attrs(&self.alias_registry, &referenced_aliases);
         let alias_type_suffix: Document<'static> =
             spec_codegen::format_alias_type_attributes(&alias_type_attrs)
                 .map_or(Document::Nil, |s| docvec![",\n     ", s]);
