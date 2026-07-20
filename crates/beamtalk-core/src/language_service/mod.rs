@@ -1692,6 +1692,17 @@ impl LanguageService for SimpleLanguageService {
                         crate::semantic_analysis::KnowledgeScope::ProjectComplete;
                 }
                 options.has_package_dependencies = self.has_package_dependencies;
+                // BT-2951: `current_package` so `AliasRegistry::add_pre_loaded`'s
+                // seeding-boundary exclusion (ADR 0108 Phase 5) actually has
+                // real package data to filter `pre_loaded_aliases` on below —
+                // without this, every entry's `package` looks unset from the
+                // exclusion check's point of view and a dependency's
+                // `internal type Foo = ...` leaks into every file's
+                // diagnostics. Must match `cross_file_alias_infos_for`'s
+                // entries' own stamping exactly — see
+                // `ProjectIndex::alias_package_for_file`'s doc.
+                options.current_package =
+                    Some(self.project_index.alias_package_for_file(file).to_string());
                 // BT-2795: Cross-file extensions from the ProjectIndex are
                 // passed so a same-project `ClassName >> selector` defined in
                 // another file resolves instead of producing a false Dnu hint.
@@ -4268,6 +4279,90 @@ mod tests {
             unresolved.is_empty(),
             "cross-file class `Foo` should resolve via ProjectIndex, got: {unresolved:?}"
         );
+    }
+
+    /// BT-2951: `ProjectIndex::cross_file_alias_infos_for` used to return
+    /// every alias from every indexed file unconditionally, with no
+    /// `package` stamping and no `current_package` threaded to
+    /// `AliasRegistry::add_pre_loaded`'s seeding-boundary exclusion — so a
+    /// dependency's `internal type Foo = ...` (indexed from
+    /// `_build/deps/<name>/src/`, mirroring `beamtalk-lsp`'s filesystem-driven
+    /// dependency preload) was visible (and go-to-definition-navigable) from
+    /// every other indexed file, silently bypassing ADR 0108's `internal`
+    /// modifier on this surface. A dependency's *public* alias must still
+    /// resolve — this mirrors `beamtalk-cli`'s
+    /// `lint_resolves_dependency_protocol_and_public_alias_but_not_internal_alias`.
+    ///
+    /// Uses `goto_definition` (rather than a diagnostic) as the resolution
+    /// signal: an annotation naming an alias absent from the project-wide
+    /// `AliasRegistry` doesn't necessarily produce a diagnostic at all
+    /// (`check_annotation_for_unresolved_alias` only warns when there's a
+    /// near-miss *suggestion* — see its doc), whereas `goto_definition`
+    /// navigating to the alias's declaration is an unambiguous "this name
+    /// resolved" signal, exactly like
+    /// `goto_definition_alias_from_annotation_site_cross_file` above uses
+    /// for the same-project case.
+    #[test]
+    fn goto_definition_excludes_dependency_internal_alias_but_resolves_public_one() {
+        let mut service = SimpleLanguageService::new();
+        let dep_file = Utf8PathBuf::from("_build/deps/http/src/Types.bt");
+        let consumer_file = Utf8PathBuf::from("src/Client.bt");
+
+        service.update_file(
+            dep_file.clone(),
+            "internal type Secret = String\ntype PublicId = Integer\n".to_string(),
+        );
+        service.update_file(
+            consumer_file.clone(),
+            "Object subclass: Client\n  useSecret: s :: Secret => s\n  useId: i :: PublicId => i\n"
+                .to_string(),
+        );
+
+        // "  useSecret: s :: Secret => s" — the annotation's "Secret" starts
+        // at column 18.
+        let secret_def = service.goto_definition(&consumer_file, Position::new(1, 20));
+        assert!(
+            secret_def.is_none(),
+            "a dependency's internal alias must not resolve (navigate) from a \
+             consumer file, got: {secret_def:?}"
+        );
+
+        // "  useId: i :: PublicId => i" — the annotation's "PublicId" starts
+        // at column 14.
+        let public_def = service.goto_definition(&consumer_file, Position::new(2, 18));
+        let loc = public_def.expect(
+            "a dependency's public alias must still resolve (navigate) from a consumer file",
+        );
+        assert_eq!(loc.file, dep_file);
+    }
+
+    /// BT-2951 sibling: a same-project file's `internal type Foo = ...` must
+    /// stay visible to every *other* same-project file (ADR 0108: internal
+    /// aliases are usable throughout their declaring package, not just their
+    /// declaring file) — only a *different* package's internal alias should
+    /// ever be excluded. Both files here are stamped with the same
+    /// same-project marker (`ProjectIndex`'s `CURRENT_PROJECT_PACKAGE_MARKER`),
+    /// so this must not regress into over-exclusion.
+    #[test]
+    fn goto_definition_resolves_same_project_internal_alias_cross_file() {
+        let mut service = SimpleLanguageService::new();
+        let alias_file = Utf8PathBuf::from("src/Types.bt");
+        let consumer_file = Utf8PathBuf::from("src/Client.bt");
+
+        service.update_file(
+            alias_file.clone(),
+            "internal type Secret = String\n".to_string(),
+        );
+        service.update_file(
+            consumer_file.clone(),
+            "Object subclass: Client\n  useSecret: s :: Secret => s\n".to_string(),
+        );
+
+        // "  useSecret: s :: Secret => s" — the annotation's "Secret" starts
+        // at column 18.
+        let def = service.goto_definition(&consumer_file, Position::new(1, 20));
+        let loc = def.expect("a same-project internal alias should resolve (navigate) cross-file");
+        assert_eq!(loc.file, alias_file);
     }
 
     /// BT-2800 (ADR 0100 Rule 3 surface-parity gap): `SimpleLanguageService`
