@@ -3527,6 +3527,13 @@ impl CoreErlangGenerator {
         // does, and a Tier 2 (stateful) receiver/argument raises the same
         // `stateful_block_dispatch` error `generate_block_value_structural_fallback`
         // established rather than being reimplemented generically.
+        //
+        // Adversarial review (BT-2908): like BT-2812's `value*` match above,
+        // the `is_function/2` arity+1 check each of these five functions runs
+        // is not statically tied to ADR-0041's `Args..., StateAcc` convention
+        // — a future change to that shape (extra state args, different
+        // position) would silently degrade Tier 2 detection here too, with no
+        // compile-time signal.
         if !is_quoted {
             match name {
                 "whileTrue" => {

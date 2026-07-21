@@ -240,3 +240,45 @@ TestCase subclass: BlocksTest
     self should: [
       [42] perform: #ensure: withArguments: #(statefulReceiver)
     ] raise: #stateful_block_dispatch
+
+  testPerformOnDoNonMatchingExceptionClassReraisesToOuterHandler =>
+    // BT-2908 adversarial review: a non-matching exception class must
+    // re-raise (not invoke the handler) through the perform: path too,
+    // exactly like a literal on:do: send (mirrors custom_exceptions_test.bt's
+    // testNonMatchingClassTypeError).
+    result := [
+      [
+        MyCustomError signal: "no"
+      ] perform: #on:do: withArguments: #(TypeError, [:e | "wrong"])
+    ] on: Exception do: [:e | "correct"]
+    self assert: result equals: "correct"
+
+  performOnDoNlrHelper =>
+    [
+      Error signal: "trigger"
+    ] perform: #on:do: withArguments: #(Error, [:e | ^42])
+    99
+
+  testPerformOnDoNonLocalReturnPropagatesThroughGenericDispatch =>
+    // BT-2908 adversarial review: on:do:'s handler block reached via
+    // perform: must let a ^ (non-local return) propagate to the enclosing
+    // method exactly like the AST-driven on:do: does. Proven via a helper
+    // method whose ^ inside the perform:-dispatched handler short-circuits
+    // before its own trailing expression (99) is reached — if NLR were
+    // caught or swallowed by the generic fallback, this would return 99
+    // (or crash) instead of 42.
+    self assert: self performOnDoNlrHelper equals: 42
+
+  performEnsureNlrHelper: counter =>
+    [^42] perform: #ensure: withArguments: #([counter increment])
+    99
+
+  testPerformOnEnsureNonLocalReturnPropagatesThroughGenericDispatch =>
+    // BT-2908 adversarial review: ensure:'s protected block reached via
+    // perform: must let a ^ propagate after cleanup runs exactly once,
+    // exactly like the AST-driven ensure: does. Same short-circuit proof as
+    // the on:do: test above, plus confirms cleanup still ran on the NLR path.
+    counter := AtomicCounter new: #bt2908EnsureNlrCounter
+    self assert: (self performEnsureNlrHelper: counter) equals: 42
+    self assert: counter value equals: 1
+    counter delete
