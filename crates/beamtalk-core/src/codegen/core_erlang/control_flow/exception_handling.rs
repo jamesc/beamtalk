@@ -49,8 +49,10 @@
 //! ```
 
 use super::super::document::Document;
-use super::super::document::leaf;
-use super::super::intrinsics::{validate_block_arity_exact, validate_on_do_handler};
+use super::super::document::{join, leaf};
+use super::super::intrinsics::{
+    STATEFUL_BLOCK_DISPATCH_HINT, validate_block_arity_exact, validate_on_do_handler,
+};
 use super::super::{CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{Block, Expression};
 use crate::docvec;
@@ -637,6 +639,284 @@ impl CoreErlangGenerator {
         ]);
 
         Ok(Document::Vec(docs))
+    }
+
+    /// Builds the Tier 1 (pure protected block) `try`/`catch` body for
+    /// `generate_on_do_structural_fallback` — factored out to keep that
+    /// function under clippy's line-count limit. Reuses
+    /// `on_do_catch_preamble`'s NLR-passthrough + `matches_class` structure;
+    /// only the handler's tier (arity 0 = pure 0-arg, arity 1 = pure 1-arg,
+    /// anything else = stateful) is discriminated dynamically here, since it
+    /// isn't known statically the way `generate_on_do` knows it from the
+    /// literal block AST.
+    fn generate_on_do_tier1_try(
+        &mut self,
+        self_var: &'static str,
+        ex_class_param: String,
+        handler_param: String,
+        class_name: &str,
+    ) -> Document<'static> {
+        let result_var = self.fresh_temp_var("Result");
+        let type_var = self.fresh_temp_var("Type");
+        let error_var = self.fresh_temp_var("Error");
+        let stack_var = self.fresh_temp_var("Stack");
+        let built_stack_var = self.fresh_temp_var("BuiltStack");
+        let ex_obj_var = self.fresh_temp_var("ExObj");
+        let match_var = self.fresh_temp_var("Match");
+        // Two NLR throw shapes `on_do_catch_preamble` matches against: the
+        // 4-tuple actor-NLR-with-state variant (BT-761) and the plain 3-tuple
+        // variant (BT-754) — not nesting levels, hence the `_with_state`/
+        // `_no_state` naming rather than a generic numeric suffix.
+        let nlr_tok_with_state_var = self.fresh_temp_var("NlrCheckTok");
+        let nlr_val_with_state_var = self.fresh_temp_var("NlrCheckVal");
+        let nlr_state_var = self.fresh_temp_var("NlrCheckState");
+        let nlr_tok_no_state_var = self.fresh_temp_var("NlrCheckTok");
+        let nlr_val_no_state_var = self.fresh_temp_var("NlrCheckVal");
+        let other_pair_var = self.fresh_temp_var("OtherPair");
+
+        // arity 1 is ambiguous between a pure 1-arg handler and a stateful
+        // 0-arg handler — same documented ambiguity as BT-2812's blockValue*
+        // (deferred disambiguation, see BT-2892); anything else is Tier 2.
+        let handler_stateful_error = self.generate_stateful_block_dispatch_error(
+            "on:do:",
+            class_name,
+            STATEFUL_BLOCK_DISPATCH_HINT,
+        );
+        let handler_dispatch = docvec![
+            "case call 'erlang':'is_function'(",
+            leaf::var(handler_param.clone()),
+            ", 0) of <'true'> when 'true' -> apply ",
+            leaf::var(handler_param.clone()),
+            " () <'false'> when 'true' -> case call 'erlang':'is_function'(",
+            leaf::var(handler_param.clone()),
+            ", 1) of <'true'> when 'true' -> apply ",
+            leaf::var(handler_param),
+            " (",
+            leaf::var(ex_obj_var.clone()),
+            ") <'false'> when 'true' -> ",
+            handler_stateful_error,
+            " end end",
+        ];
+
+        let catch_preamble = Self::on_do_catch_preamble(
+            &type_var,
+            &error_var,
+            stack_var.clone(),
+            nlr_tok_with_state_var,
+            nlr_val_with_state_var,
+            nlr_state_var,
+            nlr_tok_no_state_var,
+            nlr_val_no_state_var,
+            other_pair_var,
+            built_stack_var,
+            ex_obj_var,
+            match_var,
+            ex_class_param,
+        );
+
+        docvec![
+            "try apply ",
+            Document::Str(self_var),
+            " () of ",
+            leaf::var(result_var.clone()),
+            " -> ",
+            leaf::var(result_var),
+            " ",
+            catch_preamble,
+            handler_dispatch,
+            " <'false'> when 'true' -> ",
+            Self::emit_raw_raise(type_var, error_var, stack_var),
+            " end end",
+        ]
+    }
+
+    /// BT-2908: Generates the fallback method body for `onDo` — Block's
+    /// `on:do:`. Reached only via generic dispatch bypassing the call-site
+    /// interception `generate_on_do` normally provides (e.g. `perform:`). See
+    /// `generate_block_value_structural_fallback` (BT-2812) for the general
+    /// Tier 1/Tier 2 discrimination rationale.
+    ///
+    /// Reuses `on_do_catch_preamble`'s NLR-passthrough + `matches_class`
+    /// structure so the Tier 1 (pure) case stays behaviourally identical to
+    /// the AST-driven `generate_on_do` — only the receiver/handler *tier*
+    /// discrimination differs, since a generically dispatched handler's
+    /// declared arity (0 or 1) isn't known statically the way it is when
+    /// `generate_on_do` reads it straight off the literal block AST.
+    /// `current_method_params` are `[ExClass, Handler]` (the `on:`/`do:`
+    /// keyword arguments); `Self` is the protected block.
+    pub(in crate::codegen::core_erlang) fn generate_on_do_structural_fallback(
+        &mut self,
+        class_name: &str,
+    ) -> Document<'static> {
+        let self_var = if self.in_class_method() {
+            "ClassSelf"
+        } else {
+            "Self"
+        };
+        let ex_class_param = self
+            .current_method_params
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "ExClass".to_string());
+        let handler_param = self
+            .current_method_params
+            .get(1)
+            .cloned()
+            .unwrap_or_else(|| "Handler".to_string());
+
+        let runtime_module =
+            super::super::primitive_bindings::PrimitiveBindingTable::runtime_module_for_class(
+                class_name,
+            );
+        let params_doc = join(
+            [
+                leaf::var(ex_class_param.clone()),
+                leaf::var(handler_param.clone()),
+            ],
+            &Document::Str(", "),
+        );
+        let placeholder_branch = docvec![
+            "call ",
+            leaf::atom(runtime_module),
+            ":'dispatch'('onDo', [",
+            params_doc,
+            "], ",
+            Document::Str(self_var),
+            ")",
+        ];
+
+        let tier1_try =
+            self.generate_on_do_tier1_try(self_var, ex_class_param, handler_param, class_name);
+
+        let self_stateful_error = self.generate_stateful_block_dispatch_error(
+            "on:do:",
+            class_name,
+            STATEFUL_BLOCK_DISPATCH_HINT,
+        );
+        docvec![
+            "case call 'erlang':'is_function'(",
+            Document::Str(self_var),
+            ", 0) of <'true'> when 'true' -> ",
+            tier1_try,
+            " <'false'> when 'true' -> case call 'erlang':'is_function'(",
+            Document::Str(self_var),
+            ", 1) of <'true'> when 'true' -> ",
+            self_stateful_error,
+            " <'false'> when 'true' -> ",
+            placeholder_branch,
+            " end end",
+        ]
+    }
+
+    /// BT-2908: Generates the fallback method body for `ensure` — Block's
+    /// `ensure:`. Reached only via generic dispatch bypassing the call-site
+    /// interception `generate_ensure` normally provides (e.g. `perform:`).
+    /// See `generate_block_value_structural_fallback` (BT-2812) for the
+    /// general Tier 1/Tier 2 discrimination rationale.
+    ///
+    /// Both receiver and cleanup block must be Tier 1 (pure, 0-arg funs) for
+    /// the generic try/catch below to be correct — Core Erlang's try/catch
+    /// mechanics don't themselves need the block's AST, only ADR-0041's
+    /// state-threading convention does, so the pure case is fully generic.
+    /// `current_method_params[0]` is the cleanup block; `Self` is the
+    /// protected block.
+    pub(in crate::codegen::core_erlang) fn generate_ensure_structural_fallback(
+        &mut self,
+        class_name: &str,
+    ) -> Document<'static> {
+        let self_var = if self.in_class_method() {
+            "ClassSelf"
+        } else {
+            "Self"
+        };
+        let cleanup_param = self
+            .current_method_params
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "CleanupBlock".to_string());
+
+        let runtime_module =
+            super::super::primitive_bindings::PrimitiveBindingTable::runtime_module_for_class(
+                class_name,
+            );
+        let placeholder_branch = docvec![
+            "call ",
+            leaf::atom(runtime_module),
+            ":'dispatch'('ensure', [",
+            leaf::var(cleanup_param.clone()),
+            "], ",
+            Document::Str(self_var),
+            ")",
+        ];
+
+        let try_result_var = self.fresh_temp_var("TryResult");
+        let result_var = self.fresh_temp_var("Result");
+        let type_var = self.fresh_temp_var("Type");
+        let error_var = self.fresh_temp_var("Error");
+        let stack_var = self.fresh_temp_var("Stack");
+
+        let tier1_try = docvec![
+            "try let ",
+            leaf::var(try_result_var.clone()),
+            " = apply ",
+            Document::Str(self_var),
+            " () in ",
+            leaf::var(try_result_var),
+            " of ",
+            leaf::var(result_var.clone()),
+            " -> let _ = apply ",
+            leaf::var(cleanup_param.clone()),
+            " () in ",
+            leaf::var(result_var),
+            " catch <",
+            leaf::var(type_var.clone()),
+            ", ",
+            leaf::var(error_var.clone()),
+            ", ",
+            leaf::var(stack_var.clone()),
+            "> -> do apply ",
+            leaf::var(cleanup_param.clone()),
+            " () ",
+            Self::emit_raw_raise(type_var, error_var, stack_var),
+        ];
+
+        let cleanup_stateful_error = self.generate_stateful_block_dispatch_error(
+            "ensure:",
+            class_name,
+            STATEFUL_BLOCK_DISPATCH_HINT,
+        );
+        let cleanup_tier_check = docvec![
+            "case call 'erlang':'is_function'(",
+            leaf::var(cleanup_param.clone()),
+            ", 0) of <'true'> when 'true' -> ",
+            tier1_try,
+            " <'false'> when 'true' -> case call 'erlang':'is_function'(",
+            leaf::var(cleanup_param),
+            ", 1) of <'true'> when 'true' -> ",
+            cleanup_stateful_error,
+            " <'false'> when 'true' -> ",
+            placeholder_branch.clone(),
+            " end end",
+        ];
+
+        let self_stateful_error = self.generate_stateful_block_dispatch_error(
+            "ensure:",
+            class_name,
+            STATEFUL_BLOCK_DISPATCH_HINT,
+        );
+        docvec![
+            "case call 'erlang':'is_function'(",
+            Document::Str(self_var),
+            ", 0) of <'true'> when 'true' -> ",
+            cleanup_tier_check,
+            " <'false'> when 'true' -> case call 'erlang':'is_function'(",
+            Document::Str(self_var),
+            ", 1) of <'true'> when 'true' -> ",
+            self_stateful_error,
+            " <'false'> when 'true' -> ",
+            placeholder_branch,
+            " end end",
+        ]
     }
 
     /// BT-410/BT-483: Generates block body expressions with state mutation threading.

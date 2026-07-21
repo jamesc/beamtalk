@@ -70,10 +70,11 @@ sealed typed Object subclass: SystemNavigation
     actorClass isNil ifTrue: [^List new]
     actors := self allClasses
       select: [:c |
-        // findClass:'s declared return type is Object (BT-2223) — a class or
-        // metaclass object at runtime, but no narrower nominal type is safe
-        // to declare across all five of its callers. The isNil guard above
-        // proves actorClass is a real class object here.
+        // Suppresses the type check on `actorClass` (declared `Object`)
+        // flowing into `superclassChain includes:`. findClass:'s return type
+        // is Object (BT-2223) — a class or metaclass object at runtime, but
+        // no narrower nominal type is safe across all five of its callers.
+        // The isNil guard above proves actorClass is a real class object here.
         @expect type
         c superclassChain includes: actorClass
       ]

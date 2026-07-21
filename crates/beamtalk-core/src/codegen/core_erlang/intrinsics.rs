@@ -27,6 +27,16 @@ use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_ana
 use crate::ast::{Block, Expression, MessageSelector, WellKnownSelector};
 use crate::docvec;
 
+/// Hint shown when a structural intrinsic reached via generic dispatch
+/// (`perform:`/`perform:withArguments:`) can't tell — from an
+/// `erlang:is_function/2` arity check alone — whether it's looking at a
+/// genuine Tier 2 (stateful, ADR-0041) block or a Tier 1 block called with
+/// the wrong argument count. Shared by BT-2812's `value*` fallback, BT-2908's
+/// loop/exception-handling fallbacks (`while_loops.rs`, `exception_handling.rs`),
+/// and BT-2888's List/Collection guard (which uses its own, differently-worded
+/// variant — see `generate_stateful_block_guard`).
+pub(in crate::codegen::core_erlang) const STATEFUL_BLOCK_DISPATCH_HINT: &str = "Wrong argument count, or the block captures mutable state and must be invoked directly instead of via perform:";
+
 /// Returns the arity of a block expression, or `None` if the expression is not a block literal.
 fn block_arity(expr: &Expression) -> Option<usize> {
     match expr {
@@ -1239,33 +1249,11 @@ impl CoreErlangGenerator {
             &Document::Str(", "),
         );
 
-        let error_base = self.fresh_temp_var("Err");
-        let error_sel = self.fresh_temp_var("Err");
-        let error_hint = self.fresh_temp_var("Err");
-        let hint = leaf::binary_lit(
-            "Wrong argument count, or the block captures mutable state and must be invoked directly instead of via perform:",
+        let stateful_branch = self.generate_stateful_block_dispatch_error(
+            real_selector,
+            class_name,
+            STATEFUL_BLOCK_DISPATCH_HINT,
         );
-        let stateful_branch = docvec![
-            "let ",
-            leaf::var(error_base.clone()),
-            " = call 'beamtalk_error':'new'('stateful_block_dispatch', ",
-            leaf::atom(class_name),
-            ") in let ",
-            leaf::var(error_sel.clone()),
-            " = call 'beamtalk_error':'with_selector'(",
-            leaf::var(error_base),
-            ", ",
-            leaf::atom(real_selector),
-            ") in let ",
-            leaf::var(error_hint.clone()),
-            " = call 'beamtalk_error':'with_hint'(",
-            leaf::var(error_sel),
-            ", ",
-            hint,
-            ") in call 'beamtalk_error':'raise'(",
-            leaf::var(error_hint),
-            ")",
-        ];
 
         let runtime_module =
             super::primitive_bindings::PrimitiveBindingTable::runtime_module_for_class(class_name);
@@ -1299,6 +1287,46 @@ impl CoreErlangGenerator {
             " <'false'> when 'true' -> ",
             placeholder_branch,
             " end end",
+        ]
+    }
+
+    /// Shared `#beamtalk_error{kind = stateful_block_dispatch}` construction used
+    /// by every structural-intrinsic fallback that can't tell (from an
+    /// `erlang:is_function/2` arity check alone) whether it's looking at a
+    /// genuine Tier 2 (stateful, ADR-0041) block or a Tier 1 block called with
+    /// the wrong argument count — see `generate_block_value_structural_fallback`'s
+    /// doc comment above for why the hint is deliberately hedged rather than
+    /// asserting a specific cause.
+    pub(in crate::codegen::core_erlang) fn generate_stateful_block_dispatch_error(
+        &mut self,
+        real_selector: &str,
+        class_name: &str,
+        hint_text: &str,
+    ) -> Document<'static> {
+        let error_base = self.fresh_temp_var("Err");
+        let error_sel = self.fresh_temp_var("Err");
+        let error_hint = self.fresh_temp_var("Err");
+        let hint = leaf::binary_lit(hint_text);
+        docvec![
+            "let ",
+            leaf::var(error_base.clone()),
+            " = call 'beamtalk_error':'new'('stateful_block_dispatch', ",
+            leaf::atom(class_name),
+            ") in let ",
+            leaf::var(error_sel.clone()),
+            " = call 'beamtalk_error':'with_selector'(",
+            leaf::var(error_base),
+            ", ",
+            leaf::atom(real_selector),
+            ") in let ",
+            leaf::var(error_hint.clone()),
+            " = call 'beamtalk_error':'with_hint'(",
+            leaf::var(error_sel),
+            ", ",
+            hint,
+            ") in call 'beamtalk_error':'raise'(",
+            leaf::var(error_hint),
+            ")",
         ]
     }
 
@@ -1337,33 +1365,17 @@ impl CoreErlangGenerator {
         class_name: &str,
         tier1_doc: Document<'static>,
     ) -> Document<'static> {
-        let error_base = self.fresh_temp_var("Err");
-        let error_sel = self.fresh_temp_var("Err");
-        let error_hint = self.fresh_temp_var("Err");
-        let hint = leaf::binary_lit(
+        // Hint text deliberately differs from `STATEFUL_BLOCK_DISPATCH_HINT`
+        // ("...via perform:") — List/Collection selectors are ordinary
+        // methods, reachable through *any* dynamic dispatch (not just
+        // `perform:`/`perform:withArguments:` the way a structural intrinsic
+        // like `value*`/`whileTrue:`/`on:do:` is), so the hint says
+        // "perform:/dynamic dispatch" to cover both.
+        let stateful_branch = self.generate_stateful_block_dispatch_error(
+            real_selector,
+            class_name,
             "Wrong argument count, or the block captures mutable state and must be invoked directly instead of via perform:/dynamic dispatch",
         );
-        let stateful_branch = docvec![
-            "let ",
-            leaf::var(error_base.clone()),
-            " = call 'beamtalk_error':'new'('stateful_block_dispatch', ",
-            leaf::atom(class_name),
-            ") in let ",
-            leaf::var(error_sel.clone()),
-            " = call 'beamtalk_error':'with_selector'(",
-            leaf::var(error_base),
-            ", ",
-            leaf::atom(real_selector),
-            ") in let ",
-            leaf::var(error_hint.clone()),
-            " = call 'beamtalk_error':'with_hint'(",
-            leaf::var(error_sel),
-            ", ",
-            hint,
-            ") in call 'beamtalk_error':'raise'(",
-            leaf::var(error_hint),
-            ")",
-        ];
 
         docvec![
             "case call 'erlang':'is_function'(",

@@ -23,14 +23,14 @@
 Actor subclass: InlineCounter
   state: value = 0
   increment => self.value := self.value + 1
-// => _
+// => InlineCounter
 
 // ---------------------------------------------------------------------------
 // Add more methods using Tonel-style standalone method defs
 // ---------------------------------------------------------------------------
 
 InlineCounter >> getValue => self.value
-// => _
+// => InlineCounter>>getValue
 
 // ---------------------------------------------------------------------------
 // Spawn and use the class
@@ -53,7 +53,7 @@ c getValue
 // ---------------------------------------------------------------------------
 
 InlineCounter >> increment => self.value := self.value + 10
-// => _
+// => InlineCounter>>increment
 
 c2 := InlineCounter spawn
 // => Actor(InlineCounter, _)
