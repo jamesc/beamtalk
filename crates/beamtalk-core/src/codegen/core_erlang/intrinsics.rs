@@ -1365,6 +1365,12 @@ impl CoreErlangGenerator {
         class_name: &str,
         tier1_doc: Document<'static>,
     ) -> Document<'static> {
+        // Hint text deliberately differs from `STATEFUL_BLOCK_DISPATCH_HINT`
+        // ("...via perform:") — List/Collection selectors are ordinary
+        // methods, reachable through *any* dynamic dispatch (not just
+        // `perform:`/`perform:withArguments:` the way a structural intrinsic
+        // like `value*`/`whileTrue:`/`on:do:` is), so the hint says
+        // "perform:/dynamic dispatch" to cover both.
         let stateful_branch = self.generate_stateful_block_dispatch_error(
             real_selector,
             class_name,
