@@ -331,7 +331,7 @@
     "format:check": "biome format src/"
   },
   "dependencies": {
-    "vscode-languageclient": "^9.0.1",
+    "vscode-languageclient": "^10.1.0",
     "ws": "^8.21.0"
   },
   "devDependencies": {
@@ -339,7 +339,7 @@
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.82.0",
     "@types/ws": "^8.0.0",
-    "@vscode/vsce": "^3.7.1",
+    "@vscode/vsce": "^3.9.2",
     "esbuild": "^0.28.1",
     "typescript": "^5.0.0",
     "vitest": "^4.1.3"
