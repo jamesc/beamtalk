@@ -147,10 +147,11 @@ TestCase subclass: BlocksTest
     ] perform: #whileFalse: withArguments: #([42])) equals: nil
     counter := AtomicCounter new: #bt2908WhileTrueCounter
     [
-      counter value < 3
-    ] perform: #whileTrue: withArguments: #([counter increment])
-    self assert: counter value equals: 3
-    counter delete
+      [
+        counter value < 3
+      ] perform: #whileTrue: withArguments: #([counter increment])
+      self assert: counter value equals: 3
+    ] ensure: [counter delete]
 
   testPerformOnPureRepeatSelector =>
     // BT-2908: repeat reached via perform:withArguments: — a pure receiver
@@ -158,14 +159,15 @@ TestCase subclass: BlocksTest
     // exception (repeat has no other way to stop) rather than the
     // wrong-selector does_not_understand it used to hit immediately.
     counter := AtomicCounter new: #bt2908RepeatCounter
-    result := [
-      [
-        counter increment
-        (counter value >= 3) ifTrue: [Error signal: "done"]
-      ] perform: #repeat withArguments: #()
-    ] on: Error do: [:e | counter value]
-    self assert: result equals: 3
-    counter delete
+    [
+      result := [
+        [
+          counter increment
+          (counter value >= 3) ifTrue: [Error signal: "done"]
+        ] perform: #repeat withArguments: #()
+      ] on: Error do: [:e | counter value]
+      self assert: result equals: 3
+    ] ensure: [counter delete]
 
   testPerformOnPureOnDoSelector =>
     // BT-2908: on:do: reached via perform:withArguments: now runs the same
@@ -190,16 +192,17 @@ TestCase subclass: BlocksTest
     // on both the success and error paths, matching generate_ensure's
     // literal-send semantics, for pure (Tier 1) receiver/cleanup blocks.
     counter := AtomicCounter new: #bt2908EnsureCounter
-    self assert: ([
-      42
-    ] perform: #ensure: withArguments: #([counter increment])) equals: 42
-    self assert: counter value equals: 1
-    caught := [
-      [1 / 0] perform: #ensure: withArguments: #([counter increment])
-    ] on: Exception do: [:e | "caught"]
-    self assert: caught equals: "caught"
-    self assert: counter value equals: 2
-    counter delete
+    [
+      self assert: ([
+        42
+      ] perform: #ensure: withArguments: #([counter increment])) equals: 42
+      self assert: counter value equals: 1
+      caught := [
+        [1 / 0] perform: #ensure: withArguments: #([counter increment])
+      ] on: Exception do: [:e | "caught"]
+      self assert: caught equals: "caught"
+      self assert: counter value equals: 2
+    ] ensure: [counter delete]
 
   testPerformOnStatefulLoopBlockRaisesClearError =>
     // BT-2908: a stateful (Tier 2) condition or body block mutates captured
@@ -279,6 +282,7 @@ TestCase subclass: BlocksTest
     // exactly like the AST-driven ensure: does. Same short-circuit proof as
     // the on:do: test above, plus confirms cleanup still ran on the NLR path.
     counter := AtomicCounter new: #bt2908EnsureNlrCounter
-    self assert: (self performEnsureNlrHelper: counter) equals: 42
-    self assert: counter value equals: 1
-    counter delete
+    [
+      self assert: (self performEnsureNlrHelper: counter) equals: 42
+      self assert: counter value equals: 1
+    ] ensure: [counter delete]
