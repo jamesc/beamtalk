@@ -286,3 +286,27 @@ TestCase subclass: BlocksTest
       self assert: (self performEnsureNlrHelper: counter) equals: 42
       self assert: counter value equals: 1
     ] ensure: [counter delete]
+
+  testPerformOnDoWithZeroArgStatefulHandlerSilentlyMisfiresInsteadOfErroring =>
+    // BT-2908 review: on:do:'s handler dispatch shares the arity-1 ambiguity
+    // BT-2812 documented for blockValue* (deferred to BT-2892) — a genuinely
+    // Tier 2 0-arg handler has raw arity 1 (StateAcc only), indistinguishable
+    // from a pure 1-arg handler, so it gets misapplied as
+    // `apply Handler (ExObj)` instead of raising stateful_block_dispatch.
+    // Empirically checked (not assumed): unlike BT-2812's blockValue* variant,
+    // where the misapplied block's internal maps:get/maps:put hits a badarg
+    // an outer safety net converts to a clean #beamtalk_error{}, this
+    // variant doesn't crash or error at all — a 0-arg block using direct-
+    // params state threading (BT-1275) just tolerates ExObj as a stand-in
+    // StateAcc and returns a garbage {Result, NewState} tuple silently, with
+    // the original exception dropped rather than propagated or reported.
+    // Pinned as the observed behavior for this specific variant of the
+    // deferred BT-2892 ambiguity — not a regression from this PR (the same
+    // arity check already exists for value:/etc. via BT-2812), but the
+    // silent-data-loss shape is worth flagging for whoever picks up BT-2892.
+    count := 0
+    statefulZeroArgHandler := [count := count + 1]
+    result := [
+      1 / 0
+    ] perform: #on:do: withArguments: #(Error, statefulZeroArgHandler)
+    self assert: (result isKindOf: Tuple)

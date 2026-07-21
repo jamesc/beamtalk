@@ -663,11 +663,15 @@ impl CoreErlangGenerator {
         let built_stack_var = self.fresh_temp_var("BuiltStack");
         let ex_obj_var = self.fresh_temp_var("ExObj");
         let match_var = self.fresh_temp_var("Match");
-        let nlr_tok_var = self.fresh_temp_var("NlrCheckTok");
-        let nlr_val_var = self.fresh_temp_var("NlrCheckVal");
+        // Two NLR throw shapes `on_do_catch_preamble` matches against: the
+        // 4-tuple actor-NLR-with-state variant (BT-761) and the plain 3-tuple
+        // variant (BT-754) — not nesting levels, hence the `_with_state`/
+        // `_no_state` naming rather than a generic numeric suffix.
+        let nlr_tok_with_state_var = self.fresh_temp_var("NlrCheckTok");
+        let nlr_val_with_state_var = self.fresh_temp_var("NlrCheckVal");
         let nlr_state_var = self.fresh_temp_var("NlrCheckState");
-        let nlr_tok_var2 = self.fresh_temp_var("NlrCheckTok");
-        let nlr_val_var2 = self.fresh_temp_var("NlrCheckVal");
+        let nlr_tok_no_state_var = self.fresh_temp_var("NlrCheckTok");
+        let nlr_val_no_state_var = self.fresh_temp_var("NlrCheckVal");
         let other_pair_var = self.fresh_temp_var("OtherPair");
 
         // arity 1 is ambiguous between a pure 1-arg handler and a stateful
@@ -698,11 +702,11 @@ impl CoreErlangGenerator {
             &type_var,
             &error_var,
             stack_var.clone(),
-            nlr_tok_var,
-            nlr_val_var,
+            nlr_tok_with_state_var,
+            nlr_val_with_state_var,
             nlr_state_var,
-            nlr_tok_var2,
-            nlr_val_var2,
+            nlr_tok_no_state_var,
+            nlr_val_no_state_var,
             other_pair_var,
             built_stack_var,
             ex_obj_var,
