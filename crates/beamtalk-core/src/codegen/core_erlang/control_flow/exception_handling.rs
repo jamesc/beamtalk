@@ -50,16 +50,12 @@
 
 use super::super::document::Document;
 use super::super::document::{join, leaf};
-use super::super::intrinsics::{validate_block_arity_exact, validate_on_do_handler};
+use super::super::intrinsics::{
+    STATEFUL_BLOCK_DISPATCH_HINT, validate_block_arity_exact, validate_on_do_handler,
+};
 use super::super::{CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{Block, Expression};
 use crate::docvec;
-
-/// Hint shown when an exception-handling structural intrinsic (`on:do:`/
-/// `ensure:`) reached via generic dispatch can't tell whether it's looking at
-/// a Tier 2 (stateful) block or a Tier 1 block called with the wrong argument
-/// count — see BT-2908 / `generate_block_value_structural_fallback` (BT-2812).
-const EXCEPTION_STATEFUL_HINT: &str = "Wrong argument count, or the block captures mutable state and must be invoked directly instead of via perform:";
 
 impl CoreErlangGenerator {
     fn state_acc_var_doc(state_version: usize) -> Document<'static> {
@@ -680,7 +676,7 @@ impl CoreErlangGenerator {
         let handler_stateful_error = self.generate_stateful_block_dispatch_error(
             "on:do:",
             class_name,
-            EXCEPTION_STATEFUL_HINT,
+            STATEFUL_BLOCK_DISPATCH_HINT,
         );
         let handler_dispatch = docvec![
             "case call 'erlang':'is_function'(",
@@ -791,7 +787,7 @@ impl CoreErlangGenerator {
         let self_stateful_error = self.generate_stateful_block_dispatch_error(
             "on:do:",
             class_name,
-            EXCEPTION_STATEFUL_HINT,
+            STATEFUL_BLOCK_DISPATCH_HINT,
         );
         docvec![
             "case call 'erlang':'is_function'(",
@@ -883,7 +879,7 @@ impl CoreErlangGenerator {
         let cleanup_stateful_error = self.generate_stateful_block_dispatch_error(
             "ensure:",
             class_name,
-            EXCEPTION_STATEFUL_HINT,
+            STATEFUL_BLOCK_DISPATCH_HINT,
         );
         let cleanup_tier_check = docvec![
             "case call 'erlang':'is_function'(",
@@ -902,7 +898,7 @@ impl CoreErlangGenerator {
         let self_stateful_error = self.generate_stateful_block_dispatch_error(
             "ensure:",
             class_name,
-            EXCEPTION_STATEFUL_HINT,
+            STATEFUL_BLOCK_DISPATCH_HINT,
         );
         docvec![
             "case call 'erlang':'is_function'(",

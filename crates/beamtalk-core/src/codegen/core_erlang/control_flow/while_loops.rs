@@ -9,17 +9,11 @@
 //! with both pure and state-threading variants.
 
 use super::super::document::{Document, join, leaf};
-use super::super::intrinsics::validate_block_arity_exact;
+use super::super::intrinsics::{STATEFUL_BLOCK_DISPATCH_HINT, validate_block_arity_exact};
 use super::super::{CoreErlangGenerator, Result, block_analysis};
 use super::{BodyKind, ThreadingPlan};
 use crate::ast::{Block, Expression};
 use crate::docvec;
-
-/// Hint shown when a loop structural intrinsic (`whileTrue:`/`whileFalse:`/
-/// `repeat`) reached via generic dispatch can't tell whether it's looking at
-/// a Tier 2 (stateful) block or a Tier 1 block called with the wrong argument
-/// count — see BT-2908 / `generate_block_value_structural_fallback` (BT-2812).
-const LOOP_STATEFUL_HINT: &str = "Wrong argument count, or the block captures mutable state and must be invoked directly instead of via perform:";
 
 /// Result of pre-extracting hybrid loop fields: pre-extraction docs, readonly params, mutated params.
 ///
@@ -822,7 +816,7 @@ impl CoreErlangGenerator {
         let body_stateful_error = self.generate_stateful_block_dispatch_error(
             real_selector,
             class_name,
-            LOOP_STATEFUL_HINT,
+            STATEFUL_BLOCK_DISPATCH_HINT,
         );
         let body_tier_check = docvec![
             "case call 'erlang':'is_function'(",
@@ -841,7 +835,7 @@ impl CoreErlangGenerator {
         let self_stateful_error = self.generate_stateful_block_dispatch_error(
             real_selector,
             class_name,
-            LOOP_STATEFUL_HINT,
+            STATEFUL_BLOCK_DISPATCH_HINT,
         );
         docvec![
             "case call 'erlang':'is_function'(",
@@ -897,8 +891,11 @@ impl CoreErlangGenerator {
             " ()",
         ];
 
-        let stateful_error =
-            self.generate_stateful_block_dispatch_error("repeat", class_name, LOOP_STATEFUL_HINT);
+        let stateful_error = self.generate_stateful_block_dispatch_error(
+            "repeat",
+            class_name,
+            STATEFUL_BLOCK_DISPATCH_HINT,
+        );
         docvec![
             "case call 'erlang':'is_function'(",
             Document::Str(self_var),

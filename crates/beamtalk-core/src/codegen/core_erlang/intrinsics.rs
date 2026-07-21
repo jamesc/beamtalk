@@ -27,6 +27,16 @@ use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_ana
 use crate::ast::{Block, Expression, MessageSelector, WellKnownSelector};
 use crate::docvec;
 
+/// Hint shown when a structural intrinsic reached via generic dispatch
+/// (`perform:`/`perform:withArguments:`) can't tell — from an
+/// `erlang:is_function/2` arity check alone — whether it's looking at a
+/// genuine Tier 2 (stateful, ADR-0041) block or a Tier 1 block called with
+/// the wrong argument count. Shared by BT-2812's `value*` fallback, BT-2908's
+/// loop/exception-handling fallbacks (`while_loops.rs`, `exception_handling.rs`),
+/// and BT-2888's List/Collection guard (which uses its own, differently-worded
+/// variant — see `generate_stateful_block_guard`).
+pub(in crate::codegen::core_erlang) const STATEFUL_BLOCK_DISPATCH_HINT: &str = "Wrong argument count, or the block captures mutable state and must be invoked directly instead of via perform:";
+
 /// Returns the arity of a block expression, or `None` if the expression is not a block literal.
 fn block_arity(expr: &Expression) -> Option<usize> {
     match expr {
@@ -1242,7 +1252,7 @@ impl CoreErlangGenerator {
         let stateful_branch = self.generate_stateful_block_dispatch_error(
             real_selector,
             class_name,
-            "Wrong argument count, or the block captures mutable state and must be invoked directly instead of via perform:",
+            STATEFUL_BLOCK_DISPATCH_HINT,
         );
 
         let runtime_module =
