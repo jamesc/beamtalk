@@ -1359,20 +1359,6 @@ trigger_image_empty_when_no_classes_test_() ->
 recheck_exit_fault_source() ->
     <<"Object subclass: ReCheckExitFaultClass\n  ok -> Integer => 42\n">>.
 
-wait_for_compiler_server_restart() ->
-    wait_for_compiler_server_restart(100).
-
-wait_for_compiler_server_restart(0) ->
-    error(compiler_server_did_not_restart);
-wait_for_compiler_server_restart(Attempts) ->
-    case whereis(beamtalk_compiler_server) of
-        undefined ->
-            timer:sleep(10),
-            wait_for_compiler_server_restart(Attempts - 1);
-        Pid when is_pid(Pid) ->
-            ok
-    end.
-
 trigger_image_degrades_on_compiler_port_exit_without_aborting_test_() ->
     {timeout, 30,
         {setup, fun recheck_setup/0, fun recheck_teardown/1, fun(_) ->
@@ -1393,7 +1379,7 @@ trigger_image_degrades_on_compiler_port_exit_without_aborting_test_() ->
 
                     %% Not left permanently broken: after the supervisor
                     %% restarts the server, the same class checks clean.
-                    ok = wait_for_compiler_server_restart(),
+                    ok = beamtalk_compiler_test_helper:wait_for_compiler_server_restart(),
                     Recovered = beamtalk_recheck:trigger_image(),
                     ?assertEqual(1, maps:get(checked, Recovered)),
                     ?assertEqual([], maps:get(findings, Recovered))
@@ -1427,7 +1413,7 @@ trigger_leaf_change_degrades_on_compiler_port_exit_without_aborting_test_() ->
 
                     %% Not left permanently broken: after the supervisor
                     %% restarts the server, the same class checks clean.
-                    ok = wait_for_compiler_server_restart(),
+                    ok = beamtalk_compiler_test_helper:wait_for_compiler_server_restart(),
                     Recovered = beamtalk_recheck:trigger_leaf_change([<<"SomeSuperclass">>]),
                     ?assertEqual(1, maps:get(checked, Recovered)),
                     ?assertEqual([<<"ReCheckExitFaultClass">>], maps:get(checked_owners, Recovered))
