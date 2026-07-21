@@ -535,6 +535,9 @@ impl ProjectIndex {
     /// sequence and got the same-project fallback marker) is re-stamped
     /// against the new root map, so call order relative to
     /// [`Self::update_file_aliases`] no longer matters for correctness.
+    /// Because each call replaces the whole map and re-stamps against it,
+    /// every call must pass the *complete* root set — passing a subset
+    /// re-stamps files under the omitted roots back to the fallback marker.
     pub fn set_root_packages(&mut self, root_packages: Vec<(Utf8PathBuf, EcoString)>) {
         self.root_packages = root_packages;
         self.restamp_file_aliases();

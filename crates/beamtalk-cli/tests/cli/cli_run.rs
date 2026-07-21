@@ -141,7 +141,10 @@ fn run_connected_status_lines_go_to_stderr_not_stdout() {
         // Status lines must NOT leak onto stdout ...
         .stdout(contains("Connecting to workspace").not())
         .stdout(contains("Running Smoke>>run (connected)").not())
-        // ... and must appear on stderr.
+        // ... and must appear on stderr. (Asserting the program's own
+        // Console output reaches stdout is blocked on connected mode
+        // currently dropping Console output entirely — script mode streams
+        // it, `--connect` loses it. Add that assertion once fixed.)
         .stderr(contains("Connecting to workspace"))
         .stderr(contains("Running Smoke>>run (connected)"));
 }

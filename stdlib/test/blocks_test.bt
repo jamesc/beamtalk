@@ -115,6 +115,22 @@ TestCase subclass: BlocksTest
       [:a :b | a + b] perform: #value: withArguments: #(3)
     ] raise: #stateful_block_dispatch
 
+  testUnaryValueOnDynamicallyObtainedStatefulBlockRaisesClearError =>
+    // BT-2914: the unary `value` fallback guard (statically-unknown
+    // receiver) must arity-discriminate like the keyword value:* guards —
+    // a Tier 2 (stateful) 0-arg block is an arity-1 fun whose StateAcc a
+    // generic call site can't supply. Laundering the block through a list
+    // hides it from the call-site Tier 2 tracking (it's neither a block
+    // literal nor a local assigned one), so the runtime guard is what fires.
+    count := 0
+    statefulBlock := [count := count + 1]
+    laundered := #(statefulBlock) first
+    self should: [laundered value] raise: #stateful_block_dispatch
+
+    // A pure 0-arg block through the same laundering keeps working.
+    pureLaundered := #([42]) first
+    self assert: pureLaundered value equals: 42
+
   testPerformWithWrongArityOnStatefulBlockRaisesAStructuredErrorNotACrash =>
     // BT-2812 code review (BT-2892 tracks improving this): the arity
     // ambiguity also cuts the other way — a genuinely Tier 2 (stateful)
