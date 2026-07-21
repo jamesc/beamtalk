@@ -332,16 +332,22 @@ handle_call({eval_trace, Expression}, From, {SessionId, State, undefined}) ->
     end),
     {noreply, {SessionId, State, {WorkerPid, MonRef, From}}};
 handle_call({eval_trace, _Expression}, _From, {_SessionId, _State, {_Pid, _Ref, _}} = FullState) ->
-    Err0 = beamtalk_error:new(eval_busy, 'REPL'),
-    Err1 = beamtalk_error:with_message(Err0, <<"An evaluation is already in progress">>),
-    Err2 = beamtalk_error:with_hint(Err1, <<"Use Ctrl-C to interrupt the current evaluation.">>),
-    {reply, {error, Err2, <<>>, []}, FullState};
+    Err = beamtalk_repl_errors:make(
+        eval_busy,
+        'REPL',
+        <<"An evaluation is already in progress">>,
+        <<"Use Ctrl-C to interrupt the current evaluation.">>
+    ),
+    {reply, {error, Err, <<>>, []}, FullState};
 handle_call({eval, _Expression}, _From, {_SessionId, _State, {_Pid, _Ref, _}} = FullState) ->
     %% Already evaluating — reject concurrent eval
-    Err0 = beamtalk_error:new(eval_busy, 'REPL'),
-    Err1 = beamtalk_error:with_message(Err0, <<"An evaluation is already in progress">>),
-    Err2 = beamtalk_error:with_hint(Err1, <<"Use Ctrl-C to interrupt the current evaluation.">>),
-    {reply, {error, Err2, <<>>, []}, FullState};
+    Err = beamtalk_repl_errors:make(
+        eval_busy,
+        'REPL',
+        <<"An evaluation is already in progress">>,
+        <<"Use Ctrl-C to interrupt the current evaluation.">>
+    ),
+    {reply, {error, Err, <<>>, []}, FullState};
 handle_call(interrupt, _From, {SessionId, State, {WorkerPid, MonRef, EvalFrom}}) ->
     %% Kill the worker process and reply to the waiting eval caller
     erlang:demonitor(MonRef, [flush]),
@@ -469,10 +475,13 @@ handle_call({remove_from_tracker, Module}, _From, {SessionId, State, undefined})
     {reply, ok, {SessionId, NewState, undefined}};
 handle_call({show_codegen, _Expression}, _From, {_SessionId, _State, {_Pid, _Ref, _}} = FullState) ->
     %% Reject if eval is in progress
-    Err0 = beamtalk_error:new(eval_busy, 'REPL'),
-    Err1 = beamtalk_error:with_message(Err0, <<"An evaluation is already in progress">>),
-    Err2 = beamtalk_error:with_hint(Err1, <<"Wait for the current evaluation to complete.">>),
-    {reply, {error, Err2, []}, FullState};
+    Err = beamtalk_repl_errors:make(
+        eval_busy,
+        'REPL',
+        <<"An evaluation is already in progress">>,
+        <<"Wait for the current evaluation to complete.">>
+    ),
+    {reply, {error, Err, []}, FullState};
 handle_call({show_codegen, Expression}, _From, {SessionId, State, undefined}) ->
     case beamtalk_repl_eval:do_show_codegen(Expression, State) of
         {ok, CoreErlang, Warnings, NewState} ->
@@ -499,10 +508,13 @@ handle_cast(
     {eval_async, _Expression, Subscriber}, {_SessionId, _State, {_Pid, _Ref, _}} = FullState
 ) ->
     %% Already evaluating — reject concurrent eval
-    Err0 = beamtalk_error:new(eval_busy, 'REPL'),
-    Err1 = beamtalk_error:with_message(Err0, <<"An evaluation is already in progress">>),
-    Err2 = beamtalk_error:with_hint(Err1, <<"Use Ctrl-C to interrupt the current evaluation.">>),
-    Subscriber ! {eval_error, Err2, <<>>, []},
+    Err = beamtalk_repl_errors:make(
+        eval_busy,
+        'REPL',
+        <<"An evaluation is already in progress">>,
+        <<"Use Ctrl-C to interrupt the current evaluation.">>
+    ),
+    Subscriber ! {eval_error, Err, <<>>, []},
     {noreply, FullState};
 handle_cast(
     {dispatch_async, ClassNameBin, SelectorBin, Argv, Subscriber}, {SessionId, State, undefined}
@@ -527,10 +539,13 @@ handle_cast(
     {_SessionId, _State, {_Pid, _Ref, _}} = FullState
 ) ->
     %% Already evaluating — reject concurrent dispatch (parity with eval_async)
-    Err0 = beamtalk_error:new(eval_busy, 'REPL'),
-    Err1 = beamtalk_error:with_message(Err0, <<"An evaluation is already in progress">>),
-    Err2 = beamtalk_error:with_hint(Err1, <<"Use Ctrl-C to interrupt the current evaluation.">>),
-    Subscriber ! {eval_error, Err2, <<>>, []},
+    Err = beamtalk_repl_errors:make(
+        eval_busy,
+        'REPL',
+        <<"An evaluation is already in progress">>,
+        <<"Use Ctrl-C to interrupt the current evaluation.">>
+    ),
+    Subscriber ! {eval_error, Err, <<>>, []},
     {noreply, FullState};
 handle_cast(_Msg, State) ->
     {noreply, State}.
