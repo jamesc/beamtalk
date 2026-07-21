@@ -1220,46 +1220,6 @@ impl CoreErlangGenerator {
     /// `#beamtalk_error{}`s and non-local-return throws must not be masked);
     /// deferred as a separately-scoped follow-up rather than risking a rushed
     /// version of that here. See BT-2892.
-    /// Shared `#beamtalk_error{kind = stateful_block_dispatch}` construction used
-    /// by every structural-intrinsic fallback that can't tell (from an
-    /// `erlang:is_function/2` arity check alone) whether it's looking at a
-    /// genuine Tier 2 (stateful, ADR-0041) block or a Tier 1 block called with
-    /// the wrong argument count — see `generate_block_value_structural_fallback`'s
-    /// doc comment for why the hint is deliberately hedged rather than
-    /// asserting a specific cause.
-    pub(in crate::codegen::core_erlang) fn generate_stateful_block_dispatch_error(
-        &mut self,
-        real_selector: &str,
-        class_name: &str,
-        hint_text: &str,
-    ) -> Document<'static> {
-        let error_base = self.fresh_temp_var("Err");
-        let error_sel = self.fresh_temp_var("Err");
-        let error_hint = self.fresh_temp_var("Err");
-        let hint = leaf::binary_lit(hint_text);
-        docvec![
-            "let ",
-            leaf::var(error_base.clone()),
-            " = call 'beamtalk_error':'new'('stateful_block_dispatch', ",
-            leaf::atom(class_name),
-            ") in let ",
-            leaf::var(error_sel.clone()),
-            " = call 'beamtalk_error':'with_selector'(",
-            leaf::var(error_base),
-            ", ",
-            leaf::atom(real_selector),
-            ") in let ",
-            leaf::var(error_hint.clone()),
-            " = call 'beamtalk_error':'with_hint'(",
-            leaf::var(error_sel),
-            ", ",
-            hint,
-            ") in call 'beamtalk_error':'raise'(",
-            leaf::var(error_hint),
-            ")",
-        ]
-    }
-
     pub(in crate::codegen::core_erlang) fn generate_block_value_structural_fallback(
         &mut self,
         intrinsic_name: &str,
@@ -1317,6 +1277,46 @@ impl CoreErlangGenerator {
             " <'false'> when 'true' -> ",
             placeholder_branch,
             " end end",
+        ]
+    }
+
+    /// Shared `#beamtalk_error{kind = stateful_block_dispatch}` construction used
+    /// by every structural-intrinsic fallback that can't tell (from an
+    /// `erlang:is_function/2` arity check alone) whether it's looking at a
+    /// genuine Tier 2 (stateful, ADR-0041) block or a Tier 1 block called with
+    /// the wrong argument count — see `generate_block_value_structural_fallback`'s
+    /// doc comment above for why the hint is deliberately hedged rather than
+    /// asserting a specific cause.
+    pub(in crate::codegen::core_erlang) fn generate_stateful_block_dispatch_error(
+        &mut self,
+        real_selector: &str,
+        class_name: &str,
+        hint_text: &str,
+    ) -> Document<'static> {
+        let error_base = self.fresh_temp_var("Err");
+        let error_sel = self.fresh_temp_var("Err");
+        let error_hint = self.fresh_temp_var("Err");
+        let hint = leaf::binary_lit(hint_text);
+        docvec![
+            "let ",
+            leaf::var(error_base.clone()),
+            " = call 'beamtalk_error':'new'('stateful_block_dispatch', ",
+            leaf::atom(class_name),
+            ") in let ",
+            leaf::var(error_sel.clone()),
+            " = call 'beamtalk_error':'with_selector'(",
+            leaf::var(error_base),
+            ", ",
+            leaf::atom(real_selector),
+            ") in let ",
+            leaf::var(error_hint.clone()),
+            " = call 'beamtalk_error':'with_hint'(",
+            leaf::var(error_sel),
+            ", ",
+            hint,
+            ") in call 'beamtalk_error':'raise'(",
+            leaf::var(error_hint),
+            ")",
         ]
     }
 
