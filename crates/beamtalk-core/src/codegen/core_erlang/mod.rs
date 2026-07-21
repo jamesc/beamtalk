@@ -3516,6 +3516,55 @@ impl CoreErlangGenerator {
             }
         }
 
+        // BT-2908: `whileTrue`/`whileFalse`/`repeat`/`onDo`/`ensure` — Block's
+        // `whileTrue:`/`whileFalse:`/`repeat`/`on:do:`/`ensure:`. The other half
+        // of the gap BT-2812's audit found but deliberately left unfixed above
+        // (see the BT-2812 comment on this match's sibling below): unlike
+        // `value*`, these need real loop/exception-handling semantics, not a
+        // bare `erlang:apply`. Feasible generically for the Tier 1 (pure) case
+        // because Core Erlang's `case`/`try`/`catch` mechanics don't themselves
+        // need the block's AST — only ADR-0041's state-threading convention
+        // does, and a Tier 2 (stateful) receiver/argument raises the same
+        // `stateful_block_dispatch` error `generate_block_value_structural_fallback`
+        // established rather than being reimplemented generically.
+        //
+        // Adversarial review (BT-2908): like BT-2812's `value*` match above,
+        // the `is_function/2` arity+1 check each of these five functions runs
+        // is not statically tied to ADR-0041's `Args..., StateAcc` convention
+        // — a future change to that shape (extra state args, different
+        // position) would silently degrade Tier 2 detection here too, with no
+        // compile-time signal.
+        if !is_quoted {
+            match name {
+                "whileTrue" => {
+                    return Ok(self.generate_while_structural_fallback(
+                        name,
+                        false,
+                        "whileTrue:",
+                        &class_name,
+                    ));
+                }
+                "whileFalse" => {
+                    return Ok(self.generate_while_structural_fallback(
+                        name,
+                        true,
+                        "whileFalse:",
+                        &class_name,
+                    ));
+                }
+                "repeat" => {
+                    return Ok(self.generate_repeat_structural_fallback(&class_name));
+                }
+                "onDo" => {
+                    return Ok(self.generate_on_do_structural_fallback(&class_name));
+                }
+                "ensure" => {
+                    return Ok(self.generate_ensure_structural_fallback(&class_name));
+                }
+                _ => {}
+            }
+        }
+
         // BT-1763: Erlang interop DNU intrinsics — forward selector/args to
         // the handler module's dispatch/3 rather than passing the intrinsic name.
         // doesNotUnderstand:args: receives (Self, Selector, Args) and we need to
@@ -3660,11 +3709,13 @@ impl CoreErlangGenerator {
         // every other structural intrinsic without a special case here — e.g.
         // `whileTrue`/`whileFalse`/`repeat`/`onDo`/`ensure` (Block) and
         // `listDo`/`listCollect`/`listSelect`/`listReject`/`listInjectInto`
-        // (List/Collection). Deliberately left unfixed by BT-2812: unlike the
-        // `value*` family (whose fix is "the receiver IS the fun to invoke, so
-        // `erlang:apply` it"), these need real loop/exception-handling semantics
-        // reimplemented generically over an arbitrary fun receiver/argument —
-        // a materially bigger, separately-scoped change. See BT-2888.
+        // (List/Collection). BT-2888 fixed the List/Collection family (guarding
+        // their existing correct Tier 1 bodies against a Tier 2 receiver) and
+        // BT-2908 fixed the Block loop/exception-handling family above (a real
+        // generic reimplementation for Tier 1, a clear error for Tier 2) — this
+        // placeholder now only remains live for primitives with no BIF lowering
+        // and no structural special-case, not for any of the originally-audited
+        // selectors.
         let runtime_module = PrimitiveBindingTable::runtime_module_for_class(&class_name);
 
         // BT-938: Validate that the target dispatch module exists in the known stdlib
