@@ -217,3 +217,23 @@ TestCase subclass: CollectionsTest
     self should: [
       #(1, 2, 3) perform: #inject:into: withArguments: #(0, statefulInjectBlock)
     ] raise: #stateful_block_dispatch
+
+  testPerformOnEachWithIndexWithStatefulBlockRaisesClearError =>
+    // BT-2914: eachWithIndex: is self-hosted (pure BT on inject:into:), not a
+    // BIF-lowered @primitive, so BT-2888's selector-keyed guard doesn't cover
+    // it. Its Collection body invokes the block via `value:value:` on a
+    // statically-unknown receiver; a Tier 2 (stateful) block arriving through
+    // perform: used to crash with a raw badarity instead of the clear
+    // stateful_block_dispatch error. The guard now lives in the generic
+    // value-send fallback, so any self-hosted iteration method gets it.
+    count := 0
+    statefulBlock := [:x :i | count := count + x]
+    self should: [
+      #(1, 2, 3) perform: #eachWithIndex: withArguments: #(statefulBlock)
+    ] raise: #stateful_block_dispatch
+
+    // Pure (Tier 1) blocks via perform: keep working (baseline, mirrors
+    // testPerformOnPureIterationBlocksAlreadyWorked).
+    self assert: (#(10, 20) perform: #eachWithIndex: withArguments: #([:x :i |
+      x + i
+    ])) equals: nil
