@@ -257,68 +257,6 @@ impl NavCache {
     }
 }
 
-/// Collects dependency/native `.beam` ebin directories under `root`'s
-/// `_build/` tree, for `beamtalk_core::ffi_type_specs::extract_type_specs`.
-///
-/// Duplicates the directory-scanning logic of `beamtalk-cli`'s
-/// `native_type_specs::collect_dependency_ebin_dirs` (itself already a
-/// deliberate BT-2858 duplicate of the CLI binary's `commands::deps`/
-/// `commands::build` versions) rather than sharing it, so `beamtalk-lsp`
-/// doesn't need a `beamtalk-lsp -> beamtalk-cli` dependency (forbidden —
-/// see `docs/development/architecture-principles.md`). Each side is a
-/// handful of `read_dir` calls over the same `_build/` layout convention
-/// this function's caller (`load_type_cache`) already assumes for
-/// `_build/type_cache/`, so duplication carries little drift risk — unlike
-/// the FFI-spec-extraction logic itself, which is *not* duplicated
-/// (`beamtalk-core`'s `ffi_type_specs` is its single source of truth).
-fn collect_dependency_ebin_dirs(root: &Utf8PathBuf) -> Vec<Utf8PathBuf> {
-    let mut dirs = Vec::new();
-    let build_root = root.join("_build");
-
-    // Path dependencies: `_build/deps/*/ebin/`.
-    if let Ok(entries) = std::fs::read_dir(build_root.join("deps")) {
-        for entry in entries.flatten() {
-            let ebin = entry.path().join("ebin");
-            if ebin.is_dir() {
-                if let Ok(utf8) = Utf8PathBuf::from_path_buf(ebin) {
-                    dirs.push(utf8);
-                }
-            }
-        }
-    }
-
-    // The project's own native/ code, compiled to `_build/dev/native/ebin/`.
-    let native_ebin = build_root.join("dev").join("native").join("ebin");
-    if native_ebin.is_dir() {
-        dirs.push(native_ebin);
-    }
-
-    // rebar3 hex/git deps: `_build/dev/native/default/lib/*/ebin/`.
-    let lib_dir = build_root
-        .join("dev")
-        .join("native")
-        .join("default")
-        .join("lib");
-    if let Ok(entries) = std::fs::read_dir(&lib_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-            let ebin = path.join("ebin");
-            if ebin.is_dir() {
-                if let Ok(utf8) = Utf8PathBuf::from_path_buf(ebin) {
-                    dirs.push(utf8);
-                }
-            }
-        }
-    }
-
-    dirs.sort();
-    dirs.dedup();
-    dirs
-}
-
 impl Backend {
     /// Creates a new `Backend` with the given LSP client handle.
     pub fn new(client: Client) -> Self {
@@ -819,7 +757,8 @@ impl Backend {
                     continue;
                 };
                 let cache_dir = root.join("_build").join("type_cache");
-                let dependency_ebin_dirs = collect_dependency_ebin_dirs(&root);
+                let dependency_ebin_dirs =
+                    beamtalk_core::ffi_type_specs::collect_project_dependency_ebin_dirs(&root);
                 if let Some(root_registry) = beamtalk_core::ffi_type_specs::extract_type_specs(
                     &cache_dir,
                     &dependency_ebin_dirs,
@@ -5067,34 +5006,6 @@ mod tests {
         let uri = path_to_stdlib_uri(&path).expect("should produce URI");
         assert_eq!(uri.scheme(), "beamtalk-stdlib");
         assert_eq!(uri.path(), "/Collection.bt");
-    }
-
-    // -----------------------------------------------------------------------
-    // load_type_cache / collect_dependency_ebin_dirs (BT-2859)
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn collect_dependency_ebin_dirs_empty_project() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
-
-        let dirs = collect_dependency_ebin_dirs(&root);
-        assert!(dirs.is_empty(), "fresh project has no dependency ebin dirs");
-    }
-
-    #[test]
-    fn collect_dependency_ebin_dirs_finds_path_dep_ebin() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
-
-        let dep_ebin = root.join("_build").join("deps").join("json").join("ebin");
-        std::fs::create_dir_all(&dep_ebin).unwrap();
-
-        let dirs = collect_dependency_ebin_dirs(&root);
-        assert!(
-            dirs.contains(&dep_ebin),
-            "should find the path dependency's ebin dir: {dirs:?}"
-        );
     }
 
     /// BT-2859: `load_type_cache` extracts live from OTP `.beam` files for a

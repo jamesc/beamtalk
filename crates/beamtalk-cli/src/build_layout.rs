@@ -11,7 +11,7 @@
 //! same note in `crate::manifest` for why every item here must stay `pub`
 //! rather than `pub(crate)`.
 
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 
 /// Provides all build-output paths relative to a project root.
 ///
@@ -41,6 +41,11 @@ impl BuildLayout {
         Self {
             project_root: project_root.into(),
         }
+    }
+
+    /// The project root directory this layout is rooted at.
+    pub fn project_root(&self) -> &Utf8Path {
+        &self.project_root
     }
 
     // ── Roots ────────────────────────────────────────────────────────
