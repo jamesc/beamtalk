@@ -533,7 +533,9 @@ impl ProjectIndex {
     /// **Note: every call must pass the *complete* root set.** Each call
     /// replaces the whole map and re-stamps tracked aliases against it, so
     /// passing a subset re-stamps files under the omitted roots back to the
-    /// fallback marker.
+    /// fallback marker — e.g. a future `didChangeWorkspaceFolders` handler
+    /// must not call this with only the newly added root, or every file
+    /// under the original roots silently reverts to the `$project` stamp.
     ///
     /// BT-2961: safely re-appliable — any file whose aliases were already
     /// stamped (e.g. a `didOpen` that raced the LSP's `initialized()`

@@ -800,8 +800,16 @@ impl TestPipeline {
     /// `test/Foo.bt` would otherwise hit `find_package_root`'s empty-parent
     /// guard (BT-1228) before ever reaching the package root on disk.
     fn current_package_for(&self, path: &Utf8Path) -> Option<String> {
-        canonical_package_root(&canonical_path(path))
-            .and_then(|root| self.pkg_root_to_name.get(&root).cloned())
+        let package = canonical_package_root(&canonical_path(path))
+            .and_then(|root| self.pkg_root_to_name.get(&root).cloned());
+        if package.is_none() {
+            debug!(
+                path = %path,
+                "No package resolved for file; E0401/E0402 visibility checks \
+                 are disabled for it"
+            );
+        }
+        package
     }
 }
 
