@@ -294,6 +294,10 @@ impl CoreErlangGenerator {
                 stateful_branch,
                 " 'false' when 'true' -> case call 'erlang':'is_function'(",
                 leaf::var(recv_var.clone()),
+                // Only arity >= 2 funs reach this branch (0 and 1 were ruled
+                // out above), so this apply always badarity-crashes — the
+                // pre-BT-2914 behaviour for wrong-arity plain functions,
+                // preserved deliberately.
                 ") of 'true' when 'true' -> apply ",
                 leaf::var(recv_var.clone()),
                 " () 'false' when 'true' -> call 'beamtalk_primitive':'send'(",
