@@ -1012,7 +1012,7 @@ impl CoreErlangGenerator {
             ") 'false' when 'true' -> case call 'erlang':'is_function'(",
             leaf::var(recv_var.clone()),
             ", ",
-            leaf::int_lit(i64::try_from(arity + 1).unwrap_or(i64::MAX)),
+            leaf::int_lit(i64::try_from(arity.saturating_add(1)).unwrap_or(i64::MAX)),
             ") of 'true' when 'true' -> ",
             stateful_branch,
             " 'false' when 'true' -> case call 'erlang':'is_function'(",
