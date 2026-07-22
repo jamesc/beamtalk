@@ -934,10 +934,14 @@ impl Backend {
     /// falls back to the same-project marker for any file under an
     /// unregistered root, matching the pre-BT-2960 behavior for that root.
     ///
-    /// Must run *before* [`Self::preload_workspace_source_files`] — unlike
-    /// [`Self::load_diagnostics_table`] (applied per-request at
-    /// diagnostic-computation time), alias package stamping happens once, at
-    /// indexing time.
+    /// Runs *before* [`Self::preload_workspace_source_files`] so preloaded
+    /// files stamp correctly on first indexing, but the ordering is a
+    /// fast-path optimisation, not a correctness requirement (BT-2961):
+    /// `set_root_packages` re-stamps any already-indexed file's aliases, so
+    /// a `didOpen`/`didChange` notification that races this call (tower-lsp
+    /// does not serialize `initialized()` against notification handlers)
+    /// is corrected here instead of keeping a stale same-project stamp
+    /// until its next edit.
     async fn load_root_packages(&self, roots: &[PathBuf]) {
         use beamtalk_core::compilation::parse_package_name_from_manifest_toml;
 
@@ -1574,12 +1578,15 @@ impl LanguageServer for Backend {
             preload_config.take()
         };
         if let Some(ref config) = preload_config {
-            // BT-2960: each workspace root's real beamtalk.toml [package] name
-            // must be known *before* preload indexes any file under that root
-            // — alias package stamping happens once, at indexing time
-            // (update_file_aliases), unlike the [diagnostics] table below
-            // (applied per-request at diagnostic-computation time, so load
-            // order relative to preload doesn't matter for it).
+            // BT-2960: load each workspace root's real beamtalk.toml
+            // [package] name before preload indexes files under that root,
+            // so first-time stamping is already correct. BT-2961: this
+            // ordering is best-effort, not a guarantee — a didOpen/didChange
+            // racing this sequence still stamps eagerly with the fallback
+            // marker, and set_root_packages/mark_stdlib_file re-stamp those
+            // files when they run. (The [diagnostics] table below needs no
+            // such care: it is applied per-request at diagnostic-computation
+            // time.)
             self.load_root_packages(&config.roots).await;
             self.preload_workspace_source_files(config.clone()).await;
             // ADR 0075: Load type cache from _build/type_cache/ for typed completions.
@@ -5470,6 +5477,121 @@ mod tests {
             "root b's file must be stamped with root b's real package name, \
              not root a's or the shared same-project marker"
         );
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    /// BT-2961: a `didOpen` racing `initialized()`'s startup sequence indexes
+    /// its file (via `svc.update_file`, exactly what the `did_open` handler
+    /// does) *before* `load_root_packages` has registered any root — the
+    /// file's aliases get the `$project` fallback stamp. `set_root_packages`
+    /// must re-stamp that file when it runs, so the race resolves to the
+    /// same correct stamp as the happy-path ordering.
+    #[tokio::test]
+    async fn did_open_racing_load_root_packages_still_gets_real_package_stamp() {
+        let temp = unique_temp_dir("beamtalk_lsp_root_packages_race");
+        let root = temp.join("a");
+        fs::create_dir_all(&root).expect("create root");
+        fs::write(
+            root.join("beamtalk.toml"),
+            "[package]\nname = \"pkg_a\"\nversion = \"0.1.0\"\n",
+        )
+        .expect("write manifest");
+
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+
+        // Simulated didOpen arrives first (race): indexed with no roots known.
+        let file = Utf8PathBuf::from_path_buf(root.join("Foo.bt")).unwrap();
+        {
+            let mut svc = backend.service.lock().expect("service lock poisoned");
+            svc.update_file(file.clone(), "internal type Foo = Integer".to_string());
+        }
+
+        // Startup sequence completes afterwards.
+        backend
+            .load_root_packages(std::slice::from_ref(&root))
+            .await;
+
+        let svc = backend.service.lock().expect("service lock poisoned");
+        assert_eq!(
+            svc.project_index().alias_package_for_file(&file),
+            EcoString::from("pkg_a"),
+        );
+        let stamped = svc
+            .project_index()
+            .cross_file_alias_infos_for(&Utf8PathBuf::from("elsewhere.bt"));
+        assert_eq!(
+            stamped.iter().find(|i| i.name == "Foo").unwrap().package,
+            Some(EcoString::from("pkg_a")),
+            "a didOpen racing load_root_packages must be re-stamped with the \
+             root's real package name once startup completes, not keep the \
+             fallback marker until the next edit"
+        );
+        drop(svc);
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    /// BT-2961: the stdlib counterpart of the race above — a `didOpen` for a
+    /// stdlib file indexed *before* `preload_workspace_source_files` marks
+    /// stdlib membership must still end up stamped with the stdlib package
+    /// marker after preload runs.
+    #[tokio::test]
+    async fn did_open_racing_preload_still_gets_stdlib_stamp() {
+        let temp = unique_temp_dir("beamtalk_lsp_stdlib_race");
+        let project_root = temp.join("project");
+        let stdlib_dir = temp.join("stdlib");
+        fs::create_dir_all(project_root.join("src")).expect("create src dir");
+        fs::create_dir_all(&stdlib_dir).expect("create stdlib dir");
+        let stdlib_file_path = stdlib_dir.join("Direction.bt");
+        fs::write(
+            &stdlib_file_path,
+            "internal type Direction = #north | #south",
+        )
+        .expect("write stdlib file");
+
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+
+        // Simulated didOpen arrives first (race): the stdlib file is indexed
+        // before anything marked it stdlib, so it stamps as same-project.
+        let stdlib_file = Utf8PathBuf::from_path_buf(stdlib_file_path).unwrap();
+        {
+            let mut svc = backend.service.lock().expect("service lock poisoned");
+            svc.update_file(
+                stdlib_file.clone(),
+                "internal type Direction = #north | #south".to_string(),
+            );
+        }
+
+        // Startup preload completes afterwards.
+        backend
+            .preload_workspace_source_files(PreloadConfig {
+                roots: vec![project_root],
+                stdlib_dirs: vec![stdlib_dir],
+            })
+            .await;
+
+        let svc = backend.service.lock().expect("service lock poisoned");
+        assert!(svc.project_index().is_stdlib_file(&stdlib_file));
+        let stamped = svc
+            .project_index()
+            .cross_file_alias_infos_for(&Utf8PathBuf::from("elsewhere.bt"));
+        assert_eq!(
+            stamped
+                .iter()
+                .find(|i| i.name == "Direction")
+                .unwrap()
+                .package,
+            Some(EcoString::from(
+                beamtalk_core::language_service::STDLIB_PACKAGE_MARKER,
+            )),
+            "a didOpen racing preload must be re-stamped with the stdlib \
+             package marker once preload marks the file, not keep the \
+             same-project marker until the next edit"
+        );
+        drop(svc);
 
         let _ = fs::remove_dir_all(&temp);
     }

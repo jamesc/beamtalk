@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Integration tests for `beamtalk gen-native` (BT-1214).
+//! Integration tests for `beamtalk generate native` (BT-1214).
 //!
 //! These tests verify the full round-trip:
 //! `.bt` source with `native:` to skeleton `.erl` `gen_server` file.
@@ -26,18 +26,18 @@ fn gen_native_generates_valid_erlang_stub() {
                       \x20 close -> Nil => self delegate\n";
     std::fs::write(tmp.path().join("TestActor.bt"), bt_source).expect("write .bt");
 
-    // Run gen-native
+    // Run generate native
     let output = Command::new(cli_common::beamtalk_binary())
-        .args(["gen-native", "TestActor"])
+        .args(["generate", "native", "TestActor"])
         .current_dir(tmp.path())
         .output()
-        .expect("run beamtalk gen-native");
+        .expect("run beamtalk generate native");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         output.status.success(),
-        "gen-native failed:\nstdout: {stdout}\nstderr: {stderr}"
+        "generate native failed:\nstdout: {stdout}\nstderr: {stderr}"
     );
 
     // Check the generated .erl file exists
@@ -93,14 +93,14 @@ fn gen_native_errors_on_missing_native_declaration() {
     std::fs::write(tmp.path().join("PlainActor.bt"), bt_source).expect("write .bt");
 
     let output = Command::new(cli_common::beamtalk_binary())
-        .args(["gen-native", "PlainActor"])
+        .args(["generate", "native", "PlainActor"])
         .current_dir(tmp.path())
         .output()
-        .expect("run beamtalk gen-native");
+        .expect("run beamtalk generate native");
 
     assert!(
         !output.status.success(),
-        "gen-native should fail for non-native class"
+        "generate native should fail for non-native class"
     );
 
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -116,14 +116,14 @@ fn gen_native_errors_on_missing_file() {
     let tmp = tempfile::tempdir().expect("create tempdir");
 
     let output = Command::new(cli_common::beamtalk_binary())
-        .args(["gen-native", "NonExistent"])
+        .args(["generate", "native", "NonExistent"])
         .current_dir(tmp.path())
         .output()
-        .expect("run beamtalk gen-native");
+        .expect("run beamtalk generate native");
 
     assert!(
         !output.status.success(),
-        "gen-native should fail for missing file"
+        "generate native should fail for missing file"
     );
 
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -147,16 +147,16 @@ fn gen_native_refuses_to_overwrite_existing_file() {
     std::fs::write(tmp.path().join("test_actor_impl.erl"), existing_content)
         .expect("write existing .erl");
 
-    // Run gen-native without --force — should fail
+    // Run generate native without --force — should fail
     let output = Command::new(cli_common::beamtalk_binary())
-        .args(["gen-native", "TestActor"])
+        .args(["generate", "native", "TestActor"])
         .current_dir(tmp.path())
         .output()
-        .expect("run beamtalk gen-native");
+        .expect("run beamtalk generate native");
 
     assert!(
         !output.status.success(),
-        "gen-native should refuse to overwrite without --force"
+        "generate native should refuse to overwrite without --force"
     );
 
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -187,18 +187,18 @@ fn gen_native_force_overwrites_existing_file() {
     std::fs::write(tmp.path().join("test_actor_impl.erl"), "%% Old content\n")
         .expect("write existing .erl");
 
-    // Run gen-native with --force — should succeed
+    // Run generate native with --force — should succeed
     let output = Command::new(cli_common::beamtalk_binary())
-        .args(["gen-native", "--force", "TestActor"])
+        .args(["generate", "native", "--force", "TestActor"])
         .current_dir(tmp.path())
         .output()
-        .expect("run beamtalk gen-native");
+        .expect("run beamtalk generate native");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         output.status.success(),
-        "gen-native --force should succeed:\nstdout: {stdout}\nstderr: {stderr}"
+        "generate native --force should succeed:\nstdout: {stdout}\nstderr: {stderr}"
     );
 
     // Verify the file was overwritten with generated content
@@ -222,11 +222,11 @@ fn gen_native_output_passes_erlc_syntax_check() {
 
     // Generate the stub
     let output = Command::new(cli_common::beamtalk_binary())
-        .args(["gen-native", "TestActor"])
+        .args(["generate", "native", "TestActor"])
         .current_dir(tmp.path())
         .output()
-        .expect("run beamtalk gen-native");
-    assert!(output.status.success(), "gen-native failed");
+        .expect("run beamtalk generate native");
+    assert!(output.status.success(), "generate native failed");
 
     // Verify erlc can parse the output (syntax check only)
     let erlc_output = Command::new("erlc")

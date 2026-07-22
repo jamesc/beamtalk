@@ -143,6 +143,7 @@ fn compile_fixtures_directory(
     output_dir: &Utf8Path,
     hierarchy: &ClassHierarchyContext,
     warnings_as_errors: bool,
+    current_package: Option<&str>,
 ) -> Result<Vec<String>> {
     if !fixtures_dir.is_dir() {
         return Ok(Vec::new());
@@ -181,6 +182,7 @@ fn compile_fixtures_directory(
             output_dir,
             hierarchy,
             warnings_as_errors,
+            current_package,
         )
         .wrap_err_with(|| format!("Failed to compile fixture '{fixture_path}'"))?;
         core_files.push(core_file);
@@ -204,6 +206,7 @@ fn compile_fixture(
     output_dir: &Utf8Path,
     hierarchy: &ClassHierarchyContext,
     warnings_as_errors: bool,
+    current_package: Option<&str>,
 ) -> Result<String> {
     let module_name = fixture_module_name(fixture_path)?;
 
@@ -213,6 +216,7 @@ fn compile_fixture(
         output_dir,
         hierarchy,
         warnings_as_errors,
+        current_package,
     )
     .wrap_err_with(|| format!("Failed to compile fixture '{fixture_path}'"))?;
 
@@ -313,14 +317,20 @@ fn generate_core_file(
     output_dir: &Utf8Path,
     hierarchy: &ClassHierarchyContext,
     warnings_as_errors: bool,
+    current_package: Option<&str>,
 ) -> Result<Utf8PathBuf> {
     let core_file = output_dir.join(format!("{module_name}.core"));
 
+    // BT-2922: Set the current package so E0401/E0402 visibility checks fire
+    // when compiling test/fixture files, matching what `beamtalk build` and
+    // `beamtalk lint` enforce (BT-2920) — the checks are gated on
+    // `current_package: Some(_)` and silently emit zero diagnostics otherwise.
     let options = beamtalk_core::CompilerOptions {
         stdlib_mode: false,
         allow_primitives: false,
         workspace_mode: false,
         warnings_as_errors,
+        current_package: current_package.map(str::to_string),
         ..Default::default()
     };
 
@@ -553,6 +563,7 @@ fn discover_and_compile_doc_tests(
     build_dir: &Utf8Path,
     hierarchy: &ClassHierarchyContext,
     warnings_as_errors: bool,
+    current_package: Option<&str>,
 ) -> Result<Vec<CompiledDocTestResult>> {
     let content = fs::read_to_string(source_path)
         .into_diagnostic()
@@ -567,8 +578,14 @@ fn discover_and_compile_doc_tests(
     }
 
     // Compile the containing source file so its classes are available to doc tests
-    compile_fixture(source_path, build_dir, hierarchy, warnings_as_errors)
-        .wrap_err_with(|| format!("Failed to compile source file for doc tests '{source_path}'"))?;
+    compile_fixture(
+        source_path,
+        build_dir,
+        hierarchy,
+        warnings_as_errors,
+        current_package,
+    )
+    .wrap_err_with(|| format!("Failed to compile source file for doc tests '{source_path}'"))?;
 
     let mut results = Vec::new();
 
@@ -769,6 +786,31 @@ struct TestPipeline {
     hex_dep_names: Vec<String>,
     /// Native `EUnit` test module names (modules ending in `_test` or `_tests`).
     native_test_modules: Vec<String>,
+}
+
+impl TestPipeline {
+    /// Resolve the owning package name for a file or directory (BT-2922).
+    ///
+    /// Walks up to the nearest `beamtalk.toml` and maps its canonical root
+    /// through `pkg_root_to_name` — the same manifest-derived name `beamtalk
+    /// build` uses for `CompilerOptions::current_package`. Returns `None` for
+    /// paths outside any discovered package (no package boundary to enforce).
+    ///
+    /// The path is canonicalized *before* the walk-up: a relative path like
+    /// `test/Foo.bt` would otherwise hit `find_package_root`'s empty-parent
+    /// guard (BT-1228) before ever reaching the package root on disk.
+    fn current_package_for(&self, path: &Utf8Path) -> Option<String> {
+        let package = canonical_package_root(&canonical_path(path))
+            .and_then(|root| self.pkg_root_to_name.get(&root).cloned());
+        if package.is_none() {
+            debug!(
+                path = %path,
+                "No package resolved for file; E0401/E0402 visibility checks \
+                 are disabled for it"
+            );
+        }
+        package
+    }
 }
 
 /// Run `BUnit` tests.
@@ -1071,11 +1113,13 @@ fn compile_fixtures(pipeline: &mut TestPipeline) -> Result<()> {
         pre_loaded_protocols: pipeline.fixture_protocol_infos.clone(),
         ..ClassHierarchyContext::default()
     };
+    let fixtures_package = pipeline.current_package_for(&fixtures_dir);
     let precompiled = compile_fixtures_directory(
         &fixtures_dir,
         &pipeline.build_dir,
         &fixture_hierarchy,
         pipeline.warnings_as_errors,
+        fixtures_package.as_deref(),
     )?;
     for module_name in &precompiled {
         pipeline.precompiled_modules.insert(module_name.clone());
@@ -1199,6 +1243,7 @@ fn compile_single_test_file(
     )?;
 
     // Compile TestCase subclasses
+    let test_file_package = pipeline.current_package_for(test_file);
     for test_class in test_classes {
         // Generate Core Erlang for the test file (BEAM compilation is batched below)
         let core_file = generate_core_file(
@@ -1207,6 +1252,7 @@ fn compile_single_test_file(
             &pipeline.build_dir,
             &file_hierarchy,
             pipeline.warnings_as_errors,
+            test_file_package.as_deref(),
         )
         .wrap_err_with(|| format!("Failed to compile test file '{test_file}'"))?;
         pending_test_cores.push(core_file);
@@ -1225,6 +1271,7 @@ fn compile_single_test_file(
         &pipeline.build_dir,
         &file_hierarchy,
         pipeline.warnings_as_errors,
+        test_file_package.as_deref(),
     )?;
     for dr in doc_results {
         // BT-1631: Doc test EUnit wrappers are still generated but not compiled here.
@@ -1301,11 +1348,13 @@ fn resolve_load_directives(
                 test_file
             );
         }
+        let fixture_package = pipeline.current_package_for(&fixture_path);
         let module_name = compile_fixture(
             &fixture_path,
             &pipeline.build_dir,
             hierarchy,
             pipeline.warnings_as_errors,
+            fixture_package.as_deref(),
         )?;
         pipeline.all_fixture_modules.push(module_name);
     }

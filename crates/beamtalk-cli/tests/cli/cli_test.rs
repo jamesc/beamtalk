@@ -46,6 +46,49 @@ fn test_fails_for_failing_suite() {
 }
 
 #[test]
+fn test_fails_with_e0402_for_internal_class_leak_in_test_file() {
+    // Regression for BT-2922: `beamtalk test`'s BUnit test-file compilation
+    // never set `current_package`, so E0401/E0402 visibility checks silently
+    // emitted zero diagnostics on the direct test-file path (the
+    // `build_packages` path was already covered by BT-2920). A test class
+    // leaking an internal class through a public method signature must fail
+    // the test run, matching `beamtalk build`'s behaviour.
+    let project = cli_common::fixture_project();
+    std::fs::write(
+        project.path().join("src/TokenBuffer.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         internal Object subclass: TokenBuffer\n\
+         \x20\x20data => nil\n",
+    )
+    .unwrap();
+    std::fs::write(
+        project.path().join("test/LeakTest.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         TestCase subclass: LeakTest\n\
+         \n\
+         \x20\x20tokenize: input :: String -> TokenBuffer => nil\n\
+         \x20\x20testNothing => self assert: true\n",
+    )
+    .unwrap();
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["test", "--quiet"])
+        .assert()
+        .failure()
+        // miette word-wraps the message to terminal width, so match the two
+        // halves separately rather than the exact single-line string.
+        .stderr(
+            contains("Internal class 'TokenBuffer' appears in public signature of")
+                .and(contains("tokenize:'")),
+        );
+}
+
+#[test]
 fn test_no_tests_found_succeeds() {
     let project = cli_common::fixture_project();
     // Remove the only test file to exercise the "no tests" path.
