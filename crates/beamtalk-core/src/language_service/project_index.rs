@@ -55,7 +55,7 @@ const CURRENT_PROJECT_PACKAGE_MARKER: &str = "$project";
 /// `class_hierarchy/builtins.rs`'s `ClassInfo.package` stamping) — stdlib is
 /// always its own package, distinct from both a project's own aliases and
 /// any fetched dependency's.
-const STDLIB_PACKAGE_MARKER: &str = "stdlib";
+pub const STDLIB_PACKAGE_MARKER: &str = "stdlib";
 
 /// Derives the dependency package name for `file` from its path (BT-2951):
 /// mirrors `beamtalk-lsp/src/server.rs`'s `dependency_src_dirs` filesystem

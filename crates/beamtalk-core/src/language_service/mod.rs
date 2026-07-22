@@ -54,7 +54,7 @@ pub mod runtime_delegate;
 mod value_objects;
 
 // Re-export value objects at the module level
-pub use project_index::ProjectIndex;
+pub use project_index::{ProjectIndex, STDLIB_PACKAGE_MARKER};
 pub use runtime_delegate::{
     NavQuery, NavQueryResponse, NavSite, NavSymbolClass, NavSymbolMethod, NavSymbolsResponse,
     RuntimeLocation, line_to_position, nav_site_to_location,

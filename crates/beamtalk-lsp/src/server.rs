@@ -5584,7 +5584,9 @@ mod tests {
                 .find(|i| i.name == "Direction")
                 .unwrap()
                 .package,
-            Some(EcoString::from("stdlib")),
+            Some(EcoString::from(
+                beamtalk_core::language_service::STDLIB_PACKAGE_MARKER,
+            )),
             "a didOpen racing preload must be re-stamped with the stdlib \
              package marker once preload marks the file, not keep the \
              same-project marker until the next edit"
