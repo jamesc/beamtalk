@@ -113,7 +113,7 @@ handle_term_pid_stats_live_actor_returns_value_map_test() ->
     end.
 
 %%====================================================================
-%% pid_stats/1 — dead pid returns dead-stats map (line 91 / dead_stats body)
+%% pid_stats/1 — dead pid returns dead-stats map (dead_stats/1 body)
 %%====================================================================
 
 pid_stats_dead_pid_returns_dead_stats_map_test() ->
@@ -140,7 +140,7 @@ pid_stats_dead_pid_returns_dead_stats_map_test() ->
     ?assertEqual(PidBin, maps:get(<<"pid">>, Stats)).
 
 %%====================================================================
-%% format_mfa/1 — undefined and catch-all clauses (lines 106, 110)
+%% format_mfa/1 — undefined and catch-all clauses
 %%====================================================================
 
 format_mfa_undefined_returns_nil_test() ->
