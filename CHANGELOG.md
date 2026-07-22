@@ -58,7 +58,7 @@
 - Fix `is_assignable_to`/`is_type_compatible` not resolving alias-typed field/slot declarations — type checking against alias-typed declarations now correctly validates union members instead of false incompatibility or silent acceptance (BT-2953, #3082).
 - Fix `check_argument_types` not tracking alias dependencies for hot-reload — stale diagnostics after an alias redefinition are now cleared correctly (follow-up to #3082, #3085).
 - Fix `class_shortcut_applies` guard checking the bare alias name instead of the resolved structural type — prevents false acceptance of class instances against alias-typed parameters (follow-up to #3083, #3085).
-- Fix cross-file alias cycles (where each half is in a separate file) going undetected — `AliasRegistry::add_pre_loaded` now runs cycle detection across pre-loaded and module-local aliases (BT-2954, #3076).
+- Fix cross-file alias cycles (where each participating alias is declared in a separate file) going undetected — `AliasRegistry::add_pre_loaded` now runs cycle detection across pre-loaded and module-local aliases (BT-2954, #3076).
 - Fix REPL-inline class/protocol redefinitions clobbering file-local alias xref edges (BT-2955, #3086).
 - Fix LSP leaking internal type aliases across package boundaries (BT-2951, #3086).
 - Fix LSP not recognizing protocols declared in other project files for alias resolution (BT-2950, #3086).
