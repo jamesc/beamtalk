@@ -22,9 +22,9 @@
 //!
 //! [`extract_type_specs`] is deliberately layout-agnostic — it takes an
 //! explicit cache directory and dependency ebin directories rather than a
-//! `beamtalk-cli`-specific `BuildLayout`, so each caller (the CLI via
-//! `BuildLayout`, the LSP via its own `_build/` path joins) supplies its own
-//! notion of where those directories live.
+//! `beamtalk-cli`-specific `BuildLayout`. Callers use
+//! [`collect_project_dependency_ebin_dirs`] to resolve those directories from
+//! a project root; `beamtalk-cli` additionally wraps this via `BuildLayout`.
 
 use crate::semantic_analysis::type_checker::{
     NativeTypeRegistry, is_specs_line, is_specs_result_error, is_specs_result_ok, parse_specs_line,
@@ -1239,6 +1239,67 @@ pub fn discover_otp_beam_files() -> Result<OtpDiscovery> {
     })
 }
 
+/// Collect the ebin directories for a project's native and path dependencies.
+///
+/// Scans the standard `_build/` layout for a project rooted at `project_root`:
+/// - `_build/deps/*/ebin/` — Beamtalk path-dependency ebin dirs
+/// - `_build/dev/native/ebin/` — the project's own compiled native Erlang
+/// - `_build/dev/native/default/lib/*/ebin/` — rebar3 hex/git dependency ebins
+///
+/// The returned list is sorted and deduplicated. Missing directories are silently
+/// skipped (no build yet → empty list rather than an error).
+///
+/// Pass the result to [`extract_type_specs`] as `dependency_ebin_dirs`. Both
+/// `beamtalk-cli` (via `BuildLayout`) and `beamtalk-lsp` call this function —
+/// it is the single source of truth for project-dependency ebin discovery.
+pub fn collect_project_dependency_ebin_dirs(project_root: &Utf8Path) -> Vec<Utf8PathBuf> {
+    let build_root = project_root.join("_build");
+    let mut dirs = Vec::new();
+
+    // Path dependencies: `_build/deps/*/ebin/`.
+    if let Ok(entries) = std::fs::read_dir(build_root.join("deps")) {
+        for entry in entries.flatten() {
+            let ebin = entry.path().join("ebin");
+            if ebin.is_dir() {
+                if let Ok(utf8) = Utf8PathBuf::from_path_buf(ebin) {
+                    dirs.push(utf8);
+                }
+            }
+        }
+    }
+
+    // The project's own native/ code, compiled to `_build/dev/native/ebin/`.
+    let native_ebin = build_root.join("dev").join("native").join("ebin");
+    if native_ebin.is_dir() {
+        dirs.push(native_ebin);
+    }
+
+    // rebar3 hex/git deps: `_build/dev/native/default/lib/*/ebin/`.
+    let lib_dir = build_root
+        .join("dev")
+        .join("native")
+        .join("default")
+        .join("lib");
+    if let Ok(entries) = std::fs::read_dir(&lib_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let ebin = path.join("ebin");
+            if ebin.is_dir() {
+                if let Ok(utf8) = Utf8PathBuf::from_path_buf(ebin) {
+                    dirs.push(utf8);
+                }
+            }
+        }
+    }
+
+    dirs.sort();
+    dirs.dedup();
+    dirs
+}
+
 /// Discover `.beam` files from project dependency directories.
 ///
 /// Collects beams from:
@@ -1285,14 +1346,13 @@ pub fn discover_dependency_beam_files(ebin_dirs: &[Utf8PathBuf]) -> Vec<Utf8Path
 /// `beamtalk-cli`'s `native_type_specs::extract_project_type_specs`, which
 /// resolves `cache_dir`/`dependency_ebin_dirs` from a `BuildLayout`),
 /// `beamtalk-mcp`'s `lint`/`diagnostic_summary` tools (BT-2858, same path),
-/// and `beamtalk-lsp` (BT-2859, which resolves the same `_build/` paths
-/// itself rather than depending on `beamtalk-cli`'s `BuildLayout`).
+/// and `beamtalk-lsp` (BT-2859). All callers obtain `dependency_ebin_dirs`
+/// via [`collect_project_dependency_ebin_dirs`].
 ///
 /// `dependency_ebin_dirs` should include the project's path-dependency ebin
 /// dirs (`_build/deps/*/ebin/`), its own compiled `native/` ebin dir, and any
-/// rebar3 hex-dependency ebin dirs — see `native_type_specs::
-/// collect_dependency_ebin_dirs` in `beamtalk-cli` for the canonical CLI-side
-/// construction.
+/// rebar3 hex-dependency ebin dirs — use [`collect_project_dependency_ebin_dirs`]
+/// to obtain them from a project root path.
 ///
 /// Non-fatal: if spec extraction fails (e.g., runtime not compiled), returns
 /// `None` rather than erroring — callers fall back to untyped FFI checking.
@@ -1524,6 +1584,34 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let cache_dir = Utf8PathBuf::from_path_buf(temp.path().join("type_cache")).unwrap();
         let _ = extract_type_specs(&cache_dir, &[]);
+    }
+
+    // -----------------------------------------------------------------------
+    // collect_project_dependency_ebin_dirs tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn collect_project_dependency_ebin_dirs_empty_project() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let dirs = collect_project_dependency_ebin_dirs(&root);
+        assert!(dirs.is_empty(), "fresh project has no dependency ebin dirs");
+    }
+
+    #[test]
+    fn collect_project_dependency_ebin_dirs_finds_path_dep_ebin() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let dep_ebin = root.join("_build").join("deps").join("json").join("ebin");
+        std::fs::create_dir_all(&dep_ebin).unwrap();
+
+        let dirs = collect_project_dependency_ebin_dirs(&root);
+        assert!(
+            dirs.contains(&dep_ebin),
+            "should find the path dependency's ebin dir: {dirs:?}"
+        );
     }
 
     // -----------------------------------------------------------------------
