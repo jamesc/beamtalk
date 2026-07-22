@@ -63,6 +63,7 @@
 - Fix LSP leaking internal type aliases across package boundaries (BT-2951, #3086).
 - Fix LSP not recognizing protocols declared in other project files for alias resolution (BT-2950, #3086).
 - Fix REPL compile-expression path not defaulting known aliases from ambient cache (BT-2956, #3086).
+- Fix Protocol method signatures missing Dialyzer `-spec`/`-type` output — `register_protocol`'s method-requirement maps now carry `param_types`/`return_type` using the Core Erlang abstract-type representation, including `user_type` references for alias-typed parameters, so Erlang/Elixir consumers of compiled Beamtalk Protocol modules receive typed specs (BT-2957, #3086).
 - Fix generic container element types (`List(T)`, `Dictionary(K,V)`) not validated on construction/mutation — `at:put:`, `++`, `merge:`, etc. now check element/value arguments against the receiver's declared type args (BT-2949, #3089).
 
 ### Standard Library
