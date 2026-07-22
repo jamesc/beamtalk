@@ -31,6 +31,10 @@ receive the live metrics map; `handle/4` is the WebSocket-edge JSON wrapper.
 
 -export([handle/4, handle_term/4, describe_ops/0]).
 
+-ifdef(TEST).
+-export([pid_stats/1, format_mfa/1]).
+-endif.
+
 -doc "WebSocket-edge wrapper: encodes the term result to JSON (BT-2402).".
 -spec handle(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
 handle(Op, Params, Msg, SessionPid) ->
