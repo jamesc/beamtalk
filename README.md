@@ -333,7 +333,7 @@ workflow. For AI agent contributors, see **[AGENTS.md](AGENTS.md)**.
 - ✅ **Cascades, map literals, comprehensions, exception handling**
 - ✅ **LSP** — Completions (incl. FFI), hover with type/Dynamic-reason, go-to-definition, find references, workspace symbols, diagnostics
 - ✅ **Testing** — SUnit-style `TestCase`, parallel runner, `BUnit` + `EUnit` integration
-- ✅ **Tooling** — `beamtalk doctor`, `beamtalk type-coverage`, `beamtalk gen-native`, `beamtalk generate stubs`, MCP server, VS Code extension
+- ✅ **Tooling** — `beamtalk doctor`, `beamtalk type-coverage`, `beamtalk generate native`, `beamtalk generate stubs`, MCP server, VS Code extension
 - ✅ **LiveView IDE** — browser-based Smalltalk cockpit (system browser, live method editing, Workspace + Transcript, Bindings, Inspector) attached to a running workspace over Erlang distribution
 
 ---

@@ -111,3 +111,42 @@ handle_term_pid_stats_live_actor_returns_value_map_test() ->
         catch gen_server:stop(ActorPid),
         catch gen_server:stop(RegistryPid)
     end.
+
+%%====================================================================
+%% pid_stats/1 — dead pid returns dead-stats map (dead_stats/1 body)
+%%====================================================================
+
+pid_stats_dead_pid_returns_dead_stats_map_test() ->
+    %% Spawn a process, capture its pid, then kill it. Calling pid_stats/1
+    %% directly (bypassing the actor registry) exercises the
+    %% `is_process_alive -> false` branch and the dead_stats/1 helper.
+    Pid = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    PidBin = list_to_binary(pid_to_list(Pid)),
+    Ref = erlang:monitor(process, Pid),
+    exit(Pid, kill),
+    receive
+        {'DOWN', Ref, process, Pid, _} -> ok
+    after 1000 ->
+        error(timeout_waiting_for_process_death)
+    end,
+    Stats = beamtalk_repl_ops_watch:pid_stats(Pid),
+    ?assert(is_map(Stats)),
+    ?assertEqual(false, maps:get(<<"alive">>, Stats)),
+    ?assertEqual(<<"dead">>, maps:get(<<"status">>, Stats)),
+    ?assertEqual(PidBin, maps:get(<<"pid">>, Stats)).
+
+%%====================================================================
+%% format_mfa/1 — undefined and catch-all clauses
+%%====================================================================
+
+format_mfa_undefined_returns_nil_test() ->
+    ?assertEqual(nil, beamtalk_repl_ops_watch:format_mfa(undefined)).
+
+format_mfa_catch_all_returns_nil_test() ->
+    %% Non-MFA atoms and tuples with wrong types both hit the catch-all clause.
+    ?assertEqual(nil, beamtalk_repl_ops_watch:format_mfa(not_a_mfa)),
+    ?assertEqual(nil, beamtalk_repl_ops_watch:format_mfa({erlang, apply, not_integer})).

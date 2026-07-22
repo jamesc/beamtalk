@@ -55,7 +55,7 @@ const CURRENT_PROJECT_PACKAGE_MARKER: &str = "$project";
 /// `class_hierarchy/builtins.rs`'s `ClassInfo.package` stamping) — stdlib is
 /// always its own package, distinct from both a project's own aliases and
 /// any fetched dependency's.
-const STDLIB_PACKAGE_MARKER: &str = "stdlib";
+pub const STDLIB_PACKAGE_MARKER: &str = "stdlib";
 
 /// Derives the dependency package name for `file` from its path (BT-2951):
 /// mirrors `beamtalk-lsp/src/server.rs`'s `dependency_src_dirs` filesystem
@@ -529,8 +529,56 @@ impl ProjectIndex {
     /// should simply be omitted; [`Self::package_for_alias_stamping`] falls
     /// back to [`CURRENT_PROJECT_PACKAGE_MARKER`] for any file that doesn't
     /// fall under a known root.
+    ///
+    /// **Note: every call must pass the *complete* root set.** Each call
+    /// replaces the whole map and re-stamps tracked aliases against it, so
+    /// passing a subset re-stamps files under the omitted roots back to the
+    /// fallback marker — e.g. a future `didChangeWorkspaceFolders` handler
+    /// must not call this with only the newly added root, or every file
+    /// under the original roots silently reverts to the `$project` stamp.
+    ///
+    /// BT-2961: safely re-appliable — any file whose aliases were already
+    /// stamped (e.g. a `didOpen` that raced the LSP's `initialized()`
+    /// sequence and got the same-project fallback marker) is re-stamped
+    /// against the new root map, so call order relative to
+    /// [`Self::update_file_aliases`] no longer matters for correctness.
     pub fn set_root_packages(&mut self, root_packages: Vec<(Utf8PathBuf, EcoString)>) {
         self.root_packages = root_packages;
+        self.restamp_file_aliases();
+    }
+
+    /// Re-derives the package stamp for every tracked alias entry and
+    /// rebuilds the merged registry if any stamp changed (BT-2961).
+    ///
+    /// Called by [`Self::set_root_packages`] and [`Self::mark_stdlib_file`]
+    /// so a file indexed *before* those startup calls (a `didOpen`/
+    /// `didChange` racing the LSP's `initialized()` sequence) is corrected
+    /// in place instead of keeping a stale stamp until its next edit. The
+    /// common startup path — roots and stdlib membership registered before
+    /// any file is indexed — finds no tracked aliases (or no stamp
+    /// differences) and skips the `rebuild_alias_registry` cost entirely.
+    ///
+    /// Cost: O(all tracked alias-bearing files) per call, even when only one
+    /// file's stamp actually changed — callers on hot paths should not reach
+    /// for this casually. Bounded in practice: only files that raced the
+    /// startup sequence ever produce a stamp difference.
+    fn restamp_file_aliases(&mut self) {
+        let files: Vec<Utf8PathBuf> = self.file_aliases.keys().cloned().collect();
+        let mut changed = false;
+        for file in files {
+            let package = self.alias_package_for_file(&file);
+            if let Some(infos) = self.file_aliases.get_mut(&file) {
+                for info in infos {
+                    if info.package.as_ref() != Some(&package) {
+                        info.package = Some(package.clone());
+                        changed = true;
+                    }
+                }
+            }
+        }
+        if changed {
+            self.rebuild_alias_registry();
+        }
     }
 
     /// The package to stamp on every [`AliasInfo`] extracted from `file`
@@ -565,11 +613,18 @@ impl ProjectIndex {
     /// `beamtalk-cli`'s build pipeline and tests — the real running LSP never
     /// calls it, instead feeding every preloaded file (user and stdlib alike)
     /// through the same [`Self::update_file`]/[`Self::update_file_aliases`]
-    /// path. Call this *before* [`Self::update_file_aliases`] for a stdlib
-    /// file so [`Self::alias_package_for_file`] stamps its aliases
-    /// [`STDLIB_PACKAGE_MARKER`] instead of the same-project marker.
+    /// path. Prefer calling this *before* [`Self::update_file_aliases`] for
+    /// a stdlib file, but the ordering is no longer load-bearing (BT-2961):
+    /// if the file's aliases were already stamped (a `didOpen` racing the
+    /// LSP's `initialized()` preload), they are re-stamped
+    /// [`STDLIB_PACKAGE_MARKER`] here instead of keeping the same-project
+    /// marker until the next edit.
     pub fn mark_stdlib_file(&mut self, file: Utf8PathBuf) {
-        self.stdlib_files.insert(file);
+        let had_aliases = self.file_aliases.contains_key(&file);
+        let newly_marked = self.stdlib_files.insert(file);
+        if newly_marked && had_aliases {
+            self.restamp_file_aliases();
+        }
     }
 
     /// Returns cross-file `ClassInfo` entries for diagnostic computation (BT-2009).
@@ -1199,6 +1254,71 @@ mod tests {
             Some(EcoString::from(STDLIB_PACKAGE_MARKER)),
             "a stdlib file marked via mark_stdlib_file must have its aliases \
              stamped STDLIB_PACKAGE_MARKER, not the same-project marker"
+        );
+    }
+
+    /// BT-2961: a stdlib file indexed *before* `mark_stdlib_file` (a
+    /// `didOpen` racing the LSP's `initialized()` preload) must still end up
+    /// with the stdlib package stamp — `mark_stdlib_file` re-stamps
+    /// already-tracked aliases instead of relying on call order.
+    #[test]
+    fn update_file_aliases_then_mark_stdlib_file_restamps_stdlib_package() {
+        let mut index = ProjectIndex::new();
+        let stdlib_file = Utf8PathBuf::from("stdlib/Direction.bt");
+
+        // Reversed order vs `mark_stdlib_file_then_update_file_stamps_stdlib_package`:
+        // the file is indexed first, so its aliases initially get the
+        // same-project fallback marker.
+        let tokens = lex_with_eof("internal type Direction = #north | #south");
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        index.update_file(stdlib_file.clone(), &hierarchy);
+        let infos = crate::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
+        index.update_file_aliases(stdlib_file.clone(), infos);
+
+        index.mark_stdlib_file(stdlib_file);
+
+        let seen = index.cross_file_alias_infos_for(&Utf8PathBuf::from("elsewhere.bt"));
+        assert_eq!(
+            seen.iter().find(|i| i.name == "Direction").unwrap().package,
+            Some(EcoString::from(STDLIB_PACKAGE_MARKER)),
+            "mark_stdlib_file must re-stamp aliases indexed before it ran, \
+             not leave the same-project marker in place until the next edit"
+        );
+    }
+
+    /// BT-2961: a file indexed *before* `set_root_packages` (a `didOpen`
+    /// racing the LSP's `initialized()` sequence) must still end up stamped
+    /// with its root's real package name — `set_root_packages` re-stamps
+    /// already-tracked aliases instead of relying on call order.
+    #[test]
+    fn update_file_aliases_then_set_root_packages_restamps_real_package() {
+        let mut index = ProjectIndex::new();
+        let root = Utf8PathBuf::from("/workspace/a");
+        let file = root.join("Foo.bt");
+
+        let tokens = lex_with_eof("internal type Foo = Integer");
+        let (module, _) = parse(tokens);
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        index.update_file(file.clone(), &hierarchy);
+        let infos = crate::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
+        index.update_file_aliases(file.clone(), infos);
+
+        // Indexed before any root is known — fallback marker for now.
+        let seen = index.cross_file_alias_infos_for(&Utf8PathBuf::from("elsewhere.bt"));
+        assert_eq!(
+            seen.iter().find(|i| i.name == "Foo").unwrap().package,
+            Some(EcoString::from(CURRENT_PROJECT_PACKAGE_MARKER)),
+        );
+
+        index.set_root_packages(vec![(root, EcoString::from("pkg_a"))]);
+
+        let seen = index.cross_file_alias_infos_for(&Utf8PathBuf::from("elsewhere.bt"));
+        assert_eq!(
+            seen.iter().find(|i| i.name == "Foo").unwrap().package,
+            Some(EcoString::from("pkg_a")),
+            "set_root_packages must re-stamp aliases indexed before it ran, \
+             not leave the fallback marker in place until the next edit"
         );
     }
 

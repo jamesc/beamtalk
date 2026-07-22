@@ -54,7 +54,7 @@ pub mod runtime_delegate;
 mod value_objects;
 
 // Re-export value objects at the module level
-pub use project_index::ProjectIndex;
+pub use project_index::{ProjectIndex, STDLIB_PACKAGE_MARKER};
 pub use runtime_delegate::{
     NavQuery, NavQueryResponse, NavSite, NavSymbolClass, NavSymbolMethod, NavSymbolsResponse,
     RuntimeLocation, line_to_position, nav_site_to_location,
@@ -293,16 +293,19 @@ impl SimpleLanguageService {
         &self.project_index
     }
 
-    /// Marks `file` as a stdlib source (BT-2959). Call before [`Self::update_file`]
-    /// for a stdlib file so its aliases are stamped with the stdlib package marker
-    /// instead of the same-project marker — see [`ProjectIndex::mark_stdlib_file`].
+    /// Marks `file` as a stdlib source (BT-2959) so its aliases are stamped
+    /// with the stdlib package marker instead of the same-project marker.
+    /// Safe to call before or after [`Self::update_file`] — a file indexed
+    /// first is re-stamped in place (BT-2961) — see
+    /// [`ProjectIndex::mark_stdlib_file`].
     pub fn mark_stdlib_file(&mut self, file: Utf8PathBuf) {
         self.project_index.mark_stdlib_file(file);
     }
 
     /// Sets the real package name for each known workspace root (BT-2960).
-    /// Call before preloading any file under that root — see
-    /// [`ProjectIndex::set_root_packages`].
+    /// Safe to call before or after files under a root are indexed —
+    /// already-stamped aliases are re-stamped against the new root map
+    /// (BT-2961) — see [`ProjectIndex::set_root_packages`].
     pub fn set_root_packages(&mut self, root_packages: Vec<(Utf8PathBuf, EcoString)>) {
         self.project_index.set_root_packages(root_packages);
     }
