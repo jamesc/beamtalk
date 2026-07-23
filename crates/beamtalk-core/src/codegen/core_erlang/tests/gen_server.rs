@@ -5130,3 +5130,124 @@ fn test_actor_with_parent_init_and_initialize_defers_to_handle_continue() {
         "handle_continue must dispatch initialize via safe_dispatch. Got:\n{code}"
     );
 }
+
+// ── Cross-file ancestor ClassInfo path ───────────────────────────────────────
+//
+// Target: gen_server/callbacks.rs — `is_nilable_type_name` and the ClassInfo
+// branch of `inherited_typed_no_default_fields` (the `else if let Some(info)
+// = hierarchy.get_class(&name)` arm).  Reached only when an ancestor class is
+// absent from the current module's AST but present in the pre-loaded
+// ClassHierarchy (BEAM metadata / cross-file compilation).
+
+/// Exercises `is_nilable_type_name()` via the `ClassInfo` path in
+/// `inherited_typed_no_default_fields()`.
+///
+/// A cross-file ancestor is injected via `CodegenOptions::with_class_hierarchy`.
+/// Its typed-no-default fields exercise every branch of `is_nilable_type_name`:
+///
+/// - `nilField :: Nil`          → `type_name == "Nil"` returns true → excluded
+/// - `nilUnionField :: Integer | Nil` → union `split(" | ").any(…)` → excluded
+/// - `reqField :: Integer`       → neither branch → included → validation fires
+///
+/// The validation output for `reqField` confirms the `ClassInfo` loop ran.
+/// The absence of `nilField` / `nilUnionField` in the output confirms the
+/// nilability guards work correctly.
+#[test]
+fn test_cross_file_ancestor_nil_typed_fields_excluded_from_validation() {
+    use crate::semantic_analysis::class_hierarchy::ClassInfo;
+    use std::collections::HashMap;
+
+    let ancestor = ClassInfo {
+        surface_incomplete: false,
+        name: ecow::EcoString::from("BaseActor"),
+        superclass: Some(ecow::EcoString::from("Actor")),
+        is_sealed: false,
+        is_abstract: false,
+        is_typed: false,
+        is_internal: false,
+        package: None,
+        is_value: false,
+        is_native: false,
+        handle_scope: None,
+        state: vec![
+            ecow::EcoString::from("nilField"),
+            ecow::EcoString::from("nilUnionField"),
+            ecow::EcoString::from("reqField"),
+        ],
+        state_types: {
+            let mut m = HashMap::new();
+            m.insert(
+                ecow::EcoString::from("nilField"),
+                ecow::EcoString::from("Nil"),
+            );
+            m.insert(
+                ecow::EcoString::from("nilUnionField"),
+                ecow::EcoString::from("Integer | Nil"),
+            );
+            m.insert(
+                ecow::EcoString::from("reqField"),
+                ecow::EcoString::from("Integer"),
+            );
+            m
+        },
+        state_has_default: {
+            let mut m = HashMap::new();
+            m.insert(ecow::EcoString::from("nilField"), false);
+            m.insert(ecow::EcoString::from("nilUnionField"), false);
+            m.insert(ecow::EcoString::from("reqField"), false);
+            m
+        },
+        methods: vec![],
+        class_methods: vec![],
+        class_variables: vec![],
+        type_params: vec![],
+        type_param_bounds: vec![],
+        superclass_type_args: vec![],
+    };
+
+    // LogChild extends cross-file BaseActor; only LogChild's AST is present.
+    let src = "BaseActor subclass: LogChild\n  logCount = 0\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+
+    let result = generate_module(
+        &module,
+        CodegenOptions::new("bt@log_child").with_class_hierarchy(vec![ancestor]),
+    );
+    assert!(result.is_ok(), "Codegen should succeed: {result:?}");
+    let code = result.unwrap();
+
+    // reqField :: Integer is not nilable → typed-no-default validation must fire.
+    assert!(
+        code.contains("'uninitialized_state_error'"),
+        "Non-nilable cross-file ancestor field must trigger typed-no-default validation. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'reqField'"),
+        "Non-nilable field 'reqField' must appear in the validation error hint. Got:\n{code}"
+    );
+
+    // nilField :: Nil — excluded by `type_name == "Nil"` branch of is_nilable_type_name.
+    assert!(
+        !code.contains("'nilField'"),
+        "Nil-typed field must be excluded by is_nilable_type_name. Got:\n{code}"
+    );
+
+    // nilUnionField :: Integer | Nil — excluded by the union-split branch.
+    assert!(
+        !code.contains("'nilUnionField'"),
+        "Integer|Nil union field must be excluded by is_nilable_type_name. Got:\n{code}"
+    );
+
+    // Because BaseActor ≠ Actor/Object (has_parent_init=true) AND reqField is a
+    // typed-no-default field (has_initialize=true via chain_has_typed_no_default),
+    // init/1 must call the parent and defer to handle_continue.
+    assert!(
+        code.contains("'bt@base_actor':'init'("),
+        "init/1 must call parent bt@base_actor:init/1 for has_parent_init path. Got:\n{code}"
+    );
+    assert!(
+        code.contains("{'continue', 'initialize'}"),
+        "init/1 must return {{continue, initialize}} to defer post-initialize check. Got:\n{code}"
+    );
+}
