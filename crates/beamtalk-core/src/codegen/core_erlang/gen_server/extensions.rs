@@ -98,16 +98,17 @@ impl CoreErlangGenerator {
         }
 
         let mut parts: Vec<Document<'static>> = Vec::with_capacity(extensions.len());
-        for ext in &extensions {
-            parts.push(self.generate_extension_registration(ext)?);
+        for (idx, ext) in extensions.iter().enumerate() {
+            parts.push(self.generate_extension_registration(idx, ext)?);
         }
         Ok(Document::Vec(parts))
     }
 
-    /// Generates a single `let _ExtN = beamtalk_extensions:register(...) in`
+    /// Generates a single `let _Ext{idx} = beamtalk_extensions:register(...) in`
     /// fragment for one foreign extension method.
     fn generate_extension_registration(
         &mut self,
+        idx: usize,
         ext: &StandaloneMethodDefinition,
     ) -> Result<Document<'static>> {
         let class_tag = Self::extension_class_tag(ext);
@@ -119,7 +120,7 @@ impl CoreErlangGenerator {
         Ok(docvec![
             line(),
             "let ",
-            leaf::var(self.fresh_temp_var("Ext")),
+            leaf::var(super::super::util::ext_var(idx)),
             " = call 'beamtalk_extensions':'register'(",
             leaf::atom(class_tag),
             ", ",

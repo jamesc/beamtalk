@@ -51,21 +51,27 @@ pub(super) fn versioned_var(prefix: &str, version: usize) -> String {
 /// Builds the metaclass tag string `"{class_name} class"`.
 ///
 /// This is the naming convention for metaclass atoms throughout the Beamtalk runtime
-/// (e.g. `'Array class'`, `'Object class'`). Uses `push_str` on a pre-allocated buffer
-/// instead of `format!()` to comply with CLAUDE.md: "NEVER use `format!()` to produce
-/// Core Erlang fragments — not even atoms, arities, or map keys."
-///
-/// # Examples
-///
-/// ```ignore
-/// assert_eq!(metaclass_tag("Array"),  "Array class");
-/// assert_eq!(metaclass_tag("Object"), "Object class");
-/// ```
+/// (e.g. `'Array class'`, `'Object class'`). Extracted as a named helper so the
+/// convention is documented in one place and callers don't need to remember the
+/// exact suffix.
 pub(super) fn metaclass_tag(class_name: &str) -> String {
     // " class" is 6 bytes.
     let mut s = String::with_capacity(class_name.len() + 6);
     s.push_str(class_name);
     s.push_str(" class");
+    s
+}
+
+/// Builds a stable, self-contained extension binding name `"_Ext{idx}"`.
+///
+/// The leading underscore prevents collisions with `fresh_var`'s counter-based
+/// names (which start at `_Foo1`). Using a local loop index keeps snapshot
+/// values stable across unrelated codegen changes.
+pub(super) fn ext_var(idx: usize) -> String {
+    // "_Ext" is 4 bytes; reserve a few more for the digits.
+    let mut s = String::with_capacity(8);
+    s.push_str("_Ext");
+    let _ = write!(s, "{idx}");
     s
 }
 
