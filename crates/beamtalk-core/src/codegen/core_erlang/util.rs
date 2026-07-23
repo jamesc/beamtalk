@@ -64,9 +64,10 @@ pub(super) fn metaclass_tag(class_name: &str) -> String {
 
 /// Builds a stable, self-contained extension binding name `"_Ext{idx}"`.
 ///
-/// The leading underscore prevents collisions with `fresh_var`'s counter-based
-/// names (which start at `_Foo1`). Using a local loop index keeps snapshot
-/// values stable across unrelated codegen changes.
+/// Using the per-module loop index keeps snapshot values stable across unrelated
+/// codegen changes that would otherwise shift the global temp-var counter.
+/// Collision with `fresh_var("Ext", n)` is not a concern in practice because no
+/// call site uses `"Ext"` as a `fresh_var` base.
 pub(super) fn ext_var(idx: usize) -> String {
     // "_Ext" is 4 bytes; reserve a few more for the digits.
     let mut s = String::with_capacity(8);
@@ -571,5 +572,19 @@ mod tests {
         // Verify capacity pre-allocation does not truncate for larger versions.
         assert_eq!(versioned_var("State", 100), "State100");
         assert_eq!(versioned_var("State", 9999), "State9999");
+    }
+
+    #[test]
+    fn test_metaclass_tag_appends_class_suffix() {
+        assert_eq!(metaclass_tag("Array"), "Array class");
+        assert_eq!(metaclass_tag("Object"), "Object class");
+        assert_eq!(metaclass_tag("MyApp"), "MyApp class");
+    }
+
+    #[test]
+    fn test_ext_var_formats_index() {
+        assert_eq!(ext_var(0), "_Ext0");
+        assert_eq!(ext_var(1), "_Ext1");
+        assert_eq!(ext_var(42), "_Ext42");
     }
 }
