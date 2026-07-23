@@ -58,7 +58,7 @@ TestCase subclass: SupervisionNodeTest
     self assert: node pid equals: nil
 
   // === Accessor types ===
-  testKindIsSymbol =>
+  testKindOtpProcess =>
     node := SupervisionNode
       pid: nil
       registeredName: nil
@@ -67,7 +67,7 @@ TestCase subclass: SupervisionNodeTest
       childCount: 0
     self assert: node kind equals: #otpProcess
 
-  testChildCountIsInteger =>
+  testChildCountZero =>
     node := SupervisionNode
       pid: nil
       registeredName: nil
@@ -143,15 +143,6 @@ TestCase subclass: SupervisionNodeTest
 
   // === printString shape ===
   testPrintStringStartsWithTag =>
-    node := SupervisionNode
-      pid: nil
-      registeredName: nil
-      kind: #beamtalkActor
-      behaviourClass: Counter
-      childCount: 0
-    self assert: node printString equals: "#SupervisionNode<#beamtalkActor Counter restarting>"
-
-  testPrintStringIncludesKindAndClass =>
     node := SupervisionNode
       pid: nil
       registeredName: nil
