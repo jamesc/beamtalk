@@ -48,6 +48,34 @@ pub(super) fn versioned_var(prefix: &str, version: usize) -> String {
     }
 }
 
+/// Builds the metaclass tag string `"{class_name} class"`.
+///
+/// This is the naming convention for metaclass atoms throughout the Beamtalk runtime
+/// (e.g. `'Array class'`, `'Object class'`). Extracted as a named helper so the
+/// convention is documented in one place and callers don't need to remember the
+/// exact suffix.
+pub(super) fn metaclass_tag(class_name: &str) -> String {
+    // " class" is 6 bytes.
+    let mut s = String::with_capacity(class_name.len() + 6);
+    s.push_str(class_name);
+    s.push_str(" class");
+    s
+}
+
+/// Builds a stable, self-contained extension binding name `"_Ext{idx}"`.
+///
+/// Using the per-module loop index keeps snapshot values stable across unrelated
+/// codegen changes that would otherwise shift the global temp-var counter.
+/// Collision with `fresh_var("Ext")` (yielding `_Ext1`, `_Ext2`, …) is not a
+/// concern in practice because no call site uses `"Ext"` as a `fresh_var` base.
+pub(super) fn ext_var(idx: usize) -> String {
+    // "_Ext" is 4 bytes; reserve a few more for the digits.
+    let mut s = String::with_capacity(8);
+    s.push_str("_Ext");
+    let _ = write!(s, "{idx}");
+    s
+}
+
 /// Escapes a string for use inside a Core Erlang double-quoted string literal.
 ///
 /// Replaces `\` with `\\` and `"` with `\"` so the result is safe to embed
@@ -544,5 +572,19 @@ mod tests {
         // Verify capacity pre-allocation does not truncate for larger versions.
         assert_eq!(versioned_var("State", 100), "State100");
         assert_eq!(versioned_var("State", 9999), "State9999");
+    }
+
+    #[test]
+    fn test_metaclass_tag_appends_class_suffix() {
+        assert_eq!(metaclass_tag("Array"), "Array class");
+        assert_eq!(metaclass_tag("Object"), "Object class");
+        assert_eq!(metaclass_tag("MyApp"), "MyApp class");
+    }
+
+    #[test]
+    fn test_ext_var_formats_index() {
+        assert_eq!(ext_var(0), "_Ext0");
+        assert_eq!(ext_var(1), "_Ext1");
+        assert_eq!(ext_var(42), "_Ext42");
     }
 }
