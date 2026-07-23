@@ -48,6 +48,27 @@ pub(super) fn versioned_var(prefix: &str, version: usize) -> String {
     }
 }
 
+/// Builds the metaclass tag string `"{class_name} class"`.
+///
+/// This is the naming convention for metaclass atoms throughout the Beamtalk runtime
+/// (e.g. `'Array class'`, `'Object class'`). Uses `push_str` on a pre-allocated buffer
+/// instead of `format!()` to comply with CLAUDE.md: "NEVER use `format!()` to produce
+/// Core Erlang fragments — not even atoms, arities, or map keys."
+///
+/// # Examples
+///
+/// ```ignore
+/// assert_eq!(metaclass_tag("Array"),  "Array class");
+/// assert_eq!(metaclass_tag("Object"), "Object class");
+/// ```
+pub(super) fn metaclass_tag(class_name: &str) -> String {
+    // " class" is 6 bytes.
+    let mut s = String::with_capacity(class_name.len() + 6);
+    s.push_str(class_name);
+    s.push_str(" class");
+    s
+}
+
 /// Escapes a string for use inside a Core Erlang double-quoted string literal.
 ///
 /// Replaces `\` with `\\` and `"` with `\"` so the result is safe to embed
