@@ -66,8 +66,8 @@ pub(super) fn metaclass_tag(class_name: &str) -> String {
 ///
 /// Using the per-module loop index keeps snapshot values stable across unrelated
 /// codegen changes that would otherwise shift the global temp-var counter.
-/// Collision with `fresh_var("Ext", n)` is not a concern in practice because no
-/// call site uses `"Ext"` as a `fresh_var` base.
+/// Collision with `fresh_var("Ext")` (yielding `_Ext1`, `_Ext2`, …) is not a
+/// concern in practice because no call site uses `"Ext"` as a `fresh_var` base.
 pub(super) fn ext_var(idx: usize) -> String {
     // "_Ext" is 4 bytes; reserve a few more for the digits.
     let mut s = String::with_capacity(8);
