@@ -57,7 +57,7 @@ TestCase subclass: SupervisionNodeTest
       childCount: 0
     self assert: node pid equals: nil
 
-  // === Accessor types ===
+  // === Accessor values ===
   testKindOtpProcess =>
     node := SupervisionNode
       pid: nil
@@ -142,7 +142,7 @@ TestCase subclass: SupervisionNodeTest
     self assert: node isBeamtalk equals: false
 
   // === printString shape ===
-  testPrintStringStartsWithTag =>
+  testPrintStringActorFormat =>
     node := SupervisionNode
       pid: nil
       registeredName: nil
