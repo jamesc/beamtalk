@@ -65,7 +65,7 @@ TestCase subclass: SupervisionNodeTest
       kind: #otpProcess
       behaviourClass: nil
       childCount: 0
-    self assert: (node kind isKindOf: Symbol) equals: true
+    self assert: node kind equals: #otpProcess
 
   testChildCountIsInteger =>
     node := SupervisionNode
@@ -74,7 +74,7 @@ TestCase subclass: SupervisionNodeTest
       kind: #otpProcess
       behaviourClass: nil
       childCount: 0
-    self assert: (node childCount isKindOf: Integer) equals: true
+    self assert: node childCount equals: 0
 
   // === isSupervisor: true for both supervisor kinds ===
   testIsSupervisorBeamtalkSupervisor =>
@@ -149,7 +149,7 @@ TestCase subclass: SupervisionNodeTest
       kind: #beamtalkActor
       behaviourClass: Counter
       childCount: 0
-    self assert: (node printString startsWith: "#SupervisionNode<") equals: true
+    self assert: node printString equals: "#SupervisionNode<#beamtalkActor Counter restarting>"
 
   testPrintStringIncludesKindAndClass =>
     node := SupervisionNode
@@ -158,9 +158,7 @@ TestCase subclass: SupervisionNodeTest
       kind: #beamtalkActor
       behaviourClass: Counter
       childCount: 0
-    str := node printString
-    self assert: (str includesSubstring: "#beamtalkActor") equals: true
-    self assert: (str includesSubstring: "Counter") equals: true
+    self assert: node printString equals: "#SupervisionNode<#beamtalkActor Counter restarting>"
 
   testPrintStringSupervisorShowsChildCount =>
     node := SupervisionNode
@@ -169,7 +167,7 @@ TestCase subclass: SupervisionNodeTest
       kind: #beamtalkSupervisor
       behaviourClass: nil
       childCount: 3
-    self assert: (node printString includesSubstring: "children: 3") equals: true
+    self assert: node printString equals: "#SupervisionNode<#beamtalkSupervisor appSup restarting children: 3>"
 
   testPrintStringRestartingShowsRestarting =>
     node := SupervisionNode
@@ -178,4 +176,4 @@ TestCase subclass: SupervisionNodeTest
       kind: #restarting
       behaviourClass: nil
       childCount: 0
-    self assert: (node printString includesSubstring: "restarting") equals: true
+    self assert: node printString equals: "#SupervisionNode<#restarting restarting>"
