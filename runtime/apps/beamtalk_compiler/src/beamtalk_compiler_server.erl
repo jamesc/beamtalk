@@ -57,7 +57,8 @@ to avoid temp files on disk (BT-48).
     handle_diagnostics_response/1,
     handle_version_response/1,
     clear_classes/0,
-    inject_diagnostics_failure/1
+    inject_diagnostics_failure/1,
+    inject_diagnostics_exit/0
 ]).
 -endif.
 
@@ -66,6 +67,11 @@ to avoid temp files on disk (BT-48).
     %% ADR 0050 Phase 3: Accumulated class metadata cache.
     %% Maps class name atom → __beamtalk_meta/0 map.
     %% Populated via register_class/2 casts and crash recovery on init.
+    %% Accumulates entries from every session that has ever called
+    %% register_class/2, with no removal on session disconnect — the
+    %% `aliases` field below (ADR 0108, BT-2899) was modeled on this same
+    %% cache and shares this exact limitation (BT-2916); see its doc for the
+    %% full rationale, which applies here unchanged.
     classes = #{} :: #{atom() => map()},
     %% ADR 0108 hot-reload re-check trigger (BT-2899): ambient session type
     %% alias cache, keyed by alias name -> its reparseable `type Name =
@@ -92,14 +98,29 @@ to avoid temp files on disk (BT-48).
     %% (`maps:put/3` in `register_class/2`'s cast handler) rather than
     %% diverging from that precedent. Like `classes`, there is no removal on
     %% session disconnect — an accepted limitation this shares with every
-    %% ambient cache in this module.
+    %% ambient cache in this module. Not a regression introduced here: it is
+    %% the pre-existing, already-accepted `classes` limitation carried over
+    %% unchanged (BT-2916 tracks this as a cross-reference, not a bug —
+    %% `beamtalk_session_sup` termination pruning a departing session's
+    %% names from either cache would need to weigh the same cost/benefit for
+    %% both, so a fix to one without the other would just leave them
+    %% inconsistent).
     aliases = #{} :: #{binary() => binary()},
     %% BT-2832 (test-only): when set (via inject_diagnostics_failure/1, only
     %% exported in TEST builds), the *next* diagnostics/3 call fails with this
     %% reason instead of reaching the real compiler port, then self-clears.
     %% Always `undefined` in production — nothing outside TEST builds can set
     %% it. See inject_diagnostics_failure/1's doc for why this exists.
-    diagnostics_fault = undefined :: undefined | binary()
+    diagnostics_fault = undefined :: undefined | binary(),
+    %% BT-2806 (test-only): when `true` (via inject_diagnostics_exit/0, only
+    %% exported in TEST builds), the *next* diagnostics/3 call stops this
+    %% process instead of replying, simulating the compiler port's
+    %% gen_server:call itself exiting (`noproc`/`timeout`) rather than an
+    %% ordinary `{error, _}` return. No self-clear flag needed, unlike
+    %% `diagnostics_fault` above — the process restart itself is the clear
+    %% (a fresh `init/1` always starts with `false`). Always `false` in
+    %% production. See inject_diagnostics_exit/0's doc for why this exists.
+    diagnostics_exit_fault = false :: boolean()
 }).
 
 %%% Public API
@@ -267,6 +288,45 @@ one consumed — are unaffected.
 -spec inject_diagnostics_failure(binary()) -> ok.
 inject_diagnostics_failure(Reason) ->
     gen_server:call(?MODULE, {inject_diagnostics_failure, Reason}, 5000).
+
+-doc """
+Force the *next* `diagnostics/3' call to exit instead of returning a value at
+all — a stricter sibling of `inject_diagnostics_failure/1' (BT-2806, test use
+only).
+
+`beamtalk_recheck:recheck_image_class/2' and `recheck_owner_for_leaf_change/3'
+each additionally `catch` the compiler port's `gen_server:call` itself exiting
+(`noproc`/`timeout`), not just an `{error, Reason}` return —
+`inject_diagnostics_failure/1' cannot reach that `catch` clause, since it
+still replies normally (with an error *value*) to a live call. This hook
+instead arms a flag that makes the *next* `{diagnostics, ...}' request stop
+this gen_server without replying at all, so the caller's `gen_server:call`
+raises an `exit` — the same shape of failure a real port crash or timeout
+would produce.
+
+Deterministic and safe to use per-test: `beamtalk_compiler_sup` supervises
+this server with `one_for_one`/`permanent`, so it is restarted immediately
+after the stop, and the very next `diagnostics/3` call (in this test or any
+other) reaches a fresh, healthy process — no explicit re-clear needed, unlike
+`inject_diagnostics_failure/1`'s flag (a fresh `init/1` always starts with
+`diagnostics_exit_fault = false`). Never touches the port itself, and
+unrelated requests (`compile_expression`, `compile`, ...) are unaffected.
+
+**Shared crash budget:** each use spends one of `beamtalk_compiler_sup`'s
+`one_for_one` restart allowance (`intensity => 5, period => 60` — production
+crash tolerance, not test-specific), and that allowance is NOT reset between
+test groups that never stop the `beamtalk_compiler` application between them
+(e.g. within a single `*_tests.erl` module using a no-op teardown — see
+`beamtalk_compiler_server_tests.erl`'s `stop_compiler/1`). Fine for a
+handful of uses; a test suite piling up more than a couple of these within
+one un-torn-down run risks exceeding the budget and leaving the server
+permanently down (`noproc`) for every subsequent test. Prefer scoping call
+sites that *do* `application:stop(beamtalk_compiler)` between test groups
+(e.g. `beamtalk_recheck_tests.erl`'s `recheck_teardown/1`) when adding more.
+""".
+-spec inject_diagnostics_exit() -> ok.
+inject_diagnostics_exit() ->
+    gen_server:call(?MODULE, inject_diagnostics_exit, 5000).
 -endif.
 
 -doc """
@@ -653,13 +713,33 @@ init(_Args) ->
 
 handle_call({compile_expression, Source, ModuleName, KnownVars, Options}, _From, State) ->
     %% ADR 0050 Phase 4: Inject class cache so the Rust compiler sees REPL-session classes.
-    Options1 = Options#{class_hierarchy => State#state.classes},
+    %% BT-2956: default known_type_aliases to the ambient alias cache, the
+    %% same backstop `compile`/`compile_method` apply unconditionally below —
+    %% but via `maps:merge/2` so an explicit caller-supplied value wins,
+    %% rather than an unconditional overwrite. `do_eval/3` (the only
+    %% production caller that reaches class/protocol-definition responses)
+    %% always threads `beamtalk_repl_state:known_type_alias_sources/1`'s
+    %% *full* session list (session-declared aliases plus every
+    %% stdlib-seeded one, BT-2938) explicitly; this ambient cache only ever
+    %% reflects session-declared aliases (`register_aliases/1`), so an
+    %% unconditional overwrite here would silently drop stdlib aliases from
+    %% that caller's more complete list. This is purely a backstop for a
+    %% caller that doesn't bother passing one.
+    Options1 = maps:merge(
+        #{known_type_aliases => alias_source_list(State#state.aliases)},
+        Options#{class_hierarchy => State#state.classes}
+    ),
     Result = beamtalk_compiler_port:compile_expression(
         State#state.port, Source, ModuleName, KnownVars, Options1
     ),
     {reply, Result, State};
 handle_call({compile_expression_trace, Source, ModuleName, KnownVars, Options}, _From, State) ->
-    Options1 = Options#{class_hierarchy => State#state.classes},
+    %% BT-2956: see the identical `maps:merge/2` backstop on the
+    %% `compile_expression` clause above — same reasoning applies here.
+    Options1 = maps:merge(
+        #{known_type_aliases => alias_source_list(State#state.aliases)},
+        Options#{class_hierarchy => State#state.classes}
+    ),
     Result = beamtalk_compiler_port:compile_expression_trace(
         State#state.port, Source, ModuleName, KnownVars, Options1
     ),
@@ -695,6 +775,16 @@ handle_call({resolve_completion_type, Expression}, _From, State) ->
         State#state.port, Expression, State#state.classes
     ),
     {reply, Result, State};
+handle_call(
+    {diagnostics, _Source, _Mode, _Options}, _From, #state{diagnostics_exit_fault = true} = State
+) ->
+    %% BT-2806 (test-only fault injection, see inject_diagnostics_exit/0):
+    %% stop without replying — the caller's gen_server:call raises an exit
+    %% (`{shutdown, {gen_server, call, [...]}}`) instead of getting a normal
+    %% return, simulating the compiler port's call itself exiting. `shutdown`
+    %% (not a crash reason) so this produces no crash report noise; the
+    %% `permanent` supervisor restarts it regardless of exit reason.
+    {stop, shutdown, State};
 handle_call(
     {diagnostics, _Source, _Mode, _Options}, _From, #state{diagnostics_fault = Fault} = State
 ) when
@@ -775,6 +865,8 @@ handle_call(clear_classes, _From, State) ->
     {reply, ok, State#state{classes = #{}, aliases = #{}}};
 handle_call({inject_diagnostics_failure, Reason}, _From, State) ->
     {reply, ok, State#state{diagnostics_fault = Reason}};
+handle_call(inject_diagnostics_exit, _From, State) ->
+    {reply, ok, State#state{diagnostics_exit_fault = true}};
 handle_call(get_classes, _From, State) ->
     {reply, State#state.classes, State};
 handle_call(get_aliases, _From, State) ->
@@ -1193,19 +1285,28 @@ handle_compile_response(
     }};
 %% BT-1950: Protocol definitions use a different response shape (kind := protocol_definition)
 %% and have no `classes` key — they have `protocols` instead.
-handle_compile_response(#{
-    status := ok,
-    kind := protocol_definition,
-    core_erlang := CoreErlang,
-    module_name := ModuleName,
-    protocols := Protocols,
-    warnings := Warnings
-}) ->
+handle_compile_response(
+    #{
+        status := ok,
+        kind := protocol_definition,
+        core_erlang := CoreErlang,
+        module_name := ModuleName,
+        protocols := Protocols,
+        warnings := Warnings
+    } = Response
+) ->
+    %% ADR 0108 hot-reload re-check trigger (BT-2899 follow-up, BT-2917):
+    %% see the class-definition clause immediately above's identical field —
+    %% a protocol-defining compile's own method-signature annotations get
+    %% the same forwarding so `beamtalk_repl_compiler` can register the same
+    %% `beamtalk_alias_xref` dependency edges a class-defining compile gets.
+    ReferencedAliases = maps:get(referenced_aliases, Response, []),
     {ok, protocol_definition, #{
         core_erlang => CoreErlang,
         module_name => ModuleName,
         protocols => Protocols,
-        warnings => Warnings
+        warnings => Warnings,
+        referenced_aliases => ReferencedAliases
     }};
 handle_compile_response(#{status := error, diagnostics := Diagnostics}) ->
     {error, Diagnostics};

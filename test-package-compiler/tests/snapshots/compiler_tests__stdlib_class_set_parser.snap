@@ -54,6 +54,8 @@ Module {
                     comments: CommentAttachment {
                         leading: [],
                         trailing: None,
+                        leading_blank_line: false,
+                        blank_line_after_comments: false,
                     },
                     doc_comment: None,
                     span: Span {
@@ -73,6 +75,8 @@ Module {
                             comments: CommentAttachment {
                                 leading: [],
                                 trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
                             },
                             expression: Primitive {
                                 name: "size",
@@ -106,6 +110,8 @@ Module {
                             },
                         ],
                         trailing: None,
+                        leading_blank_line: true,
+                        blank_line_after_comments: false,
                     },
                     doc_comment: None,
                     span: Span {
@@ -123,6 +129,8 @@ Module {
                             comments: CommentAttachment {
                                 leading: [],
                                 trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
                             },
                             expression: Primitive {
                                 name: "isEmpty",
@@ -146,6 +154,8 @@ Module {
                     comments: CommentAttachment {
                         leading: [],
                         trailing: None,
+                        leading_blank_line: false,
+                        blank_line_after_comments: false,
                     },
                     doc_comment: None,
                     span: Span {
@@ -182,6 +192,8 @@ Module {
                             comments: CommentAttachment {
                                 leading: [],
                                 trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
                             },
                             expression: Primitive {
                                 name: "includes:",
@@ -215,6 +227,8 @@ Module {
                             },
                         ],
                         trailing: None,
+                        leading_blank_line: true,
+                        blank_line_after_comments: false,
                     },
                     doc_comment: None,
                     span: Span {
@@ -251,6 +265,8 @@ Module {
                             comments: CommentAttachment {
                                 leading: [],
                                 trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
                             },
                             expression: Primitive {
                                 name: "add:",
@@ -284,6 +300,8 @@ Module {
                             },
                         ],
                         trailing: None,
+                        leading_blank_line: true,
+                        blank_line_after_comments: false,
                     },
                     doc_comment: None,
                     span: Span {
@@ -320,6 +338,8 @@ Module {
                             comments: CommentAttachment {
                                 leading: [],
                                 trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
                             },
                             expression: Primitive {
                                 name: "remove:",
@@ -343,6 +363,8 @@ Module {
                     comments: CommentAttachment {
                         leading: [],
                         trailing: None,
+                        leading_blank_line: false,
+                        blank_line_after_comments: false,
                     },
                     doc_comment: None,
                     span: Span {
@@ -379,6 +401,8 @@ Module {
                             comments: CommentAttachment {
                                 leading: [],
                                 trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
                             },
                             expression: Primitive {
                                 name: "union:",
@@ -412,6 +436,8 @@ Module {
                             },
                         ],
                         trailing: None,
+                        leading_blank_line: true,
+                        blank_line_after_comments: false,
                     },
                     doc_comment: None,
                     span: Span {
@@ -448,6 +474,8 @@ Module {
                             comments: CommentAttachment {
                                 leading: [],
                                 trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
                             },
                             expression: Primitive {
                                 name: "intersection:",
@@ -471,6 +499,8 @@ Module {
                     comments: CommentAttachment {
                         leading: [],
                         trailing: None,
+                        leading_blank_line: false,
+                        blank_line_after_comments: false,
                     },
                     doc_comment: None,
                     span: Span {
@@ -507,6 +537,8 @@ Module {
                             comments: CommentAttachment {
                                 leading: [],
                                 trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
                             },
                             expression: Primitive {
                                 name: "difference:",
@@ -530,6 +562,8 @@ Module {
                     comments: CommentAttachment {
                         leading: [],
                         trailing: None,
+                        leading_blank_line: false,
+                        blank_line_after_comments: false,
                     },
                     doc_comment: None,
                     span: Span {
@@ -566,6 +600,8 @@ Module {
                             comments: CommentAttachment {
                                 leading: [],
                                 trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
                             },
                             expression: Primitive {
                                 name: "isSubsetOf:",
@@ -599,6 +635,8 @@ Module {
                             },
                         ],
                         trailing: None,
+                        leading_blank_line: true,
+                        blank_line_after_comments: false,
                     },
                     doc_comment: None,
                     span: Span {
@@ -616,6 +654,8 @@ Module {
                             comments: CommentAttachment {
                                 leading: [],
                                 trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
                             },
                             expression: Primitive {
                                 name: "asList",
@@ -649,6 +689,8 @@ Module {
                             },
                         ],
                         trailing: None,
+                        leading_blank_line: true,
+                        blank_line_after_comments: false,
                     },
                     doc_comment: None,
                     span: Span {
@@ -685,6 +727,8 @@ Module {
                             comments: CommentAttachment {
                                 leading: [],
                                 trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
                             },
                             expression: Primitive {
                                 name: "fromList:",
@@ -708,6 +752,8 @@ Module {
                     comments: CommentAttachment {
                         leading: [],
                         trailing: None,
+                        leading_blank_line: false,
+                        blank_line_after_comments: false,
                     },
                     doc_comment: None,
                     span: Span {
@@ -744,6 +790,8 @@ Module {
                             comments: CommentAttachment {
                                 leading: [],
                                 trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
                             },
                             expression: Primitive {
                                 name: "do:",
@@ -777,6 +825,8 @@ Module {
                             },
                         ],
                         trailing: None,
+                        leading_blank_line: true,
+                        blank_line_after_comments: false,
                     },
                     doc_comment: None,
                     span: Span {
@@ -827,6 +877,8 @@ Module {
                     },
                 ],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: true,
             },
             doc_comment: None,
             backing_module: None,

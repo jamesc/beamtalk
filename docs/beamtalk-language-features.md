@@ -1329,6 +1329,26 @@ Generates:
 
 Unresolved type parameters map to `any()` in Dialyzer specs.
 
+**Named type alias emission.** When a module declares `type` aliases (ADR 0108), codegen emits matching named Erlang `-type` attributes into the compiled module. Method annotations referencing an alias name emit `user_type` references in their `-spec` attributes instead of `any()`:
+
+```beamtalk
+type Timeout = Integer | #infinity
+
+Actor subclass: Worker
+  run: t :: Timeout => // ...
+```
+
+Generates:
+
+```erlang
+-type 'Timeout'() :: integer() | 'infinity'.
+-spec run('Timeout'()) -> any().
+```
+
+(The bare `('Timeout'())` form omits the parameter name — both it and the named form `(T :: 'Timeout'())` are valid Erlang specs; codegen emits the bare form, matching typical `erlc` output.)
+
+Cross-package alias references (an annotation referencing an alias exported by a dependency) are not yet resolved in codegen — they still fall through to `any()`.
+
 ### REPL Type Display
 
 The REPL displays generic type information when available:
@@ -1789,6 +1809,8 @@ type Pub = Priv | String
 - Aliases may reference other aliases; a reference cycle — including self-reference — is a compile error at declaration time (`type Ab = Bc | Integer` / `type Bc = Ab | Symbol` → `type alias cycle: 'Ab' → 'Bc' → 'Ab'`).
 - Parametric aliases (`type Option(T) = T | Nil`) and recursive aliases (`type JsonValue = ... | List(JsonValue)`) are **not yet supported** — both need deferred (lazy) resolution in place of the eager expansion aliases use today. `type Name(...) = ...` is reserved syntax for the future parametric form.
 - Doc comments (`///`) above a `type` declaration are preserved and shown by `:help <Alias>` and LSP hover.
+
+**Erlang interop.** Codegen emits a named Erlang `-type` attribute for each alias declared in a module, and method `-spec` attributes reference it via `user_type` instead of expanding to `any()`. Erlang/Elixir consumers of a compiled Beamtalk module see idiomatic Dialyzer types (e.g. `-type 'Timeout'() :: integer() | 'infinity'.`). See [Dialyzer Spec Generation](#dialyzer-spec-generation) for details.
 
 **Tooling.** The LSP offers completions, go-to-definition, find-references, and hover for alias names in `.bt` files. In the REPL, `type` declarations are accepted as input and persist for the rest of the session; declaring `type Direction = ...` at the prompt echoes the declared name (`=> Direction`), the same convention a class declaration echoes (`Actor subclass: Counter` → `Counter`); `:help <Alias>` renders the declaration, its expansion, and any doc comment. The System Browser and the VS Code Workspace Explorer sidebar list declared aliases in a "Type Aliases" section alongside Classes and Protocols. See [`docs/development/surface-parity.md`](development/surface-parity.md) for the full cross-surface matrix.
 
@@ -4938,7 +4960,7 @@ The full list of structural intrinsics: `actorSpawn`, `actorSpawnWith`, `blockVa
 
 **Relationship to `native:` (ADR 0101).** `@primitive` and `@intrinsic` cover native BEAM *value types* and compiler *substrate*. A third mechanism, the class-level `native:` declaration with `=> self delegate` bodies, covers whole-class **delegation** to a single Erlang module (a stateless `Object` such as `Stream`, or an `Actor` gen_server). Pick by what the method needs: guarded dispatch + the open-world extension registry → `@primitive`; the dispatch act itself (`==`, `class`, `perform:`, actor lifecycle) → `@intrinsic`; pure pass-through to one module → `native:`. See [`native:` for stateless Objects](beamtalk-native-erlang.md#native-stateless-objects--native-for-object).
 
-**Known limitation: `whileTrue:`/`whileFalse:`/`repeat`/`on:do:`/`ensure:` via `perform:`.** These five structural intrinsics have real semantics only at the call-site interception the compiler recognizes for a literal message send (e.g. `[cond] whileTrue: [body]` written directly in source). Reaching the compiled method body through any other dispatch path — `perform:`, `perform:withArguments:`, or other generic/dynamic sends — resolves to a placeholder and raises a misleading `does_not_understand` naming the wrong (internal) selector, e.g. `[i < 3] perform: #whileTrue: withArguments: #([i := i + 1])` fails with `Block does not understand 'whileTrue'` rather than working or raising a clear error. `respondsTo:` still returns `true` for these selectors, since the method genuinely is defined — this is a runtime dispatch gap, not a missing method. Fixing it generically would require reimplementing loop and exception-handling control flow (condition re-evaluation, catch/handler dispatch, cleanup-on-exit) over an opaque runtime fun rather than the literal block AST the call-site codegen relies on — a materially bigger change, tracked separately (BT-2908) rather than accepted as part of the smaller List/Collection iteration fix (BT-2888) that closed the equivalent gap for `do:`/`collect:`/`select:`/`reject:`/`inject:into:`.
+**`whileTrue:`/`whileFalse:`/`repeat`/`on:do:`/`ensure:` via `perform:` (BT-2908).** These five structural intrinsics have real semantics only at the call-site interception the compiler recognizes for a literal message send (e.g. `[cond] whileTrue: [body]` written directly in source). Reaching the compiled method body through any other dispatch path — `perform:`, `perform:withArguments:`, or other generic/dynamic sends — used to resolve to a placeholder and raise a misleading `does_not_understand` naming the wrong (internal) selector. This is now handled the same way BT-2812/BT-2888 handle it for `value*`/`do:`/`collect:`/etc.: a **Tier 1** (pure) condition/receiver/handler/cleanup block gets a real generic implementation — a runtime loop for `whileTrue:`/`whileFalse:`/`repeat`, a runtime `try`/`catch` for `on:do:`/`ensure:` — since neither needs the block's literal AST, only its (opaque, already-evaluated) fun value. A **Tier 2** (stateful, ADR-0041) block reached this way raises a clear `#stateful_block_dispatch` error instead, since a generically-dispatched call site has no live `StateAcc` to thread mutations through. `respondsTo:` returns `true` for these selectors either way, since the method genuinely is defined.
 
 ---
 

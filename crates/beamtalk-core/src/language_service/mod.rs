@@ -54,7 +54,7 @@ pub mod runtime_delegate;
 mod value_objects;
 
 // Re-export value objects at the module level
-pub use project_index::ProjectIndex;
+pub use project_index::{ProjectIndex, STDLIB_PACKAGE_MARKER};
 pub use runtime_delegate::{
     NavQuery, NavQueryResponse, NavSite, NavSymbolClass, NavSymbolMethod, NavSymbolsResponse,
     RuntimeLocation, line_to_position, nav_site_to_location,
@@ -291,6 +291,23 @@ impl SimpleLanguageService {
     #[must_use]
     pub fn project_index(&self) -> &ProjectIndex {
         &self.project_index
+    }
+
+    /// Marks `file` as a stdlib source (BT-2959) so its aliases are stamped
+    /// with the stdlib package marker instead of the same-project marker.
+    /// Safe to call before or after [`Self::update_file`] — a file indexed
+    /// first is re-stamped in place (BT-2961) — see
+    /// [`ProjectIndex::mark_stdlib_file`].
+    pub fn mark_stdlib_file(&mut self, file: Utf8PathBuf) {
+        self.project_index.mark_stdlib_file(file);
+    }
+
+    /// Sets the real package name for each known workspace root (BT-2960).
+    /// Safe to call before or after files under a root are indexed —
+    /// already-stamped aliases are re-stamped against the new root map
+    /// (BT-2961) — see [`ProjectIndex::set_root_packages`].
+    pub fn set_root_packages(&mut self, root_packages: Vec<(Utf8PathBuf, EcoString)>) {
+        self.project_index.set_root_packages(root_packages);
     }
 
     /// Gets file data if it exists.
@@ -1637,6 +1654,17 @@ impl LanguageService for SimpleLanguageService {
             let alias_infos = crate::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
             self.project_index
                 .update_file_aliases(file.clone(), alias_infos);
+
+            // BT-2950: track this file's `Protocol define: ...` declarations
+            // too, so `extending:`/conformance checks against a protocol
+            // declared in a different project file or indexed dependency
+            // resolve during LSP diagnostics — mirrors the alias tracking
+            // immediately above (BT-2910 already wired the CLI `build`/`lint`
+            // side of this; this closes the LSP parity gap).
+            let protocol_infos =
+                crate::semantic_analysis::ProtocolRegistry::extract_protocol_infos(&module);
+            self.project_index
+                .update_file_protocols(file.clone(), protocol_infos);
         } else {
             // Hierarchy build failed: store the file with merged diagnostics
             // but do not update the project index for this file.
@@ -1692,13 +1720,38 @@ impl LanguageService for SimpleLanguageService {
                         crate::semantic_analysis::KnowledgeScope::ProjectComplete;
                 }
                 options.has_package_dependencies = self.has_package_dependencies;
+                // BT-2951: `current_package` so `AliasRegistry::add_pre_loaded`'s
+                // seeding-boundary exclusion (ADR 0108 Phase 5) actually has
+                // real package data to filter `pre_loaded_aliases` on below —
+                // without this, every entry's `package` looks unset from the
+                // exclusion check's point of view and a dependency's
+                // `internal type Foo = ...` leaks into every file's
+                // diagnostics. Must match `cross_file_alias_infos_for`'s
+                // entries' own stamping exactly — see
+                // `ProjectIndex::alias_package_for_file`'s doc.
+                options.current_package =
+                    Some(self.project_index.alias_package_for_file(file).to_string());
                 // BT-2795: Cross-file extensions from the ProjectIndex are
                 // passed so a same-project `ClassName >> selector` defined in
                 // another file resolves instead of producing a false Dnu hint.
                 let cross_file_extensions = self.project_index.cross_file_extensions_for(file);
+                // BT-2928: Cross-file type aliases from the ProjectIndex, so a
+                // `type Name = ...` declared in another project file resolves
+                // instead of leaving `Dynamic (dynamic receiver)` behind —
+                // mirrors `cross_file_classes` immediately above.
+                let pre_loaded_aliases = self.project_index.cross_file_alias_infos_for(file);
+                // BT-2950: Cross-file protocol declarations from the
+                // ProjectIndex, so `extending:`/conformance checks against a
+                // `Protocol define: Name ...` declared in another project
+                // file or dependency resolve instead of degrading to
+                // "unknown protocol" — parity with the CLI's `build`/`lint`
+                // wiring (BT-2910), mirrors `cross_file_classes` above.
+                let pre_loaded_protocols = self.project_index.cross_file_protocol_infos_for(file);
                 let ctx = crate::queries::diagnostic_provider::ProjectDiagnosticContext {
                     options,
                     cross_file_classes,
+                    pre_loaded_protocols,
+                    pre_loaded_aliases,
                     cross_file_extensions,
                     native_type_registry: self.native_types.clone(),
                     // BT-2800: apply the same `beamtalk.toml` `[diagnostics]`
@@ -4261,6 +4314,156 @@ mod tests {
         assert!(
             unresolved.is_empty(),
             "cross-file class `Foo` should resolve via ProjectIndex, got: {unresolved:?}"
+        );
+    }
+
+    /// BT-2951: `ProjectIndex::cross_file_alias_infos_for` used to return
+    /// every alias from every indexed file unconditionally, with no
+    /// `package` stamping and no `current_package` threaded to
+    /// `AliasRegistry::add_pre_loaded`'s seeding-boundary exclusion — so a
+    /// dependency's `internal type Foo = ...` (indexed from
+    /// `_build/deps/<name>/src/`, mirroring `beamtalk-lsp`'s filesystem-driven
+    /// dependency preload) was visible (and go-to-definition-navigable) from
+    /// every other indexed file, silently bypassing ADR 0108's `internal`
+    /// modifier on this surface. A dependency's *public* alias must still
+    /// resolve — this mirrors `beamtalk-cli`'s
+    /// `lint_resolves_dependency_protocol_and_public_alias_but_not_internal_alias`.
+    ///
+    /// Uses `goto_definition` (rather than a diagnostic) as the resolution
+    /// signal: an annotation naming an alias absent from the project-wide
+    /// `AliasRegistry` doesn't necessarily produce a diagnostic at all
+    /// (`check_annotation_for_unresolved_alias` only warns when there's a
+    /// near-miss *suggestion* — see its doc), whereas `goto_definition`
+    /// navigating to the alias's declaration is an unambiguous "this name
+    /// resolved" signal, exactly like
+    /// `goto_definition_alias_from_annotation_site_cross_file` above uses
+    /// for the same-project case.
+    #[test]
+    fn goto_definition_excludes_dependency_internal_alias_but_resolves_public_one() {
+        let mut service = SimpleLanguageService::new();
+        let dep_file = Utf8PathBuf::from("_build/deps/http/src/Types.bt");
+        let consumer_file = Utf8PathBuf::from("src/Client.bt");
+
+        service.update_file(
+            dep_file.clone(),
+            "internal type Secret = String\ntype PublicId = Integer\n".to_string(),
+        );
+        service.update_file(
+            consumer_file.clone(),
+            "Object subclass: Client\n  useSecret: s :: Secret => s\n  useId: i :: PublicId => i\n"
+                .to_string(),
+        );
+
+        // "  useSecret: s :: Secret => s" — the annotation's "Secret" starts
+        // at column 18.
+        let secret_def = service.goto_definition(&consumer_file, Position::new(1, 20));
+        assert!(
+            secret_def.is_none(),
+            "a dependency's internal alias must not resolve (navigate) from a \
+             consumer file, got: {secret_def:?}"
+        );
+
+        // "  useId: i :: PublicId => i" — the annotation's "PublicId" starts
+        // at column 14.
+        let public_def = service.goto_definition(&consumer_file, Position::new(2, 18));
+        let loc = public_def.expect(
+            "a dependency's public alias must still resolve (navigate) from a consumer file",
+        );
+        assert_eq!(loc.file, dep_file);
+    }
+
+    /// BT-2951 sibling: a same-project file's `internal type Foo = ...` must
+    /// stay visible to every *other* same-project file (ADR 0108: internal
+    /// aliases are usable throughout their declaring package, not just their
+    /// declaring file) — only a *different* package's internal alias should
+    /// ever be excluded. Both files here are stamped with the same
+    /// same-project marker (`ProjectIndex`'s `CURRENT_PROJECT_PACKAGE_MARKER`),
+    /// so this must not regress into over-exclusion.
+    #[test]
+    fn goto_definition_resolves_same_project_internal_alias_cross_file() {
+        let mut service = SimpleLanguageService::new();
+        let alias_file = Utf8PathBuf::from("src/Types.bt");
+        let consumer_file = Utf8PathBuf::from("src/Client.bt");
+
+        service.update_file(
+            alias_file.clone(),
+            "internal type Secret = String\n".to_string(),
+        );
+        service.update_file(
+            consumer_file.clone(),
+            "Object subclass: Client\n  useSecret: s :: Secret => s\n".to_string(),
+        );
+
+        // "  useSecret: s :: Secret => s" — the annotation's "Secret" starts
+        // at column 18.
+        let def = service.goto_definition(&consumer_file, Position::new(1, 20));
+        let loc = def.expect("a same-project internal alias should resolve (navigate) cross-file");
+        assert_eq!(loc.file, alias_file);
+    }
+
+    /// BT-2950: `pre_loaded_protocols` was never populated on the LSP
+    /// surface at all — a protocol declared in a different project file was
+    /// invisible to LSP diagnostics, so an `extending:` clause naming it
+    /// produced a false "extends unknown protocol" error even though
+    /// `beamtalk build`/`beamtalk lint` already resolve it correctly
+    /// (BT-2910). Mirrors `diagnostics_resolve_cross_file_class_via_project_index`
+    /// above, but for protocols.
+    #[test]
+    fn diagnostics_resolve_cross_file_protocol_via_project_index() {
+        let mut service = SimpleLanguageService::new();
+        let base_file = Utf8PathBuf::from("src/Base.bt");
+        let extending_file = Utf8PathBuf::from("src/Extended.bt");
+
+        service.update_file(
+            base_file,
+            "Protocol define: BaseProto\n  base => Boolean\n".to_string(),
+        );
+        service.update_file(
+            extending_file.clone(),
+            "Protocol define: ExtendedProto\n  extending: BaseProto\n  extra => Boolean\n"
+                .to_string(),
+        );
+
+        let diags = service.diagnostics(&extending_file);
+        let unknown_protocol: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("extends unknown protocol"))
+            .collect();
+        assert!(
+            unknown_protocol.is_empty(),
+            "cross-file protocol `BaseProto` should resolve via ProjectIndex, got: {unknown_protocol:?}"
+        );
+    }
+
+    /// BT-2950 sibling: a protocol exported by an indexed path dependency
+    /// (under `_build/deps/<name>/src/`, mirroring how the alias-resolution
+    /// path already covers dependency files) must resolve in a consumer
+    /// file — parity with `beamtalk-cli`'s dependency-side test for the same
+    /// wiring (BT-2910).
+    #[test]
+    fn diagnostics_resolve_dependency_protocol_via_project_index() {
+        let mut service = SimpleLanguageService::new();
+        let dep_file = Utf8PathBuf::from("_build/deps/http/src/Base.bt");
+        let consumer_file = Utf8PathBuf::from("src/Extended.bt");
+
+        service.update_file(
+            dep_file,
+            "Protocol define: BaseProto\n  base => Boolean\n".to_string(),
+        );
+        service.update_file(
+            consumer_file.clone(),
+            "Protocol define: ExtendedProto\n  extending: BaseProto\n  extra => Boolean\n"
+                .to_string(),
+        );
+
+        let diags = service.diagnostics(&consumer_file);
+        let unknown_protocol: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("extends unknown protocol"))
+            .collect();
+        assert!(
+            unknown_protocol.is_empty(),
+            "a dependency-exported protocol should resolve via ProjectIndex, got: {unknown_protocol:?}"
         );
     }
 

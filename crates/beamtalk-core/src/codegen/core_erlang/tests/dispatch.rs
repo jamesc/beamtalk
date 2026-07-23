@@ -3294,3 +3294,33 @@ fn test_bt2276_class_methods_computed_fun_passes_compile() {
                classMethods: #{ #greet => someFun }; register";
     try_codegen(src).expect("computed classMethods fun must compile (validated at register time)");
 }
+
+#[test]
+fn test_class_method_self_send_long_selector_uses_hashed_atom() {
+    // BT-1408 follow-up (#3051): inside a class-side method, a self-send whose
+    // selector would form a 'class_<selector>' atom exceeding Erlang's 255-byte
+    // hard limit must hash via safe_class_method_fn_name, not emit the raw
+    // overlong atom that erlc's core_scan rejects at BEAM-compile time.
+    // The `class` keyword declares a class-side method; `self <sel>` inside it
+    // triggers generate_class_method_self_send → line 1267 → the fixed path.
+    // "class_" (6 bytes) + 250 'a's = 256 bytes — one over the limit.
+    let long_sel = "a".repeat(250);
+    let src = format!(
+        "Actor subclass: LongSel\n  state: x = 0\n\n  class {long_sel} => 42\n\n  class go => self {long_sel}\n"
+    );
+    let code = codegen_source(&src);
+
+    // The raw 'class_<selector>' atom (256 bytes) must NOT appear anywhere —
+    // erlc's atom scanner rejects atoms > 255 bytes at BEAM-compile time.
+    let raw_class_atom = format!("class_{long_sel}");
+    assert!(
+        !code.contains(&raw_class_atom),
+        "oversized 'class_<selector>' atom must not appear in generated code. Got:\n{code}"
+    );
+    // The self-send call in `go` must use the hashed 'class_kw_<hex>' form,
+    // not the raw oversized atom. codegen_source uses module name "test".
+    assert!(
+        code.contains("call 'test':'class_kw_"),
+        "class method self-send must use hashed call target 'class_kw_<hex>'. Got:\n{code}"
+    );
+}

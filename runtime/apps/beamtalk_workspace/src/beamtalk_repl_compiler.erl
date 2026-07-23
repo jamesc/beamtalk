@@ -16,6 +16,7 @@ Uses the beamtalk_compiler OTP application (ADR 0022) exclusively.
 -export([
     compile_expression/3,
     compile_expression/4,
+    compile_expression_no_registration/3,
     compile_expression_trace/3,
     compile_file/4,
     compile_file/5,
@@ -78,6 +79,67 @@ Compile a Beamtalk expression to bytecode, with earlier-turn type aliases.
     | {error, term()}.
 compile_expression(Expression, ModuleName, Bindings, KnownTypeAliasSources) ->
     compile_expression_via_port(Expression, ModuleName, Bindings, KnownTypeAliasSources).
+
+-doc """
+Compile a Beamtalk expression the same way `compile_expression/3` does, but
+without the `beamtalk_alias_xref` registration (or the bytecode compile that
+triggers it) `compile_class_definition_result/2`/
+`compile_protocol_definition_result/2` normally perform for a
+`class_definition`/`protocol_definition` result (BT-2956).
+
+CONTRACT WARNING: the `class_definition`/`method_definition`/
+`protocol_definition`/`type_alias_definition` payload maps and warnings
+lists returned here are always empty (`#{}`/`[]`), never the real compiled
+payload. That is safe ONLY because the current, sole caller —
+`beamtalk_repl_eval:eval_with_self/2` (`evaluate:`) — always rejects those
+four result shapes outright and never inspects the payload; skipping
+alias_xref registration and the bytecode compile that would normally
+populate them is pure side-effect avoidance for a result about to be
+discarded. Do NOT reuse this function for a new caller that reads the
+payload of a definition-shaped result — call `compile_expression/3,4`
+instead, or extend this function's registration behaviour first.
+
+This function is NOT alias-unaware: `CompileOpts` below never sets
+`known_type_aliases`, so `::` annotations in the expression still resolve
+via `beamtalk_compiler_server`'s ambient-alias `maps:merge` backstop
+(BT-2956) — the same one `compile_expression/3,4` relies on when its own
+caller omits `known_type_aliases`. Skipping registration only skips the
+`beamtalk_alias_xref` write and bytecode compile for definition-shaped
+results; it does not skip alias *resolution* for the expression itself.
+""".
+-spec compile_expression_no_registration(string(), atom(), map()) ->
+    {ok, binary(), term(), [binary()]}
+    | {ok, class_definition, map(), [binary()]}
+    | {ok, method_definition, map(), [binary()]}
+    | {ok, protocol_definition, map(), [binary()]}
+    | {ok, type_alias_definition, map(), [binary()]}
+    | {error, term()}.
+compile_expression_no_registration(Expression, ModuleName, Bindings) ->
+    SourceBin = list_to_binary(Expression),
+    ModNameBin = atom_to_binary(ModuleName, utf8),
+    KnownVars = known_vars(Bindings),
+    CompileOpts = add_class_indexes(#{}),
+    wrap_compiler_errors(
+        fun() ->
+            case
+                beamtalk_compiler:compile_expression(SourceBin, ModNameBin, KnownVars, CompileOpts)
+            of
+                {ok, class_definition, _ClassInfo} ->
+                    {ok, class_definition, #{}, []};
+                {ok, method_definition, _MethodInfo} ->
+                    {ok, method_definition, #{}, []};
+                {ok, protocol_definition, _ProtocolInfo} ->
+                    {ok, protocol_definition, #{}, []};
+                {ok, type_alias_definition, _AliasInfo} ->
+                    {ok, type_alias_definition, #{}, []};
+                {ok, CoreErlang, Warnings} ->
+                    compile_standard_expression(CoreErlang, Warnings);
+                {error, Diagnostics} ->
+                    {error, Diagnostics}
+            end
+        end,
+        direct
+    ).
 
 -doc """
 Compile a Beamtalk expression in trace mode (BT-1238).
@@ -383,10 +445,23 @@ compile_method_reload(ClassSource, MethodSource, Options) ->
                     case beamtalk_compiler:compile_core_erlang(CoreErlang) of
                         {ok, _CompiledMod, Binary} ->
                             Classes = maps:get(classes, CR, []),
-                            %% ADR 0108 hot-reload re-check trigger (BT-2899):
-                            %% see compile_file_core/4's identical registration.
+                            %% ADR 0108 hot-reload re-check trigger (BT-2899).
+                            %% `additive` (BT-2955 follow-up): `ClassSource`
+                            %% here is the class's own reconstructed source —
+                            %% `beamtalk_workspace_meta:get_class_source/1` is
+                            %% keyed by class name and stores only that
+                            %% class's subclass-definition text, not the
+                            %% originating file's other top-level
+                            %% declarations. A `type Name = ...` alias
+                            %% declared as a *sibling* of this class in the
+                            %% same source file (the exact `stdlib/src/Ets.bt`
+                            %% shape BT-2955 fixed for the other REPL-inline
+                            %% paths) is therefore just as invisible to this
+                            %% compile as it is to `compile_class_definition_result/2`
+                            %% — `replace` here would silently clobber a real
+                            %% edge a prior `:load` registered.
                             ReferencedAliases = maps:get(referenced_aliases, CR, []),
-                            register_alias_xref_for_classes(Classes, ReferencedAliases),
+                            register_alias_xref_for_classes(Classes, ReferencedAliases, additive),
                             {ok, #{
                                 binary => Binary,
                                 module_name => ModName,
@@ -455,9 +530,11 @@ compile_expression_via_port(Expression, ModuleName, Bindings, KnownTypeAliasSour
                             MethodInfo
                         ),
                         Warnings};
-                %% BT-1612: Protocol definition — compile Core Erlang to BEAM
+                %% BT-1612: Protocol definition — compile Core Erlang to BEAM.
+                %% `additive` (BT-2955): this is the REPL-inline path, which
+                %% may be missing file-local alias context.
                 {ok, protocol_definition, ProtocolInfo} ->
-                    compile_protocol_definition_result(ProtocolInfo);
+                    compile_protocol_definition_result(ProtocolInfo, additive);
                 %% ADR 0108 Phase 8 (BT-2902): type alias definition — no
                 %% Core Erlang/bytecode step (aliases erase entirely).
                 {ok, type_alias_definition, AliasInfo} ->
@@ -475,10 +552,55 @@ compile_expression_via_port(Expression, ModuleName, Bindings, KnownTypeAliasSour
         direct
     ).
 
-%% BT-1612: Compile a protocol definition result to BEAM bytecode.
--spec compile_protocol_definition_result(map()) ->
+-doc """
+Compile a protocol definition result to BEAM bytecode (BT-1612).
+
+ADR 0108 hot-reload re-check trigger (BT-2899 follow-up, BT-2917, BT-2952):
+also registers `ProtocolInfo`'s `referenced_aliases` into `beamtalk_alias_xref`
+for the compiled protocols — see `register_alias_xref_for_protocols/3`'s doc.
+
+## History: why this used to be split into two functions
+
+This function is shared by *two* callers: `compile_file_via_port/5` (a real
+file compile) and `compile_expression_via_port/4` (a REPL-typed `Protocol
+define: ...`). Before BT-2952, only the file-compile path's
+`referenced_aliases` was the compiler-port's genuinely-computed set — the
+REPL-inline path's was hardcoded `[]` (the Rust side didn't compute one for
+that path yet), so registering unconditionally here would have let a
+REPL-inline recompile of an already-`:load`ed protocol silently *clobber*
+the real edge with `[]` (`beamtalk_alias_xref:register_class/2` is
+whole-set replacement, not a delta — see its own doc). Registration used to
+live only in a `compile_protocol_definition_result_for_file/1` wrapper the
+file-compile path alone called.
+
+BT-2952 made the compiler port compute a genuine `referenced_aliases` set
+for the REPL-inline path too (mirroring `compile_class_definition_result/2`,
+classes' REPL-inline equivalent, which registers directly for the same
+reason), so both callers now carry trustworthy data for *aliases declared in
+the REPL session*.
+
+## File-local aliases (BT-2955): the `Mode` parameter
+
+"Trustworthy" above does not extend to an alias declared inside the SAME
+file as the protocol/class (e.g. `stdlib/src/Ets.bt`'s `type EtsTableType =
+...` alongside `Ets`'s own method signatures) — a REPL-inline redefinition
+of that protocol/class has no way to see a file-local alias it didn't also
+declare in-session, so its `referenced_aliases` silently omits it, and an
+unconditional whole-set-replace registration would clobber whatever a prior
+`:load` of that file registered. `Mode` disambiguates this function's two
+callers again (mirroring the pre-BT-2952 split, but for registration
+semantics rather than whether to register at all): `compile_file_via_port/5`
+passes `replace` (a file compile always has the complete picture for its own
+file, so `beamtalk_alias_xref:register_class/2`'s whole-set-replace stays
+correct and is still the only way to ever retire a stale edge);
+`compile_expression_via_port/4` passes `additive`
+(`beamtalk_alias_xref:register_class_additive/2` — see that function's doc
+for why never removing an edge is the safe default for a REPL-inline compile
+that might be missing file-local context).
+""".
+-spec compile_protocol_definition_result(map(), replace | additive) ->
     {ok, protocol_definition, map(), [binary()]} | {error, binary()}.
-compile_protocol_definition_result(ProtocolInfo) ->
+compile_protocol_definition_result(ProtocolInfo, Mode) ->
     #{
         core_erlang := CoreErlang,
         module_name := ModuleNameBin,
@@ -489,6 +611,8 @@ compile_protocol_definition_result(ProtocolInfo) ->
     ModuleName = binary_to_atom(ModuleNameBin, utf8),
     case beamtalk_compiler:compile_core_erlang(CoreErlang) of
         {ok, _CompiledMod, Binary} ->
+            ReferencedAliases = maps:get(referenced_aliases, ProtocolInfo, []),
+            register_alias_xref_for_protocols(Protocols, ReferencedAliases, Mode),
             {ok, protocol_definition,
                 #{
                     binary => Binary,
@@ -503,7 +627,28 @@ compile_protocol_definition_result(ProtocolInfo) ->
             {error, ErrMsg}
     end.
 
-%% Compile a class definition result including optional trailing expressions.
+-doc """
+Compile a class definition result including optional trailing expressions.
+
+ADR 0108 hot-reload re-check trigger (BT-2899 / BT-2952 follow-up): also
+registers `ClassInfo`'s `referenced_aliases` into `beamtalk_alias_xref` for
+every class this REPL-inline definition installs — see
+`register_alias_xref_for_classes/3`'s doc for why the same flat set is
+registered against every class in a multi-class source. Previously this
+never registered anything (only the file-compile path's `compile_file_core/4`
+did) because the compiler port hardcoded an empty `referenced_aliases` set
+for REPL-inline class definitions; now that the port computes a genuine set
+(BT-2952) for aliases declared in the REPL session, registering here is as
+safe as `compile_file_core/4` doing it for the file-compile path for aliases
+declared *at the REPL* — but this function is exclusively the REPL-inline
+call site (unlike `compile_protocol_definition_result/2`, `compile_file_core/4`
+handles classes for the file-compile path directly), so it always registers
+`additive` (BT-2955): a class whose alias reference was declared *inside the
+same file* the class originally came from, not in the REPL session, is
+invisible to this compile's `referenced_aliases`, and an unconditional
+whole-set-replace registration would silently clobber a real edge a prior
+`:load` registered. See `beamtalk_alias_xref:register_class_additive/2`'s doc.
+""".
 -spec compile_class_definition_result(map(), atom()) ->
     {ok, class_definition, map(), [binary()]} | {error, binary()}.
 compile_class_definition_result(ClassInfo, ModuleName) ->
@@ -517,6 +662,8 @@ compile_class_definition_result(ClassInfo, ModuleName) ->
     ClassModName = binary_to_atom(ClassModNameBin, utf8),
     case beamtalk_compiler:compile_core_erlang(CoreErlang) of
         {ok, _CompiledMod, Binary} ->
+            ReferencedAliases = maps:get(referenced_aliases, ClassInfo, []),
+            register_alias_xref_for_classes(Classes, ReferencedAliases, additive),
             TrailingResult = compile_trailing_expressions(ClassInfo, ModuleName),
             assemble_class_result(Binary, ClassModName, Classes, Warnings, TrailingResult);
         {error, Reason} ->
@@ -601,8 +748,14 @@ compile_file_via_port(Source, Path, StdlibMode, ModuleNameOverride, PrebuiltInde
                     compile_file_core(CoreErlang, ModuleName, Classes, ReferencedAliases);
                 %% BT-1950: Protocol definitions from the compile path — compile
                 %% Core Erlang to BEAM and return a protocol_definition result.
+                %% BT-2917/BT-2952: `compile_protocol_definition_result/2`
+                %% itself registers `beamtalk_alias_xref` edges from
+                %% `ProtocolInfo`'s `referenced_aliases` — see that
+                %% function's doc. `replace`: this is the file-compile path,
+                %% which always has the complete alias picture for its own
+                %% file (BT-2955).
                 {ok, protocol_definition, ProtocolInfo} ->
-                    compile_protocol_definition_result(ProtocolInfo);
+                    compile_protocol_definition_result(ProtocolInfo, replace);
                 {error, Diagnostics} ->
                     {error, {compile_error, format_formatted_diagnostics(Diagnostics)}}
             end
@@ -614,12 +767,14 @@ compile_file_via_port(Source, Path, StdlibMode, ModuleNameOverride, PrebuiltInde
 %%
 %% ADR 0108 hot-reload re-check trigger (BT-2899): also registers
 %% `ReferencedAliases` into `beamtalk_alias_xref` for every class this
-%% compile installs — see `register_alias_xref_for_classes/2`'s doc for why
+%% compile installs — see `register_alias_xref_for_classes/3`'s doc for why
 %% the same flat set is registered against every class in a multi-class
 %% source, and why registering slightly before `code:load_binary/3` actually
 %% installs the class is an accepted, harmless imprecision (this index is
 %% advisory-only, matching every other ADR 0105/0108 store's risk
-%% tolerance).
+%% tolerance). `replace`: this is the file-compile path, which always has
+%% the complete alias picture for its own file (BT-2955) — it remains the
+%% sole authority that can retire a stale edge.
 -spec compile_file_core(binary(), atom(), list(), [binary()]) ->
     {ok, binary(), list(), atom()} | {error, term()}.
 compile_file_core(CoreErlang, ModuleName, Classes, ReferencedAliases) ->
@@ -632,7 +787,7 @@ compile_file_core(CoreErlang, ModuleName, Classes, ReferencedAliases) ->
                 }
              || C <- Classes
             ],
-            register_alias_xref_for_classes(Classes, ReferencedAliases),
+            register_alias_xref_for_classes(Classes, ReferencedAliases, replace),
             {ok, Binary, ClassNames, ModuleName};
         {error, Reason} ->
             {error, {core_compile_error, Reason}}
@@ -655,18 +810,64 @@ correctness gap" tolerance every other ADR 0105/0108 mechanism accepts.
 Per-class precision would need per-class alias-dependency tracking on the
 Rust side, which BT-2899 deliberately scopes to a flat per-compile set (see
 `resolve_type_annotation_with_alias_deps`'s doc).
+
+`Mode` (BT-2955) selects which `beamtalk_alias_xref` registration primitive
+to use: `replace` for a call site with the complete alias picture for its
+source (`beamtalk_alias_xref:register_class/2`, whole-set-replace — can
+retire a stale edge); `additive` for a call site that might be missing
+file-local alias context, e.g. a REPL-inline redefinition
+(`beamtalk_alias_xref:register_class_additive/2` — never removes an edge).
+See those two functions' docs.
 """.
--spec register_alias_xref_for_classes([map()], [binary()]) -> ok.
-register_alias_xref_for_classes(Classes, ReferencedAliases) ->
+-spec register_alias_xref_for_classes([map()], [binary()], replace | additive) -> ok.
+register_alias_xref_for_classes(Classes, ReferencedAliases, Mode) ->
+    RegisterFun = alias_xref_register_fun(Mode),
     lists:foreach(
         fun(C) ->
             case maps:get(name, C, <<>>) of
                 <<>> -> ok;
-                ClassNameBin -> beamtalk_alias_xref:register_class(ClassNameBin, ReferencedAliases)
+                ClassNameBin -> RegisterFun(ClassNameBin, ReferencedAliases)
             end
         end,
         Classes
     ).
+
+-doc """
+Register `ReferencedAliases` into `beamtalk_alias_xref` for every protocol
+name in `Protocols` (ADR 0108 hot-reload re-check trigger, BT-2899 follow-up,
+BT-2917).
+
+Protocol-shaped adapter over `beamtalk_alias_xref:register_class/2`/
+`register_class_additive/2` (both themselves name-shape-agnostic — see their
+docs — they just index `binary() -> [binary()]`): `Protocols` here is a
+plain `[binary()]` of protocol names (`protocol_definition_ok_response`'s
+`protocols` field, see `crates/beamtalk-compiler-port/src/main.rs`), unlike
+`Classes`' `#{name := ..., superclass := ...}` maps, so this can't reuse
+`register_alias_xref_for_classes/3` directly.
+
+`Mode` — see `register_alias_xref_for_classes/3`'s doc.
+""".
+-spec register_alias_xref_for_protocols([binary()], [binary()], replace | additive) -> ok.
+register_alias_xref_for_protocols(Protocols, ReferencedAliases, Mode) ->
+    RegisterFun = alias_xref_register_fun(Mode),
+    lists:foreach(
+        fun
+            %% Mirrors register_alias_xref_for_classes/3's empty-name guard —
+            %% belt-and-braces against a malformed/empty protocol name
+            %% binary reaching the xref index.
+            (<<>>) ->
+                ok;
+            (ProtocolNameBin) ->
+                RegisterFun(ProtocolNameBin, ReferencedAliases)
+        end,
+        Protocols
+    ).
+
+%% Resolve `Mode` to the `beamtalk_alias_xref` registration primitive it
+%% names — see `register_alias_xref_for_classes/3`'s doc.
+-spec alias_xref_register_fun(replace | additive) -> fun((binary(), [binary()]) -> ok).
+alias_xref_register_fun(replace) -> fun beamtalk_alias_xref:register_class/2;
+alias_xref_register_fun(additive) -> fun beamtalk_alias_xref:register_class_additive/2.
 
 %% Build and merge class superclass and module indexes into a compile options map.
 %%

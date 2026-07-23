@@ -27,61 +27,6 @@ pub use beamtalk_core::ffi_type_specs::{
 
 use crate::build_layout::BuildLayout;
 use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
-use camino::Utf8PathBuf;
-
-/// Collects dependency/native `.beam` ebin directories for `layout`'s project.
-///
-/// Duplicates the directory-scanning logic of `beamtalk-cli`'s (binary-only)
-/// `commands::deps::collect_dep_ebin_paths` + `commands::build::
-/// collect_rebar3_ebin_paths`, so this module doesn't need to depend on the
-/// `commands` module tree (which lives in the CLI binary, not this library
-/// crate). Each side is a handful of `read_dir` calls over paths `BuildLayout`
-/// already owns, so duplication carries little drift risk — unlike the
-/// FFI-spec-extraction logic itself, which is *not* duplicated (`beamtalk-
-/// core`'s `ffi_type_specs` is its single source of truth, consumed by
-/// `beamtalk-cli`, `beamtalk-mcp`, and `beamtalk-lsp`).
-fn collect_dependency_ebin_dirs(layout: &BuildLayout) -> Vec<Utf8PathBuf> {
-    let mut dirs = Vec::new();
-
-    // Path dependencies: `_build/deps/*/ebin/`.
-    if let Ok(entries) = std::fs::read_dir(layout.deps_dir()) {
-        for entry in entries.flatten() {
-            let ebin = entry.path().join("ebin");
-            if ebin.is_dir() {
-                if let Ok(utf8) = Utf8PathBuf::from_path_buf(ebin) {
-                    dirs.push(utf8);
-                }
-            }
-        }
-    }
-
-    // The project's own native/ code, compiled to `_build/dev/native/ebin/`.
-    let native_ebin = layout.native_ebin_dir();
-    if native_ebin.exists() {
-        dirs.push(native_ebin);
-    }
-
-    // rebar3 hex/git deps: `_build/dev/native/default/lib/*/ebin/`.
-    let lib_dir = layout.rebar_lib_dir();
-    if let Ok(entries) = std::fs::read_dir(&lib_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-            let ebin = path.join("ebin");
-            if ebin.is_dir() {
-                if let Ok(utf8) = Utf8PathBuf::from_path_buf(ebin) {
-                    dirs.push(utf8);
-                }
-            }
-        }
-    }
-
-    dirs.sort();
-    dirs.dedup();
-    dirs
-}
 
 /// ADR 0075 Phase 1 / BT-2851: Extract type specs from OTP and dependency
 /// `.beam` files for a manifest-backed project and cache them.
@@ -95,39 +40,7 @@ fn collect_dependency_ebin_dirs(layout: &BuildLayout) -> Vec<Utf8PathBuf> {
 /// Non-fatal: if spec extraction fails (e.g., runtime not compiled), returns
 /// `None` rather than erroring — callers fall back to untyped FFI checking.
 pub fn extract_project_type_specs(layout: &BuildLayout) -> Option<NativeTypeRegistry> {
-    let dep_ebin_dirs = collect_dependency_ebin_dirs(layout);
+    let dep_ebin_dirs =
+        beamtalk_core::ffi_type_specs::collect_project_dependency_ebin_dirs(layout.project_root());
     beamtalk_core::ffi_type_specs::extract_type_specs(&layout.type_cache_dir(), &dep_ebin_dirs)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-    use tempfile::TempDir;
-
-    #[test]
-    fn collect_dependency_ebin_dirs_empty_project() {
-        let temp = TempDir::new().unwrap();
-        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
-        let layout = BuildLayout::new(&root);
-
-        let dirs = collect_dependency_ebin_dirs(&layout);
-        assert!(dirs.is_empty(), "fresh project has no dependency ebin dirs");
-    }
-
-    #[test]
-    fn collect_dependency_ebin_dirs_finds_path_dep_ebin() {
-        let temp = TempDir::new().unwrap();
-        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
-        let layout = BuildLayout::new(&root);
-
-        let dep_ebin = layout.deps_dir().join("json").join("ebin");
-        fs::create_dir_all(&dep_ebin).unwrap();
-
-        let dirs = collect_dependency_ebin_dirs(&layout);
-        assert!(
-            dirs.contains(&dep_ebin),
-            "should find the path dependency's ebin dir: {dirs:?}"
-        );
-    }
 }

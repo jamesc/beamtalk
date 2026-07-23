@@ -86,6 +86,8 @@ Module {
                     },
                 ],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -118,6 +120,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: MessageSend {
                 receiver: Block(
@@ -128,6 +132,8 @@ Module {
                                 comments: CommentAttachment {
                                     leading: [],
                                     trailing: None,
+                                    leading_blank_line: false,
+                                    blank_line_after_comments: false,
                                 },
                                 expression: MessageSend {
                                     receiver: Identifier(
@@ -188,6 +194,8 @@ Module {
                                     comments: CommentAttachment {
                                         leading: [],
                                         trailing: None,
+                                        leading_blank_line: false,
+                                        blank_line_after_comments: false,
                                     },
                                     expression: Assignment {
                                         target: Identifier(
@@ -276,6 +284,8 @@ Module {
                     },
                 ],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -308,6 +318,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Block(
                 Block {
@@ -317,6 +329,8 @@ Module {
                             comments: CommentAttachment {
                                 leading: [],
                                 trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
                             },
                             expression: Identifier(
                                 Identifier {
@@ -342,6 +356,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Error {
                 message: "Unexpected token: expected expression, found =",
@@ -356,6 +372,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: MessageSend {
                 receiver: Error {
@@ -385,6 +403,8 @@ Module {
                                     comments: CommentAttachment {
                                         leading: [],
                                         trailing: None,
+                                        leading_blank_line: false,
+                                        blank_line_after_comments: false,
                                     },
                                     expression: Assignment {
                                         target: Identifier(
@@ -473,6 +493,8 @@ Module {
                     },
                 ],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -505,6 +527,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -537,6 +561,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -569,6 +595,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: MessageSend {
                 receiver: Block(
@@ -579,6 +607,8 @@ Module {
                                 comments: CommentAttachment {
                                     leading: [],
                                     trailing: None,
+                                    leading_blank_line: false,
+                                    blank_line_after_comments: false,
                                 },
                                 expression: MessageSend {
                                     receiver: Identifier(
@@ -639,6 +669,8 @@ Module {
                                     comments: CommentAttachment {
                                         leading: [],
                                         trailing: None,
+                                        leading_blank_line: false,
+                                        blank_line_after_comments: false,
                                     },
                                     expression: Assignment {
                                         target: Identifier(
@@ -692,6 +724,8 @@ Module {
                                     comments: CommentAttachment {
                                         leading: [],
                                         trailing: None,
+                                        leading_blank_line: false,
+                                        blank_line_after_comments: false,
                                     },
                                     expression: Assignment {
                                         target: Identifier(
@@ -745,6 +779,8 @@ Module {
                                     comments: CommentAttachment {
                                         leading: [],
                                         trailing: None,
+                                        leading_blank_line: false,
+                                        blank_line_after_comments: false,
                                     },
                                     expression: Assignment {
                                         target: Identifier(
@@ -860,6 +896,8 @@ Module {
                     },
                 ],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -892,6 +930,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: MessageSend {
                 receiver: Literal(
@@ -923,6 +963,8 @@ Module {
                                     comments: CommentAttachment {
                                         leading: [],
                                         trailing: None,
+                                        leading_blank_line: false,
+                                        blank_line_after_comments: false,
                                     },
                                     expression: Assignment {
                                         target: Identifier(
@@ -1011,6 +1053,8 @@ Module {
                     },
                 ],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -1043,6 +1087,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: MessageSend {
                 receiver: Literal(
@@ -1098,6 +1144,8 @@ Module {
                                     comments: CommentAttachment {
                                         leading: [],
                                         trailing: None,
+                                        leading_blank_line: false,
+                                        blank_line_after_comments: false,
                                     },
                                     expression: Assignment {
                                         target: Identifier(
@@ -1213,6 +1261,8 @@ Module {
                     },
                 ],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -1289,6 +1339,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -1321,6 +1373,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: MessageSend {
                 receiver: Identifier(
@@ -1360,6 +1414,8 @@ Module {
                                     comments: CommentAttachment {
                                         leading: [],
                                         trailing: None,
+                                        leading_blank_line: false,
+                                        blank_line_after_comments: false,
                                     },
                                     expression: Assignment {
                                         target: Identifier(
@@ -1448,6 +1504,8 @@ Module {
                     },
                 ],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -1480,6 +1538,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -1529,6 +1589,8 @@ Module {
                                         comments: CommentAttachment {
                                             leading: [],
                                             trailing: None,
+                                            leading_blank_line: false,
+                                            blank_line_after_comments: false,
                                         },
                                         expression: Assignment {
                                             target: Identifier(
@@ -1631,6 +1693,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Error {
                 message: "Unexpected token: expected expression, found =",
@@ -1645,6 +1709,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: MessageSend {
                 receiver: Error {
@@ -1674,6 +1740,8 @@ Module {
                                     comments: CommentAttachment {
                                         leading: [],
                                         trailing: None,
+                                        leading_blank_line: false,
+                                        blank_line_after_comments: false,
                                     },
                                     expression: Literal(
                                         Integer(
@@ -1706,6 +1774,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Error {
                 message: "Unexpected token: expected expression, found )",
@@ -1720,6 +1790,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Error {
                 message: "Unexpected token: expected expression, found ]",
@@ -1734,6 +1806,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Error {
                 message: "Unexpected token: expected expression, found .",
@@ -1748,6 +1822,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Error {
                 message: "Unexpected token: expected expression, found .",
@@ -1762,6 +1838,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Error {
                 message: "Unexpected token: expected expression, found ]",
@@ -1776,6 +1854,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Error {
                 message: "Unexpected token: expected expression, found .",
@@ -1790,6 +1870,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Error {
                 message: "Unexpected token: expected expression, found ]",
@@ -1804,6 +1886,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Error {
                 message: "Unexpected token: expected expression, found ]",
@@ -1818,6 +1902,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Error {
                 message: "Unexpected token: expected expression, found .",
@@ -1832,6 +1918,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Error {
                 message: "Unexpected token: expected expression, found .",
@@ -1846,6 +1934,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Error {
                 message: "Unexpected token: expected expression, found .",
@@ -1860,6 +1950,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: MessageSend {
                 receiver: Error {
@@ -1889,6 +1981,8 @@ Module {
                                     comments: CommentAttachment {
                                         leading: [],
                                         trailing: None,
+                                        leading_blank_line: false,
+                                        blank_line_after_comments: false,
                                     },
                                     expression: Assignment {
                                         target: Identifier(
@@ -1921,6 +2015,8 @@ Module {
                                     comments: CommentAttachment {
                                         leading: [],
                                         trailing: None,
+                                        leading_blank_line: false,
+                                        blank_line_after_comments: false,
                                     },
                                     expression: MessageSend {
                                         receiver: Block(
@@ -1931,6 +2027,8 @@ Module {
                                                         comments: CommentAttachment {
                                                             leading: [],
                                                             trailing: None,
+                                                            leading_blank_line: false,
+                                                            blank_line_after_comments: false,
                                                         },
                                                         expression: MessageSend {
                                                             receiver: Identifier(
@@ -1991,6 +2089,8 @@ Module {
                                                             comments: CommentAttachment {
                                                                 leading: [],
                                                                 trailing: None,
+                                                                leading_blank_line: false,
+                                                                blank_line_after_comments: false,
                                                             },
                                                             expression: Assignment {
                                                                 target: Identifier(
@@ -2044,6 +2144,8 @@ Module {
                                                             comments: CommentAttachment {
                                                                 leading: [],
                                                                 trailing: None,
+                                                                leading_blank_line: false,
+                                                                blank_line_after_comments: false,
                                                             },
                                                             expression: Assignment {
                                                                 target: Identifier(
@@ -2113,6 +2215,8 @@ Module {
                                     comments: CommentAttachment {
                                         leading: [],
                                         trailing: None,
+                                        leading_blank_line: false,
+                                        blank_line_after_comments: false,
                                     },
                                     expression: Assignment {
                                         target: Identifier(
@@ -2166,6 +2270,8 @@ Module {
                                     comments: CommentAttachment {
                                         leading: [],
                                         trailing: None,
+                                        leading_blank_line: false,
+                                        blank_line_after_comments: false,
                                     },
                                     expression: Assignment {
                                         target: Identifier(
@@ -2272,6 +2378,8 @@ Module {
                     },
                 ],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: true,
             },
             expression: Error {
                 message: "Invalid assignment target",
@@ -2286,6 +2394,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Error {
                 message: "Unexpected token: expected expression, found .",
@@ -2300,6 +2410,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: MessageSend {
                 receiver: MessageSend {
@@ -2346,6 +2458,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: MessageSend {
                 receiver: Error {
@@ -2375,6 +2489,8 @@ Module {
                                     comments: CommentAttachment {
                                         leading: [],
                                         trailing: None,
+                                        leading_blank_line: false,
+                                        blank_line_after_comments: false,
                                     },
                                     expression: Assignment {
                                         target: FieldAccess {
@@ -2470,6 +2586,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Return {
                 value: FieldAccess {
@@ -2505,6 +2623,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: true,
+                blank_line_after_comments: false,
             },
             expression: MessageSend {
                 receiver: Error {
@@ -2530,6 +2650,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Error {
                 message: "Unexpected token: expected expression, found =>",
@@ -2544,6 +2666,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Error {
                 message: "Invalid assignment target",
@@ -2558,6 +2682,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: MessageSend {
                 receiver: MessageSend {
@@ -2604,6 +2730,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Error {
                 message: "Unexpected token: expected expression, found ]",
@@ -2618,6 +2746,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Return {
                 value: FieldAccess {
@@ -2653,6 +2783,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: true,
+                blank_line_after_comments: false,
             },
             expression: Identifier(
                 Identifier {
@@ -2669,6 +2801,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Error {
                 message: "Unexpected token: expected expression, found =>",
@@ -2683,6 +2817,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Error {
                 message: "Unexpected token: expected expression, found .",
@@ -2697,6 +2833,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: MessageSend {
                 receiver: MessageSend {
@@ -2737,6 +2875,8 @@ Module {
                                     comments: CommentAttachment {
                                         leading: [],
                                         trailing: None,
+                                        leading_blank_line: false,
+                                        blank_line_after_comments: false,
                                     },
                                     expression: Assignment {
                                         target: Identifier(
@@ -2806,6 +2946,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: FieldAccess {
@@ -2851,6 +2993,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Return {
                 value: Identifier(
@@ -2873,6 +3017,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: true,
+                blank_line_after_comments: false,
             },
             expression: Identifier(
                 Identifier {
@@ -2889,6 +3035,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Error {
                 message: "Unexpected token: expected expression, found =>",
@@ -2903,6 +3051,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Error {
                 message: "Unexpected token: expected expression, found .",
@@ -2917,6 +3067,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: MessageSend {
                 receiver: MessageSend {
@@ -2963,6 +3115,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: MessageSend {
                 receiver: Error {
@@ -2992,6 +3146,8 @@ Module {
                                     comments: CommentAttachment {
                                         leading: [],
                                         trailing: None,
+                                        leading_blank_line: false,
+                                        blank_line_after_comments: false,
                                     },
                                     expression: Assignment {
                                         target: FieldAccess {
@@ -3071,6 +3227,8 @@ Module {
                                     comments: CommentAttachment {
                                         leading: [],
                                         trailing: None,
+                                        leading_blank_line: false,
+                                        blank_line_after_comments: false,
                                     },
                                     expression: Assignment {
                                         target: Identifier(
@@ -3153,6 +3311,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Return {
                 value: Identifier(
@@ -3175,6 +3335,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: true,
+                blank_line_after_comments: false,
             },
             expression: Error {
                 message: "Type annotations on non-identifier assignments are not supported",
@@ -3189,6 +3351,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Error {
                 message: "Unexpected token: expected expression, found .",
@@ -3203,6 +3367,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Error {
                 message: "Unexpected token: expected expression, found .",
@@ -3217,6 +3383,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Error {
                 message: "Unexpected token: expected expression, found .",
@@ -3231,6 +3399,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Error {
                 message: "Unexpected token: expected expression, found ]",
@@ -3245,6 +3415,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Error {
                 message: "Unexpected token: expected expression, found .",
@@ -3259,6 +3431,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Error {
                 message: "Unexpected token: expected expression, found .",
@@ -3273,6 +3447,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: MessageSend {
                 receiver: Error {
@@ -3302,6 +3478,8 @@ Module {
                                     comments: CommentAttachment {
                                         leading: [],
                                         trailing: None,
+                                        leading_blank_line: false,
+                                        blank_line_after_comments: false,
                                     },
                                     expression: Assignment {
                                         target: Identifier(
@@ -3355,6 +3533,8 @@ Module {
                                     comments: CommentAttachment {
                                         leading: [],
                                         trailing: None,
+                                        leading_blank_line: false,
+                                        blank_line_after_comments: false,
                                     },
                                     expression: Assignment {
                                         target: Identifier(

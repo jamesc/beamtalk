@@ -57,6 +57,7 @@ fn union_arg_all_compatible_no_warning() {
         false,
         None,
         None,
+        &[],
     );
     assert!(
         checker.diagnostics().is_empty(),
@@ -114,6 +115,7 @@ fn union_arg_none_compatible_warns() {
         false,
         None,
         None,
+        &[],
     );
     assert_eq!(
         checker.diagnostics().len(),
@@ -177,6 +179,7 @@ fn union_arg_mixed_compatible_hints() {
         false,
         None,
         None,
+        &[],
     );
     assert_eq!(
         checker.diagnostics().len(),
@@ -240,6 +243,7 @@ fn union_arg_dynamic_still_skips() {
         false,
         None,
         None,
+        &[],
     );
     assert!(
         checker.diagnostics().is_empty(),
@@ -339,6 +343,7 @@ fn class_literal_arg_accepted_for_behaviour_param() {
         false,
         Some(std::slice::from_ref(&class_ref_arg)),
         None,
+        &[],
     );
     assert!(
         checker.diagnostics().is_empty(),
@@ -362,6 +367,7 @@ fn class_literal_arg_accepted_for_class_param() {
         false,
         Some(std::slice::from_ref(&class_ref_arg)),
         None,
+        &[],
     );
     assert!(
         checker.diagnostics().is_empty(),
@@ -386,6 +392,7 @@ fn class_literal_arg_accepted_for_object_param() {
         false,
         Some(std::slice::from_ref(&class_ref_arg)),
         None,
+        &[],
     );
     assert!(
         checker.diagnostics().is_empty(),
@@ -410,6 +417,7 @@ fn class_literal_arg_accepted_for_protoobject_param() {
         false,
         Some(std::slice::from_ref(&class_ref_arg)),
         None,
+        &[],
     );
     assert!(
         checker.diagnostics().is_empty(),
@@ -434,6 +442,7 @@ fn class_literal_arg_rejected_for_unrelated_param() {
         false,
         Some(std::slice::from_ref(&class_ref_arg)),
         None,
+        &[],
     );
     assert_eq!(
         checker.diagnostics().len(),
@@ -467,6 +476,7 @@ fn instance_identifier_still_rejected_for_class_param() {
         false,
         Some(std::slice::from_ref(&ident_arg)),
         None,
+        &[],
     );
     assert_eq!(
         checker.diagnostics().len(),
@@ -498,6 +508,7 @@ fn instance_identifier_still_rejected_for_behaviour_param() {
         false,
         Some(std::slice::from_ref(&ident_arg)),
         None,
+        &[],
     );
     assert_eq!(
         checker.diagnostics().len(),
@@ -1814,6 +1825,7 @@ fn union_arg_parameterized_member_mismatch_warns() {
         false,
         None,
         None,
+        &[],
     );
     assert!(
         !checker.diagnostics().is_empty(),
@@ -1889,6 +1901,7 @@ fn union_arg_parameterized_members_all_match_no_warning() {
         false,
         None,
         None,
+        &[],
     );
     assert!(
         checker.diagnostics().is_empty(),

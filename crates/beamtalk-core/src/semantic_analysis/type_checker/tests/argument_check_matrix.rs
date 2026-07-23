@@ -155,6 +155,7 @@ fn assert_unary_cell(cell: &str, arg_ty: InferredType) {
         false,
         None,
         None,
+        &[],
     );
     assert!(
         checker.diagnostics().is_empty(),

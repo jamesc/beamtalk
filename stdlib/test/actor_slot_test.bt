@@ -17,6 +17,8 @@ TestCase subclass: ActorSlotTest
 
   setUp => self.counter := ActorSlotCounter spawn
 
+  tearDown => self.counter isNil ifFalse: [self.counter stop]
+
   testMultipleSlotAssignmentsInOneMethod =>
     // Both count and total are updated and persist correctly
     result := self.counter incrementBoth: 10

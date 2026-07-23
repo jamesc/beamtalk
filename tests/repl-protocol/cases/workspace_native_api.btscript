@@ -330,7 +330,7 @@ extSendersSource := "describe => self btTwoTwoOneSixSrcSenderMarker"
 // => _
 
 Erlang beamtalk_extensions register: #Integer selector: #btTwoTwoOneSixSrcSenderExt fun: extSendersFun owner: #test source: extSendersSource
-// => _
+// => Result ok: nil
 
 extSenderHits := SystemNavigation default sendersOf: #btTwoTwoOneSixSrcSenderMarker
 // => _
@@ -339,10 +339,10 @@ extSenderHits := SystemNavigation default sendersOf: #btTwoTwoOneSixSrcSenderMar
 // => true
 
 Erlang ets delete: #beamtalk_extensions key: #(#Integer, #btTwoTwoOneSixSrcSenderExt)
-// => _
+// => true
 
 Erlang ets delete: #beamtalk_extension_sources key: #(#Integer, #btTwoTwoOneSixSrcSenderExt)
-// => _
+// => true
 
 // BT-2196: Extensions registered via the legacy `register/4` (no source)
 // stay invisible to `sendersOf:` — there is no body text to grep.
@@ -350,7 +350,7 @@ extBareSendersFun := [:a :s | s]
 // => _
 
 Erlang beamtalk_extensions register: #Integer selector: #btTwoTwoOneSixBareSenderExt fun: extBareSendersFun owner: #test
-// => _
+// => Result ok: nil
 
 extBareSenderHits := SystemNavigation default sendersOf: #btTwoTwoOneSixSrcSenderMarker
 // => _
@@ -359,7 +359,7 @@ extBareSenderHits := SystemNavigation default sendersOf: #btTwoTwoOneSixSrcSende
 // => false
 
 Erlang ets delete: #beamtalk_extensions key: #(#Integer, #btTwoTwoOneSixBareSenderExt)
-// => _
+// => true
 
 // BT-2196: A class-side extension (registered under the `#'Integer class'`
 // metaclass tag) reports the metaclass OBJECT in `#class`, matching the
@@ -373,7 +373,7 @@ extMetaSource := "describe => self btTwoTwoOneSixMetaSenderMarker"
 // => _
 
 Erlang beamtalk_extensions register: #'Integer class' selector: #btTwoTwoOneSixMetaSenderExt fun: extMetaFun owner: #test source: extMetaSource
-// => _
+// => Result ok: nil
 
 extMetaHits := SystemNavigation default sendersOf: #btTwoTwoOneSixMetaSenderMarker
 // => _
@@ -382,10 +382,10 @@ extMetaHits := SystemNavigation default sendersOf: #btTwoTwoOneSixMetaSenderMark
 // => true
 
 Erlang ets delete: #beamtalk_extensions key: #(#'Integer class', #btTwoTwoOneSixMetaSenderExt)
-// => _
+// => true
 
 Erlang ets delete: #beamtalk_extension_sources key: #(#'Integer class', #btTwoTwoOneSixMetaSenderExt)
-// => _
+// => true
 
 // ===========================================================================
 // SYSTEMNAVIGATION REFERENCESTO: — find class-reference sites (BT-2203)
@@ -461,7 +461,7 @@ extRefsSource := "asInt => Integer new"
 // => _
 
 Erlang beamtalk_extensions register: #String selector: #btTwoTwoOneSixSrcRefExt fun: extRefsFun owner: #test source: extRefsSource
-// => _
+// => Result ok: nil
 
 extRefHits := SystemNavigation default referencesTo: Integer
 // => _
@@ -470,17 +470,17 @@ extRefHits := SystemNavigation default referencesTo: Integer
 // => true
 
 Erlang ets delete: #beamtalk_extensions key: #(#String, #btTwoTwoOneSixSrcRefExt)
-// => _
+// => true
 
 Erlang ets delete: #beamtalk_extension_sources key: #(#String, #btTwoTwoOneSixSrcRefExt)
-// => _
+// => true
 
 // register/4 (no source) → invisible to referencesTo: scan.
 extBareRefsFun := [:a :s | s]
 // => _
 
 Erlang beamtalk_extensions register: #String selector: #btTwoTwoOneSixBareRefExt fun: extBareRefsFun owner: #test
-// => _
+// => Result ok: nil
 
 extBareRefHits := SystemNavigation default referencesTo: Integer
 // => _
@@ -489,7 +489,7 @@ extBareRefHits := SystemNavigation default referencesTo: Integer
 // => false
 
 Erlang ets delete: #beamtalk_extensions key: #(#String, #btTwoTwoOneSixBareRefExt)
-// => _
+// => true
 
 // ===========================================================================
 // SYSTEMNAVIGATION ANNOUNCEMENTSSENTBY: — static emission analysis (BT-2475)
@@ -595,7 +595,7 @@ extEmitSource := "emitExt => announcer announce: (AnnounceEventB new)"
 // => _
 
 Erlang beamtalk_extensions register: #AnnounceEmitter selector: #emitExt fun: extEmitFun owner: #test source: extEmitSource
-// => _
+// => Result ok: nil
 
 extEmitSites := SystemNavigation default announcementSitesSentBy: AnnounceEmitter
 // => _
@@ -604,10 +604,10 @@ extEmitSites := SystemNavigation default announcementSitesSentBy: AnnounceEmitte
 // => true
 
 Erlang ets delete: #beamtalk_extensions key: #(#AnnounceEmitter, #emitExt)
-// => _
+// => true
 
 Erlang ets delete: #beamtalk_extension_sources key: #(#AnnounceEmitter, #emitExt)
-// => _
+// => true
 
 // ===========================================================================
 // SYSTEMNAVIGATION FIELDREADERSOF:IN: / FIELDWRITERSOF:IN: (BT-2208)
@@ -846,7 +846,7 @@ extMatchSource := "xyzzy => 42 // bt-two-two-one-six-method-marker"
 // => _
 
 Erlang beamtalk_extensions register: #Integer selector: #btTwoTwoOneSixMatchExt fun: extMatchFun owner: #test source: extMatchSource
-// => _
+// => Result ok: nil
 
 extMatchHits := SystemNavigation default methodsMatching: (Regex from: "bt-two-two-one-six-method-marker") unwrap
 // => _
@@ -855,10 +855,10 @@ extMatchHits := SystemNavigation default methodsMatching: (Regex from: "bt-two-t
 // => true
 
 Erlang ets delete: #beamtalk_extensions key: #(#Integer, #btTwoTwoOneSixMatchExt)
-// => _
+// => true
 
 Erlang ets delete: #beamtalk_extension_sources key: #(#Integer, #btTwoTwoOneSixMatchExt)
-// => _
+// => true
 
 // ===========================================================================
 // SYSTEMNAVIGATION SELECTORSMATCHING: — fuzzy selector search (BT-2204)
@@ -917,13 +917,13 @@ extFun := [:a :s | s]
 // => _
 
 Erlang beamtalk_extensions register: #Integer selector: #btTwoTwoFourExtMarker fun: extFun owner: #test
-// => _
+// => Result ok: nil
 
 (SystemNavigation default selectorsMatching: "btTwoTwoFourExtMarker") includes: #btTwoTwoFourExtMarker
 // => true
 
 Erlang ets delete: #beamtalk_extensions key: #(#Integer, #btTwoTwoFourExtMarker)
-// => _
+// => true
 
 // No-match returns an empty list.
 SystemNavigation default selectorsMatching: "ZzZxYwQpPpNoSuchSelectorXyzzy"
@@ -1241,7 +1241,7 @@ extFfiSource := "describe: xs => (Erlang lists) reverse: xs"
 // => _
 
 Erlang beamtalk_extensions register: #Integer selector: #btTwoTwoOneOneFfiExt fun: extFfiFun owner: #test source: extFfiSource
-// => _
+// => Result ok: nil
 
 extFfiHits := SystemNavigation default ffiSitesFor: "lists:reverse"
 // => _
@@ -1250,10 +1250,10 @@ extFfiHits := SystemNavigation default ffiSitesFor: "lists:reverse"
 // => true
 
 Erlang ets delete: #beamtalk_extensions key: #(#Integer, #btTwoTwoOneOneFfiExt)
-// => _
+// => true
 
 Erlang ets delete: #beamtalk_extension_sources key: #(#Integer, #btTwoTwoOneOneFfiExt)
-// => _
+// => true
 
 // --- no-match returns [] ---
 

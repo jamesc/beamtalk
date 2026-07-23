@@ -30,7 +30,7 @@ beamtalk type-coverage --class MyApp          # Filter to a specific class
 beamtalk type-coverage --detail --class MyApp # Detail for one class
 
 # Native Erlang
-beamtalk gen-native MyActor # Generate skeleton gen_server from a native: Actor class
+beamtalk generate native MyActor # Generate skeleton gen_server from a native: Actor class
 ```
 
 For full details on `beamtalk.toml`, dependencies, lockfiles, qualified names, and collision detection, see the [Package Management](beamtalk-packages.md) guide.
@@ -1036,4 +1036,4 @@ Adding a new WebSocket-based interface requires only a protocol adapter over the
 
 ## Native Erlang Integration
 
-For packages that need hand-written Erlang code — gen_server implementations, hex.pm dependencies, or direct OTP control — see the [Native Erlang Integration guide](beamtalk-native-erlang.md). It covers the `native/` directory layout, the `native:` keyword for actor classes, the `gen-native` stub generator, and hex dependency management via `[native.dependencies]` in `beamtalk.toml`.
+For packages that need hand-written Erlang code — gen_server implementations, hex.pm dependencies, or direct OTP control — see the [Native Erlang Integration guide](beamtalk-native-erlang.md). It covers the `native/` directory layout, the `native:` keyword for actor classes, the `generate native` stub generator, and hex dependency management via `[native.dependencies]` in `beamtalk.toml`.

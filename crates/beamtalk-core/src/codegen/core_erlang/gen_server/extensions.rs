@@ -120,7 +120,7 @@ impl CoreErlangGenerator {
         Ok(docvec![
             line(),
             "let ",
-            leaf::var(format!("_Ext{idx}")),
+            leaf::var(super::super::util::ext_var(idx)),
             " = call 'beamtalk_extensions':'register'(",
             leaf::atom(class_tag),
             ", ",
@@ -144,7 +144,7 @@ impl CoreErlangGenerator {
     fn extension_class_tag(ext: &StandaloneMethodDefinition) -> String {
         let name = ext.class_name.name.to_string();
         if ext.is_class_method {
-            format!("{name} class")
+            super::super::util::metaclass_tag(&name)
         } else {
             name
         }

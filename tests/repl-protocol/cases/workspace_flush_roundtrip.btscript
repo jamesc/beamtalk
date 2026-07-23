@@ -112,7 +112,7 @@ patchEntry isActive
 // In-memory dispatch sees the patched body (the install hot-swap actually
 // installed the new method, not just logged it).
 c1 := Counter spawn
-// => _
+// => Actor(Counter, _)
 
 c1 increment
 // => 5

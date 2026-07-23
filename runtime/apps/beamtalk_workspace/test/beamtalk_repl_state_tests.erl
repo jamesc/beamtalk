@@ -235,3 +235,254 @@ state_independence_test() ->
 
     ?assertEqual(#{}, beamtalk_repl_state:get_bindings(State3)),
     ?assertEqual(1, beamtalk_repl_state:get_eval_counter(State3)).
+
+%%% BT-2938: fresh-session seeding from stdlib's own compiled aliases
+
+%% Temporarily set `beamtalk_stdlib`'s `type_aliases` env to `Aliases`, run
+%% `Fun`, then restore the original env (`undefined` → unset). Mirrors
+%% `beamtalk_repl_ops_browse_tests:with_stdlib_aliases/2` — stdlib is the one
+%% app always loaded under the EUnit harness, and `application:set_env/3` on
+%% it is the minimal, precedent-consistent way to fixture its alias env
+%% without building a real `.app` file end-to-end.
+with_stdlib_aliases(Aliases, Fun) ->
+    _ = application:load(beamtalk_stdlib),
+    Previous = application:get_env(beamtalk_stdlib, type_aliases),
+    ok = application:set_env(beamtalk_stdlib, type_aliases, Aliases),
+    try
+        Fun()
+    after
+        case Previous of
+            {ok, V} -> application:set_env(beamtalk_stdlib, type_aliases, V);
+            undefined -> application:unset_env(beamtalk_stdlib, type_aliases)
+        end
+    end.
+
+stdlib_alias_seeded_into_fresh_session_test() ->
+    with_stdlib_aliases(
+        [
+            #{
+                name => 'SupervisionStrategy',
+                expansion => "#oneForOne | #oneForAll | #restForOne",
+                doc => "Restart strategy for a supervised child.",
+                source_file => "stdlib/src/Supervisor.bt",
+                internal => false
+            }
+        ],
+        fun() ->
+            State = beamtalk_repl_state:new(undefined, 0),
+            AliasTable = beamtalk_repl_state:get_alias_table(State),
+            ?assertEqual(
+                #{
+                    expansion => <<"#oneForOne | #oneForAll | #restForOne">>,
+                    doc_comment => <<"Restart strategy for a supervised child.">>,
+                    declared_in => <<"stdlib">>
+                },
+                maps:get(<<"SupervisionStrategy">>, AliasTable)
+            )
+        end
+    ).
+
+%% `known_type_alias_sources/1` folds every seeded alias (stdlib included)
+%% into the compiler-port `known_type_aliases` request field — this is what
+%% makes a `::`-typed local referencing a stdlib alias resolve.
+stdlib_alias_seeded_reaches_known_type_alias_sources_test() ->
+    with_stdlib_aliases(
+        [
+            #{
+                name => 'SupervisionStrategy',
+                expansion => "#oneForOne | #oneForAll | #restForOne",
+                doc => undefined,
+                source_file => "stdlib/src/Supervisor.bt",
+                internal => false
+            }
+        ],
+        fun() ->
+            State = beamtalk_repl_state:new(undefined, 0),
+            Sources = beamtalk_repl_state:known_type_alias_sources(State),
+            ?assertEqual(
+                [<<"type SupervisionStrategy = #oneForOne | #oneForAll | #restForOne">>], Sources
+            )
+        end
+    ).
+
+stdlib_alias_without_doc_comment_test() ->
+    with_stdlib_aliases(
+        [
+            #{
+                name => 'LogFormat',
+                expansion => "#text | #json",
+                doc => undefined,
+                source_file => "stdlib/src/BeamtalkInterface.bt",
+                internal => false
+            }
+        ],
+        fun() ->
+            State = beamtalk_repl_state:new(undefined, 0),
+            Entry = maps:get(<<"LogFormat">>, beamtalk_repl_state:get_alias_table(State)),
+            ?assertEqual(undefined, maps:get(doc_comment, Entry))
+        end
+    ).
+
+%% Seeding-boundary exclusion (mirrors `beamtalk_repl_ops_browse:
+%% alias_visible/2`): an `internal type Foo = ...` stdlib alias is never
+%% seeded into a session — a REPL session is never "inside" the stdlib
+%% package.
+stdlib_internal_alias_excluded_test() ->
+    with_stdlib_aliases(
+        [
+            #{
+                name => 'InternalOnlyStrategy',
+                expansion => "#a | #b",
+                doc => undefined,
+                source_file => "stdlib/src/Fixture.bt",
+                internal => true
+            }
+        ],
+        fun() ->
+            State = beamtalk_repl_state:new(undefined, 0),
+            AliasTable = beamtalk_repl_state:get_alias_table(State),
+            ?assertNot(maps:is_key(<<"InternalOnlyStrategy">>, AliasTable))
+        end
+    ).
+
+%% Fail-safe (not fail-open) on a row missing the `internal` key entirely —
+%% mirrors `beamtalk_repl_ops_browse:alias_visible/2`'s convention. Should
+%% never happen against real `format_type_aliases_entry` output (which
+%% always emits `internal`), but a row shape this reader doesn't recognise
+%% must not default to seeding it as public.
+stdlib_alias_missing_internal_key_excluded_test() ->
+    with_stdlib_aliases(
+        [
+            #{
+                name => 'NoInternalKeyStrategy',
+                expansion => "#a | #b",
+                doc => undefined,
+                source_file => "stdlib/src/Fixture.bt"
+            }
+        ],
+        fun() ->
+            State = beamtalk_repl_state:new(undefined, 0),
+            AliasTable = beamtalk_repl_state:get_alias_table(State),
+            ?assertNot(maps:is_key(<<"NoInternalKeyStrategy">>, AliasTable))
+        end
+    ).
+
+%% A non-boolean `internal` value (hand-edited/corrupted `.app` file) must
+%% only drop this one row, not wipe every other well-formed alias in the
+%% same env — the `case` in `stdlib_alias_fold/2` needs its own catch-all
+%% arm, not just the outer `try/catch` in `stdlib_alias_table/0`, or a
+%% `case_clause` here would surface as an empty table (review finding,
+%% Claude BeamTalk Review on this PR).
+stdlib_alias_non_boolean_internal_drops_only_that_row_test() ->
+    with_stdlib_aliases(
+        [
+            #{
+                name => 'GoodStrategy',
+                expansion => "#a | #b",
+                doc => undefined,
+                source_file => "stdlib/src/Fixture.bt",
+                internal => false
+            },
+            #{
+                name => 'BadInternalStrategy',
+                expansion => "#c | #d",
+                doc => undefined,
+                source_file => "stdlib/src/Fixture.bt",
+                internal => not_a_boolean
+            }
+        ],
+        fun() ->
+            State = beamtalk_repl_state:new(undefined, 0),
+            AliasTable = beamtalk_repl_state:get_alias_table(State),
+            ?assert(maps:is_key(<<"GoodStrategy">>, AliasTable)),
+            ?assertNot(maps:is_key(<<"BadInternalStrategy">>, AliasTable))
+        end
+    ).
+
+%% Same row-level-isolation guarantee, this time for a field so malformed
+%% that `app_env_binary`/`app_env_doc` themselves throw (e.g. a `name` that
+%% is neither atom, binary, nor list) — not just a bad `internal` value.
+%% The inner `try/catch` in `stdlib_alias_fold/2` must catch this too, or
+%% it escapes to `stdlib_alias_table/0`'s outer `try/catch` and wipes every
+%% other well-formed row (review finding, Claude BeamTalk Review on this
+%% PR).
+stdlib_alias_unconvertible_field_drops_only_that_row_test() ->
+    with_stdlib_aliases(
+        [
+            #{
+                name => 'GoodStrategy',
+                expansion => "#a | #b",
+                doc => undefined,
+                source_file => "stdlib/src/Fixture.bt",
+                internal => false
+            },
+            #{
+                %% Neither atom, binary, nor list — app_env_binary/1 has no
+                %% catch-all clause for this, so it throws function_clause.
+                name => 42,
+                expansion => "#c | #d",
+                doc => undefined,
+                source_file => "stdlib/src/Fixture.bt",
+                internal => false
+            }
+        ],
+        fun() ->
+            State = beamtalk_repl_state:new(undefined, 0),
+            AliasTable = beamtalk_repl_state:get_alias_table(State),
+            ?assert(maps:is_key(<<"GoodStrategy">>, AliasTable))
+        end
+    ).
+
+%% A session-declared `type Name = ...` legally shadows a same-named stdlib
+%% entry (ADR 0108 Semantics' "current turn wins" precedent) rather than
+%% erroring or being ignored.
+session_declared_alias_shadows_stdlib_entry_test() ->
+    with_stdlib_aliases(
+        [
+            #{
+                name => 'SupervisionStrategy',
+                expansion => "#oneForOne | #oneForAll | #restForOne",
+                doc => undefined,
+                source_file => "stdlib/src/Supervisor.bt",
+                internal => false
+            }
+        ],
+        fun() ->
+            State0 = beamtalk_repl_state:new(undefined, 0),
+            SessionEntry = #{
+                expansion => <<"#custom">>, doc_comment => undefined, declared_in => <<"REPL">>
+            },
+            State1 = beamtalk_repl_state:put_alias(<<"SupervisionStrategy">>, SessionEntry, State0),
+            ?assertEqual(
+                SessionEntry,
+                maps:get(<<"SupervisionStrategy">>, beamtalk_repl_state:get_alias_table(State1))
+            )
+        end
+    ).
+
+%% Best-effort: a malformed `type_aliases` env (not even a list) seeds an
+%% empty table rather than crashing session creation.
+stdlib_alias_table_malformed_env_is_empty_test() ->
+    with_stdlib_aliases(
+        not_a_list,
+        fun() ->
+            State = beamtalk_repl_state:new(undefined, 0),
+            ?assertEqual(#{}, beamtalk_repl_state:get_alias_table(State))
+        end
+    ).
+
+%% No `type_aliases` env key at all (older `.app` build, or a package with
+%% no aliases) — same empty-table fallback, no crash.
+stdlib_alias_table_missing_env_is_empty_test() ->
+    _ = application:load(beamtalk_stdlib),
+    Previous = application:get_env(beamtalk_stdlib, type_aliases),
+    application:unset_env(beamtalk_stdlib, type_aliases),
+    try
+        State = beamtalk_repl_state:new(undefined, 0),
+        ?assertEqual(#{}, beamtalk_repl_state:get_alias_table(State))
+    after
+        case Previous of
+            {ok, V} -> application:set_env(beamtalk_stdlib, type_aliases, V);
+            undefined -> ok
+        end
+    end.

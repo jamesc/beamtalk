@@ -167,6 +167,12 @@ abstract typed Value subclass: Collection(E)
   ///
   /// Uses `^` (non-local return) for early exit — compiles to throw/catch on BEAM.
   ///
+  /// `noneBlock` is deliberately `Block(Object)`, not `Block(E)`: the fallback
+  /// commonly produces a value outside the element type (`ifNone: [nil]`,
+  /// `ifNone: [#missing]`), so narrowing it to `E` would reject those
+  /// legitimate uses. The trade-off — a wrong-typed default is not flagged —
+  /// is intentional, and is why the return type is `E | Object`.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// #(1, 2) detect: [:x | x > 5] ifNone: [0]  // => 0

@@ -66,6 +66,67 @@ handle_compile_response_ok_test() ->
         Result
     ).
 
+%% ADR 0108 hot-reload re-check trigger (BT-2899): a class-defining
+%% compile's `referenced_aliases` field must survive this response
+%% reshaping, defaulting to `[]` for an older compiler-port binary that
+%% omits the key.
+handle_compile_response_ok_forwards_referenced_aliases_test() ->
+    Response = #{
+        status => ok,
+        core_erlang => <<"core">>,
+        module_name => <<"mod">>,
+        classes => [<<"Foo">>],
+        warnings => [],
+        referenced_aliases => [<<"Direction">>]
+    },
+    Result = beamtalk_compiler_server:handle_compile_response(Response),
+    ?assertMatch(
+        {ok, #{referenced_aliases := [<<"Direction">>]}},
+        Result
+    ).
+
+%% BT-2917 (BT-2899 follow-up): the protocol_definition clause is a
+%% *separate* reshaping match arm from the class-definition one above — it
+%% must forward `referenced_aliases` too. Confirmed missing by inspection
+%% before this fix: the port response carried the field, but this reshaping
+%% step silently dropped it (rebuilds the reply map by hand instead of
+%% forwarding `Response` verbatim), so nothing downstream ever saw it, even
+%% though `crates/beamtalk-compiler-port/src/main.rs`'s
+%% `protocol_definition_ok_response` had already started sending it.
+handle_compile_response_protocol_definition_forwards_referenced_aliases_test() ->
+    Response = #{
+        status => ok,
+        kind => protocol_definition,
+        core_erlang => <<"core">>,
+        module_name => <<"mod">>,
+        protocols => [<<"Directional">>],
+        warnings => [],
+        referenced_aliases => [<<"Direction">>]
+    },
+    Result = beamtalk_compiler_server:handle_compile_response(Response),
+    ?assertMatch(
+        {ok, protocol_definition, #{referenced_aliases := [<<"Direction">>]}},
+        Result
+    ).
+
+%% Defensive default: a protocol_definition response omitting the field
+%% entirely (an older compiler-port binary predating BT-2917) must still
+%% decode, with `referenced_aliases => []` rather than crashing.
+handle_compile_response_protocol_definition_defaults_referenced_aliases_test() ->
+    Response = #{
+        status => ok,
+        kind => protocol_definition,
+        core_erlang => <<"core">>,
+        module_name => <<"mod">>,
+        protocols => [<<"Directional">>],
+        warnings => []
+    },
+    Result = beamtalk_compiler_server:handle_compile_response(Response),
+    ?assertMatch(
+        {ok, protocol_definition, #{referenced_aliases := []}},
+        Result
+    ).
+
 handle_compile_response_error_test() ->
     Response = #{status => error, diagnostics => [<<"parse error">>]},
     Result = beamtalk_compiler_server:handle_compile_response(Response),
@@ -191,7 +252,11 @@ alias_cache_test_() ->
         {"two sessions' aliases merge, neither wipes the other",
             fun register_aliases_concurrent_sessions_merge/0},
         {"clear_classes → alias cache emptied too", fun clear_classes_empties_aliases/0},
-        {"register_aliases when server down → no crash", fun register_aliases_when_down/0}
+        {"register_aliases when server down → no crash", fun register_aliases_when_down/0},
+        {"compile_expression/3 backstops the ambient alias cache (BT-2956)",
+            fun compile_expression_ambient_alias_backstop/0},
+        {"compile_expression_trace/3 backstops the ambient alias cache too (BT-2956)",
+            fun compile_expression_trace_ambient_alias_backstop/0}
     ]}.
 
 register_aliases_visible() ->
@@ -239,6 +304,55 @@ register_aliases_when_down() ->
     application:stop(beamtalk_compiler),
     ?assertEqual(ok, beamtalk_compiler_server:register_aliases([<<"type Down = Integer">>])),
     application:start(beamtalk_compiler).
+
+%% BT-2956: `compile_expression/3` (no explicit `known_type_aliases`) must
+%% still resolve an earlier-turn alias via the ambient cache — proving the
+%% `{compile_expression}` handler now defaults `known_type_aliases` the same
+%% way `{compile}`/`{compile_method}` already do, instead of only ever
+%% seeing whatever (if anything) the caller happened to pass in `Options`.
+compile_expression_ambient_alias_backstop() ->
+    beamtalk_compiler_server:clear_classes(),
+    ok = beamtalk_compiler_server:register_aliases([<<"type Direction = #north | #south">>]),
+    {ok, protocol_definition, ProtocolInfo} = beamtalk_compiler_server:compile_expression(
+        <<"Protocol define: Directional\n  heading: d :: Direction -> Boolean\n">>,
+        <<"bt@ambient_backstop">>,
+        []
+    ),
+    ?assertEqual([<<"Direction">>], maps:get(referenced_aliases, ProtocolInfo)).
+
+%% `compile_expression_trace/3,4` hits the identical `maps:merge/2` ambient-alias
+%% backstop as `compile_expression/3,4` (see the matching comment on both
+%% `handle_call` clauses), but it rejects class/protocol definitions outright, so
+%% it can't reuse `compile_expression_ambient_alias_backstop/0`'s
+%% `referenced_aliases` payload assertion above. Instead this proves the same
+%% thing observably: a plain expression's `matchExhaustive:` only sees `Direction`
+%% resolve to the closed 4-member union (and so reports the `#west` gap as a
+%% compile error) when the ambient alias cache actually reached the trace-mode
+%% compile — without it, `Direction` falls back to an unresolved type and
+%% `matchExhaustive:` has nothing closed to check against.
+compile_expression_trace_ambient_alias_backstop() ->
+    beamtalk_compiler_server:clear_classes(),
+    ok = beamtalk_compiler_server:register_aliases([
+        <<"type Direction = #north | #south | #east | #west">>
+    ]),
+    {error, Diagnostics} = beamtalk_compiler_server:compile_expression_trace(
+        <<
+            "scrutinee :: Direction := #north. "
+            "scrutinee matchExhaustive: [#north -> 0; #south -> 1; #east -> 2]"
+        >>,
+        <<"bt@trace_ambient_backstop">>,
+        []
+    ),
+    ?assert(
+        lists:any(
+            fun(D) ->
+                Msg = maps:get(message, D),
+                binary:match(Msg, <<"non-exhaustive matchExhaustive:">>) =/= nomatch andalso
+                    binary:match(Msg, <<"#west">>) =/= nomatch
+            end,
+            Diagnostics
+        )
+    ).
 
 %%% ---------------------------------------------------------------
 %%% gen_server edge cases (via running server)
@@ -303,6 +417,47 @@ no_fault_reaches_port() ->
     %% No fault armed — an ordinary diagnostics call is unaffected.
     Result = beamtalk_compiler_server:diagnostics(<<"1 + 2">>),
     ?assertMatch({ok, _}, Result).
+
+%%% ---------------------------------------------------------------
+%%% BT-2806: inject_diagnostics_exit/0 (test-only fault injection)
+%%%
+%%% Sibling to BT-2832's inject_diagnostics_failure/1 above: that mechanism
+%%% only forces an ordinary `{error, _}' *return*, which cannot reach
+%%% `beamtalk_recheck:recheck_image_class/2''s (and
+%%% `recheck_owner_for_leaf_change/3''s) additional `catch' clause guarding
+%%% against the compiler port's `gen_server:call' itself *exiting*
+%%% (`noproc'/`timeout'). This hook instead stops the server without
+%%% replying, so the caller's `gen_server:call' raises an exit — see
+%%% `beamtalk_recheck_tests.erl' for the higher-level regression coverage
+%%% this exists to enable.
+%%% ---------------------------------------------------------------
+
+diagnostics_exit_fault_injection_test_() ->
+    {timeout, 10,
+        {setup, fun start_compiler/0, fun stop_compiler/1, [
+            {"armed exit fault makes the next diagnostics call exit, not return",
+                fun exit_fault_makes_next_call_exit/0},
+            {"compiler server recovers (supervisor restart) after the injected exit",
+                fun exit_fault_recovers_after_restart/0}
+        ]}}.
+
+exit_fault_makes_next_call_exit() ->
+    ok = beamtalk_compiler_server:inject_diagnostics_exit(),
+    ?assertExit({shutdown, _}, beamtalk_compiler_server:diagnostics(<<"1 + 2">>)),
+    %% Let beamtalk_compiler_sup finish restarting before the next test in
+    %% this group runs — otherwise its own inject call could race the
+    %% not-yet-re-registered name.
+    ok = beamtalk_compiler_test_helper:wait_for_compiler_server_restart().
+
+exit_fault_recovers_after_restart() ->
+    ok = beamtalk_compiler_server:inject_diagnostics_exit(),
+    ?assertExit({shutdown, _}, beamtalk_compiler_server:diagnostics(<<"1 + 2">>)),
+    %% beamtalk_compiler_sup (one_for_one/permanent) restarts the server
+    %% immediately after the injected stop — wait for the registered name to
+    %% come back, then prove the next call reaches a fresh, healthy process
+    %% (the fault is one-shot, not stuck broken for the rest of the run).
+    ok = beamtalk_compiler_test_helper:wait_for_compiler_server_restart(),
+    ?assertMatch({ok, _}, beamtalk_compiler_server:diagnostics(<<"1 + 2">>)).
 
 %%% ---------------------------------------------------------------
 %%% Helpers

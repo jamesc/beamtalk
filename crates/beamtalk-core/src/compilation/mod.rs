@@ -19,6 +19,7 @@ pub use dependency::{DependencyMap, DependencySource, DependencySpec, GitReferen
 pub use diagnostics_policy::{
     DiagnosticSeverityOverride, DiagnosticsTable, DiagnosticsTableError, apply_diagnostics_table,
     parse_diagnostics_table, parse_diagnostics_table_from_manifest_toml,
+    parse_package_name_from_manifest_toml,
 };
 pub use extension_conflicts::{
     ExtensionConflict, conflict_diagnostics, detect_extension_conflicts, shadowing_diagnostics,

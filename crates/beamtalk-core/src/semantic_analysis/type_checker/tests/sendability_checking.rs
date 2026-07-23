@@ -68,6 +68,7 @@ fn check_consume(class: &str, superclass: &str, arg: InferredType) -> Vec<Diagno
         false,
         None,
         None,
+        &[],
     );
     checker.take_diagnostics()
 }

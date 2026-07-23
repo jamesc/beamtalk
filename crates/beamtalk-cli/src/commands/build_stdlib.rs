@@ -12,8 +12,13 @@
 //!
 //! Part of ADR 0007 (Compilable Stdlib with Primitive Injection).
 
-use crate::beam_compiler::{BeamCompiler, CompileContext, compile_source_with_bindings};
+use crate::beam_compiler::{
+    BeamCompiler, ClassHierarchyContext, CompileContext, compile_source_with_bindings,
+};
+use crate::commands::app_file;
+use crate::commands::build::build_alias_metadata;
 use crate::commands::util;
+use beamtalk_core::semantic_analysis::alias_registry::AliasRegistry;
 use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
@@ -103,22 +108,97 @@ pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
     // get proper type inference instead of Dynamic (ADR 0075).
     let native_type_registry = extract_stdlib_type_specs();
 
+    // BT-2935: live same-run alias pre-pass — see its doc for why.
+    let alias_sources = collect_stdlib_alias_sources(&source_files)?;
     let compile_ctx = CompileContext {
         native_type_registry: native_type_registry.map(std::sync::Arc::new),
+        hierarchy: ClassHierarchyContext {
+            pre_loaded_aliases: stdlib_pre_loaded_aliases(&alias_sources),
+            ..ClassHierarchyContext::default()
+        },
         ..CompileContext::default()
     };
 
     // Compile each .bt file to .core (files are independent, no ordering required)
+    let (core_files, class_metadata, protocol_modules) = compile_all_stdlib_files(
+        &source_files,
+        &temp_path,
+        quiet,
+        &options,
+        &bindings,
+        &compile_ctx,
+    )?;
+
+    // Batch compile .core → .beam into ebin directory
+    info!("Compiling Core Erlang to BEAM");
+    let compiler = BeamCompiler::new(ebin_dir.clone());
+    compiler
+        .compile_batch(&core_files)
+        .wrap_err("Failed to compile stdlib Core Erlang to BEAM")?;
+
+    // BT-2938: `{type_aliases, [...]}` `.app`/`.app.src` env metadata — the
+    // same `build_alias_metadata` extraction the ordinary `beamtalk build`
+    // pipeline already uses (`build.rs`'s `ClassIndexResult::all_alias_infos`
+    // call site), independently re-parsing `source_files` for doc
+    // comments/display expansions `AliasSource`/`ClassHierarchyContext`
+    // above don't carry. This is what lets `beamtalk_repl_state:new/3` (the
+    // REPL/workspace session's alias-seeding path) and `browse-type-aliases`
+    // read stdlib's own aliases back via `application:get_env(beamtalk_stdlib,
+    // type_aliases)`.
+    let alias_metadata = build_alias_metadata(&source_files);
+
+    generate_app_file(
+        &ebin_dir,
+        &source_files,
+        &class_metadata,
+        &protocol_modules,
+        &alias_metadata,
+    )?;
+    // Also update .app.src so rebar3 picks up the classes env
+    let app_src_dir = Utf8PathBuf::from("runtime/apps/beamtalk_stdlib/src");
+    if app_src_dir.exists() {
+        generate_app_src_file(
+            &app_src_dir,
+            &class_metadata,
+            &protocol_modules,
+            &alias_metadata,
+        )?;
+    }
+
+    // Generate Rust builtins file from parsed class metadata and aliases.
+    generate_builtins_rs(
+        &class_metadata,
+        &alias_source_texts_sorted_by_name(alias_sources),
+    )?;
+
+    println!("Built {} stdlib modules", source_files.len());
+
+    Ok(())
+}
+
+/// Compiles every stdlib source file to Core Erlang, collecting class
+/// metadata and protocol module names along the way.
+///
+/// Protocol-only files (e.g. `Printable.bt`) have no class definition — they
+/// are still compiled so the protocol gets registered at runtime, but
+/// contribute no `ClassMeta`. Files are independent (no compile ordering
+/// required); cross-file class/alias visibility comes entirely from
+/// `compile_ctx` (built by the caller before this runs).
+fn compile_all_stdlib_files(
+    source_files: &[Utf8PathBuf],
+    temp_path: &Utf8Path,
+    quiet: bool,
+    options: &beamtalk_core::CompilerOptions,
+    bindings: &beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable,
+    compile_ctx: &CompileContext<'_>,
+) -> Result<(Vec<Utf8PathBuf>, Vec<ClassMeta>, Vec<String>)> {
     let mut core_files = Vec::new();
     let mut class_metadata = Vec::new();
     let mut protocol_modules = Vec::new();
-    for source_file in &source_files {
+    for source_file in source_files {
         let module_name = module_name_from_path(source_file)?;
         let core_file = temp_path.join(format!("{module_name}.core"));
 
-        // Protocol-only files (e.g. Printable.bt) have no class definition —
-        // skip metadata extraction but still compile them so the protocol
-        // gets registered at runtime.
         if is_protocol_only_file(source_file)? {
             if !quiet {
                 println!("  Compiling {source_file} (protocol)...");
@@ -127,9 +207,9 @@ pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
                 source_file,
                 &module_name,
                 &core_file,
-                &options,
-                &bindings,
-                &compile_ctx,
+                options,
+                bindings,
+                compile_ctx,
             )?;
             core_files.push(core_file);
             protocol_modules.push(module_name);
@@ -147,33 +227,13 @@ pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
             source_file,
             &module_name,
             &core_file,
-            &options,
-            &bindings,
-            &compile_ctx,
+            options,
+            bindings,
+            compile_ctx,
         )?;
         core_files.push(core_file);
     }
-
-    // Batch compile .core → .beam into ebin directory
-    info!("Compiling Core Erlang to BEAM");
-    let compiler = BeamCompiler::new(ebin_dir.clone());
-    compiler
-        .compile_batch(&core_files)
-        .wrap_err("Failed to compile stdlib Core Erlang to BEAM")?;
-
-    generate_app_file(&ebin_dir, &source_files, &class_metadata, &protocol_modules)?;
-    // Also update .app.src so rebar3 picks up the classes env
-    let app_src_dir = Utf8PathBuf::from("runtime/apps/beamtalk_stdlib/src");
-    if app_src_dir.exists() {
-        generate_app_src_file(&app_src_dir, &class_metadata, &protocol_modules)?;
-    }
-
-    // Generate Rust builtins file from parsed class metadata
-    generate_builtins_rs(&class_metadata)?;
-
-    println!("Built {} stdlib modules", source_files.len());
-
-    Ok(())
+    Ok((core_files, class_metadata, protocol_modules))
 }
 
 /// Remove all `.beam` and `.app` files from the ebin directory.
@@ -698,6 +758,117 @@ fn mark_timer_spawns(class_methods: &mut [MethodMeta]) -> Result<()> {
     Ok(())
 }
 
+/// A single stdlib type-alias declaration collected by
+/// `collect_stdlib_alias_sources` (BT-2935), carrying both its
+/// reconstructed `AliasInfo` (for immediately seeding *this* run's own
+/// `pre_loaded_aliases`) and its exact declaration source text (for
+/// persisting into `generated_builtins.rs`, so a consumer with no direct
+/// access to `stdlib/src/*.bt` — e.g. a REPL/workspace session, BT-2938 —
+/// can still reconstruct it later via
+/// `ClassHierarchy::generated_stdlib_aliases`).
+struct AliasSource {
+    info: beamtalk_core::semantic_analysis::alias_registry::AliasInfo,
+    text: String,
+}
+
+/// Scans every stdlib source file for `type Name = ...` declarations,
+/// reconstructing each into an `AliasSource` immediately (BT-2935).
+///
+/// **Why a live, same-run pre-pass — not a seed from
+/// `ClassHierarchy::generated_stdlib_aliases`'s persisted snapshot** (the
+/// design this replaced during review): `build-stdlib` always runs with
+/// `--warnings-as-errors` (`Justfile`'s `build-stdlib` recipe), and an
+/// unresolved cross-file alias reference surfaces as a
+/// `DiagnosticCategory::Type` warning — a category *not* excluded from
+/// warnings-as-errors promotion, unlike `UnresolvedClass` (see
+/// `beam_compiler.rs`'s exclusion list). Seeding from the *previous* run's
+/// persisted snapshot instead of a live scan would mean a stdlib change that
+/// declares `type Foo = ...` in one file and references `Foo` cross-file in
+/// another, landed in the *same* commit, bails before `generate_builtins_rs`
+/// ever runs — so `Foo` would never get persisted, and every subsequent
+/// `build-stdlib` run would repeat the exact same failure with no way out
+/// short of splitting the change across two builds or dropping
+/// `--warnings-as-errors`. A live pre-pass has direct access to every
+/// stdlib source file right now, so — unlike a consumer with no source
+/// access, which genuinely has no better option than the persisted
+/// snapshot — it never needs to fall back to stale data at all.
+///
+/// Fails loudly (`Result::Err`, not a silent skip) if a freshly-sliced
+/// declaration fails to re-parse via
+/// [`AliasRegistry::from_source_text`] — that would indicate a bug in the
+/// slicing logic itself (e.g. a span not covering a standalone-parseable
+/// declaration), not a tolerable degradation. Contrast
+/// `ClassHierarchy::generated_stdlib_aliases`'s defensive skip-on-failure,
+/// which exists only to tolerate a corrupted or hand-edited *generated*
+/// file at runtime, long after this build-time check already passed.
+fn collect_stdlib_alias_sources(source_files: &[Utf8PathBuf]) -> Result<Vec<AliasSource>> {
+    let mut all = Vec::new();
+    for file in source_files {
+        for text in extract_alias_source_snippets(file)? {
+            let info = AliasRegistry::from_source_text(&text).ok_or_else(|| {
+                miette::miette!(
+                    "Internal error: sliced type-alias declaration in '{file}' failed to \
+                     re-parse: {text:?}"
+                )
+            })?;
+            all.push(AliasSource { info, text });
+        }
+    }
+    Ok(all)
+}
+
+/// Extracts the `pre_loaded_aliases` value for
+/// [`ClassHierarchyContext`](crate::beam_compiler::ClassHierarchyContext)
+/// from [`collect_stdlib_alias_sources`]'s output, stamping every entry's
+/// `package` as `"stdlib"` (mirroring [`generate_class_entry`]'s hardcoded
+/// `package: Some("stdlib".into())` for generated `ClassInfo`).
+fn stdlib_pre_loaded_aliases(
+    alias_sources: &[AliasSource],
+) -> Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo> {
+    alias_sources
+        .iter()
+        .map(|a| {
+            let mut info = a.info.clone();
+            info.package = Some("stdlib".into());
+            info
+        })
+        .collect()
+}
+
+/// Extracts `alias_sources`' declaration texts sorted by alias *name* (not
+/// raw declaration text — `internal type Foo` would otherwise sort under
+/// "i", not alongside plain `type` entries), for
+/// [`generate_alias_sources_section`], which trusts its caller to have
+/// already sorted (see that function's doc).
+fn alias_source_texts_sorted_by_name(mut alias_sources: Vec<AliasSource>) -> Vec<String> {
+    alias_sources.sort_by(|a, b| a.info.name.cmp(&b.info.name));
+    alias_sources.into_iter().map(|a| a.text).collect()
+}
+
+/// Extracts every `type Name = ...` declaration in a `.bt` file as verbatim
+/// source text (BT-2935), one string per alias.
+///
+/// Slices each declaration's exact span out of the original source rather
+/// than reconstructing it from the parsed `TypeAnnotation` — see
+/// `generate_builtins_rs`'s doc for why. A file with no type-alias
+/// declarations (the common case) returns an empty `Vec`.
+fn extract_alias_source_snippets(path: &Utf8Path) -> Result<Vec<String>> {
+    let source = fs::read_to_string(path)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to read '{path}'"))?;
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
+    let (module, _diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+
+    Ok(AliasRegistry::extract_alias_infos(&module)
+        .iter()
+        .filter_map(|info| {
+            let start = usize::try_from(info.span.start()).ok()?;
+            let end = usize::try_from(info.span.end()).ok()?;
+            source.get(start..end).map(str::to_string)
+        })
+        .collect())
+}
+
 /// Check whether a `.bt` file contains only protocol definitions (no classes).
 ///
 /// Protocol-only files (e.g. `Printable.bt`) define structural protocols via
@@ -872,20 +1043,21 @@ fn format_stdlib_classes_list(class_metadata: &[ClassMeta], separator: &str) -> 
 /// Lists all modules and embeds class hierarchy metadata in the `env` section.
 /// The metadata is used by `beamtalk_stdlib` to load modules in dependency order.
 ///
-/// **No `type_aliases` env key (ADR 0108 Phase 8, BT-2903):** unlike
+/// **`type_aliases` env key (ADR 0108 Phase 8, BT-2903/BT-2938):** mirrors
 /// [`super::app_file::generate_app_file`] (the real `beamtalk build`
-/// pipeline, which now emits `{type_aliases, [...]}` via
-/// [`super::build::build_alias_metadata`]), this stdlib-specific writer does
-/// not — stdlib itself declares no `type` aliases yet. When the ADR's
-/// "Stdlib follow-through" work lands (`RestartStrategy`, `JsonValue`,
-/// tracked against BT-2618/BT-2827 in the ADR), this function needs the same
-/// `build_alias_metadata`/`format_type_aliases_entry` wiring, or
-/// `browse-type-aliases` will never show stdlib's own aliases.
+/// pipeline), which emits `{type_aliases, [...]}` via
+/// [`super::build::build_alias_metadata`] + [`app_file::format_type_aliases_entry`].
+/// Without this key, `application:get_env(beamtalk_stdlib, type_aliases)`
+/// returns `undefined` forever, so neither `browse-type-aliases`
+/// (`beamtalk_repl_ops_browse.erl`) nor the REPL/workspace session's
+/// alias-seeding path (`beamtalk_repl_state:new/3`, BT-2938) can ever learn
+/// stdlib's own `type Name = ...` declarations.
 fn generate_app_file(
     ebin_dir: &Utf8Path,
     source_files: &[Utf8PathBuf],
     class_metadata: &[ClassMeta],
     protocol_modules: &[String],
+    alias_metadata: &[app_file::AliasMetadata],
 ) -> Result<()> {
     let module_names: Vec<String> = source_files
         .iter()
@@ -908,6 +1080,11 @@ fn generate_app_file(
         .collect::<Vec<_>>()
         .join(", ");
 
+    // BT-2938: same `{type_aliases, [...]}` entry the ordinary `beamtalk
+    // build` pipeline emits (`app_file::format_type_aliases_entry`) — empty
+    // string (no key at all) when stdlib declares no aliases.
+    let type_aliases_entry = app_file::format_type_aliases_entry(alias_metadata);
+
     let version = env!("BEAMTALK_VERSION");
     let app_content = format!(
         "{{application, beamtalk_stdlib, [\n\
@@ -918,7 +1095,7 @@ fn generate_app_file(
          \x20   {{applications, [kernel, stdlib, beamtalk_runtime]}},\n\
          \x20   {{env, [\n\
          \x20       {{classes, [{classes_list}]}},\n\
-         \x20       {{protocol_modules, [{protocol_modules_list}]}}\n\
+         \x20       {{protocol_modules, [{protocol_modules_list}]}}{type_aliases_entry}\n\
          \x20   ]}}\n\
          ]}}.\n"
     );
@@ -935,11 +1112,13 @@ fn generate_app_file(
 /// Generate/update the `.app.src` file so rebar3 picks up the classes metadata.
 ///
 /// The `.app.src` uses `{modules, []}` (rebar3 auto-fills modules) but embeds
-/// the `{classes, [...]}` env for the runtime to read via `application:get_env`.
+/// the `{classes, [...]}` and (BT-2938) `{type_aliases, [...]}` envs for the
+/// runtime to read via `application:get_env`.
 fn generate_app_src_file(
     src_dir: &Utf8Path,
     class_metadata: &[ClassMeta],
     protocol_modules: &[String],
+    alias_metadata: &[app_file::AliasMetadata],
 ) -> Result<()> {
     // ADR 0070 Phase 4: Generate extended class hierarchy entries for env
     let classes_list = format_stdlib_classes_list(class_metadata, ",\n            ");
@@ -950,6 +1129,9 @@ fn generate_app_src_file(
         .map(|m| format!("'{m}'"))
         .collect::<Vec<_>>()
         .join(", ");
+
+    // BT-2938: see `generate_app_file`'s doc.
+    let type_aliases_entry = app_file::format_type_aliases_entry(alias_metadata);
 
     let app_src_content = format!(
         "{{application, beamtalk_stdlib, [\n\
@@ -962,7 +1144,7 @@ fn generate_app_src_file(
          \x20       {{classes, [\n\
          \x20           {classes_list}\n\
          \x20       ]}},\n\
-         \x20       {{protocol_modules, [{protocol_modules_list}]}}\n\
+         \x20       {{protocol_modules, [{protocol_modules_list}]}}{type_aliases_entry}\n\
          \x20   ]}}\n\
          ]}}.\n"
     );
@@ -980,11 +1162,54 @@ fn generate_app_src_file(
 const GENERATED_BUILTINS_PATH: &str =
     "crates/beamtalk-core/src/semantic_analysis/class_hierarchy/generated_builtins.rs";
 
-/// Generate the `generated_builtins.rs` file from parsed stdlib class metadata.
+/// Generate the `generated_builtins.rs` file from parsed stdlib class and
+/// type-alias metadata.
 ///
-/// This produces a Rust source file that defines `generated_builtin_classes()` and
-/// `is_generated_builtin_class()`, replacing the hand-written tables in `builtins.rs`.
-fn generate_builtins_rs(class_metadata: &[ClassMeta]) -> Result<()> {
+/// This produces a Rust source file that defines `generated_builtin_classes()`,
+/// `is_generated_builtin_class()`, and (BT-2935) `generated_stdlib_alias_sources()`,
+/// replacing the hand-written tables in `builtins.rs`.
+///
+/// **BT-2935 design decision — how a stdlib `type Name = ...` alias is
+/// persisted here:** `AliasInfo::annotation` is a full, recursive
+/// `TypeAnnotation` AST (unions, generics, `\`/`&`, nested `Box`es, `Span`s
+/// on every node) — nothing like `ClassInfo`/`MethodInfo`'s flat
+/// `Option<EcoString>` return/param-type strings, which this generator
+/// already emits as simple quoted-string literals (see
+/// `generate_method_list`). Three representations were considered:
+///
+/// 1. **Add `serde` derives to `TypeAnnotation`** (and transitively
+///    `Identifier`) and embed a serialized (e.g. JSON) blob. Rejected: both
+///    types are deep in the shared AST used by parser, semantic analysis,
+///    codegen, and the LSP — adding derives there is a real, ongoing
+///    maintenance surface (every future `TypeAnnotation` variant needs a
+///    serde-compatible shape) for a feature only this one generator needs.
+/// 2. **Hand-write a recursive Rust-literal-construction emitter** for
+///    `TypeAnnotation` (mirroring `generate_superclass_type_args`'s much
+///    simpler two-variant `SuperclassTypeArg` emitter). Rejected: it would
+///    duplicate the parser's own understanding of the AST's shape in a
+///    second, hand-maintained place that silently falls out of sync (no
+///    compile error) whenever `TypeAnnotation` gains a variant — the emitter
+///    would need a matching arm added by hand, and forgetting one would
+///    silently miscompile or panic on a real alias RHS instead of failing to
+///    build.
+/// 3. **Store each alias's verbatim declaration source text** (`"type
+///    RestartStrategy = #temporary | #transient | #permanent"`, sliced
+///    directly from the original `.bt` file via
+///    [`extract_alias_source_snippets`]) and re-parse it back into an
+///    `AliasInfo` at load time via
+///    [`beamtalk_core::semantic_analysis::alias_registry::AliasRegistry::from_source_text`].
+///    **Chosen.** Zero new derives, zero hand-maintained AST mirror — every
+///    consumer goes through the same lexer/parser the rest of the compiler
+///    already trusts, so a new `TypeAnnotation` variant just works the
+///    moment the parser supports it. The cost is a handful of cheap
+///    single-line re-lexes at `ClassHierarchy::generated_stdlib_aliases()`
+///    call time (today: 5 stdlib aliases) — negligible next to compiling
+///    every stdlib file in the same pipeline. This mirrors
+///    `MethodInfo::return_type`'s existing stringly-typed precedent in this
+///    very generator, just keeping the *whole* declaration instead of a bare
+///    type name (a bare name isn't enough to reconstruct a union/generic
+///    RHS).
+fn generate_builtins_rs(class_metadata: &[ClassMeta], alias_sources: &[String]) -> Result<()> {
     let mut code = String::new();
 
     code.push_str(
@@ -1043,6 +1268,10 @@ fn generate_builtins_rs(class_metadata: &[ClassMeta]) -> Result<()> {
     }
 
     code.push_str("    classes\n}\n");
+
+    // Generate generated_stdlib_alias_sources() (BT-2935) — see this
+    // function's own doc for the source-text-persisted-and-reparsed design.
+    generate_alias_sources_section(&mut code, alias_sources);
 
     let dest = Utf8PathBuf::from(GENERATED_BUILTINS_PATH);
 
@@ -1193,6 +1422,42 @@ fn generate_class_entry(code: &mut String, meta: &ClassMeta) {
     code.push_str("        },\n    );\n\n");
 }
 
+/// Emit the `generated_stdlib_alias_sources()` function body (BT-2935): one
+/// `&'static str` literal per stdlib type-alias declaration, in the order
+/// given by `alias_sources`.
+///
+/// Unlike [`generate_class_entry`]'s `sorted_meta` (sorted right before
+/// calling this file's class-entry generator), sorting alias entries by
+/// *name* requires the caller's already-reconstructed `AliasInfo` — plain
+/// declaration text alone would sort `internal type Foo = ...` under "i",
+/// not alongside `type` entries — so the caller (`build_stdlib()`) is
+/// responsible for passing `alias_sources` pre-sorted by name; this function
+/// only formats whatever order it's given.
+///
+/// See `generate_builtins_rs`'s doc for why each alias is persisted as its
+/// verbatim declaration source text rather than a literal-Rust
+/// `TypeAnnotation` construction or a `serde` blob.
+fn generate_alias_sources_section(code: &mut String, alias_sources: &[String]) {
+    code.push_str(
+        "\n/// Returns the verbatim `type Name = ...` declaration source text for every\n\
+         /// stdlib type alias (BT-2935), sorted by alias name.\n\
+         ///\n\
+         /// Auto-generated from `stdlib/src/*.bt` ASTs. See\n\
+         /// `crates/beamtalk-cli/src/commands/build_stdlib.rs`'s `generate_builtins_rs`\n\
+         /// doc for why source text (re-parsed by\n\
+         /// `AliasRegistry::from_source_text`), not a literal-Rust `TypeAnnotation`\n\
+         /// construction or a `serde` blob, was chosen to represent each alias here.\n\
+         pub(super) fn generated_stdlib_alias_sources() -> Vec<&'static str> {\n\
+         \x20   vec![\n",
+    );
+
+    for text in alias_sources {
+        let escaped = text.replace('\\', "\\\\").replace('"', "\\\"");
+        let _ = writeln!(code, "        \"{escaped}\",");
+    }
+    code.push_str("    ]\n}\n");
+}
+
 /// Emit `superclass_type_args: vec![...]` for a subclass's parent binding.
 ///
 /// Each entry is either a [`SuperclassTypeArg::ParamRef`] when the argument
@@ -1302,6 +1567,285 @@ mod tests {
         (temp, dir)
     }
 
+    /// BT-2935: End-to-end regression fixture for stdlib's own cross-file
+    /// type-alias resolution, proving the full round trip
+    /// `build_stdlib.rs` relies on: `collect_stdlib_alias_sources` (a live,
+    /// same-run pre-pass — *not* a seed from a previously-persisted
+    /// `generated_builtins.rs` snapshot, see that function's doc for why)
+    /// → `ClassHierarchyContext::pre_loaded_aliases` → cross-file resolution
+    /// during a real compile, in the very same run the alias was first
+    /// declared in. Mirrors the shape of `build.rs`'s
+    /// `test_cross_file_alias_resolution_no_false_type_mismatch` (BT-2928),
+    /// adapted to `build_stdlib`'s own manifest-less compile path
+    /// (`compile_source_with_bindings`, no package/`build_class_module_index`).
+    #[test]
+    fn test_cross_file_alias_resolution_seeds_pre_loaded_aliases() {
+        let (_temp, lib_dir) = temp_utf8_dir();
+
+        // File 1: declares the alias and a class with a method that returns
+        // it. `A` is a `Value` subclass so `A new` is instantiable (`Object`
+        // classes are abstract and not directly instantiable).
+        fs::write(
+            lib_dir.join("AliasFixtureA.bt"),
+            "type Direction = #north | #south | #east | #west\n\
+             Value subclass: AliasFixtureA\n  heading -> Direction => #north\n",
+        )
+        .unwrap();
+
+        // File 2: consumes A's alias-typed return value as an argument to a
+        // parameter typed with the spelled-out equivalent union — the exact
+        // shape of the real `RestartStrategy`/`Timeout` stdlib bug this issue
+        // fixes (BT-2923).
+        fs::write(
+            lib_dir.join("AliasFixtureB.bt"),
+            "Object subclass: AliasFixtureB\n  \
+             useDirection: d :: #north | #south | #east | #west => d\n  \
+             test => self useDirection: AliasFixtureA new heading\n",
+        )
+        .unwrap();
+
+        let file_a = lib_dir.join("AliasFixtureA.bt");
+        let file_b = lib_dir.join("AliasFixtureB.bt");
+
+        // Mirrors build_stdlib()'s own per-file class extraction.
+        let source_a = fs::read_to_string(&file_a).unwrap();
+        let tokens_a = beamtalk_core::source_analysis::lex_with_eof(&source_a);
+        let (module_a, _diags) = beamtalk_core::source_analysis::parse(tokens_a);
+        let pre_loaded_classes =
+            beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::extract_class_infos(
+                &module_a,
+            );
+        assert_eq!(pre_loaded_classes.len(), 1, "expected one class in file A");
+
+        // The real function under test, called the way `build_stdlib()`
+        // actually calls it — over *all* source files in one pass, before
+        // any compile happens — proving this is a live scan (file A's alias
+        // is seeded immediately, in the same call, with no dependency on any
+        // prior "generated" snapshot existing).
+        let alias_sources =
+            collect_stdlib_alias_sources(&[file_a.clone(), file_b.clone()]).unwrap();
+        assert_eq!(
+            alias_sources.len(),
+            1,
+            "expected exactly one alias declaration, from file A (file B declares none)"
+        );
+        assert!(alias_sources[0].text.starts_with("type Direction ="));
+        assert_eq!(alias_sources[0].info.name.as_str(), "Direction");
+
+        let pre_loaded_aliases: Vec<_> = alias_sources
+            .iter()
+            .map(|a| {
+                let mut info = a.info.clone();
+                info.package = Some("stdlib".into());
+                info
+            })
+            .collect();
+        assert_eq!(pre_loaded_aliases.len(), 1);
+        assert_eq!(pre_loaded_aliases[0].name.as_str(), "Direction");
+
+        let options = beamtalk_core::CompilerOptions {
+            stdlib_mode: true,
+            allow_primitives: false,
+            workspace_mode: false,
+            ..Default::default()
+        };
+        let bindings = beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new();
+
+        // Compile B with cross-file class info AND cross-file alias info —
+        // should produce no "Argument ... expects" type-mismatch warning.
+        let core_file = lib_dir.join("b.core");
+        let diagnostics = compile_source_with_bindings(
+            &file_b,
+            "bt@stdlib@alias_fixture_b",
+            &core_file,
+            &options,
+            &bindings,
+            &CompileContext {
+                hierarchy: ClassHierarchyContext {
+                    pre_loaded_classes: pre_loaded_classes.clone(),
+                    pre_loaded_aliases: pre_loaded_aliases.clone(),
+                    ..ClassHierarchyContext::default()
+                },
+                ..CompileContext::default()
+            },
+            None,
+        )
+        .expect("cross-file alias-typed argument should compile without errors");
+
+        assert!(
+            diagnostics.iter().all(|d| !d.message.contains("Argument")),
+            "expected no false argument-type-mismatch diagnostic once cross-file \
+             aliases are seeded, got: {diagnostics:?}"
+        );
+
+        // Negative control: WITHOUT pre_loaded_aliases (but still with
+        // pre_loaded_classes), the same compile reproduces the pre-BT-2935
+        // false positive — proving this test actually exercises the fix
+        // rather than a scenario that never warned.
+        let core_file_unfixed = lib_dir.join("b_unfixed.core");
+        let diagnostics_unfixed = compile_source_with_bindings(
+            &file_b,
+            "bt@stdlib@alias_fixture_b_unfixed",
+            &core_file_unfixed,
+            &options,
+            &bindings,
+            &CompileContext {
+                hierarchy: ClassHierarchyContext {
+                    pre_loaded_classes,
+                    // No pre_loaded_aliases — reproduces the pre-fix gap.
+                    ..ClassHierarchyContext::default()
+                },
+                ..CompileContext::default()
+            },
+            None,
+        )
+        .expect("compile should still succeed even with the false-positive warning");
+
+        assert!(
+            diagnostics_unfixed
+                .iter()
+                .any(|d| d.message.contains("Argument")),
+            "expected the negative control (no pre_loaded_aliases) to reproduce \
+             the pre-BT-2935 false positive, got: {diagnostics_unfixed:?}"
+        );
+    }
+
+    #[test]
+    fn test_extract_alias_source_snippets_captures_verbatim_declaration() {
+        let (_temp, lib_dir) = temp_utf8_dir();
+        let file = lib_dir.join("Fixture.bt");
+        fs::write(
+            &file,
+            "type RestartStrategy = #temporary | #transient | #permanent\n\
+             Object subclass: Fixture\n  noop => nil\n",
+        )
+        .unwrap();
+
+        let snippets = extract_alias_source_snippets(&file).unwrap();
+        assert_eq!(snippets.len(), 1);
+        assert_eq!(
+            snippets[0],
+            "type RestartStrategy = #temporary | #transient | #permanent"
+        );
+
+        // Round-trips through the read side of the generated table.
+        let info = AliasRegistry::from_source_text(&snippets[0])
+            .expect("verbatim declaration text should re-parse");
+        assert_eq!(info.name.as_str(), "RestartStrategy");
+        assert!(!info.is_internal);
+    }
+
+    #[test]
+    fn test_extract_alias_source_snippets_captures_internal_modifier() {
+        let (_temp, lib_dir) = temp_utf8_dir();
+        let file = lib_dir.join("Fixture.bt");
+        fs::write(&file, "internal type Scratch = Integer\n").unwrap();
+
+        let snippets = extract_alias_source_snippets(&file).unwrap();
+        assert_eq!(snippets, vec!["internal type Scratch = Integer"]);
+
+        let info = AliasRegistry::from_source_text(&snippets[0]).unwrap();
+        assert!(
+            info.is_internal,
+            "the `internal` modifier should survive the source-text round trip"
+        );
+    }
+
+    #[test]
+    fn test_extract_alias_source_snippets_no_aliases() {
+        let (_temp, lib_dir) = temp_utf8_dir();
+        let file = lib_dir.join("Fixture.bt");
+        fs::write(&file, "Object subclass: Fixture\n  noop => nil\n").unwrap();
+
+        assert!(extract_alias_source_snippets(&file).unwrap().is_empty());
+    }
+
+    /// Pass 2 (system review) edge case: a declaration that spans multiple
+    /// source lines (a long union wrapped for readability) embeds a literal
+    /// newline in the sliced snippet. Rust string literals accept a raw
+    /// newline verbatim (no escaping needed — `generate_alias_sources_section`
+    /// only escapes `\` and `"`), so this must still round-trip cleanly
+    /// through generation and `AliasRegistry::from_source_text` reparse.
+    #[test]
+    fn test_extract_alias_source_snippets_handles_multiline_declaration() {
+        let (_temp, lib_dir) = temp_utf8_dir();
+        let file = lib_dir.join("Fixture.bt");
+        fs::write(
+            &file,
+            "type Wrapped =\n    #a\n    | #b\n    | #c\n\nObject subclass: Fixture\n  noop => nil\n",
+        )
+        .unwrap();
+
+        let snippets = extract_alias_source_snippets(&file).unwrap();
+        assert_eq!(snippets.len(), 1);
+        assert!(
+            snippets[0].contains('\n'),
+            "expected the multiline declaration to be captured verbatim, got: {:?}",
+            snippets[0]
+        );
+
+        // Generation must produce valid Rust even with an embedded newline.
+        let mut code = String::new();
+        generate_alias_sources_section(&mut code, &snippets);
+        assert!(code.contains("type Wrapped ="));
+
+        // And the read side must still reconstruct the alias correctly.
+        let info = AliasRegistry::from_source_text(&snippets[0])
+            .expect("a multiline declaration should still re-parse");
+        assert_eq!(info.name.as_str(), "Wrapped");
+    }
+
+    #[test]
+    fn test_generate_alias_sources_section_empty() {
+        let mut code = String::new();
+        generate_alias_sources_section(&mut code, &[]);
+        assert!(
+            code.contains("pub(super) fn generated_stdlib_alias_sources() -> Vec<&'static str> {"),
+            "Should always emit the function signature. Got: {code}"
+        );
+        assert!(
+            code.contains("vec![\n    ]"),
+            "Should emit an empty vec when there are no aliases. Got: {code}"
+        );
+    }
+
+    #[test]
+    fn test_generate_alias_sources_section_preserves_caller_order() {
+        // Sorting by alias *name* requires the caller's `AliasInfo` (plain
+        // declaration text alone would put `internal type ...` out of order
+        // — see this function's doc) — so it emits entries in whatever order
+        // it's given, trusting the caller (`build_stdlib()`) to have already
+        // sorted by name.
+        let mut code = String::new();
+        generate_alias_sources_section(
+            &mut code,
+            &[
+                "type Zebra = Integer".to_string(),
+                "type Alpha = String".to_string(),
+            ],
+        );
+
+        let alpha_pos = code.find("type Alpha").unwrap();
+        let zebra_pos = code.find("type Zebra").unwrap();
+        assert!(
+            zebra_pos < alpha_pos,
+            "Should preserve caller order (Zebra before Alpha here), not re-sort. Got: {code}"
+        );
+    }
+
+    #[test]
+    fn test_generate_alias_sources_section_escapes_embedded_quotes() {
+        // Not valid Beamtalk syntax — this only exercises the generator's
+        // Rust-string-literal escaping, not the parser.
+        let mut code = String::new();
+        generate_alias_sources_section(&mut code, &[r#"contains "a quote""#.to_string()]);
+
+        assert!(
+            code.contains(r#"contains \"a quote\""#),
+            "Embedded quotes should be escaped for the Rust string literal. Got: {code}"
+        );
+    }
+
     #[test]
     fn test_find_stdlib_files() {
         let (_temp, lib_dir) = temp_utf8_dir();
@@ -1391,7 +1935,7 @@ mod tests {
             Utf8PathBuf::from("lib/String.bt"),
         ];
 
-        generate_app_file(&ebin_dir, &source_files, &[], &[]).unwrap();
+        generate_app_file(&ebin_dir, &source_files, &[], &[], &[]).unwrap();
 
         let app_file = ebin_dir.join("beamtalk_stdlib.app");
         assert!(app_file.exists());
@@ -1407,10 +1951,13 @@ mod tests {
     fn test_generate_app_file_empty() {
         let (_temp, ebin_dir) = temp_utf8_dir();
 
-        generate_app_file(&ebin_dir, &[], &[], &[]).unwrap();
+        generate_app_file(&ebin_dir, &[], &[], &[], &[]).unwrap();
 
         let content = fs::read_to_string(ebin_dir.join("beamtalk_stdlib.app")).unwrap();
         assert!(content.contains("{modules, []}"));
+        // BT-2938: no type-alias metadata => no `type_aliases` env key at all
+        // (matches `format_type_aliases_entry`'s empty-input contract).
+        assert!(!content.contains("type_aliases"));
     }
 
     #[test]
@@ -1422,7 +1969,7 @@ mod tests {
             Utf8PathBuf::from("lib/my-bad-name.bt"),
         ];
 
-        let result = generate_app_file(&ebin_dir, &source_files, &[], &[]);
+        let result = generate_app_file(&ebin_dir, &source_files, &[], &[], &[]);
         assert!(result.is_err());
     }
 
@@ -1433,12 +1980,36 @@ mod tests {
         let source_files = vec![Utf8PathBuf::from("lib/Integer.bt")];
         let protocol_modules = vec!["bt@stdlib@printable".to_string()];
 
-        generate_app_file(&ebin_dir, &source_files, &[], &protocol_modules).unwrap();
+        generate_app_file(&ebin_dir, &source_files, &[], &protocol_modules, &[]).unwrap();
 
         let content = fs::read_to_string(ebin_dir.join("beamtalk_stdlib.app")).unwrap();
         assert!(
             content.contains("{protocol_modules, ['bt@stdlib@printable']}"),
             "Should contain protocol_modules env key. Got:\n{content}"
+        );
+    }
+
+    #[test]
+    fn test_generate_app_file_with_type_aliases() {
+        let (_temp, ebin_dir) = temp_utf8_dir();
+
+        let source_files = vec![Utf8PathBuf::from("lib/Supervisor.bt")];
+        let alias_metadata = vec![app_file::AliasMetadata {
+            name: "SupervisionStrategy".to_string(),
+            expansion: "#oneForOne | #oneForAll | #restForOne".to_string(),
+            doc: None,
+            source_file: "lib/Supervisor.bt".to_string(),
+            internal: false,
+        }];
+
+        generate_app_file(&ebin_dir, &source_files, &[], &[], &alias_metadata).unwrap();
+
+        let content = fs::read_to_string(ebin_dir.join("beamtalk_stdlib.app")).unwrap();
+        assert!(
+            content.contains("{type_aliases, [")
+                && content.contains("name => 'SupervisionStrategy'")
+                && content.contains("expansion => \"#oneForOne | #oneForAll | #restForOne\""),
+            "Should contain type_aliases env key with the alias entry. Got:\n{content}"
         );
     }
 

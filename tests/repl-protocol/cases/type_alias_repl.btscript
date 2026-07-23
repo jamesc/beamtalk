@@ -7,7 +7,10 @@
 // hot-reload re-check trigger verified end-to-end from a live REPL session
 // (ADR 0108 Phase 10, BT-2905 — the epic's required final E2E validation
 // phase; per CLAUDE.md, "EUnit and BUnit alone are insufficient for
-// user-facing features").
+// user-facing features"). The very first section below (BT-2938) instead
+// proves a *stdlib-declared* alias resolves in a session that never
+// declared it at all — the gap this file's other sections don't cover,
+// since every other section's aliases are typed at the REPL first.
 //
 // REPL display-value decision (flagged for maintainer sign-off — see the
 // PR description and CLAUDE.md's REPL-output rule): a `type` declaration
@@ -30,6 +33,27 @@
 // and `hover_resolves_alias_through_project_wide_registry` in
 // crates/beamtalk-core/src/queries/hover_provider.rs and
 // crates/beamtalk-core/src/language_service/mod.rs respectively (BT-2901).
+
+// ===========================================================================
+// BT-2938: a *stdlib-declared* alias (`type SupervisionStrategy = ...`,
+// `stdlib/src/Supervisor.bt`) resolves in this fresh session — which has
+// not typed a single `type` declaration yet — for both `:help` and a
+// `::`-typed local, exactly the way a compiled-in stdlib *class* already
+// resolves out of the box. Before this issue, `:help SupervisionStrategy`
+// failed with `Class 'SupervisionStrategy' not found` (the session's
+// alias table only ever tracked session-declared aliases). The `__`
+// wildcards skip the blank-line-delimited doc-comment block (present here,
+// unlike `Direction` below) without pinning its exact line-wrapping; the
+// `Declared in: stdlib` provenance line (distinct from `Declared in: REPL`
+// below) is this issue's own REPL-output convention, flagged in the PR
+// description for maintainer sign-off per CLAUDE.md's REPL-output rule.
+// ===========================================================================
+
+:help SupervisionStrategy
+// => type SupervisionStrategy = #oneForOne | #oneForAll | #restForOne__OTP supervisor restart strategy__Declared in: stdlib
+
+sup :: SupervisionStrategy := #oneForOne
+// => oneForOne
 
 // ===========================================================================
 // Declaring a type alias directly at the REPL echoes its name.

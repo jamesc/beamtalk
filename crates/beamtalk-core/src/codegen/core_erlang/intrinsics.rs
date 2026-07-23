@@ -27,6 +27,16 @@ use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_ana
 use crate::ast::{Block, Expression, MessageSelector, WellKnownSelector};
 use crate::docvec;
 
+/// Hint shown when a structural intrinsic reached via generic dispatch
+/// (`perform:`/`perform:withArguments:`) can't tell — from an
+/// `erlang:is_function/2` arity check alone — whether it's looking at a
+/// genuine Tier 2 (stateful, ADR-0041) block or a Tier 1 block called with
+/// the wrong argument count. Shared by BT-2812's `value*` fallback, BT-2908's
+/// loop/exception-handling fallbacks (`while_loops.rs`, `exception_handling.rs`),
+/// and BT-2888's List/Collection guard (which uses its own, differently-worded
+/// variant — see `generate_stateful_block_guard`).
+pub(in crate::codegen::core_erlang) const STATEFUL_BLOCK_DISPATCH_HINT: &str = "Wrong argument count, or the block captures mutable state and must be invoked directly instead of via perform:";
+
 /// Returns the arity of a block expression, or `None` if the expression is not a block literal.
 fn block_arity(expr: &Expression) -> Option<usize> {
     match expr {
@@ -259,6 +269,16 @@ impl CoreErlangGenerator {
             let (preamble, mut docs) = self.capture_subexpr_sequence(&[receiver], "ValRecv")?;
             let recv_doc = docs.remove(0);
             let recv_var = self.fresh_temp_var("ValRecv");
+            // BT-2914: arity-discriminate before applying — a Tier 2
+            // (stateful) zero-arg block is an arity-1 fun whose `StateAcc`
+            // this call site cannot supply; raise the clear
+            // `stateful_block_dispatch` error instead of a raw `badarity`
+            // (see `generate_value_keyword_guard`'s matching branch).
+            let stateful_branch = self.generate_stateful_block_dispatch_error(
+                "value",
+                "Block",
+                "Wrong argument count, or the block captures mutable state and must be invoked directly instead of via perform:/dynamic dispatch",
+            );
             let call_doc = docvec![
                 "let ",
                 leaf::var(recv_var.clone()),
@@ -266,11 +286,23 @@ impl CoreErlangGenerator {
                 recv_doc,
                 " in case call 'erlang':'is_function'(",
                 leaf::var(recv_var.clone()),
+                ", 0) of 'true' when 'true' -> apply ",
+                leaf::var(recv_var.clone()),
+                " () 'false' when 'true' -> case call 'erlang':'is_function'(",
+                leaf::var(recv_var.clone()),
+                ", 1) of 'true' when 'true' -> ",
+                stateful_branch,
+                " 'false' when 'true' -> case call 'erlang':'is_function'(",
+                leaf::var(recv_var.clone()),
+                // Only arity >= 2 funs reach this branch (0 and 1 were ruled
+                // out above), so this apply always badarity-crashes — the
+                // pre-BT-2914 behaviour for wrong-arity plain functions,
+                // preserved deliberately.
                 ") of 'true' when 'true' -> apply ",
                 leaf::var(recv_var.clone()),
                 " () 'false' when 'true' -> call 'beamtalk_primitive':'send'(",
                 leaf::var(recv_var),
-                ", 'value', []) end",
+                ", 'value', []) end end end",
             ];
             self.finalize_dispatch_with_preamble(preamble, call_doc, "ValRes")
         };
@@ -914,6 +946,18 @@ impl CoreErlangGenerator {
     }
 
     /// This mirrors the runtime guard emitted for the unary `value` case (BT-335).
+    ///
+    /// BT-2914: the function branch discriminates arity before applying. A
+    /// Tier 2 (stateful, ADR-0041) block compiles to an (N+1)-arg fun expecting
+    /// a live `StateAcc` this statically-unknown call site cannot supply — it
+    /// reaches here when a stateful block flows through generic dispatch into a
+    /// self-hosted method's block parameter (e.g. `perform: #eachWithIndex:`,
+    /// whose Collection body invokes `block value:value:`). Applying it N-ary
+    /// used to crash with a raw `badarity`; now it raises the same clear
+    /// `stateful_block_dispatch` error BT-2812/BT-2888 established. Any other
+    /// arity mismatch keeps the pre-existing `badarity` behaviour (the plain
+    /// apply in the fallthrough branch), and non-function receivers still fall
+    /// back to `beamtalk_primitive:send/3`.
     fn generate_value_keyword_guard(
         &mut self,
         receiver: &Expression,
@@ -945,8 +989,33 @@ impl CoreErlangGenerator {
 
         let send_list = docvec!["[", join(arg_var_docs, &Document::Str(", ")), "]"];
 
+        // BT-2914: same hedged hint as `generate_stateful_block_guard` —
+        // `is_function/2` can't distinguish a genuine Tier 2 block from a pure
+        // fun called with one argument too few, and the block can arrive here
+        // through any dynamic dispatch, not just `perform:`.
+        let stateful_branch = self.generate_stateful_block_dispatch_error(
+            selector_name,
+            "Block",
+            "Wrong argument count, or the block captures mutable state and must be invoked directly instead of via perform:/dynamic dispatch",
+        );
+        let arity = arguments.len();
+
         let case_doc = docvec![
             "case call 'erlang':'is_function'(",
+            leaf::var(recv_var.clone()),
+            ", ",
+            leaf::int_lit(i64::try_from(arity).unwrap_or(i64::MAX)),
+            ") of 'true' when 'true' -> apply ",
+            leaf::var(recv_var.clone()),
+            " (",
+            apply_args.clone(),
+            ") 'false' when 'true' -> case call 'erlang':'is_function'(",
+            leaf::var(recv_var.clone()),
+            ", ",
+            leaf::int_lit(i64::try_from(arity.saturating_add(1)).unwrap_or(i64::MAX)),
+            ") of 'true' when 'true' -> ",
+            stateful_branch,
+            " 'false' when 'true' -> case call 'erlang':'is_function'(",
             leaf::var(recv_var.clone()),
             ") of 'true' when 'true' -> apply ",
             leaf::var(recv_var.clone()),
@@ -958,7 +1027,7 @@ impl CoreErlangGenerator {
             leaf::atom(selector_name.to_string()),
             ", ",
             send_list,
-            ") end",
+            ") end end end",
         ];
 
         // BT-1942: If any sub-expression produced an open scope from a class
@@ -1239,33 +1308,11 @@ impl CoreErlangGenerator {
             &Document::Str(", "),
         );
 
-        let error_base = self.fresh_temp_var("Err");
-        let error_sel = self.fresh_temp_var("Err");
-        let error_hint = self.fresh_temp_var("Err");
-        let hint = leaf::binary_lit(
-            "Wrong argument count, or the block captures mutable state and must be invoked directly instead of via perform:",
+        let stateful_branch = self.generate_stateful_block_dispatch_error(
+            real_selector,
+            class_name,
+            STATEFUL_BLOCK_DISPATCH_HINT,
         );
-        let stateful_branch = docvec![
-            "let ",
-            leaf::var(error_base.clone()),
-            " = call 'beamtalk_error':'new'('stateful_block_dispatch', ",
-            leaf::atom(class_name),
-            ") in let ",
-            leaf::var(error_sel.clone()),
-            " = call 'beamtalk_error':'with_selector'(",
-            leaf::var(error_base),
-            ", ",
-            leaf::atom(real_selector),
-            ") in let ",
-            leaf::var(error_hint.clone()),
-            " = call 'beamtalk_error':'with_hint'(",
-            leaf::var(error_sel),
-            ", ",
-            hint,
-            ") in call 'beamtalk_error':'raise'(",
-            leaf::var(error_hint),
-            ")",
-        ];
 
         let runtime_module =
             super::primitive_bindings::PrimitiveBindingTable::runtime_module_for_class(class_name);
@@ -1299,6 +1346,46 @@ impl CoreErlangGenerator {
             " <'false'> when 'true' -> ",
             placeholder_branch,
             " end end",
+        ]
+    }
+
+    /// Shared `#beamtalk_error{kind = stateful_block_dispatch}` construction used
+    /// by every structural-intrinsic fallback that can't tell (from an
+    /// `erlang:is_function/2` arity check alone) whether it's looking at a
+    /// genuine Tier 2 (stateful, ADR-0041) block or a Tier 1 block called with
+    /// the wrong argument count — see `generate_block_value_structural_fallback`'s
+    /// doc comment above for why the hint is deliberately hedged rather than
+    /// asserting a specific cause.
+    pub(in crate::codegen::core_erlang) fn generate_stateful_block_dispatch_error(
+        &mut self,
+        real_selector: &str,
+        class_name: &str,
+        hint_text: &str,
+    ) -> Document<'static> {
+        let error_base = self.fresh_temp_var("Err");
+        let error_sel = self.fresh_temp_var("Err");
+        let error_hint = self.fresh_temp_var("Err");
+        let hint = leaf::binary_lit(hint_text);
+        docvec![
+            "let ",
+            leaf::var(error_base.clone()),
+            " = call 'beamtalk_error':'new'('stateful_block_dispatch', ",
+            leaf::atom(class_name),
+            ") in let ",
+            leaf::var(error_sel.clone()),
+            " = call 'beamtalk_error':'with_selector'(",
+            leaf::var(error_base),
+            ", ",
+            leaf::atom(real_selector),
+            ") in let ",
+            leaf::var(error_hint.clone()),
+            " = call 'beamtalk_error':'with_hint'(",
+            leaf::var(error_sel),
+            ", ",
+            hint,
+            ") in call 'beamtalk_error':'raise'(",
+            leaf::var(error_hint),
+            ")",
         ]
     }
 
@@ -1337,33 +1424,17 @@ impl CoreErlangGenerator {
         class_name: &str,
         tier1_doc: Document<'static>,
     ) -> Document<'static> {
-        let error_base = self.fresh_temp_var("Err");
-        let error_sel = self.fresh_temp_var("Err");
-        let error_hint = self.fresh_temp_var("Err");
-        let hint = leaf::binary_lit(
+        // Hint text deliberately differs from `STATEFUL_BLOCK_DISPATCH_HINT`
+        // ("...via perform:") — List/Collection selectors are ordinary
+        // methods, reachable through *any* dynamic dispatch (not just
+        // `perform:`/`perform:withArguments:` the way a structural intrinsic
+        // like `value*`/`whileTrue:`/`on:do:` is), so the hint says
+        // "perform:/dynamic dispatch" to cover both.
+        let stateful_branch = self.generate_stateful_block_dispatch_error(
+            real_selector,
+            class_name,
             "Wrong argument count, or the block captures mutable state and must be invoked directly instead of via perform:/dynamic dispatch",
         );
-        let stateful_branch = docvec![
-            "let ",
-            leaf::var(error_base.clone()),
-            " = call 'beamtalk_error':'new'('stateful_block_dispatch', ",
-            leaf::atom(class_name),
-            ") in let ",
-            leaf::var(error_sel.clone()),
-            " = call 'beamtalk_error':'with_selector'(",
-            leaf::var(error_base),
-            ", ",
-            leaf::atom(real_selector),
-            ") in let ",
-            leaf::var(error_hint.clone()),
-            " = call 'beamtalk_error':'with_hint'(",
-            leaf::var(error_sel),
-            ", ",
-            hint,
-            ") in call 'beamtalk_error':'raise'(",
-            leaf::var(error_hint),
-            ")",
-        ];
 
         docvec![
             "case call 'erlang':'is_function'(",

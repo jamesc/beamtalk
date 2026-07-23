@@ -50,6 +50,8 @@ Module {
                     },
                 ],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Assignment {
                 target: Identifier(
@@ -96,6 +98,8 @@ Module {
                                         comments: CommentAttachment {
                                             leading: [],
                                             trailing: None,
+                                            leading_blank_line: false,
+                                            blank_line_after_comments: false,
                                         },
                                         expression: Literal(
                                             Symbol(
@@ -134,6 +138,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Error {
                 message: "Unexpected token: expected expression, found ,",
@@ -148,6 +154,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Error {
                 message: "Unexpected token: expected expression, found ]",
@@ -162,6 +170,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Error {
                 message: "Unexpected token: expected expression, found ]",
@@ -176,6 +186,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Error {
                 message: "Unexpected token: expected expression, found ]",
@@ -190,6 +202,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Error {
                 message: "Unexpected token: expected expression, found ]",
@@ -204,6 +218,8 @@ Module {
             comments: CommentAttachment {
                 leading: [],
                 trailing: None,
+                leading_blank_line: false,
+                blank_line_after_comments: false,
             },
             expression: Error {
                 message: "Unexpected token: expected expression, found ]",

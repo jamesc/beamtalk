@@ -9,7 +9,7 @@
 //! with both pure and state-threading variants.
 
 use super::super::document::{Document, join, leaf};
-use super::super::intrinsics::validate_block_arity_exact;
+use super::super::intrinsics::{STATEFUL_BLOCK_DISPATCH_HINT, validate_block_arity_exact};
 use super::super::{CoreErlangGenerator, Result, block_analysis};
 use super::{BodyKind, ThreadingPlan};
 use crate::ast::{Block, Expression};
@@ -738,6 +738,177 @@ impl CoreErlangGenerator {
             exit_stateacc,
             " end ",
         ]);
+    }
+
+    /// BT-2908: Generates the fallback method body for `whileTrue`/`whileFalse`
+    /// — Block's `whileTrue:`/`whileFalse:`. Reached only when something
+    /// bypasses the call-site interception these selectors normally get (e.g.
+    /// `perform:`/`perform:withArguments:`) — the same gap BT-2812 closed for
+    /// Block's `value*` family. See
+    /// `generate_block_value_structural_fallback`'s doc comment for the full
+    /// rationale (Tier 1/Tier 2 discrimination via `erlang:is_function/2`
+    /// arity, the arity-ambiguity caveat, and the `stateful_block_dispatch`
+    /// error shape).
+    ///
+    /// Unlike `value*` (a single receiver to discriminate), both the
+    /// *condition* (`Self`) and the *body* (`current_method_params[0]`) must
+    /// independently be Tier 1 for the generic loop below to be correct —
+    /// either being Tier 2 raises `stateful_block_dispatch`, mirroring
+    /// `generate_block_value_structural_fallback`'s single-receiver case.
+    pub(in crate::codegen::core_erlang) fn generate_while_structural_fallback(
+        &mut self,
+        intrinsic_name: &str,
+        negate: bool,
+        real_selector: &str,
+        class_name: &str,
+    ) -> Document<'static> {
+        let self_var = if self.in_class_method() {
+            "ClassSelf"
+        } else {
+            "Self"
+        };
+        let body_param = self
+            .current_method_params
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "BodyBlock".to_string());
+
+        let runtime_module =
+            super::super::primitive_bindings::PrimitiveBindingTable::runtime_module_for_class(
+                class_name,
+            );
+        let placeholder_branch = docvec![
+            "call ",
+            leaf::atom(runtime_module),
+            ":'dispatch'(",
+            leaf::atom(intrinsic_name),
+            ", [",
+            leaf::var(body_param.clone()),
+            "], ",
+            Document::Str(self_var),
+            ")",
+        ];
+
+        let (continue_atom, exit_atom) = if negate {
+            ("'false'", "'true'")
+        } else {
+            ("'true'", "'false'")
+        };
+        let loop_fn = self.fresh_temp_var("Loop");
+        let tier1_loop = docvec![
+            "letrec ",
+            leaf::fname(loop_fn.clone(), 0),
+            " = fun () -> case apply ",
+            Document::Str(self_var),
+            " () of <",
+            continue_atom,
+            "> when 'true' -> let _ = apply ",
+            leaf::var(body_param.clone()),
+            " () in apply ",
+            leaf::fname(loop_fn.clone(), 0),
+            " () <",
+            exit_atom,
+            "> when 'true' -> 'nil' end in apply ",
+            leaf::fname(loop_fn, 0),
+            " ()",
+        ];
+
+        let body_stateful_error = self.generate_stateful_block_dispatch_error(
+            real_selector,
+            class_name,
+            STATEFUL_BLOCK_DISPATCH_HINT,
+        );
+        let body_tier_check = docvec![
+            "case call 'erlang':'is_function'(",
+            leaf::var(body_param.clone()),
+            ", 0) of <'true'> when 'true' -> ",
+            tier1_loop,
+            " <'false'> when 'true' -> case call 'erlang':'is_function'(",
+            leaf::var(body_param),
+            ", 1) of <'true'> when 'true' -> ",
+            body_stateful_error,
+            " <'false'> when 'true' -> ",
+            placeholder_branch.clone(),
+            " end end",
+        ];
+
+        let self_stateful_error = self.generate_stateful_block_dispatch_error(
+            real_selector,
+            class_name,
+            STATEFUL_BLOCK_DISPATCH_HINT,
+        );
+        docvec![
+            "case call 'erlang':'is_function'(",
+            Document::Str(self_var),
+            ", 0) of <'true'> when 'true' -> ",
+            body_tier_check,
+            " <'false'> when 'true' -> case call 'erlang':'is_function'(",
+            Document::Str(self_var),
+            ", 1) of <'true'> when 'true' -> ",
+            self_stateful_error,
+            " <'false'> when 'true' -> ",
+            placeholder_branch,
+            " end end",
+        ]
+    }
+
+    /// BT-2908: Generates the fallback method body for `repeat` — Block's
+    /// `repeat`. See `generate_while_structural_fallback` for the general
+    /// rationale; `repeat` only has a receiver to discriminate (no argument
+    /// block — `[self processNextMessage] repeat` takes no arguments).
+    pub(in crate::codegen::core_erlang) fn generate_repeat_structural_fallback(
+        &mut self,
+        class_name: &str,
+    ) -> Document<'static> {
+        let self_var = if self.in_class_method() {
+            "ClassSelf"
+        } else {
+            "Self"
+        };
+
+        let runtime_module =
+            super::super::primitive_bindings::PrimitiveBindingTable::runtime_module_for_class(
+                class_name,
+            );
+        let placeholder_branch = docvec![
+            "call ",
+            leaf::atom(runtime_module),
+            ":'dispatch'('repeat', [], ",
+            Document::Str(self_var),
+            ")",
+        ];
+
+        let loop_fn = self.fresh_temp_var("Loop");
+        let tier1_loop = docvec![
+            "letrec ",
+            leaf::fname(loop_fn.clone(), 0),
+            " = fun () -> let _ = apply ",
+            Document::Str(self_var),
+            " () in apply ",
+            leaf::fname(loop_fn.clone(), 0),
+            " () in apply ",
+            leaf::fname(loop_fn, 0),
+            " ()",
+        ];
+
+        let stateful_error = self.generate_stateful_block_dispatch_error(
+            "repeat",
+            class_name,
+            STATEFUL_BLOCK_DISPATCH_HINT,
+        );
+        docvec![
+            "case call 'erlang':'is_function'(",
+            Document::Str(self_var),
+            ", 0) of <'true'> when 'true' -> ",
+            tier1_loop,
+            " <'false'> when 'true' -> case call 'erlang':'is_function'(",
+            Document::Str(self_var),
+            ", 1) of <'true'> when 'true' -> ",
+            stateful_error,
+            " <'false'> when 'true' -> ",
+            placeholder_branch,
+            " end end",
+        ]
     }
 
     /// Appends the initial call to a hybrid loop function.

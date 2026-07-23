@@ -1278,11 +1278,15 @@ impl CoreErlangGenerator {
             let cv = self.current_class_var();
             let comma = if arguments.is_empty() { "" } else { ", " };
 
+            // BT-1408 follow-up: apply the same atom-length guard used by the
+            // keyword-constructor path below — long selectors must be hashed to
+            // stay within Erlang's 255-char atom limit.
+            let safe_fn = super::selector_mangler::safe_class_method_fn_name(&selector_atom);
             let call_doc = docvec![
                 "call ",
                 leaf::atom(module),
                 ":",
-                leaf::atom(format!("class_{selector_atom}")),
+                leaf::atom(safe_fn),
                 "(ClassSelf, ",
                 leaf::var(cv),
                 comma,

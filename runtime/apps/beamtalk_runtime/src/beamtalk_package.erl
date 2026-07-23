@@ -11,8 +11,14 @@ Package reflection for Beamtalk.
 Provides runtime access to package metadata backed by OTP application
 environment and the `bt@{pkg}@{class}` BEAM module naming convention.
 
-Packages map 1:1 to OTP applications whose env contains a `classes` key
-(the metadata format defined by ADR 0070 Phase 4).
+Packages map 1:1 to OTP applications whose env contains a non-empty
+`classes` key (the metadata format defined by ADR 0070 Phase 4) *or* a
+non-empty `type_aliases` key (ADR 0108 Phase 8) — the latter covers a
+"types-only" package with `type` alias declarations and zero classes
+(BT-2915), which has no class entry to derive a package name from, so its
+name is instead taken from the OTP application's own atom name (app name
+== package name by construction for `beamtalk build`'s generated `.app`
+files).
 
 ## Responsibilities
 
@@ -21,6 +27,10 @@ Packages map 1:1 to OTP applications whose env contains a `classes` key
 - Reverse-lookup: which package owns a class? (`package_name/1`)
 - List classes within a package (`classes/1`)
 - List dependencies of a package (`dependencies/1`)
+- Find the OTP application hosting a package (`find_app_for_package/1`) —
+  exported so other package-discovery consumers (e.g.
+  `beamtalk_repl_ops_browse:browse_type_aliases/0`) share this logic
+  instead of re-deriving it against only `classes`.
 
 See also: docs/ADR/0070-package-namespaces-and-dependencies.md Section 8
 """.
@@ -31,6 +41,7 @@ See also: docs/ADR/0070-package-namespaces-and-dependencies.md Section 8
     package_name/1,
     classes/1,
     dependencies/1,
+    find_app_for_package/1,
     %% Beamtalk FFI shim: `Package packageNameFor: #ClassName`
     packageNameFor/1
 ]).
@@ -42,24 +53,19 @@ See also: docs/ADR/0070-package-namespaces-and-dependencies.md Section 8
 -doc """
 Returns a list of loaded package names (binaries).
 
-A "package" is any OTP application whose env includes `{classes, [...]}`.
-The stdlib package is always present; user packages appear after their
-OTP application is loaded.
+A "package" is any OTP application whose env includes a non-empty
+`{classes, [...]}` list, or (BT-2915) a non-empty `{type_aliases, [...]}`
+list with no classes. The stdlib package is always present; user packages
+appear after their OTP application is loaded.
 """.
 -spec all() -> [binary()].
 all() ->
     Apps = application:loaded_applications(),
     lists:filtermap(
         fun({AppName, _Desc, _Vsn}) ->
-            case application:get_env(AppName, classes) of
-                {ok, ClassList} when is_list(ClassList), ClassList =/= [] ->
-                    PkgName = package_name_from_classes(ClassList),
-                    case PkgName of
-                        undefined -> false;
-                        Name -> {true, Name}
-                    end;
-                _ ->
-                    false
+            case package_name_for_app(AppName) of
+                undefined -> false;
+                Name -> {true, Name}
             end
         end,
         Apps
@@ -154,7 +160,9 @@ classes(Name) when is_binary(Name) ->
 Returns the list of dependency package names (binaries) for a package.
 
 Reads the OTP application dependency list and filters to only those
-applications that are themselves Beamtalk packages (have a `classes` env).
+applications that are themselves Beamtalk packages (have a non-empty
+`classes` env, or — when `classes` is absent/empty — a non-empty
+`type_aliases` env).
 Returns an empty list if the package is not found.
 """.
 -spec dependencies(binary() | atom()) -> [binary()].
@@ -167,15 +175,9 @@ dependencies(Name) when is_binary(Name) ->
                 {ok, DepApps} ->
                     lists:filtermap(
                         fun(DepApp) ->
-                            case application:get_env(DepApp, classes) of
-                                {ok, ClassList} when is_list(ClassList), ClassList =/= [] ->
-                                    PkgName = package_name_from_classes(ClassList),
-                                    case PkgName of
-                                        undefined -> false;
-                                        N -> {true, N}
-                                    end;
-                                _ ->
-                                    false
+                            case package_name_for_app(DepApp) of
+                                undefined -> false;
+                                N -> {true, N}
                             end
                         end,
                         DepApps
@@ -214,7 +216,44 @@ package_name_from_classes([#{package := Pkg} | _]) when is_binary(Pkg) ->
 package_name_from_classes(_) ->
     undefined.
 
--doc "Find the OTP application that hosts a given package name.".
+-doc """
+Returns the package name (binary) an OTP application hosts, or `undefined`
+if it is not a Beamtalk package.
+
+Prefers a non-empty `classes` env key (ADR 0070), deriving the name from
+the class entries via `package_name_from_classes/1`. Falls back to a
+non-empty `type_aliases` env key (BT-2915) when there are no classes to
+derive a name from — a types-only package has no class entry at all, so
+the OTP application's own atom name is used instead (app name == package
+name by construction for `beamtalk build`'s generated `.app` files).
+""".
+-spec package_name_for_app(atom()) -> binary() | undefined.
+package_name_for_app(AppName) ->
+    case application:get_env(AppName, classes) of
+        %% A non-empty but malformed classes list (no `package` key on any
+        %% entry) intentionally does NOT fall through to type_aliases below:
+        %% a non-empty classes env means "not types-only", so this app is
+        %% correctly reported as undiscoverable rather than misidentified.
+        {ok, ClassList} when is_list(ClassList), ClassList =/= [] ->
+            package_name_from_classes(ClassList);
+        _ ->
+            case application:get_env(AppName, type_aliases) of
+                {ok, Aliases} when is_list(Aliases), Aliases =/= [] ->
+                    atom_to_binary(AppName, utf8);
+                _ ->
+                    undefined
+            end
+    end.
+
+-doc """
+Find the OTP application that hosts a given package name.
+
+Exported so other package-discovery consumers (e.g.
+`beamtalk_repl_ops_browse:browse_type_aliases/0`,
+`browse_native_modules/0`) can resolve a package name back to its OTP
+application without re-deriving the classes-or-type_aliases discovery
+signal themselves.
+""".
 -spec find_app_for_package(binary()) -> {ok, atom()} | error.
 find_app_for_package(PkgName) ->
     Apps = application:loaded_applications(),
@@ -223,14 +262,9 @@ find_app_for_package(PkgName) ->
 find_app_for_package(_PkgName, []) ->
     error;
 find_app_for_package(PkgName, [{AppName, _Desc, _Vsn} | Rest]) ->
-    case application:get_env(AppName, classes) of
-        {ok, ClassList} when is_list(ClassList), ClassList =/= [] ->
-            case package_name_from_classes(ClassList) of
-                PkgName -> {ok, AppName};
-                _ -> find_app_for_package(PkgName, Rest)
-            end;
-        _ ->
-            find_app_for_package(PkgName, Rest)
+    case package_name_for_app(AppName) of
+        PkgName -> {ok, AppName};
+        _ -> find_app_for_package(PkgName, Rest)
     end.
 
 -doc """

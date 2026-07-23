@@ -1,6 +1,15 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
+/// OTP restart policy for a supervised actor — how it is restarted after exit.
+///
+/// - `#permanent` — always restart (e.g., a database pool)
+/// - `#transient` — restart only on abnormal exit (e.g., a request handler)
+/// - `#temporary` — never restart (the default)
+///
+/// @see SupervisionSpec#restart
+type RestartStrategy = #permanent | #transient | #temporary
+
 /// Actor — Base class for process-based objects.
 ///
 /// Actor inherits from Object and adds process-based concurrency.
@@ -131,7 +140,7 @@ Object subclass: Actor
   /// Actor supervisionPolicy           // => #temporary
   /// DatabasePool supervisionPolicy    // => #permanent (if overridden)
   /// ```
-  class supervisionPolicy -> #permanent | #transient | #temporary => #temporary
+  class supervisionPolicy -> RestartStrategy => #temporary
 
   /// Whether this class is a supervisor.
   ///
@@ -234,7 +243,7 @@ Object subclass: Actor
   /// slowDb query: sql              // forwarded with 30s timeout
   /// slowDb stop                    // stop the proxy when done
   /// ```
-  withTimeout: ms :: Integer | #infinity -> TimeoutProxy =>
+  withTimeout: ms :: Timeout -> TimeoutProxy =>
     proxy := TimeoutProxy spawn
     proxy setTarget: self
     proxy setTimeoutMs: ms

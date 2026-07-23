@@ -305,12 +305,12 @@ handle_event({call, From}, {'readLine', []}, _State, Data) ->
     {keep_state, Data, [{reply, From, {ok, read_line(Data)}}]}.
 ```
 
-## The `gen-native` Stub Generator
+## The `generate native` Stub Generator
 
-Rather than writing the gen_server boilerplate by hand, use the `gen-native` CLI command to generate a skeleton from the `.bt` file:
+Rather than writing the gen_server boilerplate by hand, use the `generate native` CLI command to generate a skeleton from the `.bt` file:
 
 ```bash
-beamtalk gen-native DatabasePool
+beamtalk generate native DatabasePool
 ```
 
 This reads `src/DatabasePool.bt` (or `DatabasePool.bt` in the current directory), extracts the `native:` module name and all `self delegate` methods, and generates a skeleton Erlang file:
@@ -535,7 +535,7 @@ Actor subclass: KeyValueStore native: kv_store
 ### Step 2: Generate the Erlang Skeleton
 
 ```bash
-beamtalk gen-native KeyValueStore
+beamtalk generate native KeyValueStore
 ```
 
 This produces `kv_store.erl` with `handle_call/3` clauses for each delegate method. Move it to the `native/` directory:

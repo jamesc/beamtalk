@@ -458,12 +458,18 @@ fn ok_response(core_erlang: &str, warnings: &[String]) -> Term {
 
 /// Build a response map for a successful inline class definition in REPL.
 /// BT-885: `trailing_core_erlang` is Some when trailing expressions follow the class body.
+/// `referenced_aliases` (ADR 0108 hot-reload re-check trigger, BT-2899 /
+/// BT-2952 follow-up) mirrors `compile_ok_response`'s field of the same
+/// name — every alias name this class's own method-signature annotations
+/// transitively depended on, so the Erlang side can register the same
+/// `beamtalk_alias_xref` dependency edges a file-defining compile gets.
 fn class_definition_ok_response(
     core_erlang: &str,
     module_name: &str,
     classes: &[(String, String)],
     trailing_core_erlang: Option<&str>,
     warnings: &[String],
+    referenced_aliases: &[ecow::EcoString],
 ) -> Term {
     let mut map: std::collections::HashMap<Term, Term> = std::collections::HashMap::from([
         (atom("status"), atom("ok")),
@@ -477,6 +483,10 @@ fn class_definition_ok_response(
         (
             atom("warnings"),
             Term::from(List::from(build_warning_terms(warnings))),
+        ),
+        (
+            atom("referenced_aliases"),
+            Term::from(List::from(build_referenced_alias_terms(referenced_aliases))),
         ),
     ]);
     if let Some(trailing) = trailing_core_erlang {
@@ -565,11 +575,18 @@ fn method_definition_ok_response(
 }
 
 /// Build a response map for a successful protocol definition in REPL (BT-1612).
+///
+/// `referenced_aliases` (ADR 0108 hot-reload re-check trigger, BT-2899 /
+/// BT-2917 follow-up) mirrors `compile_ok_response`'s field of the same
+/// name — every alias name this protocol's own method-signature annotations
+/// transitively depended on, so the Erlang side can register the same
+/// `beamtalk_alias_xref` dependency edges a class-defining compile gets.
 fn protocol_definition_ok_response(
     core_erlang: &str,
     module_name: &str,
     protocol_names: &[String],
     warnings: &[String],
+    referenced_aliases: &[ecow::EcoString],
 ) -> Term {
     let protocol_terms: Vec<Term> = protocol_names.iter().map(|n| binary(n)).collect();
     Term::from(Map::from([
@@ -581,6 +598,10 @@ fn protocol_definition_ok_response(
         (
             atom("warnings"),
             Term::from(List::from(build_warning_terms(warnings))),
+        ),
+        (
+            atom("referenced_aliases"),
+            Term::from(List::from(build_referenced_alias_terms(referenced_aliases))),
         ),
     ]))
 }
@@ -752,20 +773,6 @@ fn error_response(diagnostics: &[String]) -> Term {
     ]))
 }
 
-/// Compute 1-based line number for a byte offset in source text.
-/// Uses byte scanning (`\n` is always 0x0A in UTF-8) so there is no panic
-/// risk from non-char-boundary offsets.
-fn byte_offset_to_line(source: &str, offset: u32) -> u32 {
-    let offset_clamped = (offset as usize).min(source.len());
-    let mut newlines: u32 = 0;
-    for &b in &source.as_bytes()[..offset_clamped] {
-        if b == b'\n' {
-            newlines = newlines.saturating_add(1);
-        }
-    }
-    newlines.saturating_add(1)
-}
-
 /// Compute 1-based column number for a byte offset in source text.
 ///
 /// Counts Unicode characters (not bytes) from the start of the line,
@@ -799,7 +806,7 @@ fn format_codegen_error(e: &beamtalk_core::erlang::CodeGenError, source: &str) -
             feature,
             span: Some(span),
         } => {
-            let line = byte_offset_to_line(source, span.start());
+            let line = span.line_number(source);
             let col = byte_offset_to_col(source, span.start());
             format!(
                 "Code generation failed: unsupported feature: {feature} at line {line}, col {col}"
@@ -818,7 +825,7 @@ fn diagnostic_error_response(
     let diag_terms: Vec<Term> = diagnostics
         .iter()
         .map(|d| {
-            let line = byte_offset_to_line(source, d.span.start());
+            let line = d.span.line_number(source);
             let line_term = Term::from(eetf::FixInteger::from(
                 i32::try_from(line).unwrap_or(i32::MAX),
             ));
@@ -858,10 +865,10 @@ fn compile_method_diagnostic_response(
     let diag_terms: Vec<Term> = diagnostics
         .iter()
         .map(|d| {
-            let abs_line = byte_offset_to_line(merged_class_source, d.span.start());
+            let abs_line = d.span.line_number(merged_class_source);
             let line = match patched_method_span {
                 Some(ms) if ms.contains(d.span) => {
-                    let method_start_line = byte_offset_to_line(merged_class_source, ms.start());
+                    let method_start_line = ms.line_number(merged_class_source);
                     abs_line.saturating_sub(method_start_line).saturating_add(1)
                 }
                 _ => abs_line,
@@ -1084,26 +1091,43 @@ fn load_native_type_registry_from(
 
 /// Parse a Beamtalk expression source and run full diagnostics with primitive validation.
 ///
-/// Returns `Ok((module, warnings))` on success, or `Err(response_term)` containing a
-/// formatted `diagnostic_error_response` that the caller should return directly.
+/// Returns `Ok((module, warnings, referenced_aliases))` on success, or
+/// `Err(response_term)` containing a formatted `diagnostic_error_response`
+/// that the caller should return directly.
 ///
 /// `pre_loaded_aliases` (ADR 0108 Phase 8, BT-2902) carries type aliases
 /// declared in earlier turns of the same REPL session, re-parsed standalone
 /// by [`extract_known_type_aliases`] — see that function's doc for why
 /// aliases need their own re-parse path rather than `pre_class_hierarchy`'s
 /// recover-from-live-BEAM-state mechanism.
+///
+/// BT-2952: uses `compute_diagnostics_and_referenced_aliases` (the same
+/// analysis as `compute_diagnostics_with_known_vars_classes_and_aliases`,
+/// additionally returning `AnalysisResult::referenced_aliases`) so the
+/// REPL-inline `compile_expression` path computes the same alias-dependency
+/// set `handle_compile`'s file-compile path already did — previously this
+/// function discarded it, so `handle_inline_class_definition` never got a
+/// real set to thread through and `handle_inline_protocol_definition` was
+/// called with a hardcoded `&[]` (BT-2917's known limitation).
 fn parse_and_check_expression(
     source: &str,
     known_vars: &[String],
     pre_class_hierarchy: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
     pre_loaded_aliases: Vec<beamtalk_core::semantic_analysis::AliasInfo>,
-) -> Result<(beamtalk_core::ast::Module, Vec<String>), Term> {
+) -> Result<
+    (
+        beamtalk_core::ast::Module,
+        Vec<String>,
+        Vec<ecow::EcoString>,
+    ),
+    Term,
+> {
     let tokens = beamtalk_core::source_analysis::lex_with_eof(source);
     let (module, parse_diagnostics) = beamtalk_core::source_analysis::parse(tokens);
 
     let known_var_refs: Vec<&str> = known_vars.iter().map(String::as_str).collect();
-    let mut all_diagnostics =
-        beamtalk_core::queries::diagnostic_provider::compute_diagnostics_with_known_vars_classes_and_aliases(
+    let (mut all_diagnostics, referenced_aliases) =
+        beamtalk_core::queries::diagnostic_provider::compute_diagnostics_and_referenced_aliases(
             &module,
             parse_diagnostics,
             &known_var_refs,
@@ -1126,7 +1150,7 @@ fn parse_and_check_expression(
         return Err(diagnostic_error_response(&error_diags, source));
     }
 
-    Ok((module, warnings))
+    Ok((module, warnings, referenced_aliases))
 }
 
 /// Handle a single `compile_expression` request.
@@ -1156,11 +1180,11 @@ fn handle_compile_expression(request: &Map) -> Term {
     let pre_class_hierarchy = extract_class_hierarchy(request);
     let pre_loaded_aliases = extract_known_type_aliases(request);
 
-    let (module, warnings) = match parse_and_check_expression(
+    let (module, warnings, referenced_aliases) = match parse_and_check_expression(
         &source,
         &known_vars,
         pre_class_hierarchy.clone(),
-        pre_loaded_aliases,
+        pre_loaded_aliases.clone(),
     ) {
         Ok(r) => r,
         Err(resp) => return resp,
@@ -1180,7 +1204,9 @@ fn handle_compile_expression(request: &Map) -> Term {
             &class_superclass_index,
             class_module_index,
             pre_class_hierarchy,
+            pre_loaded_aliases,
             module_name_override.as_deref(),
+            &referenced_aliases,
         );
     }
 
@@ -1217,6 +1243,13 @@ fn handle_compile_expression(request: &Map) -> Term {
 
     // BT-1612: If the parsed module contains protocol definitions, compile and return them
     if !module.protocols.is_empty() {
+        // BT-2952: `parse_and_check_expression` now computes
+        // `referenced_aliases` for this REPL-expression path too (mirroring
+        // `handle_compile`'s file-compile path below), closing the gap
+        // `handle_inline_protocol_definition`'s doc comment used to describe
+        // (BT-2917 shipped the protocol-side wiring but left this call site
+        // passing a hardcoded `&[]`, since the Rust side didn't compute a
+        // real set yet).
         return handle_inline_protocol_definition(
             &module,
             &source,
@@ -1224,8 +1257,10 @@ fn handle_compile_expression(request: &Map) -> Term {
             &class_superclass_index,
             class_module_index,
             pre_class_hierarchy,
+            pre_loaded_aliases,
             module_name_override.as_deref(),
             false, // REPL expressions are never stdlib
+            &referenced_aliases,
         );
     }
 
@@ -1283,7 +1318,11 @@ fn handle_compile_expression_trace(request: &Map) -> Term {
     let pre_class_hierarchy = extract_class_hierarchy(request);
     let pre_loaded_aliases = extract_known_type_aliases(request);
 
-    let (module, warnings) = match parse_and_check_expression(
+    // Trace mode never defines classes/protocols/aliases (rejected below), so
+    // the `referenced_aliases` this also now computes (BT-2952) has no
+    // consumer here — trace-mode expressions can't reference an alias in a
+    // position that needs xref registration.
+    let (module, warnings, _referenced_aliases) = match parse_and_check_expression(
         &source,
         &known_vars,
         pre_class_hierarchy,
@@ -1361,6 +1400,12 @@ fn derive_class_module_name(
 /// expressions and the class body itself.
 /// BT-1670: Accepts optional `module_name_override` so package-qualified names
 /// are used consistently across all load paths.
+/// BT-2952: Accepts `referenced_aliases` — the caller's already-computed
+/// alias-dependency set (`parse_and_check_expression`'s
+/// `compute_diagnostics_and_referenced_aliases` result), threaded into the
+/// response so the Erlang side can register the same `beamtalk_alias_xref`
+/// dependency edges a file-defining compile gets. Mirrors
+/// `handle_inline_protocol_definition`'s identical parameter.
 #[allow(clippy::too_many_arguments)]
 fn handle_inline_class_definition(
     module: beamtalk_core::ast::Module,
@@ -1370,7 +1415,9 @@ fn handle_inline_class_definition(
     class_superclass_index: &std::collections::HashMap<String, String>,
     class_module_index: std::collections::HashMap<String, String>,
     pre_class_hierarchy: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    pre_loaded_aliases: Vec<beamtalk_core::semantic_analysis::AliasInfo>,
     module_name_override: Option<&str>,
+    referenced_aliases: &[ecow::EcoString],
 ) -> Term {
     let mut module = module;
     let mut warnings = warnings.to_vec();
@@ -1437,7 +1484,8 @@ fn handle_inline_class_definition(
             .with_source(source)
             .with_class_superclass_index(class_superclass_index.clone())
             .with_class_module_index(class_module_index)
-            .with_class_hierarchy(pre_class_hierarchy),
+            .with_class_hierarchy(pre_class_hierarchy)
+            .with_pre_loaded_aliases(pre_loaded_aliases),
     ) {
         Ok(code) => class_definition_ok_response(
             &code,
@@ -1445,6 +1493,7 @@ fn handle_inline_class_definition(
             &classes,
             trailing_core_erlang.as_deref(),
             &warnings,
+            referenced_aliases,
         ),
         Err(e) => error_response(&[format_codegen_error(&e, source)]),
     }
@@ -1456,6 +1505,19 @@ fn handle_inline_class_definition(
 /// with protocol registration via BT-1610), then returns a `protocol_definition`
 /// response so the Erlang side can load and execute the module.
 /// BT-1670: Accepts optional `module_name_override` for package-mode consistency.
+/// BT-2917: Accepts `referenced_aliases` — the caller's already-computed
+/// alias-dependency set, threaded straight into the response so the Erlang
+/// side can register the same `beamtalk_alias_xref` dependency edges a
+/// class-defining compile gets. BT-2952: both callers (the REPL
+/// `compile_expression` path and `handle_compile`'s file-compile path) now
+/// pass a genuinely-computed set — `compile_expression`'s used to pass a
+/// hardcoded `&[]` since the Rust side didn't compute one for that path yet.
+/// BT-2941: Accepts `pre_loaded_aliases` — mirrors the `.with_pre_loaded_aliases(...)`
+/// wiring BT-2932 applied to the other three `CodegenOptions` call sites in this
+/// file (`handle_inline_class_definition`, `handle_compile`'s class path,
+/// `handle_compile_method`) — so a protocol method signature referencing a
+/// cross-module alias resolves to a `user_type` reference in the generated
+/// `-type` attributes instead of silently dropping the alias (empty registry).
 #[allow(clippy::too_many_arguments)]
 fn handle_inline_protocol_definition(
     module: &beamtalk_core::ast::Module,
@@ -1464,8 +1526,10 @@ fn handle_inline_protocol_definition(
     class_superclass_index: &std::collections::HashMap<String, String>,
     class_module_index: std::collections::HashMap<String, String>,
     pre_class_hierarchy: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    pre_loaded_aliases: Vec<beamtalk_core::semantic_analysis::AliasInfo>,
     module_name_override: Option<&str>,
     stdlib_mode: bool,
+    referenced_aliases: &[ecow::EcoString],
 ) -> Term {
     let first_protocol_name = &module.protocols[0].name.name;
     let protocol_module_name =
@@ -1484,11 +1548,16 @@ fn handle_inline_protocol_definition(
             .with_source(source)
             .with_class_superclass_index(class_superclass_index.clone())
             .with_class_module_index(class_module_index)
-            .with_class_hierarchy(pre_class_hierarchy),
+            .with_class_hierarchy(pre_class_hierarchy)
+            .with_pre_loaded_aliases(pre_loaded_aliases),
     ) {
-        Ok(code) => {
-            protocol_definition_ok_response(&code, &protocol_module_name, &protocol_names, warnings)
-        }
+        Ok(code) => protocol_definition_ok_response(
+            &code,
+            &protocol_module_name,
+            &protocol_names,
+            warnings,
+            referenced_aliases,
+        ),
         Err(e) => error_response(&[format_codegen_error(&e, source)]),
     }
 }
@@ -1573,7 +1642,7 @@ fn handle_compile(request: &Map) -> Term {
             parse_diagnostics,
             &[],
             pre_class_hierarchy.clone(),
-            pre_loaded_aliases,
+            pre_loaded_aliases.clone(),
             diagnostics_overrides(),
         );
 
@@ -1679,6 +1748,10 @@ fn handle_compile(request: &Map) -> Term {
     // protocol-only files. Route through the protocol codegen instead.
     if !module.protocols.is_empty() && module.classes.is_empty() {
         let warning_msgs: Vec<String> = warnings.iter().map(|w| w.message.clone()).collect();
+        // BT-2917: `referenced_aliases` was already computed above (BT-2899)
+        // for this file-compile path — thread it through so a protocol-only
+        // file's alias-typed method signatures get the same
+        // `beamtalk_alias_xref` registration a class-defining compile gets.
         return handle_inline_protocol_definition(
             &module,
             &source,
@@ -1686,8 +1759,10 @@ fn handle_compile(request: &Map) -> Term {
             &class_superclass_index,
             class_module_index,
             pre_class_hierarchy,
+            pre_loaded_aliases,
             module_name_override.as_deref(),
             stdlib_mode,
+            &referenced_aliases,
         );
     }
 
@@ -1711,6 +1786,7 @@ fn handle_compile(request: &Map) -> Term {
             .with_class_module_index(class_module_index)
             .with_class_superclass_index(class_superclass_index)
             .with_class_hierarchy(pre_class_hierarchy)
+            .with_pre_loaded_aliases(pre_loaded_aliases)
             .with_source_path_opt(source_path.as_deref()),
     ) {
         Ok(code) => compile_ok_response(
@@ -1887,7 +1963,7 @@ fn handle_compile_method(request: &Map) -> Term {
             merged_parse_diags,
             &[],
             pre_class_hierarchy.clone(),
-            pre_loaded_aliases,
+            pre_loaded_aliases.clone(),
             diagnostics_overrides(),
         );
     let options = beamtalk_core::CompilerOptions {
@@ -1943,6 +2019,7 @@ fn handle_compile_method(request: &Map) -> Term {
             .with_class_module_index(class_module_index)
             .with_class_superclass_index(class_superclass_index)
             .with_class_hierarchy(pre_class_hierarchy)
+            .with_pre_loaded_aliases(pre_loaded_aliases)
             .with_source_path_opt(source_path.as_deref()),
     ) {
         Ok(code) => compile_method_ok_response(
@@ -3163,6 +3240,280 @@ mod tests {
             names,
             vec!["Direction".to_string()],
             "expected Direction to be recorded as referenced: {response:?}"
+        );
+    }
+
+    /// BT-2917 (BT-2899 follow-up): the sibling of
+    /// `compile_with_known_type_aliases_reports_referenced_aliases` for a
+    /// protocol-only `compile` — before this fix, `protocol_definition`'s
+    /// response had no `referenced_aliases` field at all, so
+    /// `beamtalk_repl_compiler.erl`'s protocol arm had nothing to register
+    /// into `beamtalk_alias_xref`, even though the exact same annotation on
+    /// a class method's signature (the test above) already worked.
+    #[test]
+    fn compile_protocol_with_known_type_aliases_reports_referenced_aliases() {
+        let request = Map::from([
+            (atom("command"), atom("compile")),
+            (
+                atom("source"),
+                binary("Protocol define: Directional\n  heading: d :: Direction -> Boolean\n"),
+            ),
+            (atom("module_name"), binary("bt@directional")),
+            (
+                atom("known_type_aliases"),
+                Term::from(List::from(vec![binary(
+                    "type Direction = #north | #south | #east | #west",
+                )])),
+            ),
+        ]);
+
+        let response = handle_compile(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response");
+        };
+        assert_eq!(
+            map_get(m, "status"),
+            Some(&atom("ok")),
+            "expected compile to succeed: {response:?}"
+        );
+        assert_eq!(
+            map_get(m, "kind"),
+            Some(&atom("protocol_definition")),
+            "expected a protocol_definition response: {response:?}"
+        );
+        let Some(Term::List(referenced)) = map_get(m, "referenced_aliases") else {
+            panic!("Expected referenced_aliases list: {response:?}");
+        };
+        let names: Vec<String> = referenced
+            .elements
+            .iter()
+            .filter_map(term_to_string)
+            .collect();
+        assert_eq!(
+            names,
+            vec!["Direction".to_string()],
+            "expected Direction to be recorded as referenced: {response:?}"
+        );
+    }
+
+    /// BT-2952: the REPL-inline sibling of
+    /// `compile_with_known_type_aliases_reports_referenced_aliases` for a
+    /// class defined via `compile_expression` (as opposed to `:load`d from
+    /// a file via `compile`) — before this fix, `parse_and_check_expression`
+    /// called `compute_diagnostics_with_known_vars_classes_and_aliases`,
+    /// which discards `AnalysisResult::referenced_aliases` entirely, so
+    /// `class_definition_ok_response` had no field to carry it in at all.
+    #[test]
+    fn compile_expression_class_with_known_type_aliases_reports_referenced_aliases() {
+        let request = Map::from([
+            (atom("command"), atom("compile_expression")),
+            (
+                atom("source"),
+                binary(
+                    "Object subclass: Dashboard\n  \
+                     heading: h :: Direction -> Integer => 0\n",
+                ),
+            ),
+            (atom("module"), binary("bt@repl_eval_1")),
+            (atom("known_vars"), Term::from(List::from(vec![]))),
+            (
+                atom("known_type_aliases"),
+                Term::from(List::from(vec![binary(
+                    "type Direction = #north | #south | #east | #west",
+                )])),
+            ),
+        ]);
+
+        let response = handle_compile_expression(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response");
+        };
+        assert_eq!(
+            map_get(m, "status"),
+            Some(&atom("ok")),
+            "expected compile_expression to succeed: {response:?}"
+        );
+        assert_eq!(
+            map_get(m, "kind"),
+            Some(&atom("class_definition")),
+            "expected a class_definition response: {response:?}"
+        );
+        let Some(Term::List(referenced)) = map_get(m, "referenced_aliases") else {
+            panic!("Expected referenced_aliases list: {response:?}");
+        };
+        let names: Vec<String> = referenced
+            .elements
+            .iter()
+            .filter_map(term_to_string)
+            .collect();
+        assert_eq!(
+            names,
+            vec!["Direction".to_string()],
+            "expected Direction to be recorded as referenced: {response:?}"
+        );
+    }
+
+    /// BT-2952: the REPL-inline sibling of
+    /// `compile_protocol_with_known_type_aliases_reports_referenced_aliases`
+    /// for a protocol defined via `compile_expression` — before this fix,
+    /// `handle_compile_expression`'s protocol branch called
+    /// `handle_inline_protocol_definition` with a hardcoded `&[]` since
+    /// `parse_and_check_expression` never computed a real set for this path.
+    #[test]
+    fn compile_expression_protocol_with_known_type_aliases_reports_referenced_aliases() {
+        let request = Map::from([
+            (atom("command"), atom("compile_expression")),
+            (
+                atom("source"),
+                binary("Protocol define: Directional\n  heading: d :: Direction -> Boolean\n"),
+            ),
+            (atom("module"), binary("bt@repl_eval_1")),
+            (atom("known_vars"), Term::from(List::from(vec![]))),
+            (
+                atom("known_type_aliases"),
+                Term::from(List::from(vec![binary(
+                    "type Direction = #north | #south | #east | #west",
+                )])),
+            ),
+        ]);
+
+        let response = handle_compile_expression(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response");
+        };
+        assert_eq!(
+            map_get(m, "status"),
+            Some(&atom("ok")),
+            "expected compile_expression to succeed: {response:?}"
+        );
+        assert_eq!(
+            map_get(m, "kind"),
+            Some(&atom("protocol_definition")),
+            "expected a protocol_definition response: {response:?}"
+        );
+        let Some(Term::List(referenced)) = map_get(m, "referenced_aliases") else {
+            panic!("Expected referenced_aliases list: {response:?}");
+        };
+        let names: Vec<String> = referenced
+            .elements
+            .iter()
+            .filter_map(term_to_string)
+            .collect();
+        assert_eq!(
+            names,
+            vec!["Direction".to_string()],
+            "expected Direction to be recorded as referenced: {response:?}"
+        );
+    }
+
+    /// BT-2941: `handle_inline_protocol_definition` (the protocol-only branch
+    /// of `handle_compile`) previously never threaded `pre_loaded_aliases`
+    /// into `CodegenOptions`, so `self.alias_registry` at codegen time was
+    /// always the empty module-local registry — a protocol source file never
+    /// declares its own `type Name = ...` (that's a separate top-level
+    /// declaration), so every alias a protocol method signature could
+    /// reference is necessarily cross-module/pre-loaded.
+    ///
+    /// BT-2957: protocol methods have no standalone function to attach a real
+    /// `-spec` to, so `generate_protocol_registrations`
+    /// (`gen_server/methods.rs`) now embeds the same `user_type`/abstract-type
+    /// representation `-spec`s use directly in each `register_protocol`
+    /// method-requirement map's `param_types`/`return_type` entries, and
+    /// `actor_codegen.rs::generate_module` marks the alias as referenced
+    /// before the module header's named `-type` declarations are emitted —
+    /// so `Wrapper`/`Base` both get a `user_type` reference here, just not
+    /// via a real Dialyzer `-spec` (protocols have no function to attach one
+    /// to).
+    #[test]
+    fn compile_protocol_cross_module_alias_reference_emits_user_type() {
+        let request = Map::from([
+            (atom("command"), atom("compile")),
+            (
+                atom("source"),
+                binary("Protocol define: Directional\n  heading: d :: Wrapper -> Boolean\n"),
+            ),
+            (atom("module_name"), binary("bt@directional")),
+            (
+                atom("known_type_aliases"),
+                Term::from(List::from(vec![
+                    binary("type Base = #north | #south | #east | #west"),
+                    binary("type Wrapper = Base"),
+                ])),
+            ),
+        ]);
+
+        let response = handle_compile(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response");
+        };
+        assert_eq!(
+            map_get(m, "status"),
+            Some(&atom("ok")),
+            "expected compile to succeed: {response:?}"
+        );
+        let core_erlang = map_get(m, "core_erlang")
+            .and_then(term_to_string)
+            .expect("core_erlang field must be present");
+        assert!(
+            core_erlang.contains("{'user_type', 0, 'wrapper', []}"),
+            "expected the protocol method's Wrapper-typed parameter to embed a \
+             user_type reference in its register_protocol metadata: {core_erlang}"
+        );
+        assert!(
+            core_erlang.matches("'wrapper'").count() >= 2,
+            "expected the module attribute list to also declare the named -type \
+             'wrapper' the user_type reference points at (one occurrence for the \
+             -type declaration, at least one more for the reference): {core_erlang}"
+        );
+    }
+
+    /// BT-2941 sibling of `compile_protocol_cross_module_alias_reference_emits_user_type`
+    /// for the OTHER `handle_inline_protocol_definition` caller: the REPL-inline
+    /// `compile_expression` path (`handle_compile_expression`'s protocol branch).
+    /// Both call sites needed the same `.with_pre_loaded_aliases(...)` wiring.
+    /// See the BT-2957 update note on the sibling test above — the same
+    /// reasoning applies here.
+    #[test]
+    fn compile_expression_protocol_cross_module_alias_reference_emits_user_type() {
+        let request = Map::from([
+            (atom("command"), atom("compile_expression")),
+            (
+                atom("source"),
+                binary("Protocol define: Directional\n  heading: d :: Wrapper -> Boolean\n"),
+            ),
+            (atom("module"), binary("bt@repl_eval_1")),
+            (atom("known_vars"), Term::from(List::from(vec![]))),
+            (
+                atom("known_type_aliases"),
+                Term::from(List::from(vec![
+                    binary("type Base = #north | #south | #east | #west"),
+                    binary("type Wrapper = Base"),
+                ])),
+            ),
+        ]);
+
+        let response = handle_compile_expression(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected a map response, got: {response:?}");
+        };
+        assert_eq!(
+            map_get(m, "status").and_then(term_to_atom).as_deref(),
+            Some("ok"),
+            "expected compile_expression to succeed: {response:?}"
+        );
+        let core_erlang = map_get(m, "core_erlang")
+            .and_then(term_to_string)
+            .expect("core_erlang field must be present");
+        assert!(
+            core_erlang.contains("{'user_type', 0, 'wrapper', []}"),
+            "expected the protocol method's Wrapper-typed parameter to embed a \
+             user_type reference in its register_protocol metadata: {core_erlang}"
+        );
+        assert!(
+            core_erlang.matches("'wrapper'").count() >= 2,
+            "expected the module attribute list to also declare the named -type \
+             'wrapper' the user_type reference points at (one occurrence for the \
+             -type declaration, at least one more for the reference): {core_erlang}"
         );
     }
 

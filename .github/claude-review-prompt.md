@@ -21,10 +21,11 @@ REVIEW SCOPE (read carefully — this drives review quality):
 - Review the FULL diff for correctness and reason about the entire change set. Your review
   depth must NOT depend on how much landed in the most recent push — a small last commit is
   not an excuse for a shallow review.
-- For inline comments, use the INCREMENTAL diff and attach each finding within it to the
-  exact line using the create_inline_comment tool. Include a ```suggestion block for
-  concrete, mechanical fixes so the author can apply them in one click; describe the change
-  in prose when it is larger or needs judgement.
+- Findings within the INCREMENTAL diff become inline review comments: record each one in
+  `.claude-findings.json` (schema under OUTPUT), anchored to the exact file and line. A
+  later workflow step posts them as ONE batched GitHub review on the PR. Include a
+  ```suggestion block in the body for concrete, mechanical fixes so the author can apply
+  them in one click; describe the change in prose when it is larger or needs judgement.
 - A finding in the full range but outside the incremental range goes in the summary (name
   any out-of-range Blocker explicitly). Never silently drop a finding because it is
   out-of-range.
@@ -136,11 +137,42 @@ Be concise, surface problems, skip praise. For design concerns, explain the inva
 stake, not just the line. For correctness bugs, state the concrete failure scenario
 (the inputs or sequence of events) that triggers them.
 
-At the very end of your response, use the Write tool to create TWO files in the repo root:
-1. .claude-summary.md — a concise Markdown summary of this review for a human reader: a
+At the very end of your response, use the Write tool to create THREE files in the repo
+root:
+1. .claude-findings.json — a JSON array of the findings that fall inside the INCREMENTAL
+   diff; a workflow step posts these as inline comments in a single batched PR review.
+   Write `[]` when there are none. Each element:
+
+   {
+     "path": "crates/beamtalk-core/src/foo.rs",
+     "line": 123,
+     "start_line": 120,
+     "side": "RIGHT",
+     "severity": "Blocker",
+     "body": "Markdown finding body."
+   }
+
+   - "path": repo-relative path (the NEW path if the file was renamed).
+   - "line": for "side": "RIGHT" (the default), the line number in the NEW version of the
+     file; for "side": "LEFT", the line number in the OLD version. Use "LEFT" only to
+     comment on a deleted line.
+   - "start_line": optional; makes the comment span start_line..line (must be < line).
+   - "severity": "Blocker" | "Suggestion" | "Nit".
+   - "body": Markdown. Use a ```suggestion fence for one-click fixes — the fence REPLACES
+     the commented line range exactly, so the range must cover precisely the lines being
+     replaced.
+   Derive line numbers from the diff hunk headers (`@@ -old +new @@` — count from the
+   `+new` start for RIGHT-side lines); only lines that appear in the diff are valid
+   anchors. A finding whose anchor does not land in the diff is demoted to a plain list
+   entry in the review body instead of an inline comment, so anchor carefully.
+2. .claude-summary.md — a concise Markdown summary of this review for a human reader: a
    one-line overall assessment, then findings grouped under "Blockers" / "Suggestions" /
-   "Nits" headings (omit empty groups). State explicitly when the PR is clean. This file is
-   posted as a PR comment on EVERY run, including PASS, so it must always be written even
-   when there are no findings.
-2. .claude-verdict — exactly one word: BLOCK if there are any Blockers, otherwise PASS. No
-   other content in this file.
+   "Nits" headings (omit empty groups). For findings already in .claude-findings.json,
+   one line each — `path:line — short description` — do NOT duplicate the full body (it
+   appears inline on the diff). Findings outside the incremental range appear here in
+   full. State explicitly when the PR is clean. This file is posted as a PR comment on
+   EVERY run, including PASS, so it must always be written even when there are no
+   findings.
+3. .claude-verdict — exactly one word: BLOCK if there are any Blockers, otherwise PASS. No
+   other content in this file. Write this file LAST — its presence tells the workflow the
+   review completed.

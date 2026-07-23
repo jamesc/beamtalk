@@ -10,6 +10,8 @@
 //! - Type parameter bounds validation (ADR 0068 Phase 2d)
 //! - Generic variance checking (ADR 0068 Phase 2f)
 
+use std::collections::HashMap;
+
 use crate::ast::{Module, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
@@ -234,6 +236,63 @@ impl TypeChecker {
             }
             // Leaf expressions — no sub-expressions to recurse into
             _ => {}
+        }
+    }
+
+    /// Records every alias name a protocol's declared method signatures
+    /// (instance- and class-side) transitively depend on, into
+    /// `self.referenced_aliases` (ADR 0108 hot-reload re-check trigger,
+    /// BT-2899 / BT-2917 follow-up).
+    ///
+    /// Protocol method signatures ([`crate::ast::ProtocolMethodSignature`])
+    /// have no body — unlike a class method, there is nothing for the main
+    /// [`Self::check_module`] pass to type-check, so
+    /// [`Self::set_param_types`]'s `referenced_aliases.extend(deps)` (the
+    /// call site that normally records this for a `::`-annotated class
+    /// method parameter) never runs for them. Without this dedicated walk, a
+    /// live redefinition of an alias named only in a `Protocol define:`
+    /// body's signature (e.g. `direction :: Direction`) would never register
+    /// a dependency edge for anything, even though the identical annotation
+    /// on a class method's signature works correctly.
+    ///
+    /// Every parameter and return-type annotation is resolved unconditionally
+    /// (not just `TypeAnnotation::Generic`, unlike
+    /// [`Self::check_bounds_in_type_annotation`]'s bounds-only walk) since an
+    /// alias dependency can appear on a plain `Simple` annotation too.
+    pub(super) fn record_protocol_signature_referenced_aliases(
+        &mut self,
+        module: &Module,
+        protocol_registry: &ProtocolRegistry,
+    ) {
+        let subst = super::type_resolver::SubstitutionMap::new();
+        for protocol in &module.protocols {
+            for sig in protocol
+                .method_signatures
+                .iter()
+                .chain(protocol.class_method_signatures.iter())
+            {
+                for param in &sig.parameters {
+                    if let Some(ref ann) = param.type_annotation {
+                        let (_, deps) =
+                            super::type_resolver::resolve_type_annotation_with_alias_deps(
+                                ann,
+                                &subst,
+                                Some(protocol_registry),
+                                self.alias_registry.as_ref(),
+                            );
+                        self.referenced_aliases.extend(deps);
+                    }
+                }
+                if let Some(ref ann) = sig.return_type {
+                    let (_, deps) = super::type_resolver::resolve_type_annotation_with_alias_deps(
+                        ann,
+                        &subst,
+                        Some(protocol_registry),
+                        self.alias_registry.as_ref(),
+                    );
+                    self.referenced_aliases.extend(deps);
+                }
+            }
         }
     }
 
@@ -466,7 +525,26 @@ impl TypeChecker {
             return;
         };
 
-        let declared_type = type_annotation.type_name();
+        // BT-2928: resolve the declared type through the alias table before
+        // comparing against the default value's inferred type — mirroring
+        // `check_state_defaults`'s alias-aware resolution (its same-file
+        // sibling, fixed in BT-2923/ADR 0108). This method is only reached
+        // for `TypeAnnotation::Generic` fields (see
+        // `check_generic_variance_in_module`'s caller-side gate), so the
+        // alias in question is typically a type *argument* — e.g. `field:
+        // items :: Array(RestartStrategy) = Array new` — and
+        // `resolve_type_annotation_with_alias_deps` recurses into `Generic`
+        // parameters, expanding the alias before `is_assignable_to_with_variance`
+        // ever sees it, instead of comparing against its opaque unresolved name.
+        let (resolved_declared, alias_deps) =
+            super::type_resolver::resolve_type_annotation_with_alias_deps(
+                type_annotation,
+                &super::type_resolver::SubstitutionMap::new(),
+                None,
+                self.alias_registry.as_ref(),
+            );
+        self.referenced_aliases.extend(alias_deps);
+        let declared_type = Self::inferred_type_to_string(&resolved_declared);
         let mut env = TypeEnv::new();
         env.set_local("self", InferredType::known(class.name.name.clone()));
         let inferred = self.infer_expr(default_value, hierarchy, &mut env, false);
@@ -569,6 +647,7 @@ impl TypeChecker {
     }
 
     /// Recursively check variance in expressions (for message send arguments).
+    #[allow(clippy::too_many_lines)] // BT-2949 adds class-type-param substitution
     fn check_variance_in_expr(
         &mut self,
         expr: &crate::ast::Expression,
@@ -587,12 +666,70 @@ impl TypeChecker {
             } => {
                 // Check if any argument has generic type args that need variance checking
                 if let Some(receiver_type) = self.type_map.get(receiver.span()) {
-                    if let InferredType::Known { class_name, .. } = receiver_type.clone() {
+                    if let InferredType::Known {
+                        class_name,
+                        type_args: ref receiver_type_args,
+                        ..
+                    } = receiver_type.clone()
+                    {
                         let sel_name = selector.name();
                         let method = hierarchy.find_method(&class_name, &sel_name);
                         if let Some(method) = method {
+                            // BT-2949: substitution map from the receiver's own
+                            // class-level generic type-param names (e.g. `E` in
+                            // `List(E)`) to its concrete `receiver_type_args`
+                            // (e.g. `List(Integer)` gives `{E -> Integer}`).
+                            // Without this, a declared parameter type naming a
+                            // class type param (`List(E)`, `Dictionary(K, V)`)
+                            // never matched `class_subst`'s keys below and
+                            // `is_assignable_to_with_variance` compared the
+                            // argument against the literal unresolved param
+                            // name, which — like a bare `E`/`V`/`K` anywhere
+                            // else in the checker — is treated as a wildcard
+                            // and always passes.
+                            // BT-2949: widen singleton (or union-of-singleton)
+                            // substitution values to `Symbol` — see the
+                            // identical widening and its doc in
+                            // `validation.rs`'s `check_argument_types`
+                            // (`widen_singleton_type_arg`). Without this, a
+                            // `Dictionary`/`List`/`Result` inferred from
+                            // symbol literals (`d1 merge: d2` with
+                            // differently-keyed dict literals, `#(#a, #b) ++
+                            // #(#c, #d)`, `Result ok: #active`) would compare
+                            // its narrow substituted type arg invariantly
+                            // against a different literal's singleton and
+                            // flag entirely correct code as a mismatch.
+                            let class_subst: HashMap<EcoString, InferredType> =
+                                TypeChecker::build_inherited_substitution_map(
+                                    hierarchy,
+                                    &class_name,
+                                    receiver_type_args,
+                                    &method.defined_in,
+                                )
+                                .into_iter()
+                                .map(|(param, ty)| {
+                                    (param, TypeChecker::widen_singleton_type_arg(&ty))
+                                })
+                                .collect();
                             for (i, arg) in arguments.iter().enumerate() {
                                 if let Some(Some(expected_ty)) = method.param_types.get(i) {
+                                    let substituted_expected;
+                                    let expected_ty = if !class_subst.is_empty()
+                                        && TypeChecker::type_string_references_class_param(
+                                            expected_ty,
+                                            &class_subst,
+                                        ) {
+                                        substituted_expected = TypeChecker::resolve_type_param(
+                                            expected_ty,
+                                            &class_subst,
+                                            &HashMap::new(),
+                                            hierarchy,
+                                        )
+                                        .display_name();
+                                        &substituted_expected
+                                    } else {
+                                        expected_ty
+                                    };
                                     // Only check when expected type is generic
                                     if expected_ty.contains('(') {
                                         if let Some(arg_type) = self.type_map.get(arg.span()) {

@@ -33,6 +33,7 @@ use ecow::EcoString;
 
 use crate::ast::ClassKind;
 use crate::semantic_analysis::ClassHierarchy;
+use crate::semantic_analysis::alias_registry::AliasRegistry;
 
 use super::InferredType;
 
@@ -196,14 +197,29 @@ const MAX_COMPOSE_DEPTH: u8 = 12;
 
 /// Derive the sendability tier of an inferred type. **The single source of
 /// truth** — every boundary check calls this.
+///
+/// `alias_registry` (BT-2936, ADR 0108 follow-up to BT-2928) is threaded
+/// through to the `Value` structural composition below so an alias-typed
+/// field expands to its declared type's tier instead of falling back to
+/// `Tier::Unknown` for the opaque alias name. Pass `None` when no registry
+/// is available, matching this function's pre-BT-2936 behaviour.
 #[must_use]
-pub(crate) fn tier_of(ty: &InferredType, hierarchy: &ClassHierarchy) -> Tier {
-    tier_of_depth(ty, hierarchy, 0)
+pub(crate) fn tier_of(
+    ty: &InferredType,
+    hierarchy: &ClassHierarchy,
+    alias_registry: Option<&AliasRegistry>,
+) -> Tier {
+    tier_of_depth(ty, hierarchy, 0, alias_registry)
 }
 
 // `Never` and `Meta` coincide at `Sendable` but describe distinct cases.
 #[allow(clippy::match_same_arms)]
-fn tier_of_depth(ty: &InferredType, hierarchy: &ClassHierarchy, depth: u8) -> Tier {
+fn tier_of_depth(
+    ty: &InferredType,
+    hierarchy: &ClassHierarchy,
+    depth: u8,
+    alias_registry: Option<&AliasRegistry>,
+) -> Tier {
     if depth >= MAX_COMPOSE_DEPTH {
         return Tier::Sendable;
     }
@@ -218,12 +234,12 @@ fn tier_of_depth(ty: &InferredType, hierarchy: &ClassHierarchy, depth: u8) -> Ti
             class_name,
             type_args,
             ..
-        } => tier_of_known(class_name, type_args, hierarchy, depth),
+        } => tier_of_known(class_name, type_args, hierarchy, depth, alias_registry),
         // A union value may be *any* member — take the weakest so a hazardous
         // member is not masked by a sendable one.
         InferredType::Union { members, .. } => members
             .iter()
-            .map(|m| tier_of_depth(m, hierarchy, depth + 1))
+            .map(|m| tier_of_depth(m, hierarchy, depth + 1, alias_registry))
             .reduce(Tier::join)
             .unwrap_or(Tier::Unknown),
         // An intersection value satisfies *every* member at once, so its
@@ -232,11 +248,13 @@ fn tier_of_depth(ty: &InferredType, hierarchy: &ClassHierarchy, depth: u8) -> Ti
         // safer co-member. Same weakest-wins rule as a union.
         InferredType::Intersection { members, .. } => members
             .iter()
-            .map(|m| tier_of_depth(m, hierarchy, depth + 1))
+            .map(|m| tier_of_depth(m, hierarchy, depth + 1, alias_registry))
             .reduce(Tier::join)
             .unwrap_or(Tier::Unknown),
         // `A \ B` is still an `A`.
-        InferredType::Negation { base, .. } => tier_of_depth(base, hierarchy, depth),
+        InferredType::Negation { base, .. } => {
+            tier_of_depth(base, hierarchy, depth, alias_registry)
+        }
     }
 }
 
@@ -245,6 +263,7 @@ fn tier_of_known(
     type_args: &[InferredType],
     hierarchy: &ClassHierarchy,
     depth: u8,
+    alias_registry: Option<&AliasRegistry>,
 ) -> Tier {
     let name = class_name.as_str();
     // Symbol singletons (`#foo`) are plain atoms.
@@ -282,7 +301,7 @@ fn tier_of_known(
     // Generic composition (ADR 0102 `type_args`): a container is as weak as its
     // weakest element — `List(Port)` (a `Collection` → `Value`) → `HandleScoped`.
     for arg in type_args {
-        tier = tier.join(tier_of_depth(arg, hierarchy, depth + 1));
+        tier = tier.join(tier_of_depth(arg, hierarchy, depth + 1, alias_registry));
     }
 
     // `Value` structural composition: a Value inherits the weakest tier of its
@@ -299,9 +318,14 @@ fn tier_of_known(
                 // be treated as the class name, `resolve_class_kind` would find
                 // no such class, and a generic field would silently drop to
                 // `Unknown` instead of composing its element tier (BT-2770).
+                // BT-2936: `alias_registry` (threaded from the top-level
+                // `tier_of` call) additionally expands an alias-typed field
+                // to its declared type before tiering, instead of treating
+                // the alias name as an unresolved nominal class.
                 Some(field_ty) => {
-                    let field_type = super::TypeChecker::resolve_type_name_string(&field_ty);
-                    tier_of_depth(&field_type, hierarchy, depth + 1)
+                    let field_type =
+                        super::TypeChecker::resolve_type_name_string(&field_ty, alias_registry);
+                    tier_of_depth(&field_type, hierarchy, depth + 1, alias_registry)
                 }
                 // An untyped field carries no static tier — treat as Unknown.
                 None => Tier::Unknown,
@@ -323,8 +347,12 @@ fn tier_of_known(
 /// default (rendering it on every `Integer` would be noise) and `Unknown`
 /// means the checker has nothing to say.
 #[must_use]
-pub(crate) fn hover_tier_label(ty: &InferredType, hierarchy: &ClassHierarchy) -> Option<String> {
-    match tier_of(ty, hierarchy) {
+pub(crate) fn hover_tier_label(
+    ty: &InferredType,
+    hierarchy: &ClassHierarchy,
+    alias_registry: Option<&AliasRegistry>,
+) -> Option<String> {
+    match tier_of(ty, hierarchy, alias_registry) {
         Tier::SendableRef => Some("SendableRef".to_string()),
         Tier::HandleScoped(scope) => Some(format!("HandleScoped(#{})", scope.as_atom())),
         Tier::Sendable | Tier::Unknown => None,
@@ -346,18 +374,18 @@ mod tests {
     #[test]
     fn builtin_table_tiers() {
         let h = hierarchy();
-        assert_eq!(tier_of(&known("Pid"), &h), Tier::SendableRef);
+        assert_eq!(tier_of(&known("Pid"), &h, None), Tier::SendableRef);
         assert_eq!(
-            tier_of(&known("Port"), &h),
+            tier_of(&known("Port"), &h, None),
             Tier::HandleScoped(HandleScope::Process)
         );
-        assert_eq!(tier_of(&known("Reference"), &h), Tier::Sendable);
+        assert_eq!(tier_of(&known("Reference"), &h, None), Tier::Sendable);
         assert_eq!(
-            tier_of(&known("Subscription"), &h),
+            tier_of(&known("Subscription"), &h, None),
             Tier::HandleScoped(HandleScope::Node)
         );
         assert_eq!(
-            tier_of(&known("FileHandle"), &h),
+            tier_of(&known("FileHandle"), &h, None),
             Tier::HandleScoped(HandleScope::Process)
         );
     }
@@ -366,14 +394,14 @@ mod tests {
     fn primitives_are_sendable() {
         let h = hierarchy();
         for p in ["Integer", "String", "Symbol", "Boolean", "Float"] {
-            assert_eq!(tier_of(&known(p), &h), Tier::Sendable, "{p}");
+            assert_eq!(tier_of(&known(p), &h, None), Tier::Sendable, "{p}");
         }
     }
 
     #[test]
     fn symbol_singleton_is_sendable() {
         let h = hierarchy();
-        assert_eq!(tier_of(&known("#west"), &h), Tier::Sendable);
+        assert_eq!(tier_of(&known("#west"), &h, None), Tier::Sendable);
     }
 
     #[test]
@@ -382,7 +410,8 @@ mod tests {
         assert_eq!(
             tier_of(
                 &InferredType::Dynamic(super::super::DynamicReason::UntypedFfi),
-                &h
+                &h,
+                None
             ),
             Tier::Unknown
         );
@@ -392,27 +421,27 @@ mod tests {
     fn unclassified_object_is_unknown() {
         let h = hierarchy();
         // A bare user Object subclass with no classification is silent.
-        assert_eq!(tier_of(&known("SomeRandomClass"), &h), Tier::Unknown);
+        assert_eq!(tier_of(&known("SomeRandomClass"), &h, None), Tier::Unknown);
     }
 
     #[test]
     fn hover_renders_meaningful_tiers() {
         let h = hierarchy();
         assert_eq!(
-            hover_tier_label(&known("Pid"), &h).as_deref(),
+            hover_tier_label(&known("Pid"), &h, None).as_deref(),
             Some("SendableRef")
         );
         assert_eq!(
-            hover_tier_label(&known("Port"), &h).as_deref(),
+            hover_tier_label(&known("Port"), &h, None).as_deref(),
             Some("HandleScoped(#process)")
         );
         assert_eq!(
-            hover_tier_label(&known("Subscription"), &h).as_deref(),
+            hover_tier_label(&known("Subscription"), &h, None).as_deref(),
             Some("HandleScoped(#node)")
         );
         // Sendable and Unknown are the silent tiers — no hover label.
-        assert_eq!(hover_tier_label(&known("Integer"), &h), None);
-        assert_eq!(hover_tier_label(&known("SomeRandomClass"), &h), None);
+        assert_eq!(hover_tier_label(&known("Integer"), &h, None), None);
+        assert_eq!(hover_tier_label(&known("SomeRandomClass"), &h, None), None);
     }
 
     #[test]
@@ -422,12 +451,12 @@ mod tests {
         // Port makes the whole collection HandleScoped(#process).
         let list_of_port = InferredType::known_with_args("List", vec![known("Port")]);
         assert_eq!(
-            tier_of(&list_of_port, &h),
+            tier_of(&list_of_port, &h, None),
             Tier::HandleScoped(HandleScope::Process)
         );
         // List(Integer) stays Sendable.
         let list_of_int = InferredType::known_with_args("List", vec![known("Integer")]);
-        assert_eq!(tier_of(&list_of_int, &h), Tier::Sendable);
+        assert_eq!(tier_of(&list_of_int, &h, None), Tier::Sendable);
     }
 
     #[test]
@@ -436,7 +465,10 @@ mod tests {
         // Dictionary(String, Port) → HandleScoped via its value type arg.
         let dict =
             InferredType::known_with_args("Dictionary", vec![known("String"), known("Port")]);
-        assert_eq!(tier_of(&dict, &h), Tier::HandleScoped(HandleScope::Process));
+        assert_eq!(
+            tier_of(&dict, &h, None),
+            Tier::HandleScoped(HandleScope::Process)
+        );
     }
 
     #[test]
@@ -448,7 +480,7 @@ mod tests {
         let (module, _) = crate::source_analysis::parse(tokens);
         let h = ClassHierarchy::build(&module).0.unwrap();
         assert_eq!(
-            tier_of(&known("PortBox"), &h),
+            tier_of(&known("PortBox"), &h, None),
             Tier::HandleScoped(HandleScope::Process)
         );
     }
@@ -462,7 +494,7 @@ mod tests {
         );
         let (module, _) = crate::source_analysis::parse(tokens);
         let h = ClassHierarchy::build(&module).0.unwrap();
-        assert_eq!(tier_of(&known("MyActor"), &h), Tier::SendableRef);
+        assert_eq!(tier_of(&known("MyActor"), &h, None), Tier::SendableRef);
     }
 
     #[test]
@@ -475,7 +507,7 @@ mod tests {
             provenance: super::super::TypeProvenance::Extracted,
         };
         assert_eq!(
-            tier_of(&intersection, &h),
+            tier_of(&intersection, &h, None),
             Tier::HandleScoped(HandleScope::Process)
         );
     }
@@ -489,7 +521,7 @@ mod tests {
         let (module, _) = crate::source_analysis::parse(tokens);
         let h = ClassHierarchy::build(&module).0.unwrap();
         assert_eq!(
-            tier_of(&known("Wrapper"), &h),
+            tier_of(&known("Wrapper"), &h, None),
             Tier::HandleScoped(HandleScope::Process)
         );
     }
@@ -506,7 +538,7 @@ mod tests {
         let (module, _) = crate::source_analysis::parse(tokens);
         let h = ClassHierarchy::build(&module).0.unwrap();
         assert_eq!(
-            tier_of(&known("Wrapper"), &h),
+            tier_of(&known("Wrapper"), &h, None),
             Tier::HandleScoped(HandleScope::Process)
         );
     }
@@ -520,7 +552,7 @@ mod tests {
         );
         let (module, _) = crate::source_analysis::parse(tokens);
         let h = ClassHierarchy::build(&module).0.unwrap();
-        assert_eq!(tier_of(&known("IntBox"), &h), Tier::Sendable);
+        assert_eq!(tier_of(&known("IntBox"), &h, None), Tier::Sendable);
     }
 
     #[test]
@@ -533,9 +565,39 @@ mod tests {
         let (module, _) = crate::source_analysis::parse(tokens);
         let h = ClassHierarchy::build(&module).0.unwrap();
         assert_eq!(
-            tier_of(&known("PortMap"), &h),
+            tier_of(&known("PortMap"), &h, None),
             Tier::HandleScoped(HandleScope::Process)
         );
+    }
+
+    /// BT-2936: a `Value`'s alias-typed field composes the tier of the
+    /// alias's *expansion* (here, `Port` → `HandleScoped(#process)`) when a
+    /// registry is threaded through, instead of falling back to
+    /// `Tier::Unknown` for the opaque alias name — the deferred half of
+    /// BT-2928's `resolve_type_name_string` fix for sendability tiering.
+    #[test]
+    fn value_composition_inherits_alias_typed_field_tier() {
+        use crate::semantic_analysis::alias_registry::AliasRegistry;
+        use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
+
+        let tokens = crate::source_analysis::lex_with_eof(
+            "type PortAlias = Port\ntyped Value subclass: Wrapper\n  field: p :: PortAlias = nil",
+        );
+        let (module, parse_diags) = crate::source_analysis::parse(tokens);
+        assert!(parse_diags.is_empty(), "parse failed: {parse_diags:?}");
+        let h = ClassHierarchy::build(&module).0.unwrap();
+        let protocol_registry = ProtocolRegistry::new();
+        let mut registry = AliasRegistry::new();
+        let diags = registry.register_module(&module, &h, &protocol_registry);
+        assert!(diags.is_empty(), "unexpected alias diagnostics: {diags:?}");
+
+        assert_eq!(
+            tier_of(&known("Wrapper"), &h, Some(&registry)),
+            Tier::HandleScoped(HandleScope::Process)
+        );
+        // Without the registry, the alias name stays opaque — the
+        // pre-BT-2936 fallback this test guards against regressing back to.
+        assert_eq!(tier_of(&known("Wrapper"), &h, None), Tier::Unknown);
     }
 
     #[test]

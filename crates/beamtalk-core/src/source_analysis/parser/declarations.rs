@@ -79,14 +79,37 @@ impl PendingDeclarationExpect {
         doc_comment: &mut Option<String>,
         comments: &mut CommentAttachment,
     ) {
-        if self.expect.is_some() {
+        let had_expect = self.expect.is_some();
+        if had_expect {
             *expect = self.expect;
         }
         if doc_comment.is_none() {
             *doc_comment = self.doc_comment;
         }
+        // BT-2944: decide `leading_blank_line` explicitly, independently of
+        // whether `leading`/`trailing` get replaced below, rather than
+        // piggybacking on the `comments.is_empty()` check below (which only
+        // ever looks at `leading`/`trailing`). When an `@expect` was
+        // actually present, it — and anything directly above it — is the
+        // true start of this declaration's leading trivia, so the
+        // blank-line-before-`@expect` signal always wins over the
+        // destination's own signal, which only reflects the (usually
+        // nonexistent) gap between `@expect` and the declaration keyword.
+        // Without this, a declaration with its own leading comment
+        // sandwiched between `@expect` and itself would keep its own
+        // (typically `false`) `leading_blank_line` and silently drop the
+        // fact that a blank line separated the whole `@expect`-annotated
+        // declaration from the previous one. No unparser reads
+        // `leading_blank_line` on class-member-level `CommentAttachment`s
+        // yet (state/class-var/method — only top-level class/protocol/
+        // type-alias declarations), but the correct merge is captured now
+        // so it doesn't need rediscovering once that changes.
+        let expect_leading_blank_line = self.comments.leading_blank_line;
         if comments.is_empty() {
             *comments = self.comments;
+        }
+        if had_expect {
+            comments.leading_blank_line = expect_leading_blank_line;
         }
     }
 }
@@ -130,7 +153,7 @@ impl Parser {
     pub(super) fn parse_class_definition(&mut self) -> ClassDefinition {
         let start = self.current_token().span();
         let doc_comment = self.collect_doc_comment();
-        let comments = self.collect_comment_attachment();
+        let mut comments = self.collect_comment_attachment();
         let mut is_abstract = false;
         let mut is_sealed = false;
         let mut is_typed = false;
@@ -220,9 +243,47 @@ impl Parser {
             None
         };
 
+        // Anchor for a trailing comment on the class header line itself
+        // (e.g. `Object subclass: Foo  // comment`) — the last token consumed
+        // so far (class name, type params, or `native:` module). Captured
+        // *before* parsing `handleScope:` because that clause conventionally
+        // sits on its own indented line (ADR 0103); if we let
+        // `collect_trailing_comment()` look at `current - 1` unconditionally
+        // after parsing it, it would inspect the `#symbol` token's own
+        // trailing trivia instead of the header line's, silently dropping a
+        // header-line comment (BT-2942).
+        let header_line_end = self.current.saturating_sub(1);
+        let handle_scope_on_new_line = matches!(
+            self.current_kind(),
+            TokenKind::Keyword(k) if k == "handleScope:"
+        ) && self.current_token().has_leading_newline();
+
         // Parse optional `handleScope: #symbol` clause (ADR 0103). Appears at
         // the head of the class body, like `native:` is a header clause.
         let handle_scope = self.parse_optional_handle_scope();
+
+        // Collect a trailing end-of-line comment on the class header line
+        // (after the last header token — class name, type params, or
+        // `native:` module — or, when `handleScope:` follows on the same
+        // line, its `#symbol`), mirroring the identical fix for type
+        // alias/protocol declarations (BT-2906). When `handleScope:` is on
+        // its own line, prefer a comment on the header line itself, but fall
+        // back to the post-`handleScope:` check (its old, only behavior) so
+        // a comment trailing the `handleScope: #symbol` line is still
+        // captured instead of silently dropped.
+        //
+        // `comments.trailing` is a single slot, so if *both* the header line
+        // and the `handleScope:` line carry a trailing comment, only the
+        // header-line one survives — the `handleScope:`-line comment is
+        // discarded. This is a deliberate choice (the header-line comment is
+        // the more prominent of the two), not an oversight; see
+        // `parse_handle_scope_on_new_line_prefers_header_over_scope_comment_when_both_present`.
+        comments.trailing = if handle_scope.is_some() && handle_scope_on_new_line {
+            self.collect_trailing_comment_at(header_line_end)
+                .or_else(|| self.collect_trailing_comment())
+        } else {
+            self.collect_trailing_comment()
+        };
 
         // Parse class body (state declarations, instance methods, class methods, class variables)
         let (state, methods, class_methods, class_variables) = self.parse_class_body();
@@ -1739,8 +1800,18 @@ impl Parser {
 
         // Collect leading comments from the class-name token's leading trivia.
         // parse_identifier() advances past the class name without reading trivia,
-        // so we must collect here before the token is consumed.
-        let mut class_leading_comments = self.collect_comment_attachment().leading;
+        // so we must collect here before the token is consumed. Also remember
+        // whether a blank line preceded the whole construct (before any leading
+        // comment, or before the class-name token itself if it has none) — this
+        // is the accurate signal for "was there a blank line before this
+        // standalone method", mirroring how classes/protocols/type-aliases
+        // capture `leading_blank_line` once at the start of their own construct
+        // (BT-2929). The later `collect_comment_attachment()` inside
+        // `parse_method_definition()` looks at the selector token instead, which
+        // would otherwise silently lose this signal (BT-2943).
+        let initial_comments = self.collect_comment_attachment();
+        let leading_blank_line = initial_comments.leading_blank_line;
+        let mut class_leading_comments = initial_comments.leading;
 
         // Parse class name, with optional package qualifier (ADR 0070).
         // Pattern: `identifier @ Identifier` or just `Identifier`.
@@ -1796,6 +1867,19 @@ impl Parser {
             class_leading_comments.append(&mut method.comments.leading);
             method.comments.leading = class_leading_comments;
         }
+        // BT-2943: `leading_blank_line` is consulted only by the module-level
+        // unparser, to decide whether to re-emit a blank line before this
+        // whole standalone-method construct (mirroring
+        // `TopLevelDecl::preceding_blank_line` for classes/protocols/type
+        // aliases, BT-2929) — never to control spacing *within* the leading
+        // comment block, which `unparse_comment_attachment_leading` handles
+        // itself via each comment's own `preceding_blank_line`. So the value
+        // captured before the class-name token — the true start of this
+        // construct — always wins here, even in the obscure case of a
+        // comment sitting between `>>` and the selector (whose own,
+        // internally-computed `leading_blank_line` describes a different gap
+        // that nothing renders).
+        method.comments.leading_blank_line = leading_blank_line;
 
         let span = start.merge(method.span);
 
@@ -1839,7 +1923,7 @@ impl Parser {
     pub(super) fn parse_type_alias_definition(&mut self) -> TypeAliasDefinition {
         let start = self.current_token().span();
         let doc_comment = self.collect_doc_comment();
-        let comments = self.collect_comment_attachment();
+        let mut comments = self.collect_comment_attachment();
 
         let is_internal =
             matches!(self.current_kind(), TokenKind::Identifier(name) if name == "internal");
@@ -1878,6 +1962,11 @@ impl Parser {
         let annotation = self.parse_type_annotation();
         let span = start.merge(annotation.span());
 
+        // Collect a trailing end-of-line comment on the declaration line
+        // (e.g. `type Port = Integer // comment`), mirroring the state
+        // declaration handling above (BT-2906).
+        comments.trailing = self.collect_trailing_comment();
+
         TypeAliasDefinition {
             name,
             annotation,
@@ -1908,7 +1997,7 @@ impl Parser {
     pub(super) fn parse_protocol_definition(&mut self) -> ProtocolDefinition {
         let start = self.current_token().span();
         let doc_comment = self.collect_doc_comment();
-        let comments = self.collect_comment_attachment();
+        let mut comments = self.collect_comment_attachment();
 
         // Consume `Protocol`
         self.advance();
@@ -1934,6 +2023,13 @@ impl Parser {
 
         // Parse optional type parameters: `Collection(E)`, `Mapping(K, V)`
         let type_params = self.parse_optional_type_params();
+
+        // Collect a trailing end-of-line comment on the declaration header
+        // line (e.g. `Protocol define: Sortable // comment`), mirroring the
+        // identical fix for `type` declarations (BT-2906). Collected before
+        // `extending:`/the body since those start on their own indented
+        // lines and aren't part of the header.
+        comments.trailing = self.collect_trailing_comment();
 
         // Parse optional `extending:` clause
         let extending = if matches!(self.current_kind(), TokenKind::Keyword(k) if k == "extending:")
@@ -2004,10 +2100,12 @@ impl Parser {
             && !self.is_at_type_alias_definition()
             && !self.is_at_standalone_method_definition()
         {
-            // BT-1618: Collect doc comment *before* checking for `class` prefix,
-            // because the doc comment is leading trivia on the `class` token and
-            // would be lost when we advance past it.
+            // BT-1618/BT-2930: Collect the doc comment and any non-doc leading
+            // comments *before* checking for `class` prefix, because both are
+            // leading trivia on the `class` token and would be lost when we
+            // advance past it.
             let doc_comment = self.collect_doc_comment();
+            let comments = self.collect_comment_attachment();
 
             // BT-1611: Detect `class` prefix for class method signatures.
             // Use the same lookahead as class definition parsing: `class` followed
@@ -2021,7 +2119,8 @@ impl Parser {
                 self.advance(); // consume `class`
             }
 
-            if let Some(sig) = self.parse_protocol_method_signature_with_doc(doc_comment) {
+            if let Some(sig) = self.parse_protocol_method_signature_with_doc(doc_comment, comments)
+            {
                 if is_class_method {
                     class_signatures.push(sig);
                 } else {
@@ -2043,9 +2142,11 @@ impl Parser {
     ///
     /// Returns `None` if the current position doesn't look like a method signature.
     ///
-    /// If `pre_doc` is `Some`, it is used as the doc comment (already collected
-    /// by the caller before consuming a `class` prefix). Otherwise, collects
-    /// the doc comment from the current token's leading trivia.
+    /// `pre_doc` and `pre_comments` are the doc comment and non-doc leading
+    /// comments, respectively, already collected by the caller before
+    /// consuming an optional `class` prefix — both live in the `class`
+    /// token's leading trivia and would be lost once the parser advances
+    /// past it (BT-1618, BT-2930).
     ///
     /// Syntax:
     /// - Unary: `asString -> String`
@@ -2054,10 +2155,11 @@ impl Parser {
     fn parse_protocol_method_signature_with_doc(
         &mut self,
         pre_doc: Option<String>,
+        pre_comments: CommentAttachment,
     ) -> Option<ProtocolMethodSignature> {
         let start = self.current_token().span();
         let doc_comment = pre_doc.or_else(|| self.collect_doc_comment());
-        let comments = self.collect_comment_attachment();
+        let comments = pre_comments;
 
         // Determine what kind of signature this is
         let (selector, parameters) = match self.current_kind() {

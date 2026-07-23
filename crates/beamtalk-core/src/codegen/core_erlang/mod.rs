@@ -361,6 +361,15 @@ pub struct CodegenOptions {
     /// `List` written back to `method_return_types` before codegen.
     native_type_registry:
         Option<std::sync::Arc<crate::semantic_analysis::type_checker::NativeTypeRegistry>>,
+    /// BT-2932: type alias declarations (`type Name = ...`) from other
+    /// modules in the same compilation unit — the codegen counterpart of
+    /// `AnalysisContext`/`ClassHierarchyContext`'s `pre_loaded_aliases`
+    /// (BT-2928). Merged with this module's own `module.type_aliases` via
+    /// `AliasRegistry::from_module_declarations_with_pre_loaded` so a
+    /// cross-module alias reference resolves to a `user_type` reference in
+    /// generated `-spec`/`-type` attributes instead of falling through to
+    /// `any()`.
+    pre_loaded_aliases: Vec<crate::semantic_analysis::alias_registry::AliasInfo>,
 }
 
 impl CodegenOptions {
@@ -380,6 +389,7 @@ impl CodegenOptions {
             beamtalk_version: None,
             otp_release: None,
             native_type_registry: None,
+            pre_loaded_aliases: Vec::new(),
         }
     }
 
@@ -494,6 +504,20 @@ impl CodegenOptions {
         >,
     ) -> Self {
         self.native_type_registry = registry;
+        self
+    }
+
+    /// BT-2932: sets pre-loaded type alias declarations from other modules
+    /// in the same compilation unit, so `generate_module` can resolve a
+    /// cross-module alias reference to a `user_type` reference in generated
+    /// `-spec`/`-type` attributes instead of falling through to `any()`.
+    /// Mirrors [`Self::with_class_hierarchy`]'s pre-loaded-metadata shape.
+    #[must_use]
+    pub fn with_pre_loaded_aliases(
+        mut self,
+        aliases: Vec<crate::semantic_analysis::alias_registry::AliasInfo>,
+    ) -> Self {
+        self.pre_loaded_aliases = aliases;
         self
     }
 }
@@ -623,6 +647,17 @@ pub fn generate_module_with_warnings(
     // so codegen generates auto-slot methods (withX: setters).
     crate::semantic_analysis::apply_class_kind_writeback(&mut module_with_writeback, &hierarchy);
     let module = &module_with_writeback;
+
+    // BT-2932: build the alias registry once, merging this module's own
+    // `type_aliases` with any pre-loaded aliases from other modules in the
+    // same compilation unit, so a cross-module alias reference resolves to
+    // a `user_type` reference instead of falling through to `any()` in
+    // generated `-spec`/`-type` attributes.
+    generator.alias_registry =
+        crate::semantic_analysis::alias_registry::AliasRegistry::from_module_declarations_with_pre_loaded(
+            module,
+            &options.pre_loaded_aliases,
+        );
 
     // ADR 0065 / BT-1457: Set Server subclass flag for handle_info codegen dispatch.
     if let Some(class) = module.classes.first() {
@@ -1344,6 +1379,22 @@ pub(crate) struct CoreErlangGenerator {
     /// ADR 0098 Phase 3: producing compound OTP version (`<release>-<erts>`),
     /// baked into `__beamtalk_meta`. Supplied by the CLI; `None` omits the key.
     otp_release: Option<EcoString>,
+    /// BT-2932: cross-module-aware alias registry for this generation —
+    /// this module's own `type_aliases` merged with any pre-loaded aliases
+    /// from other modules in the same compilation unit
+    /// (`CodegenOptions::pre_loaded_aliases`). Populated by
+    /// `generate_module_with_warnings` before codegen begins; consumed by
+    /// the `generate_class_specs`/`generate_method_spec`/
+    /// `generate_type_alias`/`generate_alias_type_attrs` call sites in
+    /// `actor_codegen.rs`, `value_type_codegen.rs`, `supervisor_codegen.rs`,
+    /// and `gen_server/native_facade.rs` so an alias-typed annotation
+    /// resolves to a `user_type` reference regardless of which module
+    /// declared the alias. Empty (not `None`) when the module has no
+    /// `type_aliases` and no pre-loaded aliases were supplied — mirrors
+    /// `AliasRegistry::from_module_declarations`'s empty-registry default,
+    /// so every downstream `Some(&self.alias_registry)` call site is a
+    /// no-op for the common case.
+    pub(super) alias_registry: crate::semantic_analysis::alias_registry::AliasRegistry,
 }
 
 impl CoreErlangGenerator {
@@ -1386,6 +1437,7 @@ impl CoreErlangGenerator {
             class_hierarchy: None,
             beamtalk_version: None,
             otp_release: None,
+            alias_registry: crate::semantic_analysis::alias_registry::AliasRegistry::new(),
         }
     }
 
@@ -2957,7 +3009,7 @@ impl CoreErlangGenerator {
                 leaf::var(class_pid_var.clone()),
                 ") in ",
                 "{'beamtalk_object', ",
-                leaf::atom(format!("{display_name} class")),
+                leaf::atom(util::metaclass_tag(&display_name)),
                 ", ",
                 leaf::var(class_mod_var),
                 ", ",
@@ -2986,7 +3038,7 @@ impl CoreErlangGenerator {
                 leaf::var(class_pid_var.clone()),
                 ") in ",
                 "{'beamtalk_object', ",
-                leaf::atom(format!("{display_name} class")),
+                leaf::atom(util::metaclass_tag(&display_name)),
                 ", ",
                 leaf::var(class_mod_var),
                 ", ",
@@ -3464,6 +3516,55 @@ impl CoreErlangGenerator {
             }
         }
 
+        // BT-2908: `whileTrue`/`whileFalse`/`repeat`/`onDo`/`ensure` — Block's
+        // `whileTrue:`/`whileFalse:`/`repeat`/`on:do:`/`ensure:`. The other half
+        // of the gap BT-2812's audit found but deliberately left unfixed above
+        // (see the BT-2812 comment on this match's sibling below): unlike
+        // `value*`, these need real loop/exception-handling semantics, not a
+        // bare `erlang:apply`. Feasible generically for the Tier 1 (pure) case
+        // because Core Erlang's `case`/`try`/`catch` mechanics don't themselves
+        // need the block's AST — only ADR-0041's state-threading convention
+        // does, and a Tier 2 (stateful) receiver/argument raises the same
+        // `stateful_block_dispatch` error `generate_block_value_structural_fallback`
+        // established rather than being reimplemented generically.
+        //
+        // Adversarial review (BT-2908): like BT-2812's `value*` match above,
+        // the `is_function/2` arity+1 check each of these five functions runs
+        // is not statically tied to ADR-0041's `Args..., StateAcc` convention
+        // — a future change to that shape (extra state args, different
+        // position) would silently degrade Tier 2 detection here too, with no
+        // compile-time signal.
+        if !is_quoted {
+            match name {
+                "whileTrue" => {
+                    return Ok(self.generate_while_structural_fallback(
+                        name,
+                        false,
+                        "whileTrue:",
+                        &class_name,
+                    ));
+                }
+                "whileFalse" => {
+                    return Ok(self.generate_while_structural_fallback(
+                        name,
+                        true,
+                        "whileFalse:",
+                        &class_name,
+                    ));
+                }
+                "repeat" => {
+                    return Ok(self.generate_repeat_structural_fallback(&class_name));
+                }
+                "onDo" => {
+                    return Ok(self.generate_on_do_structural_fallback(&class_name));
+                }
+                "ensure" => {
+                    return Ok(self.generate_ensure_structural_fallback(&class_name));
+                }
+                _ => {}
+            }
+        }
+
         // BT-1763: Erlang interop DNU intrinsics — forward selector/args to
         // the handler module's dispatch/3 rather than passing the intrinsic name.
         // doesNotUnderstand:args: receives (Self, Selector, Args) and we need to
@@ -3533,13 +3634,22 @@ impl CoreErlangGenerator {
                 // block via generic dispatch. Guard against a Tier 2 (stateful)
                 // block hitting a raw arity crash instead of a clear error — see
                 // `generate_stateful_block_guard`.
+                // BT-2913: `doWithKey:` (2-arg-block convention, same shape as
+                // `inject:into:`'s block) has the identical gap — extend the
+                // same guard. `keysAndValuesDo:` is self-hosted as `self
+                // doWithKey: block` (Dictionary.bt), so it inherits the fix
+                // once `doWithKey:` itself is guarded.
                 let stateful_guard_block_param = match name {
-                    "do:" | "collect:" | "select:" | "reject:" => params.first(),
+                    "do:" | "collect:" | "select:" | "reject:" | "doWithKey:" => params.first(),
                     "inject:into:" => params.get(1),
                     _ => None,
                 };
                 if let Some(block_param) = stateful_guard_block_param {
-                    let pure_arity = if name == "inject:into:" { 2 } else { 1 };
+                    let pure_arity = if matches!(name, "inject:into:" | "doWithKey:") {
+                        2
+                    } else {
+                        1
+                    };
                     return Ok(self.generate_stateful_block_guard(
                         block_param,
                         pure_arity,
@@ -3599,11 +3709,13 @@ impl CoreErlangGenerator {
         // every other structural intrinsic without a special case here — e.g.
         // `whileTrue`/`whileFalse`/`repeat`/`onDo`/`ensure` (Block) and
         // `listDo`/`listCollect`/`listSelect`/`listReject`/`listInjectInto`
-        // (List/Collection). Deliberately left unfixed by BT-2812: unlike the
-        // `value*` family (whose fix is "the receiver IS the fun to invoke, so
-        // `erlang:apply` it"), these need real loop/exception-handling semantics
-        // reimplemented generically over an arbitrary fun receiver/argument —
-        // a materially bigger, separately-scoped change. See BT-2888.
+        // (List/Collection). BT-2888 fixed the List/Collection family (guarding
+        // their existing correct Tier 1 bodies against a Tier 2 receiver) and
+        // BT-2908 fixed the Block loop/exception-handling family above (a real
+        // generic reimplementation for Tier 1, a clear error for Tier 2) — this
+        // placeholder now only remains live for primitives with no BIF lowering
+        // and no structural special-case, not for any of the originally-audited
+        // selectors.
         let runtime_module = PrimitiveBindingTable::runtime_module_for_class(&class_name);
 
         // BT-938: Validate that the target dispatch module exists in the known stdlib

@@ -513,11 +513,18 @@ pub(in crate::semantic_analysis) fn receiver_type_for_class(
 ///
 /// [`SuperclassTypeArg::ParamRef`]: crate::semantic_analysis::class_hierarchy::SuperclassTypeArg::ParamRef
 /// [`SuperclassTypeArg::Concrete`]: crate::semantic_analysis::class_hierarchy::SuperclassTypeArg::Concrete
+///
+/// `alias_registry` (BT-2936, ADR 0108 follow-up to BT-2928) is threaded
+/// through to the `Concrete` arm below so an alias-typed `extends
+/// Base(SomeAlias)` type argument expands to its declared type instead of
+/// staying an opaque nominal class. Pass `None` when no registry is
+/// available, matching this function's pre-BT-2936 behaviour.
 pub(in crate::semantic_analysis) fn super_receiver_type(
     child_class: &EcoString,
     child_type_args: &[InferredType],
     parent_class: &EcoString,
     hierarchy: &ClassHierarchy,
+    alias_registry: Option<&AliasRegistry>,
 ) -> InferredType {
     use crate::semantic_analysis::class_hierarchy::SuperclassTypeArg;
 
@@ -542,7 +549,7 @@ pub(in crate::semantic_analysis) fn super_receiver_type(
             // keyword aliases canonicalise correctly instead of becoming an
             // opaque `Known("List(Integer)")`.
             SuperclassTypeArg::Concrete { type_name } => {
-                super::TypeChecker::resolve_type_name_string(type_name)
+                super::TypeChecker::resolve_type_name_string(type_name, alias_registry)
             }
         })
         .collect();
@@ -1664,8 +1671,13 @@ mod tests {
             "Object subclass: Base(E)\n  state: x :: E = nil\n\nBase(R) subclass: Sub(R)\n",
         );
         let child_type_args = vec![InferredType::known("R")];
-        let result =
-            super_receiver_type(&"Sub".into(), &child_type_args, &"Base".into(), &hierarchy);
+        let result = super_receiver_type(
+            &"Sub".into(),
+            &child_type_args,
+            &"Base".into(),
+            &hierarchy,
+            None,
+        );
         let InferredType::Known {
             class_name,
             type_args,
@@ -1685,7 +1697,7 @@ mod tests {
         let (_, hierarchy) = parse_module(
             "Object subclass: Base(E)\n  state: x :: E = nil\n\nBase(Integer) subclass: IntBase\n",
         );
-        let result = super_receiver_type(&"IntBase".into(), &[], &"Base".into(), &hierarchy);
+        let result = super_receiver_type(&"IntBase".into(), &[], &"Base".into(), &hierarchy, None);
         let InferredType::Known {
             class_name,
             type_args,
@@ -1698,12 +1710,50 @@ mod tests {
         assert_eq!(type_args, vec![InferredType::known("Integer")]);
     }
 
+    /// BT-2936: `IntBase extends Base(SomeAlias)` where `type SomeAlias =
+    /// Integer` — the `Concrete` superclass type arg expands the alias
+    /// through the threaded `alias_registry` instead of staying an opaque
+    /// nominal class named `SomeAlias`.
+    #[test]
+    fn super_receiver_expands_alias_typed_concrete_superclass_arg() {
+        let (_, hierarchy) = parse_module(
+            "Object subclass: Base(E)\n  state: x :: E = nil\n\nBase(SomeAlias) subclass: IntBase\n",
+        );
+        let registry = alias_registry_with("SomeAlias", TypeAnnotation::Simple(ident("Integer")));
+        let result = super_receiver_type(
+            &"IntBase".into(),
+            &[],
+            &"Base".into(),
+            &hierarchy,
+            Some(&registry),
+        );
+        let InferredType::Known {
+            class_name,
+            type_args,
+            ..
+        } = result
+        else {
+            panic!("expected Known");
+        };
+        assert_eq!(class_name.as_str(), "Base");
+        assert_eq!(type_args, vec![InferredType::known("Integer")]);
+
+        // Without the registry, the alias name stays opaque — the
+        // pre-BT-2936 fallback this test guards against regressing back to.
+        let unresolved =
+            super_receiver_type(&"IntBase".into(), &[], &"Base".into(), &hierarchy, None);
+        let InferredType::Known { type_args, .. } = unresolved else {
+            panic!("expected Known");
+        };
+        assert_eq!(type_args, vec![InferredType::known("SomeAlias")]);
+    }
+
     #[test]
     fn super_receiver_falls_back_when_no_extends_annotation() {
         // Non-generic child of non-generic parent — no superclass_type_args.
         // super's receiver should match `receiver_type_for_class(parent)`.
         let (_, hierarchy) = parse_module("Object subclass: Parent\n\nParent subclass: Child\n");
-        let result = super_receiver_type(&"Child".into(), &[], &"Parent".into(), &hierarchy);
+        let result = super_receiver_type(&"Child".into(), &[], &"Parent".into(), &hierarchy, None);
         let expected = receiver_type_for_class(&"Parent".into(), &hierarchy);
         assert_eq!(result, expected);
     }
@@ -1718,6 +1768,7 @@ mod tests {
             &[InferredType::known("R")],
             &"Base".into(),
             &hierarchy,
+            None,
         );
         let expected = receiver_type_for_class(&"Base".into(), &hierarchy);
         assert_eq!(result, expected);

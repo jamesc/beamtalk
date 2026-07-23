@@ -36,6 +36,12 @@ safe_to_existing_atom_plus_operator_test() ->
     %% '+' should be a known atom (used in Erlang)
     ?assertEqual({ok, '+'}, beamtalk_repl_docs:safe_to_existing_atom(<<"+">>)).
 
+safe_to_existing_atom_non_binary_test() ->
+    %% Mirrors beamtalk_repl_server_tests:safe_to_existing_atom_non_binary_test/0
+    %% (BT-865): beamtalk_repl_errors:safe_to_existing_atom/1 widens the
+    %% accepted domain to any term, not just binaries.
+    ?assertEqual({error, badarg}, beamtalk_repl_docs:safe_to_existing_atom(123)).
+
 %%====================================================================
 %% format_superclass tests
 %%====================================================================

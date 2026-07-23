@@ -39,7 +39,7 @@
 
 // Spawn a TypedCounter to create a binding (tc) that completions can resolve.
 tc := TypedCounter spawn
-// => _
+// => Actor(TypedCounter, _)
 
 // `tc getValue ` — getValue is annotated `-> Integer`, so Integer methods appear.
 :complete tc getValue
