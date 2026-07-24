@@ -3373,7 +3373,7 @@ fn test_abstract_actor_spawn_raises_instantiation_error() {
         "Abstract actor spawn/0 must have arity-0 fun signature. Got:\n{code}"
     );
     assert!(
-        !code.contains("beamtalk_actor':'safe_spawn'"),
+        !code.contains("'beamtalk_actor':'safe_spawn'"),
         "Abstract actor spawn must NOT call safe_spawn. Got:\n{code}"
     );
     assert!(
