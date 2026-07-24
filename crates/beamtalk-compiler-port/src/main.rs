@@ -2200,15 +2200,7 @@ fn handle_find_senders_in_source(request: &Map) -> Term {
     };
 
     let lines = beamtalk_core::queries::senders_query::find_senders_in_source(&source, &selector);
-    let line_terms: Vec<Term> = lines
-        .iter()
-        .map(|&line| int_term(i32::try_from(line).unwrap_or(i32::MAX)))
-        .collect();
-
-    Term::from(Map::from([
-        (atom("status"), atom("ok")),
-        (atom("lines"), Term::from(List::from(line_terms))),
-    ]))
+    ok_lines_response(&lines)
 }
 
 /// Handle a `find_all_sends_in_source` request (BT-2206).
@@ -2339,15 +2331,7 @@ fn handle_find_references_to_in_source(request: &Map) -> Term {
         &source,
         &class_name,
     );
-    let line_terms: Vec<Term> = lines
-        .iter()
-        .map(|&line| int_term(i32::try_from(line).unwrap_or(i32::MAX)))
-        .collect();
-
-    Term::from(Map::from([
-        (atom("status"), atom("ok")),
-        (atom("lines"), Term::from(List::from(line_terms))),
-    ]))
+    ok_lines_response(&lines)
 }
 
 /// Handle a `find_field_readers_in_source` request (BT-2208).
@@ -2373,7 +2357,7 @@ fn handle_find_field_readers_in_source(request: &Map) -> Term {
 
     let lines =
         beamtalk_core::queries::field_accesses_query::find_field_readers_in_source(&source, &field);
-    field_lines_response(&lines)
+    ok_lines_response(&lines)
 }
 
 /// Handle a `find_field_writers_in_source` request (BT-2208).
@@ -2399,7 +2383,7 @@ fn handle_find_field_writers_in_source(request: &Map) -> Term {
 
     let lines =
         beamtalk_core::queries::field_accesses_query::find_field_writers_in_source(&source, &field);
-    field_lines_response(&lines)
+    ok_lines_response(&lines)
 }
 
 /// Handle a `find_ffi_sites_in_source` request (BT-2211).
@@ -2434,12 +2418,13 @@ fn handle_find_ffi_sites_in_source(request: &Map) -> Term {
     let lines = beamtalk_core::queries::ffi_sites_query::find_ffi_sites_in_source(
         &source, &module, &function, arity,
     );
-    field_lines_response(&lines)
+    ok_lines_response(&lines)
 }
 
 /// Build the standard `#{status => ok, lines => [...]}` response shared by the
-/// field reader/writer queries (BT-2208) and the FFI sites query (BT-2211).
-fn field_lines_response(lines: &[u32]) -> Term {
+/// senders query (BT-2200), references-to query (BT-2203), field reader/writer
+/// queries (BT-2208), and FFI sites query (BT-2211).
+fn ok_lines_response(lines: &[u32]) -> Term {
     let line_terms: Vec<Term> = lines
         .iter()
         .map(|&line| int_term(i32::try_from(line).unwrap_or(i32::MAX)))
