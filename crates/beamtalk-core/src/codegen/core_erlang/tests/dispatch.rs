@@ -3434,8 +3434,9 @@ fn test_actor_spawn_registers_instance_for_hot_reload() {
     let spawn1_start = code
         .find("'spawn'/1 = fun (InitArgs) ->")
         .expect("spawn/1 must be generated");
+    let spawn1_end = code.find("'new'/0 = fun () ->").unwrap_or(code.len());
     let spawn0_body = &code[spawn0_start..spawn1_start];
-    let spawn1_body = &code[spawn1_start..];
+    let spawn1_body = &code[spawn1_start..spawn1_end];
     assert!(
         spawn0_body.contains("let _InstReg = try call 'beamtalk_object_instances':'register'("),
         "spawn/0 ok-branch must register the instance. Got spawn/0 body:\n{spawn0_body}"
