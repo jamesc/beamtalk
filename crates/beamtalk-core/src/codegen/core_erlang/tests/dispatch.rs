@@ -3324,3 +3324,146 @@ fn test_class_method_self_send_long_selector_uses_hashed_atom() {
         "class method self-send must use hashed call target 'class_kw_<hex>'. Got:\n{code}"
     );
 }
+
+// ─── gen_server/spawn.rs coverage ────────────────────────────────────────────
+
+#[test]
+fn test_abstract_actor_spawn_raises_instantiation_error() {
+    // BT-105: Abstract Actor subclasses must emit spawn/0 and spawn/1 as
+    // instantiation_error stubs — not real safe_spawn calls.
+    use crate::ast::*;
+
+    let class = ClassDefinition {
+        name: Identifier::new("AbstractQueue", Span::new(0, 0)),
+        superclass: Some(Identifier::new("Actor", Span::new(0, 0))),
+        superclass_package: None,
+        class_kind: ClassKind::Actor,
+        is_abstract: true,
+        is_sealed: false,
+        is_typed: false,
+        is_internal: false,
+        supervisor_kind: None,
+        state: vec![],
+        methods: vec![],
+        class_methods: vec![],
+        class_variables: vec![],
+        type_params: vec![],
+        superclass_type_args: vec![],
+        comments: CommentAttachment::default(),
+        doc_comment: None,
+        backing_module: None,
+        handle_scope: None,
+        span: Span::new(0, 0),
+    };
+    let module = Module {
+        classes: vec![class],
+        type_aliases: Vec::new(),
+        expressions: vec![],
+        method_definitions: vec![],
+        protocols: Vec::new(),
+        span: Span::new(0, 0),
+        file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
+    };
+    let code = generate_module(&module, CodegenOptions::new("bt@abstract_queue"))
+        .expect("codegen should succeed");
+
+    assert!(
+        code.contains("'spawn'/0 = fun () ->"),
+        "Abstract actor spawn/0 must have arity-0 fun signature. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("beamtalk_actor':'safe_spawn'"),
+        "Abstract actor spawn must NOT call safe_spawn. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'beamtalk_error':'new'('instantiation_error', 'AbstractQueue')"),
+        "Abstract actor spawn must raise instantiation_error for the class. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'beamtalk_error':'with_selector'(Error0, 'spawn')"),
+        "spawn/0 error stub must name selector 'spawn'. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'spawn'/1 = fun (_InitArgs) ->"),
+        "Abstract actor spawn/1 must discard InitArgs (_InitArgs). Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'beamtalk_error':'with_selector'(Error0, 'spawnWith:')"),
+        "spawn/1 error stub must name selector 'spawnWith:'. Got:\n{code}"
+    );
+    let abstract_hint = CoreErlangGenerator::binary_string_literal(
+        "Abstract classes cannot be instantiated. Subclass it first.",
+    );
+    assert_eq!(
+        code.matches(abstract_hint.as_str()).count(),
+        2,
+        "Both spawn/0 and spawn/1 stubs must include the abstract-class hint. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_actor_spawn_registers_instance_for_hot_reload() {
+    // BT-572: spawn/0 and spawn/1 ok-branches must register the new pid with
+    // beamtalk_object_instances:register/2, wrapped in try-catch so a missing
+    // registry (e.g. in stdlib unit tests) does not crash the spawn.
+    use crate::ast::*;
+
+    let module = Module::new(vec![], Span::new(0, 0));
+    let code = generate_module(&module, CodegenOptions::new("counter"))
+        .expect("codegen should succeed");
+
+    assert!(
+        code.contains("let _InstReg = try call 'beamtalk_object_instances':'register'("),
+        "spawn must register instance for hot-reload tracking. Got:\n{code}"
+    );
+    assert!(
+        code.contains("of _RegOk -> _RegOk"),
+        "instance registration success arm must return the ok value. Got:\n{code}"
+    );
+    assert!(
+        code.contains("catch <_RegT, _RegE, _RegS> -> 'ok'"),
+        "instance registration must swallow errors when registry is absent. Got:\n{code}"
+    );
+    assert_eq!(
+        code.matches("_InstReg").count(),
+        2,
+        "Both spawn/0 and spawn/1 ok-branches must register the instance. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_spawn_with_args_validates_map_argument() {
+    // BT-473: spawn/1 must guard InitArgs with erlang:is_map before calling
+    // safe_spawn. A non-map raises type_error with the 'spawnWith:' selector
+    // and a descriptive hint.
+    use crate::ast::*;
+
+    let module = Module::new(vec![], Span::new(0, 0));
+    let code = generate_module(&module, CodegenOptions::new("counter"))
+        .expect("codegen should succeed");
+
+    assert!(
+        code.contains("case call 'erlang':'is_map'(InitArgs)"),
+        "spawn/1 must guard InitArgs with erlang:is_map. Got:\n{code}"
+    );
+    assert!(
+        code.contains("<'false'> when 'true' ->"),
+        "spawn/1 must have a false branch for non-map InitArgs. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'beamtalk_error':'new'('type_error', 'Counter')"),
+        "spawn/1 false-branch must raise type_error for the class. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'beamtalk_error':'with_selector'(TypeErr0, 'spawnWith:')"),
+        "type_error must name selector 'spawnWith:'. Got:\n{code}"
+    );
+    let dict_hint = CoreErlangGenerator::binary_string_literal(
+        "spawnWith: expects a Dictionary argument",
+    );
+    assert!(
+        code.contains(dict_hint.as_str()),
+        "type_error must include the Dictionary hint. Got:\n{code}"
+    );
+}
