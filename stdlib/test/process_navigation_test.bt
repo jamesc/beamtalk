@@ -42,17 +42,16 @@ TestCase subclass: ProcessNavigationTest
   testTreeNodesCount => self assert: self sampleTree nodes size equals: 3
 
   testTreeNodesAreSupervisionNodes =>
-    self assert: (self sampleTree nodes first isKindOf: SupervisionNode) equals: true
+    self assert: (self sampleTree nodes first isKindOf: SupervisionNode)
 
-  testTreeIsEmptyFalse => self assert: self sampleTree isEmpty equals: false
+  testTreeIsEmptyFalse => self deny: self sampleTree isEmpty
 
-  testEmptyTreeIsEmpty =>
-    self assert: (SupervisionTree flatNodes: #()) isEmpty equals: true
+  testEmptyTreeIsEmpty => self assert: (SupervisionTree flatNodes: #()) isEmpty
 
-  testTreeRootNotNil => self assert: self sampleTree root isNil equals: false
+  testTreeRootNotNil => self deny: self sampleTree root isNil
 
   testTreePrintStringShape =>
-    self assert: (self sampleTree printString startsWith: "#SupervisionTree<") equals: true
+    self assert: (self sampleTree printString startsWith: "#SupervisionTree<")
 
   testEmptyTreePrintString =>
     self assert: (SupervisionTree flatNodes: #()) printString equals: "#SupervisionTree<empty>"
@@ -104,21 +103,21 @@ TestCase subclass: ProcessNavigationTest
 
   testDoReturnsTree =>
     result := self sampleTree do: [:n | n kind]
-    self assert: (result isKindOf: SupervisionTree) equals: true
+    self assert: (result isKindOf: SupervisionTree)
 
   // === ProcessNavigation: constructors over the live tree (FFI, no workspace) ===
   testDefaultIsProcessNavigation =>
-    self assert: (ProcessNavigation default isKindOf: ProcessNavigation) equals: true
+    self assert: (ProcessNavigation default isKindOf: ProcessNavigation)
 
   testDefaultTreeIsSupervisionTree =>
-    self assert: (ProcessNavigation default tree isKindOf: SupervisionTree) equals: true
+    self assert: (ProcessNavigation default tree isKindOf: SupervisionTree)
 
   testSystemTreeIsSupervisionTree =>
-    self assert: (ProcessNavigation system tree isKindOf: SupervisionTree) equals: true
+    self assert: (ProcessNavigation system tree isKindOf: SupervisionTree)
 
   testDefaultIsSubsetOfSystem =>
     // The default scope filters infra, so its node set is a subset of system's.
-    self assert: (ProcessNavigation default tree size <= ProcessNavigation system tree size) equals: true
+    self assert: (ProcessNavigation default tree size <= ProcessNavigation system tree size)
 
   // === from: runtime type-error fallback (untyped FFI input) ===
   // `ProcessNavigation from: 42` is rejected STATICALLY by the type checker
@@ -126,5 +125,5 @@ TestCase subclass: ProcessNavigationTest
   // shim keeps for untyped/Dynamic input arriving via FFI.
   testFromWrongTypeRuntimeFallback =>
     result := (Erlang beamtalk_process_navigation) from: 42
-    self assert: result isError equals: true
+    self assert: result isError
     self assert: result error kind equals: #type_error
