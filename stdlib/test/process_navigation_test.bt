@@ -46,8 +46,7 @@ TestCase subclass: ProcessNavigationTest
 
   testTreeIsEmptyFalse => self deny: self sampleTree isEmpty
 
-  testEmptyTreeIsEmpty =>
-    self assert: (SupervisionTree flatNodes: #()) isEmpty
+  testEmptyTreeIsEmpty => self assert: (SupervisionTree flatNodes: #()) isEmpty
 
   testTreeRootNotNil => self deny: self sampleTree root isNil
 
