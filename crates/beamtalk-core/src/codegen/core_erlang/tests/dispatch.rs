@@ -3434,7 +3434,10 @@ fn test_actor_spawn_registers_instance_for_hot_reload() {
     let spawn1_start = code
         .find("'spawn'/1 = fun (InitArgs) ->")
         .expect("spawn/1 must be generated");
-    let spawn1_end = code.find("'new'/0 = fun () ->").unwrap_or(code.len());
+    let spawn1_end = code[spawn1_start..]
+        .find("'new'/0 = fun () ->")
+        .map(|offset| spawn1_start + offset)
+        .unwrap_or(code.len());
     let spawn0_body = &code[spawn0_start..spawn1_start];
     let spawn1_body = &code[spawn1_start..spawn1_end];
     assert!(
