@@ -3400,6 +3400,11 @@ fn test_abstract_actor_spawn_raises_instantiation_error() {
         2,
         "Both spawn/0 and spawn/1 stubs must include the abstract-class hint. Got:\n{code}"
     );
+    // Abstract stubs must never emit an instance-registration call.
+    assert!(
+        !code.contains("beamtalk_object_instances':'register'"),
+        "Abstract actor spawn stubs must not register instances. Got:\n{code}"
+    );
 }
 
 #[test]
@@ -3414,10 +3419,6 @@ fn test_actor_spawn_registers_instance_for_hot_reload() {
         generate_module(&module, CodegenOptions::new("counter")).expect("codegen should succeed");
 
     assert!(
-        code.contains("let _InstReg = try call 'beamtalk_object_instances':'register'("),
-        "spawn must register instance for hot-reload tracking. Got:\n{code}"
-    );
-    assert!(
         code.contains("of _RegOk -> _RegOk"),
         "instance registration success arm must return the ok value. Got:\n{code}"
     );
@@ -3425,10 +3426,23 @@ fn test_actor_spawn_registers_instance_for_hot_reload() {
         code.contains("catch <_RegT, _RegE, _RegS> -> 'ok'"),
         "instance registration must swallow errors when registry is absent. Got:\n{code}"
     );
-    assert_eq!(
-        code.matches("_InstReg").count(),
-        2,
-        "Both spawn/0 and spawn/1 ok-branches must register the instance. Got:\n{code}"
+    // Check each spawn function independently so a missing registration in one
+    // is reported precisely rather than as a count mismatch.
+    let spawn0_start = code
+        .find("'spawn'/0 = fun () ->")
+        .expect("spawn/0 must be generated");
+    let spawn1_start = code
+        .find("'spawn'/1 = fun (InitArgs) ->")
+        .expect("spawn/1 must be generated");
+    let spawn0_body = &code[spawn0_start..spawn1_start];
+    let spawn1_body = &code[spawn1_start..];
+    assert!(
+        spawn0_body.contains("let _InstReg = try call 'beamtalk_object_instances':'register'("),
+        "spawn/0 ok-branch must register the instance. Got spawn/0 body:\n{spawn0_body}"
+    );
+    assert!(
+        spawn1_body.contains("let _InstReg = try call 'beamtalk_object_instances':'register'("),
+        "spawn/1 ok-branch must register the instance. Got spawn/1 body:\n{spawn1_body}"
     );
 }
 
