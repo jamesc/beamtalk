@@ -3410,8 +3410,8 @@ fn test_actor_spawn_registers_instance_for_hot_reload() {
     use crate::ast::*;
 
     let module = Module::new(vec![], Span::new(0, 0));
-    let code = generate_module(&module, CodegenOptions::new("counter"))
-        .expect("codegen should succeed");
+    let code =
+        generate_module(&module, CodegenOptions::new("counter")).expect("codegen should succeed");
 
     assert!(
         code.contains("let _InstReg = try call 'beamtalk_object_instances':'register'("),
@@ -3440,8 +3440,8 @@ fn test_spawn_with_args_validates_map_argument() {
     use crate::ast::*;
 
     let module = Module::new(vec![], Span::new(0, 0));
-    let code = generate_module(&module, CodegenOptions::new("counter"))
-        .expect("codegen should succeed");
+    let code =
+        generate_module(&module, CodegenOptions::new("counter")).expect("codegen should succeed");
 
     assert!(
         code.contains("case call 'erlang':'is_map'(InitArgs)"),
@@ -3459,9 +3459,8 @@ fn test_spawn_with_args_validates_map_argument() {
         code.contains("call 'beamtalk_error':'with_selector'(TypeErr0, 'spawnWith:')"),
         "type_error must name selector 'spawnWith:'. Got:\n{code}"
     );
-    let dict_hint = CoreErlangGenerator::binary_string_literal(
-        "spawnWith: expects a Dictionary argument",
-    );
+    let dict_hint =
+        CoreErlangGenerator::binary_string_literal("spawnWith: expects a Dictionary argument");
     assert!(
         code.contains(dict_hint.as_str()),
         "type_error must include the Dictionary hint. Got:\n{code}"
