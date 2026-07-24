@@ -3402,7 +3402,7 @@ fn test_abstract_actor_spawn_raises_instantiation_error() {
     );
     // Abstract stubs must never emit an instance-registration call.
     assert!(
-        !code.contains("beamtalk_object_instances':'register'"),
+        !code.contains("'beamtalk_object_instances':'register'"),
         "Abstract actor spawn stubs must not register instances. Got:\n{code}"
     );
 }
@@ -3412,13 +3412,40 @@ fn test_actor_spawn_registers_instance_for_hot_reload() {
     // BT-572: spawn/0 and spawn/1 ok-branches must register the new pid with
     // beamtalk_object_instances:register/2, wrapped in try-catch so a missing
     // registry (e.g. in stdlib unit tests) does not crash the spawn.
-    //
-    // Module::new with no classes relies on the empty-module-defaults-to-actor
-    // fallback in is_actor_class (else { true }). The module name "counter"
-    // synthesises the class atom 'Counter' via the module-name heuristic.
     use crate::ast::*;
 
-    let module = Module::new(vec![], Span::new(0, 0));
+    let class = ClassDefinition {
+        name: Identifier::new("Counter", Span::new(0, 0)),
+        superclass: Some(Identifier::new("Actor", Span::new(0, 0))),
+        superclass_package: None,
+        class_kind: ClassKind::Actor,
+        is_abstract: false,
+        is_sealed: false,
+        is_typed: false,
+        is_internal: false,
+        supervisor_kind: None,
+        state: vec![],
+        methods: vec![],
+        class_methods: vec![],
+        class_variables: vec![],
+        type_params: vec![],
+        superclass_type_args: vec![],
+        comments: CommentAttachment::default(),
+        doc_comment: None,
+        backing_module: None,
+        handle_scope: None,
+        span: Span::new(0, 0),
+    };
+    let module = Module {
+        classes: vec![class],
+        method_definitions: Vec::new(),
+        protocols: Vec::new(),
+        type_aliases: Vec::new(),
+        expressions: Vec::new(),
+        span: Span::new(0, 0),
+        file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
+    };
     let code =
         generate_module(&module, CodegenOptions::new("counter")).expect("codegen should succeed");
 
@@ -3465,7 +3492,38 @@ fn test_spawn_with_args_validates_map_argument() {
     // and a descriptive hint.
     use crate::ast::*;
 
-    let module = Module::new(vec![], Span::new(0, 0));
+    let class = ClassDefinition {
+        name: Identifier::new("Counter", Span::new(0, 0)),
+        superclass: Some(Identifier::new("Actor", Span::new(0, 0))),
+        superclass_package: None,
+        class_kind: ClassKind::Actor,
+        is_abstract: false,
+        is_sealed: false,
+        is_typed: false,
+        is_internal: false,
+        supervisor_kind: None,
+        state: vec![],
+        methods: vec![],
+        class_methods: vec![],
+        class_variables: vec![],
+        type_params: vec![],
+        superclass_type_args: vec![],
+        comments: CommentAttachment::default(),
+        doc_comment: None,
+        backing_module: None,
+        handle_scope: None,
+        span: Span::new(0, 0),
+    };
+    let module = Module {
+        classes: vec![class],
+        method_definitions: Vec::new(),
+        protocols: Vec::new(),
+        type_aliases: Vec::new(),
+        expressions: Vec::new(),
+        span: Span::new(0, 0),
+        file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
+    };
     let code =
         generate_module(&module, CodegenOptions::new("counter")).expect("codegen should succeed");
 
