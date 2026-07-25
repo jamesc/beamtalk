@@ -2576,21 +2576,28 @@ publish_leaf_change_recheck_outcome_safe(SuperclassBin, Result) ->
 %% re-check actually cleared or superseded something a surface may still be
 %% displaying. Shared by `publish_leaf_change_recheck_outcome/2` and
 %% `publish_alias_change_recheck_outcome/2`, whose announce gates both need
-%% that signal (see their docs for why "did we clear anything" is the right
-%% gate for them, where `publish_shape_recheck_outcome/3`'s "were any owners
-%% checked" is right for its own capped, xref-derived candidate set).
+%% that signal (see their docs for why "did we displace anything" is the
+%% right gate for them, where `publish_shape_recheck_outcome/3`'s "were any
+%% owners checked" is right for its own capped, xref-derived candidate set).
+%%
+%% Deliberately *not* narrowed to "cleared to empty" (PR #3116 review): the
+%% flag covers a supersession (non-empty replaced by different non-empty)
+%% too. That case is redundant with the callers' own `Findings =/= []` half
+%% and so never changes an outcome — but narrowing it would mean reading
+%% each new bucket back to classify the write, for no behavioural gain.
+%%
 %% Every owner is written unconditionally — the fold never short-circuits,
 %% so the ADR 0105 "replacement, not just agreement" rule still applies to
 %% every checked owner regardless of what earlier owners returned.
--spec put_owner_origins_clearing_any(
+-spec put_owner_origins_replacing_any(
     [binary()], binary(), [beamtalk_recheck:finding()]
 ) -> boolean().
-put_owner_origins_clearing_any(CheckedOwners, OriginBin, Findings) ->
+put_owner_origins_replacing_any(CheckedOwners, OriginBin, Findings) ->
     lists:foldl(
-        fun(OwnerBin, ClearedAny) ->
+        fun(OwnerBin, ReplacedAny) ->
             OwnerFindings = [F || F <- Findings, maps:get(owner, F) =:= OwnerBin],
             Prev = findings_store_put_owner_origin(OwnerBin, OriginBin, OwnerFindings),
-            ClearedAny orelse Prev =/= []
+            ReplacedAny orelse Prev =/= []
         end,
         false,
         CheckedOwners
@@ -2618,10 +2625,11 @@ unbatched single-superclass sweep would have reported for this superclass
 alone.
 
 The announce fires when this re-check has something for a surface to act
-on: either it produced `Findings`, or its store writes actually *cleared* a
-`{Owner, SuperclassBin}` origin bucket that a surface may still be
-displaying (`ClearedStaleFindings` — `findings_store_put_owner_origin/3`
-hands back each previous bucket, so this costs no extra store round trip).
+on: either it produced `Findings`, or its store writes displaced a
+previously non-empty `{Owner, SuperclassBin}` origin bucket that a surface
+may still be displaying (`ReplacedNonEmpty` —
+`findings_store_put_owner_origin/3` hands back each previous bucket, so
+this costs no extra store round trip).
 
 Deliberately **not** `publish_shape_recheck_outcome/3`'s "announce whenever
 `CheckedOwners` is non-empty" gate (PR #2965 review, which suggested
@@ -2659,11 +2667,11 @@ publish_leaf_change_recheck_outcome(SuperclassBin, Result) ->
         not_verified_owners := NotVerifiedOwners
     } = Result,
     Findings = [F || F <- AllFindings, maps:get(changed_class, F) =:= SuperclassBin],
-    ClearedStaleFindings = put_owner_origins_clearing_any(
+    ReplacedNonEmpty = put_owner_origins_replacing_any(
         CheckedOwners, SuperclassBin, Findings
     ),
     mark_unverified_findings_stale(SuperclassBin, NotVerifiedOwners),
-    case Findings =/= [] orelse ClearedStaleFindings of
+    case Findings =/= [] orelse ReplacedNonEmpty of
         false ->
             ok;
         true ->
@@ -2792,11 +2800,11 @@ publish_alias_change_recheck_outcome(AliasNameBin, Result) ->
         cap_note := CapNote,
         not_verified_owners := NotVerifiedOwners
     } = Result,
-    ClearedStaleFindings = put_owner_origins_clearing_any(
+    ReplacedNonEmpty = put_owner_origins_replacing_any(
         CheckedOwners, AliasNameBin, Findings
     ),
     mark_unverified_findings_stale(AliasNameBin, NotVerifiedOwners),
-    case Findings =/= [] orelse ClearedStaleFindings of
+    case Findings =/= [] orelse ReplacedNonEmpty of
         false ->
             ok;
         true ->
