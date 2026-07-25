@@ -192,6 +192,20 @@ impl Module {
             file_trailing_comments: Vec::new(),
         }
     }
+
+    /// Iterate every method defined in this module — both inline class methods
+    /// (instance-side and class-side) and standalone Tonel-style definitions.
+    ///
+    /// Use this instead of manually nesting
+    /// `for class in &module.classes { for method in … }` and a separate
+    /// `for standalone in &module.method_definitions { … }` loop when the
+    /// per-method logic does not need the enclosing `ClassDefinition` context.
+    pub fn all_methods(&self) -> impl Iterator<Item = &MethodDefinition> {
+        self.classes
+            .iter()
+            .flat_map(|c| c.methods.iter().chain(c.class_methods.iter()))
+            .chain(self.method_definitions.iter().map(|s| &s.method))
+    }
 }
 
 /// A comment in the source code.

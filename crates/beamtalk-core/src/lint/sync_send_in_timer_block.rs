@@ -29,15 +29,8 @@ pub(crate) struct SyncSendInTimerBlockPass;
 
 impl LintPass for SyncSendInTimerBlockPass {
     fn check(&self, module: &Module, diagnostics: &mut Vec<Diagnostic>) {
-        for class in &module.classes {
-            for method in class.methods.iter().chain(class.class_methods.iter()) {
-                for stmt in &method.body {
-                    walk_for_timer_sends(&stmt.expression, false, diagnostics);
-                }
-            }
-        }
-        for standalone in &module.method_definitions {
-            for stmt in &standalone.method.body {
+        for method in module.all_methods() {
+            for stmt in &method.body {
                 walk_for_timer_sends(&stmt.expression, false, diagnostics);
             }
         }

@@ -178,18 +178,10 @@ fn empty_body_error(selector: &str, span: Span) -> Diagnostic {
 }
 
 pub(crate) fn check_empty_method_bodies(module: &Module, diagnostics: &mut Vec<Diagnostic>) {
-    for class in &module.classes {
-        for method in class.methods.iter().chain(class.class_methods.iter()) {
-            if method.body.is_empty() {
-                let selector = method.selector.name();
-                diagnostics.push(empty_body_error(&selector, method.span));
-            }
-        }
-    }
-    for standalone in &module.method_definitions {
-        if standalone.method.body.is_empty() {
-            let selector = standalone.method.selector.name();
-            diagnostics.push(empty_body_error(&selector, standalone.method.span));
+    for method in module.all_methods() {
+        if method.body.is_empty() {
+            let selector = method.selector.name();
+            diagnostics.push(empty_body_error(&selector, method.span));
         }
     }
 }

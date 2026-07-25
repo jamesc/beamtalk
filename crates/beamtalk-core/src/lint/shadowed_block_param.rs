@@ -39,13 +39,8 @@ impl LintPass for ShadowedBlockParamPass {
         // Top-level expressions (module scope, depth 0)
         check_expr_seq(&module.expressions, &mut scope, diagnostics);
 
-        for class in &module.classes {
-            for method in class.methods.iter().chain(class.class_methods.iter()) {
-                check_method(method, &mut scope, diagnostics);
-            }
-        }
-        for standalone in &module.method_definitions {
-            check_method(&standalone.method, &mut scope, diagnostics);
+        for method in module.all_methods() {
+            check_method(method, &mut scope, diagnostics);
         }
     }
 }
