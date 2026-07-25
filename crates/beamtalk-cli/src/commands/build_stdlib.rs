@@ -90,6 +90,15 @@ pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
         allow_primitives: false,
         workspace_mode: false,
         warnings_as_errors,
+        // BT-2964: stdlib compiles as the "stdlib" package, matching the
+        // `package: Some("stdlib")` stamp on `stdlib_pre_loaded_aliases`'s
+        // entries (and `generate_class_entry`'s `ClassInfo`s) and the LSP's
+        // `STDLIB_PACKAGE_MARKER` — without it, `None` here would make
+        // `AliasRegistry::add_pre_loaded` fall into the open-world REPL path
+        // instead of enforcing stdlib's own package boundary, and an
+        // `internal type` alias would resolve by accident rather than by the
+        // same-package rule (ADR 0108).
+        current_package: Some("stdlib".into()),
         ..Default::default()
     };
 
@@ -1707,6 +1716,127 @@ mod tests {
                 .any(|d| d.message.contains("Argument")),
             "expected the negative control (no pre_loaded_aliases) to reproduce \
              the pre-BT-2935 false positive, got: {diagnostics_unfixed:?}"
+        );
+    }
+
+    /// BT-2964: an `internal type` stdlib alias must resolve cross-file
+    /// *within* stdlib. `stdlib_pre_loaded_aliases` stamps every entry
+    /// `package: Some("stdlib")` and `build_stdlib()`'s `CompilerOptions`
+    /// set `current_package: Some("stdlib")` to match —
+    /// `AliasRegistry::add_pre_loaded`'s seeding-boundary exclusion
+    /// (ADR 0108) drops an `internal` entry whose `package` differs from
+    /// `current_package`, so a mismatch between the two identities would
+    /// silently drop the alias and surface as a confusing unresolved-type
+    /// diagnostic in the consuming file.
+    #[test]
+    fn test_internal_alias_resolves_cross_file_within_stdlib() {
+        let (_temp, lib_dir) = temp_utf8_dir();
+
+        // File A declares a package-private alias.
+        let file_a = lib_dir.join("InternalAliasFixtureA.bt");
+        fs::write(
+            &file_a,
+            "internal type Direction = #north | #south | #east | #west\n\
+             Object subclass: InternalAliasFixtureA\n  noop => nil\n",
+        )
+        .unwrap();
+
+        // File B consumes it in an `internal` method signature — the one
+        // position ADR 0108 permits an internal alias outside its declaring
+        // file (a public signature would be an E0402 leak).
+        let file_b = lib_dir.join("InternalAliasFixtureB.bt");
+        fs::write(
+            &file_b,
+            "Object subclass: InternalAliasFixtureB\n  \
+             internal go: d :: Direction -> Symbol => d\n",
+        )
+        .unwrap();
+
+        let alias_sources =
+            collect_stdlib_alias_sources(&[file_a.clone(), file_b.clone()]).unwrap();
+        assert_eq!(alias_sources.len(), 1, "expected file A's alias only");
+        assert!(alias_sources[0].info.is_internal);
+
+        // The real stamping function under test.
+        let pre_loaded_aliases = stdlib_pre_loaded_aliases(&alias_sources);
+        assert_eq!(pre_loaded_aliases[0].package.as_deref(), Some("stdlib"));
+
+        // The same options shape `build_stdlib()` constructs — crucially
+        // with `current_package: Some("stdlib")` matching the stamp above.
+        let options = beamtalk_core::CompilerOptions {
+            stdlib_mode: true,
+            allow_primitives: false,
+            workspace_mode: false,
+            current_package: Some("stdlib".into()),
+            ..Default::default()
+        };
+        let bindings = beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new();
+
+        let core_file = lib_dir.join("internal_b.core");
+        let diagnostics = compile_source_with_bindings(
+            &file_b,
+            "bt@stdlib@internal_alias_fixture_b",
+            &core_file,
+            &options,
+            &bindings,
+            &CompileContext {
+                hierarchy: ClassHierarchyContext {
+                    pre_loaded_aliases: pre_loaded_aliases.clone(),
+                    ..ClassHierarchyContext::default()
+                },
+                ..CompileContext::default()
+            },
+            None,
+        )
+        .expect("internal stdlib alias should resolve cross-file within stdlib");
+        assert!(
+            diagnostics.iter().all(|d| !d.message.contains("Direction")),
+            "expected no diagnostic about `Direction`, got: {diagnostics:?}"
+        );
+
+        // Negative control at the analysis level: a mismatched
+        // `current_package` makes the seeding-boundary exclusion drop the
+        // internal alias — proving the compile above passes because the two
+        // "stdlib" identities line up, not because the boundary is
+        // unenforced.
+        let source_b = fs::read_to_string(&file_b).unwrap();
+        let tokens_b = beamtalk_core::source_analysis::lex_with_eof(&source_b);
+        let (module_b, _diags) = beamtalk_core::source_analysis::parse(tokens_b);
+        let extensions = beamtalk_core::compilation::extension_index::ExtensionIndex::default();
+
+        let mismatched = beamtalk_core::CompilerOptions {
+            current_package: Some("not_stdlib".into()),
+            ..options.clone()
+        };
+        let result =
+            beamtalk_core::semantic_analysis::analyse_with_natives_and_protocols_and_aliases(
+                &module_b,
+                &mismatched,
+                vec![],
+                vec![],
+                pre_loaded_aliases.clone(),
+                None,
+                &extensions,
+            );
+        assert!(
+            !result.alias_registry.has_alias("Direction"),
+            "a mismatched current_package must drop the internal stdlib alias \
+             at the seeding boundary"
+        );
+
+        let result =
+            beamtalk_core::semantic_analysis::analyse_with_natives_and_protocols_and_aliases(
+                &module_b,
+                &options,
+                vec![],
+                vec![],
+                pre_loaded_aliases,
+                None,
+                &extensions,
+            );
+        assert!(
+            result.alias_registry.has_alias("Direction"),
+            "the matching \"stdlib\" current_package must seed the internal alias"
         );
     }
 
