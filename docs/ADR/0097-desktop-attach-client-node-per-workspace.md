@@ -21,12 +21,18 @@ their dock, not a `localhost:4000` URL they have to remember to start by hand.
 The shaping discussion converged on two constraints that narrow the design
 sharply:
 
-1. **Connect to live workspaces; do not spawn the Rust toolchain.** The desktop
-   app should *attach* to workspaces the user has already started
-   (`beamtalk workspace create … --background --persistent`), discovered from
-   `~/.beamtalk/workspaces/`. It is a client, not a process manager for the
-   language runtime. This removes cross-platform bundling and lifecycle
-   supervision of the Rust `beamtalk` binary — the most painful packaging slice.
+1. **Attach to live workspaces; do not bundle or supervise the Rust
+   toolchain.** The desktop app *attaches* to workspaces discovered from
+   `~/.beamtalk/workspaces/`, typically started with
+   `beamtalk workspace create … --background --persistent`. It is a client, not
+   a process supervisor for the language runtime: it never ships the Rust
+   `beamtalk` binary and never babysits its lifecycle — the most painful
+   packaging slice. The constraint is on **bundling, not invoking**: the broker
+   already shells out to the *installed* CLI for liveness (`workspace status`),
+   and invoking that same CLI for `workspace create`/`stop` costs no additional
+   packaging — `--background --persistent` daemonizes the workspace, so no
+   supervision follows. In-scope lifecycle is "invoke the user's CLI";
+   out-of-scope is shipping or supervising it.
 
 2. **Multiple workspaces, switchable at runtime.** A developer typically has
    more than one workspace alive. The desktop app's reason to exist (over just
@@ -179,9 +185,16 @@ untouched.
    BEAMs are orphaned — the reaping mechanism (process group, parent-death
    watch, or PID-file sweep on next start) must be specified in the spike, since
    crash-reaping is cited below as a load-bearing argument for the Tauri shell.
+5. **Create / stop, via the installed CLI** — the picker's empty state and
+   lifecycle buttons shell out to the user's installed `beamtalk` CLI
+   (`workspace create … --background --persistent`, `workspace stop`) — never a
+   bundled copy (constraint 1). If the CLI can't be resolved (GUI-app `PATH`,
+   §1), the picker degrades to setup instructions: the first-run experience
+   must not be a blank window with an unstated terminal prerequisite.
 
-**Local-only posture (security).** Three things the broker must pin, none of
-which the remote-shaped release does for it:
+**Local-only posture (security).** Three things the broker must pin — none of
+which the remote-shaped release does for it — and one it deliberately leaves
+ephemeral:
 
 - **Loopback bind.** The prod endpoint hardcodes `ip: {0,0,0,0,0,0,0,0}`
   (`runtime.exs:74`) with **no env hook today**, so "the broker passes a bind
@@ -202,16 +215,22 @@ which the remote-shaped release does for it:
   derives from `PORT`, so the origin *likely* matches `http://localhost:<port>`
   already — but it is load-bearing and must be pinned explicitly and validated
   in the spike (§6d), not assumed.
-- **Stable, locked-down secret.** Provision a **stable `SECRET_KEY_BASE` per
-  workspace** (rather than inheriting `bin/server`'s ephemeral-per-boot key) so a
-  front crash + respawn doesn't invalidate the user's live session cookies. This
-  secret signs session cookies — a forged cookie is RCE-equivalent — so it is
-  stored `0600` under the (already `0700`) workspace dir; the same "get it wrong
-  and you expose the workspace" failure-mode framing applies as to the bind.
+- **Ephemeral `SECRET_KEY_BASE` per boot — deliberately.** The broker inherits
+  `bin/server`'s ephemeral-per-boot key rather than provisioning a stable
+  per-workspace secret. In the unauthenticated localhost lane there is no login
+  session worth preserving across a front restart: LiveView state lives in the
+  front's *processes*, which the restart destroyed anyway — the browser
+  remounts fresh whether or not the old session cookie still verifies. A
+  stable secret would add an RCE-adjacent artifact (a forged session cookie ≈
+  eval) with an unspecified writer inside a directory whose lifecycle the Rust
+  CLI owns, for no user-visible benefit. If the remote/OIDC topology (future
+  ADR) ever needs durable sessions, that ADR owns the decision.
 
 ### What this is NOT
 
-- It does **not** spawn or supervise the Rust `beamtalk` workspace runtime.
+- It does **not** bundle or supervise the Rust `beamtalk` workspace runtime —
+  creating/stopping workspaces happens by invoking the user's *installed* CLI
+  (Broker §5), which daemonizes workspaces itself.
 - It does **not** introduce a new wire protocol — the front still speaks the
   same `:rpc` it does today.
 - It does **not** add per-session node targeting to `workspace.ex` (the
@@ -250,10 +269,12 @@ at-URL). That shared surface is the natural seam at which a future
 "desktop remote attach + OIDC" ADR would extend this one — it does not require
 revisiting any decision here.
 
-### Decided sub-decisions
+### Open sub-decisions (deferred to implementation spike)
 
-- **Shell: Tauri.** The desktop shell is a **Tauri (Rust) app**, not Electron.
-  Three reasons. First, **language coherence**: the Beamtalk compiler/CLI is
+- **Shell: Tauri (recommendation, spike-confirmed).** Recommendation: a
+  **Tauri (Rust) app**, not Electron — a *recommendation the spike must
+  confirm*, not a settled decision; the CI build lane (§5) waits for its
+  verdict. Three reasons. First, **language coherence**: the Beamtalk compiler/CLI is
   already Rust, so a Rust shell keeps the toolchain in one language — the broker
   logic (discovery, spawn, port allocation, child reaping) is ordinary Rust
   process handling, reviewable by the same people who own `beamtalk-cli`.
@@ -273,12 +294,9 @@ revisiting any decision here.
   still lets the browser/OS consume `Ctrl/Cmd-W` (it closes the PWA window), and
   the page still cannot `preventDefault` it — so editor-grade key ownership is a
   concrete capability that tips the spike's shell decision toward Tauri.
-  Caveat: the spike (Implementation §6) builds the no-shell coordinator
-  alternative alongside and must confirm the Rust shell earns its keep over it
-  before the CI build lane is committed.
-
-### Open sub-decisions (deferred to implementation spike)
-
+  The spike (Implementation §6) builds the no-shell coordinator alternative
+  alongside; its exit criteria (a)–(g) — including webview keybinding and
+  rendering parity, which cut *against* Tauri on Linux — decide the shell.
 - **Window model: window-per-workspace vs tabbed.** Recommendation:
   **window-per-workspace**. It falls straight out of one-BEAM-per-workspace and
   keeps crash isolation visible to the user (a dead workspace = one greyed
@@ -328,11 +346,13 @@ cookie-bearing dist nodes.
 - **End-user developer (uses the IDE).** Opens a native app, sees a list of
   live workspaces, clicks one, gets a window. No `localhost:4000` to remember,
   no `mix`/Elixir on their machine (ERTS is bundled). Mental model:
-  one window = one workspace.
+  one window = one workspace. First run with no workspaces is a real state:
+  the picker offers "create a workspace" via the installed CLI (Broker §5), or
+  setup instructions if the CLI isn't found — never a silent empty list.
 - **IDE contributor.** `workspace.ex` is untouched, so the from-source
   `just web` flow and its tests are unaffected. The new surface is a small
-  shell + a free-`PORT` per instance and (optionally) a one-line self-node-name
-  seeding in `ensure_distributed/0`. Low blast radius.
+  shell + a free-`PORT` per instance and a small self-node-name seeding
+  (id + entropy) in `ensure_distributed/0`. Low blast radius.
 - **Operator / security.** The cookie boundary (ADR 0091) is *strengthened* on
   the isolation axis: each front node carries exactly one workspace's cookie, so
   a compromise or crash is contained to one workspace. (A single node *could*
@@ -430,8 +450,8 @@ code. **This is the real 80/20 challenger**: it delivers discovery + a
 dock icon + pick-a-workspace without Tauri, a Rust broker, or a new CI build
 lane. **Not rejected outright** — instead, the spike (Implementation §6) must
 build this *first* and justify the Tauri shell against it. The Tauri case rests
-on things the coordinator can't easily do: enforcing the loopback/no-OIDC
-posture and `SECRET_KEY_BASE` provisioning *outside* the BEAM (a coordinator
+on things the coordinator can't easily do: enforcing the
+loopback/no-OIDC/`check_origin` posture *outside* the BEAM (a coordinator
 front would have to spawn children with the same care anyway), true per-window
 OS integration, **ownership of OS-reserved keybindings** (`Ctrl/Cmd-W` etc. as
 IDE actions — see "Shell: Tauri"; a PWA window still cedes these to the browser),
@@ -439,12 +459,26 @@ and reaping orphaned child processes on crash. If those don't
 prove load-bearing in the spike, the coordinator wins and this ADR's
 shell choice should flip.
 
-### Desktop app spawns the Rust workspace too
-Bundle and supervise `beamtalk workspace create` from the shell. **Rejected**
-per the framing constraint: it reintroduces cross-platform bundling of the Rust
-toolchain and lifecycle supervision of a second, less-well-behaved process —
-the most expensive and platform-fragile slice — for no benefit to the "attach
-to what's already running" use case.
+### Desktop app bundles and supervises the Rust workspace runtime
+Ship the Rust toolchain inside the app and supervise workspace processes from
+the shell. **Rejected** per the framing constraint: it reintroduces
+cross-platform bundling of the Rust toolchain and lifecycle supervision of a
+second, less-well-behaved process — the most expensive and platform-fragile
+slice. What is *not* rejected: invoking the user's already-installed CLI to
+create/stop workspaces (Broker §5). An earlier "attach-only" framing conflated
+bundling with invoking; the rejection applies to bundling only.
+
+### `beamtalk workspace open <id>` — CLI-only launcher, no desktop app
+Add a CLI command that spawns a front for the workspace (free port, loopback
+bind) and opens the browser/PWA at it; discovery is `beamtalk workspace list`.
+Zero new artifacts, no CI lane, no GUI-`PATH` problem (the CLI *is* the entry
+point), and it fits ADR 0099's CLI application story. **Rejected as a
+replacement, cheap as a complement**: it delivers launch but none of the
+connection-broker UX — no persistent picker, no window management, no
+post-attach monitoring or orphan reaping (stray fronts accumulate with no
+owner) — and it inherits the PWA path's inability to own OS-reserved
+keybindings. Worth shipping *independently* of this ADR as a CLI affordance;
+the spike's no-shell coordinator comparison effectively subsumes it.
 
 ## Consequences
 
@@ -452,7 +486,7 @@ to what's already running" use case.
 - **Small, additive front changes — the attach client's core is untouched.**
   Reuses the shipped boot-time global-env model and `bin/server` discovery; the
   RPC/eval path is unchanged. The new front-side work is three small, additive
-  pieces (Impl §1): a one-line sname seed, a `BT_ATTACH_BIND_IP` env hook in
+  pieces (Impl §1): an id+entropy sname seed, a `BT_ATTACH_BIND_IP` env hook in
   `config/runtime.exs`, and a minimal `/readiness` endpoint.
 - **Blast-radius and crash isolation** — one workspace's cookie per process, one
   window per front.
@@ -480,19 +514,20 @@ to what's already running" use case.
   the front refuses or warns on mismatch.
 - **The broker inherits security-critical responsibilities the BEAM release
   won't enforce for it:** forcing a loopback bind (the prod default is
-  all-interfaces), refusing OIDC config, and provisioning a stable
-  `SECRET_KEY_BASE`. Get any wrong and you either expose the IDE to the LAN or
-  break the user's session on every restart. These are the price of reusing the
-  remote-shaped release as a local tool.
+  all-interfaces), refusing OIDC config, and pinning `check_origin`. Get one
+  wrong and you expose an unauthenticated eval surface to the LAN (or to
+  drive-by-localhost pages). These are the price of reusing the remote-shaped
+  release as a local tool.
 
 ### Neutral
 - Does not foreclose a later move to single-node per-session targeting; the
   broker can collapse if that refactor lands.
-- Shell is **Tauri (Rust)** (language coherence with the compiler/CLI),
-  *contingent on the spike* showing the broker's loopback/no-OIDC/secret +
-  crash-reaping duties need to live outside the BEAM; if not, the no-shell
-  coordinator front wins and the shell choice flips. The window model
-  (per-workspace vs tabbed) is likewise deferred to the spike.
+- Shell **recommendation is Tauri (Rust)** (language coherence with the
+  compiler/CLI) — an open sub-decision the spike settles: it must show the
+  broker's loopback/no-OIDC/`check_origin` + crash-reaping duties need to live
+  outside the BEAM; if not, the no-shell coordinator front wins and the shell
+  choice flips. The window model (per-workspace vs tabbed) and single-instance
+  policy are likewise deferred to the spike.
 
 ## Implementation
 
@@ -515,7 +550,8 @@ to what's already running" use case.
    then `GET /readiness` for true workspace reachability — distribution starts
    lazily, so HTTP-up alone is not enough), child-exit reaping. (~M)
 3. **Picker / launcher UI** — native list of live workspaces, attach/detach,
-   disconnected-state handling. (~M)
+   disconnected-state handling, the first-run empty state, and create/stop via
+   the installed CLI (Broker §5). (~M)
 4. **Window-per-workspace wiring** — one window per attached front. (~S)
 5. **Packaging** — bundle the `bt_attach` release into the shell; CI release
    lane mirroring `liveview-release.yml`. Three named costs the "reuse
@@ -563,7 +599,8 @@ CI release lanes. **Not** affected: the wire/RPC/eval layer, the Rust toolchain.
   [ADR 0091](0091-remote-workspace-access-phoenix-authenticated-front.md) (Attach topology + cookie boundary),
   [ADR 0058](0058-platform-security-model.md) (Trusted Developer Tool stance),
   [ADR 0046](0046-vscode-live-workspace-sidebar.md) (per-connection client precedent),
-  [ADR 0020](0020-connection-security.md) (transport/cookie machinery)
+  [ADR 0020](0020-connection-security.md) (transport/cookie machinery),
+  [ADR 0099](0099-cli-application-story.md) (CLI application story — the `workspace open` alternative)
 - Documentation: `editors/liveview/README.md`,
   `editors/liveview/rel/overlays/bin/server`,
   `docs/research/phoenix-topology-spike.md`,
