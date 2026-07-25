@@ -5,49 +5,48 @@
 // correctly unpacks {Value, State} tuples.
 
 TestCase subclass: ControlFlowRhsStateTest
+  field: a = nil
+
+  setUp => self withA: ControlFlowRhsActor spawn
+
+  tearDown => self.a isNil ifFalse: [self.a stop]
 
   testFieldAssignFromConditionalTrue =>
     // self.x := flag ifTrue: [self.y := 10. 42] ifFalse: [0]
     // When true: x should get 42 (not the {42, State} tuple), y should be 10
-    a := ControlFlowRhsActor spawn
-    result := a assignFieldFromConditional: true
+    result := self.a assignFieldFromConditional: true
     self assert: result equals: 42
-    self assert: a getY equals: 10
+    self assert: self.a getY equals: 10
 
   testFieldAssignFromConditionalFalse =>
     // When false: x should get 0, y should stay 0
-    a := ControlFlowRhsActor spawn
-    result := a assignFieldFromConditional: false
+    result := self.a assignFieldFromConditional: false
     self assert: result equals: 0
-    self assert: a getY equals: 0
+    self assert: self.a getY equals: 0
 
   testFieldAssignFromConditionalWithLocal =>
     // self.x := flag ifTrue: [tmp := self.y + 5. self.y := tmp. tmp * 2]
     // y starts at 0, so tmp=5, y becomes 5, x becomes 10
-    a := ControlFlowRhsActor spawn
-    result := a assignFieldFromConditionalWithLocal: true
+    result := self.a assignFieldFromConditionalWithLocal: true
     self assert: result equals: 10
-    self assert: a getY equals: 5
+    self assert: self.a getY equals: 5
 
   testConditionalFieldAtPutTrue =>
     // flag ifTrue: [self fieldAt: #x put: 99]
     // When true: x should be 99
-    a := ControlFlowRhsActor spawn
-    a conditionalFieldAtPut: true
-    self assert: a getX equals: 99
+    self.a conditionalFieldAtPut: true
+    self assert: self.a getX equals: 99
 
   testConditionalFieldAtPutFalse =>
     // When false: x should stay 0
-    a := ControlFlowRhsActor spawn
-    a conditionalFieldAtPut: false
-    self assert: a getX equals: 0
+    self.a conditionalFieldAtPut: false
+    self assert: self.a getX equals: 0
 
   testFieldAssignFromCollect =>
     // self.x := items collect: [:item | self.y := self.y + 1. item * 2]
     // y should be incremented for each item, x should be the collected result.
     // BT-2342: the receiver is an Array (#[...]), so the result reconstructs an
     // Array (#[...]) to match the pure collect: path — not a raw list (#(...)).
-    a := ControlFlowRhsActor spawn
-    result := a assignFieldFromCollect: #[1, 2, 3]
+    result := self.a assignFieldFromCollect: #[1, 2, 3]
     self assert: result equals: #[2, 4, 6]
-    self assert: a getY equals: 3
+    self assert: self.a getY equals: 3
