@@ -240,10 +240,11 @@ live_alias_redefinition_invalidates_a_matchexhaustive_proof_test_() ->
 %%====================================================================
 %% Regression: redefining the alias to the SAME expansion (no member added)
 %% must not produce a spurious non-exhaustive finding — the dependent's
-%% matchExhaustive: is still sound. The clean re-check still *announces*
-%% (with empty findings) so a surface can drop anything it was showing —
-%% the clearing signal `publish_shape_recheck_outcome/3` already relies on
-%% (PR #2965 review).
+%% matchExhaustive: is still sound. Nothing was found and nothing was
+%% cleared (no dependent had a stored finding for this origin), so the
+%% re-check stays silent — the announce gate is "produced findings or
+%% cleared something", not "checked any owner" (PR #2965 review; see
+%% `publish_leaf_change_recheck_outcome/2`'s doc).
 %%====================================================================
 
 live_alias_redefinition_to_same_expansion_does_not_produce_findings_test_() ->
@@ -276,17 +277,13 @@ live_alias_redefinition_to_same_expansion_does_not_produce_findings_test_() ->
                     ),
                     wait_for_alias_change_worker(),
 
-                    %% The announcement fires (checked owners are non-empty)
-                    %% but carries no findings — a clean re-check is the
-                    %% "drop what you were showing" push, not silence.
-                    Event = receive_reload_check_announcement(),
-                    ?assertEqual(<<"AliasChangeDirection">>, maps:get(changedClass, Event)),
-                    ?assertEqual(alias_change, maps:get(classification, Event)),
-                    ?assertEqual([], maps:get(findings, Event)),
-                    ?assert(
-                        lists:member(
-                            <<"AliasChangeRecheckUser">>, maps:get(checkedOwners, Event)
-                        )
+                    %% Nothing found, nothing cleared — no announcement. A
+                    %% no-op redefinition must not push a frame to every
+                    %% subscriber (contrast the back-to-sound test below,
+                    %% where a real stored finding IS cleared).
+                    ?assertError(
+                        timeout_waiting_for_reload_check_announcement,
+                        receive_reload_check_announcement()
                     ),
                     ?assertEqual(
                         [],

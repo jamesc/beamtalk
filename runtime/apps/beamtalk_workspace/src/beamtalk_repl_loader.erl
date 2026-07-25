@@ -2004,11 +2004,20 @@ findings_store_clear_owner(OwnerBin) ->
 %% `beamtalk_workspace_findings_store`'s moduledoc) — a caller broken by two
 %% independently-reloading classes keeps both findings; only the one that
 %% actually just got re-checked is replaced.
--spec findings_store_put_owner_origin(binary(), binary(), [beamtalk_recheck:finding()]) -> ok.
+%%
+%% Returns the store's *previous* bucket for this exact
+%% `{OwnerBin, ChangedClassBin}` origin (`[]` when there was nothing stored,
+%% and `[]` on any store failure) — `put_owner_origin/3` hands this back
+%% precisely so a caller can tell "this write actually cleared something a
+%% surface may still be displaying" from "this write was a no-op", with no
+%% extra store round trip. `publish_leaf_change_recheck_outcome/2` and
+%% `publish_alias_change_recheck_outcome/2` use it to decide whether a
+%% findings-free re-check is still worth announcing.
+-spec findings_store_put_owner_origin(binary(), binary(), [beamtalk_recheck:finding()]) ->
+    [beamtalk_recheck:finding()].
 findings_store_put_owner_origin(OwnerBin, ChangedClassBin, Findings) ->
     try
-        _ = beamtalk_workspace_findings_store:put_owner_origin(OwnerBin, ChangedClassBin, Findings),
-        ok
+        beamtalk_workspace_findings_store:put_owner_origin(OwnerBin, ChangedClassBin, Findings)
     catch
         Class:Reason:Stack ->
             ?LOG_WARNING(
@@ -2024,7 +2033,7 @@ findings_store_put_owner_origin(OwnerBin, ChangedClassBin, Findings) ->
                     ]
                 }
             ),
-            ok
+            []
     end.
 
 %% Runs `beamtalk_recheck:trigger/4` only when `CaptureOutcome` warrants it
@@ -2561,6 +2570,32 @@ publish_leaf_change_recheck_outcome_safe(SuperclassBin, Result) ->
             ok
     end.
 
+%% Write each checked owner's slice of `Findings` to its
+%% `{OwnerBin, OriginBin}` origin bucket, returning `true` when at least one
+%% of those writes replaced a *previously non-empty* bucket — i.e. when this
+%% re-check actually cleared or superseded something a surface may still be
+%% displaying. Shared by `publish_leaf_change_recheck_outcome/2` and
+%% `publish_alias_change_recheck_outcome/2`, whose announce gates both need
+%% that signal (see their docs for why "did we clear anything" is the right
+%% gate for them, where `publish_shape_recheck_outcome/3`'s "were any owners
+%% checked" is right for its own capped, xref-derived candidate set).
+%% Every owner is written unconditionally — the fold never short-circuits,
+%% so the ADR 0105 "replacement, not just agreement" rule still applies to
+%% every checked owner regardless of what earlier owners returned.
+-spec put_owner_origins_clearing_any(
+    [binary()], binary(), [beamtalk_recheck:finding()]
+) -> boolean().
+put_owner_origins_clearing_any(CheckedOwners, OriginBin, Findings) ->
+    lists:foldl(
+        fun(OwnerBin, ClearedAny) ->
+            OwnerFindings = [F || F <- Findings, maps:get(owner, F) =:= OwnerBin],
+            Prev = findings_store_put_owner_origin(OwnerBin, OriginBin, OwnerFindings),
+            ClearedAny orelse Prev =/= []
+        end,
+        false,
+        CheckedOwners
+    ).
+
 -doc """
 Publish a leaf-change re-check's outcome for `SuperclassBin` — mirrors
 `publish_shape_recheck_outcome/3`'s store-write/announce shape, reusing the
@@ -2582,20 +2617,36 @@ batch, since it is literally the same round trip), matching exactly what an
 unbatched single-superclass sweep would have reported for this superclass
 alone.
 
-Like `publish_shape_recheck_outcome/3`, the announce fires whenever
-`CheckedOwners` is non-empty, **not** only when `Findings` is (PR #2965
-review). A superclass cannot *regain* leaf status through this path (losing
-leaf status is monotonic short of `removeFromSystem`), so there is no
+The announce fires when this re-check has something for a surface to act
+on: either it produced `Findings`, or its store writes actually *cleared* a
+`{Owner, SuperclassBin}` origin bucket that a surface may still be
+displaying (`ClearedStaleFindings` — `findings_store_put_owner_origin/3`
+hands back each previous bucket, so this costs no extra store round trip).
+
+Deliberately **not** `publish_shape_recheck_outcome/3`'s "announce whenever
+`CheckedOwners` is non-empty" gate (PR #2965 review, which suggested
+mirroring it): that gate is proportionate for a shape re-check, whose
+`checked_owners` is a *capped, xref-derived* set of that change's actual
+dependents — non-empty there genuinely means "we checked this change's
+dependents". A leaf-change sweep's candidate set is the **entire live
+image** (`beamtalk_recheck:do_trigger_leaf_change/1` reads
+`beamtalk_workspace_meta:all_class_sources/0`, uncapped — see
+`trigger_leaf_change/1`'s doc for why there is no xref candidate set to
+scope it), so `CheckedOwners =/= []` degenerates to "some class exists" and
+would broadcast a whole-image `checkedOwners` list to every subscriber on
+every first-subclass event, the overwhelming majority of which find and
+clear nothing. Gating on the clearing signal itself keeps the review's fix
+(a cleared finding always reaches the surface displaying it) without that
+amplification.
+
+A superclass cannot *regain* leaf status through this path (losing leaf
+status is monotonic short of `removeFromSystem`), so there is no
 "reload fixes reload" case symmetrical to a method/shape edit — but the
-clean-sweep store write above (`put_owner_origin(Owner, SuperclassBin, [])`
-for every checked owner) can still clear a `{Owner, SuperclassBin}` origin
-bucket an *earlier* re-check of the same class left behind: method/shape
-re-checks of `SuperclassBin` write findings under the exact same
-`{Owner, ChangedClass}` key this sweep replaces. A surface needs the
-announcement itself to know to drop what it was showing, not just a quiet
-store write nobody hears about — matching `publish_shape_recheck_outcome/3`'s
-structure exactly, the `?LOG_INFO` is gated on `Findings` (nothing worth
-logging about a clean re-check), the announce on `CheckedOwners` alone.
+clean-sweep write can still clear a bucket an *earlier* re-check of the
+same class left behind, since method/shape re-checks of `SuperclassBin`
+write under the exact same `{Owner, ChangedClass}` key this sweep replaces.
+The `?LOG_INFO` stays gated on `Findings` alone (nothing worth logging
+about a re-check that only cleared).
 """.
 -spec publish_leaf_change_recheck_outcome(binary(), beamtalk_recheck:result()) -> ok.
 publish_leaf_change_recheck_outcome(SuperclassBin, Result) ->
@@ -2608,18 +2659,14 @@ publish_leaf_change_recheck_outcome(SuperclassBin, Result) ->
         not_verified_owners := NotVerifiedOwners
     } = Result,
     Findings = [F || F <- AllFindings, maps:get(changed_class, F) =:= SuperclassBin],
-    lists:foreach(
-        fun(OwnerBin) ->
-            OwnerFindings = [F || F <- Findings, maps:get(owner, F) =:= OwnerBin],
-            findings_store_put_owner_origin(OwnerBin, SuperclassBin, OwnerFindings)
-        end,
-        CheckedOwners
+    ClearedStaleFindings = put_owner_origins_clearing_any(
+        CheckedOwners, SuperclassBin, Findings
     ),
     mark_unverified_findings_stale(SuperclassBin, NotVerifiedOwners),
-    case CheckedOwners of
-        [] ->
+    case Findings =/= [] orelse ClearedStaleFindings of
+        false ->
             ok;
-        _ ->
+        true ->
             case Findings of
                 [] ->
                     ok;
@@ -2720,17 +2767,20 @@ finding without new wiring. `changedSelector` carries `AliasNameBin` itself
 (there is no single call-site selector this is "about" — same reasoning
 `finding()`'s doc already gives for `shape_change`/`leaf_change`).
 
-Announce is gated on `CheckedOwners` being non-empty, matching
-`publish_leaf_change_recheck_outcome/2` (and, originally,
-`publish_shape_recheck_outcome/3` — PR #2965 review): unlike a leaf-status
-transition, an alias redefinition is *repeatable*, so "redefinition fixes
-redefinition" is a live clearing scenario — a dependent flagged by one
-redefinition and re-checked clean by the next has its store entry cleared
-by the unconditional `put_owner_origin(Owner, AliasNameBin, [])` write
-above, and a surface needs the announcement itself to know to drop what it
-was showing, not just a quiet store write nobody hears about. The
-`?LOG_INFO` stays gated on `Findings` (nothing worth logging about a clean
-re-check).
+Announce is gated on "produced findings **or** cleared something", matching
+`publish_leaf_change_recheck_outcome/2` (see its doc for why that is the
+right gate here and `publish_shape_recheck_outcome/3`'s `CheckedOwners`
+gate is the right one there). This path needs the clearing half more
+directly than the leaf one does: unlike a leaf-status transition, an alias
+redefinition is *repeatable*, so "redefinition fixes redefinition" is a
+first-class scenario — a dependent flagged by one redefinition and
+re-checked clean by the next has its store entry cleared by the
+unconditional `put_owner_origin(Owner, AliasNameBin, [])` write above, and
+a surface needs the announcement itself to know to drop what it was
+showing, not just a quiet store write nobody hears about (PR #2965 review).
+A redefinition that changes nothing anyone was flagged for stays silent, as
+before. The `?LOG_INFO` stays gated on `Findings` alone (nothing worth
+logging about a re-check that only cleared).
 """.
 -spec publish_alias_change_recheck_outcome(binary(), beamtalk_recheck:result()) -> ok.
 publish_alias_change_recheck_outcome(AliasNameBin, Result) ->
@@ -2742,18 +2792,14 @@ publish_alias_change_recheck_outcome(AliasNameBin, Result) ->
         cap_note := CapNote,
         not_verified_owners := NotVerifiedOwners
     } = Result,
-    lists:foreach(
-        fun(OwnerBin) ->
-            OwnerFindings = [F || F <- Findings, maps:get(owner, F) =:= OwnerBin],
-            findings_store_put_owner_origin(OwnerBin, AliasNameBin, OwnerFindings)
-        end,
-        CheckedOwners
+    ClearedStaleFindings = put_owner_origins_clearing_any(
+        CheckedOwners, AliasNameBin, Findings
     ),
     mark_unverified_findings_stale(AliasNameBin, NotVerifiedOwners),
-    case CheckedOwners of
-        [] ->
+    case Findings =/= [] orelse ClearedStaleFindings of
+        false ->
             ok;
-        _ ->
+        true ->
             case Findings of
                 [] ->
                     ok;
