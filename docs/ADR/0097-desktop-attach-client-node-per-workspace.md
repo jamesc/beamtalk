@@ -44,9 +44,9 @@ The `bt_attach` front is hardwired to a **single** workspace, fixed at boot:
 | Mechanism | Where | Behaviour |
 |-----------|-------|-----------|
 | Target node | `workspace.ex:54` (`node_name/0`) | reads `BT_WORKSPACE_NODE` env **once**, module-global |
-| Cookie | `workspace.ex:951` `set_cookie/0` | reads `BT_WORKSPACE_COOKIE` env, calls `Node.set_cookie(node_name(), token)` — the **per-peer** arity (`erlang:set_cookie(Node, Cookie)`), scoped to the one target node |
-| Self node name | `workspace.ex:936` `ensure_distributed/0` | the front starts its *own* distribution via `:net_kernel.start([:"bt_attach_#{System.unique_integer([:positive])}@localhost", :shortnames])` — it does **not** use `RELEASE_NODE` |
-| Every RPC | `workspace.ex:966` `rpc/3` | `:rpc.call(node_name(), …)` — always the one global target |
+| Cookie | `workspace.ex:1966` `set_cookie/0` | reads `BT_WORKSPACE_COOKIE` env, calls `Node.set_cookie(node_name(), token)` — the **per-peer** arity (`erlang:set_cookie(Node, Cookie)`), scoped to the one target node |
+| Self node name | `workspace.ex:1951` `ensure_distributed/0` | the front starts its *own* distribution via `:net_kernel.start([:"bt_attach_#{System.unique_integer([:positive])}@localhost", :shortnames])` — it does **not** use `RELEASE_NODE` |
+| Every RPC | `workspace.ex:1981` `rpc/3` | `:rpc.call(node_name(), …)` — always the one global target |
 | Launcher | `rel/overlays/bin/server <id>` | resolves `node_name` from `~/.beamtalk/workspaces/<id>/metadata.json` + the sibling `cookie` file, exports the two env vars, runs `bin/bt_attach start` |
 
 So today: **one front node, bound to one workspace, for the life of the
@@ -82,7 +82,7 @@ data (`metadata.json` + `cookie`) already lives on disk in a stable layout.
   Two facts about the **prod** release make this an active requirement, not a
   given: (1) `config/runtime.exs:74` binds the endpoint to **all interfaces**
   (`{0,0,0,0,0,0,0,0}`), not loopback — a desktop front left at that default is
-  reachable from the LAN; and (2) `runtime.exs:31` runs `IdeConfig.load!()` for
+  reachable from the LAN; and (2) `runtime.exs:32` runs `IdeConfig.load!()` for
   every non-test boot, so a stray `~/.beamtalk/ide.toml` (or `BT_OIDC_*`) makes
   each spawned front enforce OIDC login. The broker must pin both: bind loopback
   and run the unauthenticated cookie-only path.
@@ -157,7 +157,7 @@ which the remote-shaped release does for it:
 - **No OIDC.** Refuse to spawn, with a clear error, if OIDC config is present
   (`~/.beamtalk/ide.toml` / `BT_OIDC_*`) — the desktop tool is the single-user
   localhost lane (ADR 0091 §"Local dev stays zero-config"), not a place to
-  silently half-enforce remote auth. (`runtime.exs:31` runs `IdeConfig.load!()`
+  silently half-enforce remote auth. (`runtime.exs:32` runs `IdeConfig.load!()`
   for every non-test boot, so a stray config would otherwise take effect.)
 - **Stable, locked-down secret.** Provision a **stable `SECRET_KEY_BASE` per
   workspace** (rather than inheriting `bin/server`'s ephemeral-per-boot key) so a
