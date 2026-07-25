@@ -67,6 +67,16 @@ The release is already self-contained (ERTS-embedded `mix release`), and `PORT`
 browser mount (`connect/0` → `ensure_distributed/0`), not at boot. Discovery
 data (`metadata.json` + `cookie`) already lives on disk in a stable layout.
 
+One invariant to state rather than assume: the front's lazy
+`:net_kernel.start/1` — unlike `erl -sname` boot — does **not** auto-start
+epmd; it fails if none is listening. The design therefore assumes
+"workspace running ⇒ epmd listening on loopback 4369", which holds today
+because the workspace's own boot daemonizes epmd. If workspace lifecycle ever
+adopts the pinned-dist-port / **epmdless** direction ADR 0091 floats for its
+private-network posture, the front's name-resolution path breaks with no
+fallback — a known future incompatibility, and why `/readiness` should report
+*epmd absent* as its own failure mode (Impl §1c).
+
 ### Constraints
 
 - **Don't regress `workspace.ex`.** It is the attach client shared with the
@@ -111,9 +121,14 @@ PORT=<free-port> bin/server <id>
   `RELEASE_NODE` override is needed. One caveat (Implementation §1): that
   integer is `System.unique_integer/1`, which is per-VM, so two *separate* front
   processes could in principle generate the same sname and collide on epmd.
-  Seeding the name with the workspace id — a one-line change to
-  `ensure_distributed/0` (or a `BT_ATTACH_NODE_SUFFIX` env it reads) — makes it
-  collision-free across processes. This is the smallest of the front-side
+  Seeding the name with the workspace id **plus per-process entropy** (e.g.
+  `bt_attach_<id>_<os_pid>@localhost`, via a `BT_ATTACH_NODE_SUFFIX` env
+  `ensure_distributed/0` reads) makes it collision-free across processes.
+  An id-*only* seed would invert the bug: two fronts attached to the **same**
+  workspace — a second window, a second broker instance, or a crash→respawn
+  racing the dying front's epmd deregistration — would collide
+  *deterministically*, in exactly the scenarios the spike (§6b) probes.
+  This is the smallest of the front-side
   touches; the design also needs a `BT_ATTACH_BIND_IP` hook in
   `config/runtime.exs` and a minimal `/readiness` endpoint (both below) — all
   small and additive, but not literally "one line."
@@ -130,7 +145,17 @@ untouched.
 ### Broker responsibilities (desktop main process)
 
 1. **Discover** — enumerate `~/.beamtalk/workspaces/*/metadata.json`; liveness
-   via `beamtalk workspace status` (or a dist ping).
+   via the installed `beamtalk` CLI (`workspace status`) or a direct epmd query
+   (TCP 4369 `NAMES`) — a *dist ping* is **not** available to a non-BEAM broker
+   without implementing the distribution handshake, so it is not a fallback.
+   Two contracts this surfaces: (a) GUI apps launched from Finder/the dock do
+   not inherit the user's shell `PATH`, so the CLI path must be resolved
+   explicitly (configurable, with sane defaults) if the CLI route is used;
+   (b) the broker parses `metadata.json` with a real JSON parser (not
+   `bin/server`'s `sed` extraction), and an independently-updating desktop app
+   coupling to a file layout owned by the Rust CLI needs a stated compat
+   contract (additive-only fields, or a version field) — today that layout is
+   stable by convention, not by contract.
 2. **Attach** — pick a free port, spawn the node as above pinned to a **loopback
    bind** and the **unauthenticated cookie-only** path (see local-only posture
    below), then probe for readiness before opening the window. Note the probe is
@@ -142,7 +167,18 @@ untouched.
    on the user's first eval. That endpoint does **not** exist today; it is a
    small, explicit addition to the front's router + a thin controller (see
    Implementation §1) — not free, but contained.
-3. **Detach / quit** — terminate that node's child process; the window closes.
+3. **Monitor** — the readiness probe runs once, before the window opens;
+   attachment health after that is not free. The broker re-polls `/readiness`
+   periodically post-attach to drive window state (the "dead workspace = greyed
+   window" UX needs this mechanism — a dead workspace does *not* kill the front,
+   whose RPCs just start returning `{:badrpc, :nodedown}`), and the front should
+   retry `connect/0` on `:nodedown` so OS sleep/resume — which drops dist
+   connections — self-heals.
+4. **Detach / quit** — terminate that node's child process; the window closes.
+   If the *broker* dies uncleanly (SIGKILL, logout), N cookie-bearing front
+   BEAMs are orphaned — the reaping mechanism (process group, parent-death
+   watch, or PID-file sweep on next start) must be specified in the spike, since
+   crash-reaping is cited below as a load-bearing argument for the Tauri shell.
 
 **Local-only posture (security).** Three things the broker must pin, none of
 which the remote-shaped release does for it:
@@ -159,6 +195,13 @@ which the remote-shaped release does for it:
   localhost lane (ADR 0091 §"Local dev stays zero-config"), not a place to
   silently half-enforce remote auth. (`runtime.exs:32` runs `IdeConfig.load!()`
   for every non-test boot, so a stray config would otherwise take effect.)
+- **Origin pinning.** The front is an *unauthenticated, eval-capable* LiveView
+  websocket on a dynamic port — exactly the surface where `check_origin` is the
+  remaining defense against drive-by-localhost / DNS-rebinding eval (the threat
+  ADR 0091 reasons about for its remote posture). The endpoint's `url` config
+  derives from `PORT`, so the origin *likely* matches `http://localhost:<port>`
+  already — but it is load-bearing and must be pinned explicitly and validated
+  in the spike (§6d), not assumed.
 - **Stable, locked-down secret.** Provision a **stable `SECRET_KEY_BASE` per
   workspace** (rather than inheriting `bin/server`'s ephemeral-per-boot key) so a
   front crash + respawn doesn't invalidate the user's live session cookies. This
@@ -240,6 +283,11 @@ revisiting any decision here.
   **window-per-workspace**. It falls straight out of one-BEAM-per-workspace and
   keeps crash isolation visible to the user (a dead workspace = one greyed
   window, not a dead tab in a shared shell).
+- **Single-instance policy and attach-twice semantics.** Is the broker a
+  single-instance app (Tauri single-instance plugin / lockfile), and what does
+  attaching twice to the same workspace mean — focus the existing window, or
+  spawn a second front? Both interact with the sname seed (two fronts on one
+  workspace must not collide) and port bookkeeping; decide in the spike.
 
 ## Prior Art
 
@@ -294,8 +342,12 @@ cookie-bearing dist nodes.
   path by default, so a naïve "just run `bin/server`" would *regress* 0091 by
   exposing an unauthenticated IDE to the LAN. The broker must force loopback and
   reject OIDC config. Given that, no new remote surface is added, and the app
-  cannot escalate privilege — it only reaches workspaces whose cookies are
-  already readable on disk by this user.
+  cannot escalate privilege *on a single-user machine* — it only reaches
+  workspaces whose cookies are already readable on disk by this user. On a
+  **shared host**, loopback ≠ single-user: any local user or process can open
+  `http://localhost:<port>` and eval as the workspace owner. That is ADR 0058's
+  trusted-developer-tool stance, accepted — but it is a stance, not an absence
+  of surface.
 - **BEAM veteran.** "One dist node per trust domain" reads as obviously correct;
   they'd be wary of the alternative concentrating several workspaces' cookies in
   one VM. `observer`/`recon` work per-front-node exactly as today.
@@ -417,6 +469,15 @@ to what's already running" use case.
 - **Per-instance port (and sname-uniqueness) management** is new surface the
   broker owns — including reusing a port and re-registering the same sname after
   a front crashes (epmd must have dropped the dead registration first).
+- **The desktop artifact introduces version skew for the first time.** Today
+  `just web` builds front and workspace from the same tree, so skew cannot
+  occur. A bundled `bt_attach` (+ its ERTS/OTP) updates on the app's cadence
+  while the workspace runs whatever runtime the user installed — and the front
+  RPCs into workspace-internal modules by name (`beamtalk_repl_ops` etc.), a
+  private surface with no versioned protocol; the dist protocol itself must
+  also stay OTP-compatible across the gap. The `/readiness` handshake (Impl
+  §1c) is the mitigation: the workspace reports a runtime/protocol version and
+  the front refuses or warns on mismatch.
 - **The broker inherits security-critical responsibilities the BEAM release
   won't enforce for it:** forcing a loopback bind (the prod default is
   all-interfaces), refusing OIDC config, and provisioning a stable
@@ -436,13 +497,18 @@ to what's already running" use case.
 ## Implementation
 
 1. **Front-side hooks (three small, additive changes).** (a) seed
-   `ensure_distributed/0`'s sname with the workspace id (or a
-   `BT_ATTACH_NODE_SUFFIX` env) so two front processes can't collide on epmd;
+   `ensure_distributed/0`'s sname with the workspace id **plus per-process
+   entropy** (e.g. `bt_attach_<id>_<os_pid>`, via a `BT_ATTACH_NODE_SUFFIX`
+   env) so two front processes can't collide on epmd — id-only would collide
+   deterministically when two fronts attach to the same workspace;
    (b) read `BT_ATTACH_BIND_IP` in `config/runtime.exs` (default = today's
    all-interfaces) so the broker can pin loopback; (c) add a `/readiness`
    endpoint (router + thin controller) that forces `connect/0` + one cheap RPC
-   and returns 200 only when the workspace is actually reachable. Confirm `PORT`
-   passthrough. (~S)
+   and returns 200 only when the workspace is actually reachable — including a
+   **version handshake** (workspace reports its runtime/protocol version; the
+   front refuses or warns on mismatch) and a failure taxonomy that
+   distinguishes *epmd absent* from *bad cookie* from *dead workspace*.
+   Confirm `PORT` passthrough. (~S)
 2. **Broker core (desktop main process)** — discovery of
    `~/.beamtalk/workspaces/*`, free-port selection, spawn with `PORT` +
    `BT_ATTACH_BIND_IP` + cookie env, **two-stage readiness probe** (HTTP port up,
@@ -452,16 +518,35 @@ to what's already running" use case.
    disconnected-state handling. (~M)
 4. **Window-per-workspace wiring** — one window per attached front. (~S)
 5. **Packaging** — bundle the `bt_attach` release into the shell; CI release
-   lane mirroring `liveview-release.yml`. (~M)
+   lane mirroring `liveview-release.yml`. Three named costs the "reuse
+   `bin/server`" framing hides: (a) an ERTS-embedded release is per-OS/per-arch,
+   so this is a **build matrix** (macOS arm64 + x86_64, Linux x86_64, Windows —
+   ADR 0027 makes Windows a supported platform), not one artifact; (b)
+   `bin/server` is a POSIX `sh` script with no Windows counterpart — on Windows
+   the broker must set the env and invoke `bin/bt_attach` itself; (c) macOS
+   notarization requires signing every nested Mach-O in the release
+   (`beam.smp`, NIFs, epmd) — Livebook treats this as a substantial ongoing
+   surface, not a one-off. (~L, was ~M)
 6. **Spike first**, and make it decide the shell question. Validate: (a)
    two-instance boot (distinct snames + ports); (b) **crash → respawn of the
    *same* workspace** — same seeded sname must re-register cleanly after epmd
    drops the dead one, and the freed port must be reusable; (c) the attach-health
    probe catching a dead-workspace/bad-cookie before the window opens; (d) the
-   loopback-bind + no-OIDC posture actually takes. Build the **no-shell
-   coordinator** (Alternatives) alongside and only commit to the Tauri shell +
-   CI lane (§5) if the broker responsibilities prove they need to live outside
-   the BEAM. (~M, was ~S — this is the load-bearing spike, not a warm-up.)
+   loopback-bind + no-OIDC + pinned-`check_origin` posture actually takes;
+   (e) **webview parity**: OS-reserved keybinding interception (`Cmd/Ctrl-W`
+   etc.) actually works in the Tauri webview on all three platforms — the
+   keybinding argument for Tauri is asserted from *browser* behavior, not yet
+   demonstrated in WebKitGTK/WebView2/WKWebView — and WebKitGTK's
+   rendering/websocket performance is adequate for an editor-grade LiveView
+   UI (a known Tauri-on-Linux risk that cuts *against* the shell as surely as
+   the keybinding argument cuts for it); (f) post-attach lifecycle: workspace
+   killed while attached → greyed window (not a wall of LiveView errors), and
+   sleep/resume → reconnect; (g) the orphan-reaping mechanism on broker crash,
+   concretely. Build the **no-shell coordinator** (Alternatives) alongside and
+   only commit to the Tauri shell + CI lane (§5) if the broker responsibilities
+   prove they need to live outside the BEAM — the spike's exit criteria are
+   (a)–(g), decided per-duty, not vibes. (~M, was ~S — this is the load-bearing
+   spike, not a warm-up.)
 
 Rough total: ~2 weeks, low risk — the front changes are small and additive; the
 attach client's RPC/eval core is untouched.
