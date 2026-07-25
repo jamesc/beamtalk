@@ -23,16 +23,8 @@ pub(crate) struct TrailingCaretPass;
 
 impl LintPass for TrailingCaretPass {
     fn check(&self, module: &Module, diagnostics: &mut Vec<Diagnostic>) {
-        for class in &module.classes {
-            for method in &class.methods {
-                check_method(method, diagnostics);
-            }
-            for method in &class.class_methods {
-                check_method(method, diagnostics);
-            }
-        }
-        for standalone in &module.method_definitions {
-            check_method(&standalone.method, diagnostics);
+        for method in module.all_methods() {
+            check_method(method, diagnostics);
         }
     }
 }

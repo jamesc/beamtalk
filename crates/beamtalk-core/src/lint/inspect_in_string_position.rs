@@ -34,15 +34,8 @@ pub(crate) struct InspectInStringPositionPass;
 
 impl LintPass for InspectInStringPositionPass {
     fn check(&self, module: &Module, diagnostics: &mut Vec<Diagnostic>) {
-        for class in &module.classes {
-            for method in class.methods.iter().chain(class.class_methods.iter()) {
-                for stmt in &method.body {
-                    walk(&stmt.expression, diagnostics);
-                }
-            }
-        }
-        for standalone in &module.method_definitions {
-            for stmt in &standalone.method.body {
+        for method in module.all_methods() {
+            for stmt in &method.body {
                 walk(&stmt.expression, diagnostics);
             }
         }
