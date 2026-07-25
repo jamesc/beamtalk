@@ -235,6 +235,23 @@ fn closed_leaf_class_union_without_nil_missing_arm_errors() {
     assert!(diags[0].message.contains("String"));
 }
 
+/// PR #2965 review: a `nil` arm on a *non-nullable* closed leaf-class
+/// union still engages the advisory check — the warning names the
+/// uncovered residual (`Integer`, `String`), not the impossible `nil` arm.
+/// Deliberate (see `arms_use_nil_or_type_pattern`'s doc): the arm asserts
+/// a nil-ness the annotation rules out, so the match is genuinely suspect,
+/// and suppressing the technically-correct warning would hide a real
+/// coverage gap exactly where the code most likely has a bug.
+#[test]
+fn nil_arm_on_non_nullable_union_still_engages_advisory_check() {
+    let ty = InferredType::simple_union(&["Integer", "String"]);
+    let diags = advisory_diagnostics(ty, vec![nil_arm(int_lit(0))]);
+    assert_eq!(diags.len(), 1, "expected one warning, got: {diags:?}");
+    assert_eq!(diags[0].severity, Severity::Warning);
+    assert!(diags[0].message.contains("Integer"));
+    assert!(diags[0].message.contains("String"));
+}
+
 // ── Gating: existing symbol-union / ordinary-class-union behaviour is
 //    unaffected by this new mechanism ────────────────────────────────────
 

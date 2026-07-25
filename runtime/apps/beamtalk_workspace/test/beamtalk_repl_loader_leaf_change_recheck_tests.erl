@@ -369,6 +369,132 @@ reloading_the_same_subclass_again_does_not_refire_test_() ->
         end}}.
 
 %%====================================================================
+%% Regression (PR #2965 review): a leaf-change sweep that finds nothing and
+%% clears nothing must stay SILENT. The sweep's candidate set is the entire
+%% live image (`all_class_sources/0`, uncapped), so a `CheckedOwners`-based
+%% announce gate — `publish_shape_recheck_outcome/3`'s, correct for its own
+%% capped xref-derived candidate set — would degenerate to "some class
+%% exists" here and broadcast a whole-image `checkedOwners` list on every
+%% first-subclass event. Pins the gate as "produced findings or cleared
+%% something" instead.
+%%====================================================================
+
+clean_leaf_change_recheck_does_not_announce_test_() ->
+    {timeout, 30,
+        {setup, fun leaf_loader_setup/0, fun leaf_loader_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    subscribe_self_to_reload_check(),
+
+                    %% `LeafRecheckCleanShape` — leaf, zero subclasses, and no
+                    %% live class anywhere `match:`es on it, so the sweep
+                    %% cannot attribute a single finding to the transition,
+                    %% and no owner has a stored finding to clear either.
+                    ShapePath = filename:join(
+                        temp_dir(),
+                        io_lib:format("leaf_recheck_clean_shape_~p.bt", [
+                            erlang:unique_integer([positive])
+                        ])
+                    ),
+                    ok = file:write_file(
+                        ShapePath, <<"Object subclass: LeafRecheckCleanShape\n">>
+                    ),
+                    State0 = beamtalk_repl_state:new(undefined, 0),
+                    {ok, _, State1} = beamtalk_repl_loader:handle_load(ShapePath, State0),
+
+                    CirclePath = filename:join(
+                        temp_dir(),
+                        io_lib:format("leaf_recheck_clean_circle_~p.bt", [
+                            erlang:unique_integer([positive])
+                        ])
+                    ),
+                    ok = file:write_file(
+                        CirclePath,
+                        <<"LeafRecheckCleanShape subclass: LeafRecheckCleanCircle\n">>
+                    ),
+                    {ok, _, _State2} = beamtalk_repl_loader:handle_load(CirclePath, State1),
+                    wait_for_leaf_change_worker(),
+
+                    ?assertError(
+                        timeout_waiting_for_reload_check_announcement,
+                        receive_reload_check_announcement()
+                    )
+                end)
+            ]
+        end}}.
+
+%%====================================================================
+%% Regression (PR #2965 review): the other half of the same gate — a
+%% findings-free sweep that DOES clear a `{Owner, Superclass}` origin
+%% bucket must announce, so the surface displaying that now-cleared finding
+%% learns to drop it. Exercised directly against the publish helper: the
+%% bucket being cleared here is one an *earlier* method/shape re-check of
+%% the same superclass wrote (leaf transitions are monotonic per superclass,
+%% so a second leaf-change sweep for the same one cannot occur), and those
+%% re-checks write under the exact same store key this sweep replaces.
+%%====================================================================
+
+leaf_change_recheck_announces_when_it_clears_a_stale_finding_test_() ->
+    {timeout, 30,
+        {setup, fun leaf_loader_setup/0, fun leaf_loader_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    OwnerBin = <<"LeafRecheckClearingOwner">>,
+                    SuperclassBin = <<"LeafRecheckClearingShape">>,
+
+                    %% A finding an earlier re-check of the same class left
+                    %% on this owner, under the origin key the leaf-change
+                    %% sweep replaces.
+                    StaleFinding = #{
+                        owner => OwnerBin,
+                        changed_class => SuperclassBin,
+                        classification => signature_change,
+                        category => <<"Type">>,
+                        severity => <<"error">>,
+                        message => <<"stale finding from an earlier re-check">>,
+                        selector => <<"draw">>,
+                        note => undefined,
+                        sites => [],
+                        start => 0,
+                        'end' => 1
+                    },
+                    _ = beamtalk_workspace_findings_store:put_owner_origin(
+                        OwnerBin, SuperclassBin, [StaleFinding]
+                    ),
+
+                    subscribe_self_to_reload_check(),
+
+                    %% A clean sweep: no findings at all, but it checked the
+                    %% owner above, so its store write clears that bucket.
+                    CleanResult = #{
+                        findings => [],
+                        checked => 1,
+                        total_candidates => 1,
+                        not_checked => 0,
+                        cap_note => undefined,
+                        checked_owners => [OwnerBin],
+                        not_checked_owners => [],
+                        not_verified_owners => []
+                    },
+                    ok = beamtalk_repl_loader:publish_leaf_change_recheck_outcome(
+                        SuperclassBin, CleanResult
+                    ),
+
+                    Event = receive_reload_check_announcement(),
+                    ?assertEqual(SuperclassBin, maps:get(changedClass, Event)),
+                    ?assertEqual(leaf_change, maps:get(classification, Event)),
+                    ?assertEqual([], maps:get(findings, Event)),
+                    ?assertEqual([OwnerBin], maps:get(checkedOwners, Event)),
+
+                    %% And the stale finding really is gone from the store.
+                    ?assertEqual(
+                        [], beamtalk_workspace_findings_store:for_owner(OwnerBin)
+                    )
+                end)
+            ]
+        end}}.
+
+%%====================================================================
 %% End-to-end: a leaf class gaining its first subclass invalidates a
 %% `matchExhaustive:` proof — ADR 0107's own headline motivating scenario
 %% (a `Known | Nil` union proved exhaustive by a `nil` arm + a `Type` arm
