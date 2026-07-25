@@ -5847,3 +5847,277 @@ fn test_terminate_plain_module_uses_module_name_as_class_label() {
         "Plain module terminate/2 must use module name 'bt_module' as class label. Got:\n{code}"
     );
 }
+
+// ── Direct unit tests for dispatch.rs codegen helpers ───────────────────────
+//
+// These call `generate_class_name_function`, `generate_has_method`, and
+// `generate_safe_dispatch` directly (without going through the full
+// `generate_module` pipeline) to pin their exact Core Erlang output and to
+// reach the macro-expanded lines that full-pipeline tests miss.
+
+#[test]
+fn test_generate_class_name_function_derives_from_module_name() {
+    // CoreErlangGenerator::class_name() converts the module name from
+    // snake_case → CamelCase when no explicit class identity is set.
+    let generator = CoreErlangGenerator::new("my_counter");
+    let module = Module::new(vec![], Span::new(0, 0));
+    let doc = generator.generate_class_name_function(&module).unwrap();
+    let output = doc.to_pretty_string();
+    assert!(
+        output.contains("'class_name'/0 = fun () -> 'MyCounter'"),
+        "class_name/0 should return CamelCase atom from module name. Got: {output}"
+    );
+}
+
+#[test]
+fn test_generate_class_name_function_single_word_module() {
+    // Single-word module name: "counter" → "Counter".
+    let generator = CoreErlangGenerator::new("counter");
+    let module = Module::new(vec![], Span::new(0, 0));
+    let doc = generator.generate_class_name_function(&module).unwrap();
+    let output = doc.to_pretty_string();
+    assert!(
+        output.contains("'class_name'/0 = fun () -> 'Counter'"),
+        "class_name/0 should return 'Counter' for module 'counter'. Got: {output}"
+    );
+}
+
+#[test]
+fn test_generate_has_method_empty_module_produces_empty_member_list() {
+    // An empty module has no methods; has_method/1 should always return false
+    // (member of an empty list is always false).
+    let generator = CoreErlangGenerator::new("counter");
+    let module = Module::new(vec![], Span::new(0, 0));
+    let doc = generator.generate_has_method(&module).unwrap();
+    let output = doc.to_pretty_string();
+    assert!(
+        output.contains("'has_method'/1 = fun (Selector) ->"),
+        "Should generate has_method/1 header. Got: {output}"
+    );
+    assert!(
+        output.contains("call 'lists':'member'(Selector, [])"),
+        "Empty module should yield empty member list. Got: {output}"
+    );
+}
+
+#[test]
+fn test_generate_has_method_lists_primary_class_methods() {
+    // A module with an Actor class should list all primary methods in has_method/1.
+    use crate::ast::{ClassDefinition, MethodDefinition, MethodKind};
+
+    let class = ClassDefinition {
+        name: Identifier::new("Counter", Span::new(0, 0)),
+        superclass: Some(Identifier::new("Actor", Span::new(0, 0))),
+        superclass_package: None,
+        class_kind: ClassKind::Actor,
+        is_abstract: false,
+        is_sealed: false,
+        is_typed: false,
+        is_internal: false,
+        supervisor_kind: None,
+        state: vec![],
+        methods: vec![
+            MethodDefinition {
+                selector: MessageSelector::Unary("increment".into()),
+                parameters: vec![],
+                body: vec![bare(Expression::Literal(
+                    Literal::Integer(0),
+                    Span::new(0, 0),
+                ))],
+                return_type: None,
+                is_sealed: false,
+                is_internal: false,
+                is_class_method: false,
+                kind: MethodKind::Primary,
+                expect: None,
+                comments: CommentAttachment::default(),
+                doc_comment: None,
+                span: Span::new(0, 0),
+            },
+            MethodDefinition {
+                selector: MessageSelector::Keyword(vec![KeywordPart::new(
+                    "setValue:",
+                    Span::new(0, 0),
+                )]),
+                parameters: vec![],
+                body: vec![bare(Expression::Literal(
+                    Literal::Integer(0),
+                    Span::new(0, 0),
+                ))],
+                return_type: None,
+                is_sealed: false,
+                is_internal: false,
+                is_class_method: false,
+                kind: MethodKind::Primary,
+                expect: None,
+                comments: CommentAttachment::default(),
+                doc_comment: None,
+                span: Span::new(0, 0),
+            },
+        ],
+        class_methods: vec![],
+        class_variables: vec![],
+        type_params: vec![],
+        superclass_type_args: vec![],
+        comments: CommentAttachment::default(),
+        doc_comment: None,
+        backing_module: None,
+        handle_scope: None,
+        span: Span::new(0, 0),
+    };
+    let module = Module {
+        classes: vec![class],
+        type_aliases: Vec::new(),
+        expressions: vec![],
+        method_definitions: Vec::new(),
+        protocols: Vec::new(),
+        span: Span::new(0, 0),
+        file_leading_comments: vec![],
+        file_trailing_comments: Vec::new(),
+    };
+
+    let generator = CoreErlangGenerator::new("counter");
+    let doc = generator.generate_has_method(&module).unwrap();
+    let output = doc.to_pretty_string();
+    assert!(
+        output.contains("'increment'"),
+        "has_method/1 should list 'increment'. Got: {output}"
+    );
+    assert!(
+        output.contains("'setValue:'"),
+        "has_method/1 should list 'setValue:'. Got: {output}"
+    );
+    assert!(
+        output.contains("call 'lists':'member'(Selector, ["),
+        "has_method/1 should call lists:member on the method list. Got: {output}"
+    );
+}
+
+#[test]
+fn test_generate_has_method_from_expression_based_module() {
+    // Script/workspace modules use top-level `name := [block]` assignments as
+    // methods; has_method/1 must include those names.
+    let src = "increment := [self.value + 1]. getValue := [self.value]";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+
+    let generator = CoreErlangGenerator::new("counter");
+    let doc = generator.generate_has_method(&module).unwrap();
+    let output = doc.to_pretty_string();
+    assert!(
+        output.contains("'increment'"),
+        "has_method/1 should include 'increment' from script method. Got: {output}"
+    );
+    assert!(
+        output.contains("'getValue'"),
+        "has_method/1 should include 'getValue' from script method. Got: {output}"
+    );
+}
+
+#[test]
+fn test_generate_safe_dispatch_structure() {
+    // safe_dispatch/3 must wrap dispatch/4 in a try/catch that returns the
+    // stacktrace on failure (BT-1822) and calls beamtalk_actor:make_self/1 first
+    // (BT-161). The generated call must reference the module's own dispatch fn.
+    let mut generator = CoreErlangGenerator::new("my_counter");
+    let doc = generator.generate_safe_dispatch().unwrap();
+    let output = doc.to_pretty_string();
+
+    assert!(
+        output.contains("'safe_dispatch'/3 = fun (Selector, Args, State) ->"),
+        "Should generate safe_dispatch/3 header. Got: {output}"
+    );
+    // BT-161: Self must be constructed via make_self before dispatch
+    assert!(
+        output.contains("call 'beamtalk_actor':'make_self'(State)"),
+        "Should construct Self via make_self/1. Got: {output}"
+    );
+    // The try must call the module's own dispatch function
+    assert!(
+        output.contains("'my_counter':'dispatch'(Selector, Args, Self, State)"),
+        "Should dispatch to my_counter:dispatch/4. Got: {output}"
+    );
+    // The try/catch structure
+    assert!(
+        output.contains("try call"),
+        "Should use try/catch for error isolation. Got: {output}"
+    );
+    assert!(
+        output.contains("of Result -> Result"),
+        "Happy path should pass Result through. Got: {output}"
+    );
+    // BT-1822: stacktrace captured and returned in error tuple
+    assert!(
+        output.contains("catch <Type, Error, Stacktrace>"),
+        "Should catch with stacktrace variable. Got: {output}"
+    );
+    assert!(
+        output.contains("{'error', {Type, Error, Stacktrace}, State}"),
+        "Should return error tuple containing the stacktrace. Got: {output}"
+    );
+}
+
+#[test]
+fn test_script_module_keyword_method_dispatch_destructures_args() {
+    // A script/workspace module with a multi-parameter block (keyword method)
+    // must generate a dispatch clause that:
+    //   1. Matches the selector atom in case Selector of
+    //   2. Matches Args as a list of named variables (Args destructuring)
+    //   3. Falls back to 'bad_arity' on arg count mismatch
+    //
+    // This exercises generate_legacy_method_clause with non-empty param_vars
+    // (line 329) and build_dispatch_clause's Args-case branch.
+    let src = "add := [:a :b | a + b]";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("test").with_workspace_mode(true),
+    )
+    .expect("codegen should succeed");
+
+    let dispatch_body =
+        extract_core_fn(&code, "'dispatch'/4 = fun").expect("should have dispatch/4");
+    assert!(
+        dispatch_body.contains("<'add'>"),
+        "dispatch/4 should have 'add' case arm. Got:\n{dispatch_body}"
+    );
+    // Args must be destructured into a list pattern when params are present
+    assert!(
+        dispatch_body.contains("case Args of"),
+        "Keyword-style method must destructure Args. Got:\n{dispatch_body}"
+    );
+    assert!(
+        dispatch_body.contains("<["),
+        "Args case should pattern-match into a list. Got:\n{dispatch_body}"
+    );
+    assert!(
+        dispatch_body.contains("'bad_arity'"),
+        "Should fall back to 'bad_arity' on arity mismatch. Got:\n{dispatch_body}"
+    );
+}
+
+#[test]
+fn test_method_table_with_script_methods_includes_arity() {
+    // Script/workspace modules emit method_table entries for every
+    // `name := [block]` binding, with the block arity as the value.
+    let src = "unary := [42]. binary := [:a :b | a + b]";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("test").with_workspace_mode(true),
+    )
+    .expect("codegen should succeed");
+
+    let table_body =
+        extract_core_fn(&code, "'method_table'/0 = fun").expect("should have method_table/0");
+    assert!(
+        table_body.contains("'unary' => 0"),
+        "method_table should list 'unary' with arity 0. Got:\n{table_body}"
+    );
+    assert!(
+        table_body.contains("'binary' => 2"),
+        "method_table should list 'binary' with arity 2. Got:\n{table_body}"
+    );
+}
