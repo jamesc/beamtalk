@@ -85,22 +85,7 @@ pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
         .map_err(|_| miette::miette!("Non-UTF-8 temp directory path"))?;
 
     // Compiler options: stdlib mode enabled
-    let options = beamtalk_core::CompilerOptions {
-        stdlib_mode: true,
-        allow_primitives: false,
-        workspace_mode: false,
-        warnings_as_errors,
-        // BT-2964: stdlib compiles as the "stdlib" package, matching the
-        // `package: Some("stdlib")` stamp on `stdlib_pre_loaded_aliases`'s
-        // entries (and `generate_class_entry`'s `ClassInfo`s) and the LSP's
-        // `STDLIB_PACKAGE_MARKER` — without it, `None` here would make
-        // `AliasRegistry::add_pre_loaded` fall into the open-world REPL path
-        // instead of enforcing stdlib's own package boundary, and an
-        // `internal type` alias would resolve by accident rather than by the
-        // same-package rule (ADR 0108).
-        current_package: Some("stdlib".into()),
-        ..Default::default()
-    };
+    let options = stdlib_compiler_options(warnings_as_errors);
 
     // BT-295 / ADR 0007 Phase 3: Build primitive binding table from ALL stdlib sources.
     // This is used during compilation so that @primitive expressions in method bodies
@@ -824,6 +809,28 @@ fn collect_stdlib_alias_sources(source_files: &[Utf8PathBuf]) -> Result<Vec<Alia
         }
     }
     Ok(all)
+}
+
+/// The `CompilerOptions` every stdlib compile in [`build_stdlib`] runs with.
+///
+/// BT-2964: `current_package` is `Some("stdlib")`, matching the
+/// `package: Some("stdlib")` stamp on [`stdlib_pre_loaded_aliases`]'s entries
+/// (and [`generate_class_entry`]'s `ClassInfo`s) and the LSP's
+/// `STDLIB_PACKAGE_MARKER` — without it, `None` would make
+/// `AliasRegistry::add_pre_loaded` fall into the open-world REPL path instead
+/// of enforcing stdlib's own package boundary, and an `internal type` alias
+/// would resolve by accident rather than by the same-package rule (ADR 0108).
+/// Tests compile against this exact function so the two identities cannot
+/// silently drift apart.
+fn stdlib_compiler_options(warnings_as_errors: bool) -> beamtalk_core::CompilerOptions {
+    beamtalk_core::CompilerOptions {
+        stdlib_mode: true,
+        allow_primitives: false,
+        workspace_mode: false,
+        warnings_as_errors,
+        current_package: Some("stdlib".into()),
+        ..Default::default()
+    }
 }
 
 /// Extracts the `pre_loaded_aliases` value for
@@ -1641,23 +1648,11 @@ mod tests {
         assert!(alias_sources[0].text.starts_with("type Direction ="));
         assert_eq!(alias_sources[0].info.name.as_str(), "Direction");
 
-        let pre_loaded_aliases: Vec<_> = alias_sources
-            .iter()
-            .map(|a| {
-                let mut info = a.info.clone();
-                info.package = Some("stdlib".into());
-                info
-            })
-            .collect();
+        let pre_loaded_aliases = stdlib_pre_loaded_aliases(&alias_sources);
         assert_eq!(pre_loaded_aliases.len(), 1);
         assert_eq!(pre_loaded_aliases[0].name.as_str(), "Direction");
 
-        let options = beamtalk_core::CompilerOptions {
-            stdlib_mode: true,
-            allow_primitives: false,
-            workspace_mode: false,
-            ..Default::default()
-        };
+        let options = stdlib_compiler_options(false);
         let bindings = beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new();
 
         // Compile B with cross-file class info AND cross-file alias info —
@@ -1761,15 +1756,9 @@ mod tests {
         let pre_loaded_aliases = stdlib_pre_loaded_aliases(&alias_sources);
         assert_eq!(pre_loaded_aliases[0].package.as_deref(), Some("stdlib"));
 
-        // The same options shape `build_stdlib()` constructs — crucially
-        // with `current_package: Some("stdlib")` matching the stamp above.
-        let options = beamtalk_core::CompilerOptions {
-            stdlib_mode: true,
-            allow_primitives: false,
-            workspace_mode: false,
-            current_package: Some("stdlib".into()),
-            ..Default::default()
-        };
+        // The exact options `build_stdlib()` runs with — crucially with
+        // `current_package: Some("stdlib")` matching the stamp above.
+        let options = stdlib_compiler_options(false);
         let bindings = beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new();
 
         let core_file = lib_dir.join("internal_b.core");
