@@ -3598,6 +3598,18 @@ impl TypeChecker {
     /// (BT-2745/ADR-0106's existing symbol-union/`Result` behaviour must stay
     /// unaffected) and not something the programmer asked this `match:` to
     /// prove.
+    ///
+    /// The gate is arm-*shape*-based, not arm-*relevance*-based (PR #2965
+    /// review): a `nil` arm on a scrutinee whose union does not include
+    /// `Nil` (e.g. `x :: Integer | String; x match: [nil -> 0]`) still
+    /// engages the mechanism, and the advisory warning names the uncovered
+    /// residual (`Integer`, `String`) rather than the impossible `nil` arm
+    /// itself. Deliberate: the arm asserts a nil-ness the annotation says
+    /// cannot happen, so the match is genuinely suspect, and the
+    /// advisory-only warning is the cheapest honest signal — requiring the
+    /// covered arms to intersect the scrutinee before engaging would
+    /// silence a technically-correct warning exactly where the code most
+    /// likely has a bug.
     fn arms_use_nil_or_type_pattern(arms: &[MatchArm]) -> bool {
         arms.iter()
             .any(|arm| matches!(arm.pattern, Pattern::Nil(_) | Pattern::Type { .. }))

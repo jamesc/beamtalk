@@ -369,6 +369,60 @@ reloading_the_same_subclass_again_does_not_refire_test_() ->
         end}}.
 
 %%====================================================================
+%% Regression (PR #2965 review): a leaf-change re-check that finds nothing
+%% still announces — with empty findings — whenever it actually checked at
+%% least one owner. The sweep's unconditional
+%% `put_owner_origin(Owner, Superclass, [])` writes can clear a
+%% `{Owner, Superclass}` origin bucket an earlier method/shape re-check of
+%% the same class left behind (same store key), so a surface needs the
+%% announcement itself to know to drop what it was showing — the same
+%% `CheckedOwners` gate `publish_shape_recheck_outcome/3` uses.
+%%====================================================================
+
+clean_leaf_change_recheck_still_announces_test_() ->
+    {timeout, 30,
+        {setup, fun leaf_loader_setup/0, fun leaf_loader_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    subscribe_self_to_reload_check(),
+
+                    %% `LeafRecheckCleanShape` — leaf, zero subclasses, and no
+                    %% live class anywhere `match:`es on it, so the sweep
+                    %% cannot attribute a single finding to the transition.
+                    ShapePath = filename:join(
+                        temp_dir(),
+                        io_lib:format("leaf_recheck_clean_shape_~p.bt", [
+                            erlang:unique_integer([positive])
+                        ])
+                    ),
+                    ok = file:write_file(
+                        ShapePath, <<"Object subclass: LeafRecheckCleanShape\n">>
+                    ),
+                    State0 = beamtalk_repl_state:new(undefined, 0),
+                    {ok, _, State1} = beamtalk_repl_loader:handle_load(ShapePath, State0),
+
+                    CirclePath = filename:join(
+                        temp_dir(),
+                        io_lib:format("leaf_recheck_clean_circle_~p.bt", [
+                            erlang:unique_integer([positive])
+                        ])
+                    ),
+                    ok = file:write_file(
+                        CirclePath,
+                        <<"LeafRecheckCleanShape subclass: LeafRecheckCleanCircle\n">>
+                    ),
+                    {ok, _, _State2} = beamtalk_repl_loader:handle_load(CirclePath, State1),
+
+                    Event = receive_reload_check_announcement(),
+                    ?assertEqual(<<"LeafRecheckCleanShape">>, maps:get(changedClass, Event)),
+                    ?assertEqual(leaf_change, maps:get(classification, Event)),
+                    ?assertEqual([], maps:get(findings, Event)),
+                    ?assertNotEqual([], maps:get(checkedOwners, Event))
+                end)
+            ]
+        end}}.
+
+%%====================================================================
 %% End-to-end: a leaf class gaining its first subclass invalidates a
 %% `matchExhaustive:` proof — ADR 0107's own headline motivating scenario
 %% (a `Known | Nil` union proved exhaustive by a `nil` arm + a `Type` arm

@@ -2582,16 +2582,20 @@ batch, since it is literally the same round trip), matching exactly what an
 unbatched single-superclass sweep would have reported for this superclass
 alone.
 
-Unlike `publish_shape_recheck_outcome/3`, the announce is gated on
-`Findings` being non-empty alone, not on `CheckedOwners` alone: a superclass
-cannot *regain* leaf status through this path (there is no "reload fixes
-reload" case symmetrical to a method/shape edit — losing leaf status is
-monotonic short of `removeFromSystem`, a distinct, out-of-scope operation
-this trigger is never reached from), so there is no clearing-only outcome
-worth announcing on its own. The findings-store write itself still runs
-for every checked owner unconditionally, so a stale prior finding is always
-replaced per ADR 0105's "replacement, not just agreement" rule even when
-this reload's re-check comes back clean.
+Like `publish_shape_recheck_outcome/3`, the announce fires whenever
+`CheckedOwners` is non-empty, **not** only when `Findings` is (PR #2965
+review). A superclass cannot *regain* leaf status through this path (losing
+leaf status is monotonic short of `removeFromSystem`), so there is no
+"reload fixes reload" case symmetrical to a method/shape edit — but the
+clean-sweep store write above (`put_owner_origin(Owner, SuperclassBin, [])`
+for every checked owner) can still clear a `{Owner, SuperclassBin}` origin
+bucket an *earlier* re-check of the same class left behind: method/shape
+re-checks of `SuperclassBin` write findings under the exact same
+`{Owner, ChangedClass}` key this sweep replaces. A surface needs the
+announcement itself to know to drop what it was showing, not just a quiet
+store write nobody hears about — matching `publish_shape_recheck_outcome/3`'s
+structure exactly, the `?LOG_INFO` is gated on `Findings` (nothing worth
+logging about a clean re-check), the announce on `CheckedOwners` alone.
 """.
 -spec publish_leaf_change_recheck_outcome(binary(), beamtalk_recheck:result()) -> ok.
 publish_leaf_change_recheck_outcome(SuperclassBin, Result) ->
@@ -2612,20 +2616,25 @@ publish_leaf_change_recheck_outcome(SuperclassBin, Result) ->
         CheckedOwners
     ),
     mark_unverified_findings_stale(SuperclassBin, NotVerifiedOwners),
-    case Findings of
+    case CheckedOwners of
         [] ->
             ok;
         _ ->
-            ?LOG_INFO(
-                "Leaf-change reload re-check produced findings",
-                #{
-                    superclass => SuperclassBin,
-                    callers_checked => Checked,
-                    callers_not_checked => NotChecked,
-                    finding_count => length(Findings),
-                    domain => [beamtalk, runtime]
-                }
-            ),
+            case Findings of
+                [] ->
+                    ok;
+                _ ->
+                    ?LOG_INFO(
+                        "Leaf-change reload re-check produced findings",
+                        #{
+                            superclass => SuperclassBin,
+                            callers_checked => Checked,
+                            callers_not_checked => NotChecked,
+                            finding_count => length(Findings),
+                            domain => [beamtalk, runtime]
+                        }
+                    )
+            end,
             beamtalk_announcements:system_announce('ReloadCheckCompleted', #{
                 changedClass => SuperclassBin,
                 changedSelector => SuperclassBin,
@@ -2711,11 +2720,17 @@ finding without new wiring. `changedSelector` carries `AliasNameBin` itself
 (there is no single call-site selector this is "about" — same reasoning
 `finding()`'s doc already gives for `shape_change`/`leaf_change`).
 
-Announce is gated on `Findings` being non-empty, matching
-`publish_leaf_change_recheck_outcome/2` — an alias redefinition that
-introduces no new staleness has nothing worth announcing, but the
-findings-store write still runs for every checked owner unconditionally, so
-a stale prior finding is always replaced.
+Announce is gated on `CheckedOwners` being non-empty, matching
+`publish_leaf_change_recheck_outcome/2` (and, originally,
+`publish_shape_recheck_outcome/3` — PR #2965 review): unlike a leaf-status
+transition, an alias redefinition is *repeatable*, so "redefinition fixes
+redefinition" is a live clearing scenario — a dependent flagged by one
+redefinition and re-checked clean by the next has its store entry cleared
+by the unconditional `put_owner_origin(Owner, AliasNameBin, [])` write
+above, and a surface needs the announcement itself to know to drop what it
+was showing, not just a quiet store write nobody hears about. The
+`?LOG_INFO` stays gated on `Findings` (nothing worth logging about a clean
+re-check).
 """.
 -spec publish_alias_change_recheck_outcome(binary(), beamtalk_recheck:result()) -> ok.
 publish_alias_change_recheck_outcome(AliasNameBin, Result) ->
@@ -2735,20 +2750,25 @@ publish_alias_change_recheck_outcome(AliasNameBin, Result) ->
         CheckedOwners
     ),
     mark_unverified_findings_stale(AliasNameBin, NotVerifiedOwners),
-    case Findings of
+    case CheckedOwners of
         [] ->
             ok;
         _ ->
-            ?LOG_INFO(
-                "Alias-change reload re-check produced findings",
-                #{
-                    alias => AliasNameBin,
-                    callers_checked => Checked,
-                    callers_not_checked => NotChecked,
-                    finding_count => length(Findings),
-                    domain => [beamtalk, runtime]
-                }
-            ),
+            case Findings of
+                [] ->
+                    ok;
+                _ ->
+                    ?LOG_INFO(
+                        "Alias-change reload re-check produced findings",
+                        #{
+                            alias => AliasNameBin,
+                            callers_checked => Checked,
+                            callers_not_checked => NotChecked,
+                            finding_count => length(Findings),
+                            domain => [beamtalk, runtime]
+                        }
+                    )
+            end,
             beamtalk_announcements:system_announce('ReloadCheckCompleted', #{
                 changedClass => AliasNameBin,
                 changedSelector => AliasNameBin,

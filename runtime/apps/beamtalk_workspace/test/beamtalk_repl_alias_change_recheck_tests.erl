@@ -240,7 +240,10 @@ live_alias_redefinition_invalidates_a_matchexhaustive_proof_test_() ->
 %%====================================================================
 %% Regression: redefining the alias to the SAME expansion (no member added)
 %% must not produce a spurious non-exhaustive finding — the dependent's
-%% matchExhaustive: is still sound.
+%% matchExhaustive: is still sound. The clean re-check still *announces*
+%% (with empty findings) so a surface can drop anything it was showing —
+%% the clearing signal `publish_shape_recheck_outcome/3` already relies on
+%% (PR #2965 review).
 %%====================================================================
 
 live_alias_redefinition_to_same_expansion_does_not_produce_findings_test_() ->
@@ -273,9 +276,95 @@ live_alias_redefinition_to_same_expansion_does_not_produce_findings_test_() ->
                     ),
                     wait_for_alias_change_worker(),
 
-                    ?assertError(
-                        timeout_waiting_for_reload_check_announcement,
-                        receive_reload_check_announcement()
+                    %% The announcement fires (checked owners are non-empty)
+                    %% but carries no findings — a clean re-check is the
+                    %% "drop what you were showing" push, not silence.
+                    Event = receive_reload_check_announcement(),
+                    ?assertEqual(<<"AliasChangeDirection">>, maps:get(changedClass, Event)),
+                    ?assertEqual(alias_change, maps:get(classification, Event)),
+                    ?assertEqual([], maps:get(findings, Event)),
+                    ?assert(
+                        lists:member(
+                            <<"AliasChangeRecheckUser">>, maps:get(checkedOwners, Event)
+                        )
+                    ),
+                    ?assertEqual(
+                        [],
+                        beamtalk_workspace_findings_store:for_owner(
+                            <<"AliasChangeRecheckUser">>
+                        )
+                    )
+                end)
+            ]
+        end}}.
+
+%%====================================================================
+%% Regression (PR #2965 review): "redefinition fixes redefinition" — a
+%% dependent flagged by one alias redefinition and re-checked clean by the
+%% next must get a clearing announcement (empty findings), not just a
+%% quiet findings-store write. Before the `CheckedOwners` announce gate,
+%% the store was cleared but no `'ReloadCheckCompleted'` fired, so a
+%% surface kept showing the stale finding indefinitely.
+%%====================================================================
+
+live_alias_redefinition_back_to_sound_expansion_announces_clearing_test_() ->
+    {timeout, 30,
+        {setup, fun alias_recheck_setup/0, fun alias_recheck_teardown/1, fun(_) ->
+            [
+                ?_test(begin
+                    State0 = beamtalk_repl_state:new(undefined, 0),
+                    State1 = declare_alias(
+                        <<"AliasChangeDirection">>,
+                        <<"#north | #south | #east">>,
+                        State0
+                    ),
+
+                    UserPath = filename:join(
+                        temp_dir(),
+                        io_lib:format("alias_recheck_user_fix_~p.bt", [
+                            erlang:unique_integer([positive])
+                        ])
+                    ),
+                    ok = file:write_file(UserPath, user_source()),
+                    {ok, _, State2} = beamtalk_repl_loader:handle_load(UserPath, State1),
+
+                    subscribe_self_to_reload_check(),
+
+                    %% Turn 2: add `#west` — the dependent's matchExhaustive:
+                    %% is newly non-exhaustive; findings are stored and
+                    %% announced (same as the headline test above).
+                    State3 = declare_alias(
+                        <<"AliasChangeDirection">>,
+                        <<"#north | #south | #east | #west">>,
+                        State2
+                    ),
+                    wait_for_alias_change_worker(),
+                    BreakEvent = receive_reload_check_announcement(),
+                    ?assertNotEqual([], maps:get(findings, BreakEvent)),
+                    ?assertNotEqual(
+                        [],
+                        beamtalk_workspace_findings_store:for_owner(
+                            <<"AliasChangeRecheckUser">>
+                        )
+                    ),
+
+                    %% Turn 3: redefine back to the original three members —
+                    %% the dependent is sound again. The re-check clears the
+                    %% store AND announces the cleared state.
+                    _State4 = declare_alias(
+                        <<"AliasChangeDirection">>,
+                        <<"#north | #south | #east">>,
+                        State3
+                    ),
+                    wait_for_alias_change_worker(),
+                    ClearEvent = receive_reload_check_announcement(),
+                    ?assertEqual(<<"AliasChangeDirection">>, maps:get(changedClass, ClearEvent)),
+                    ?assertEqual(alias_change, maps:get(classification, ClearEvent)),
+                    ?assertEqual([], maps:get(findings, ClearEvent)),
+                    ?assert(
+                        lists:member(
+                            <<"AliasChangeRecheckUser">>, maps:get(checkedOwners, ClearEvent)
+                        )
                     ),
                     ?assertEqual(
                         [],
