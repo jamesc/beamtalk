@@ -7,7 +7,9 @@
 TestCase subclass: ControlFlowRhsStateTest
   field: a = nil
 
-  setUp => self.a := ControlFlowRhsActor spawn
+  setUp => self withA: ControlFlowRhsActor spawn
+
+  tearDown => self.a isNil ifFalse: [self.a stop]
 
   testFieldAssignFromConditionalTrue =>
     // self.x := flag ifTrue: [self.y := 10. 42] ifFalse: [0]
