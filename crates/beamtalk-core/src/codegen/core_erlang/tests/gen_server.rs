@@ -5861,6 +5861,7 @@ fn test_generate_class_name_function_derives_from_module_name() {
     // snake_case → CamelCase when no explicit class identity is set.
     let generator = CoreErlangGenerator::new("my_counter");
     let module = Module::new(vec![], Span::new(0, 0));
+    // _module arg is unused by production code; only self.module_name matters
     let doc = generator.generate_class_name_function(&module).unwrap();
     let output = doc.to_pretty_string();
     assert!(
@@ -5874,6 +5875,7 @@ fn test_generate_class_name_function_single_word_module() {
     // Single-word module name: "counter" → "Counter".
     let generator = CoreErlangGenerator::new("counter");
     let module = Module::new(vec![], Span::new(0, 0));
+    // _module arg is unused by production code; only self.module_name matters
     let doc = generator.generate_class_name_function(&module).unwrap();
     let output = doc.to_pretty_string();
     assert!(
@@ -5939,7 +5941,10 @@ fn test_generate_has_method_lists_primary_class_methods() {
                     "setValue:",
                     Span::new(0, 0),
                 )]),
-                parameters: vec![],
+                parameters: vec![ParameterDefinition {
+                    name: Identifier::new("value", Span::new(0, 0)),
+                    type_annotation: None,
+                }],
                 body: vec![bare(Expression::Literal(
                     Literal::Integer(0),
                     Span::new(0, 0),
