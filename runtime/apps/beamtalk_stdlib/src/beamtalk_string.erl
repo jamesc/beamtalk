@@ -42,6 +42,12 @@ All operations are grapheme-aware and handle UTF-8 correctly.
     from_iolist/1
 ]).
 
+%% Instance methods — URL encoding (explicit `(Erlang beamtalk_string) sel:
+%% self` FFI dispatch, not @primitive — see docs/beamtalk-native-erlang.md
+%% "The naming rule": function name is the first keyword with its colon
+%% removed, no case conversion, so these are camelCase not snake_case).
+-export([urlEncoded/1, urlDecoded/1]).
+
 -doc "1-based grapheme access. Returns the grapheme at the given index.".
 -spec at(binary(), integer()) -> binary().
 at(Str, Idx) when is_binary(Str), is_integer(Idx), Idx >= 1 ->
@@ -357,9 +363,51 @@ from_iolist(_) ->
         'String', 'fromIolist:', <<"Expected an iolist (List) or String">>
     ).
 
+-doc """
+Percent-encode characters outside the URL-safe unreserved set (RFC 3986 §2.3:
+letters, digits, `-`, `.`, `_`, `~`) via `uri_string:quote/1`.
+""".
+-spec urlEncoded(binary()) -> binary().
+urlEncoded(Str) when is_binary(Str) ->
+    uri_string:quote(Str);
+urlEncoded(_) ->
+    beamtalk_error:raise_type_error('String', 'urlEncoded', <<"Receiver must be a String">>).
+
+-doc """
+Decode a percent-encoded string via `uri_string:unquote/1`.
+
+Raises a structured `parse_error` when a `%` is followed by two characters
+that aren't both valid hex digits (e.g. `%ZZ`, `%G0`) — `uri_string:unquote/1`
+throws `{error, invalid_percent_encoding, Input}` in that case rather than
+returning a value. A truncated escape at the end of the string (`%2`, or a
+bare trailing `%`) is left unchanged rather than rejected — that leniency
+comes from `uri_string:unquote/1` itself, not this wrapper.
+""".
+-spec urlDecoded(binary()) -> binary().
+urlDecoded(Str) when is_binary(Str) ->
+    try
+        uri_string:unquote(Str)
+    catch
+        throw:{error, _Reason, _Input} ->
+            raise_url_decode_error()
+    end;
+urlDecoded(_) ->
+    beamtalk_error:raise_type_error('String', 'urlDecoded', <<"Receiver must be a String">>).
+
 %%% ============================================================================
 %%% Internal Functions
 %%% ============================================================================
+
+-doc "Raise a structured parse_error for a malformed percent-encoded string.".
+-spec raise_url_decode_error() -> no_return().
+raise_url_decode_error() ->
+    Error0 = beamtalk_error:new(parse_error, 'String'),
+    Error1 = beamtalk_error:with_selector(Error0, 'urlDecoded'),
+    Error2 = beamtalk_error:with_hint(
+        Error1,
+        <<"Malformed percent-encoding — a '%' must be followed by two hex digits">>
+    ),
+    beamtalk_error:raise(Error2).
 
 -doc "Grapheme-aware substring search.".
 -spec index_of_graphemes([string:grapheme_cluster()], [string:grapheme_cluster()], integer()) ->

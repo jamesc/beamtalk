@@ -84,6 +84,46 @@ sealed typed Collection subclass: Binary
   class sealed deserializeWithUsed: binary :: Binary -> Object =>
     (Erlang beamtalk_binary) deserializeWithUsed: binary
 
+  /// Decode a standard (RFC 4648 §4) base64 string to a Binary.
+  ///
+  /// Returns a Result: success gives the decoded Binary, failure gives a
+  /// structured error (malformed base64, e.g. wrong padding or invalid
+  /// alphabet characters).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Binary fromBase64: "aGVsbG8=") unwrap asStringUnchecked   // => "hello"
+  /// (Binary fromBase64: "not base64!!") isError                // => true
+  /// ```
+  class sealed fromBase64: str :: String -> Result(Binary, Error) =>
+    (Erlang beamtalk_binary) fromBase64: str
+
+  /// Decode a URL-safe (RFC 4648 §5) base64 string to a Binary.
+  ///
+  /// Uses `-`/`_` in place of `+`/`/`. Returns a Result, as `fromBase64:`.
+  /// Accepts both padded and unpadded input — the unpadded form is the one
+  /// commonly used in JWTs (RFC 7515 §2) and PKCE challenges.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Binary fromBase64Url: "aGVsbG8h") unwrap asStringUnchecked   // => "hello!"
+  /// ```
+  class sealed fromBase64Url: str :: String -> Result(Binary, Error) =>
+    (Erlang beamtalk_binary) fromBase64Url: str
+
+  /// Decode a hexadecimal string to a Binary.
+  ///
+  /// Accepts upper- or lower-case hex digits. Returns a Result: failure
+  /// covers odd length or non-hex-digit characters.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Binary fromHex: "68656c6c6f") unwrap asStringUnchecked   // => "hello"
+  /// (Binary fromHex: "zz") isError                             // => true
+  /// ```
+  class sealed fromHex: str :: String -> Result(Binary, Error) =>
+    (Erlang beamtalk_binary) fromHex: str
+
   // ═══════════════════════════════════════════════════════════════════
   // Collection subclass-responsibility methods
   // ═══════════════════════════════════════════════════════════════════
@@ -212,3 +252,43 @@ sealed typed Collection subclass: Binary
   /// (Binary fromBytes: #(104, 101, 108, 108, 111)) asStringUnchecked   // => "hello"
   /// ```
   asStringUnchecked -> String => @primitive
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Encoding
+  // ═══════════════════════════════════════════════════════════════════
+
+  /// Encode as a standard (RFC 4648 §4) base64 string, with `=` padding.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Binary fromBytes: #(104, 101, 108, 108, 111)) asBase64   // => "aGVsbG8="
+  /// ```
+  ///
+  /// The underlying FFI spec types the result `binary()` (`String | Binary`),
+  /// but `beamtalk_binary:'asBase64:'/1` always builds an ASCII base64
+  /// string — suppress the resulting `String | Binary` vs. declared `String`
+  /// return-type mismatch.
+  @expect type
+  asBase64 -> String => (Erlang beamtalk_binary) asBase64: self
+
+  /// Encode as a URL-safe (RFC 4648 §5) base64 string, with `=` padding.
+  ///
+  /// Uses `-`/`_` in place of `+`/`/` so the result is safe to embed
+  /// directly in a URL path or query component without further escaping.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Binary fromBytes: #(251, 239)) asBase64      // => "++8="
+  /// (Binary fromBytes: #(251, 239)) asBase64Url   // => "--8="
+  /// ```
+  @expect type
+  asBase64Url -> String => (Erlang beamtalk_binary) asBase64Url: self
+
+  /// Encode as a lowercase hexadecimal string.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Binary fromBytes: #(104, 101, 108, 108, 111)) asHex   // => "68656c6c6f"
+  /// ```
+  @expect type
+  asHex -> String => (Erlang beamtalk_binary) asHex: self

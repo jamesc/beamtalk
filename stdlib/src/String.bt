@@ -569,3 +569,45 @@ sealed typed Binary subclass: String
   /// "hello" displayString       // => "hello"
   /// ```
   displayString -> String => self
+
+  // ═══════════════════════════════════════════════════════════════════
+  // URL encoding
+  // ═══════════════════════════════════════════════════════════════════
+
+  /// Percent-encode characters outside the URL-safe unreserved set
+  /// (RFC 3986 §2.3: letters, digits, `-`, `.`, `_`, `~`).
+  ///
+  /// Encodes every reserved/special character, including `/`, `+`, and
+  /// space — use this for a value that will be placed inside a single URL
+  /// path segment or query component, not for a value that already is a
+  /// full URL.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// "hello world" urlEncoded    // => "hello%20world"
+  /// "a/b+c" urlEncoded          // => "a%2Fb%2Bc"
+  /// ```
+  ///
+  /// The underlying FFI spec types the result `binary()` (`String | Binary`),
+  /// but `beamtalk_string:urlEncoded/1` always builds an ASCII string —
+  /// suppress the resulting `String | Binary` vs. declared `String`
+  /// return-type mismatch.
+  @expect type
+  urlEncoded -> String => (Erlang beamtalk_string) urlEncoded: self
+
+  /// Decode a percent-encoded string.
+  ///
+  /// Inverse of `urlEncoded`. Any `%XX` escape is decoded to its byte;
+  /// characters with no escape pass through unchanged. Raises a
+  /// `parse_error` when a `%` is followed by two characters that aren't
+  /// both valid hex digits (e.g. `%ZZ`); a truncated escape at the end of
+  /// the string (`%2`, or a bare trailing `%`) is left unchanged rather
+  /// than rejected.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// "hello%20world" urlDecoded  // => "hello world"
+  /// "a%2Fb%2Bc" urlDecoded      // => "a/b+c"
+  /// ```
+  @expect type
+  urlDecoded -> String => (Erlang beamtalk_string) urlDecoded: self

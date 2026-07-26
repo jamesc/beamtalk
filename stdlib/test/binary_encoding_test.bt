@@ -1,0 +1,85 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Stdlib tests for Binary encoding — asBase64/asBase64Url/asHex and their
+// class-side decoders, checked against RFC 4648 §10 test vectors.
+
+TestCase subclass: BinaryEncodingTest
+
+  // ===== asBase64 (RFC 4648 §10 test vectors) =====
+  testAsBase64EmptyString =>
+    self assert: (Binary fromBytes: #()) asBase64 equals: ""
+
+  testAsBase64F => self assert: "f" asBase64 equals: "Zg=="
+
+  testAsBase64Fo => self assert: "fo" asBase64 equals: "Zm8="
+
+  testAsBase64Foo => self assert: "foo" asBase64 equals: "Zm9v"
+
+  testAsBase64Foob => self assert: "foob" asBase64 equals: "Zm9vYg=="
+
+  testAsBase64Fooba => self assert: "fooba" asBase64 equals: "Zm9vYmE="
+
+  testAsBase64Foobar => self assert: "foobar" asBase64 equals: "Zm9vYmFy"
+
+  // ===== fromBase64: (round trip + error handling) =====
+  testFromBase64RoundTrip =>
+    self assert: (Binary fromBase64: "Zm9vYmFy") unwrap asStringUnchecked equals: "foobar"
+
+  testFromBase64IsOkOnValidInput =>
+    self assert: (Binary fromBase64: "aGVsbG8=") isOk
+
+  testFromBase64IsErrorOnMalformedInput =>
+    self assert: (Binary fromBase64: "not valid base64!!") isError
+    self assert: (Binary fromBase64: "a") isError
+
+  testFromBase64RejectsUrlSafeAlphabet =>
+    // "--8=" is the url-safe encoding of #(251, 239); the standard decoder
+    // must reject its '-' characters rather than accept them.
+    self assert: (Binary fromBase64: "--8=") isError
+
+  // ===== asBase64Url / fromBase64Url: =====
+  testAsBase64UrlUsesUrlSafeAlphabet =>
+    // Bytes chosen so the standard alphabet needs `+`; url-safe uses `-`.
+    bin := Binary fromBytes: #(251, 239)
+    self assert: bin asBase64 equals: "++8="
+    self assert: bin asBase64Url equals: "--8="
+
+  testFromBase64UrlRoundTrip =>
+    encoded := (Binary fromBytes: #(251, 239)) asBase64Url
+    self assert: (Binary fromBase64Url: encoded) unwrap equals: (Binary fromBytes: #(251, 239))
+
+  testFromBase64UrlIsErrorOnMalformedInput =>
+    self assert: (Binary fromBase64Url: "not valid!!") isError
+
+  testFromBase64UrlAcceptsUnpaddedInput =>
+    // "--8=" is the padded url-safe encoding of #(251, 239); JWTs and PKCE
+    // challenges use the unpadded form ("--8") instead — both must decode
+    // to the same bytes.
+    self assert: (Binary fromBase64Url: "--8") unwrap equals: (Binary fromBytes: #(251, 239))
+
+  testFromBase64UrlRejectsStandardAlphabet =>
+    // "++8=" is the standard encoding of #(251, 239); the url-safe decoder
+    // must reject its '+' characters rather than accept them.
+    self assert: (Binary fromBase64Url: "++8=") isError
+
+  // ===== asHex / fromHex: =====
+  testAsHexLowercase => self assert: "hello" asHex equals: "68656c6c6f"
+
+  testAsHexEmptyBinary => self assert: (Binary fromBytes: #()) asHex equals: ""
+
+  testFromHexRoundTrip =>
+    self assert: (Binary fromHex: "68656c6c6f") unwrap asStringUnchecked equals: "hello"
+
+  testFromHexIsCaseInsensitive =>
+    self assert: (Binary fromHex: "68656C6C6F") unwrap asStringUnchecked equals: "hello"
+
+  testFromHexIsErrorOnOddLength => self assert: (Binary fromHex: "abc") isError
+
+  testFromHexIsErrorOnNonHexCharacters =>
+    self assert: (Binary fromHex: "zz") isError
+
+  // ===== String inherits Binary's encoding methods =====
+  testStringInheritsAsBase64 => self assert: "hello" asBase64 equals: "aGVsbG8="
+
+  testStringInheritsAsHex => self assert: "hi" asHex equals: "6869"

@@ -1,0 +1,73 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Digest — cryptographic hash functions and HMAC message authentication.
+///
+/// A stateless namespace of class methods — there are no Digest instances.
+/// Thin wrapper over OTP's `crypto:hash/2` and `crypto:mac/4`. Every selector
+/// accepts a String or Binary and returns a raw Binary digest; pipe the
+/// result through `asHex` or `asBase64` (see `Binary`) for a printable form.
+///
+/// ## BEAM Mapping
+/// `sha256:`/`sha512:` use `crypto:hash/2`; `md5:` also uses `crypto:hash/2`;
+/// `hmacSha256:key:`/`hmacSha512:key:` use `crypto:mac/4`.
+///
+/// ## Examples
+/// ```beamtalk
+/// (Digest sha256: "abc") asHex
+/// // => "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+/// (Digest hmacSha256: "message" key: "secret") byteSize
+/// // => 32
+/// ```
+sealed typed Object subclass: Digest
+
+  /// SHA-256 digest (32 bytes) of `input`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Digest sha256: "abc") byteSize   // => 32
+  /// ```
+  class sealed sha256: input :: String | Binary -> Binary =>
+    (Erlang beamtalk_digest) sha256: input
+
+  /// SHA-512 digest (64 bytes) of `input`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Digest sha512: "abc") byteSize   // => 64
+  /// ```
+  class sealed sha512: input :: String | Binary -> Binary =>
+    (Erlang beamtalk_digest) sha512: input
+
+  /// MD5 digest (16 bytes) of `input`.
+  ///
+  /// **Legacy/non-cryptographic use only** — MD5 is not collision-resistant.
+  /// Do not use it for signatures, password storage, or integrity checks on
+  /// untrusted data; it is provided only for interoperating with legacy
+  /// protocols and non-security checksums (e.g. cache keys). Prefer
+  /// `sha256:`/`sha512:` for anything security-sensitive.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Digest md5: "abc") byteSize      // => 16
+  /// ```
+  class sealed md5: input :: String | Binary -> Binary =>
+    (Erlang beamtalk_digest) md5: input
+
+  /// HMAC-SHA256 message authentication code of `input` using `key`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Digest hmacSha256: "message" key: "secret") byteSize   // => 32
+  /// ```
+  class sealed hmacSha256: input :: String | Binary key: key :: String | Binary -> Binary =>
+    (Erlang beamtalk_digest) hmacSha256: input key: key
+
+  /// HMAC-SHA512 message authentication code of `input` using `key`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Digest hmacSha512: "message" key: "secret") byteSize   // => 64
+  /// ```
+  class sealed hmacSha512: input :: String | Binary key: key :: String | Binary -> Binary =>
+    (Erlang beamtalk_digest) hmacSha512: input key: key
