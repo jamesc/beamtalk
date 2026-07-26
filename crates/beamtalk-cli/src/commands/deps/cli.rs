@@ -285,7 +285,10 @@ fn add_registry_dependency(
         url: release.git.clone(),
         reference,
         resolved_sha: resolved.resolved_sha.clone(),
-        registry_version: Some(release.version.clone()),
+        registry_version: Some(super::lockfile::RegistryVersion {
+            version: release.version.clone(),
+            registry: Some(registry_location.to_string()),
+        }),
     });
     lockfile.write(project_root)?;
 
@@ -675,7 +678,10 @@ fn update_single_registry_dep(
         url: release.git.clone(),
         reference,
         resolved_sha: resolved.resolved_sha.clone(),
-        registry_version: Some(version.to_string()),
+        registry_version: Some(super::lockfile::RegistryVersion {
+            version: version.to_string(),
+            registry: Some(location.to_string()),
+        }),
     });
     lockfile.write(project_root)?;
 
@@ -1301,7 +1307,10 @@ utils = { path = \"utils\" }
             url: "https://github.com/jamesc/beamtalk-yaml".to_string(),
             reference: GitReference::Tag("v0.2.1".to_string()),
             resolved_sha: "abc1234def5678".to_string(),
-            registry_version: Some("0.2.1".to_string()),
+            registry_version: Some(super::super::lockfile::RegistryVersion {
+                version: "0.2.1".to_string(),
+                registry: Some("https://github.com/jamesc/beamtalk-registry".to_string()),
+            }),
         };
         assert_eq!(
             format_registry_source_info("0.2.1", Some(&entry)),

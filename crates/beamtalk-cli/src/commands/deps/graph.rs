@@ -18,7 +18,7 @@ use tracing::{debug, info};
 
 use crate::commands::manifest::{self, ParsedManifest};
 
-use super::lockfile::{LockEntry, Lockfile};
+use super::lockfile::{LockEntry, Lockfile, RegistryVersion};
 use super::registry::{self, RegistryLocation};
 
 use super::path::{ResolvedDependency, canonicalize_dep_path};
@@ -293,10 +293,11 @@ fn discover_deps(
 /// Resolve a registry dependency to an on-disk checkout.
 ///
 /// Takes the `(git url, tag)` straight from the lockfile when it already
-/// records this exact version — so a locked build never touches the registry
-/// index. Otherwise the index is consulted, then the release is fetched
-/// through the ordinary git machinery and the checked-out package's own
-/// declared version is validated against the request.
+/// records this exact version *from the currently configured registry* — so
+/// a locked build never touches the registry index. Otherwise the index is
+/// consulted, then the release is fetched through the ordinary git machinery
+/// and the checked-out package's own declared version is validated against
+/// the request.
 fn resolve_registry_dep(
     ctx: &mut DiscoveryContext<'_>,
     dep_name: &str,
@@ -304,18 +305,30 @@ fn resolve_registry_dep(
     parent_name: &str,
 ) -> Result<Utf8PathBuf> {
     let locked = ctx.lockfile.get(dep_name);
+    let current_registry = ctx.registry_location.to_string();
 
-    // Fast path: the lockfile already pins this exact version, so we can go
-    // straight to the git checkout without reading (or fetching) the index.
+    // Fast path: the lockfile already pins this exact version *from this
+    // registry*, so we can go straight to the git checkout without reading
+    // (or fetching) the index.
+    //
+    // The registry comparison matters as much as the version one (BT-2993):
+    // without it, a lock entry produced by a since-abandoned registry (env
+    // var unset, `[registry] url` edited, or a mirror swapped in) would keep
+    // satisfying every build from the old registry's git URL forever — the
+    // new registry would never be consulted.
     //
     // The lock entry is forwarded to `resolve_git_dep` *only* on that hit.
     // On a miss the entry is deliberately dropped: it pins the previously
     // resolved SHA, and `resolve_git_dep` reuses an existing checkout whose
     // HEAD matches that SHA without looking at the reference we pass. Keeping
-    // it across a version bump would leave the old version checked out while
-    // we believe we fetched the new tag.
+    // it across a version or registry change would leave the old checkout in
+    // place while we believe we fetched the new one.
     let (url, reference, lock_entry) = match locked {
-        Some(entry) if entry.registry_version.as_deref() == Some(version) => {
+        Some(entry)
+            if entry.registry_version.as_ref().is_some_and(|rv| {
+                rv.version == version && rv.registry.as_deref() == Some(current_registry.as_str())
+            }) =>
+        {
             debug!(dep = %dep_name, version, "Registry dependency satisfied from lockfile");
             (entry.url.clone(), entry.reference.clone(), locked)
         }
@@ -353,7 +366,10 @@ fn resolve_registry_dep(
         url: resolved.url,
         reference: resolved.reference,
         resolved_sha: resolved.resolved_sha,
-        registry_version: Some(version.to_string()),
+        registry_version: Some(RegistryVersion {
+            version: version.to_string(),
+            registry: Some(current_registry),
+        }),
     });
 
     Ok(checkout_root)
@@ -1030,6 +1046,41 @@ pkg_b = {{ path = "{b_str}" }}"#
         (dir, url, sha)
     }
 
+    /// Like [`create_git_dep_repo`], but with an extra marker source file so
+    /// the commit is guaranteed to differ from another repo built with the
+    /// same package name/version (which, created back-to-back, could
+    /// otherwise land on the same commit SHA).
+    fn create_marked_git_dep_repo(
+        pkg_name: &str,
+        version: &str,
+        marker: &str,
+    ) -> (TempDir, String, String) {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path();
+
+        run_git_cmd(path, &["init"]);
+        run_git_cmd(path, &["config", "user.email", "test@test.com"]);
+        run_git_cmd(path, &["config", "user.name", "Test"]);
+        run_git_cmd(path, &["config", "commit.gpgsign", "false"]);
+
+        write_manifest(path, pkg_name, version, "");
+        // A plain non-source marker file — anything under `src/` would be
+        // picked up and compiled as Beamtalk source.
+        fs::write(path.join("MARKER"), marker).unwrap();
+
+        run_git_cmd(path, &["add", "."]);
+        run_git_cmd(path, &["commit", "-m", "initial"]);
+        run_git_cmd(path, &["tag", "-m", "v1.0.0", "v1.0.0"]);
+
+        let sha = get_git_sha(path);
+        let mut path_str = path.display().to_string().replace('\\', "/");
+        if !path_str.starts_with('/') {
+            path_str.insert(0, '/');
+        }
+        let url = format!("file://{path_str}");
+        (dir, url, sha)
+    }
+
     fn run_git_cmd(dir: &std::path::Path, args: &[&str]) {
         let output = Command::new("git")
             .args(args)
@@ -1268,10 +1319,13 @@ middle = {{ path = "{middle_str}" }}"#
 
         resolve_dependency_graph(&root_path, &beamtalk_core::CompilerOptions::default()).unwrap();
 
-        // Reading the lockfile back preserves the registry version.
+        // Reading the lockfile back preserves the registry version and which
+        // registry produced it.
         let lock = Lockfile::read(&root_path).unwrap().unwrap();
         let entry = lock.get("my_pkg").unwrap();
-        assert_eq!(entry.registry_version.as_deref(), Some("1.0.0"));
+        let rv = entry.registry_version.as_ref().unwrap();
+        assert_eq!(rv.version, "1.0.0");
+        assert_eq!(rv.registry.as_deref(), Some(index_root.as_str()));
         assert_eq!(entry.reference, GitReference::Tag("v1.0.0".to_string()));
 
         // And re-serializing is stable.
@@ -1384,7 +1438,11 @@ middle = {{ path = "{middle_str}" }}"#
 
         let lock = Lockfile::read(&root_path).unwrap().unwrap();
         assert_eq!(
-            lock.get("my_pkg").unwrap().registry_version.as_deref(),
+            lock.get("my_pkg")
+                .unwrap()
+                .registry_version
+                .as_ref()
+                .map(|rv| rv.version.as_str()),
             Some("2.0.0")
         );
         assert_eq!(
@@ -1521,5 +1579,80 @@ middle = {{ path = "{middle_str}" }}"#
             msg.contains("Packages in the registry: my_pkg"),
             "should list what the index does have: {msg}"
         );
+    }
+
+    /// Switching `[registry] url` to a registry serving a different git URL
+    /// for the *same* version must re-resolve through the new registry,
+    /// rather than treating the old registry's lock entry as still valid
+    /// (BT-2993).
+    ///
+    /// Regression: `resolve_registry_dep`'s lock-hit fast path only compared
+    /// `registry_version`, never which registry produced it — so a lockfile
+    /// generated against one registry silently kept building from that
+    /// registry's git URL even after the configured registry changed.
+    #[test]
+    fn test_registry_switch_forces_reresolution() {
+        // Distinct marker content, not just distinct directories: two repos
+        // created back-to-back with byte-identical trees, authors, and commit
+        // messages can hash to the *same* commit SHA when created within the
+        // same timestamp granularity, which would make this test pass without
+        // actually proving anything.
+        let (_git_dir_a, url_a, sha_a) = create_git_dep_repo("my_pkg", "1.0.0", "");
+        let (_git_dir_b, url_b, sha_b) = create_marked_git_dep_repo("my_pkg", "1.0.0", "marker-b");
+        assert_ne!(url_a, url_b, "the two repos must be distinct");
+        assert_ne!(sha_a, sha_b, "the two repos must have distinct commits");
+
+        let (_index_dir_a, index_root_a) = create_registry_index(
+            "my_pkg",
+            &format!("[[versions]]\nversion = \"1.0.0\"\ngit = \"{url_a}\"\n"),
+        );
+        let (_index_dir_b, index_root_b) = create_registry_index(
+            "my_pkg",
+            &format!("[[versions]]\nversion = \"1.0.0\"\ngit = \"{url_b}\"\n"),
+        );
+
+        let root_dir = TempDir::new().unwrap();
+        let root = root_dir.path().join("root");
+        write_registry_project(&root, &index_root_a, "my_pkg", "1.0.0");
+        let root_path = Utf8PathBuf::from_path_buf(root.clone()).unwrap();
+        let options = beamtalk_core::CompilerOptions::default();
+
+        resolve_dependency_graph(&root_path, &options).unwrap();
+        let lock = Lockfile::read(&root_path).unwrap().unwrap();
+        let entry = lock.get("my_pkg").unwrap();
+        assert_eq!(entry.url, url_a);
+        assert_eq!(entry.resolved_sha, sha_a);
+        assert_eq!(
+            entry.registry_version.as_ref().unwrap().registry.as_deref(),
+            Some(index_root_a.as_str())
+        );
+
+        // Point the project at registry B — same requested version, different
+        // registry, different git URL for that version.
+        write_registry_project(&root, &index_root_b, "my_pkg", "1.0.0");
+        resolve_dependency_graph(&root_path, &options)
+            .expect("switching registries should re-resolve cleanly");
+
+        let lock = Lockfile::read(&root_path).unwrap().unwrap();
+        let entry = lock.get("my_pkg").unwrap();
+        assert_eq!(
+            entry.url, url_b,
+            "the new registry's git URL must be fetched, not the old lock's"
+        );
+        assert_eq!(
+            entry.resolved_sha, sha_b,
+            "the checkout must come from the new registry's repo"
+        );
+        assert_eq!(
+            entry.registry_version.as_ref().unwrap().registry.as_deref(),
+            Some(index_root_b.as_str())
+        );
+
+        // The on-disk checkout was actually refetched from repo B, not just
+        // the lockfile bookkeeping.
+        let checkout_manifest = crate::commands::build_layout::BuildLayout::new(&root_path)
+            .dep_checkout_dir("my_pkg")
+            .join("beamtalk.toml");
+        assert!(fs::read_to_string(&checkout_manifest).is_ok());
     }
 }
