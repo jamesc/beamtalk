@@ -366,4 +366,91 @@ defmodule BtAttach.WorkspaceTest do
       end
     end
   end
+
+  describe "attach_sname/2 — self node-name seeding (ADR 0097 Implementation §1a)" do
+    test "with no suffix, falls back to a unique-integer name (today's behaviour)" do
+      name = Workspace.attach_sname(nil, "999")
+      assert Atom.to_string(name) =~ ~r/^bt_attach_\d+@localhost$/
+    end
+
+    test "an empty-string suffix is treated the same as unset" do
+      name = Workspace.attach_sname("", "999")
+      assert Atom.to_string(name) =~ ~r/^bt_attach_\d+@localhost$/
+    end
+
+    test "two unset-suffix calls never collide (System.unique_integer/1)" do
+      refute Workspace.attach_sname(nil, "1") == Workspace.attach_sname(nil, "1")
+    end
+
+    test "a workspace-id suffix is combined with the given OS-pid entropy" do
+      assert Workspace.attach_sname("ws-42", "1234") == :"bt_attach_ws-42_1234@localhost"
+    end
+
+    test "the same suffix with different os_pid values never collides (per-process entropy)" do
+      # This is the exact bug ADR 0097 calls out: an id-only seed would collide
+      # deterministically when two fronts attach to the same workspace.
+      refute Workspace.attach_sname("ws-42", "1") == Workspace.attach_sname("ws-42", "2")
+    end
+  end
+
+  describe "epmd_reachable?/2 — local epmd probe (ADR 0097 Implementation §1c)" do
+    test "true when something is listening on the given host/port" do
+      {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
+      {:ok, port} = :inet.port(listener)
+
+      on_exit(fn -> :gen_tcp.close(listener) end)
+
+      assert Workspace.epmd_reachable?(~c"127.0.0.1", port) == true
+    end
+
+    test "false when nothing is listening on the given host/port" do
+      # Bind port 0 to get a free port, then close it immediately so the OS
+      # frees it back up but nothing is listening there for our probe.
+      {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
+      {:ok, port} = :inet.port(listener)
+      :ok = :gen_tcp.close(listener)
+
+      assert Workspace.epmd_reachable?(~c"127.0.0.1", port) == false
+    end
+  end
+
+  describe "classify_unreachable/2 — readiness failure taxonomy (ADR 0097 Implementation §1c)" do
+    test "epmd_absent when the names query itself failed" do
+      assert Workspace.classify_unreachable(:beamtalk_workspace_spike@localhost, {:error, :x}) ==
+               :epmd_absent
+    end
+
+    test "bad_cookie when epmd still knows about the target node" do
+      names = {:ok, [{~c"beamtalk_workspace_spike", 45678}]}
+
+      assert Workspace.classify_unreachable(:beamtalk_workspace_spike@localhost, names) ==
+               :bad_cookie
+    end
+
+    test "dead_workspace when epmd has no record of the target node" do
+      names = {:ok, [{~c"some_other_node", 45678}]}
+
+      assert Workspace.classify_unreachable(:beamtalk_workspace_spike@localhost, names) ==
+               :dead_workspace
+    end
+
+    test "dead_workspace when epmd's names list is empty" do
+      assert Workspace.classify_unreachable(:beamtalk_workspace_spike@localhost, {:ok, []}) ==
+               :dead_workspace
+    end
+  end
+
+  describe "readiness/0 — full connectivity check against a real workspace (ADR 0097 §1c)" do
+    # No stub here: readiness/0 forces real distribution (`ensure_distributed/0`
+    # + `Node.connect/1`) plus a real RPC, so unlike the pure-logic describes
+    # above this needs an actual workspace node and its cookie — the same
+    # `:workspace`-gated CI job as `workspace_live_test.exs`. Excluded from the
+    # default `mix test` run (see test_helper.exs).
+    @describetag :workspace
+
+    test "reports :ok with a version report when the workspace is reachable" do
+      assert {:ok, report} = Workspace.readiness()
+      assert %{runtime_version: _, protocol_version: _, otp_release: _, erts_version: _} = report
+    end
+  end
 end
