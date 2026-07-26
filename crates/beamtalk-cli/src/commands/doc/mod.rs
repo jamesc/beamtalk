@@ -313,6 +313,25 @@ mod tests {
     }
 
     #[test]
+    fn test_find_source_files_recurses_into_subdirectories() {
+        // Matches `beamtalk build`, so every class that compiles also gets
+        // documented — whether it lives in `src/` or `src/collections/`.
+        let temp = TempDir::new().unwrap();
+        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        fs::create_dir_all(dir.join("collections/ordered")).unwrap();
+        fs::write(dir.join("Object.bt"), "// stub").unwrap();
+        fs::write(dir.join("collections/Array.bt"), "// stub").unwrap();
+        fs::write(dir.join("collections/ordered/List.bt"), "// stub").unwrap();
+
+        let files = find_source_files(&dir).unwrap();
+        assert_eq!(
+            files.len(),
+            3,
+            "Nested classes must be documented: {files:?}"
+        );
+    }
+
+    #[test]
     fn test_parse_class_info() {
         let temp = TempDir::new().unwrap();
         let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();

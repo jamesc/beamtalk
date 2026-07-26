@@ -204,15 +204,28 @@ pub fn build_binding_table<'a>(
 /// Parsing errors are silently ignored — files that fail to parse simply
 /// contribute no bindings. This is safe because the binding table is used
 /// as an optimization hint, not a correctness requirement.
+/// Subdirectories are walked too, so grouping `stdlib/src/` into
+/// `collections/`, `actors/`, … does not silently drop `@primitive` bindings
+/// for the classes that move.
 pub fn load_from_directory(lib_dir: &std::path::Path) -> PrimitiveBindingTable {
     let mut table = PrimitiveBindingTable::new();
+    load_into_table(lib_dir, &mut table);
+    table
+}
 
-    let Ok(entries) = std::fs::read_dir(lib_dir) else {
-        return table;
+fn load_into_table(dir: &std::path::Path, table: &mut PrimitiveBindingTable) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
     };
 
     for entry in entries.flatten() {
         let path = entry.path();
+
+        if path.is_dir() {
+            load_into_table(&path, table);
+            continue;
+        }
+
         if path.extension().and_then(|e| e.to_str()) != Some("bt") {
             continue;
         }
@@ -225,8 +238,6 @@ pub fn load_from_directory(lib_dir: &std::path::Path) -> PrimitiveBindingTable {
         let (module, _diagnostics) = crate::source_analysis::parse(tokens);
         table.add_from_module(&module);
     }
-
-    table
 }
 
 #[cfg(test)]
@@ -588,6 +599,44 @@ mod tests {
             Some(&PrimitiveBinding::SelectorBased {
                 selector: "exists:".to_string(),
             })
+        );
+    }
+
+    #[test]
+    fn test_load_from_directory_recurses_into_subdirectories() {
+        // stdlib/src/ may be grouped into subdirectories; `@primitive`
+        // bindings for the classes that move must still be picked up.
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        std::fs::create_dir_all(root.join("numeric")).unwrap();
+        std::fs::create_dir_all(root.join("collections/ordered")).unwrap();
+
+        std::fs::write(
+            root.join("numeric/Integer.bt"),
+            "Value subclass: Integer\n  + other => @primitive\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("collections/ordered/List.bt"),
+            "Object subclass: List\n  size => @primitive\n",
+        )
+        .unwrap();
+
+        let table = load_from_directory(root);
+
+        assert_eq!(
+            table.lookup("Integer", "+"),
+            Some(&PrimitiveBinding::SelectorBased {
+                selector: "+".to_string(),
+            }),
+            "One level deep must be found"
+        );
+        assert_eq!(
+            table.lookup("List", "size"),
+            Some(&PrimitiveBinding::SelectorBased {
+                selector: "size".to_string(),
+            }),
+            "Two levels deep must be found"
         );
     }
 

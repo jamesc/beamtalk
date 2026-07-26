@@ -11,8 +11,6 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use tracing::{debug, warn};
 
-use crate::commands::util;
-
 /// Information about a documented class.
 pub struct ClassInfo {
     /// The class name (e.g., `Counter`).
@@ -44,9 +42,13 @@ pub struct MethodInfo {
     pub is_sealed: bool,
 }
 
-/// Find all `.bt` source files in a path.
+/// Find all `.bt` source files in a path, recursing into subdirectories.
+///
+/// Matches `build::find_source_files`, so `beamtalk doc` documents every class
+/// that `beamtalk build` compiles — including classes in `src/` subdirectories
+/// (user packages) or `stdlib/src/` subdirectories.
 pub(super) fn find_source_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
-    util::find_files(path, &["bt"])
+    beamtalk_core::file_walker::FileWalker::source_files().walk(path)
 }
 
 /// Parse a `.bt` source file and extract class documentation info.

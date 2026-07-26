@@ -17,7 +17,6 @@ use crate::beam_compiler::{
 };
 use crate::commands::app_file;
 use crate::commands::build::build_alias_metadata;
-use crate::commands::util;
 use beamtalk_core::semantic_analysis::alias_registry::AliasRegistry;
 use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
 use camino::{Utf8Path, Utf8PathBuf};
@@ -56,6 +55,8 @@ pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
         println!("No .bt source files found in '{lib_dir}'");
         return Ok(());
     }
+
+    check_duplicate_stems(&source_files)?;
 
     // Incremental build: skip if all outputs are newer than all inputs
     if is_stdlib_up_to_date(&ebin_dir, &source_files) {
@@ -369,9 +370,37 @@ fn oldest_mtime_in_dir(dir: &Utf8Path, ext: &str) -> Option<SystemTime> {
     oldest
 }
 
-/// Find all `.bt` files in the stdlib source directory.
+/// Find all `.bt` files in the stdlib source directory, recursively.
+///
+/// Recursive so `stdlib/src/` can be grouped into subdirectories
+/// (`collections/`, `actors/`, …) without silently dropping classes from the
+/// build. Subdirectories are purely editorial — they do *not* affect module
+/// names; see [`module_name_from_path`].
 fn find_stdlib_files(lib_dir: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
-    util::find_files(lib_dir, &["bt"])
+    beamtalk_core::file_walker::FileWalker::source_files().walk(lib_dir)
+}
+
+/// Reject two stdlib sources whose file stems collide.
+///
+/// Module names come from the file stem alone, so `collections/Array.bt` and
+/// `legacy/Array.bt` would both compile to `bt@stdlib@array` — the second
+/// silently clobbering the first in `ebin/`. Flat layouts got this for free
+/// from the filesystem; nested ones have to check.
+fn check_duplicate_stems(source_files: &[Utf8PathBuf]) -> Result<()> {
+    let mut seen: std::collections::HashMap<&str, &Utf8Path> = std::collections::HashMap::new();
+    for file in source_files {
+        let Some(stem) = file.file_stem() else {
+            continue;
+        };
+        if let Some(first) = seen.insert(stem, file.as_path()) {
+            miette::bail!(
+                "Duplicate stdlib class file name '{stem}.bt': '{first}' and '{file}' would both \
+                 compile to the same module. Stdlib module names come from the file stem only, \
+                 so class file names must be unique across all subdirectories."
+            );
+        }
+    }
+    Ok(())
 }
 
 /// Extract the module name from a `.bt` file path.
@@ -379,6 +408,17 @@ fn find_stdlib_files(lib_dir: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
 /// ADR 0016: All stdlib classes use `bt@stdlib@{snake_case}` prefix.
 /// The `@` separator is legal in unquoted Erlang atoms and follows
 /// the Gleam convention (`gleam@list`, `gleam@string`).
+///
+/// Only the file *stem* is used — a subdirectory under `stdlib/src/` never
+/// becomes part of the module name. This deliberately diverges from user
+/// packages, where `src/util/math.bt` becomes `util@math`
+/// (`build::compute_relative_module`). Stdlib keeps the flat mapping because
+/// it is a closed-form function of the class name: `compiled_module_name`,
+/// `PrimitiveBindingTable::runtime_module_for_class` and
+/// `beamtalk_primitive:module_for_value/1` all derive `bt@stdlib@{snake}`
+/// with no path and no lookup table available. Folding directories into the
+/// atom would couple that hot dispatch path to a purely cosmetic layout
+/// choice.
 fn module_name_from_path(path: &Utf8Path) -> Result<String> {
     let stem = path
         .file_stem()
@@ -1046,12 +1086,31 @@ fn format_stdlib_class_entry(m: &ClassMeta) -> String {
 }
 
 /// Format stdlib class metadata entries joined with the given separator.
+/// Sorted by class name so the generated `.app`/`.app.src` content depends
+/// only on *which* classes exist, never on the order the source tree happened
+/// to be walked in. Without this, moving a class into a `stdlib/src/`
+/// subdirectory reshuffles a checked-in generated file for no semantic reason.
 fn format_stdlib_classes_list(class_metadata: &[ClassMeta], separator: &str) -> String {
-    class_metadata
-        .iter()
+    let mut sorted: Vec<&ClassMeta> = class_metadata.iter().collect();
+    sorted.sort_by(|a, b| a.class_name.cmp(&b.class_name));
+    sorted
+        .into_iter()
         .map(format_stdlib_class_entry)
         .collect::<Vec<_>>()
         .join(separator)
+}
+
+/// Format a sorted, quoted Erlang atom list (`'a', 'b', …`).
+///
+/// Same layout-independence rationale as [`format_stdlib_classes_list`].
+fn format_sorted_atom_list(names: &[String]) -> String {
+    let mut sorted = names.to_vec();
+    sorted.sort();
+    sorted
+        .iter()
+        .map(|m| format!("'{m}'"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Generate the `beamtalk_stdlib.app` file in the ebin directory.
@@ -1080,21 +1139,13 @@ fn generate_app_file(
         .map(|f| module_name_from_path(f))
         .collect::<Result<_>>()?;
 
-    let modules_list = module_names
-        .iter()
-        .map(|m| format!("'{m}'"))
-        .collect::<Vec<_>>()
-        .join(", ");
+    let modules_list = format_sorted_atom_list(&module_names);
 
     // ADR 0070 Phase 4: Generate extended class hierarchy entries for env
     let classes_list = format_stdlib_classes_list(class_metadata, ",\n                    ");
 
     // BT-1766: Protocol-only modules need to be loaded separately during stdlib init
-    let protocol_modules_list = protocol_modules
-        .iter()
-        .map(|m| format!("'{m}'"))
-        .collect::<Vec<_>>()
-        .join(", ");
+    let protocol_modules_list = format_sorted_atom_list(protocol_modules);
 
     // BT-2938: same `{type_aliases, [...]}` entry the ordinary `beamtalk
     // build` pipeline emits (`app_file::format_type_aliases_entry`) — empty
@@ -1140,11 +1191,7 @@ fn generate_app_src_file(
     let classes_list = format_stdlib_classes_list(class_metadata, ",\n            ");
 
     // BT-1766: Protocol-only modules need to be loaded separately during stdlib init
-    let protocol_modules_list = protocol_modules
-        .iter()
-        .map(|m| format!("'{m}'"))
-        .collect::<Vec<_>>()
-        .join(", ");
+    let protocol_modules_list = format_sorted_atom_list(protocol_modules);
 
     // BT-2938: see `generate_app_file`'s doc.
     let type_aliases_entry = app_file::format_type_aliases_entry(alias_metadata);
@@ -2462,6 +2509,70 @@ mod tests {
         assert!(
             code.contains("is_internal: true"),
             "Should emit is_internal: true for an internal method. Got: {code}"
+        );
+    }
+
+    // --- stdlib/src/ subdirectory support ---
+
+    #[test]
+    fn find_stdlib_files_recurses_into_subdirectories() {
+        let (_temp, dir) = temp_utf8_dir();
+        fs::create_dir_all(dir.join("collections")).unwrap();
+        fs::create_dir_all(dir.join("actors/supervision")).unwrap();
+        fs::write(dir.join("Object.bt"), "Object subclass: Object\n").unwrap();
+        fs::write(dir.join("collections/Array.bt"), "Object subclass: Array\n").unwrap();
+        fs::write(
+            dir.join("actors/supervision/Supervisor.bt"),
+            "Object subclass: Supervisor\n",
+        )
+        .unwrap();
+
+        let files = find_stdlib_files(&dir).unwrap();
+
+        let mut stems: Vec<&str> = files.iter().filter_map(|f| f.file_stem()).collect();
+        stems.sort_unstable();
+        assert_eq!(
+            stems,
+            vec!["Array", "Object", "Supervisor"],
+            "Nested classes must be found at any depth. Got: {files:?}"
+        );
+    }
+
+    #[test]
+    fn module_name_ignores_subdirectory() {
+        // Subdirectories are editorial only — `bt@stdlib@array` regardless of
+        // where the file sits. Deliberately unlike user packages, where
+        // `src/util/math.bt` becomes `util@math`.
+        let flat = module_name_from_path(Utf8Path::new("stdlib/src/Array.bt")).unwrap();
+        let nested =
+            module_name_from_path(Utf8Path::new("stdlib/src/collections/Array.bt")).unwrap();
+
+        assert_eq!(flat, "bt@stdlib@array");
+        assert_eq!(nested, flat, "Subdirectory must not change the module name");
+    }
+
+    #[test]
+    fn check_duplicate_stems_accepts_unique_names_across_subdirectories() {
+        let files = vec![
+            Utf8PathBuf::from("stdlib/src/Object.bt"),
+            Utf8PathBuf::from("stdlib/src/collections/Array.bt"),
+            Utf8PathBuf::from("stdlib/src/numeric/Integer.bt"),
+        ];
+        assert!(check_duplicate_stems(&files).is_ok());
+    }
+
+    #[test]
+    fn check_duplicate_stems_rejects_colliding_names() {
+        // Both would compile to `bt@stdlib@array`, silently clobbering in ebin/.
+        let files = vec![
+            Utf8PathBuf::from("stdlib/src/collections/Array.bt"),
+            Utf8PathBuf::from("stdlib/src/legacy/Array.bt"),
+        ];
+
+        let err = check_duplicate_stems(&files).unwrap_err().to_string();
+        assert!(
+            err.contains("Array.bt") && err.contains("legacy/Array.bt"),
+            "Error must name both colliding files. Got: {err}"
         );
     }
 }

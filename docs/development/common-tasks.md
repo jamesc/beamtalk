@@ -26,6 +26,41 @@ Step-by-step guides for common tasks in the Beamtalk codebase.
    - Use `@primitive intrinsicName` pragmas for methods backed by runtime dispatch (see [ADR 0007](../ADR/0007-compilable-stdlib-with-primitive-injection.md))
    - Pure Beamtalk methods need no pragma — they compile directly
    - Provide usage examples in comments
+   - Subdirectories under `stdlib/src/` are allowed and purely editorial —
+     see [Stdlib source layout](#stdlib-source-layout) below
+
+### Stdlib source layout
+
+`stdlib/src/` may be grouped into subdirectories (`collections/`, `actors/`, …).
+The build walks it recursively, so a nested class compiles, documents, installs
+and loads exactly like a top-level one — a flat and a nested tree produce
+byte-identical `beamtalk_stdlib.app` output.
+
+**Subdirectories never affect module names.** `stdlib/src/collections/Array.bt`
+compiles to `bt@stdlib@array`, not `bt@stdlib@collections@array`. This
+deliberately diverges from user packages, where `src/util/math.bt` becomes
+`util@math`.
+
+The reason is that stdlib's class→module mapping is a *closed-form function of
+the class name*, with no path and no lookup table involved:
+
+- `value_type_codegen::compiled_module_name` (packages use a two-pass
+  `class_module_index`; stdlib falls through to `bt@stdlib@{snake}`)
+- `PrimitiveBindingTable::runtime_module_for_class`
+- `beamtalk_primitive:module_for_value/1` — dispatches on `is_integer(X)`, so
+  no class name is even available to look up
+
+Folding directories into the atom would couple that hot dispatch path to a
+cosmetic layout choice, and turn every future file move into an ABI change.
+
+Two consequences:
+
+- **Class file names must be unique across all subdirectories.**
+  `build-stdlib` fails with a duplicate-stem error rather than silently
+  clobbering a module in `ebin/`.
+- Moving a class between subdirectories is free at build time, but does
+  invalidate any `stdlib/src/...` paths written in docs and comments. Update
+  those in the same change.
 
 2. **Implement runtime support** (for primitive methods only)
    - Add dispatch clause in the appropriate runtime module (e.g., `runtime/apps/beamtalk_runtime/src/beamtalk_primitive.erl`)

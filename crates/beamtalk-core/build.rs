@@ -43,17 +43,7 @@ fn main() {
 
 fn generate_stdlib_types(lib_dir: &Path) {
     let mut class_names: Vec<String> = Vec::new();
-
-    for entry in fs::read_dir(lib_dir).expect("Failed to read lib/ directory") {
-        let entry = entry.expect("Failed to read directory entry");
-        let path = entry.path();
-        if path.extension().is_some_and(|ext| ext == "bt") {
-            if let Some(stem) = path.file_stem() {
-                class_names.push(stem.to_string_lossy().to_string());
-            }
-        }
-    }
-
+    collect_stdlib_class_names(lib_dir, &mut class_names);
     class_names.sort();
 
     let out_dir = env::var("OUT_DIR").expect("OUT_DIR not set");
@@ -71,4 +61,24 @@ fn generate_stdlib_types(lib_dir: &Path) {
     );
 
     fs::write(dest_path, code).expect("Failed to write stdlib_types.rs");
+}
+
+/// Collect stdlib class names from `dir`, recursing into subdirectories.
+///
+/// `stdlib/src/` may be grouped into subdirectories (`collections/`, …).
+/// Those are editorial only — the class name is the file stem regardless of
+/// depth, matching `build_stdlib::module_name_from_path`. Recursing keeps
+/// `is_known_stdlib_type()` from silently missing nested classes.
+fn collect_stdlib_class_names(dir: &Path, out: &mut Vec<String>) {
+    let entries = fs::read_dir(dir).expect("Failed to read stdlib source directory");
+    for entry in entries {
+        let path = entry.expect("Failed to read directory entry").path();
+        if path.is_dir() {
+            collect_stdlib_class_names(&path, out);
+        } else if path.extension().is_some_and(|ext| ext == "bt") {
+            if let Some(stem) = path.file_stem() {
+                out.push(stem.to_string_lossy().to_string());
+            }
+        }
+    }
 }
