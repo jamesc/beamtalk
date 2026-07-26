@@ -6,7 +6,7 @@
 /// Provides one-shot delays, repeating intervals, and process sleep.
 /// Timer instances are cancellable value objects wrapping a spawned process.
 ///
-/// Delays and intervals are Integer milliseconds or a Duration (BT-2969).
+/// Delays and intervals are Integer milliseconds or a Duration.
 ///
 /// ## Examples
 /// ```beamtalk

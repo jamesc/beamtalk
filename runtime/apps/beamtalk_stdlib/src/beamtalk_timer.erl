@@ -56,7 +56,7 @@ to the canonical `'after:do:'/2` implementation.
 -doc """
 Evaluate `Block` once after the given delay. Returns a Timer.
 
-The delay is Integer milliseconds or a Duration (BT-2969).
+The delay is Integer milliseconds or a Duration.
 """.
 -spec 'after:do:'(integer() | beamtalk_duration:t(), Do :: function()) -> t().
 'after:do:'(#{'$beamtalk_class' := 'Duration'} = D, Block) ->
@@ -86,7 +86,7 @@ The delay is Integer milliseconds or a Duration (BT-2969).
 -doc """
 Evaluate `Block` at the given repeat interval. Returns a Timer.
 
-The interval is Integer milliseconds or a Duration (BT-2969).
+The interval is Integer milliseconds or a Duration.
 """.
 -spec 'every:do:'(integer() | beamtalk_duration:t(), Do :: function()) -> t().
 'every:do:'(#{'$beamtalk_class' := 'Duration'} = D, Block) ->
@@ -106,7 +106,7 @@ The interval is Integer milliseconds or a Duration (BT-2969).
 -doc """
 Block the current process for the given delay.
 
-The delay is Integer milliseconds or a Duration (BT-2969).
+The delay is Integer milliseconds or a Duration.
 """.
 -spec 'sleep:'(integer() | beamtalk_duration:t()) -> 'nil'.
 'sleep:'(#{'$beamtalk_class' := 'Duration'} = D) ->

@@ -136,7 +136,7 @@ sealed typed Value subclass: DateTime native: beamtalk_datetime
   /// ```
   addDays: days :: Integer -> DateTime => self delegate
 
-  /// Add a Duration, return a new DateTime (BT-2969).
+  /// Add a Duration, return a new DateTime.
   ///
   /// DateTime has second resolution; any sub-second milliseconds in the
   /// Duration are truncated toward zero.
@@ -158,7 +158,7 @@ sealed typed Value subclass: DateTime native: beamtalk_datetime
   /// ```
   diffSeconds: other :: DateTime -> Integer => self delegate
 
-  /// Difference between this and another DateTime as a Duration (BT-2969).
+  /// Difference between this and another DateTime as a Duration.
   ///
   /// Positive when this DateTime is later than `other`. Stays inline FFI
   /// (not `self delegate`, ADR 0101 / BT-2731): an operator selector is not

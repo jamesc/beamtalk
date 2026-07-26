@@ -200,7 +200,7 @@ second(#{second := V}) -> V.
     raise_type_error('addDays:', <<"Argument must be an Integer">>).
 
 -doc """
-Add a Duration, return a new DateTime (BT-2969).
+Add a Duration, return a new DateTime.
 
 DateTime has second resolution; any sub-second milliseconds in the
 Duration are truncated toward zero.
@@ -212,7 +212,7 @@ Duration are truncated toward zero.
     raise_type_error('addDuration:', <<"Argument must be a Duration">>).
 
 -doc """
-Difference between two DateTimes as a Duration (BT-2969).
+Difference between two DateTimes as a Duration.
 
 `A - B` is positive when A is later than B.
 """.

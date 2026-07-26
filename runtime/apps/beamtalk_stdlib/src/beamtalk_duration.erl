@@ -55,7 +55,7 @@ through named shims (`add`, `subtract`, `multiply`, `lt`, `gt`, `lte`,
 -export([lt/2, gt/2, lte/2, gte/2, eql/2, neq/2, sneq/2]).
 
 %% Cross-module helper (beamtalk_timer, beamtalk_datetime)
--export([to_millis/1, is_duration/1]).
+-export([is_duration/1]).
 
 -type t() :: #{'$beamtalk_class' := 'Duration', millis := integer()}.
 -export_type([t/0]).
@@ -345,20 +345,6 @@ sneq(_, _) ->
 %%% ============================================================================
 %%% Cross-module Helpers
 %%% ============================================================================
-
--doc """
-Normalise a timeout value to integer milliseconds.
-
-Accepts an Integer (already milliseconds) or a Duration; anything else
-returns `error`. Not currently called by `beamtalk_timer` or
-`beamtalk_datetime` — both extract `millis` directly via
-`asMilliseconds`/`asSeconds` — but available for future callers that
-need a single normalisation point for `Duration | Integer` timeouts.
-""".
--spec to_millis(term()) -> {ok, integer()} | error.
-to_millis(Ms) when is_integer(Ms) -> {ok, Ms};
-to_millis(#{'$beamtalk_class' := 'Duration', millis := Ms}) -> {ok, Ms};
-to_millis(_) -> error.
 
 -doc "True if the value is a Duration tagged map.".
 -spec is_duration(term()) -> boolean().

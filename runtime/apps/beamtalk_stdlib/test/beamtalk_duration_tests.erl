@@ -284,12 +284,6 @@ shims_test() ->
 %%% Cross-module helpers
 %%% ============================================================================
 
-to_millis_test() ->
-    ?assertEqual({ok, 500}, beamtalk_duration:to_millis(500)),
-    ?assertEqual({ok, 1500}, beamtalk_duration:to_millis(ms(1500))),
-    ?assertEqual(error, beamtalk_duration:to_millis(<<"1500">>)),
-    ?assertEqual(error, beamtalk_duration:to_millis(#{})).
-
 is_duration_test() ->
     ?assertEqual(true, beamtalk_duration:is_duration(ms(1))),
     ?assertEqual(false, beamtalk_duration:is_duration(1)),
