@@ -90,7 +90,7 @@ pub(super) fn escape_core_erlang_string(s: &str) -> String {
 /// embed between `"..."` in generated Erlang source (e.g. `-eval` arguments,
 /// path strings passed to `erlc`, `.app` descriptions).
 ///
-/// This is distinct from [`escape_core_erlang_string`], which is a lighter
+/// This is distinct from `escape_core_erlang_string`, which is a lighter
 /// variant for Core Erlang `.core` output.
 #[must_use]
 pub fn escape_erlang_string(s: &str) -> String {
