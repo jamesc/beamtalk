@@ -261,7 +261,7 @@ Publish a release from your package's own repository — do not edit this reposi
 by hand:
 
     beamtalk version bump minor   # or `beamtalk version X.Y.Z`
-    git commit -am "release 0.3.0"
+    git add beamtalk.toml && git commit -m "release 0.3.0"
     beamtalk publish
 
 `beamtalk publish` tags your repository, pushes the tag, and opens (or updates)
@@ -283,7 +283,7 @@ Publishing a new version of a package you maintain:
 
 ```bash
 beamtalk version bump minor      # or: beamtalk version 0.3.0
-git commit -am "release 0.3.0"
+git add beamtalk.toml && git commit -m "release 0.3.0"
 beamtalk publish
 ```
 
@@ -307,7 +307,7 @@ beamtalk version bump major    # 1.2.3 -> 2.0.0
 beamtalk publish --dry-run     # print what would happen without tagging, pushing, or writing anything
 ```
 
-**If step 3 fails** (stage, commit, or push), the tag from step 2 is already live on `origin`. `beamtalk publish`'s error message names exactly what's left to do — if the *push* failed, `git pull --rebase && git push` from `_build/registry/index/` (a plain `git push` suffices for a transient network error; `git pull --rebase` is needed if another author pushed to the same registry concurrently); if staging or the *commit* failed instead, there is no local commit yet, so `git add . && git commit -m "registry: <name> vX.Y.Z"` there first (substituting your package name and version, e.g. `registry: yaml v0.2.1`), then `git push`. Do **not** re-run `beamtalk publish` or bump the version in either case: the tag already exists, so a retry reports "already published" and suggests bumping, which would silently skip the release you just tagged.
+**If step 3 fails** (stage, commit, or push), the tag from step 2 is already live on `origin`. `beamtalk publish`'s error message names exactly what's left to do — if the *push* failed, `git pull --rebase && git push` from `_build/registry/index/` (a plain `git push` suffices for a transient network error; `git pull --rebase` is needed if another author pushed to the same registry concurrently — if the rebase itself conflicts, run `git rebase --abort` and coordinate with the other publisher); if staging or the *commit* failed instead, there is no local commit yet, so `git add . && git commit -m "registry: <name> vX.Y.Z"` there first (substituting your package name and version, e.g. `registry: yaml v0.2.1`), then `git push`. Do **not** re-run `beamtalk publish` or bump the version in either case: the tag already exists, so a retry reports "already published" and suggests bumping, which would silently skip the release you just tagged.
 
 A registry dependency and the package it names always agree on which registry is authoritative — `beamtalk publish` resolves the target registry through the exact same `BEAMTALK_REGISTRY` → `[registry] url` → default chain that consuming a registry dependency does, using the *library's own* `beamtalk.toml`.
 
