@@ -2,9 +2,13 @@
 
 **Issue:** BT-2984
 **Date:** 2026-07-27
-**Status:** Complete — recommendation: **Tauri, provisionally confirmed** (one
-criterion, (e), needs a hands-on cross-platform follow-up before BT-2985/BT-2986
-lock in a Tauri-specific broker implementation)
+**Status:** Complete — recommendation: **lean Tauri, but the shell decision is
+not actually settled by this spike.** Six of the ADR's seven exit criteria
+turned out to be shell-agnostic (satisfied identically by either alternative),
+which leaves the decision resting entirely on criterion (e) — the one
+criterion this spike could **not** validate hands-on (no display server, no
+Tauri toolchain, no target OSes in this sandbox; see Scope below). This is
+"undecided pending a real (e) test," not a confirmed yes — see Verdict below.
 **Throwaway code:** `spikes/desktop-attach-spike/` (this branch, not merged to
 main — see that directory's README for how to reproduce every result below)
 
@@ -80,6 +84,14 @@ two-fronts-one-workspace) passes cleanly. **This is broker-core work
 (BT-2985), not shell-specific** — a Tauri broker and the no-shell coordinator
 both spawn `bin/server` and both need this exact env var.
 
+Harness caveat: `broker.sh`'s `free_port()` helper (bind port 0, read the
+assigned number, close, hand that number to the front) has a check-then-use
+race — nothing guarantees another process doesn't grab the same port between
+the close and the front's own bind. It didn't bite across this spike's runs,
+but it's a known gap in the throwaway harness, not a property of the front or
+broker design being validated; BT-2985's real port allocation should retry on
+bind failure rather than assume a `free_port()`-style probe is race-free.
+
 ## (b) Crash → respawn of the same workspace — PASS
 
 Killed a live front (`kill -9`); epmd dropped its registration and the port
@@ -117,6 +129,18 @@ follow-up** (see "Follow-ups" below) rather than fixed here — it's shipped,
 reviewed code outside this spike's throwaway scope, and the fix is a one-line
 `:net_adm.names(:localhost)` at the call site.
 
+Caveat on generality: this spike ran on **one** host (WSL2, hostname
+`muckish`), so "PARTIAL PASS" describes what was observed here, not a claim
+that the taxonomy fails on every host — on a machine where the local hostname
+happens to self-resolve cleanly, `:net_adm.names()` would succeed and the
+taxonomy would work as shipped. What *is* general is the code-level defect:
+relying on hostname self-resolution for a query that only ever needs to reach
+the **local** epmd is objectively more fragile than the explicit `:localhost`
+form, independent of whether it happens to bite on any particular tester's
+machine — hostnames that don't loop back cleanly are common enough in
+containers/CI/some mDNS setups that this is worth fixing regardless of
+whether it reproduces on a "normal" dev laptop.
+
 Shell-agnostic: entirely front-side (BT-2983) behavior; a Tauri broker and the
 coordinator would both be equally misled by it today.
 
@@ -130,14 +154,21 @@ coordinator would both be equally misled by it today.
   env hook was needed** — the default `check_origin: true` plus the endpoint's
   own `url:` config (which already derives host/port from `PORT`) pins it
   correctly out of the box, exactly as ADR 0097 predicted but flagged as
-  "must be validated, not assumed."
-- **No-OIDC fail-closed**: spawning with an incomplete OIDC env
-  (`BT_OIDC_ISSUER` set, required keys missing) crashes the release at boot
-  with a clear `RuntimeError` — the app never serves a byte of unauthenticated
-  traffic. Confirms the safety net BT-2983/ADR 0091 designed is real; the
-  broker's job is simply to *check* for OIDC config **before** spawning (to
-  give a friendly error instead of a boot crash), not to re-implement the
-  enforcement.
+  "must be validated, not assumed." Only the exact `localhost:<port>` origin
+  was tried; a real webview may present a slightly different origin (e.g. a
+  `127.0.0.1` navigation, or whatever Tauri's webview reports as its origin
+  for a `localhost` URL) — worth a quick re-check once an actual webview is
+  in the loop (see "What's not settled" below, folds into the (e) follow-up).
+- **Incomplete-OIDC-config fail-closed**: spawning with an *incomplete* OIDC
+  env (`BT_OIDC_ISSUER` set, required keys missing) crashes the release at
+  boot with a clear `RuntimeError` — the app never serves a byte of
+  unauthenticated traffic. This tests the fail-closed safety net for a
+  half-configured OIDC setup, not the "no OIDC config at all" case (that path
+  is just the normal unauthenticated posture, already exercised by every
+  other test in this write-up). Confirms the safety net BT-2983/ADR 0091
+  designed is real; the broker's job is simply to *check* for OIDC config
+  **before** spawning (to give a friendly error instead of a boot crash), not
+  to re-implement the enforcement.
 
 Shell-agnostic: all three are env-vars-plus-front-config; both shells set the
 identical env before invoking `bin/server`.
@@ -192,11 +223,17 @@ below.
 - **Sleep/resume → front reconnects**: rather than guessing, this was
   reproduced directly by connecting a throwaway debug node (using the
   release's own persistent cookie, `dist-liveview/releases/COOKIE`) to a live
-  front and calling `:erlang.disconnect_node/1` on the workspace peer — the
-  same effect an OS sleep/resume has on a dist connection. `Node.list()`
-  confirmed the link was gone; the **very next** `/readiness` call returned
-  `200` again, because `connect/0` is idempotent and re-runs `Node.connect/1`
-  on every call. Self-heal confirmed, no restart needed.
+  front and calling `:erlang.disconnect_node/1` on the workspace peer.
+  `Node.list()` confirmed the link was gone; the **very next** `/readiness`
+  call returned `200` again, because `connect/0` is idempotent and re-runs
+  `Node.connect/1` on every call. Self-heal confirmed for a clean, mutual
+  disconnect. Caveat: `disconnect_node/1` is a proxy for what OS sleep/resume
+  does to a dist connection, not the literal thing — a real suspend can leave
+  a half-open socket (one side thinks it's connected, the other doesn't) that
+  behaves differently than a clean teardown, and `net_ticktime` timeout
+  behavior wasn't exercised. The idempotent-`connect/0` mechanism this relies
+  on should generalize, but "self-heal confirmed" here means confirmed for the
+  clean-disconnect case specifically.
 
 Shell-agnostic: entirely front-side behavior already shipped in BT-2983; both
 shells just poll `/readiness` and react to the transition.
@@ -216,6 +253,17 @@ orphan, not a simulated one), then ran `broker.sh sweep` (the "next broker
 start" step) which detected the still-alive, untracked-by-this-session PID,
 `SIGTERM`'d it (with a `SIGKILL` fallback), and cleared its bookkeeping —
 verified the OS process was actually gone afterward, not just untracked.
+
+**Known gap in the prototyped mechanism, to harden in BT-2985**: `sweep` kills
+whatever PID a pidfile names with no check that it's still the *same* process
+— if the orphan already died and the OS recycled its PID for something else
+before the next sweep runs, a naive PID-file sweep kills an unrelated
+process. This spike's single-orphan, short-lived test window never triggered
+that, so it's a latent correctness gap in the mechanism, not something ruled
+out by "PASS" here. The real broker should additionally record something
+distinguishing (process start time, or verify the target's executable path
+matches `dist-liveview/bin/bt_attach` via `/proc/<pid>/exe` on Linux or the
+platform equivalent) before signaling.
 
 **Bonus finding, relevant to the shell decision**: the no-shell coordinator
 prototype needs this too, and doesn't get it for free. Killing the running
@@ -239,7 +287,16 @@ paid by whichever shell does the spawning.
    redirects the browser to `http://localhost:<port>/`.
 3. Tracks already-attached workspaces in memory and **reuses the existing
    front** on a repeat `/attach/:id` rather than spawning a duplicate — proven
-   live: two calls to `/attach/spike-a` returned the same port both times.
+   live both sequentially (two calls to `/attach/spike-a` returned the same
+   port both times) and concurrently: an initial version used a plain
+   "get, then spawn if absent" check, which an adversarial pass on this spike
+   correctly flagged as racy (two near-simultaneous `/attach/:id` requests,
+   each its own Bandit-spawned process, could both observe "nothing tracked"
+   and both spawn). Fixed with an atomic `Agent.get_and_update/2`
+   claim-or-wait (`Coordinator.State.claim_or_get/1`) and re-verified: two
+   `curl` requests fired in parallel at `/attach/spike-c` resolved to the
+   *same* port, and `ps`/`epmd -names` confirmed only one front process
+   actually started.
 
 Verified live end-to-end: listing shows real `alive`/`dead` status for real
 workspaces; clicking Attach spawns a real front, waits for real readiness, and
@@ -298,14 +355,20 @@ browser-tab/PWA-based alternative. That is exactly the ADR's own framing
 no-shell coordinator's PWA path cannot match"), and this spike's desk research
 does not contradict it.
 
-**Recommendation: Tauri, provisionally confirmed.** "Provisionally" because
-(e) — the sole remaining justification — is also the one criterion this spike
-could not run hands-on (no display, no Tauri toolchain, no target OSes in this
-sandbox). Given five of the other six criteria surfaced real, previously-unknown
-bugs when actually run (the release-boot sname collision, the readiness
-taxonomy collapse), "asserted from documentation" is a materially weaker bar
-than this spike held everything else to, and (e) deserves the same treatment
-before BT-2985/BT-2986 commit to a Tauri-specific broker implementation.
+**Recommendation: lean Tauri, but say plainly that this spike did not settle
+the shell decision.** Restated without the soft-yes framing: every criterion
+this spike could actually *run* turned out not to require Tauri — a
+throwaway Elixir page matched it duty-for-duty, including finding real bugs
+neither implementation was immune to. The entire case for Tauri rests on
+(e), and (e) is the one criterion this spike validated by reading Tauri's own
+documentation and GitHub issues, not by running a webview. Two of the other
+six criteria surfaced real, previously-unknown bugs the moment they were
+actually run (the release-boot sname collision, the readiness taxonomy
+collapse) rather than when merely reasoned about — which is exactly the
+failure mode a desk-research-only pass on (e) is equally exposed to. Treat
+the shell decision as **open, leaning Tauri on documented capability**, not
+closed, until (e) gets the same hands-on treatment before BT-2985/BT-2986
+commit to a Tauri-specific broker implementation.
 
 ## What's not settled — recommended before committing further Tauri work
 

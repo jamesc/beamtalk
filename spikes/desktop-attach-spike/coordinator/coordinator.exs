@@ -29,15 +29,53 @@ Mix.install([
 ])
 
 defmodule Coordinator.State do
-  @moduledoc "Tracks spawned per-workspace fronts so re-clicking Attach reuses a live one instead of leaking a second."
+  @moduledoc """
+  Tracks spawned per-workspace fronts so re-clicking Attach reuses a live one
+  instead of leaking a second. An adversarial review of this spike flagged
+  that a naive "get, then spawn if nil" (no lock between the two steps) lets
+  two near-simultaneous `/attach/:id` requests both observe `nil` and both
+  spawn — Plug/Bandit runs each request in its own process, so there is a
+  real window. `claim_or_get/1` closes it by making the check-and-reserve a
+  single atomic `Agent.get_and_update/2` call: the first caller gets
+  `:claimed` and must spawn; any concurrent caller gets `{:existing,
+  :pending}` and waits on `await/2` instead of racing a second spawn.
+  """
   use Agent
 
   def start_link(_), do: Agent.start_link(fn -> %{} end, name: __MODULE__)
 
+  @doc "Read-only peek for the listing page — not atomic, fine for display purposes only."
   def get(ws_id), do: Agent.get(__MODULE__, &Map.get(&1, ws_id))
+
+  def claim_or_get(ws_id) do
+    Agent.get_and_update(__MODULE__, fn state ->
+      case Map.get(state, ws_id) do
+        nil -> {:claimed, Map.put(state, ws_id, :pending)}
+        entry -> {{:existing, entry}, state}
+      end
+    end)
+  end
 
   def put(ws_id, port, os_pid),
     do: Agent.update(__MODULE__, &Map.put(&1, ws_id, %{port: port, os_pid: os_pid}))
+
+  def drop(ws_id), do: Agent.update(__MODULE__, &Map.delete(&1, ws_id))
+
+  @doc "Poll for a :pending claim (made by a concurrent request) to resolve into a real entry."
+  def await(ws_id, deadline_ms) do
+    case Agent.get(__MODULE__, &Map.get(&1, ws_id)) do
+      %{port: _} = entry ->
+        entry
+
+      _ ->
+        if System.monotonic_time(:millisecond) < deadline_ms do
+          Process.sleep(100)
+          await(ws_id, deadline_ms)
+        else
+          nil
+        end
+    end
+  end
 
   def all, do: Agent.get(__MODULE__, & &1)
 end
@@ -141,15 +179,21 @@ defmodule Coordinator.Router do
       Coordinator.Discovery.list()
       |> Enum.map_join("\n", fn ws ->
         attached = Coordinator.State.get(ws.id)
+        # Workspace ids come from directory names under ~/.beamtalk/workspaces/
+        # — local, CLI-controlled today, but this is still an HTTP response;
+        # escape before interpolating rather than assume they're HTML-safe.
+        safe_id = Plug.HTML.html_escape(ws.id)
+        safe_node = Plug.HTML.html_escape(ws.node)
 
         action =
           cond do
             not ws.alive -> "<span class=\"dead\">workspace not running</span>"
-            attached -> "<a href=\"http://localhost:#{attached.port}/\" target=\"_blank\">Open (already attached, port #{attached.port})</a>"
-            true -> "<a href=\"/attach/#{ws.id}\">Attach</a>"
+            match?(%{port: _}, attached) -> "<a href=\"http://localhost:#{attached.port}/\" target=\"_blank\">Open (already attached, port #{attached.port})</a>"
+            attached == :pending -> "<span class=\"dead\">attaching…</span>"
+            true -> "<a href=\"/attach/#{URI.encode(ws.id)}\">Attach</a>"
           end
 
-        "<tr><td>#{ws.id}</td><td>#{ws.node}</td><td>#{if ws.alive, do: "alive", else: "dead"}</td><td>#{action}</td></tr>"
+        "<tr><td>#{safe_id}</td><td>#{safe_node}</td><td>#{if ws.alive, do: "alive", else: "dead"}</td><td>#{action}</td></tr>"
       end)
 
     body = """
@@ -172,27 +216,67 @@ defmodule Coordinator.Router do
 
   get "/attach/:id" do
     ws_id = conn.path_params["id"]
+    deadline = System.monotonic_time(:millisecond) + 20_000
 
-    {port, _os_pid} =
-      case Coordinator.State.get(ws_id) do
-        %{port: port} -> {port, nil}
-        nil -> Coordinator.Spawner.spawn_front(ws_id)
+    result =
+      case Coordinator.State.claim_or_get(ws_id) do
+        :claimed ->
+          spawn_and_wait(ws_id, deadline)
+
+        {:existing, :pending} ->
+          # A concurrent /attach/:id request already claimed this workspace
+          # and is spawning it — wait on that instead of racing a second
+          # spawn (the double-spawn an adversarial review of this spike
+          # flagged in the original get-then-spawn version).
+          case Coordinator.State.await(ws_id, deadline) do
+            %{port: port} -> {:ok, port}
+            nil -> :timeout
+          end
+
+        {:existing, %{port: port}} ->
+          # Tracked front might have died since the last attach (crash,
+          # `workspace stop`, etc.) — a short readiness re-check before
+          # reusing it, same as broker.sh's own status check.
+          case wait_ready(port, 3_000) do
+            :ok ->
+              {:ok, port}
+
+            :timeout ->
+              Coordinator.State.drop(ws_id)
+              spawn_and_wait(ws_id, deadline)
+          end
       end
 
-    # Two-stage probe (same contract as the broker's wait-ready) before
-    # redirecting the browser — otherwise the user hits a connection-refused
-    # tab while the front is still booting.
-    wait_ready(port, 20_000)
+    case result do
+      {:ok, port} ->
+        conn
+        |> Plug.Conn.put_resp_header("location", "http://localhost:#{port}/")
+        |> Plug.Conn.send_resp(302, "")
 
-    conn
-    |> Plug.Conn.put_resp_header("location", "http://localhost:#{port}/")
-    |> Plug.Conn.send_resp(302, "")
+      :timeout ->
+        # Redirecting anyway (the original version of this handler did) would
+        # hand the browser a connection-refused tab; a real coordinator/broker
+        # UI would show this inline instead of a bare 504.
+        Plug.Conn.send_resp(conn, 504, "front for '#{ws_id}' did not become ready in time")
+    end
   end
 
   match _ do
     Plug.Conn.send_resp(conn, 404, "not found")
   end
 
+  defp spawn_and_wait(ws_id, deadline) do
+    {port, _os_pid} = Coordinator.Spawner.spawn_front(ws_id)
+    remaining = max(deadline - System.monotonic_time(:millisecond), 0)
+
+    case wait_ready(port, remaining) do
+      :ok -> {:ok, port}
+      :timeout -> :timeout
+    end
+  end
+
+  # Two-stage probe (same contract as the broker's wait-ready): HTTP up, then
+  # /readiness for true workspace reachability.
   defp wait_ready(port, timeout_ms) do
     deadline = System.monotonic_time(:millisecond) + timeout_ms
     do_wait_ready(port, deadline)
