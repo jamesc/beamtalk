@@ -211,16 +211,19 @@ io_capture_loop_forwards_chunk_to_subscriber_test() ->
     Self = self(),
     ReplyAs = make_ref(),
     LoopPid = spawn(fun() -> beamtalk_io_capture:io_capture_loop(<<>>, Self) end),
-    LoopPid ! {io_request, Self, ReplyAs, {put_chars, unicode, <<"hello">>}},
-    receive
-        {io_reply, ReplyAs, ok} -> ok
-    after 1000 ->
-        error(timeout_waiting_for_io_reply)
-    end,
-    receive
-        {eval_out, Chunk} ->
-            ?assertEqual(<<"hello">>, Chunk)
-    after 1000 ->
-        error(timeout_waiting_for_eval_out)
-    end,
-    exit(LoopPid, kill).
+    try
+        LoopPid ! {io_request, Self, ReplyAs, {put_chars, unicode, <<"hello">>}},
+        receive
+            {io_reply, ReplyAs, ok} -> ok
+        after 1000 ->
+            error(timeout_waiting_for_io_reply)
+        end,
+        receive
+            {eval_out, Chunk} ->
+                ?assertEqual(<<"hello">>, Chunk)
+        after 1000 ->
+            error(timeout_waiting_for_eval_out)
+        end
+    after
+        exit(LoopPid, kill)
+    end.
