@@ -309,6 +309,8 @@ beamtalk publish --dry-run     # print what would happen without tagging, pushin
 
 **If step 3 fails** (stage, commit, or push), the tag from step 2 is already live on `origin`. `beamtalk publish`'s error message names exactly what's left to do — if the *push* failed, `git pull --rebase && git push` from `_build/registry/index/` (a plain `git push` suffices for a transient network error; `git pull --rebase` is needed if another author pushed to the same registry concurrently — if the rebase itself conflicts, resolve the conflict in `packages/<name>.toml`, then `git add packages/<name>.toml && git rebase --continue && git push`); if staging or the *commit* failed instead, there is no local commit yet, so `git add . && git commit -m "registry: <name> vX.Y.Z"` there first (substituting your package name and version, e.g. `registry: yaml v0.2.1`), then `git push`. Do **not** re-run `beamtalk publish` or bump the version in either case: the tag already exists, so a retry reports "already published" and suggests bumping, which would silently skip the release you just tagged.
 
+**If step 2's tag push itself fails** (before step 3 runs at all), the annotated tag exists locally but not on `origin` — the opposite situation. Here the preflight's "tag absent both locally and on `origin`" check rejects a retry because the *local* tag is in the way. Delete it first with `git tag -d vX.Y.Z`, then re-run `beamtalk publish`.
+
 A registry dependency and the package it names always agree on which registry is authoritative — `beamtalk publish` resolves the target registry through the exact same `BEAMTALK_REGISTRY` → `[registry] url` → default chain that consuming a registry dependency does, using the *library's own* `beamtalk.toml`.
 
 ## Lockfile (`beamtalk.lock`)
