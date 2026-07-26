@@ -33,12 +33,12 @@ DateTime objects are represented as tagged maps:
 %% Instance methods
 -export([year/1, month/1, day/1, hour/1, minute/1, second/1]).
 -export(['asTimestamp'/1, 'asString'/1, 'printString'/1]).
--export(['addSeconds:'/2, 'addDays:'/2, 'diffSeconds:'/2]).
--export(['<'/2, '>'/2, '=<'/2, '>='/2, '=:='/2, '/='/2]).
+-export(['addSeconds:'/2, 'addDays:'/2, 'addDuration:'/2, 'diffSeconds:'/2]).
+-export(['<'/2, '>'/2, '=<'/2, '>='/2, '=:='/2, '/='/2, '-'/2]).
 
 %% FFI shims for (Erlang beamtalk_datetime) dispatch
 -export([year/3, year/6, fromTimestamp/1, fromString/1]).
--export([addSeconds/2, addDays/2, diffSeconds/2]).
+-export([addSeconds/2, addDays/2, addDuration/2, diffSeconds/2, subtract/2]).
 -export([lt/2, gt/2, lte/2, gte/2, eql/2, neq/2, sneq/2]).
 
 -type t() :: #{'$beamtalk_class' := 'DateTime', atom() => term()}.
@@ -199,6 +199,29 @@ second(#{second := V}) -> V.
 'addDays:'(_, _) ->
     raise_type_error('addDays:', <<"Argument must be an Integer">>).
 
+-doc """
+Add a Duration, return a new DateTime (BT-2969).
+
+DateTime has second resolution; any sub-second milliseconds in the
+Duration are truncated toward zero.
+""".
+-spec 'addDuration:'(t(), beamtalk_duration:t()) -> t().
+'addDuration:'(Self, #{'$beamtalk_class' := 'Duration'} = D) ->
+    'addSeconds:'(Self, beamtalk_duration:'asSeconds'(D));
+'addDuration:'(_, _) ->
+    raise_type_error('addDuration:', <<"Argument must be a Duration">>).
+
+-doc """
+Difference between two DateTimes as a Duration (BT-2969).
+
+`A - B` is positive when A is later than B.
+""".
+-spec '-'(t(), t()) -> beamtalk_duration:t().
+'-'(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
+    beamtalk_duration:'seconds:'('diffSeconds:'(Self, Other));
+'-'(_, _) ->
+    raise_type_error('-', <<"Argument must be a DateTime">>).
+
 -doc "Difference in seconds between this and another DateTime.".
 -spec 'diffSeconds:'(t(), t()) -> integer().
 'diffSeconds:'(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
@@ -283,8 +306,16 @@ addSeconds(Self, Secs) -> 'addSeconds:'(Self, Secs).
 -spec addDays(t(), Days :: integer()) -> t().
 addDays(Self, Days) -> 'addDays:'(Self, Days).
 
+%% `addDuration:with:` → strips to `addDuration`, arity 2
+-spec addDuration(t(), beamtalk_duration:t()) -> t().
+addDuration(Self, D) -> 'addDuration:'(Self, D).
+
 %% `diffSeconds:with:` → strips to `diffSeconds`, arity 2
 diffSeconds(Self, Other) -> 'diffSeconds:'(Self, Other).
+
+%% `subtract:with:` → strips to `subtract`, arity 2 (DateTime difference)
+-spec subtract(t(), t()) -> beamtalk_duration:t().
+subtract(Self, Other) -> '-'(Self, Other).
 
 %% `lt:with:` → strips to `lt`, arity 2
 -spec lt(t(), t()) -> boolean().

@@ -232,8 +232,8 @@ Object subclass: Actor
   /// Wrap this actor with a custom message timeout.
   ///
   /// Returns a TimeoutProxy that forwards all messages to this actor using
-  /// the given timeout (in milliseconds, or `#infinity`) for `gen_server:call`.
-  /// The default OTP timeout is 5000ms.
+  /// the given timeout (milliseconds, a Duration, or `#infinity`) for
+  /// `gen_server:call`. The default OTP timeout is 5000ms.
   ///
   /// The proxy is a separate actor process — call `stop` on it when done.
   ///
@@ -242,11 +242,15 @@ Object subclass: Actor
   /// slowDb := db withTimeout: 30000
   /// slowDb query: sql              // forwarded with 30s timeout
   /// slowDb stop                    // stop the proxy when done
+  /// patient := db withTimeout: (Duration seconds: 30)
+  /// patient stop
   /// ```
-  withTimeout: ms :: Timeout -> TimeoutProxy =>
+  withTimeout: ms :: Timeout | Duration -> TimeoutProxy =>
     proxy := TimeoutProxy spawn
     proxy setTarget: self
-    proxy setTimeoutMs: ms
+    (ms isKindOf: Duration) ifTrue: [
+      proxy setTimeoutMs: ms asMilliseconds
+    ] ifFalse: [proxy setTimeoutMs: ms]
     proxy
 
   // === Lifecycle hooks ===
