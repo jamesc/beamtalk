@@ -332,7 +332,8 @@ eql(Self, Other) -> '=:='(Self, Other).
 -spec neq(t(), t()) -> boolean().
 neq(Self, Other) -> '/='(Self, Other).
 
-%% `sneq:with:` → strips to `sneq`, arity 2 (strict inequality)
+%% `sneq:with:` → strips to `sneq`, arity 2 — maps to the `=/=` operator
+%% (Beamtalk's strict inequality; `neq` above is `/=`)
 -spec sneq(t(), t()) -> boolean().
 sneq(#{'$beamtalk_class' := 'Duration', millis := A}, #{
     '$beamtalk_class' := 'Duration', millis := B
@@ -349,8 +350,10 @@ sneq(_, _) ->
 Normalise a timeout value to integer milliseconds.
 
 Accepts an Integer (already milliseconds) or a Duration; anything else
-returns `error`. Used by APIs that accept `Duration | Integer` timeouts
-(e.g. `beamtalk_timer`).
+returns `error`. Not currently called by `beamtalk_timer` or
+`beamtalk_datetime` — both extract `millis` directly via
+`asMilliseconds`/`asSeconds` — but available for future callers that
+need a single normalisation point for `Duration | Integer` timeouts.
 """.
 -spec to_millis(term()) -> {ok, integer()} | error.
 to_millis(Ms) when is_integer(Ms) -> {ok, Ms};

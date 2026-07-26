@@ -77,9 +77,9 @@ The delay is Integer milliseconds or a Duration (BT-2969).
     end),
     make_timer(Pid);
 'after:do:'(Ms, _Block) when is_integer(Ms) ->
-    raise_error('after:do:', <<"Delay must be a non-negative Integer or Duration">>);
+    raise_error('after:do:', <<"Delay must be a non-negative Integer or a non-negative Duration">>);
 'after:do:'(_Ms, Block) when is_function(Block, 0) ->
-    raise_error('after:do:', <<"Delay must be a non-negative Integer or Duration">>);
+    raise_error('after:do:', <<"Delay must be a non-negative Integer or a non-negative Duration">>);
 'after:do:'(_, _) ->
     raise_error('after:do:', <<"Expected an Integer or Duration delay and a Block">>).
 
@@ -95,11 +95,13 @@ The interval is Integer milliseconds or a Duration (BT-2969).
     Pid = spawn_link(fun() -> repeat_loop(Ms, Block) end),
     make_timer(Pid);
 'every:do:'(Ms, _Block) when is_integer(Ms) ->
-    raise_error('every:do:', <<"Interval must be a positive Integer or Duration">>);
+    raise_error('every:do:', <<"Interval must be a positive Integer or a positive Duration">>);
 'every:do:'(_Ms, Block) when is_function(Block, 0) ->
-    raise_error('every:do:', <<"Interval must be a positive Integer or Duration">>);
+    raise_error('every:do:', <<"Interval must be a positive Integer or a positive Duration">>);
 'every:do:'(_, _) ->
-    raise_error('every:do:', <<"Expected a positive Integer or Duration interval and a Block">>).
+    raise_error(
+        'every:do:', <<"Expected a positive Integer or a positive Duration interval and a Block">>
+    ).
 
 -doc """
 Block the current process for the given delay.
@@ -113,7 +115,7 @@ The delay is Integer milliseconds or a Duration (BT-2969).
     timer:sleep(Ms),
     nil;
 'sleep:'(_) ->
-    raise_error('sleep:', <<"Delay must be a non-negative Integer or Duration">>).
+    raise_error('sleep:', <<"Delay must be a non-negative Integer or a non-negative Duration">>).
 
 %%% ============================================================================
 %%% Instance Methods
