@@ -168,6 +168,13 @@ fn resolve_deps_recursive(
                     "Skipping git dependency (not yet implemented)"
                 );
             }
+            DependencySource::Registry { version } => {
+                debug!(
+                    dep = %name,
+                    version = %version,
+                    "Skipping registry dependency (not yet implemented)"
+                );
+            }
         }
     }
     Ok(())

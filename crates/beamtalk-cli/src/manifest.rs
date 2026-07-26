@@ -67,6 +67,10 @@ pub struct Manifest {
     /// The optional `[native]` section containing `dependencies` for hex packages.
     #[serde(default)]
     native: Option<NativeSection>,
+    /// The optional `[registry]` section overriding the package registry the
+    /// project's registry dependencies resolve through.
+    #[serde(default)]
+    registry: Option<RegistryConfig>,
     /// The optional `[diagnostics]` section — per-category severity overrides
     /// (ADR 0100 Rule 3). Stored as raw TOML for lazy parsing.
     ///
@@ -86,9 +90,28 @@ struct NativeSection {
     dependencies: Option<toml::Value>,
 }
 
+/// The `[registry]` section of `beamtalk.toml`.
+///
+/// Overrides which package registry this project's registry dependencies
+/// resolve through. The value may be a git URL (cloned into
+/// `_build/registry/index/`) or a path to a local directory containing a
+/// `packages/` subdirectory (used in place, with no git and no network).
+///
+/// ```toml
+/// [registry]
+/// url = "https://github.com/jamesc/beamtalk-registry"
+/// ```
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RegistryConfig {
+    /// The registry index location — a git URL or a local directory path.
+    pub url: String,
+}
+
 /// A dependency entry as it appears in `beamtalk.toml`.
 ///
-/// Supports two forms:
+/// Supports three forms:
+/// - `name = "1.2.3"` — registry dependency at an exact version
 /// - `name = { path = "..." }` — local path dependency
 /// - `name = { git = "...", tag/branch/rev = "..." }` — git dependency
 #[derive(Debug, Deserialize, Clone)]
@@ -214,6 +237,91 @@ fn validate_dependency(name: &str, dep: &TomlDependency) -> Result<DependencySpe
     })
 }
 
+/// Validate a bare-string registry dependency (`name = "1.2.3"`).
+///
+/// Registry dependencies pin an exact `major.minor.patch` version — version
+/// ranges are deliberately not supported, so the resolved graph is always
+/// reproducible without a constraint solver.
+fn validate_registry_dependency(name: &str, version: &str) -> Result<DependencySpec> {
+    if let Err(e) = validate_package_name(name) {
+        miette::bail!(
+            "Invalid dependency name '{name}': {}",
+            format_name_error(name, &e)
+        );
+    }
+
+    if let Err(reason) = validate_exact_version(version) {
+        miette::bail!(
+            "Dependency '{name}' has an invalid version '{version}' — {reason}\n\n  \
+             Registry dependencies must pin an exact version, e.g.\n    \
+             {name} = \"1.2.3\"\n\n  \
+             For version ranges or a specific branch, use a git dependency instead:\n    \
+             {name} = {{ git = \"https://...\", tag = \"v1.2.3\" }}"
+        );
+    }
+
+    Ok(DependencySpec {
+        name: name.to_string(),
+        source: DependencySource::Registry {
+            version: version.to_string(),
+        },
+    })
+}
+
+/// Validate an exact `major.minor.patch` version string.
+///
+/// Every segment must be a non-empty run of ASCII digits. Returns a short
+/// human-readable reason on failure (the caller adds the surrounding context).
+fn validate_exact_version(version: &str) -> Result<(), String> {
+    if version.is_empty() {
+        return Err("the version is empty".to_string());
+    }
+
+    if version.trim() != version {
+        return Err("the version has leading or trailing whitespace".to_string());
+    }
+
+    // Reject range/constraint operators with a targeted message rather than
+    // the generic "not major.minor.patch" one.
+    for op in ["~>", ">=", "<=", ">", "<", "=", "^", "*"] {
+        if version.starts_with(op) {
+            return Err(format!(
+                "version ranges are not supported (found '{op}'), only exact versions"
+            ));
+        }
+    }
+
+    let segments: Vec<&str> = version.split('.').collect();
+    if segments.len() != 3 {
+        return Err(format!(
+            "expected exactly three segments (major.minor.patch), found {}",
+            segments.len()
+        ));
+    }
+
+    for segment in &segments {
+        if segment.is_empty() {
+            return Err("a version segment is empty".to_string());
+        }
+        if !segment.bytes().all(|b| b.is_ascii_digit()) {
+            return Err(format!(
+                "version segment '{segment}' is not a non-negative integer"
+            ));
+        }
+        // `01.0.0` and `1.0.0` name the same release but would be pinned as two
+        // different strings in the lockfile, so only the canonical spelling is
+        // accepted.
+        if segment.len() > 1 && segment.starts_with('0') {
+            return Err(format!(
+                "version segment '{segment}' has a leading zero — write it as '{}'",
+                segment.trim_start_matches('0')
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 /// Parse and validate the `[dependencies]` section of a manifest.
 ///
 /// Returns an empty map if the section is missing or empty.
@@ -236,14 +344,25 @@ fn parse_dependencies(deps: Option<&toml::Value>) -> Result<DependencyMap> {
 
     let mut result = DependencyMap::new();
     for (name, value) in table {
-        // Each dependency entry must be an inline table like { path = "..." }
-        let dep: TomlDependency = value
-            .clone()
-            .try_into()
-            .into_diagnostic()
-            .wrap_err_with(|| format!("Dependency '{name}' has an invalid format — expected a table with 'path' or 'git' keys"))?;
+        // A bare string is a registry dependency: `name = "1.2.3"`.
+        let spec = if let Some(version) = value.as_str() {
+            validate_registry_dependency(name, version)?
+        } else {
+            // Otherwise the entry must be an inline table like { path = "..." }
+            let dep: TomlDependency =
+                value
+                    .clone()
+                    .try_into()
+                    .into_diagnostic()
+                    .wrap_err_with(|| {
+                        format!(
+                            "Dependency '{name}' has an invalid format — expected a version string \
+                         like \"1.2.3\", or a table with 'path' or 'git' keys"
+                        )
+                    })?;
 
-        let spec = validate_dependency(name, &dep)?;
+            validate_dependency(name, &dep)?
+        };
         result.insert(name.clone(), spec);
     }
     Ok(result)
@@ -503,6 +622,9 @@ pub struct ParsedManifest {
     /// The parsed and validated `[diagnostics]` severity overrides (ADR 0100
     /// Rule 3; empty if the section is absent).
     pub diagnostics: DiagnosticsTable,
+    /// The optional `[registry]` section — overrides where registry
+    /// dependencies are resolved from (`None` uses the env var / default).
+    pub registry: Option<RegistryConfig>,
 }
 
 /// Parse a `beamtalk.toml` manifest file.
@@ -557,6 +679,7 @@ pub fn parse_manifest_full(path: &Utf8Path) -> Result<ParsedManifest> {
         dependencies,
         native_dependencies,
         diagnostics,
+        registry: manifest.registry,
     })
 }
 
@@ -1341,6 +1464,237 @@ utils = { path = "../my-utils" }
                 path: PathBuf::from("../my-utils")
             }
         );
+    }
+
+    // --- Registry dependency parsing (BT-2978) ---
+
+    /// Render an error as a single line.
+    ///
+    /// miette's `Debug` output hard-wraps to the terminal width, so asserting
+    /// on a multi-word phrase is otherwise flaky — collapsing whitespace lets
+    /// tests assert on the message as written.
+    fn flat_err(err: &miette::Report) -> String {
+        format!("{err:?}")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// Parse a `[dependencies]` table containing a single entry, returning the
+    /// result so tests can assert on either success or the error message.
+    fn parse_single_dep(temp: &TempDir, entry: &str) -> Result<ParsedManifest> {
+        let path = write_manifest(
+            temp,
+            &format!(
+                "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n\n[dependencies]\n{entry}\n"
+            ),
+        );
+        parse_manifest_full(&path.join("beamtalk.toml"))
+    }
+
+    #[test]
+    fn test_parse_registry_dependency() {
+        let temp = TempDir::new().unwrap();
+        let manifest = parse_single_dep(&temp, r#"yaml = "0.2.1""#).unwrap();
+
+        assert_eq!(manifest.dependencies.len(), 1);
+        let dep = &manifest.dependencies["yaml"];
+        assert_eq!(dep.name, "yaml");
+        assert_eq!(
+            dep.source,
+            DependencySource::Registry {
+                version: "0.2.1".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn test_registry_dependency_display() {
+        let temp = TempDir::new().unwrap();
+        let manifest = parse_single_dep(&temp, r#"yaml = "0.2.1""#).unwrap();
+        assert_eq!(
+            manifest.dependencies["yaml"].to_string(),
+            "yaml (registry: 0.2.1)"
+        );
+    }
+
+    #[test]
+    fn test_registry_and_other_sources_coexist() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[dependencies]
+yaml = "0.2.1"
+utils = { path = "../my-utils" }
+json = { git = "https://example.test/json", tag = "v1.0.0" }
+"#,
+        );
+
+        let manifest = parse_manifest_full(&path.join("beamtalk.toml")).unwrap();
+        assert_eq!(manifest.dependencies.len(), 3);
+        assert!(matches!(
+            manifest.dependencies["yaml"].source,
+            DependencySource::Registry { .. }
+        ));
+        assert!(matches!(
+            manifest.dependencies["utils"].source,
+            DependencySource::Path { .. }
+        ));
+        assert!(matches!(
+            manifest.dependencies["json"].source,
+            DependencySource::Git { .. }
+        ));
+    }
+
+    #[test]
+    fn test_registry_dependency_rejects_partial_version() {
+        let temp = TempDir::new().unwrap();
+        let err = parse_single_dep(&temp, r#"yaml = "0.2""#).unwrap_err();
+        let msg = flat_err(&err);
+        assert!(msg.contains("expected exactly three segments"), "{msg}");
+    }
+
+    #[test]
+    fn test_registry_dependency_rejects_range() {
+        let temp = TempDir::new().unwrap();
+        let err = parse_single_dep(&temp, r#"yaml = "~> 1.0""#).unwrap_err();
+        let msg = flat_err(&err);
+        assert!(msg.contains("version ranges are not supported"), "{msg}");
+    }
+
+    #[test]
+    fn test_registry_dependency_rejects_empty_version() {
+        let temp = TempDir::new().unwrap();
+        let err = parse_single_dep(&temp, r#"yaml = """#).unwrap_err();
+        let msg = flat_err(&err);
+        assert!(msg.contains("empty"), "{msg}");
+    }
+
+    #[test]
+    fn test_registry_dependency_rejects_non_numeric_version() {
+        let temp = TempDir::new().unwrap();
+        let err = parse_single_dep(&temp, r#"yaml = "1.2.beta""#).unwrap_err();
+        let msg = flat_err(&err);
+        assert!(msg.contains("not a non-negative integer"), "{msg}");
+    }
+
+    #[test]
+    fn test_registry_dependency_rejects_too_many_segments() {
+        let temp = TempDir::new().unwrap();
+        let err = parse_single_dep(&temp, r#"yaml = "1.2.3.4""#).unwrap_err();
+        let msg = flat_err(&err);
+        assert!(msg.contains("expected exactly three segments"), "{msg}");
+    }
+
+    #[test]
+    fn test_registry_dependency_rejects_leading_zero_version() {
+        let temp = TempDir::new().unwrap();
+        let err = parse_single_dep(&temp, r#"yaml = "01.0.0""#).unwrap_err();
+        let msg = flat_err(&err);
+        assert!(msg.contains("leading zero"), "{msg}");
+    }
+
+    #[test]
+    fn test_registry_dependency_accepts_zero_segments() {
+        // A bare `0` segment is canonical and must still be accepted.
+        let temp = TempDir::new().unwrap();
+        let manifest = parse_single_dep(&temp, r#"yaml = "0.0.0""#).unwrap();
+        assert!(matches!(
+            manifest.dependencies["yaml"].source,
+            DependencySource::Registry { .. }
+        ));
+    }
+
+    #[test]
+    fn test_registry_dependency_rejects_invalid_package_name() {
+        let temp = TempDir::new().unwrap();
+        let err = parse_single_dep(&temp, r#"BadName = "1.2.3""#).unwrap_err();
+        let msg = flat_err(&err);
+        assert!(msg.contains("Invalid dependency name"), "{msg}");
+    }
+
+    #[test]
+    fn test_registry_dependency_error_suggests_git_alternative() {
+        let temp = TempDir::new().unwrap();
+        let err = parse_single_dep(&temp, r#"yaml = "~> 1.0""#).unwrap_err();
+        let msg = flat_err(&err);
+        assert!(msg.contains("git ="), "should suggest a git dep: {msg}");
+    }
+
+    // --- [registry] section ---
+
+    #[test]
+    fn test_parse_registry_section() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[registry]
+url = "https://example.test/registry"
+"#,
+        );
+
+        let manifest = parse_manifest_full(&path.join("beamtalk.toml")).unwrap();
+        assert_eq!(
+            manifest.registry.unwrap().url,
+            "https://example.test/registry"
+        );
+    }
+
+    /// A Windows path in `[registry] url` must be written as a TOML *literal*
+    /// string — in a basic string its backslashes are escapes, and `\U` in
+    /// particular is a unicode escape that fails to parse (the same hazard as
+    /// BT-1737's `file://` handling).
+    #[test]
+    fn test_registry_url_accepts_windows_path_as_literal_string() {
+        let temp = TempDir::new().unwrap();
+        let windows_path = r"C:\Users\RUNNER~1\AppData\Local\Temp\.tmpZ1Oqf7";
+        let path = write_manifest(
+            &temp,
+            &format!(
+                "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n\n\
+                 [registry]\nurl = '{windows_path}'\n"
+            ),
+        );
+
+        let manifest = parse_manifest_full(&path.join("beamtalk.toml")).unwrap();
+        assert_eq!(manifest.registry.unwrap().url, windows_path);
+    }
+
+    #[test]
+    fn test_registry_section_absent_is_none() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(&temp, "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n");
+        let manifest = parse_manifest_full(&path.join("beamtalk.toml")).unwrap();
+        assert!(manifest.registry.is_none());
+    }
+
+    #[test]
+    fn test_registry_section_rejects_unknown_fields() {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[registry]
+url = "https://example.test/registry"
+mirror = "https://example.test/other"
+"#,
+        );
+
+        assert!(parse_manifest_full(&path.join("beamtalk.toml")).is_err());
     }
 
     #[test]

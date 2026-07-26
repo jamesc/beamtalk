@@ -176,6 +176,7 @@ fn run_add(
             url: url.to_string(),
             reference,
             resolved_sha: resolved.resolved_sha.clone(),
+            registry_version: None,
         });
         lockfile.write(project_root)?;
 
@@ -318,6 +319,15 @@ fn run_list(project_root: &Utf8Path) -> Result<()> {
                     format!("(git: {short_url} {ref_str})")
                 }
             }
+            DependencySource::Registry { version } => {
+                if let Some(entry) = lockfile.get(dep_name) {
+                    let short_sha = &entry.resolved_sha[..7.min(entry.resolved_sha.len())];
+                    let short_url = shorten_git_url(&entry.url);
+                    format!("(registry: {version} -> {short_url} @ {short_sha})")
+                } else {
+                    format!("(registry: {version})")
+                }
+            }
         };
 
         max_name = max_name.max(dep_name.len());
@@ -339,7 +349,7 @@ fn dep_version(project_root: &Utf8Path, name: &str, source: &DependencySource) -
             let utf8 = Utf8PathBuf::from(path.to_string_lossy().to_string());
             project_root.join(&utf8)
         }
-        DependencySource::Git { .. } => {
+        DependencySource::Git { .. } | DependencySource::Registry { .. } => {
             crate::commands::build_layout::BuildLayout::new(project_root).dep_checkout_dir(name)
         }
     };
@@ -396,10 +406,19 @@ fn run_update(project_root: &Utf8Path, name: Option<&str>) -> Result<()> {
             miette::bail!("Dependency '{target_name}' not found in beamtalk.toml");
         }
         if !git_deps.contains_key(target_name) {
-            miette::bail!(
-                "Dependency '{target_name}' is a path dependency — \
-                 only git dependencies can be updated"
-            );
+            // Registry deps are pinned to an exact version in beamtalk.toml, so
+            // "updating" one means editing that version (BT-2979 adds
+            // first-class registry support to `deps update`).
+            let kind = match &manifest.dependencies[target_name].source {
+                DependencySource::Registry { version } => {
+                    format!(
+                        "is pinned to registry version {version} — edit the version in \
+                         beamtalk.toml to change it"
+                    )
+                }
+                _ => "is a path dependency — only git dependencies can be updated".to_string(),
+            };
+            miette::bail!("Dependency '{target_name}' {kind}");
         }
 
         let (url, reference) = git_deps[target_name];
@@ -454,6 +473,7 @@ fn update_single_git_dep(
         url: url.to_string(),
         reference: reference.clone(),
         resolved_sha: resolved.resolved_sha.clone(),
+        registry_version: None,
     });
     lockfile.write(project_root)?;
 

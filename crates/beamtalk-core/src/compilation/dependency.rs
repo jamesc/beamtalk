@@ -6,9 +6,11 @@
 //! **DDD Context:** Compilation
 //!
 //! These types represent parsed dependency declarations from `beamtalk.toml`.
-//! Phase 1 supports two dependency sources:
+//! Three dependency sources are supported:
 //! - **Path dependencies:** local filesystem paths (for monorepo/development)
 //! - **Git dependencies:** remote git repositories with tag, branch, or rev pinning
+//! - **Registry dependencies:** an exact version resolved through the package
+//!   registry index into a `(git url, tag)` pair
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -47,6 +49,20 @@ pub enum DependencySource {
         /// The git reference to check out.
         reference: GitReference,
     },
+
+    /// A registry dependency, declared as a bare exact version string.
+    ///
+    /// ```toml
+    /// yaml = "0.2.1"
+    /// ```
+    ///
+    /// The version is looked up in the registry index (`packages/<name>.toml`)
+    /// to produce a `(git url, tag)` pair, which then flows through the same
+    /// machinery as a [`DependencySource::Git`] dependency.
+    Registry {
+        /// The exact requested version (`major.minor.patch`).
+        version: String,
+    },
 }
 
 /// A git reference for pinning a dependency to a specific point in history.
@@ -72,6 +88,7 @@ impl fmt::Display for DependencySource {
                     GitReference::Rev(rev) => write!(f, " (rev: {rev})"),
                 }
             }
+            Self::Registry { version } => write!(f, "registry: {version}"),
         }
     }
 }

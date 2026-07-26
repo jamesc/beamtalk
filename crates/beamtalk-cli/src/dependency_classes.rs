@@ -146,7 +146,12 @@ pub fn resolve_dependency_class_infos(project_root: &Utf8Path) -> (bool, Vec<Cla
                     };
                     normalize_path(&declaring_root.join(relative))
                 }
-                DependencySource::Git { .. } => layout.dep_checkout_dir(&name),
+                // A registry dependency is fetched into the same checkout
+                // directory as a git dependency once resolved, so the offline
+                // walk treats the two identically (BT-2978).
+                DependencySource::Git { .. } | DependencySource::Registry { .. } => {
+                    layout.dep_checkout_dir(&name)
+                }
             };
 
             if !dep_root.is_dir() {
@@ -425,6 +430,34 @@ mod tests {
         assert!(
             infos.iter().any(|c| c.name == "HTTPServer"),
             "expected HTTPServer in resolved class infos, got {infos:?}"
+        );
+    }
+
+    /// BT-2978: a registry dependency lands in the same `_build/deps/<name>/`
+    /// checkout as a git dependency, so the offline walk must find its classes
+    /// the same way.
+    #[test]
+    #[serial_test::serial(dependency_class_cache)]
+    fn registry_dependency_checkout_present_resolves_classes() {
+        let tmp = TempDir::new().unwrap();
+        let root = Utf8Path::from_path(tmp.path()).unwrap();
+        write(
+            tmp.path().join("beamtalk.toml").as_path(),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n\
+             [dependencies]\nyaml = \"0.2.1\"\n",
+        );
+        write(
+            tmp.path()
+                .join("_build/deps/yaml/src/yaml_parser.bt")
+                .as_path(),
+            "Object subclass: YAMLParser\n",
+        );
+
+        let (has_deps, infos) = resolve_dependency_class_infos(root);
+        assert!(has_deps);
+        assert!(
+            infos.iter().any(|c| c.name == "YAMLParser"),
+            "expected YAMLParser in resolved class infos, got {infos:?}"
         );
     }
 
