@@ -3,6 +3,8 @@
 ## Status
 Implemented (2026-03-24). Supersedes [ADR 0031](0031-flat-namespace-for-v01.md) (Flat Namespace for v0.1).
 
+**Note (2026-07-26):** the "Alternative: Registry-Based Dependencies (Hex.pm)" deferred below shipped in minimal, non-hex.pm form via the library registry epic (BT-2977) — see [ADR 0073](0073-package-distribution-and-discovery.md)'s "Amendment (2026-07-26)" for what was built and how it relates to what this section deferred.
+
 ## Context
 
 Beamtalk v0.1 shipped with a flat global namespace (ADR 0031). All classes are globally visible, there is no import/export syntax, and class names must be unique across a workspace. This was an explicit decision — the ecosystem was too small and the language too young to design a module system.
@@ -579,6 +581,8 @@ json = "1.0"
 ```
 
 **Deferred, not rejected.** Hex.pm is the right long-term answer (Gleam proved a non-Elixir language can use it). But it requires ecosystem maturity: published packages, version policies, a publishing workflow. Path + git dependencies are sufficient while the ecosystem bootstraps.
+
+**Update (2026-07-26):** a minimal, self-hosted (not hex.pm) version of this alternative shipped — `name = "1.0"` now resolves through a registry index to a `(git url, tag)` pair, published via `beamtalk publish`. It provides published packages and a publishing workflow, but not version policies (no semver ranges) or hex.pm hosting. See [ADR 0073](0073-package-distribution-and-discovery.md)'s "Amendment (2026-07-26)" for the full comparison — this alternative is now partially, not fully, resolved.
 
 ## Consequences
 
