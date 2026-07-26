@@ -151,14 +151,7 @@ fn clone_repo(name: &str, url: &str, target: &Utf8Path) -> Result<()> {
 /// Deliberately excludes git's `ext::` and `fd::` helper transports: `ext::`
 /// runs an arbitrary shell command, so a URL carrying it is code execution, not
 /// a fetch.
-const ALLOWED_URL_SCHEMES: &[&str] = &[
-    "https://",
-    "http://",
-    "ssh://",
-    "git://",
-    "file://",
-    "git+ssh://",
-];
+const ALLOWED_URL_SCHEMES: &[&str] = &["https://", "http://", "ssh://", "git://", "file://"];
 
 /// Reject dependency URLs that git would not treat as a plain remote.
 ///
@@ -202,10 +195,18 @@ pub fn validate_git_url(name: &str, url: &str) -> Result<()> {
 
     // `user@host:path` scp-style syntax has no scheme but is a normal git
     // remote. Accept it only when it really looks like one: a non-empty host
-    // segment before the first colon that carries no slash.
-    let scp_like = url
-        .split_once(':')
-        .is_some_and(|(host, _)| !host.is_empty() && !host.contains('/'));
+    // segment before the first colon that carries no slash, and a path that
+    // does not begin with `//`.
+    //
+    // That last condition is what keeps an unrecognised *scheme* out. Without
+    // it `badscheme://host/repo` splits into ("badscheme", "//host/repo") and
+    // reads as scp-style, and git would go looking for `git-remote-badscheme`
+    // on PATH — `protocol.ext.allow=never` only disables the built-in `ext::`
+    // helper, not arbitrary installed transport programs. A real scp-style
+    // path never starts with `//`.
+    let scp_like = url.split_once(':').is_some_and(|(host, path)| {
+        !host.is_empty() && !host.contains('/') && !path.starts_with("//")
+    });
 
     if !scp_like {
         miette::bail!(
@@ -633,6 +634,19 @@ mod tests {
     fn test_validate_git_url_rejects_other_transport_helpers() {
         assert!(validate_git_url("dep", "fd::7").is_err());
         assert!(validate_git_url("dep", "transport::whatever").is_err());
+    }
+
+    #[test]
+    fn test_validate_git_url_rejects_unknown_scheme() {
+        // Would otherwise read as scp-style and send git looking for
+        // `git-remote-<scheme>` on PATH.
+        for url in [
+            "gitremote://evil.test/repo",
+            "badscheme://host/repo",
+            "git+ssh://host/repo",
+        ] {
+            assert!(validate_git_url("dep", url).is_err(), "should reject {url}");
+        }
     }
 
     #[test]

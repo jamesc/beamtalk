@@ -308,6 +308,15 @@ fn validate_exact_version(version: &str) -> Result<(), String> {
                 "version segment '{segment}' is not a non-negative integer"
             ));
         }
+        // `01.0.0` and `1.0.0` name the same release but would be pinned as two
+        // different strings in the lockfile, so only the canonical spelling is
+        // accepted.
+        if segment.len() > 1 && segment.starts_with('0') {
+            return Err(format!(
+                "version segment '{segment}' has a leading zero — write it as '{}'",
+                segment.trim_start_matches('0')
+            ));
+        }
     }
 
     Ok(())
@@ -1583,6 +1592,25 @@ json = { git = "https://example.test/json", tag = "v1.0.0" }
     }
 
     #[test]
+    fn test_registry_dependency_rejects_leading_zero_version() {
+        let temp = TempDir::new().unwrap();
+        let err = parse_single_dep(&temp, r#"yaml = "01.0.0""#).unwrap_err();
+        let msg = flat_err(&err);
+        assert!(msg.contains("leading zero"), "{msg}");
+    }
+
+    #[test]
+    fn test_registry_dependency_accepts_zero_segments() {
+        // A bare `0` segment is canonical and must still be accepted.
+        let temp = TempDir::new().unwrap();
+        let manifest = parse_single_dep(&temp, r#"yaml = "0.0.0""#).unwrap();
+        assert!(matches!(
+            manifest.dependencies["yaml"].source,
+            DependencySource::Registry { .. }
+        ));
+    }
+
+    #[test]
     fn test_registry_dependency_rejects_invalid_package_name() {
         let temp = TempDir::new().unwrap();
         let err = parse_single_dep(&temp, r#"BadName = "1.2.3""#).unwrap_err();
@@ -1620,6 +1648,26 @@ url = "https://example.test/registry"
             manifest.registry.unwrap().url,
             "https://example.test/registry"
         );
+    }
+
+    /// A Windows path in `[registry] url` must be written as a TOML *literal*
+    /// string — in a basic string its backslashes are escapes, and `\U` in
+    /// particular is a unicode escape that fails to parse (the same hazard as
+    /// BT-1737's `file://` handling).
+    #[test]
+    fn test_registry_url_accepts_windows_path_as_literal_string() {
+        let temp = TempDir::new().unwrap();
+        let windows_path = r"C:\Users\RUNNER~1\AppData\Local\Temp\.tmpZ1Oqf7";
+        let path = write_manifest(
+            &temp,
+            &format!(
+                "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n\n\
+                 [registry]\nurl = '{windows_path}'\n"
+            ),
+        );
+
+        let manifest = parse_manifest_full(&path.join("beamtalk.toml")).unwrap();
+        assert_eq!(manifest.registry.unwrap().url, windows_path);
     }
 
     #[test]

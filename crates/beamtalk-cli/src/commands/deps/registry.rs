@@ -283,6 +283,12 @@ pub fn ensure_index(
 fn ensure_git_index(url: &str, project_root: &Utf8Path, refresh: bool) -> Result<Utf8PathBuf> {
     let index_dir = BuildLayout::new(project_root).registry_index_dir();
 
+    // `swap_in_index` moves the old index aside before renaming the new one
+    // into place. If a previous run was killed between those two renames, the
+    // only good copy is sitting at `index.previous` — put it back before
+    // deciding whether an index exists at all.
+    recover_orphaned_index(&index_dir);
+
     let has_index = index_dir.join("packages").is_dir();
 
     if has_index {
@@ -323,6 +329,22 @@ fn ensure_git_index(url: &str, project_root: &Utf8Path, refresh: bool) -> Result
                 Err(e)
             }
         }
+    }
+}
+
+/// Restore an index stranded at `<index_dir>.previous` by an interrupted swap.
+///
+/// Only acts when `index_dir` itself has no usable index, so it can never
+/// clobber a good checkout.
+fn recover_orphaned_index(index_dir: &Utf8Path) {
+    if index_dir.join("packages").is_dir() {
+        return;
+    }
+
+    let previous = index_dir.with_extension("previous");
+    if previous.join("packages").is_dir() {
+        debug!(%previous, %index_dir, "Restoring registry index left by an interrupted swap");
+        let _ = std::fs::rename(&previous, index_dir);
     }
 }
 

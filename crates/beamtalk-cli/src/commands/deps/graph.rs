@@ -1195,7 +1195,10 @@ middle = {{ path = "{middle_str}" }}"#
             "my_app",
             "0.1.0",
             &format!(
-                "[registry]\nurl = \"{index_root}\"\n\n[dependencies]\n{dep_name} = \"{version}\"\n"
+                // A TOML *literal* string: a Windows temp path contains
+                // backslashes, and `\U` in a basic string is a unicode escape
+                // (BT-1737's `file://` handling has the same hazard).
+                "[registry]\nurl = '{index_root}'\n\n[dependencies]\n{dep_name} = \"{version}\"\n"
             ),
         );
     }
@@ -1467,7 +1470,7 @@ middle = {{ path = "{middle_str}" }}"#
             "my_app",
             "0.1.0",
             &format!(
-                "[registry]\nurl = \"{index_root}\"\n\n\
+                "[registry]\nurl = '{index_root}'\n\n\
                  [dependencies]\nmiddle = {{ path = \"../middle\" }}\n"
             ),
         );
