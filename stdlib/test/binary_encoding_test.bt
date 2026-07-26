@@ -52,6 +52,12 @@ TestCase subclass: BinaryEncodingTest
   testFromBase64UrlIsErrorOnMalformedInput =>
     self assert: (Binary fromBase64Url: "not valid!!") isError
 
+  testFromBase64UrlAcceptsUnpaddedInput =>
+    // "--8=" is the padded url-safe encoding of #(251, 239); JWTs and PKCE
+    // challenges use the unpadded form ("--8") instead — both must decode
+    // to the same bytes.
+    self assert: (Binary fromBase64Url: "--8") unwrap equals: (Binary fromBytes: #(251, 239))
+
   testFromBase64UrlRejectsStandardAlphabet =>
     // "++8=" is the standard encoding of #(251, 239); the url-safe decoder
     // must reject its '+' characters rather than accept them.

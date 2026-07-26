@@ -101,6 +101,8 @@ sealed typed Collection subclass: Binary
   /// Decode a URL-safe (RFC 4648 §5) base64 string to a Binary.
   ///
   /// Uses `-`/`_` in place of `+`/`/`. Returns a Result, as `fromBase64:`.
+  /// Accepts both padded and unpadded input — the unpadded form is the one
+  /// commonly used in JWTs (RFC 7515 §2) and PKCE challenges.
   ///
   /// ## Examples
   /// ```beamtalk

@@ -394,6 +394,10 @@ urlDecoded(Str) when is_binary(Str) ->
 urlDecoded(_) ->
     beamtalk_error:raise_type_error('String', 'urlDecoded', <<"Receiver must be a String">>).
 
+%%% ============================================================================
+%%% Internal Functions
+%%% ============================================================================
+
 -doc "Raise a structured parse_error for a malformed percent-encoded string.".
 -spec raise_url_decode_error() -> no_return().
 raise_url_decode_error() ->
@@ -404,10 +408,6 @@ raise_url_decode_error() ->
         <<"Malformed percent-encoding — a '%' must be followed by two hex digits">>
     ),
     beamtalk_error:raise(Error2).
-
-%%% ============================================================================
-%%% Internal Functions
-%%% ============================================================================
 
 -doc "Grapheme-aware substring search.".
 -spec index_of_graphemes([string:grapheme_cluster()], [string:grapheme_cluster()], integer()) ->

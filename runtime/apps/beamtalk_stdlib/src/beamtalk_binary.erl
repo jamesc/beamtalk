@@ -124,9 +124,14 @@ padding, invalid alphabet characters, etc.).
 """.
 -spec 'fromBase64:'(binary()) -> beamtalk_result:t().
 'fromBase64:'(Str) when is_binary(Str) ->
-    try
-        beamtalk_result:from_tagged_tuple({ok, base64:decode(Str)})
+    try base64:decode(Str) of
+        Decoded ->
+            beamtalk_result:from_tagged_tuple({ok, Decoded})
     catch
+        %% base64:decode/1 signals malformed input inconsistently across
+        %% cases — badarg for a bad alphabet/padding, function_clause for
+        %% some too-short inputs — so this stays a catch-all rather than
+        %% naming a specific reason.
         error:_ ->
             beamtalk_result:from_tagged_tuple({error, base64_decode_error('fromBase64:')})
     end;
@@ -136,12 +141,19 @@ padding, invalid alphabet characters, etc.).
 -doc """
 Decode a URL-safe (RFC 4648 §5) base64 string (`-`/`_` in place of `+`/`/`).
 Returns a Result, as `fromBase64:/1`.
+
+Accepts both padded and unpadded input (`padding => false`) — the unpadded
+form is the one commonly used in JWTs (RFC 7515 §2) and PKCE challenges.
 """.
 -spec 'fromBase64Url:'(binary()) -> beamtalk_result:t().
 'fromBase64Url:'(Str) when is_binary(Str) ->
-    try
-        beamtalk_result:from_tagged_tuple({ok, base64:decode(Str, #{mode => urlsafe})})
+    try base64:decode(Str, #{mode => urlsafe, padding => false}) of
+        Decoded ->
+            beamtalk_result:from_tagged_tuple({ok, Decoded})
     catch
+        %% Malformed input raises badarg, function_clause, or even badarith
+        %% depending on exactly how it's malformed (verified empirically —
+        %% not documented) — a catch-all is the only robust option.
         error:_ ->
             beamtalk_result:from_tagged_tuple({error, base64_decode_error('fromBase64Url:')})
     end;
@@ -154,10 +166,11 @@ a Result: `Result error:` on odd length or non-hex-digit characters.
 """.
 -spec 'fromHex:'(binary()) -> beamtalk_result:t().
 'fromHex:'(Str) when is_binary(Str) ->
-    try
-        beamtalk_result:from_tagged_tuple({ok, binary:decode_hex(Str)})
+    try binary:decode_hex(Str) of
+        Decoded ->
+            beamtalk_result:from_tagged_tuple({ok, Decoded})
     catch
-        error:_ ->
+        error:badarg ->
             Error0 = beamtalk_error:new(parse_error, 'Binary'),
             Error1 = beamtalk_error:with_selector(Error0, 'fromHex:'),
             Error2 = beamtalk_error:with_hint(
