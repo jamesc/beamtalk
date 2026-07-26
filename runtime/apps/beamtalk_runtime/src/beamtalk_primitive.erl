@@ -544,6 +544,8 @@ module_for_value(X) when is_map(X) ->
             'bt@stdlib@regex';
         'DateTime' ->
             'bt@stdlib@date_time';
+        'Duration' ->
+            'bt@stdlib@duration';
         'Timer' ->
             'bt@stdlib@timer';
         'TestResult' ->
