@@ -6,10 +6,20 @@
 // returns, the collector has already processed the event
 
 TestCase subclass: ActorCoordinationTest
+  field: col = nil
+  field: bus = nil
+
+  setUp =>
+    self.col := EventCollector spawn
+    self.bus := EventBus spawn
+
+  tearDown =>
+    self.bus isNil ifFalse: [self.bus stop]
+    self.col isNil ifFalse: [self.col stop]
 
   testSyncEventDelivery =>
-    col := EventCollector spawn
-    bus := EventBus spawn
+    col := self.col
+    bus := self.bus
     bus subscribe: col
     bus notify: "hello"
     // notify: is synchronous; no barriers needed
@@ -17,8 +27,8 @@ TestCase subclass: ActorCoordinationTest
 
   // Multiple events delivered in order
   testMultipleEventsDelivered =>
-    col := EventCollector spawn
-    bus := EventBus spawn
+    col := self.col
+    bus := self.bus
     bus subscribe: col; notify: "first"; notify: "second"; notify: "third"
     self assert: col eventCount equals: 3
     self assert: col events equals: #("first", "second", "third")
