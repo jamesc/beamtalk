@@ -88,6 +88,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "Reference"
             | "Regex"
             | "Result"
+            | "RetryPolicy"
             | "RuntimeError"
             | "Server"
             | "Session"
@@ -2851,6 +2852,53 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             class_variables: vec![],
             type_params: vec!["T".into(), "E".into()],
             type_param_bounds: vec![None, None],
+            superclass_type_args: vec![],
+        },
+    );
+
+    classes.insert(
+        "RetryPolicy".into(),
+        ClassInfo {
+            name: "RetryPolicy".into(),
+            superclass: Some("Value".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: true,
+            is_native: false,
+            handle_scope: None,
+            surface_incomplete: false,
+            state: vec!["initialInterval".into(), "backoffCoefficient".into(), "maximumInterval".into(), "maximumAttempts".into(), "jitter".into(), "nonRetryableErrors".into()],
+            state_types: HashMap::from([("initialInterval".into(), "Integer".into()), ("backoffCoefficient".into(), "Float".into()), ("maximumInterval".into(), "Integer | Nil".into()), ("maximumAttempts".into(), "Integer | Nil".into()), ("jitter".into(), "Boolean".into()), ("nonRetryableErrors".into(), "List(String)".into())]),
+            state_has_default: HashMap::from([("initialInterval".into(), true), ("backoffCoefficient".into(), true), ("maximumInterval".into(), true), ("maximumAttempts".into(), true), ("jitter".into(), true), ("nonRetryableErrors".into(), true)]),
+            methods: vec![
+                MethodInfo { selector: "intervalForAttempt:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "RetryPolicy".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![Some("Integer".into())], doc: Some("The backoff delay before attempt `attempt + 1`, in milliseconds.\n\nComputed as `initialInterval * backoffCoefficient ^ (attempt - 1)`,\ncapped at `maximumInterval` when set, then randomized within\n`[0, cappedDelay]` when `jitter` is true.\n\n## Examples\n```beamtalk\nrp := RetryPolicy new: #{#initialInterval => 1000, #backoffCoefficient => 2.0}\nrp intervalForAttempt: 1    // => 1000\nrp intervalForAttempt: 2    // => 2000\nrp intervalForAttempt: 3    // => 4000\n\ncapped := RetryPolicy new: #{#initialInterval => 1000, #maximumInterval => 1500}\ncapped intervalForAttempt: 3   // => 1500\n```".into()) },
+                MethodInfo { selector: "jitteredDelay:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "RetryPolicy".into(), is_sealed: false, is_internal: true, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![Some("Integer".into())], doc: Some("Full-jitter randomization: a random integer in `[0, cappedDelay]`.".into()) },
+                MethodInfo { selector: "retriesExhausted:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "RetryPolicy".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![Some("Integer".into())], doc: Some("True once `attempt` has reached `maximumAttempts`. Always false when\n`maximumAttempts` is `nil` or `0` (unlimited).\n\n## Examples\n```beamtalk\nrp := RetryPolicy new: #{#maximumAttempts => 3}\nrp retriesExhausted: 2    // => false\nrp retriesExhausted: 3    // => true\n(RetryPolicy new) retriesExhausted: 999   // => false\n```".into()) },
+                MethodInfo { selector: "isNonRetryable:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "RetryPolicy".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![Some("Exception".into())], doc: Some("True when `anError`'s class name appears in `nonRetryableErrors`.\n\n## Examples\n```beamtalk\nrp := RetryPolicy new: #{#nonRetryableErrors => #(\"Error\")}\nrp isNonRetryable: (Result tryDo: [Error signal: \"boom\"]) error   // => true\n```".into()) },
+                MethodInfo { selector: "do:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "RetryPolicy".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Result(R, Exception)".into()), param_types: vec![Some("Block(Integer, R)".into())], doc: Some("Run `aBlock`, retrying on failure per this policy. `aBlock` receives the\n1-based attempt number (useful for logging).\n\nEvaluates `aBlock`. On success, returns `Result ok: value`. On failure,\nshort-circuits with `Result error: theException` when the error's class\nis in `nonRetryableErrors` or attempts are exhausted; otherwise sleeps\n`intervalForAttempt:` milliseconds via `Timer sleep:` and retries.\n\n## Examples\n```beamtalk\nrp := RetryPolicy new: #{#initialInterval => 1, #maximumAttempts => 3}\n(rp do: [:attempt | 1 + 1]) value        // => 2\n(rp do: [:attempt | 1 / 0]) isError      // => true\n```".into()) },
+                MethodInfo { selector: "attempt:do:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "RetryPolicy".into(), is_sealed: false, is_internal: true, spawns_block: false, return_type: Some("Result(R, Exception)".into()), param_types: vec![Some("Integer".into()), Some("Block(Integer, R)".into())], doc: Some("Internal recursive step of `do:` — tries `aBlock`, then decides whether\nto return the outcome or sleep and retry.".into()) },
+                MethodInfo { selector: "initialInterval".into(), arity: 0, kind: MethodKind::Primary, defined_in: "RetryPolicy".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Returns the `initialInterval` field value. Default: `1000`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withInitialInterval:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "RetryPolicy".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("RetryPolicy".into()), param_types: vec![Some("Integer".into())], doc: Some("Returns a new `RetryPolicy` with `initialInterval` set to the given value.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "backoffCoefficient".into(), arity: 0, kind: MethodKind::Primary, defined_in: "RetryPolicy".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Float".into()), param_types: vec![], doc: Some("Returns the `backoffCoefficient` field value. Default: `2.0`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withBackoffCoefficient:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "RetryPolicy".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("RetryPolicy".into()), param_types: vec![Some("Float".into())], doc: Some("Returns a new `RetryPolicy` with `backoffCoefficient` set to the given value.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "maximumInterval".into(), arity: 0, kind: MethodKind::Primary, defined_in: "RetryPolicy".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Integer | Nil".into()), param_types: vec![], doc: Some("Returns the `maximumInterval` field value. Default: `nil`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withMaximumInterval:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "RetryPolicy".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("RetryPolicy".into()), param_types: vec![Some("Integer | Nil".into())], doc: Some("Returns a new `RetryPolicy` with `maximumInterval` set to the given value.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "maximumAttempts".into(), arity: 0, kind: MethodKind::Primary, defined_in: "RetryPolicy".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Integer | Nil".into()), param_types: vec![], doc: Some("Returns the `maximumAttempts` field value. Default: `nil`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withMaximumAttempts:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "RetryPolicy".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("RetryPolicy".into()), param_types: vec![Some("Integer | Nil".into())], doc: Some("Returns a new `RetryPolicy` with `maximumAttempts` set to the given value.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "jitter".into(), arity: 0, kind: MethodKind::Primary, defined_in: "RetryPolicy".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("Returns the `jitter` field value. Default: `false`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withJitter:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "RetryPolicy".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("RetryPolicy".into()), param_types: vec![Some("Boolean".into())], doc: Some("Returns a new `RetryPolicy` with `jitter` set to the given value.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "nonRetryableErrors".into(), arity: 0, kind: MethodKind::Primary, defined_in: "RetryPolicy".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("List(String)".into()), param_types: vec![], doc: Some("Returns the `nonRetryableErrors` field value. Default: `...`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withNonRetryableErrors:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "RetryPolicy".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("RetryPolicy".into()), param_types: vec![Some("List(String)".into())], doc: Some("Returns a new `RetryPolicy` with `nonRetryableErrors` set to the given value.\n\n*(compiler-generated)*".into()) },
+            ],
+            class_methods: vec![
+                MethodInfo { selector: "initialInterval:backoffCoefficient:maximumInterval:maximumAttempts:jitter:nonRetryableErrors:".into(), arity: 6, kind: MethodKind::Primary, defined_in: "RetryPolicy".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("RetryPolicy".into()), param_types: vec![Some("Integer".into()), Some("Float".into()), Some("Integer | Nil".into()), Some("Integer | Nil".into()), Some("Boolean".into()), Some("List(String)".into())], doc: Some("Creates a new `RetryPolicy`. Args: initialInterval (default: 1000), backoffCoefficient (default: 2.0), maximumInterval (default: nil), maximumAttempts (default: nil), jitter (default: false), nonRetryableErrors (default: ...).\n\n*(compiler-generated)*".into()) },
+            ],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
             superclass_type_args: vec![],
         },
     );

@@ -1,0 +1,133 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// RetryPolicy — configurable exponential backoff and retry execution.
+///
+/// A Value describing how to retry a failing operation: the initial delay,
+/// the exponential backoff coefficient, an optional cap on the delay and on
+/// the number of attempts, optional full-jitter randomization, and a list of
+/// error class names that should never be retried. Temporal-compatible
+/// defaults: 1s initial interval, 2.0 backoff coefficient, unlimited attempts.
+///
+/// Use `intervalForAttempt:` to compute backoff delays without executing
+/// anything (pure, testable without sleeping). Use `do:` to actually run a
+/// block with retry: it sleeps the computed backoff between attempts via
+/// `Timer sleep:`, stops on a non-retryable error or exhausted attempts, and
+/// returns the outcome as a `Result`.
+///
+/// ## Examples
+/// ```beamtalk
+/// rp := RetryPolicy new: #{
+///   #initialInterval => 500,
+///   #backoffCoefficient => 1.5,
+///   #maximumAttempts => 5,
+///   #nonRetryableErrors => #("InvalidInput")
+/// }
+/// rp intervalForAttempt: 1     // => 500
+/// rp intervalForAttempt: 2     // => 750
+///
+/// result := rp do: [:attempt | 1 / 0]
+/// result isError               // => true
+/// ```
+typed Value subclass: RetryPolicy
+  /// Delay before the first retry, in milliseconds.
+  field: initialInterval :: Integer = 1000
+  /// Multiplier applied to the delay after each failed attempt.
+  field: backoffCoefficient :: Float = 2.0
+  /// Upper bound on the computed delay, in milliseconds. `nil` means uncapped.
+  field: maximumInterval :: Integer | Nil = nil
+  /// Maximum number of attempts before giving up. `nil` or `0` means unlimited.
+  field: maximumAttempts :: Integer | Nil = nil
+  /// When true, the computed delay is randomized between 0 and the raw
+  /// backoff value ("full jitter") to avoid thundering-herd retries.
+  field: jitter :: Boolean = false
+  /// Error class names that short-circuit retry — the first attempt that
+  /// raises one of these is returned immediately, without further attempts.
+  field: nonRetryableErrors :: List(String) = #()
+
+  // ===== Interval Math (pure, no sleeping) =====
+
+  /// The backoff delay before attempt `attempt + 1`, in milliseconds.
+  ///
+  /// Computed as `initialInterval * backoffCoefficient ^ (attempt - 1)`,
+  /// capped at `maximumInterval` when set, then randomized within
+  /// `[0, cappedDelay]` when `jitter` is true.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// rp := RetryPolicy new: #{#initialInterval => 1000, #backoffCoefficient => 2.0}
+  /// rp intervalForAttempt: 1    // => 1000
+  /// rp intervalForAttempt: 2    // => 2000
+  /// rp intervalForAttempt: 3    // => 4000
+  ///
+  /// capped := RetryPolicy new: #{#initialInterval => 1000, #maximumInterval => 1500}
+  /// capped intervalForAttempt: 3   // => 1500
+  /// ```
+  intervalForAttempt: attempt :: Integer -> Integer =>
+    raw := (self.initialInterval * (self.backoffCoefficient raisedTo: attempt - 1)) ceiling
+    capped := self.maximumInterval
+      ifNil: [raw]
+      ifNotNil: [:maxMs | raw < maxMs ifTrue: [raw] ifFalse: [maxMs]]
+    self.jitter ifTrue: [self jitteredDelay: capped] ifFalse: [capped]
+
+  /// Full-jitter randomization: a random integer in `[0, cappedDelay]`.
+  internal jitteredDelay: cappedDelay :: Integer -> Integer =>
+    cappedDelay <= 0 ifTrue: [0] ifFalse: [(Random nextInteger: cappedDelay + 1) - 1]
+
+  /// True once `attempt` has reached `maximumAttempts`. Always false when
+  /// `maximumAttempts` is `nil` or `0` (unlimited).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// rp := RetryPolicy new: #{#maximumAttempts => 3}
+  /// rp retriesExhausted: 2    // => false
+  /// rp retriesExhausted: 3    // => true
+  /// (RetryPolicy new) retriesExhausted: 999   // => false
+  /// ```
+  retriesExhausted: attempt :: Integer -> Boolean =>
+    self.maximumAttempts match: [
+      nil -> false;
+      n :: Integer when: [n <= 0] -> false;
+      n :: Integer -> attempt >= n
+    ]
+
+  /// True when `anError`'s class name appears in `nonRetryableErrors`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// rp := RetryPolicy new: #{#nonRetryableErrors => #("Error")}
+  /// rp isNonRetryable: (Result tryDo: [Error signal: "boom"]) error   // => true
+  /// ```
+  isNonRetryable: anError :: Exception -> Boolean =>
+    errClassName := anError class name asString
+    self.nonRetryableErrors anySatisfy: [:name | name == errClassName]
+
+  // ===== Executor =====
+
+  /// Run `aBlock`, retrying on failure per this policy. `aBlock` receives the
+  /// 1-based attempt number (useful for logging).
+  ///
+  /// Evaluates `aBlock`. On success, returns `Result ok: value`. On failure,
+  /// short-circuits with `Result error: theException` when the error's class
+  /// is in `nonRetryableErrors` or attempts are exhausted; otherwise sleeps
+  /// `intervalForAttempt:` milliseconds via `Timer sleep:` and retries.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// rp := RetryPolicy new: #{#initialInterval => 1, #maximumAttempts => 3}
+  /// (rp do: [:attempt | 1 + 1]) value        // => 2
+  /// (rp do: [:attempt | 1 / 0]) isError      // => true
+  /// ```
+  do: aBlock :: Block(Integer, R) -> Result(R, Exception) =>
+    self attempt: 1 do: aBlock
+
+  /// Internal recursive step of `do:` — tries `aBlock`, then decides whether
+  /// to return the outcome or sleep and retry.
+  internal attempt: attempt :: Integer do: aBlock :: Block(Integer, R) -> Result(R, Exception) =>
+    outcome := Result tryDo: [aBlock value: attempt]
+    outcome ok ifTrue: [^outcome]
+    err := outcome error
+    (self isNonRetryable: err) ifTrue: [^outcome]
+    (self retriesExhausted: attempt) ifTrue: [^outcome]
+    Timer sleep: (self intervalForAttempt: attempt)
+    self attempt: attempt + 1 do: aBlock
