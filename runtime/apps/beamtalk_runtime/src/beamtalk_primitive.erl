@@ -383,6 +383,11 @@ send_pid(X, await, _Args) ->
     beamtalk_future:await(X);
 send_pid(X, awaitForever, _Args) ->
     beamtalk_future:await_forever(X);
+send_pid(X, 'await:', [#{'$beamtalk_class' := 'Duration', millis := Ms}]) ->
+    %% BT-2969: `Future await:` accepts a Duration as well as Integer ms.
+    %% Matched structurally — beamtalk_runtime cannot call into
+    %% beamtalk_stdlib (beamtalk_duration), dependencies flow down only.
+    beamtalk_future:await(X, Ms);
 send_pid(X, 'await:', [Timeout]) ->
     beamtalk_future:await(X, Timeout);
 send_pid(X, 'whenResolved:', [Block]) ->
@@ -539,6 +544,8 @@ module_for_value(X) when is_map(X) ->
             'bt@stdlib@regex';
         'DateTime' ->
             'bt@stdlib@date_time';
+        'Duration' ->
+            'bt@stdlib@duration';
         'Timer' ->
             'bt@stdlib@timer';
         'TestResult' ->

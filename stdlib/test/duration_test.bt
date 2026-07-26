@@ -1,0 +1,189 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Stdlib tests for Duration class
+
+TestCase subclass: DurationTest
+
+  // ===== Construction =====
+  testConstructionMilliseconds =>
+    d := Duration milliseconds: 1500
+    self assert: d class equals: Duration
+    self assert: d asMilliseconds equals: 1500
+
+  testConstructionSeconds =>
+    self assert: (Duration seconds: 90) asMilliseconds equals: 90000
+
+  testConstructionMinutes =>
+    self assert: (Duration minutes: 2) asSeconds equals: 120
+
+  testConstructionHours =>
+    self assert: (Duration hours: 2) asMinutes equals: 120
+
+  testConstructionDays => self assert: (Duration days: 1) asHours equals: 24
+
+  testConstructionFloatRounds =>
+    // Float inputs are scaled to ms and rounded to the nearest integer
+    self assert: (Duration seconds: 1.5) asMilliseconds equals: 1500
+    self assert: (Duration minutes: 1.5) asSeconds equals: 90
+
+  testConstructionNegative =>
+    self assert: (Duration seconds: -1) asMilliseconds equals: -1000
+
+  // ===== Conversions =====
+  testConversionsTruncateTowardZero =>
+    // Unit accessors return Integers truncated toward zero
+    self assert: (Duration milliseconds: 1999) asSeconds equals: 1
+    self assert: (Duration milliseconds: -1999) asSeconds equals: -1
+    self assert: (Duration seconds: 119) asMinutes equals: 1
+    self assert: (Duration minutes: 90) asHours equals: 1
+    self assert: (Duration hours: 36) totalDays equals: 1
+
+  // ===== Predicates =====
+  testIsZero =>
+    self assert: (Duration seconds: 0) isZero
+    self deny: (Duration seconds: 1) isZero
+
+  testIsNegative =>
+    self assert: (Duration seconds: -1) isNegative
+    self deny: (Duration seconds: 0) isNegative
+    self deny: (Duration seconds: 1) isNegative
+
+  // ===== Arithmetic =====
+  testAddition =>
+    sum := (Duration hours: 1) + (Duration minutes: 30)
+    self assert: sum asMinutes equals: 90
+
+  testSubtraction =>
+    diff := (Duration hours: 1) - (Duration minutes: 30)
+    self assert: diff asMinutes equals: 30
+    // Subtraction may go negative
+    neg := (Duration seconds: 1) - (Duration seconds: 3)
+    self assert: neg asSeconds equals: -2
+    self assert: neg isNegative
+
+  testMultiplicationByScalar =>
+    self assert: ((Duration minutes: 10) * 3) asMinutes equals: 30
+    // Float scalar rounds to the nearest millisecond
+    self assert: ((Duration seconds: 10) * 1.5) asSeconds equals: 15
+
+  // ===== Comparison =====
+  testComparison =>
+    a := Duration seconds: 1
+    b := Duration seconds: 2
+    self assert: (a < b)
+    self deny: (b < a)
+    self assert: (b > a)
+    self deny: (a > b)
+    self assert: (a <= a)
+    self assert: (a <= b)
+    self deny: (b <= a)
+    self assert: (a >= a)
+    self deny: (a >= b)
+    self assert: (a =:= (Duration milliseconds: 1000))
+    self deny: (a =:= b)
+    self assert: (a /= b)
+    self deny: (a /= a)
+    self assert: (a =/= b)
+
+  // ===== Formatting =====
+  testPrintString =>
+    self assert: (Duration seconds: 5415) printString equals: "1h 30m 15s"
+    self assert: (Duration milliseconds: 1500) printString equals: "1s 500ms"
+    self assert: (Duration milliseconds: 0) printString equals: "0ms"
+    self assert: (Duration minutes: -90) printString equals: "-1h 30m"
+
+  testAsStringIso8601 =>
+    self assert: (Duration minutes: 90) asString equals: "PT1H30M"
+    self assert: (Duration hours: 26) asString equals: "P1DT2H"
+    self assert: (Duration milliseconds: 250) asString equals: "PT0.250S"
+    self assert: (Duration seconds: 0) asString equals: "PT0S"
+    self assert: (Duration minutes: -90) asString equals: "-PT1H30M"
+
+  testFromString =>
+    self assert: (Duration fromString: "PT1H30M") asMinutes equals: 90
+    self assert: (Duration fromString: "P1DT2H") asHours equals: 26
+    self assert: (Duration fromString: "PT0.250S") asMilliseconds equals: 250
+    self assert: (Duration fromString: "-PT1H30M") asMinutes equals: -90
+
+  testStringRoundTrip =>
+    // asString / fromString: round-trip preserves exact milliseconds
+    d := Duration milliseconds: 90061250
+    self assert: (Duration fromString: d asString) asMilliseconds equals: 90061250
+    z := Duration milliseconds: 0
+    self assert: (Duration fromString: z asString) asMilliseconds equals: 0
+    n := Duration milliseconds: -1500
+    self assert: (Duration fromString: n asString) asMilliseconds equals: -1500
+
+  // ===== Error handling =====
+  testErrorHandling =>
+    // Non-numeric constructor argument raises error
+    @expect type
+    self should: [Duration seconds: "hello"] raise: #type_error
+    // Invalid ISO 8601 string raises error
+    self should: [Duration fromString: "not-a-duration"] raise: #type_error
+    self should: [Duration fromString: "P"] raise: #type_error
+    // Arithmetic with non-Duration raises error
+    @expect type
+    self should: [(Duration seconds: 1) + 5] raise: #type_error
+    // Scaling by a Duration raises error
+    @expect type
+    self should: [
+      (Duration seconds: 1) * (Duration seconds: 2)
+    ] raise: #type_error
+    // Comparison with non-Duration raises error
+    @expect type
+    self should: [(Duration seconds: 1) < 5] raise: #type_error
+
+  // ===== Integration — Timer =====
+  testTimerSleepAcceptsDuration =>
+    self assert: (Timer sleep: (Duration milliseconds: 1)) equals: nil
+    // Integer milliseconds stay supported
+    self assert: (Timer sleep: 1) equals: nil
+
+  testTimerAfterAcceptsDuration =>
+    t := Timer after: (Duration seconds: 10) do: []
+    self assert: t class equals: Timer
+    self assert: t isActive
+    self assert: t cancel
+
+  testTimerEveryAcceptsDuration =>
+    t := Timer every: (Duration seconds: 10) do: []
+    self assert: t class equals: Timer
+    self assert: t cancel
+
+  // ===== Integration — DateTime =====
+  testDateTimeAddDuration =>
+    dt := DateTime
+      year: 2026
+      month: 1
+      day: 1
+    self assert: (dt addDuration: (Duration hours: 1)) hour equals: 1
+    self assert: (dt addDuration: (Duration days: 7)) day equals: 8
+    // Sub-second milliseconds are truncated toward zero (second resolution)
+    self assert: (dt addDuration: (Duration milliseconds: 1999)) second equals: 1
+
+  testDateTimeSubtractionReturnsDuration =>
+    a := DateTime
+      year: 2026
+      month: 1
+      day: 2
+    b := DateTime
+      year: 2026
+      month: 1
+      day: 1
+    self assert: (a - b) class equals: Duration
+    self assert: (a - b) asHours equals: 24
+    self assert: (b - a) isNegative
+
+  // ===== Integration — Actor withTimeout: =====
+  testActorWithTimeoutAcceptsDuration =>
+    fixture := ActorChainingFixture spawn
+    proxy := fixture withTimeout: (Duration seconds: 30)
+    self assert: proxy getValue equals: 0
+    proxy stop
+    // Integer milliseconds stay supported
+    proxy2 := fixture withTimeout: 30000
+    self assert: proxy2 getValue equals: 0
+    proxy2 stop
+    fixture stop

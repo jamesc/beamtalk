@@ -53,8 +53,14 @@ to the canonical `'after:do:'/2` implementation.
 %%% Class Methods
 %%% ============================================================================
 
--doc "Evaluate `Block` once after `Ms` milliseconds. Returns a Timer.".
--spec 'after:do:'(integer(), Do :: function()) -> t().
+-doc """
+Evaluate `Block` once after the given delay. Returns a Timer.
+
+The delay is Integer milliseconds or a Duration.
+""".
+-spec 'after:do:'(integer() | beamtalk_duration:t(), Do :: function()) -> t().
+'after:do:'(#{'$beamtalk_class' := 'Duration'} = D, Block) ->
+    'after:do:'(beamtalk_duration:'asMilliseconds'(D), Block);
 'after:do:'(Ms, Block) when is_integer(Ms), Ms >= 0, is_function(Block, 0) ->
     Pid = spawn_link(fun() ->
         receive
@@ -71,31 +77,45 @@ to the canonical `'after:do:'/2` implementation.
     end),
     make_timer(Pid);
 'after:do:'(Ms, _Block) when is_integer(Ms) ->
-    raise_error('after:do:', <<"Duration must be a non-negative Integer">>);
+    raise_error('after:do:', <<"Delay must be a non-negative Integer or a non-negative Duration">>);
 'after:do:'(_Ms, Block) when is_function(Block, 0) ->
-    raise_error('after:do:', <<"Duration must be a non-negative Integer">>);
+    raise_error('after:do:', <<"Delay must be a non-negative Integer or a non-negative Duration">>);
 'after:do:'(_, _) ->
-    raise_error('after:do:', <<"Expected an Integer duration and a Block">>).
+    raise_error('after:do:', <<"Expected an Integer or Duration delay and a Block">>).
 
--doc "Evaluate `Block` every `Ms` milliseconds. Returns a Timer.".
--spec 'every:do:'(integer(), Do :: function()) -> t().
+-doc """
+Evaluate `Block` at the given repeat interval. Returns a Timer.
+
+The interval is Integer milliseconds or a Duration.
+""".
+-spec 'every:do:'(integer() | beamtalk_duration:t(), Do :: function()) -> t().
+'every:do:'(#{'$beamtalk_class' := 'Duration'} = D, Block) ->
+    'every:do:'(beamtalk_duration:'asMilliseconds'(D), Block);
 'every:do:'(Ms, Block) when is_integer(Ms), Ms > 0, is_function(Block, 0) ->
     Pid = spawn_link(fun() -> repeat_loop(Ms, Block) end),
     make_timer(Pid);
 'every:do:'(Ms, _Block) when is_integer(Ms) ->
-    raise_error('every:do:', <<"Duration must be a positive Integer">>);
+    raise_error('every:do:', <<"Interval must be a positive Integer or a positive Duration">>);
 'every:do:'(_Ms, Block) when is_function(Block, 0) ->
-    raise_error('every:do:', <<"Duration must be a positive Integer">>);
+    raise_error('every:do:', <<"Interval must be a positive Integer or a positive Duration">>);
 'every:do:'(_, _) ->
-    raise_error('every:do:', <<"Expected a positive Integer duration and a Block">>).
+    raise_error(
+        'every:do:', <<"Expected a positive Integer or a positive Duration interval and a Block">>
+    ).
 
--doc "Block the current process for `Ms` milliseconds.".
--spec 'sleep:'(integer()) -> 'nil'.
+-doc """
+Block the current process for the given delay.
+
+The delay is Integer milliseconds or a Duration.
+""".
+-spec 'sleep:'(integer() | beamtalk_duration:t()) -> 'nil'.
+'sleep:'(#{'$beamtalk_class' := 'Duration'} = D) ->
+    'sleep:'(beamtalk_duration:'asMilliseconds'(D));
 'sleep:'(Ms) when is_integer(Ms), Ms >= 0 ->
     timer:sleep(Ms),
     nil;
 'sleep:'(_) ->
-    raise_error('sleep:', <<"Duration must be a non-negative Integer">>).
+    raise_error('sleep:', <<"Delay must be a non-negative Integer or a non-negative Duration">>).
 
 %%% ============================================================================
 %%% Instance Methods
@@ -154,15 +174,15 @@ cancel(#{'$beamtalk_class' := 'Timer', pid := Pid}) ->
 %%% ============================================================================
 
 -doc "FFI shim: `(Erlang beamtalk_timer) after: ms do: block`".
--spec 'after'(integer(), Do :: function()) -> t().
+-spec 'after'(integer() | beamtalk_duration:t(), Do :: function()) -> t().
 'after'(Ms, Block) -> 'after:do:'(Ms, Block).
 
 -doc "FFI shim: `(Erlang beamtalk_timer) every: ms do: block`".
--spec every(integer(), Do :: function()) -> t().
+-spec every(integer() | beamtalk_duration:t(), Do :: function()) -> t().
 every(Ms, Block) -> 'every:do:'(Ms, Block).
 
 -doc "FFI shim: `(Erlang beamtalk_timer) sleep: ms`".
--spec sleep(integer()) -> 'nil'.
+-spec sleep(integer() | beamtalk_duration:t()) -> 'nil'.
 sleep(Ms) -> 'sleep:'(Ms).
 
 %%% ============================================================================

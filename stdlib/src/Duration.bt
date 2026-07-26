@@ -1,0 +1,268 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Duration — a span of time stored as total milliseconds (Integer).
+///
+/// Provides class-side constructors from milliseconds/seconds/minutes/hours/
+/// days, integer conversions, arithmetic, comparison, and formatting.
+/// Timeout-taking APIs (`Timer sleep:`, `Timer after:do:`, `Timer every:do:`,
+/// `Future await:`, `Actor withTimeout:`) accept a Duration anywhere they
+/// accept Integer milliseconds.
+///
+/// Constructors accept an Integer or a Float; Float inputs are scaled to
+/// milliseconds and rounded to the nearest integer, so `Duration seconds: 1.5`
+/// is exactly 1500 ms. Unit conversions (`asSeconds`, `asMinutes`, `asHours`,
+/// `totalDays`) return Integers truncated toward zero — exact Integer
+/// arithmetic for deadlines was chosen over Float results.
+///
+/// ## Examples
+/// ```beamtalk
+/// timeout := Duration seconds: 30
+/// timeout asMilliseconds                           // => 30000
+/// (Duration hours: 1) + (Duration minutes: 30)     // => 1h 30m
+/// (Duration minutes: 90) asString                  // => "PT1H30M"
+/// Timer sleep: (Duration milliseconds: 10)         // => nil
+/// ```
+sealed typed Value subclass: Duration native: beamtalk_duration
+
+  // ===== Class Methods — Construction =====
+
+  /// Use 'Duration milliseconds:', 'seconds:', 'minutes:', 'hours:', 'days:', or 'fromString:' to create a Duration.
+  class new: _ :: Object -> Nil =>
+    self error: "Use 'Duration milliseconds:', 'seconds:', 'minutes:', 'hours:', 'days:', or 'fromString:' to create a Duration"
+
+  /// Construct from milliseconds (Integer, or Float rounded to the nearest ms).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Duration milliseconds: 1500) asMilliseconds   // => 1500
+  /// ```
+  class sealed milliseconds: n :: Number -> Duration => self delegate
+
+  /// Construct from seconds (Integer, or Float rounded to the nearest ms).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Duration seconds: 90) asMilliseconds          // => 90000
+  /// (Duration seconds: 1.5) asMilliseconds         // => 1500
+  /// ```
+  class sealed seconds: n :: Number -> Duration => self delegate
+
+  /// Construct from minutes (Integer, or Float rounded to the nearest ms).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Duration minutes: 2) asSeconds                // => 120
+  /// ```
+  class sealed minutes: n :: Number -> Duration => self delegate
+
+  /// Construct from hours (Integer, or Float rounded to the nearest ms).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Duration hours: 2) asMinutes                  // => 120
+  /// ```
+  class sealed hours: n :: Number -> Duration => self delegate
+
+  /// Construct from days (Integer, or Float rounded to the nearest ms).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Duration days: 1) asHours                     // => 24
+  /// ```
+  class sealed days: n :: Number -> Duration => self delegate
+
+  /// Parse an ISO 8601 duration string (e.g. "PT1H30M", "P1DT2H", "PT0.250S").
+  ///
+  /// Accepts an optional leading "-" for negative durations. Round-trips with
+  /// `asString`. Weeks/months/years are not supported (calendar-dependent).
+  /// Fractional seconds need a leading digit before the decimal point
+  /// ("PT0.5S", not "PT.5S").
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Duration fromString: "PT1H30M") asMinutes     // => 90
+  /// (Duration fromString: "PT0.250S") asMilliseconds  // => 250
+  /// ```
+  class sealed fromString: str :: String -> Duration => self delegate
+
+  // ===== Instance Methods — Conversions =====
+
+  /// Total milliseconds (exact Integer).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Duration seconds: 2) asMilliseconds           // => 2000
+  /// ```
+  asMilliseconds -> Integer => self delegate
+
+  /// Total whole seconds (Integer, truncated toward zero).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Duration milliseconds: 1999) asSeconds        // => 1
+  /// ```
+  asSeconds -> Integer => self delegate
+
+  /// Total whole minutes (Integer, truncated toward zero).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Duration seconds: 119) asMinutes              // => 1
+  /// ```
+  asMinutes -> Integer => self delegate
+
+  /// Total whole hours (Integer, truncated toward zero).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Duration minutes: 90) asHours                 // => 1
+  /// ```
+  asHours -> Integer => self delegate
+
+  /// Total whole days (Integer, truncated toward zero).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Duration hours: 36) totalDays                 // => 1
+  /// ```
+  totalDays -> Integer => self delegate
+
+  // ===== Instance Methods — Predicates =====
+
+  /// True if this duration is exactly zero.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Duration seconds: 0) isZero                   // => true
+  /// (Duration seconds: 1) isZero                   // => false
+  /// ```
+  isZero -> Boolean => self delegate
+
+  /// True if this duration is negative.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Duration seconds: -1) isNegative              // => true
+  /// (Duration seconds: 1) isNegative               // => false
+  /// ```
+  isNegative -> Boolean => self delegate
+
+  // ===== Instance Methods — Formatting =====
+
+  /// ISO 8601 duration string (e.g. "PT1H30M"). Round-trips with `fromString:`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Duration minutes: 90) asString                // => "PT1H30M"
+  /// (Duration milliseconds: 250) asString          // => "PT0.250S"
+  /// ```
+  asString -> String => self delegate
+
+  /// Human-readable representation (e.g. "1h 30m 15s"); zero is "0ms".
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Duration seconds: 5415) printString           // => "1h 30m 15s"
+  /// (Duration milliseconds: 0) printString         // => "0ms"
+  /// ```
+  printString -> String => self delegate
+
+  // ===== Instance Methods — Arithmetic =====
+  //
+  // Operator selectors (`+`, `<`, …) are not valid Erlang function names, so
+  // these stay inline FFI (ADR 0101 / BT-2731) dispatching through the named
+  // shims `add`/`subtract`/`multiply`/`lt`/`gt`/`lte`/`gte`/`eql`/`sneq`/`neq`.
+
+  /// Sum of two Durations.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((Duration hours: 1) + (Duration minutes: 30)) asMinutes  // => 90
+  /// ```
+  + other :: Duration -> Duration =>
+    (Erlang beamtalk_duration) add: self with: other
+
+  /// Difference of two Durations (may be negative).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((Duration hours: 1) - (Duration minutes: 30)) asMinutes  // => 30
+  /// ```
+  - other :: Duration -> Duration =>
+    (Erlang beamtalk_duration) subtract: self with: other
+
+  /// Scale this Duration by an Integer or Float scalar (Float rounds to ms).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((Duration minutes: 10) * 3) asMinutes         // => 30
+  /// ((Duration seconds: 10) * 1.5) asSeconds       // => 15
+  /// ```
+  * scalar :: Number -> Duration =>
+    (Erlang beamtalk_duration) multiply: self with: scalar
+
+  // ===== Instance Methods — Comparison =====
+
+  /// True if this Duration is shorter than `other`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Duration seconds: 1) < (Duration seconds: 2)  // => true
+  /// ```
+  < other :: Duration -> Boolean =>
+    (Erlang beamtalk_duration) lt: self with: other
+
+  /// True if this Duration is longer than `other`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Duration seconds: 2) > (Duration seconds: 1)  // => true
+  /// ```
+  > other :: Duration -> Boolean =>
+    (Erlang beamtalk_duration) gt: self with: other
+
+  /// True if this Duration is shorter than or equal to `other`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Duration seconds: 1) <= (Duration seconds: 1)  // => true
+  /// ```
+  <= other :: Duration -> Boolean =>
+    (Erlang beamtalk_duration) lte: self with: other
+
+  /// True if this Duration is longer than or equal to `other`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Duration seconds: 2) >= (Duration seconds: 1)  // => true
+  /// ```
+  >= other :: Duration -> Boolean =>
+    (Erlang beamtalk_duration) gte: self with: other
+
+  /// True if this Duration is exactly the same length as `other`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Duration seconds: 60) =:= (Duration minutes: 1)  // => true
+  /// ```
+  =:= other :: Duration -> Boolean =>
+    (Erlang beamtalk_duration) eql: self with: other
+
+  /// True if this Duration is not strictly equal to `other`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Duration seconds: 1) =/= (Duration seconds: 2)  // => true
+  /// ```
+  =/= other :: Duration -> Boolean =>
+    (Erlang beamtalk_duration) sneq: self with: other
+
+  /// True if this Duration differs in length from `other`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Duration seconds: 1) /= (Duration seconds: 2)  // => true
+  /// ```
+  /= other :: Duration -> Boolean =>
+    (Erlang beamtalk_duration) neq: self with: other

@@ -136,6 +136,18 @@ sealed typed Value subclass: DateTime native: beamtalk_datetime
   /// ```
   addDays: days :: Integer -> DateTime => self delegate
 
+  /// Add a Duration, return a new DateTime.
+  ///
+  /// DateTime has second resolution; any sub-second milliseconds in the
+  /// Duration are truncated toward zero.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (DateTime year: 2026 month: 1 day: 1) addDuration: (Duration hours: 1)
+  /// // => DateTime(2026-01-01T01:00:00Z)
+  /// ```
+  addDuration: d :: Duration -> DateTime => self delegate
+
   /// Difference in seconds between this and another DateTime.
   ///
   /// ## Examples
@@ -145,6 +157,22 @@ sealed typed Value subclass: DateTime native: beamtalk_datetime
   /// a diffSeconds: b                               // => 86400
   /// ```
   diffSeconds: other :: DateTime -> Integer => self delegate
+
+  /// Difference between this and another DateTime as a Duration.
+  ///
+  /// Positive when this DateTime is later than `other`. Stays inline FFI
+  /// (not `self delegate`, ADR 0101 / BT-2731): an operator selector is not
+  /// a valid Erlang function name, so it dispatches through the `subtract`
+  /// shim.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// a := DateTime year: 2026 month: 1 day: 2
+  /// b := DateTime year: 2026 month: 1 day: 1
+  /// (a - b) asHours                                // => 24
+  /// ```
+  - other :: DateTime -> Duration =>
+    (Erlang beamtalk_datetime) subtract: self with: other
 
   // ===== Instance Methods — Comparison =====
   //
