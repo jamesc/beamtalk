@@ -109,6 +109,20 @@ defmodule BtAttachWeb.StubWorkspaceClient do
 
   def connect, do: :ok
 
+  # ADR 0097: the desktop-attach `/readiness` handshake target. A canned
+  # "always reachable" report — tests exercising the failure taxonomy
+  # (`readiness_controller_test.exs`) use their own small fake clients instead
+  # of this shared stub, since they need to drive distinct error reasons.
+  def readiness do
+    {:ok,
+     %{
+       runtime_version: "stub",
+       protocol_version: "2.0",
+       otp_release: "stub",
+       erts_version: "stub"
+     }}
+  end
+
   def start_session(_session_id, _meta) do
     # Returns a stub pid. Safe only when the caller uses a nil token, which
     # short-circuits SessionRegistry.register/3 before any monitor is set up.
