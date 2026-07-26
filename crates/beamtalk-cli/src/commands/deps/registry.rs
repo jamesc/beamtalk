@@ -534,6 +534,49 @@ pub fn resolve_release(
     );
 }
 
+/// Resolve a package name to its highest published release.
+///
+/// Used by `deps add NAME` when no `--version` is given. Follows the same
+/// miss-then-refresh-retry policy as [`resolve_release`]: the index already on
+/// disk is tried first, and only refreshed once — on a miss — before failing.
+///
+/// # Errors
+///
+/// Returns an error if the index is unavailable, the package has no entry, or
+/// the package has no published releases. The error lists what packages the
+/// index does have.
+pub fn resolve_latest_release(
+    project_root: &Utf8Path,
+    location: &RegistryLocation,
+    name: &str,
+) -> Result<RegistryRelease> {
+    let index_root = ensure_index(location, project_root, false)?;
+    if let Some(entry) = read_entry(&index_root, name)? {
+        if let Some(release) = entry.latest_version() {
+            return Ok(release.clone());
+        }
+    }
+
+    // Miss — refresh the index once and retry before failing.
+    debug!(name, "Registry lookup miss, refreshing index and retrying");
+    let index_root = ensure_index(location, project_root, true)?;
+    let entry = read_entry(&index_root, name)?;
+
+    let Some(entry) = entry else {
+        miette::bail!(
+            "Package '{name}' was not found in the registry ({location}).\n\n  \
+             {}\n\n  \
+             Check the spelling, or declare it as a git dependency:\n    \
+             {name} = {{ git = \"https://...\", tag = \"v1.0.0\" }}",
+            describe_available_packages(&index_root)
+        );
+    };
+
+    entry.latest_version().cloned().ok_or_else(|| {
+        miette::miette!("Package '{name}' has no published versions in the registry ({location}).")
+    })
+}
+
 /// Describe which packages the index does contain, for a not-found error.
 fn describe_available_packages(index_root: &Utf8Path) -> String {
     let mut names = Vec::new();
@@ -1064,5 +1107,53 @@ git = "g"
             msg.contains("The latest version is 0.2.1"),
             "should suggest the latest: {msg}"
         );
+    }
+
+    // ── resolve_latest_release ─────────────────────────────────────────
+
+    #[test]
+    fn test_resolve_latest_release_hit() {
+        let (_dir, root) = make_index(&[("yaml", YAML_ENTRY)]);
+        let project = TempDir::new().unwrap();
+        let location = RegistryLocation::LocalDir(root);
+
+        let release = resolve_latest_release(&utf8(&project), &location, "yaml").unwrap();
+        assert_eq!(release.version, "0.2.1");
+        assert_eq!(release.tag, "release-0.2.1");
+    }
+
+    #[test]
+    fn test_resolve_latest_release_unknown_package_lists_available() {
+        let (_dir, root) = make_index(&[("yaml", YAML_ENTRY)]);
+        let project = TempDir::new().unwrap();
+        let location = RegistryLocation::LocalDir(root);
+
+        let err = resolve_latest_release(&utf8(&project), &location, "json").unwrap_err();
+        let msg = flat_err(&err);
+        assert!(msg.contains("not found in the registry"), "{msg}");
+        assert!(
+            msg.contains("yaml"),
+            "should list available packages: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_resolve_latest_release_no_published_versions() {
+        let (_dir, root) = make_index(&[("empty", "name = \"empty\"\n")]);
+        let project = TempDir::new().unwrap();
+        let location = RegistryLocation::LocalDir(root);
+
+        let err = resolve_latest_release(&utf8(&project), &location, "empty").unwrap_err();
+        assert!(flat_err(&err).contains("no published versions"), "{err:?}");
+    }
+
+    #[test]
+    fn test_resolve_latest_release_through_git_registry() {
+        let (_repo, url) = make_git_index(&[("yaml", YAML_ENTRY)]);
+        let project = TempDir::new().unwrap();
+        let location = RegistryLocation::Git(url);
+
+        let release = resolve_latest_release(&utf8(&project), &location, "yaml").unwrap();
+        assert_eq!(release.version, "0.2.1");
     }
 }

@@ -242,7 +242,17 @@ fn validate_dependency(name: &str, dep: &TomlDependency) -> Result<DependencySpe
 /// Registry dependencies pin an exact `major.minor.patch` version — version
 /// ranges are deliberately not supported, so the resolved graph is always
 /// reproducible without a constraint solver.
-fn validate_registry_dependency(name: &str, version: &str) -> Result<DependencySpec> {
+///
+/// `pub` (rather than crate-private) so `deps add --version` (BT-2979, in the
+/// `beamtalk` binary crate that depends on this lib crate) can validate a
+/// user-supplied version up front, with the identical error a manual
+/// `beamtalk.toml` edit would get, before touching the registry index.
+///
+/// # Errors
+///
+/// Returns an error if `name` is not a valid package name, or `version` is
+/// not an exact `major.minor.patch` version.
+pub fn validate_registry_dependency(name: &str, version: &str) -> Result<DependencySpec> {
     if let Err(e) = validate_package_name(name) {
         miette::bail!(
             "Invalid dependency name '{name}': {}",
