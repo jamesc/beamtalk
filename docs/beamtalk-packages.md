@@ -210,7 +210,7 @@ description = "One-line description of the package"
 [[versions]]
 version = "0.1.0"
 git = "https://github.com/<owner>/beamtalk-<name>"
-tag = "v0.1.0"   # optional — defaults to "v{version}"
+tag = "v0.1.0"   # optional — defaults to "v" + the version field (e.g. "v0.1.0")
 ```
 
 A package with multiple published releases simply has more `[[versions]]` blocks, oldest first:
@@ -306,6 +306,8 @@ beamtalk version bump major    # 1.2.3 -> 2.0.0
 ```bash
 beamtalk publish --dry-run     # print what would happen without tagging, pushing, or writing anything
 ```
+
+**If step 3 fails** (push conflict, permission denied, network error), the tag from step 2 is already live on `origin`. `beamtalk publish` prints a recovery message pointing at the index clone in `_build/registry/index/` — run `git push` from there once the issue is resolved. Do **not** re-run `beamtalk publish` or bump the version: the tag already exists, so a retry reports "already published" and suggests bumping, which would silently skip the release you just tagged.
 
 A registry dependency and the package it names always agree on which registry is authoritative — `beamtalk publish` resolves the target registry through the exact same `BEAMTALK_REGISTRY` → `[registry] url` → default chain that consuming a registry dependency does, using the *library's own* `beamtalk.toml`.
 
