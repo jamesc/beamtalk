@@ -23,9 +23,11 @@ get_returns_expected_keys_test() ->
         lists:sort(maps:keys(Report))
     ).
 
-get_protocol_version_matches_describe_op_test() ->
-    %% Mirrors the "protocol" literal in
-    %% beamtalk_repl_ops_dev:handle_term(<<"describe">>, ...) — BT-2091.
+%% Not a cross-module guarantee: beamtalk_runtime cannot depend on
+%% beamtalk_workspace (dependencies flow down only), so this only pins the
+%% literal in beamtalk_version itself. Keeping the two literals in sync when
+%% the wire protocol changes is a manual step (see the module doc).
+get_protocol_version_is_expected_literal_test() ->
     #{protocol_version := Vsn} = beamtalk_version:get(),
     ?assertEqual(<<"2.0">>, Vsn).
 
