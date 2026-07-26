@@ -245,7 +245,9 @@ This generates the corresponding `{hex, [{repos, [...]}]}` section in the rebar.
 
 **Why per-project, not global config?** Projects must be self-contained — cloning a repo must be enough to build it. Global config may be added later for auth tokens only.
 
-#### Resolution priority
+#### Resolution priority — original design, not what shipped
+
+> **Describes the original Phase 2 plan, not the shipped registry.** The shipped registry resolves exact versions only (no `~>` ranges) through a self-hosted git index (not hex.pm), and pins a git commit SHA in the lockfile (no checksum). See "Amendment (2026-07-26)" above and [`docs/beamtalk-packages.md` § Package Registry](../beamtalk-packages.md#package-registry) for the actual behaviour.
 
 When resolving a Beamtalk package dependency:
 1. **Path** — `{ path = "..." }` resolves to the local filesystem
