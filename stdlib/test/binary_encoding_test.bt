@@ -33,6 +33,11 @@ TestCase subclass: BinaryEncodingTest
     self assert: (Binary fromBase64: "not valid base64!!") isError
     self assert: (Binary fromBase64: "a") isError
 
+  testFromBase64RejectsUrlSafeAlphabet =>
+    // "--8=" is the url-safe encoding of #(251, 239); the standard decoder
+    // must reject its '-' characters rather than accept them.
+    self assert: (Binary fromBase64: "--8=") isError
+
   // ===== asBase64Url / fromBase64Url: =====
   testAsBase64UrlUsesUrlSafeAlphabet =>
     // Bytes chosen so the standard alphabet needs `+`; url-safe uses `-`.
@@ -46,6 +51,11 @@ TestCase subclass: BinaryEncodingTest
 
   testFromBase64UrlIsErrorOnMalformedInput =>
     self assert: (Binary fromBase64Url: "not valid!!") isError
+
+  testFromBase64UrlRejectsStandardAlphabet =>
+    // "++8=" is the standard encoding of #(251, 239); the url-safe decoder
+    // must reject its '+' characters rather than accept them.
+    self assert: (Binary fromBase64Url: "++8=") isError
 
   // ===== asHex / fromHex: =====
   testAsHexLowercase => self assert: "hello" asHex equals: "68656c6c6f"

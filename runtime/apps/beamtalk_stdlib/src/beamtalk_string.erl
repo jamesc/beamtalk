@@ -373,12 +373,36 @@ urlEncoded(Str) when is_binary(Str) ->
 urlEncoded(_) ->
     beamtalk_error:raise_type_error('String', 'urlEncoded', <<"Receiver must be a String">>).
 
--doc "Decode a percent-encoded string via `uri_string:unquote/1`.".
+-doc """
+Decode a percent-encoded string via `uri_string:unquote/1`.
+
+Raises a structured `parse_error` when a `%` is followed by two characters
+that aren't both valid hex digits (e.g. `%ZZ`, `%G0`) — `uri_string:unquote/1`
+throws `{error, invalid_percent_encoding, Input}` in that case rather than
+returning a value. A truncated escape at the end of the string (`%2`, or a
+bare trailing `%`) is left unchanged rather than rejected — that leniency
+comes from `uri_string:unquote/1` itself, not this wrapper.
+""".
 -spec urlDecoded(binary()) -> binary().
 urlDecoded(Str) when is_binary(Str) ->
-    uri_string:unquote(Str);
+    try
+        uri_string:unquote(Str)
+    catch
+        throw:{error, _Reason, _Input} ->
+            raise_url_decode_error()
+    end;
 urlDecoded(_) ->
     beamtalk_error:raise_type_error('String', 'urlDecoded', <<"Receiver must be a String">>).
+
+-spec raise_url_decode_error() -> no_return().
+raise_url_decode_error() ->
+    Error0 = beamtalk_error:new(parse_error, 'String'),
+    Error1 = beamtalk_error:with_selector(Error0, 'urlDecoded'),
+    Error2 = beamtalk_error:with_hint(
+        Error1,
+        <<"Malformed percent-encoding — a '%' must be followed by two hex digits">>
+    ),
+    beamtalk_error:raise(Error2).
 
 %%% ============================================================================
 %%% Internal Functions

@@ -28,6 +28,18 @@ TestCase subclass: StringUrlEncodingTest
 
   testUrlDecodedEmptyString => self assert: "" urlDecoded equals: ""
 
+  testUrlDecodedRaisesOnMalformedEscape =>
+    self should: ["%ZZ" urlDecoded] raise: #parse_error
+    self should: ["abc%G0def" urlDecoded] raise: #parse_error
+
+  testUrlDecodedLeavesTruncatedEscapeUnchanged =>
+    // A '%' with fewer than two hex digits following (including none) is
+    // passed through as a literal by uri_string:unquote/1, not rejected —
+    // only a '%' followed by two characters that aren't both valid hex
+    // digits raises.
+    self assert: "abc%2" urlDecoded equals: "abc%2"
+    self assert: "abc%" urlDecoded equals: "abc%"
+
   // ===== Round trip =====
   testUrlEncodedDecodedRoundTrip =>
     original := "hello world/foo?bar=baz&x=1 2 3"
