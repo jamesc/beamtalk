@@ -14,8 +14,8 @@ TestCase subclass: ActorCoordinationTest
     self.bus := EventBus spawn
 
   tearDown =>
-    self.col isNil ifFalse: [self.col stop]
     self.bus isNil ifFalse: [self.bus stop]
+    self.col isNil ifFalse: [self.col stop]
 
   testSyncEventDelivery =>
     col := self.col
