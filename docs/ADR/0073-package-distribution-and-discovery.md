@@ -1,7 +1,40 @@
 # ADR 0073: Package Distribution and Discovery
 
 ## Status
-Implemented (Phase 1, 2026-03-31)
+Implemented (Phase 1, 2026-03-31). Phase 2 implemented in simplified form, 2026-07-26 — the design that shipped differs from the Phase 2 design this ADR originally specified; see "Amendment (2026-07-26)" below. The original Phase 2 design (hex-compatible static registry, PubGrub) is retained in the Decision section for reference but is **not** what was built — treat it as a possible future direction, not the current plan.
+
+## Amendment (2026-07-26): Phase 2 Shipped in Simplified Form
+
+The library registry epic (BT-2977) shipped a working package registry — BT-2978 (registry-dependency resolution), BT-2979 (`deps add`/`deps list`/`deps update` registry support), BT-2980 (`beamtalk version`/`beamtalk publish`), BT-2981 (user docs). It does not follow the Phase 2 design specified below. Found and recorded via BT-2995.
+
+### What shipped vs. what this ADR specified
+
+| This ADR specified (Phase 2, original) | What shipped |
+| --- | --- |
+| `[repos]` top-level section, shared with native hex deps (explicitly *not* a per-project registry URL) | `[registry] url` — a single URL, Beamtalk-package-only; native hex deps under `[native.dependencies]` are untouched by it |
+| Hex-compatible static registry: protobuf index (`names`, `versions`, `packages/<name>`), signed, serving tarballs | A directory of TOML files (`packages/<name>.toml`) in a plain git repo (or a local directory for CI/air-gapped use) — no tarballs, no signing, no protobuf |
+| Version ranges (`http = "~> 0.1"`) resolved by a **PubGrub** solver (`pubgrub` crate) | Exact `major.minor.patch` only (`yaml = "0.2.1"`) — no ranges, no solver of any kind |
+| Distinct lockfile entry kind: `source = "registry"`, `registry = "beamtalk"`, `version`, `checksum = "sha256:..."` | The existing git `[[package]]` entry (`url`, `reference`, `sha` — the *commit* SHA) gains one optional `version` field recording the requested registry version; there is no separate entry kind and no package-content checksum |
+| `beamtalk package build --tarball`, `beamtalk package registry build`, `beamtalk package retire` | `beamtalk publish` — tags the package's own repo and appends a `[[versions]]` block to the index; no tarball is ever built, nothing is retired/yanked |
+
+A registry dependency resolves through the index into a `(git url, tag)` pair that then flows through the **existing git-dependency machinery unchanged** — cloned into `_build/deps/`, pinned to a commit SHA in `beamtalk.lock`, exactly like a hand-written `{ git = ..., tag = ... }` entry. The registry adds *indexing* (name/version → repo/tag) in front of Phase 1's git deps; it does not add a second distribution mechanism alongside them. See `crates/beamtalk-cli/src/commands/deps/registry.rs` (index resolution and lookup) and `crates/beamtalk-cli/src/commands/publish.rs` (`beamtalk publish`) for the implementation, and [`docs/beamtalk-packages.md` § Package Registry](../beamtalk-packages.md#package-registry) for the user-facing design and index format.
+
+### Why the simpler design
+
+- **The ecosystem still has ~1-2 packages and one publisher.** A PubGrub solver, protobuf index, and tarball signing pipeline solve problems (constraint conflicts across many independently-versioned packages, tamper-evident distribution at scale) that do not exist yet at this scale — the same "infrastructure proportional to actual need" reasoning this ADR already applies to the Phase 1 vs. Phase 2 boundary, applied one step further down.
+- **Zero new distribution mechanism.** Phase 1 (git deps) already does the hard part — clone, pin, compile. The registry is *only* a lookup table (`(name, version) -> (git url, tag)`); it reuses the git-clone path Phase 1 built rather than introducing tarballs, a second fetch code path, or a second thing to keep working. This is a smaller step than "Phase 1 → Phase 2" as originally specified, not an implementation of that step.
+- **No signing keypair or protobuf tooling to build or operate.** The original Phase 2 estimated ~600–1000 LOC of Rust (tarball creation, protobuf registry generation, RSA signing) plus registry hosting infrastructure. None of it is needed to answer "where do I find package X" with a git repo of TOML files.
+
+### What this defers or leaves open
+
+- **No integrity checksum on the fetched content.** The lockfile pins a git commit SHA, but nothing yet *enforces* that a fresh clone of a dependency actually lands on that recorded SHA before it is compiled and used — see BT-2992. The original Phase 2 design's `checksum = "sha256:..."` on a hex tarball would have closed this gap structurally (the tarball itself is hashed and verified); the shipped design has no equivalent yet. This is the most concrete cost of the simpler design and the most likely near-term follow-up.
+- **Whether version ranges are ever supported is now an open question, not a settled plan.** The original Phase 2 committed to `~> 0.1`-style ranges via PubGrub. Nothing in the shipped design blocks introducing that later — a version-range string is a natural extension of the existing `name = "X.Y.Z"` manifest position — but it is speculative future work, not a phase already decided on. Track separately if/when it becomes worth doing.
+- **Migration path to a hex-compatible registry: not dropped, but not planned.** The rest of "Phase 2: Hex-Compatible Registry" below (protobuf index, signing, tarballs, PubGrub) remains a *possible* future direction if the ecosystem grows enough to need version-range solving or tamper-evident distribution (many packages, external maintainers, native hex-dep version conflicts becoming frequent — see the "Native dep version conflicts" paragraph below, which is unaffected by this amendment and still describes the current `[native.dependencies]`/rebar3 behaviour). The migration would be additive, not a rewrite: the current TOML-index format already tolerates unknown keys, so a `checksum` or `yanked` field could be added to `packages/<name>.toml` without breaking older `beamtalk` binaries reading it, and a PubGrub-based resolver could be introduced behind the same `name = "X.Y.Z"` manifest syntax by generalising it to accept ranges. What is genuinely open is whether that migration is ever worth doing, not whether it is possible.
+- **`beamtalk package retire`/`unretire` and native-registry sharing (`[repos]`) were not built.** A published version cannot currently be marked bad; the only recourse is publishing a new version and telling consumers not to use the old one out of band.
+
+### Relationship to ADR 0070's deferred alternative
+
+[ADR 0070](0070-package-namespaces-and-dependencies.md) deferred (not rejected) an "Alternative: Registry-Based Dependencies (Hex.pm)" — `json = "1.0"` resolving through hex.pm — pending "ecosystem maturity: published packages, version policies, a publishing workflow." What shipped here is a minimal instance of that alternative: it provides published packages (via `beamtalk publish`) and a publishing workflow, using the same `name = "X.Y.Z"` manifest syntax ADR 0070 sketched. It does **not** provide "version policies" in the sense ADR 0070 meant — there is no semver-range resolution, and the registry is self-hosted rather than hex.pm. ADR 0070's deferral is therefore only partially resolved: registry-based dependencies now exist, but the version-policy and hex.pm-hosting pieces it deferred remain deferred, tracked as open questions above rather than as a committed next phase.
 
 ## Context
 
@@ -65,7 +98,9 @@ GitHub Releases provide a landing page for each version with release notes. The 
 - Compiler regressions that break extracted packages are not caught by the main repo's CI — requires cross-repo CI or periodic integration testing
 - Test migration: BUnit/e2e tests that exercise extracted classes must move to the new repo or the main repo must add a git dep on the extracted package
 
-#### Phase 2: Hex-Compatible Registry (When External Users Arrive)
+#### Phase 2: Hex-Compatible Registry (When External Users Arrive) — original design, not what shipped
+
+> **This section describes the original Phase 2 plan as first written. A simpler registry actually shipped in 2026-07 (BT-2977–2981) — see "Amendment (2026-07-26)" above for what was built and why. The design below is retained as a possible future direction, not the current plan.**
 
 When the ecosystem has external contributors or enough packages that version constraint solving matters, add a **hex-compatible static registry**. This is a set of static files (protobuf index + tarballs) served from any HTTP endpoint — S3, GitHub Pages, or any static host.
 
@@ -192,7 +227,9 @@ cowboy = "~> 2.12"                                          # public hex.pm
 beamtalk_http_native = { version = "~> 0.1", repo = "beamtalk" }  # private repo
 ```
 
-#### Registry declaration: `[repos]`
+#### Registry declaration: `[repos]` — original design, not what shipped
+
+> **Not implemented.** What shipped is a single `[registry] url` key that only affects Beamtalk-package registry deps — see "Amendment (2026-07-26)" above and [`docs/beamtalk-packages.md` § Package Registry](../beamtalk-packages.md#package-registry). `[native.dependencies]` and rebar3's hex repos are untouched by it.
 
 Private hex repos are declared in a top-level `[repos]` section (Phase 2+). This section serves both Beamtalk package deps and native hex deps — the registry infrastructure is shared.
 
@@ -217,7 +254,9 @@ When resolving a Beamtalk package dependency:
 
 Path deps take absolute priority (development override). Git deps are pinned by lockfile with commit SHA. Registry deps are pinned by lockfile with version + checksum.
 
-#### Lockfile format for registry deps
+#### Lockfile format for registry deps — original design, not what shipped
+
+> **Not implemented.** What shipped adds a single optional `version` field to the existing git `[[package]]` entry instead of a new entry kind — see "Amendment (2026-07-26)" above. There is no `source` field, no `registry` field, and no `checksum` field; `sha` remains the resolved git commit SHA, not a package-content hash.
 
 ADR 0070's lockfile uses `[[package]]` entries with `url`, `reference`, and `sha` fields (designed for git sources). Registry deps (Phase 2+) add a new entry kind:
 
@@ -252,7 +291,9 @@ MCP already discovers corpora from the `_build/` tree (implemented in `crates/be
 
 Searching a registry for packages by class name, method selector, or protocol conformance requires server-side metadata indexing. This is not possible with a static hex registry — it would require a custom registry with a search API or a separate search index (analogous to docs.rs for Rust). Deferred until the ecosystem warrants it.
 
-### 4. CLI Surface
+### 4. CLI Surface — original design; `beamtalk publish` shipped in simplified form
+
+> **What shipped:** `beamtalk publish` (BT-2980) — tags the current repo and appends an entry to the registry index, with no tarball step. `package build --tarball`, `package registry build`, and `package retire`/`unretire` below were not built (see "Amendment (2026-07-26)" above). `beamtalk version` (also BT-2980) is a manifest-version bump helper not originally listed here.
 
 ```bash
 # Phase 1: Build the package (compile + test)
@@ -392,27 +433,33 @@ Use `__beamtalk_meta/0` function exports as the sole source of API metadata. MCP
 
 ## Consequences
 
+> The Positive/Negative/Neutral bullets below are as originally written for the three-phase design; bullets referring to the original Phase 2 (hex-compatible registry, `[repos]`, PubGrub) describe a design that was not built. See "Amendment (2026-07-26)" above for consequences of what actually shipped, summarised in the amendment-specific bullets appended to Negative and Neutral below.
+
 ### Positive
 - Phase 1 requires zero new infrastructure — git deps work today
-- Hex-compatible tarball format (Phase 2) means rebar3, mix, and existing hex tooling work out of the box
+- Hex-compatible tarball format (Phase 2, original design — not what shipped) means rebar3, mix, and existing hex tooling work out of the box
 - Three-phase strategy matches infrastructure investment to actual ecosystem size
 - `class_corpus.json` generated on build gives MCP/LSP API visibility — no new infrastructure needed
-- Per-project `[repos]` keeps projects self-contained and reproducible
+- Per-project `[repos]` (original design — not what shipped; see Amendment) keeps projects self-contained and reproducible
 - Gleam has proven hex.pm accepts non-Elixir build tools — Phase 3 path is validated
-- Pure Rust tooling (Phase 2) — no Elixir/Mix dependency for publishing
+- Pure Rust tooling (Phase 2, original design — not what shipped) — no Elixir/Mix dependency for publishing
+- **(Shipped, 2026-07-26)** The registry that actually shipped needed none of Phase 2's tooling investment — indexing is a lookup table in front of Phase 1's already-working git-dependency machinery
 
 ### Negative
 - Phase 1 has no version constraint solving — consumers pin exact versions via git tags
 - Phase 1 has no package discoverability — consumers need to know the git URL
 - Phase 1 splits CI: compiler regressions that break extracted packages are not caught by the main repo's CI without cross-repo integration testing
-- Phase 2 requires ~600 lines of Rust tooling and registry hosting infrastructure
+- Phase 2 (original design — not what shipped) would have required ~600 lines of Rust tooling and registry hosting infrastructure
 - Phase 3 depends on hex.pm accepting `build_tools = ["beamtalk"]` — third-party dependency, though low-risk
 - Remote package search is not possible until a custom search index is built (deferred)
+- **(Shipped, 2026-07-26)** No integrity checksum on fetched dependency content — the locked git commit SHA is not currently enforced on a fresh clone (BT-2992), a gap the original Phase 2 tarball checksum would have closed
+- **(Shipped, 2026-07-26)** No version-range support of any kind — every registry dependency pins one exact version; whether ranges are ever added is an open question, not a planned phase
+- **(Shipped, 2026-07-26)** A future move to a hex-compatible registry is a real lockfile migration, not a superset: today's lockfile records a commit SHA per registry dependency, not a package checksum, so adopting the original Phase 2 lockfile shape (`source`, `registry`, `checksum`) would be a third lockfile entry kind to support or migrate, alongside plain-git and today's registry-git entries
 
 ### Neutral
-- Tarball format (Phase 2+) is the same whether served from static registry or hex.pm
+- Tarball format (Phase 2+, original design — not what shipped) is the same whether served from static registry or hex.pm
 - The existing `corpus.json` (example corpus) and `class_corpus.json` (class API corpus) remain separate concerns
-- Lockfile format extends additively with `source = "registry"` entries (Phase 2+)
+- Lockfile format extends additively with `source = "registry"` entries (Phase 2+, original design — not what shipped; see Amendment for the entry shape that actually shipped)
 
 ## Implementation
 
@@ -425,7 +472,10 @@ Use `__beamtalk_meta/0` function exports as the sole source of API metadata. MCP
 6. Verify full fetch/compile/test cycle works from a clean checkout
 7. Add cross-repo CI: main repo periodically builds against latest tagged HTTP package
 
-### Phase 2: Hex-Compatible Registry (When Needed)
+### Phase 2: Hex-Compatible Registry (When Needed) — original plan, not what shipped
+
+> Steps 8–16 below were the original Phase 2 plan and were **not built**. What shipped instead (BT-2977–2981, 2026-07-26) is listed after this list — see "Amendment (2026-07-26)" above for the full comparison.
+
 8. `beamtalk package build --tarball` — pure Rust tarball creation (reference: Gleam's `publish.rs`)
 9. `beamtalk package registry build` — pure Rust static registry generation (`prost`, `rsa`/`ring`)
 10. `[repos]` section in manifest parser
@@ -435,6 +485,15 @@ Use `__beamtalk_meta/0` function exports as the sole source of API metadata. MCP
 14. Lockfile extension with `source = "registry"` entries
 15. `beamtalk package retire` / `beamtalk package unretire`
 16. Set up static registry hosting
+
+### Registry, as shipped (BT-2977–2981, 2026-07-26)
+
+8'. `[registry] url` in the manifest parser, resolved with `BEAMTALK_REGISTRY` env → manifest → default priority (`crates/beamtalk-cli/src/manifest.rs`, `crates/beamtalk-cli/src/commands/deps/registry.rs`)
+9'. Registry index resolution and lookup: a git-or-local-directory index of `packages/<name>.toml` files, `(name, exact version) -> (git url, tag)` (`registry.rs`)
+10'. `deps add`/`deps list`/`deps update` extended to resolve and re-resolve registry dependencies through the index (BT-2979)
+11'. `beamtalk.lock`'s existing git `[[package]]` entry gains an optional `version` field (`crates/beamtalk-cli/src/commands/deps/lockfile.rs`)
+12'. `beamtalk version` (manifest version bump helper) and `beamtalk publish` (tag + push + append/create the index entry) (BT-2980, `crates/beamtalk-cli/src/commands/publish.rs`)
+13'. User docs: `docs/beamtalk-packages.md` § Package Registry (BT-2981)
 
 ### Phase 3: hex.pm (When APIs Stabilise)
 17. `beamtalk package publish` with hex.pm API integration (via `hexpm` Rust crate)
@@ -450,32 +509,43 @@ Use `__beamtalk_meta/0` function exports as the sole source of API metadata. MCP
 | Component | Phase | Changes |
 |-----------|-------|---------|
 | `packages/http` | 1 | Extract to `jamesc/beamtalk-http` |
-| `crates/beamtalk-cli/src/commands/manifest.rs` | 2 | Parse `[repos]`, table-form native deps with `repo` field |
-| `crates/beamtalk-cli/src/commands/build.rs` | 2 | Generate `{hex, [{repos, ...}]}` in rebar.config |
-| `crates/beamtalk-cli/src/commands/package.rs` (new) | 2 | `package build --tarball`, `package registry build`, `package retire` |
-| `crates/beamtalk-cli/src/commands/deps/` | 2 | PubGrub-based resolution (`pubgrub` crate), lockfile extension |
+| `crates/beamtalk-cli/src/commands/manifest.rs` | 2 (original plan — not built) | Parse `[repos]`, table-form native deps with `repo` field |
+| `crates/beamtalk-cli/src/commands/build.rs` | 2 (original plan — not built) | Generate `{hex, [{repos, ...}]}` in rebar.config |
+| `crates/beamtalk-cli/src/commands/package.rs` (new) | 2 (original plan — not built) | `package build --tarball`, `package registry build`, `package retire` |
+| `crates/beamtalk-cli/src/commands/deps/` | 2 (original plan — not built) | PubGrub-based resolution (`pubgrub` crate), lockfile extension |
 | `crates/beamtalk-mcp/src/server.rs` | — | Already handles dependency corpora — no changes needed |
+| `crates/beamtalk-cli/src/manifest.rs` | 2, as shipped | `RegistryConfig` — parses `[registry] url` |
+| `crates/beamtalk-cli/src/commands/deps/registry.rs` (new) | 2, as shipped | Registry index location resolution, clone/refresh, lookup |
+| `crates/beamtalk-cli/src/commands/publish.rs` (new) | 2, as shipped | `beamtalk publish` — tag, push, update index entry |
+| `crates/beamtalk-cli/src/commands/deps/lockfile.rs` | 2, as shipped | `LockEntry.registry_version` — additive `version` field on the existing git entry |
 
 ## Migration Path
 
 Each phase adds new capabilities. The tooling is backwards-compatible, but **consumers of first-party packages must update their `beamtalk.toml`** when packages migrate between distribution phases:
 
 - **Phase 1:** Consumers of extracted packages change from `http = { path = "../packages/http" }` to `http = { git = "...", tag = "v0.1.0" }`. Path deps for local development (via `beamtalk deps add --path`) remain available as overrides.
-- **Phase 2:** Consumers change from git dep to registry dep: `http = "~> 0.1"`. Git deps continue to work for packages not yet on the registry.
-- **Phase 3:** No consumer change — registry deps resolve from hex.pm instead of the static registry (URL change in `[repos]`, or removed entirely if hex.pm is the default).
+- **Phase 2 (original design — not what shipped):** Consumers change from git dep to registry dep: `http = "~> 0.1"`. Git deps continue to work for packages not yet on the registry.
+- **Phase 3 (original design):** No consumer change — registry deps resolve from hex.pm instead of the static registry (URL change in `[repos]`, or removed entirely if hex.pm is the default).
+- **Phase 2, as shipped:** Consumers change from git dep to registry dep with an *exact* version: `http = "0.1.0"` (no range syntax). Git deps continue to work for packages not yet on the registry. See "Amendment (2026-07-26)" above for what a later move to a hex-compatible registry (if ever pursued) would additionally require — chiefly a new lockfile entry kind, since today's registry entries are a git `[[package]]` entry, not a checksum-bearing tarball reference.
 
 ## Implementation Tracking
 
-**Epic:** BT-1739
+**Epic:** BT-1739 (Phase 1: package distribution)
 **Issues:** BT-1738 (Justfile/--app), BT-1740 (extract HTTP repo), BT-1741 (monorepo git dep), BT-1742 (cross-repo CI)
 **Status:** Implemented (Phase 1)
 
+**Epic:** BT-2977 (library registry — Phase 2, shipped in simplified form; see "Amendment (2026-07-26)" above)
+**Issues:** BT-2978 (registry-dependency resolution), BT-2979 (`deps add`/`list`/`update` registry support), BT-2980 (`beamtalk version`/`beamtalk publish`), BT-2981 (docs), BT-2995 (this amendment)
+**Follow-up:** BT-2992 (enforce the locked SHA on a fresh dependency clone — the integrity gap noted above)
+**Status:** Implemented (simplified Phase 2)
+
 ## References
 - Related issues: BT-1721 (MCP discovery), BT-1727 (private hex repo setup), BT-1728 (repo field in native deps), BT-1729 (publish first-party packages)
-- Related ADRs: ADR 0026 (package manifest), ADR 0070 (package namespaces and dependencies), ADR 0071 (class visibility), ADR 0072 (native Erlang in packages)
-- Hex tarball specification: https://github.com/hexpm/specifications/blob/main/package_tarball.md
-- Hex registry specification: https://github.com/hexpm/specifications/tree/main/registry
+- Related issues (registry, 2026-07): BT-2977 (epic), BT-2978, BT-2979, BT-2980, BT-2981, BT-2992, BT-2995
+- Related ADRs: ADR 0026 (package manifest), ADR 0070 (package namespaces and dependencies — see its "Alternative: Registry-Based Dependencies" note pointing back here), ADR 0071 (class visibility), ADR 0072 (native Erlang in packages)
+- Hex tarball specification (original Phase 2 design, not implemented): https://github.com/hexpm/specifications/blob/main/package_tarball.md
+- Hex registry specification (original Phase 2 design, not implemented): https://github.com/hexpm/specifications/tree/main/registry
 - `hex_core` (pure Erlang hex client, for future Beamtalk-native reimplementation): https://github.com/hexpm/hex_core
-- `pubgrub` Rust crate (version constraint solver): https://crates.io/crates/pubgrub
-- `hexpm` Rust crate (Gleam's hex.pm API client): https://github.com/gleam-lang/hexpm-rust
-- Gleam's tarball builder (reference implementation): `gleam/compiler-cli/src/publish.rs`
+- `pubgrub` Rust crate (version constraint solver — not currently used; the shipped registry has no solver): https://crates.io/crates/pubgrub
+- `hexpm` Rust crate (Gleam's hex.pm API client — not currently used): https://github.com/gleam-lang/hexpm-rust
+- Gleam's tarball builder (reference implementation for the original, unbuilt tarball design): `gleam/compiler-cli/src/publish.rs`

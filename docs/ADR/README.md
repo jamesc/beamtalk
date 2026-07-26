@@ -99,7 +99,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0070](0070-package-namespaces-and-dependencies.md) | Package Namespaces and Dependencies | Implemented | 2026-03-24 |
 | [0071](0071-class-visibility-internal-modifier.md) | Class Visibility — `internal` Modifier for Package-Scoped Access Control | Implemented | 2026-03-28 |
 | [0072](0072-user-erlang-sources-in-packages.md) | User Erlang Sources in Beamtalk Packages | Implemented | 2026-03-29 |
-| [0073](0073-package-distribution-and-discovery.md) | Package Distribution and Discovery | Implemented (Phase 1) | 2026-03-31 |
+| [0073](0073-package-distribution-and-discovery.md) | Package Distribution and Discovery | Implemented (Phase 1; Phase 2 implemented in simplified form, amended 2026-07-26) | 2026-03-31 |
 | [0074](0074-deferred-metaprogramming.md) | Deferred Metaprogramming | Accepted (deferral) | 2026-04-01 |
 | [0075](0075-erlang-ffi-type-definitions.md) | Erlang FFI Type Definitions | Implemented (Phase 1; Phase 2 deferred) | 2026-04-02 |
 | [0076](0076-ok-error-tuple-to-result-at-ffi-boundary.md) | Convert Erlang ok/error Tuples to Result at FFI Boundary | Implemented | 2026-04-03 |
