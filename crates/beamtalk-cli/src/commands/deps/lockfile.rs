@@ -337,7 +337,7 @@ impl Lockfile {
             if let Some(rv) = &entry.registry_version {
                 let _ = writeln!(output, "version = \"{}\"", rv.version);
                 if let Some(registry) = &rv.registry {
-                    let _ = writeln!(output, "registry = \"{registry}\"");
+                    let _ = writeln!(output, "registry = \"{}\"", escape_toml_string(registry));
                 }
             }
             let _ = writeln!(output, "url = \"{}\"", entry.url);
@@ -366,6 +366,17 @@ impl Default for Lockfile {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Escape a value for embedding in a TOML basic string.
+///
+/// Unlike `url`/`name`/`sha`, a registry identity can be a raw filesystem
+/// path (`[registry] url` pointing at a local directory) rather than
+/// validated git-URL syntax, so it can contain backslashes (Windows paths)
+/// or quotes. An unescaped Windows path here corrupts the lockfile with an
+/// invalid `\` escape, and every later `Lockfile::read` hard-fails.
+fn escape_toml_string(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 /// Format a `GitReference` for lockfile storage.
@@ -665,6 +676,36 @@ mod tests {
         assert!(
             content.contains("registry = \"https://github.com/jamesc/beamtalk-registry\""),
             "{content}"
+        );
+    }
+
+    #[test]
+    fn test_registry_field_with_backslash_and_quote_roundtrips() {
+        // A local-directory registry (`[registry] url` pointing at a
+        // filesystem path) is a raw, unvalidated string -- unlike `url`,
+        // which only ever holds a validated git URL. A Windows path or a
+        // quote in the identity must not corrupt the TOML: an unescaped `\`
+        // is not a valid TOML escape sequence, so `Lockfile::read` would
+        // hard-fail on every subsequent command with no self-healing.
+        let mut original = Lockfile::new();
+        original.insert(LockEntry {
+            name: "yaml".to_string(),
+            url: "https://github.com/jamesc/beamtalk-yaml".to_string(),
+            reference: GitReference::Tag("v0.2.1".to_string()),
+            resolved_sha: "abc1234def5678abc1234def5678abc1234def56".to_string(),
+            registry_version: Some(registry_version(
+                "0.2.1",
+                r#"C:\vendor\registry with "quotes""#,
+            )),
+        });
+
+        let content = original.serialize();
+        let parsed = Lockfile::parse(&content).unwrap_or_else(|e| {
+            panic!("serialized lockfile failed to re-parse: {e}\n\ncontent:\n{content}")
+        });
+        assert_eq!(
+            parsed.get("yaml").unwrap().registry_version,
+            original.get("yaml").unwrap().registry_version,
         );
     }
 
