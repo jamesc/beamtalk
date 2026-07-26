@@ -37,6 +37,14 @@ pub struct ResolvedGitDep {
 /// If a lockfile entry is provided and its SHA matches the current clone, the clone is
 /// skipped. Otherwise, a fresh clone is performed.
 ///
+/// When `lock_entry` is provided and its `(url, reference)` matches this request,
+/// the lock is enforced against the freshly resolved SHA as well as the skip-clone
+/// checkout — a fresh clone whose reference resolves to a different commit than the
+/// lock records (a moved tag, or a branch that has advanced) fails rather than
+/// silently adopting the new commit and rewriting `beamtalk.lock`. This applies
+/// uniformly to tags, branches, and revs. Callers that intend to move the pin
+/// (`deps add`, `deps update`) pass `lock_entry: None` and are unaffected.
+///
 /// Returns the resolved dependency with the exact commit SHA.
 ///
 /// # Errors
@@ -45,6 +53,7 @@ pub struct ResolvedGitDep {
 /// - The git URL is unreachable or invalid
 /// - The requested tag/branch/rev does not exist
 /// - Git commands fail
+/// - A matching lock entry's SHA differs from the freshly resolved SHA
 pub fn resolve_git_dep(
     name: &str,
     url: &str,
@@ -99,6 +108,42 @@ pub fn resolve_git_dep(
 
     // Resolve to exact commit SHA
     let resolved_sha = resolve_head_sha(name, &checkout_path)?;
+
+    // Enforce the lock on a fresh clone too, not just when reusing an existing
+    // checkout (the `verify_checkout` branch above). Git references are
+    // mutable — a tag can be repointed at will, and a branch moves by
+    // definition — so the lockfile is the only thing that pins reproducibility
+    // once a checkout is gone. Every fresh CI runner and every `beamtalk
+    // clean` takes this path with no warm checkout to compare against, so
+    // without this check a moved tag would silently resolve to the new
+    // commit and `resolve_dependency_graph` would rewrite `beamtalk.lock` to
+    // match it — no error, no warning, just a lockfile diff nobody reviews.
+    //
+    // This applies uniformly to tags, branches, and revs: a branch dependency
+    // is reproducible up to the next `beamtalk deps update`, exactly like a
+    // tag dependency, rather than silently following the branch tip. Callers
+    // that want to intentionally advance the pin (`deps add`, `deps update`)
+    // already pass `lock_entry: None`, so this check never fires for them.
+    if let Some(entry) = lock_entry.filter(|e| e.url == url && e.reference == *reference) {
+        if entry.resolved_sha != resolved_sha {
+            let ref_desc = describe_reference(reference);
+            miette::bail!(
+                "Dependency '{name}' has moved since it was locked.\n\n  \
+                 {ref_desc} now resolves to a different commit than the one \
+                 recorded in beamtalk.lock:\n\n    \
+                 locked:   {locked_sha}\n    \
+                 resolved: {resolved_sha}\n\n\
+                 This can happen when a git tag is moved (or, for a branch \
+                 dependency, when the branch simply advances) after it was \
+                 locked. Beamtalk enforces the lock rather than silently \
+                 rebuilding against a different commit.\n\n\
+                 If this is expected, run `beamtalk deps update {name}` to \
+                 accept the new commit and update the lock.",
+                locked_sha = entry.resolved_sha,
+            );
+        }
+    }
+
     info!(name, sha = %resolved_sha, "Resolved git dependency");
 
     Ok(ResolvedGitDep {
@@ -217,6 +262,15 @@ pub fn validate_git_url(name: &str, url: &str) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Describe a git reference for use in an error message, e.g. `tag 'v1.0.0'`.
+fn describe_reference(reference: &GitReference) -> String {
+    match reference {
+        GitReference::Tag(tag) => format!("tag '{tag}'"),
+        GitReference::Branch(branch) => format!("branch '{branch}'"),
+        GitReference::Rev(rev) => format!("rev '{rev}'"),
+    }
 }
 
 /// Check out the requested reference (tag, branch, or rev).
@@ -502,9 +556,15 @@ mod tests {
         assert!(marker.exists(), "Should have skipped re-clone");
     }
 
+    /// A checkout that doesn't match the lock forces a re-clone (the
+    /// skip-clone `verify_checkout` guard), but the fresh clone is then held
+    /// to the same lock as any other fresh clone (BT-2992): if the freshly
+    /// resolved SHA still doesn't match a lock entry that names this exact
+    /// `(url, reference)`, resolution fails instead of silently adopting
+    /// whatever commit the reference resolves to now.
     #[test]
-    fn test_reclone_when_lockfile_sha_mismatch() {
-        let (_repo, url, expected_sha) = create_test_repo();
+    fn test_reclone_then_lock_mismatch_fails() {
+        let (_repo, url, _expected_sha) = create_test_repo();
         let project_dir = TempDir::new().unwrap();
         let project_root = Utf8PathBuf::from_path_buf(project_dir.path().to_path_buf()).unwrap();
 
@@ -522,7 +582,9 @@ mod tests {
         let marker = result.checkout_path.join(".test_marker");
         std::fs::write(&marker, "present").unwrap();
 
-        // Resolve with mismatched SHA should re-clone
+        // The lock names a SHA that matches neither the stale checkout nor
+        // what the repository's tag actually resolves to (an impossible SHA,
+        // standing in for "the tag moved after this was locked").
         let lock_entry = LockEntry {
             name: "test_dep".to_string(),
             url: url.clone(),
@@ -531,18 +593,150 @@ mod tests {
             registry_version: None,
         };
 
-        let result2 = resolve_git_dep(
+        let err = resolve_git_dep(
             "test_dep",
             &url,
             &GitReference::Tag("v1.0.0".to_string()),
             &project_root,
             Some(&lock_entry),
         )
+        .unwrap_err()
+        .to_string();
+
+        // The stale checkout was still removed and re-cloned (the mismatch
+        // is only caught after the fresh clone resolves its SHA).
+        assert!(!marker.exists(), "Should have re-cloned before checking");
+        assert!(err.contains("test_dep"), "unexpected error: {err}");
+        assert!(err.contains("deadbeef"), "unexpected error: {err}");
+        assert!(
+            err.contains("beamtalk deps update"),
+            "unexpected error: {err}"
+        );
+    }
+
+    /// The primary regression this guards against (BT-2992): a fresh clone —
+    /// no local checkout at all, the state of every CI runner and every
+    /// `beamtalk clean` — must enforce the lock too, not just the skip-clone
+    /// path. Simulates a moved tag by retagging a local `file://` repo onto a
+    /// second commit while the lock still pins the first.
+    #[test]
+    fn test_fresh_clone_fails_when_tag_has_moved_since_locking() {
+        let (repo, url, first_sha) = create_test_repo();
+
+        // Move the tag onto a second commit, as if the upstream maintainer
+        // repointed it after the dependency was locked.
+        std::fs::write(repo.path().join("second.txt"), "content").unwrap();
+        run_git(repo.path(), &["add", "."]);
+        run_git(repo.path(), &["commit", "-m", "second commit"]);
+        run_git(repo.path(), &["tag", "-d", "v1.0.0"]);
+        run_git(repo.path(), &["tag", "-m", "v1.0.0 moved", "v1.0.0"]);
+        let second_sha = get_git_sha(repo.path());
+        assert_ne!(first_sha, second_sha);
+
+        let project_dir = TempDir::new().unwrap();
+        let project_root = Utf8PathBuf::from_path_buf(project_dir.path().to_path_buf()).unwrap();
+
+        // No prior checkout exists under `_build/deps` — this is a fresh
+        // resolve, exactly like a CI runner or post-`beamtalk clean` build.
+        let lock_entry = LockEntry {
+            name: "test_dep".to_string(),
+            url: url.clone(),
+            reference: GitReference::Tag("v1.0.0".to_string()),
+            resolved_sha: first_sha.clone(),
+            registry_version: None,
+        };
+
+        let err = resolve_git_dep(
+            "test_dep",
+            &url,
+            &GitReference::Tag("v1.0.0".to_string()),
+            &project_root,
+            Some(&lock_entry),
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("test_dep"), "unexpected error: {err}");
+        assert!(err.contains(&first_sha), "unexpected error: {err}");
+        assert!(err.contains(&second_sha), "unexpected error: {err}");
+        assert!(
+            err.contains("beamtalk deps update"),
+            "unexpected error: {err}"
+        );
+    }
+
+    /// The same enforcement applies to branch dependencies: a locked branch
+    /// dependency is reproducible up to the next `beamtalk deps update`,
+    /// rather than silently following the branch tip on every fresh clone.
+    #[test]
+    fn test_fresh_clone_fails_when_branch_has_advanced_since_locking() {
+        let (repo, url, first_sha) = create_test_repo();
+
+        // Advance the tracked branch past the commit that was locked.
+        run_git(repo.path(), &["checkout", "develop"]);
+        std::fs::write(repo.path().join("second.txt"), "content").unwrap();
+        run_git(repo.path(), &["add", "."]);
+        run_git(repo.path(), &["commit", "-m", "advance develop"]);
+        let second_sha = get_git_sha(repo.path());
+        assert_ne!(first_sha, second_sha);
+
+        let project_dir = TempDir::new().unwrap();
+        let project_root = Utf8PathBuf::from_path_buf(project_dir.path().to_path_buf()).unwrap();
+
+        let lock_entry = LockEntry {
+            name: "test_dep".to_string(),
+            url: url.clone(),
+            reference: GitReference::Branch("develop".to_string()),
+            resolved_sha: first_sha.clone(),
+            registry_version: None,
+        };
+
+        let err = resolve_git_dep(
+            "test_dep",
+            &url,
+            &GitReference::Branch("develop".to_string()),
+            &project_root,
+            Some(&lock_entry),
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("test_dep"), "unexpected error: {err}");
+        assert!(err.contains("branch"), "unexpected error: {err}");
+        assert!(
+            err.contains("beamtalk deps update"),
+            "unexpected error: {err}"
+        );
+    }
+
+    /// `deps update`'s call pattern (`lock_entry: None`) must keep moving the
+    /// pin without error, even when a previous lock entry (not passed in
+    /// here) would have mismatched.
+    #[test]
+    fn test_update_style_call_with_no_lock_entry_succeeds_despite_moved_tag() {
+        let (repo, url, first_sha) = create_test_repo();
+
+        std::fs::write(repo.path().join("second.txt"), "content").unwrap();
+        run_git(repo.path(), &["add", "."]);
+        run_git(repo.path(), &["commit", "-m", "second commit"]);
+        run_git(repo.path(), &["tag", "-d", "v1.0.0"]);
+        run_git(repo.path(), &["tag", "-m", "v1.0.0 moved", "v1.0.0"]);
+        let second_sha = get_git_sha(repo.path());
+
+        let project_dir = TempDir::new().unwrap();
+        let project_root = Utf8PathBuf::from_path_buf(project_dir.path().to_path_buf()).unwrap();
+
+        let result = resolve_git_dep(
+            "test_dep",
+            &url,
+            &GitReference::Tag("v1.0.0".to_string()),
+            &project_root,
+            None, // `deps update` / `deps add` always pass None
+        )
         .unwrap();
 
-        assert_eq!(result2.resolved_sha, expected_sha);
-        // Marker file should be gone (directory was re-created)
-        assert!(!marker.exists(), "Should have re-cloned");
+        assert_eq!(result.resolved_sha, second_sha);
+        assert_ne!(result.resolved_sha, first_sha);
     }
 
     /// Changing the requested ref in `beamtalk.toml` must refetch, even though
