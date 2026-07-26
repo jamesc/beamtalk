@@ -298,15 +298,25 @@ mod tests {
             .join(" ")
     }
 
+    /// Restores the process cwd to the directory captured at construction
+    /// when dropped — including on an unwinding panic, so one failing test
+    /// can't strand the process cwd inside a tempdir that a later
+    /// `#[serial(cwd)]` test then deletes out from under it.
+    struct CwdGuard(std::path::PathBuf);
+
+    impl Drop for CwdGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.0);
+        }
+    }
+
     /// Run `f` with the process cwd set to `dir`, always restoring the
-    /// original cwd afterward. Callers must serialize with `#[serial(cwd)]`
-    /// since the working directory is process-global.
+    /// original cwd afterward, even if `f` panics. Callers must serialize
+    /// with `#[serial(cwd)]` since the working directory is process-global.
     fn with_cwd<T>(dir: &std::path::Path, f: impl FnOnce() -> T) -> T {
-        let original_dir = std::env::current_dir().unwrap();
+        let _guard = CwdGuard(std::env::current_dir().unwrap());
         std::env::set_current_dir(dir).unwrap();
-        let result = f();
-        std::env::set_current_dir(original_dir).unwrap();
-        result
+        f()
     }
 
     // -----------------------------------------------------------------------
