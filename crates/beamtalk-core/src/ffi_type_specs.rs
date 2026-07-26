@@ -26,6 +26,7 @@
 //! [`collect_project_dependency_ebin_dirs`] to resolve those directories from
 //! a project root; `beamtalk-cli` additionally wraps this via `BuildLayout`.
 
+use crate::codegen::core_erlang::escape_erlang_string;
 use crate::semantic_analysis::type_checker::{
     NativeTypeRegistry, is_specs_line, is_specs_result_error, is_specs_result_ok, parse_specs_line,
 };
@@ -218,28 +219,6 @@ pub fn has_beam_files(dir: &Path) -> bool {
             })
             .unwrap_or(false)
 }
-/// Escapes a string for safe embedding in an Erlang string literal, used
-/// when sending `.beam` file paths to the `beamtalk_build_worker` node.
-///
-/// Duplicates `beam_compiler::escape_erlang_string` (a pure, dependency-free
-/// utility unlikely to change) rather than sharing it, so this module doesn't
-/// need to depend on the CLI binary's `beam_compiler` module.
-fn escape_erlang_string(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            '\\' => result.push_str("\\\\"),
-            '"' => result.push_str("\\\""),
-            '\n' => result.push_str("\\n"),
-            '\r' => result.push_str("\\r"),
-            '\t' => result.push_str("\\t"),
-            '\0' => result.push_str("\\0"),
-            _ => result.push(c),
-        }
-    }
-    result
-}
-
 // ---------------------------------------------------------------------------
 // Type cache: persists spec extraction results per Erlang module (ADR 0075)
 // ---------------------------------------------------------------------------
