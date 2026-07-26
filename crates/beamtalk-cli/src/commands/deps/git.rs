@@ -703,6 +703,8 @@ mod tests {
 
         assert!(err.contains("test_dep"), "unexpected error: {err}");
         assert!(err.contains("branch"), "unexpected error: {err}");
+        assert!(err.contains(&first_sha), "unexpected error: {err}");
+        assert!(err.contains(&second_sha), "unexpected error: {err}");
         assert!(
             err.contains("beamtalk deps update"),
             "unexpected error: {err}"
