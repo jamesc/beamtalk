@@ -120,6 +120,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "Tuple"
             | "TypeError"
             | "UndefinedObject"
+            | "Uuid"
             | "Value"
             | "WorkspaceInterface"
     )
@@ -4144,6 +4145,47 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "UndefinedObject".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Return a developer-readable string representation.\n\n## Examples\n```beamtalk\nnil printString             // => \"nil\"\n```".into()) },
             ],
             class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    );
+
+    classes.insert(
+        "Uuid".into(),
+        ClassInfo {
+            name: "Uuid".into(),
+            superclass: Some("Value".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: true,
+            is_native: true,
+            handle_scope: None,
+            surface_incomplete: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
+            methods: vec![
+                MethodInfo { selector: "asString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Uuid".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Canonical lowercase hyphenated string form (`8-4-4-4-12` hex digits).\n\n## Examples\n```beamtalk\n(Uuid fromString: \"550E8400-E29B-41D4-A716-446655440000\") unwrap asString\n// => \"550e8400-e29b-41d4-a716-446655440000\"\n```".into()) },
+                MethodInfo { selector: "asBinary".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Uuid".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Binary".into()), param_types: vec![], doc: Some("Raw 16-byte binary representation.\n\n## Examples\n```beamtalk\nUuid v4 asBinary size                       // => 16\n```".into()) },
+                MethodInfo { selector: "version".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Uuid".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("The RFC 9562 version nibble (4 or 7 for values this class creates;\n1-8 for values parsed from elsewhere).\n\n## Examples\n```beamtalk\nUuid v4 version                             // => 4\nUuid v7 version                             // => 7\n```".into()) },
+                MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Uuid".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Human-readable representation: Uuid(...).\n\n## Examples\n```beamtalk\n(Uuid fromString: \"550e8400-e29b-41d4-a716-446655440000\") unwrap printString\n// => \"Uuid(550e8400-e29b-41d4-a716-446655440000)\"\n```".into()) },
+                MethodInfo { selector: "<".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Uuid".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![Some("Uuid".into())], doc: Some("True if this Uuid sorts before `other` (byte-wise on the raw 16 bytes).\n\n## Examples\n```beamtalk\n(Uuid fromString: \"00000000-0000-7000-8000-000000000000\")\n  unwrap < (Uuid fromString: \"ffffffff-ffff-7fff-bfff-ffffffffffff\") unwrap\n// => true\n```".into()) },
+                MethodInfo { selector: ">".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Uuid".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![Some("Uuid".into())], doc: Some("True if this Uuid sorts after `other` (byte-wise on the raw 16 bytes).".into()) },
+                MethodInfo { selector: "<=".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Uuid".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![Some("Uuid".into())], doc: Some("True if this Uuid sorts before or the same as `other`.".into()) },
+                MethodInfo { selector: ">=".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Uuid".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![Some("Uuid".into())], doc: Some("True if this Uuid sorts after or the same as `other`.".into()) },
+            ],
+            class_methods: vec![
+                MethodInfo { selector: "new:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Uuid".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Object".into())], doc: Some("Use 'Uuid v4', 'Uuid v7', or 'Uuid fromString:' to create a Uuid.".into()) },
+                MethodInfo { selector: "v4".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Uuid".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Uuid".into()), param_types: vec![], doc: Some("Generate a random (version 4) Uuid.\n\nUses `crypto:strong_rand_bytes/1` — not predictable, but not\ntime-ordered either. Prefer `v7` for values that should sort by\ncreation time.\n\n## Examples\n```beamtalk\nUuid v4 version                             // => 4\n```".into()) },
+                MethodInfo { selector: "v7".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Uuid".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Uuid".into()), param_types: vec![], doc: Some("Generate a time-ordered (version 7) Uuid.\n\nEmbeds the current Unix time in milliseconds in the high 48 bits, so\nUuids from different milliseconds sort chronologically. There is no\nsub-millisecond counter, so Uuids generated within the same millisecond\nsort in an unspecified relative order.\n\n## Examples\n```beamtalk\nUuid v7 version                             // => 7\n```".into()) },
+                MethodInfo { selector: "fromString:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Uuid".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Result(Uuid, Error)".into()), param_types: vec![Some("String".into())], doc: Some("Parse the canonical `8-4-4-4-12` hyphenated hex string form.\n\nAccepts upper- or lower-case hex digits; `asString` always renders\nlowercase. Returns `Result error:` for malformed input.\n\n## Examples\n```beamtalk\n(Uuid fromString: \"550e8400-e29b-41d4-a716-446655440000\") unwrap asString\n// => \"550e8400-e29b-41d4-a716-446655440000\"\n(Uuid fromString: \"not-a-uuid\") isError\n// => true\n```".into()) },
+                MethodInfo { selector: "isValid:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Uuid".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![Some("String".into())], doc: Some("True if `str` is a syntactically valid canonical Uuid string.\n\n## Examples\n```beamtalk\nUuid isValid: \"550e8400-e29b-41d4-a716-446655440000\"   // => true\nUuid isValid: \"not-a-uuid\"                              // => false\n```".into()) },
+            ],
             class_variables: vec![],
             type_params: vec![],
             type_param_bounds: vec![],

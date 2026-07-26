@@ -1,0 +1,149 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Uuid — RFC 9562 universally unique identifiers (v4 random, v7 time-ordered).
+///
+/// UUID v7 embeds a 48-bit millisecond Unix timestamp in its high bits, so
+/// values from different milliseconds sort chronologically by creation time
+/// — the right default for event-sourced identifiers (event/activity/session
+/// IDs). There is no sub-millisecond counter, so ordering within the same
+/// millisecond is unspecified. UUID v4 is fully random and has no ordering
+/// guarantee at all.
+///
+/// A Uuid's 16-byte binary representation is its entire identity: equal
+/// Uuids are always structurally equal maps, so the inherited `=`/`hash`
+/// from Value already do the right thing — no per-class override needed.
+///
+/// ## Examples
+/// ```beamtalk
+/// id := Uuid v7
+/// id version                                  // => 7
+/// id asString                                 // => "018f...-....-7...-....-............"
+///
+/// parsed := (Uuid fromString: id asString) unwrap
+/// parsed =:= id                                // => true
+///
+/// Uuid isValid: "not-a-uuid"                  // => false
+/// ```
+sealed typed Value subclass: Uuid native: beamtalk_uuid
+
+  // ===== Class Methods — Construction =====
+
+  /// Use 'Uuid v4', 'Uuid v7', or 'Uuid fromString:' to create a Uuid.
+  class new: _ :: Object -> Nil =>
+    self error: "Use 'Uuid v4', 'Uuid v7', or 'Uuid fromString:' to create a Uuid"
+
+  /// Generate a random (version 4) Uuid.
+  ///
+  /// Uses `crypto:strong_rand_bytes/1` — not predictable, but not
+  /// time-ordered either. Prefer `v7` for values that should sort by
+  /// creation time.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Uuid v4 version                             // => 4
+  /// ```
+  class sealed v4 -> Uuid => self delegate
+
+  /// Generate a time-ordered (version 7) Uuid.
+  ///
+  /// Embeds the current Unix time in milliseconds in the high 48 bits, so
+  /// Uuids from different milliseconds sort chronologically. There is no
+  /// sub-millisecond counter, so Uuids generated within the same millisecond
+  /// sort in an unspecified relative order.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Uuid v7 version                             // => 7
+  /// ```
+  class sealed v7 -> Uuid => self delegate
+
+  /// Parse the canonical `8-4-4-4-12` hyphenated hex string form.
+  ///
+  /// Accepts upper- or lower-case hex digits; `asString` always renders
+  /// lowercase. Returns `Result error:` for malformed input.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Uuid fromString: "550e8400-e29b-41d4-a716-446655440000") unwrap asString
+  /// // => "550e8400-e29b-41d4-a716-446655440000"
+  /// (Uuid fromString: "not-a-uuid") isError
+  /// // => true
+  /// ```
+  class sealed fromString: str :: String -> Result(Uuid, Error) => self delegate
+
+  /// True if `str` is a syntactically valid canonical Uuid string.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Uuid isValid: "550e8400-e29b-41d4-a716-446655440000"   // => true
+  /// Uuid isValid: "not-a-uuid"                              // => false
+  /// ```
+  class sealed isValid: str :: String -> Boolean => self delegate
+
+  // ===== Instance Methods — Conversion =====
+
+  /// Canonical lowercase hyphenated string form (`8-4-4-4-12` hex digits).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Uuid fromString: "550E8400-E29B-41D4-A716-446655440000") unwrap asString
+  /// // => "550e8400-e29b-41d4-a716-446655440000"
+  /// ```
+  asString -> String => self delegate
+
+  /// Raw 16-byte binary representation.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Uuid v4 asBinary size                       // => 16
+  /// ```
+  asBinary -> Binary => self delegate
+
+  /// The RFC 9562 version nibble (4 or 7 for values this class creates;
+  /// 1-8 for values parsed from elsewhere).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Uuid v4 version                             // => 4
+  /// Uuid v7 version                             // => 7
+  /// ```
+  version -> Integer => self delegate
+
+  /// Human-readable representation: Uuid(...).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Uuid fromString: "550e8400-e29b-41d4-a716-446655440000") unwrap printString
+  /// // => "Uuid(550e8400-e29b-41d4-a716-446655440000)"
+  /// ```
+  printString -> String => self delegate
+
+  // ===== Instance Methods — Comparison =====
+  //
+  // Ordering compares the raw 16-byte binary (ADR 0101 / BT-2731, BT-2709/2710
+  // runtime guard). For v7 Uuids this is equivalent to comparing creation
+  // time. `=`/`hash` are NOT overridden here: `=:=`/`=/=`/`/=`/`==` are
+  // hard-lowered by the compiler to raw Erlang term comparison regardless of
+  // any class-level method (ADR 0002) — and structural map comparison on
+  // `bytes` already gives the correct result, so a class-level override
+  // would be silently-unreachable dead code.
+
+  /// True if this Uuid sorts before `other` (byte-wise on the raw 16 bytes).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Uuid fromString: "00000000-0000-7000-8000-000000000000")
+  ///   unwrap < (Uuid fromString: "ffffffff-ffff-7fff-bfff-ffffffffffff") unwrap
+  /// // => true
+  /// ```
+  < other :: Uuid -> Boolean => (Erlang beamtalk_uuid) lt: self with: other
+
+  /// True if this Uuid sorts after `other` (byte-wise on the raw 16 bytes).
+  > other :: Uuid -> Boolean => (Erlang beamtalk_uuid) gt: self with: other
+
+  /// True if this Uuid sorts before or the same as `other`.
+  <= other :: Uuid -> Boolean => (Erlang beamtalk_uuid) lte: self with: other
+
+  /// True if this Uuid sorts after or the same as `other`.
+  >= other :: Uuid -> Boolean => (Erlang beamtalk_uuid) gte: self with: other

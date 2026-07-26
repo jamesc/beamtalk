@@ -107,6 +107,7 @@
             #{name => 'Tuple', module => 'bt@stdlib@tuple', parent => 'Collection', package => 'stdlib', kind => object, type_params => []},
             #{name => 'TypeError', module => 'bt@stdlib@type_error', parent => 'Error', package => 'stdlib', kind => object, type_params => []},
             #{name => 'UndefinedObject', module => 'bt@stdlib@undefined_object', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
+            #{name => 'Uuid', module => 'bt@stdlib@uuid', parent => 'Value', package => 'stdlib', kind => value, type_params => []},
             #{name => 'Value', module => 'bt@stdlib@value', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'WorkspaceInterface', module => 'bt@stdlib@workspace_interface', parent => 'Object', package => 'stdlib', kind => object, type_params => []}
         ]},
