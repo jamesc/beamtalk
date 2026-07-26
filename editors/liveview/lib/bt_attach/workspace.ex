@@ -133,6 +133,9 @@ defmodule BtAttach.Workspace do
         {:error, classify_unreachable(node)}
 
       {:error, {:connect_failed, _node, :ignored}} ->
+        # :ignored means this node's own dist went away, not the workspace's —
+        # see the taxonomy doc above. No better bucket exists, so it's folded
+        # into :dead_workspace.
         {:error, :dead_workspace}
     end
   end
