@@ -1,10 +1,24 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-/// DateTime — UTC date and time via Erlang calendar/os modules.
+/// DateTime — UTC or fixed-offset date and time via Erlang calendar/os modules.
 ///
-/// Provides class-side constructors for creating UTC datetime values and
-/// instance methods for access, arithmetic, comparison, and formatting.
+/// Provides class-side constructors for creating datetime values and
+/// instance methods for access, arithmetic, comparison, pattern-based
+/// formatting/parsing, and fixed UTC-offset conversion.
+///
+/// `year`..`second` are wall-clock fields; `offsetMinutes` is the UTC offset
+/// they are expressed in (0 for UTC). Ordering (`<`, `>`, `<=`, `>=`),
+/// `asTimestamp`, and arithmetic all operate on the underlying instant, not
+/// the raw wall-clock fields. Equality is different: `=:=`/`/=` cannot be
+/// overridden (they always compare the raw representation structurally, so
+/// a `+02:00` DateTime and its UTC equivalent are NOT `=:=`) — use
+/// `sameInstant:` for instant-based equality.
+///
+/// **Timezone scope:** only fixed UTC offsets are supported. OTP ships no
+/// IANA tzdata, so named timezones (e.g. `"America/New_York"`, with DST
+/// rules) are out of scope here — pass the offset explicitly (from a client
+/// or a tzdata lookup elsewhere) to `toOffset:`.
 ///
 /// ## Examples
 /// ```beamtalk
@@ -13,6 +27,11 @@
 /// dt year                                          // => 2026
 /// dt asString                                      // => "2026-02-18T00:00:00Z"
 /// dt addDays: 7                                    // => DateTime(2026-02-25T00:00:00Z)
+/// offset := DateTime fromString: "2026-07-25T14:30:00+02:00"
+/// offset offsetMinutes                             // => 120
+/// offset toUtc asString                            // => "2026-07-25T12:30:00Z"
+/// offset sameInstant: offset toUtc                 // => true
+/// dt format: "yyyy/MM/dd"                          // => "2026/02/18"
 /// ```
 sealed typed Value subclass: DateTime native: beamtalk_datetime
 
@@ -61,7 +80,21 @@ sealed typed Value subclass: DateTime native: beamtalk_datetime
   class sealed year: y :: Integer month: m :: Integer day: d :: Integer hour: h :: Integer minute: mi :: Integer second: s :: Integer -> DateTime =>
     self delegate
 
-  /// Construct from Unix epoch timestamp (seconds).
+  /// Construct from year, month, day, hour, minute, second, and a fixed
+  /// UTC offset in minutes (e.g. 120 for `+02:00`, -300 for `-05:00`).
+  ///
+  /// The wall-clock fields are stored as given, not normalized to UTC —
+  /// use `toUtc` to convert.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// DateTime year: 2026 month: 7 day: 25 hour: 14 minute: 30 second: 0 offsetMinutes: 120
+  /// // => DateTime(2026-07-25T14:30:00+02:00)
+  /// ```
+  class sealed year: y :: Integer month: m :: Integer day: d :: Integer hour: h :: Integer minute: mi :: Integer second: s :: Integer offsetMinutes: off :: Integer -> DateTime =>
+    self delegate
+
+  /// Construct from Unix epoch timestamp (seconds). Result is UTC (offsetMinutes 0).
   ///
   /// ## Examples
   /// ```beamtalk
@@ -70,14 +103,35 @@ sealed typed Value subclass: DateTime native: beamtalk_datetime
   /// ```
   class sealed fromTimestamp: ts :: Integer -> DateTime => self delegate
 
-  /// Parse an ISO 8601 string.
+  /// Parse a strict ISO 8601 string, including an optional UTC offset
+  /// suffix (`Z`, or `+hh:mm`/`-hh:mm`). Raises `#type_error` if the string
+  /// doesn't match.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// DateTime fromString: '2026-02-18T10:30:00Z'
+  /// DateTime fromString: "2026-02-18T10:30:00Z"
   /// // => DateTime(2026-02-18T10:30:00Z)
+  /// DateTime fromString: "2026-07-25T14:30:00+02:00"
+  /// // => DateTime(2026-07-25T14:30:00+02:00)
   /// ```
   class sealed fromString: str :: String -> DateTime => self delegate
+
+  /// Parse `str` using the pattern language documented at `format:` — the
+  /// fallible, Result-based counterpart to `fromString:`.
+  ///
+  /// Returns `Result ok: dateTime` on success, `Result error:` if `str`
+  /// doesn't match `pattern` or the parsed fields form an invalid date/time.
+  /// The pattern language has no offset token, so the result is always UTC.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// DateTime parse: "2026-07-25 14:30:00" format: "yyyy-MM-dd HH:mm:ss"
+  /// // => Result ok: DateTime(2026-07-25T14:30:00Z)
+  /// (DateTime parse: "not a date" format: "yyyy-MM-dd") isOk
+  /// // => false
+  /// ```
+  class sealed parse: str :: String format: pattern :: String -> Result(DateTime, Error) =>
+    self delegate
 
   // ===== Instance Methods — Accessors =====
 
@@ -99,12 +153,20 @@ sealed typed Value subclass: DateTime native: beamtalk_datetime
   /// Second component (0-59).
   second -> Integer => self delegate
 
+  /// UTC offset (minutes) that the wall-clock fields are expressed in (0 for UTC).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (DateTime fromString: "2026-07-25T14:30:00+02:00") offsetMinutes  // => 120
+  /// ```
+  offsetMinutes -> Integer => self delegate
+
   // ===== Instance Methods — Conversion =====
 
-  /// Convert to Unix epoch timestamp (seconds).
+  /// Convert to Unix epoch timestamp (seconds) — the instant, honoring offsetMinutes.
   asTimestamp -> Integer => self delegate
 
-  /// Format as ISO 8601 string.
+  /// Format as ISO 8601 string: `Z` suffix for UTC, `+hh:mm`/`-hh:mm` otherwise.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -115,6 +177,50 @@ sealed typed Value subclass: DateTime native: beamtalk_datetime
 
   /// Human-readable representation.
   printString -> String => self delegate
+
+  /// Convert to the equivalent UTC (offsetMinutes 0) DateTime, same instant.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (DateTime fromString: "2026-07-25T14:30:00+02:00") toUtc asString
+  /// // => "2026-07-25T12:30:00Z"
+  /// ```
+  toUtc -> DateTime => self delegate
+
+  /// Convert to an equivalent DateTime expressed at a different fixed UTC
+  /// offset (minutes). Same instant; only the wall-clock fields and
+  /// offsetMinutes change.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (DateTime fromString: "2026-07-25T12:30:00Z") toOffset: 120
+  /// // => DateTime(2026-07-25T14:30:00+02:00)
+  /// ```
+  toOffset: minutes :: Integer -> DateTime => self delegate
+
+  /// Format the wall-clock fields using a documented pattern language (a
+  /// subset of CLDR/strftime-style date-time patterns; see `parse:format:`
+  /// for the inverse).
+  ///
+  /// Recognized pattern letters — a run of N identical letters controls
+  /// width: `y`/`yy`/`yyyy` (year: unpadded / last-2-digits / zero-padded
+  /// to N digits), `M`/`MM`, `d`/`dd`, `H`/`HH`, `m`/`mm`, `s`/`ss` (month,
+  /// day, hour 24h, minute, second: unpadded / zero-padded to N digits).
+  /// Any other character (`-`, `:`, `T`, ` `, ...) passes through literally.
+  /// No offset token — use `asString`/`fromString:` for offset-aware ISO
+  /// 8601 formatting. For `parse:format:`, put a literal separator between
+  /// two adjacent unpadded numeric tokens (e.g. `M/d`, not `Md`) — without
+  /// one, an unpadded field greedily consumes digits that belong to its
+  /// neighbor. `yy` always parses as `2000 + NN` — it does not round-trip
+  /// years outside 2000-2099; use `yyyy` for those.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (DateTime year: 2026 month: 7 day: 25 hour: 14 minute: 30 second: 0)
+  ///   format: "yyyy-MM-dd HH:mm:ss"
+  /// // => "2026-07-25 14:30:00"
+  /// ```
+  format: pattern :: String -> String => self delegate
 
   // ===== Instance Methods — Arithmetic =====
 
@@ -176,10 +282,20 @@ sealed typed Value subclass: DateTime native: beamtalk_datetime
 
   // ===== Instance Methods — Comparison =====
   //
-  // These 7 operators stay inline FFI (not `self delegate`, ADR 0101 / BT-2731):
-  // an operator selector (`<`, `=:=`, …) is not a valid Erlang function name, so
-  // `self delegate` cannot emit the call. They dispatch through the named shims
-  // `lt`/`gt`/`lte`/`gte`/`eql`/`sneq`/`neq` instead (still wrapped-by-default).
+  // `<`, `>`, `<=`, `>=` stay inline FFI (not `self delegate`, ADR 0101 / BT-2731):
+  // an operator selector is not a valid Erlang function name, so `self delegate`
+  // cannot emit the call. They dispatch through the named shims `lt`/`gt`/`lte`/`gte`
+  // (still wrapped-by-default), and a runtime dispatch guard (BT-2709/2710) lets
+  // this override actually run.
+  //
+  // `=:=`, `=/=`, and `/=` are NOT overridable here: per ADR 0002, the compiler
+  // hard-lowers all four equality/inequality operators straight to Erlang's raw
+  // `=:=`/`=/=` term comparison at codegen time, with no method dispatch at all —
+  // any `=:=`/`=/=`/`/=` method declared on a class is dead code. For DateTime
+  // that means `=:=`/`/=` compare the underlying representation structurally
+  // (same wall-clock fields AND same offsetMinutes), NOT the represented instant:
+  // two DateTimes at different offsets for the same instant are NOT `=:=`. Use
+  // `sameInstant:` below for instant-based equality.
 
   /// True if this DateTime is earlier than `other`.
   ///
@@ -217,29 +333,29 @@ sealed typed Value subclass: DateTime native: beamtalk_datetime
   >= other :: DateTime -> Boolean =>
     (Erlang beamtalk_datetime) gte: self with: other
 
-  /// True if this DateTime represents the same instant as `other`.
+  /// True if this DateTime represents the same instant as `other`, regardless
+  /// of offsetMinutes. A plain named method, not an operator override — `=:=`
+  /// cannot be overridden (see the comment above); use this instead for
+  /// instant-based equality.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// dt =:= dt    // => true
+  /// dt sameInstant: dt    // => true
+  /// (DateTime fromString: "2026-07-25T12:00:00Z")
+  ///   sameInstant: (DateTime fromString: "2026-07-25T14:00:00+02:00")
+  /// // => true
   /// ```
-  =:= other :: DateTime -> Boolean =>
+  sameInstant: other :: DateTime -> Boolean =>
     (Erlang beamtalk_datetime) eql: self with: other
 
-  /// True if this DateTime is not strictly equal to `other`.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// (DateTime year: 2026 month: 1 day: 1) =/= (DateTime year: 2026 month: 1 day: 2)  // => true
-  /// ```
-  =/= other :: DateTime -> Boolean =>
-    (Erlang beamtalk_datetime) sneq: self with: other
-
   /// True if this DateTime does not represent the same instant as `other`.
+  /// The negation of `sameInstant:`.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// (DateTime year: 2026 month: 1 day: 1) /= (DateTime year: 2026 month: 1 day: 2)  // => true
+  /// (DateTime year: 2026 month: 1 day: 1)
+  ///   differentInstant: (DateTime year: 2026 month: 1 day: 2)
+  /// // => true
   /// ```
-  /= other :: DateTime -> Boolean =>
-    (Erlang beamtalk_datetime) neq: self with: other
+  differentInstant: other :: DateTime -> Boolean =>
+    (self sameInstant: other) not
