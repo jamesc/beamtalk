@@ -244,9 +244,12 @@ fn add_registry_dependency(
 
     // The index is third-party data (same threat model as the git URLs it
     // hands out — see BT-2978's `validate_git_url`), so validate whatever
-    // version it reports before writing it into the user's manifest. This
-    // matters most on the `--version`-omitted path above: `release.version`
-    // there comes straight from index TOML, unchecked.
+    // version it reports before writing it into the user's manifest. On the
+    // `Some(v)` path above this re-validates the same already-valid `v`
+    // (`resolve_release` can only return a release whose version equals it)
+    // — redundant but harmless. It's load-bearing on the `--version`-omitted
+    // path: there, `release.version` comes straight from untrusted index
+    // TOML and this is the only check it gets before being written out.
     manifest::validate_registry_dependency(name, &release.version).map(|_| ())?;
 
     let fragment = format!("{name} = \"{}\"", release.version);
