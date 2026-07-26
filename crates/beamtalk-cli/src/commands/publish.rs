@@ -76,6 +76,19 @@ pub fn run(dry_run: bool) -> Result<()> {
         }
     }
 
+    // Preflight 5: for a git-backed registry, resolve the identity that will
+    // author the index commit *before* anything is mutated. The index lives
+    // in a separate clone from the project (typically
+    // `_build/registry/index/`), so it does not inherit an identity the user
+    // configured only locally in their project repo — checking this only at
+    // commit time would mean failing after the release tag is already live
+    // on `origin` and `beamtalk publish` refuses to re-run (the tag-absence
+    // preflight above would then block a retry).
+    let git_identity = match &location {
+        RegistryLocation::Git(_) => Some(get_git_identity(&project_root)?),
+        RegistryLocation::LocalDir(_) => None,
+    };
+
     let entry_path = index_root.join("packages").join(format!("{name}.toml"));
     let new_entry_content = render_index_entry_content(
         name,
@@ -107,13 +120,8 @@ pub fn run(dry_run: bool) -> Result<()> {
     write_index_entry(&entry_path, &new_entry_content)?;
     match &location {
         RegistryLocation::Git(_) => {
-            // The index lives in a separate clone from the project (typically
-            // `_build/registry/index/`), so it does not inherit a git identity
-            // the user has configured only locally in their project repo.
-            // Resolve identity there and pass it through explicitly, rather
-            // than relying on whatever the index clone's own local/global
-            // config happens to be.
-            let (author_name, author_email) = get_git_identity(&project_root)?;
+            let (author_name, author_email) =
+                git_identity.expect("resolved for RegistryLocation::Git in preflight above");
             commit_and_push_index(&index_root, name, version, &author_name, &author_email)?;
         }
         RegistryLocation::LocalDir(dir) => {
@@ -211,7 +219,16 @@ fn get_git_identity(project_root: &Utf8Path) -> Result<(String, String)> {
                  git config user.email you@example.com"
             );
         }
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if value.is_empty() {
+            miette::bail!(
+                "git's '{key}' is configured but empty.\n\n  \
+                 'beamtalk publish' commits the registry index update using your git \
+                 identity. Set it with:\n    git config user.name \"Your Name\"\n    \
+                 git config user.email you@example.com"
+            );
+        }
+        Ok(value)
     };
 
     Ok((read("user.name")?, read("user.email")?))
@@ -771,6 +788,35 @@ mod tests {
         assert!(
             flat_err(&result.unwrap_err()).contains("already exists locally"),
             "expected a tag-exists error"
+        );
+    }
+
+    #[test]
+    #[serial(cwd)]
+    fn test_publish_rejects_empty_git_identity() {
+        // A local config entry set to an empty string (as opposed to unset,
+        // which would fall back to global config) shadows global config
+        // regardless of what identity the environment running this test
+        // happens to have configured — so this stays hermetic.
+        let fixture = setup("yaml", "0.1.0", None);
+        run_git(fixture.library.path(), &["config", "user.name", ""]);
+
+        let result = with_cwd(&utf8(&fixture.library), || run(false));
+        assert!(result.is_err());
+        assert!(flat_err(&result.unwrap_err()).contains("configured but empty"));
+
+        // The identity preflight runs before create_and_push_tag, not after
+        // — a missing/empty identity must not leave a tag already pushed to
+        // origin with no way to retry (beamtalk publish would then refuse to
+        // re-run: "Tag already exists").
+        let tags = Command::new("git")
+            .args(["tag", "--list"])
+            .current_dir(fixture.library.path())
+            .output()
+            .unwrap();
+        assert!(
+            String::from_utf8_lossy(&tags.stdout).trim().is_empty(),
+            "no tag should have been created when the identity preflight fails"
         );
     }
 
