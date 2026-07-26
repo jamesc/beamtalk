@@ -102,31 +102,38 @@ defmodule BtAttach.Workspace do
 
   @doc """
   Full connectivity check for the desktop-attach `/readiness` endpoint (ADR
-  0097 Implementation §1c). Forces `connect/0` plus one cheap RPC — the
-  workspace's version report (`beamtalk_version:get/0`, BT-2991) — and
-  classifies failure into the taxonomy the endpoint surfaces:
+  0097 Implementation §1c). Calls `connect/0` (rather than re-implementing its
+  steps, so the two can never drift) plus one cheap RPC — the workspace's
+  version report (`beamtalk_version:get/0`, BT-2991) — and classifies failure
+  into the taxonomy the endpoint surfaces:
 
     * `{:error, :epmd_absent}`   — no local dist name server to publish to.
     * `{:error, :bad_cookie}`    — epmd knows the target node; dist handshake
                                    rejected (mismatched cookie).
-    * `{:error, :dead_workspace}` — epmd has no record of the target node, or
-                                    the workspace died between connect and RPC.
+    * `{:error, :dead_workspace}` — epmd has no record of the target node, the
+                                    workspace died between connect and RPC, or
+                                    (the rare `:ignored` case) this node's own
+                                    distribution unexpectedly went away between
+                                    `connect/0`'s two internal calls — a local
+                                    dist failure, not the target's epmd being
+                                    absent, so it is *not* reported as
+                                    `:epmd_absent`.
 
   Returns `{:ok, version_report}` (see `beamtalk_version:get/0`) on success.
   """
   def readiness do
-    case ensure_distributed() do
+    case connect() do
+      :ok ->
+        readiness_rpc()
+
       {:error, :epmd_absent} = err ->
         err
 
-      :ok ->
-        set_cookie()
+      {:error, {:connect_failed, node, false}} ->
+        {:error, classify_unreachable(node)}
 
-        case Node.connect(node_name()) do
-          true -> readiness_rpc()
-          false -> {:error, classify_unreachable(node_name())}
-          :ignored -> {:error, :epmd_absent}
-        end
+      {:error, {:connect_failed, _node, :ignored}} ->
+        {:error, :dead_workspace}
     end
   end
 
