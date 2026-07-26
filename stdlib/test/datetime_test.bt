@@ -481,3 +481,10 @@ TestCase subclass: DateTimeTest
     self should: [
       DateTime fromString: "2026-07-25T14:30:00+99:99"
     ] raise: #type_error
+    // fromString: with an ISO-valid but real-world-nonsensical offset
+    // (+15:00, between the +14:00 real max and the ISO +23:59 ceiling)
+    // also raises — validate_offset applies uniformly, not just to the
+    // keyword constructor
+    self should: [
+      DateTime fromString: "2026-07-25T14:30:00+15:00"
+    ] raise: #type_error

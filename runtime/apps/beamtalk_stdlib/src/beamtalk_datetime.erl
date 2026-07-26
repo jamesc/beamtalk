@@ -181,6 +181,7 @@ DateTime fromString: "2026-07-25T14:30:00+02:00"
 'fromString:'(Str) when is_binary(Str) ->
     case parse_iso8601(Str) of
         {ok, Y, Mo, D, H, Mi, S, Off} ->
+            validate_offset(Off, 'fromString:'),
             make_datetime(Y, Mo, D, H, Mi, S, Off);
         error ->
             Error0 = beamtalk_error:new(type_error, 'DateTime'),
