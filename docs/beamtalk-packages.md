@@ -307,7 +307,7 @@ beamtalk version bump major    # 1.2.3 -> 2.0.0
 beamtalk publish --dry-run     # print what would happen without tagging, pushing, or writing anything
 ```
 
-**If step 3 fails** (push conflict, permission denied, network error), the tag from step 2 is already live on `origin`. `beamtalk publish` prints a recovery message pointing at the index clone in `_build/registry/index/` — run `git push` from there once the issue is resolved. Do **not** re-run `beamtalk publish` or bump the version: the tag already exists, so a retry reports "already published" and suggests bumping, which would silently skip the release you just tagged.
+**If step 3 fails** (stage, commit, or push), the tag from step 2 is already live on `origin`. `beamtalk publish`'s error message names exactly what's left to do — if the *push* failed, `git push` from `_build/registry/index/`; if staging or the *commit* failed instead, there is no local commit yet, so `git add . && git commit` there first, then `git push`. Do **not** re-run `beamtalk publish` or bump the version in either case: the tag already exists, so a retry reports "already published" and suggests bumping, which would silently skip the release you just tagged.
 
 A registry dependency and the package it names always agree on which registry is authoritative — `beamtalk publish` resolves the target registry through the exact same `BEAMTALK_REGISTRY` → `[registry] url` → default chain that consuming a registry dependency does, using the *library's own* `beamtalk.toml`.
 
