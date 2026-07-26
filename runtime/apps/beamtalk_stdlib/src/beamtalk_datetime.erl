@@ -335,6 +335,8 @@ This pattern language has **no UTC-offset token** — use `asString`/
 `parse:format:`, put a literal separator between two adjacent unpadded
 numeric tokens (e.g. `M/d`, not `Md`) — without one, an unpadded field's
 `\\d{1,N}` regex greedily consumes digits belonging to its neighbor.
+`yy` always parses as `2000 + NN`; it does not round-trip years outside
+2000-2099 — use `yyyy` for those.
 
 ## Examples
 ```beamtalk
@@ -629,12 +631,12 @@ validate_time(H, Mi, S, Selector) ->
     beamtalk_error:raise(Error2).
 
 -spec validate_offset(integer(), atom()) -> ok.
-validate_offset(Off, _Selector) when is_integer(Off), Off > -1440, Off < 1440 ->
+validate_offset(Off, _Selector) when is_integer(Off), Off >= -720, Off =< 840 ->
     ok;
 validate_offset(Off, Selector) ->
     Msg = iolist_to_binary(
         io_lib:format(
-            "Invalid offsetMinutes: ~p (must be strictly between -1440 and 1440, i.e. within a day of UTC)",
+            "Invalid offsetMinutes: ~p (must be within the real-world UTC offset range, -720 to +840, i.e. -12:00 to +14:00)",
             [Off]
         )
     ),
