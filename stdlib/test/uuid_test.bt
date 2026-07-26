@@ -1,0 +1,178 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Stdlib tests for Uuid class
+
+TestCase subclass: UuidTest
+
+  // ===== Construction =====
+  testV4ReturnsUuid =>
+    id := Uuid v4
+    self assert: id class equals: Uuid
+
+  testV4Version => self assert: (Uuid v4) version equals: 4
+
+  testV7ReturnsUuid =>
+    id := Uuid v7
+    self assert: id class equals: Uuid
+
+  testV7Version => self assert: (Uuid v7) version equals: 7
+
+  testNewIsDisabled => self should: [Uuid new: 5] raise: #user_error
+
+  // ===== Format validity =====
+  testAsStringFormat =>
+    // Canonical 8-4-4-4-12 lowercase hex form
+    s := (Uuid v4) asString
+    self assert: s size equals: 36
+    self assert: (s matchesRegex: "^[0-9a-f]\{8}-[0-9a-f]\{4}-[0-9a-f]\{4}-[0-9a-f]\{4}-[0-9a-f]\{12}\z")
+
+  testPrintString =>
+    s := (Uuid fromString: "550e8400-e29b-41d4-a716-446655440000") unwrap printString
+    self assert: s equals: "Uuid(550e8400-e29b-41d4-a716-446655440000)"
+
+  testAsBinarySize =>
+    // NOTE: calling .size directly on the raw Binary crashes the runtime
+    // (a pre-existing bug: raw non-UTF-8 binaries are misclassified as
+    // String by class_of, and String's grapheme-aware size then chokes on
+    // invalid UTF-8 — reproduces with any non-UTF-8 binary, not Uuid-specific;
+    // filed as a follow-up). Use the Erlang FFI escape hatch to sidestep it.
+    self assert: (Erlang erlang byte_size: (Uuid v4) asBinary) equals: 16
+
+  // ===== Uniqueness smoke test =====
+  testV4Uniqueness =>
+    ids := (1 to: 50) collect: [:i | Uuid v4]
+    self assert: ids asSet size equals: 50
+
+  testV7Uniqueness =>
+    ids := (1 to: 50) collect: [:i | Uuid v7]
+    self assert: ids asSet size equals: 50
+
+  // ===== v7 monotonic ordering =====
+  testV7MonotonicOrdering =>
+    a := Uuid v7
+    Timer sleep: 50
+    b := Uuid v7
+    Timer sleep: 50
+    c := Uuid v7
+    self assert: (a < b)
+    self assert: (b < c)
+    self assert: (a <= b)
+    self assert: (b >= a)
+    self deny: (b < a)
+
+  // ===== Parse / print round-trip =====
+  testFromStringParsesCanonicalForm =>
+    result := Uuid fromString: "550e8400-e29b-41d4-a716-446655440000"
+    self assert: result isOk
+    id := result unwrap
+    self assert: id class equals: Uuid
+    self assert: id version equals: 4
+    self assert: id asString equals: "550e8400-e29b-41d4-a716-446655440000"
+
+  testFromStringIsCaseInsensitiveAndCanonicalizesToLowercase =>
+    id := (Uuid fromString: "550E8400-E29B-41D4-A716-446655440000") unwrap
+    self assert: id asString equals: "550e8400-e29b-41d4-a716-446655440000"
+
+  testRoundTripThroughAsString =>
+    original := Uuid v7
+    reparsed := (Uuid fromString: original asString) unwrap
+    self assert: reparsed =:= original
+    self assert: reparsed asString equals: original asString
+
+  testV4RoundTripThroughAsString =>
+    original := Uuid v4
+    reparsed := (Uuid fromString: original asString) unwrap
+    self assert: reparsed =:= original
+    self assert: reparsed asString equals: original asString
+
+  testFromStringRejectsMalformedInput =>
+    self assert: (Uuid fromString: "not-a-uuid") isError
+    self assert: (Uuid fromString: "550e8400e29b41d4a716446655440000") isError
+    self assert: (Uuid fromString: "550e8400-e29b-41d4-a716-44665544000") isError
+    self assert: (Uuid fromString: "gggggggg-gggg-gggg-gggg-gggggggggggg") isError
+    self assert: (Uuid fromString: "") isError
+
+  testFromStringRejectsTrailingNewline =>
+    // PCRE's `$` also matches just before a trailing "\n" — a common way to
+    // accidentally admit malformed input (e.g. a UUID read as a file/HTTP
+    // line). The pattern must anchor strictly at end-of-string instead.
+    self assert: (Uuid fromString: "550e8400-e29b-41d4-a716-446655440000\n") isError
+
+  // ===== isValid: =====
+  testIsValid =>
+    self assert: (Uuid isValid: "550e8400-e29b-41d4-a716-446655440000")
+    self assert: (Uuid isValid: "550E8400-E29B-41D4-A716-446655440000")
+    self deny: (Uuid isValid: "not-a-uuid")
+    self deny: (Uuid isValid: "")
+    self deny: (Uuid isValid: "550e8400-e29b-41d4-a716-446655440000\n")
+
+  testIsValidAgreesWithFromString =>
+    // isValid: must be true exactly when fromString: succeeds.
+    validCases := #("550e8400-e29b-41d4-a716-446655440000", (Uuid v4) asString, (Uuid v7) asString)
+    invalidCases := #("not-a-uuid", "", "550e8400-e29b-41d4-a716-446655440000\n", "gggggggg-gggg-gggg-gggg-gggggggggggg")
+    validCases
+      do: [:s |
+        self assert: (Uuid isValid: s)
+        self assert: (Uuid fromString: s) isOk
+      ]
+    invalidCases
+      do: [:s |
+        self deny: (Uuid isValid: s)
+        self assert: (Uuid fromString: s) isError
+      ]
+
+  // ===== RFC 9562 conformance of generated values =====
+  testV4HasConformantVariantBits =>
+    // Variant nibble is the 20th character (1-based) of the canonical
+    // string form and must be one of 8/9/a/b.
+    variantChar := ((Uuid v4) asString) at: 20
+    self assert: (#("8", "9", "a", "b") includes: variantChar)
+
+  testV7HasConformantVariantBits =>
+    variantChar := ((Uuid v7) asString) at: 20
+    self assert: (#("8", "9", "a", "b") includes: variantChar)
+
+  // ===== Equality and hash =====
+  testEqualityIsStructural =>
+    a := (Uuid fromString: "550e8400-e29b-41d4-a716-446655440000") unwrap
+    b := (Uuid fromString: "550e8400-e29b-41d4-a716-446655440000") unwrap
+    c := Uuid v4
+    self assert: a =:= b
+    self assert: a hash equals: b hash
+    self deny: a =:= c
+
+  // ===== Comparison =====
+  testComparisonOperators =>
+    a := (Uuid fromString: "00000000-0000-7000-8000-000000000000") unwrap
+    b := (Uuid fromString: "ffffffff-ffff-7fff-bfff-ffffffffffff") unwrap
+    self assert: (a < b)
+    self deny: (b < a)
+    self assert: (b > a)
+    self deny: (a > b)
+    self assert: (a <= a)
+    self assert: (a <= b)
+    self deny: (b <= a)
+    self assert: (b >= a)
+    self assert: (a >= a)
+    self deny: (a >= b)
+
+  // ===== Error handling =====
+  testComparisonRejectsNonUuidArgument =>
+    id := Uuid v4
+    @expect type
+    self should: [id < 5] raise: #type_error
+    @expect type
+    self should: [id > 5] raise: #type_error
+    @expect type
+    self should: [id <= 5] raise: #type_error
+    @expect type
+    self should: [id >= 5] raise: #type_error
+
+  testFromStringRejectsNonStringArgument =>
+    @expect type
+    self should: [Uuid fromString: 5] raise: #type_error
+
+  testIsValidRejectsNonStringArgument =>
+    @expect type
+    self should: [Uuid isValid: 5] raise: #type_error

@@ -1164,7 +1164,7 @@ fn generate_app_file(
          \x20   {{vsn, \"{version}\"}},\n\
          \x20   {{modules, [{modules_list}]}},\n\
          \x20   {{registered, []}},\n\
-         \x20   {{applications, [kernel, stdlib, beamtalk_runtime]}},\n\
+         \x20   {{applications, [kernel, stdlib, crypto, beamtalk_runtime]}},\n\
          \x20   {{env, [\n\
          \x20       {{classes, [{classes_list}]}},\n\
          \x20       {{protocol_modules, [{protocol_modules_list}]}}{type_aliases_entry}\n\
@@ -1207,7 +1207,7 @@ fn generate_app_src_file(
          \x20   {{vsn, {{cmd, \"escript ../../../scripts/version.escript\"}}}},\n\
          \x20   {{modules, []}},\n\
          \x20   {{registered, []}},\n\
-         \x20   {{applications, [kernel, stdlib, beamtalk_runtime]}},\n\
+         \x20   {{applications, [kernel, stdlib, crypto, beamtalk_runtime]}},\n\
          \x20   {{env, [\n\
          \x20       {{classes, [\n\
          \x20           {classes_list}\n\
