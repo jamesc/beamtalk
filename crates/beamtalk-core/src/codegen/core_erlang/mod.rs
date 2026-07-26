@@ -111,6 +111,7 @@ mod variable_context;
 
 // Re-export utility functions for IDE queries
 pub use util::escape_atom_chars;
+pub use util::escape_erlang_string;
 pub use util::to_module_name;
 
 use crate::ast::{Block, Expression, MessageSelector, Module, WellKnownSelector};
