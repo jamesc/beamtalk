@@ -204,6 +204,7 @@ pub fn build_binding_table<'a>(
 /// Parsing errors are silently ignored — files that fail to parse simply
 /// contribute no bindings. This is safe because the binding table is used
 /// as an optimization hint, not a correctness requirement.
+///
 /// Subdirectories are walked too, so grouping `stdlib/src/` into
 /// `collections/`, `actors/`, … does not silently drop `@primitive` bindings
 /// for the classes that move.
@@ -213,15 +214,26 @@ pub fn load_from_directory(lib_dir: &std::path::Path) -> PrimitiveBindingTable {
     table
 }
 
+/// Symlinks are skipped, matching `FileWalker`'s default (the walker
+/// `build_stdlib` uses over the same tree) and stopping a symlinked directory
+/// cycle from recursing forever.
 fn load_into_table(dir: &std::path::Path, table: &mut PrimitiveBindingTable) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
 
     for entry in entries.flatten() {
+        // `file_type()` does not traverse symlinks, unlike `Path::is_dir()`.
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_symlink() {
+            continue;
+        }
+
         let path = entry.path();
 
-        if path.is_dir() {
+        if file_type.is_dir() {
             load_into_table(&path, table);
             continue;
         }
@@ -637,6 +649,33 @@ mod tests {
                 selector: "size".to_string(),
             }),
             "Two levels deep must be found"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_load_from_directory_does_not_follow_symlinked_directory_cycle() {
+        // A symlink pointing back at an ancestor would recurse forever if
+        // directory detection followed links. Matches `FileWalker`'s
+        // skip-symlinks default over the same tree.
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        std::fs::create_dir_all(root.join("numeric")).unwrap();
+        std::fs::write(
+            root.join("numeric/Integer.bt"),
+            "Value subclass: Integer\n  + other => @primitive\n",
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(root, root.join("numeric/loop")).unwrap();
+
+        // Terminates, and still collects the real file alongside the cycle.
+        let table = load_from_directory(root);
+
+        assert_eq!(
+            table.lookup("Integer", "+"),
+            Some(&PrimitiveBinding::SelectorBased {
+                selector: "+".to_string(),
+            })
         );
     }
 

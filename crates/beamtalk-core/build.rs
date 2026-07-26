@@ -69,11 +69,22 @@ fn generate_stdlib_types(lib_dir: &Path) {
 /// Those are editorial only — the class name is the file stem regardless of
 /// depth, matching `build_stdlib::module_name_from_path`. Recursing keeps
 /// `is_known_stdlib_type()` from silently missing nested classes.
+///
+/// Symlinks are skipped, matching `FileWalker`'s default (the walker
+/// `build_stdlib` uses over the same tree). Beyond keeping the two in sync,
+/// it stops a symlinked directory cycle from recursing until the build script
+/// blows its stack.
 fn collect_stdlib_class_names(dir: &Path, out: &mut Vec<String>) {
     let entries = fs::read_dir(dir).expect("Failed to read stdlib source directory");
     for entry in entries {
-        let path = entry.expect("Failed to read directory entry").path();
-        if path.is_dir() {
+        let entry = entry.expect("Failed to read directory entry");
+        // `file_type()` does not traverse symlinks, unlike `Path::is_dir()`.
+        let file_type = entry.file_type().expect("Failed to read file type");
+        if file_type.is_symlink() {
+            continue;
+        }
+        let path = entry.path();
+        if file_type.is_dir() {
             collect_stdlib_class_names(&path, out);
         } else if path.extension().is_some_and(|ext| ext == "bt") {
             if let Some(stem) = path.file_stem() {

@@ -47,8 +47,15 @@ pub struct MethodInfo {
 /// Matches `build::find_source_files`, so `beamtalk doc` documents every class
 /// that `beamtalk build` compiles — including classes in `src/` subdirectories
 /// (user packages) or `stdlib/src/` subdirectories.
+///
+/// Build/VCS directories are excluded. `build::find_source_files` avoids them
+/// by preferring the package's `src/` subdirectory, but `doc` walks whatever
+/// path it is handed — so pointing it at a package root would otherwise pull
+/// in every dependency's classes from `_build/deps/`.
 pub(super) fn find_source_files(path: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
-    beamtalk_core::file_walker::FileWalker::source_files().walk(path)
+    beamtalk_core::file_walker::FileWalker::source_files()
+        .exclude_dirs(&[".git", "target", "node_modules", "_build"])
+        .walk(path)
 }
 
 /// Parse a `.bt` source file and extract class documentation info.

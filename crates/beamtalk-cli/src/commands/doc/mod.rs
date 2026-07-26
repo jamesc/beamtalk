@@ -332,6 +332,24 @@ mod tests {
     }
 
     #[test]
+    fn test_find_source_files_skips_build_directories() {
+        // Recursion must not turn `beamtalk doc <package-root>` into "document
+        // every dependency too" — `_build/deps/**` classes are not this
+        // package's API.
+        let temp = TempDir::new().unwrap();
+        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        fs::create_dir_all(dir.join("_build/deps/http/src")).unwrap();
+        fs::create_dir_all(dir.join("target")).unwrap();
+        fs::write(dir.join("Mine.bt"), "// stub").unwrap();
+        fs::write(dir.join("_build/deps/http/src/HTTPClient.bt"), "// stub").unwrap();
+        fs::write(dir.join("target/Stale.bt"), "// stub").unwrap();
+
+        let files = find_source_files(&dir).unwrap();
+        assert_eq!(files.len(), 1, "Only the package's own class: {files:?}");
+        assert!(files[0].as_str().ends_with("Mine.bt"));
+    }
+
+    #[test]
     fn test_parse_class_info() {
         let temp = TempDir::new().unwrap();
         let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();

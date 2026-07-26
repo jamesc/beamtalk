@@ -56,7 +56,7 @@ pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
         return Ok(());
     }
 
-    check_duplicate_stems(&source_files)?;
+    check_duplicate_module_names(&source_files)?;
 
     // Incremental build: skip if all outputs are newer than all inputs
     if is_stdlib_up_to_date(&ebin_dir, &source_files) {
@@ -380,23 +380,27 @@ fn find_stdlib_files(lib_dir: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
     beamtalk_core::file_walker::FileWalker::source_files().walk(lib_dir)
 }
 
-/// Reject two stdlib sources whose file stems collide.
+/// Reject two stdlib sources that would compile to the same module.
 ///
 /// Module names come from the file stem alone, so `collections/Array.bt` and
-/// `legacy/Array.bt` would both compile to `bt@stdlib@array` — the second
-/// silently clobbering the first in `ebin/`. Flat layouts got this for free
-/// from the filesystem; nested ones have to check.
-fn check_duplicate_stems(source_files: &[Utf8PathBuf]) -> Result<()> {
-    let mut seen: std::collections::HashMap<&str, &Utf8Path> = std::collections::HashMap::new();
+/// `legacy/Array.bt` both become `bt@stdlib@array` — the second silently
+/// clobbering the first in `ebin/`. Flat layouts got uniqueness for free from
+/// the filesystem; nested ones have to check.
+///
+/// Keyed on the *derived module name*, not the raw stem, because
+/// [`module_name_from_path`] case-folds: `BEAMError.bt` and `Beamerror.bt` are
+/// distinct filenames that both produce `bt@stdlib@beamerror`. Comparing stems
+/// would wave that collision straight through.
+fn check_duplicate_module_names(source_files: &[Utf8PathBuf]) -> Result<()> {
+    let mut seen: std::collections::HashMap<String, &Utf8Path> = std::collections::HashMap::new();
     for file in source_files {
-        let Some(stem) = file.file_stem() else {
-            continue;
-        };
-        if let Some(first) = seen.insert(stem, file.as_path()) {
+        let module = module_name_from_path(file)?;
+        if let Some(first) = seen.insert(module.clone(), file.as_path()) {
             miette::bail!(
-                "Duplicate stdlib class file name '{stem}.bt': '{first}' and '{file}' would both \
-                 compile to the same module. Stdlib module names come from the file stem only, \
-                 so class file names must be unique across all subdirectories."
+                "Stdlib sources '{first}' and '{file}' both compile to module '{module}'. \
+                 Module names come from the file stem alone (case-folded), and subdirectories \
+                 do not namespace them, so stdlib class file names must be unique across all \
+                 subdirectories. Rename one of the two files."
             );
         }
     }
@@ -1086,6 +1090,7 @@ fn format_stdlib_class_entry(m: &ClassMeta) -> String {
 }
 
 /// Format stdlib class metadata entries joined with the given separator.
+///
 /// Sorted by class name so the generated `.app`/`.app.src` content depends
 /// only on *which* classes exist, never on the order the source tree happened
 /// to be walked in. Without this, moving a class into a `stdlib/src/`
@@ -2552,27 +2557,54 @@ mod tests {
     }
 
     #[test]
-    fn check_duplicate_stems_accepts_unique_names_across_subdirectories() {
+    fn check_duplicate_module_names_accepts_unique_names_across_subdirectories() {
         let files = vec![
             Utf8PathBuf::from("stdlib/src/Object.bt"),
             Utf8PathBuf::from("stdlib/src/collections/Array.bt"),
             Utf8PathBuf::from("stdlib/src/numeric/Integer.bt"),
         ];
-        assert!(check_duplicate_stems(&files).is_ok());
+        assert!(check_duplicate_module_names(&files).is_ok());
     }
 
     #[test]
-    fn check_duplicate_stems_rejects_colliding_names() {
-        // Both would compile to `bt@stdlib@array`, silently clobbering in ebin/.
+    fn check_duplicate_module_names_rejects_same_stem_in_two_subdirectories() {
+        // Both compile to `bt@stdlib@array`, silently clobbering in ebin/.
         let files = vec![
             Utf8PathBuf::from("stdlib/src/collections/Array.bt"),
             Utf8PathBuf::from("stdlib/src/legacy/Array.bt"),
         ];
 
-        let err = check_duplicate_stems(&files).unwrap_err().to_string();
+        let err = check_duplicate_module_names(&files)
+            .unwrap_err()
+            .to_string();
         assert!(
-            err.contains("Array.bt") && err.contains("legacy/Array.bt"),
-            "Error must name both colliding files. Got: {err}"
+            err.contains("stdlib/src/collections/Array.bt")
+                && err.contains("stdlib/src/legacy/Array.bt"),
+            "Error must name both colliding paths in full, so the user knows \
+             which two files to rename. Got: {err}"
+        );
+        assert!(
+            err.contains("bt@stdlib@array"),
+            "Error should name the module they collide on. Got: {err}"
+        );
+    }
+
+    #[test]
+    fn check_duplicate_module_names_catches_case_folded_collision() {
+        // `to_module_name` lowercases, so these distinct filenames both yield
+        // `bt@stdlib@beamerror`. A raw-stem comparison would miss it — and
+        // `BEAMError.bt` is a real stdlib class, so the shape is not academic.
+        let files = vec![
+            Utf8PathBuf::from("stdlib/src/BEAMError.bt"),
+            Utf8PathBuf::from("stdlib/src/errors/Beamerror.bt"),
+        ];
+
+        let err = check_duplicate_module_names(&files)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("bt@stdlib@beamerror"),
+            "Case-folded collision must be rejected. Got: {err}"
         );
     }
 }

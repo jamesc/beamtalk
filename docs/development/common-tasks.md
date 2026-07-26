@@ -55,9 +55,10 @@ cosmetic layout choice, and turn every future file move into an ABI change.
 
 Two consequences:
 
-- **Class file names must be unique across all subdirectories.**
-  `build-stdlib` fails with a duplicate-stem error rather than silently
-  clobbering a module in `ebin/`.
+- **Class file names must be unique across all subdirectories**, and unique
+  *after case-folding* — `to_module_name` lowercases, so `BEAMError.bt` and
+  `Beamerror.bt` both yield `bt@stdlib@beamerror`. `build-stdlib` fails with a
+  duplicate-module error rather than silently clobbering a module in `ebin/`.
 - Moving a class between subdirectories is free at build time, but does
   invalidate any `stdlib/src/...` paths written in docs and comments. Update
   those in the same change.
