@@ -592,8 +592,22 @@ three small front-side additions (`ensure_distributed/0` sname seed,
 `config/runtime.exs` `BT_ATTACH_BIND_IP`, a `/readiness` router + controller),
 CI release lanes. **Not** affected: the wire/RPC/eval layer, the Rust toolchain.
 
+## Implementation Tracking
+
+**Epic:** BT-2982
+**Issues:**
+- BT-2983 — Front-side attach hooks (sname seed, `BT_ATTACH_BIND_IP`, `/readiness`)
+- BT-2984 — Spike: settle shell (Tauri vs no-shell coordinator), window model, single-instance policy
+- BT-2985 — Desktop broker core (discovery, spawn, two-stage readiness, reaping)
+- BT-2986 — Desktop picker UI (workspace list, attach/detach, first-run empty state)
+- BT-2987 — Packaging: Linux + macOS build lane, signing/notarization
+- BT-2988 — Packaging: Windows support
+- BT-2989 — E2E validation + user docs
+
+**Status:** Planned
+
 ## References
-- Related issues: BT-XXX (to be filed via `/plan-adr`)
+- Related issues: BT-2982 (Epic), BT-2983–BT-2989 (see Implementation Tracking above)
 - Related ADRs:
   [ADR 0017](0017-browser-connectivity-to-running-workspaces.md) (LiveView IDE),
   [ADR 0091](0091-remote-workspace-access-phoenix-authenticated-front.md) (Attach topology + cookie boundary),
