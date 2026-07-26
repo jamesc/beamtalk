@@ -272,7 +272,18 @@ fn validate_registry_dependency(name: &str, version: &str) -> Result<DependencyS
 ///
 /// Every segment must be a non-empty run of ASCII digits. Returns a short
 /// human-readable reason on failure (the caller adds the surrounding context).
-fn validate_exact_version(version: &str) -> Result<(), String> {
+///
+/// `pub` so `commands::version` (`beamtalk version X.Y.Z`, BT-2980) can apply
+/// the same exact-version rule a registry dependency's version is held to,
+/// rather than duplicating it.
+///
+/// # Errors
+///
+/// Returns `Err` with a short human-readable reason if `version` is not a
+/// valid `major.minor.patch` string (empty, has surrounding whitespace, uses
+/// a range operator, has the wrong number of segments, a non-numeric
+/// segment, or a segment with a leading zero).
+pub fn validate_exact_version(version: &str) -> Result<(), String> {
     if version.is_empty() {
         return Err("the version is empty".to_string());
     }

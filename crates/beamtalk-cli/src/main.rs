@@ -328,6 +328,28 @@ enum Command {
         action: commands::deps::cli::DepsCommand,
     },
 
+    /// Show, set, or bump the package version in beamtalk.toml (BT-2980)
+    ///
+    /// No arguments prints the current version. `beamtalk version X.Y.Z`
+    /// sets it exactly (must be greater than the current version).
+    /// `beamtalk version bump patch|minor|major` increments the
+    /// corresponding segment. Distinct from clap's own `--version`/`-V` flag.
+    Version {
+        /// `X.Y.Z`, or `bump patch|minor|major`. Omit to print the current version.
+        #[arg(trailing_var_arg = true)]
+        args: Vec<String>,
+    },
+
+    /// Tag and publish a release to the package registry (BT-2980)
+    ///
+    /// Tags the current `beamtalk.toml` version, pushes the tag to `origin`,
+    /// and records the release in the package registry index.
+    Publish {
+        /// Print the tag name and registry index diff without tagging or pushing anything
+        #[arg(long)]
+        dry_run: bool,
+    },
+
     /// Generate code from Beamtalk sources (native Erlang stubs, FFI stubs)
     Generate {
         #[command(subcommand)]
@@ -612,6 +634,8 @@ fn run() -> Result<()> {
         } => commands::test::run_tests(&path, warnings_as_errors, jobs, quiet),
         Command::Generate { action } => commands::generate::cli::run(action),
         Command::Deps { action } => commands::deps::cli::run(action),
+        Command::Version { args } => commands::version::run(&args),
+        Command::Publish { dry_run } => commands::publish::run(dry_run),
         Command::Doctor { dev } => commands::doctor::run(dev),
         Command::Doc {
             path,

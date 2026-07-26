@@ -215,6 +215,8 @@ These CLI subcommands are build/tooling commands that operate offline (no worksp
 | `deps add` | -- | -- | `surface-specific: package management` |
 | `deps list` | -- | -- | `surface-specific: package management` |
 | `deps update` | -- | -- | `surface-specific: package management` |
+| `version` | -- | -- | `surface-specific: package release workflow` (BT-2980). Shows, sets, or bumps the `version` field in `beamtalk.toml` via a surgical text edit (same approach as `deps add`'s manifest write) — no workspace, offline. Distinct from clap's own `--version`/`-V` flag on the top-level `beamtalk` binary. |
+| `publish` | -- | -- | `surface-specific: package release workflow` (BT-2980). Tags and pushes a release, then updates the package registry index (`deps::registry`, BT-2978) — network/git side-effecting, CLI-only; there is no REPL/MCP/LSP analogue for authoring a registry release. |
 | `generate native` | -- | -- | `surface-specific: code generation` |
 | `generate stubs` | -- | -- | `surface-specific: code generation` |
 | `doc` | -- | -- | `surface-specific: HTML documentation generator` |
