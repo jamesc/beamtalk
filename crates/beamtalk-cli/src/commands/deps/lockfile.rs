@@ -24,6 +24,15 @@
 //! reference = "tag:v1.0.0"
 //! sha = "abc1234def5678..."
 //!
+//! # A registry dependency additionally records the exact version requested
+//! # in beamtalk.toml, so resolution can skip the registry index on a hit.
+//! [[package]]
+//! name = "yaml"
+//! version = "0.2.1"
+//! url = "https://github.com/jamesc/beamtalk-yaml"
+//! reference = "tag:v0.2.1"
+//! sha = "fed4321cba9876..."
+//!
 //! [[native_package]]
 //! name = "gun"
 //! version = "2.1.3"
@@ -64,6 +73,13 @@ pub struct LockEntry {
     pub reference: GitReference,
     /// The exact commit SHA this reference resolved to.
     pub resolved_sha: String,
+    /// For a registry dependency, the exact version requested in
+    /// `beamtalk.toml` (serialized as the optional `version` field).
+    ///
+    /// `None` for plain git dependencies. A lock entry whose recorded version
+    /// still matches the manifest lets resolution skip the registry index
+    /// entirely and go straight to the git checkout.
+    pub registry_version: Option<String>,
 }
 
 /// A locked native (hex.pm) dependency entry (ADR 0072 Phase 2).
@@ -104,6 +120,11 @@ struct TomlLockfile {
 #[allow(dead_code)] // Constructed by serde deserialization
 struct TomlLockEntry {
     name: String,
+    /// The registry version, when this package was resolved from the registry.
+    /// Absent in lockfiles written before registry support — old lockfiles
+    /// therefore still parse, and their entries simply carry no version.
+    #[serde(default)]
+    version: Option<String>,
     url: String,
     reference: String,
     sha: String,
@@ -223,6 +244,7 @@ impl Lockfile {
                     url: entry.url,
                     reference,
                     resolved_sha: entry.sha,
+                    registry_version: entry.version,
                 },
             );
         }
@@ -279,6 +301,9 @@ impl Lockfile {
         for entry in self.packages.values() {
             output.push_str("[[package]]\n");
             let _ = writeln!(output, "name = \"{}\"", entry.name);
+            if let Some(version) = &entry.registry_version {
+                let _ = writeln!(output, "version = \"{version}\"");
+            }
             let _ = writeln!(output, "url = \"{}\"", entry.url);
             let _ = writeln!(
                 output,
@@ -498,12 +523,14 @@ mod tests {
             url: "https://github.com/someone/beamtalk-http".to_string(),
             reference: GitReference::Branch("main".to_string()),
             resolved_sha: "fed8765cba4321fed8765cba4321fed8765cba43".to_string(),
+            registry_version: None,
         });
         lockfile.insert(LockEntry {
             name: "json".to_string(),
             url: "https://github.com/jamesc/beamtalk-json".to_string(),
             reference: GitReference::Tag("v1.0.0".to_string()),
             resolved_sha: "abc1234def5678abc1234def5678abc1234def56".to_string(),
+            registry_version: None,
         });
         lockfile
     }
@@ -528,6 +555,71 @@ mod tests {
         let parsed = Lockfile::parse(&serialized).unwrap();
 
         assert_eq!(original, parsed);
+    }
+
+    // --- Registry version field (BT-2978) ---
+
+    #[test]
+    fn test_registry_version_is_serialized_as_version() {
+        let mut lockfile = Lockfile::new();
+        lockfile.insert(LockEntry {
+            name: "yaml".to_string(),
+            url: "https://github.com/jamesc/beamtalk-yaml".to_string(),
+            reference: GitReference::Tag("v0.2.1".to_string()),
+            resolved_sha: "abc1234def5678abc1234def5678abc1234def56".to_string(),
+            registry_version: Some("0.2.1".to_string()),
+        });
+
+        let content = lockfile.serialize();
+        assert!(content.contains("version = \"0.2.1\""), "{content}");
+    }
+
+    #[test]
+    fn test_registry_version_roundtrips() {
+        let mut original = Lockfile::new();
+        original.insert(LockEntry {
+            name: "yaml".to_string(),
+            url: "https://github.com/jamesc/beamtalk-yaml".to_string(),
+            reference: GitReference::Tag("v0.2.1".to_string()),
+            resolved_sha: "abc1234def5678abc1234def5678abc1234def56".to_string(),
+            registry_version: Some("0.2.1".to_string()),
+        });
+
+        let parsed = Lockfile::parse(&original.serialize()).unwrap();
+        assert_eq!(original, parsed);
+        assert_eq!(
+            parsed.get("yaml").unwrap().registry_version.as_deref(),
+            Some("0.2.1")
+        );
+    }
+
+    #[test]
+    fn test_git_entry_omits_version_field() {
+        let content = sample_lockfile().serialize();
+        assert!(
+            !content.contains("version = "),
+            "a plain git entry should not write a version: {content}"
+        );
+    }
+
+    #[test]
+    fn test_pre_registry_lockfile_still_parses() {
+        // A lockfile written before registry support carried no `version` key.
+        let legacy = r#"
+[[package]]
+name = "json"
+url = "https://github.com/jamesc/beamtalk-json"
+reference = "tag:v1.0.0"
+sha = "abc1234def5678abc1234def5678abc1234def56"
+"#;
+
+        let parsed = Lockfile::parse(legacy).unwrap();
+        let entry = parsed.get("json").unwrap();
+        assert_eq!(
+            entry.resolved_sha,
+            "abc1234def5678abc1234def5678abc1234def56"
+        );
+        assert_eq!(entry.registry_version, None);
     }
 
     #[test]
@@ -624,12 +716,14 @@ sha = "abc123"
             url: "https://example.com/zebra".to_string(),
             reference: GitReference::Tag("v1".to_string()),
             resolved_sha: "aaa".to_string(),
+            registry_version: None,
         });
         lockfile.insert(LockEntry {
             name: "alpha".to_string(),
             url: "https://example.com/alpha".to_string(),
             reference: GitReference::Tag("v1".to_string()),
             resolved_sha: "bbb".to_string(),
+            registry_version: None,
         });
 
         let serialized = lockfile.serialize();
@@ -670,12 +764,14 @@ sha = "abc123"
             url: "https://example.com/dep".to_string(),
             reference: GitReference::Tag("v1".to_string()),
             resolved_sha: "old_sha".to_string(),
+            registry_version: None,
         });
         lockfile.insert(LockEntry {
             name: "dep".to_string(),
             url: "https://example.com/dep".to_string(),
             reference: GitReference::Tag("v2".to_string()),
             resolved_sha: "new_sha".to_string(),
+            registry_version: None,
         });
 
         assert_eq!(lockfile.packages.len(), 1);

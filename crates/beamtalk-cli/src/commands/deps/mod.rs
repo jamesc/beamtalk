@@ -9,6 +9,8 @@
 //! `beamtalk.toml`. Phase 1 supports:
 //! - **Path dependencies:** local filesystem paths (for monorepo/development)
 //! - **Git dependencies:** clone repos, check out tag/branch/rev, resolve to exact SHA
+//! - **Registry dependencies:** an exact version resolved through the registry
+//!   index into a `(git url, tag)` pair, then fetched as a git dependency
 //! - **Lockfile:** `beamtalk.lock` pins exact commit SHAs for reproducible builds
 //! - **Topological ordering:** compile dependencies in correct order (leaves first)
 //! - **Cycle detection:** clear error when circular dependencies are found
@@ -19,6 +21,7 @@ pub mod git;
 pub mod graph;
 pub mod lockfile;
 pub mod path;
+pub mod registry;
 
 // Re-export commonly used items
 pub use path::collect_dep_ebin_paths;
@@ -206,7 +209,11 @@ fn discover_all_dep_roots(
                         true,
                     )
                 }
-                DependencySource::Git { .. } => (layout.dep_checkout_dir(dep_name), false),
+                // Registry deps are fetched into the same checkout directory
+                // as git deps — they *are* git deps once resolved.
+                DependencySource::Git { .. } | DependencySource::Registry { .. } => {
+                    (layout.dep_checkout_dir(dep_name), false)
+                }
             };
 
             let is_direct = direct_names.contains(dep_name.as_str());
@@ -281,26 +288,86 @@ fn collect_fresh_deps(
     Ok(resolved)
 }
 
+/// Check that every registry dependency's manifest version is the one the
+/// lockfile actually pinned.
+///
+/// A version bump in `beamtalk.toml` must force re-resolution even when the
+/// lockfile's mtime still looks current.
+fn registry_versions_match(project_root: &Utf8Path, manifest: &manifest::ParsedManifest) -> bool {
+    use beamtalk_core::compilation::DependencySource;
+
+    let requested: Vec<(&String, &String)> = manifest
+        .dependencies
+        .iter()
+        .filter_map(|(name, spec)| match &spec.source {
+            DependencySource::Registry { version } => Some((name, version)),
+            _ => None,
+        })
+        .collect();
+
+    if requested.is_empty() {
+        return true;
+    }
+
+    let lock = match lockfile::Lockfile::read(project_root) {
+        Ok(Some(lock)) => lock,
+        Ok(None) => {
+            debug!("Lockfile missing for registry deps — deps are stale");
+            return false;
+        }
+        Err(e) => {
+            debug!(error = %e, "Failed to read lockfile — deps are stale");
+            return false;
+        }
+    };
+
+    for (name, version) in requested {
+        match lock.get(name) {
+            Some(entry) if entry.registry_version.as_ref() == Some(version) => {}
+            Some(_) => {
+                debug!(
+                    dep = %name,
+                    version = %version,
+                    "Registry dep version differs from lockfile — deps are stale"
+                );
+                return false;
+            }
+            None => {
+                debug!(dep = %name, "Registry dep not in lockfile — deps are stale");
+                return false;
+            }
+        }
+    }
+
+    true
+}
+
 /// Check whether all dependencies (direct and transitive) are already
 /// resolved and compiled.
 ///
 /// Returns `true` (fresh) when:
 /// 1. All dependency ebin directories exist under `_build/deps/{name}/ebin/`
-/// 2. The lockfile exists and is newer than `beamtalk.toml` (for git deps),
-///    OR there are no git dependencies (path-only deps don't use a lockfile)
+/// 2. The lockfile exists and is newer than `beamtalk.toml` (for git and
+///    registry deps), OR there are only path dependencies (which don't use a
+///    lockfile)
+/// 3. Every registry dep's locked version still matches the manifest
 fn deps_are_fresh(project_root: &Utf8Path, manifest: &manifest::ParsedManifest) -> bool {
-    let has_git_deps = manifest.dependencies.values().any(|spec| {
+    use beamtalk_core::compilation::DependencySource;
+
+    // Registry deps resolve into git checkouts and are pinned in the lockfile
+    // just like git deps, so they carry the same lockfile requirement.
+    let has_locked_deps = manifest.dependencies.values().any(|spec| {
         matches!(
             spec.source,
-            beamtalk_core::compilation::DependencySource::Git { .. }
+            DependencySource::Git { .. } | DependencySource::Registry { .. }
         )
     });
 
-    // Check lockfile freshness for git deps
-    if has_git_deps {
+    // Check lockfile freshness for git/registry deps
+    if has_locked_deps {
         let lockfile_path = project_root.join(lockfile::LOCKFILE_NAME);
         if !lockfile_path.exists() {
-            debug!("Lockfile missing but git deps present — deps are stale");
+            debug!("Lockfile missing but git/registry deps present — deps are stale");
             return false;
         }
 
@@ -318,6 +385,13 @@ fn deps_are_fresh(project_root: &Utf8Path, manifest: &manifest::ParsedManifest) 
                     return false;
                 }
             }
+        }
+
+        // The mtime check above can miss a manifest edit that lands within the
+        // same timestamp granularity, so compare the requested registry
+        // versions against what is actually locked.
+        if !registry_versions_match(project_root, manifest) {
+            return false;
         }
     }
 
@@ -1177,5 +1251,134 @@ mod tests {
             !layout.dep_checkout_dir("leftover").exists(),
             "All deps should be removed when no deps are declared"
         );
+    }
+
+    // --- Registry dependency freshness (BT-2978) ---
+
+    /// Lay out a project with one compiled registry dep locked at
+    /// `locked_version`, whose manifest asks for `manifest_version`.
+    fn setup_registry_project(
+        temp: &TempDir,
+        manifest_version: &str,
+        locked_version: &str,
+    ) -> camino::Utf8PathBuf {
+        let root = camino::Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let layout = BuildLayout::new(&root);
+        let checkout = layout.dep_checkout_dir("yaml");
+        fs::create_dir_all(&checkout).unwrap();
+        fs::write(
+            checkout.join("beamtalk.toml"),
+            format!("[package]\nname = \"yaml\"\nversion = \"{locked_version}\"\n"),
+        )
+        .unwrap();
+
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        create_dep_ebin_with_beam(temp.path(), "yaml");
+
+        write_manifest(
+            temp.path(),
+            "my_app",
+            "0.1.0",
+            &format!("[dependencies]\nyaml = \"{manifest_version}\"\n"),
+        );
+
+        // Lockfile must be newer than the manifest so only the version
+        // comparison can make the deps stale.
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        fs::write(
+            temp.path().join("beamtalk.lock"),
+            format!(
+                "# This file is auto-generated by beamtalk. Do not edit manually.\n\n\
+                 [[package]]\n\
+                 name = \"yaml\"\n\
+                 version = \"{locked_version}\"\n\
+                 url = \"https://example.test/yaml\"\n\
+                 reference = \"tag:v{locked_version}\"\n\
+                 sha = \"abc123\"\n"
+            ),
+        )
+        .unwrap();
+
+        root
+    }
+
+    #[test]
+    fn test_registry_dep_fresh_when_locked_version_matches() {
+        let temp = TempDir::new().unwrap();
+        let root = setup_registry_project(&temp, "0.2.1", "0.2.1");
+        let parsed = manifest::parse_manifest_full(&root.join("beamtalk.toml")).unwrap();
+
+        assert!(
+            deps_are_fresh(&root, &parsed),
+            "Registry dep locked at the requested version should be fresh"
+        );
+    }
+
+    #[test]
+    fn test_registry_dep_stale_when_manifest_version_differs() {
+        let temp = TempDir::new().unwrap();
+        // Manifest asks for 0.3.0 but the lockfile pins 0.2.1.
+        let root = setup_registry_project(&temp, "0.3.0", "0.2.1");
+        let parsed = manifest::parse_manifest_full(&root.join("beamtalk.toml")).unwrap();
+
+        assert!(
+            !deps_are_fresh(&root, &parsed),
+            "A version bump in beamtalk.toml must force re-resolution"
+        );
+    }
+
+    #[test]
+    fn test_registry_dep_stale_without_lockfile() {
+        let temp = TempDir::new().unwrap();
+        let root = setup_registry_project(&temp, "0.2.1", "0.2.1");
+        fs::remove_file(temp.path().join("beamtalk.lock")).unwrap();
+        let parsed = manifest::parse_manifest_full(&root.join("beamtalk.toml")).unwrap();
+
+        assert!(
+            !deps_are_fresh(&root, &parsed),
+            "Registry deps require a lockfile, like git deps"
+        );
+    }
+
+    #[test]
+    fn test_registry_dep_stale_when_lock_entry_has_no_version() {
+        let temp = TempDir::new().unwrap();
+        let root = setup_registry_project(&temp, "0.2.1", "0.2.1");
+
+        // A pre-registry lock entry (no `version`) can't prove the pin matches.
+        fs::write(
+            temp.path().join("beamtalk.lock"),
+            "# This file is auto-generated by beamtalk. Do not edit manually.\n\n\
+             [[package]]\n\
+             name = \"yaml\"\n\
+             url = \"https://example.test/yaml\"\n\
+             reference = \"tag:v0.2.1\"\n\
+             sha = \"abc123\"\n",
+        )
+        .unwrap();
+
+        let parsed = manifest::parse_manifest_full(&root.join("beamtalk.toml")).unwrap();
+        assert!(
+            !deps_are_fresh(&root, &parsed),
+            "An unversioned lock entry should force re-resolution"
+        );
+    }
+
+    #[test]
+    fn test_discover_all_dep_roots_registry_uses_checkout_dir() {
+        let temp = TempDir::new().unwrap();
+        let root = setup_registry_project(&temp, "0.2.1", "0.2.1");
+        let parsed = manifest::parse_manifest_full(&root.join("beamtalk.toml")).unwrap();
+
+        let deps = discover_all_dep_roots(&root, &parsed).unwrap();
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0].name, "yaml");
+        assert_eq!(
+            deps[0].root,
+            BuildLayout::new(&root).dep_checkout_dir("yaml")
+        );
+        assert!(!deps[0].is_path_dep);
+        assert!(deps[0].is_direct);
     }
 }

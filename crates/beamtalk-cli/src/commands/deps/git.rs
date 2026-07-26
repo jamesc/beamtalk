@@ -355,6 +355,7 @@ mod tests {
             url: url.clone(),
             reference: GitReference::Tag("v1.0.0".to_string()),
             resolved_sha: expected_sha.clone(),
+            registry_version: None,
         };
 
         let result2 = resolve_git_dep(
@@ -397,6 +398,7 @@ mod tests {
             url: url.clone(),
             reference: GitReference::Tag("v1.0.0".to_string()),
             resolved_sha: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef".to_string(),
+            registry_version: None,
         };
 
         let result2 = resolve_git_dep(

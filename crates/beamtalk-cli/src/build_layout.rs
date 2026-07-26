@@ -131,6 +131,21 @@ impl BuildLayout {
     pub fn dep_stamp_path(&self, name: &str) -> Utf8PathBuf {
         self.dep_checkout_dir(name).join(".beamtalk-stamp.json")
     }
+
+    // ── Registry ─────────────────────────────────────────────────────
+
+    /// `_build/registry/` — package registry storage root.
+    pub fn registry_dir(&self) -> Utf8PathBuf {
+        self.build_root().join("registry")
+    }
+
+    /// `_build/registry/index/` — the cloned registry index checkout.
+    ///
+    /// Only used when the registry resolves to a git URL; a registry that
+    /// points at a local directory is read in place.
+    pub fn registry_index_dir(&self) -> Utf8PathBuf {
+        self.registry_dir().join("index")
+    }
 }
 
 #[cfg(test)]
@@ -236,6 +251,21 @@ mod tests {
         assert_eq!(
             layout.dep_stamp_path("utils"),
             "/home/user/my_app/_build/deps/utils/.beamtalk-stamp.json"
+        );
+    }
+
+    #[test]
+    fn test_registry_dir() {
+        let layout = BuildLayout::new("/home/user/my_app");
+        assert_eq!(layout.registry_dir(), "/home/user/my_app/_build/registry");
+    }
+
+    #[test]
+    fn test_registry_index_dir() {
+        let layout = BuildLayout::new("/home/user/my_app");
+        assert_eq!(
+            layout.registry_index_dir(),
+            "/home/user/my_app/_build/registry/index"
         );
     }
 }

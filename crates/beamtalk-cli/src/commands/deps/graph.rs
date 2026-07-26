@@ -10,7 +10,7 @@
 //! (leaves first). Detects circular dependencies and enforces the single-version
 //! policy (each package name may appear at most once in the resolved graph).
 
-use beamtalk_core::compilation::DependencySource;
+use beamtalk_core::compilation::{DependencySource, GitReference};
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, Result};
 use std::collections::{BTreeMap, HashMap};
@@ -19,6 +19,7 @@ use tracing::{debug, info};
 use crate::commands::manifest::{self, ParsedManifest};
 
 use super::lockfile::{LockEntry, Lockfile};
+use super::registry::{self, RegistryLocation};
 
 use super::path::{ResolvedDependency, canonicalize_dep_path};
 
@@ -74,31 +75,30 @@ pub fn resolve_dependency_graph(
     let lockfile = Lockfile::read(project_root)?.unwrap_or_default();
 
     // Phase 1: Discover the full dependency graph
-    // Newly resolved git deps are collected so we can update the lockfile.
+    // Newly resolved git/registry deps are collected so we can update the lockfile.
     let mut ctx = DiscoveryContext {
         project_root,
         graph: BTreeMap::new(),
         discovery_stack: vec![root_name.clone()],
         lockfile: &lockfile,
-        new_git_resolutions: Vec::new(),
+        new_lock_entries: Vec::new(),
+        // The registry is a property of the project being built, so the root
+        // manifest's `[registry]` governs the whole graph — a transitive
+        // dependency cannot redirect resolution to a registry of its own.
+        registry_location: registry::resolve_registry_location(root_manifest.registry.as_ref()),
     };
 
     discover_deps(&mut ctx, project_root, &root_name, &root_manifest)?;
 
     // Extract results from context (drops the lockfile borrow)
     let graph = ctx.graph;
-    let new_git_resolutions = ctx.new_git_resolutions;
+    let new_lock_entries = ctx.new_lock_entries;
 
-    // Update lockfile with any newly resolved git deps
-    if !new_git_resolutions.is_empty() {
+    // Update lockfile with any newly resolved git/registry deps
+    if !new_lock_entries.is_empty() {
         let mut lockfile = lockfile;
-        for resolved in &new_git_resolutions {
-            lockfile.insert(LockEntry {
-                name: resolved.name.clone(),
-                url: resolved.url.clone(),
-                reference: resolved.reference.clone(),
-                resolved_sha: resolved.resolved_sha.clone(),
-            });
+        for entry in new_lock_entries {
+            lockfile.insert(entry);
         }
         lockfile.write(project_root)?;
     }
@@ -199,7 +199,11 @@ struct DiscoveryContext<'a> {
     graph: BTreeMap<String, DepNode>,
     discovery_stack: Vec<String>,
     lockfile: &'a Lockfile,
-    new_git_resolutions: Vec<super::git::ResolvedGitDep>,
+    /// Lock entries produced during this walk, written back once discovery
+    /// completes.
+    new_lock_entries: Vec<LockEntry>,
+    /// Where registry dependencies resolve from, taken from the root manifest.
+    registry_location: RegistryLocation,
 }
 
 /// Recursively discover dependencies by walking manifests.
@@ -251,7 +255,13 @@ fn discover_deps(
                     )
                 })?;
                 let checkout_root = resolved.checkout_path.clone();
-                ctx.new_git_resolutions.push(resolved);
+                ctx.new_lock_entries.push(LockEntry {
+                    name: resolved.name.clone(),
+                    url: resolved.url.clone(),
+                    reference: resolved.reference.clone(),
+                    resolved_sha: resolved.resolved_sha.clone(),
+                    registry_version: None,
+                });
 
                 discover_single_dep(
                     ctx,
@@ -261,8 +271,118 @@ fn discover_deps(
                     parent_name,
                 )?;
             }
+            DependencySource::Registry { version } => {
+                let checkout_root = resolve_registry_dep(ctx, dep_name, version, parent_name)?;
+
+                discover_single_dep(
+                    ctx,
+                    dep_name,
+                    &checkout_root,
+                    &format!("registry: {version}"),
+                    parent_name,
+                )?;
+            }
         }
     }
+    Ok(())
+}
+
+/// Resolve a registry dependency to an on-disk checkout.
+///
+/// Takes the `(git url, tag)` straight from the lockfile when it already
+/// records this exact version — so a locked build never touches the registry
+/// index. Otherwise the index is consulted, then the release is fetched
+/// through the ordinary git machinery and the checked-out package's own
+/// declared version is validated against the request.
+fn resolve_registry_dep(
+    ctx: &mut DiscoveryContext<'_>,
+    dep_name: &str,
+    version: &str,
+    parent_name: &str,
+) -> Result<Utf8PathBuf> {
+    let lock_entry = ctx.lockfile.get(dep_name);
+
+    // Fast path: the lockfile already pins this exact version, so we can go
+    // straight to the git checkout without reading (or fetching) the index.
+    let (url, reference) = match lock_entry {
+        Some(entry) if entry.registry_version.as_deref() == Some(version) => {
+            debug!(dep = %dep_name, version, "Registry dependency satisfied from lockfile");
+            (entry.url.clone(), entry.reference.clone())
+        }
+        _ => {
+            let release = registry::resolve_release(
+                ctx.project_root,
+                &ctx.registry_location,
+                dep_name,
+                version,
+            )
+            .wrap_err_with(|| {
+                format!(
+                    "Failed to resolve registry dependency '{dep_name}' \
+                             (required by '{parent_name}')"
+                )
+            })?;
+            (release.git, GitReference::Tag(release.tag))
+        }
+    };
+
+    let resolved =
+        super::git::resolve_git_dep(dep_name, &url, &reference, ctx.project_root, lock_entry)
+            .wrap_err_with(|| {
+                format!(
+                    "Failed to fetch registry dependency '{dep_name}' {version} \
+             (required by '{parent_name}')"
+                )
+            })?;
+
+    validate_checkout_version(dep_name, version, &resolved.checkout_path, &url, &reference)?;
+
+    let checkout_root = resolved.checkout_path.clone();
+    ctx.new_lock_entries.push(LockEntry {
+        name: resolved.name,
+        url: resolved.url,
+        reference: resolved.reference,
+        resolved_sha: resolved.resolved_sha,
+        registry_version: Some(version.to_string()),
+    });
+
+    Ok(checkout_root)
+}
+
+/// Check that a fetched registry package declares the version we asked for.
+///
+/// Guards against a registry index that points a version at the wrong tag, and
+/// against a package whose tag and `beamtalk.toml` have drifted apart — either
+/// would otherwise silently build the wrong code.
+fn validate_checkout_version(
+    dep_name: &str,
+    requested: &str,
+    checkout_path: &Utf8Path,
+    url: &str,
+    reference: &GitReference,
+) -> Result<()> {
+    let manifest_path = checkout_path.join("beamtalk.toml");
+    let manifest = manifest::parse_manifest(&manifest_path).wrap_err_with(|| {
+        format!("Failed to read the manifest of registry dependency '{dep_name}'")
+    })?;
+
+    if manifest.version != requested {
+        let tag = match reference {
+            GitReference::Tag(tag) => tag.as_str(),
+            GitReference::Branch(branch) => branch.as_str(),
+            GitReference::Rev(rev) => rev.as_str(),
+        };
+        miette::bail!(
+            "Registry dependency '{dep_name}' version mismatch.\n  \
+             Requested: '{requested}' (from [dependencies] in beamtalk.toml)\n  \
+             Found:     '{}' (in {manifest_path})\n\n  \
+             The registry points version '{requested}' at '{tag}' in {url}, but that \
+             tag's package declares a different version. This is a packaging error — \
+             report it to the package maintainer.",
+            manifest.version
+        );
+    }
+
     Ok(())
 }
 
@@ -1026,6 +1146,223 @@ middle = {{ path = "{middle_str}" }}"#
         assert!(
             names.contains(&"middle"),
             "Direct path dep should be resolved: {names:?}"
+        );
+    }
+
+    // ── Registry dependencies (BT-2978) ──────────────────────────────
+    //
+    // These drive the whole path: manifest → registry index → git checkout →
+    // lockfile. The index is a plain local directory and the "remote" is a
+    // `file://` repo, so nothing here touches the network.
+    //
+    // Each test points `[registry] url` at its own index. `BEAMTALK_REGISTRY`
+    // deliberately outranks the manifest, so these assume it is unset — which
+    // holds in CI and in a normal dev shell.
+
+    /// Create a local registry index directory holding one package entry.
+    fn create_registry_index(pkg_name: &str, versions_toml: &str) -> (TempDir, Utf8PathBuf) {
+        let dir = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap();
+        fs::create_dir_all(root.join("packages")).unwrap();
+        fs::write(
+            root.join("packages").join(format!("{pkg_name}.toml")),
+            format!("name = \"{pkg_name}\"\n{versions_toml}"),
+        )
+        .unwrap();
+        (dir, root)
+    }
+
+    /// Create a root project whose only dependency is a registry package.
+    fn write_registry_project(
+        root: &std::path::Path,
+        index_root: &Utf8Path,
+        dep_name: &str,
+        version: &str,
+    ) {
+        fs::create_dir_all(root).unwrap();
+        write_manifest(
+            root,
+            "my_app",
+            "0.1.0",
+            &format!(
+                "[registry]\nurl = \"{index_root}\"\n\n[dependencies]\n{dep_name} = \"{version}\"\n"
+            ),
+        );
+    }
+
+    #[test]
+    fn test_registry_dep_resolves_and_writes_lockfile() {
+        let (_git_dir, url, sha) = create_git_dep_repo("my_pkg", "1.0.0", "");
+        let (_index_dir, index_root) = create_registry_index(
+            "my_pkg",
+            &format!("[[versions]]\nversion = \"1.0.0\"\ngit = \"{url}\"\n"),
+        );
+
+        let root_dir = TempDir::new().unwrap();
+        let root = root_dir.path().join("root");
+        write_registry_project(&root, &index_root, "my_pkg", "1.0.0");
+
+        let root_path = Utf8PathBuf::from_path_buf(root.clone()).unwrap();
+        let options = beamtalk_core::CompilerOptions::default();
+
+        let result = resolve_dependency_graph(&root_path, &options);
+        assert!(
+            result.is_ok(),
+            "Registry dep should resolve: {:?}",
+            result.err()
+        );
+
+        // The package was fetched into the usual dep checkout directory.
+        let layout = crate::commands::build_layout::BuildLayout::new(&root_path);
+        assert!(
+            layout
+                .dep_checkout_dir("my_pkg")
+                .join("beamtalk.toml")
+                .exists(),
+            "Registry dep should be checked out under _build/deps/"
+        );
+
+        // The lockfile records the registry version alongside the git pin.
+        let lock_content = fs::read_to_string(root.join("beamtalk.lock")).unwrap();
+        assert!(lock_content.contains("name = \"my_pkg\""), "{lock_content}");
+        assert!(
+            lock_content.contains("version = \"1.0.0\""),
+            "lockfile should record the registry version: {lock_content}"
+        );
+        assert!(
+            lock_content.contains("reference = \"tag:v1.0.0\""),
+            "tag should default to v{{version}}: {lock_content}"
+        );
+        assert!(lock_content.contains(&sha), "{lock_content}");
+    }
+
+    #[test]
+    fn test_registry_dep_lockfile_round_trip() {
+        let (_git_dir, url, _sha) = create_git_dep_repo("my_pkg", "1.0.0", "");
+        let (_index_dir, index_root) = create_registry_index(
+            "my_pkg",
+            &format!("[[versions]]\nversion = \"1.0.0\"\ngit = \"{url}\"\n"),
+        );
+
+        let root_dir = TempDir::new().unwrap();
+        let root = root_dir.path().join("root");
+        write_registry_project(&root, &index_root, "my_pkg", "1.0.0");
+        let root_path = Utf8PathBuf::from_path_buf(root.clone()).unwrap();
+
+        resolve_dependency_graph(&root_path, &beamtalk_core::CompilerOptions::default()).unwrap();
+
+        // Reading the lockfile back preserves the registry version.
+        let lock = Lockfile::read(&root_path).unwrap().unwrap();
+        let entry = lock.get("my_pkg").unwrap();
+        assert_eq!(entry.registry_version.as_deref(), Some("1.0.0"));
+        assert_eq!(entry.reference, GitReference::Tag("v1.0.0".to_string()));
+
+        // And re-serializing is stable.
+        let reparsed = Lockfile::parse(&lock.serialize()).unwrap();
+        assert_eq!(reparsed, lock);
+    }
+
+    #[test]
+    fn test_registry_dep_resolves_from_lockfile_without_index() {
+        let (_git_dir, url, _sha) = create_git_dep_repo("my_pkg", "1.0.0", "");
+        let (index_dir, index_root) = create_registry_index(
+            "my_pkg",
+            &format!("[[versions]]\nversion = \"1.0.0\"\ngit = \"{url}\"\n"),
+        );
+
+        let root_dir = TempDir::new().unwrap();
+        let root = root_dir.path().join("root");
+        write_registry_project(&root, &index_root, "my_pkg", "1.0.0");
+        let root_path = Utf8PathBuf::from_path_buf(root.clone()).unwrap();
+        let options = beamtalk_core::CompilerOptions::default();
+
+        // First resolve populates the lockfile and the checkout.
+        resolve_dependency_graph(&root_path, &options).unwrap();
+        assert!(root.join("beamtalk.lock").exists());
+
+        // Destroy the index entirely — a locked build must not need it.
+        index_dir.close().unwrap();
+        assert!(!index_root.exists(), "index should be gone");
+
+        let result = resolve_dependency_graph(&root_path, &options);
+        assert!(
+            result.is_ok(),
+            "A lockfile hit should bypass the registry index: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn test_registry_dep_version_mismatch_is_an_error() {
+        // The repo's package declares 0.1.0, but the index advertises the same
+        // tag as version 2.0.0 — a packaging error we must not build through.
+        let (_git_dir, url, _sha) = create_git_dep_repo("my_pkg", "0.1.0", "");
+        let (_index_dir, index_root) = create_registry_index(
+            "my_pkg",
+            &format!("[[versions]]\nversion = \"2.0.0\"\ngit = \"{url}\"\ntag = \"v1.0.0\"\n"),
+        );
+
+        let root_dir = TempDir::new().unwrap();
+        let root = root_dir.path().join("root");
+        write_registry_project(&root, &index_root, "my_pkg", "2.0.0");
+        let root_path = Utf8PathBuf::from_path_buf(root).unwrap();
+
+        let err = resolve_dependency_graph(&root_path, &beamtalk_core::CompilerOptions::default())
+            .unwrap_err();
+        let msg = format!("{err:?}")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(msg.contains("version mismatch"), "{msg}");
+        assert!(msg.contains("Requested: '2.0.0'"), "{msg}");
+        assert!(msg.contains("Found: '0.1.0'"), "{msg}");
+    }
+
+    #[test]
+    fn test_registry_dep_unknown_version_lists_available() {
+        let (_git_dir, url, _sha) = create_git_dep_repo("my_pkg", "1.0.0", "");
+        let (_index_dir, index_root) = create_registry_index(
+            "my_pkg",
+            &format!("[[versions]]\nversion = \"1.0.0\"\ngit = \"{url}\"\n"),
+        );
+
+        let root_dir = TempDir::new().unwrap();
+        let root = root_dir.path().join("root");
+        write_registry_project(&root, &index_root, "my_pkg", "9.9.9");
+        let root_path = Utf8PathBuf::from_path_buf(root).unwrap();
+
+        let err = resolve_dependency_graph(&root_path, &beamtalk_core::CompilerOptions::default())
+            .unwrap_err();
+        let msg = format!("{err:?}")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(msg.contains("Available versions: 1.0.0"), "{msg}");
+    }
+
+    #[test]
+    fn test_registry_dep_unknown_package_errors() {
+        let (_git_dir, url, _sha) = create_git_dep_repo("my_pkg", "1.0.0", "");
+        let (_index_dir, index_root) = create_registry_index(
+            "my_pkg",
+            &format!("[[versions]]\nversion = \"1.0.0\"\ngit = \"{url}\"\n"),
+        );
+
+        let root_dir = TempDir::new().unwrap();
+        let root = root_dir.path().join("root");
+        write_registry_project(&root, &index_root, "other_pkg", "1.0.0");
+        let root_path = Utf8PathBuf::from_path_buf(root).unwrap();
+
+        let err = resolve_dependency_graph(&root_path, &beamtalk_core::CompilerOptions::default())
+            .unwrap_err();
+        let msg = format!("{err:?}")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(msg.contains("was not found in the registry"), "{msg}");
+        assert!(
+            msg.contains("Packages in the registry: my_pkg"),
+            "should list what the index does have: {msg}"
         );
     }
 }
