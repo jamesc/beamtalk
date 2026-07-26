@@ -648,8 +648,11 @@ dialyzer-specs: build-stdlib
     # Compile stdlib to Core Erlang (preserves .core files)
     CORE_DIR=$(mktemp -d)
     trap 'rm -rf "$CORE_DIR"' EXIT
-    # Copy .bt sources and build in temp dir to get .core files
-    cp stdlib/src/*.bt "$CORE_DIR/"
+    # Copy .bt sources and build in temp dir to get .core files.
+    # Flattened on purpose: stdlib module names come from the file stem, so any
+    # stdlib/src/ subdirectories are irrelevant here (and unique stems are
+    # enforced by build-stdlib's duplicate-stem check).
+    find stdlib/src -type f -name '*.bt' -exec cp {} "$CORE_DIR/" \;
     cargo run --bin beamtalk --quiet -- build --stdlib-mode "$CORE_DIR/"
     # Run spec validation on the generated .core files
     escript scripts/validate_specs.escript "$CORE_DIR/build/"
@@ -1302,10 +1305,15 @@ install PREFIX="/usr/local": build-release build-stdlib
     install -m 755 "runtime/tools/rebar3" "${PREFIX}/lib/beamtalk/tools/rebar3"
 
     # Stdlib sources for LSP/tooling navigation
+    # Mirrors the source tree (including any subdirectories) so LSP
+    # goto-definition resolves to the same relative layout as the repo.
     STDLIB_SOURCE_SRC="stdlib/src"
-    if [ -d "${STDLIB_SOURCE_SRC}" ] && compgen -G "${STDLIB_SOURCE_SRC}/*.bt" > /dev/null; then
-        install -d "${PREFIX}/share/beamtalk/stdlib/src"
-        install -m 644 "${STDLIB_SOURCE_SRC}"/*.bt "${PREFIX}/share/beamtalk/stdlib/src/"
+    if [ -d "${STDLIB_SOURCE_SRC}" ]; then
+        find "${STDLIB_SOURCE_SRC}" -type f -name '*.bt' | while read -r bt; do
+            rel="${bt#"${STDLIB_SOURCE_SRC}"/}"
+            install -d "${PREFIX}/share/beamtalk/stdlib/src/$(dirname "${rel}")"
+            install -m 644 "${bt}" "${PREFIX}/share/beamtalk/stdlib/src/${rel}"
+        done
     fi
 
     echo "✅ Installed beamtalk to ${PREFIX}"
@@ -1404,7 +1412,7 @@ dist: build-release build-stdlib
     Copy-Item target/release/beamtalk-exec.exe dist/bin/
     $appCount = 0; foreach ($ebinDir in (Get-ChildItem -Directory "runtime/_build/default/lib/*/ebin" -ErrorAction SilentlyContinue)) { $app = $ebinDir.Parent.Name; $appRoot = $ebinDir.Parent.FullName; if (!(Get-ChildItem "$($ebinDir.FullName)/*.beam" -ErrorAction SilentlyContinue)) { continue }; New-Item -ItemType Directory -Force -Path "dist/lib/beamtalk/lib/$app/ebin" | Out-Null; Copy-Item "$($ebinDir.FullName)/*.beam" "dist/lib/beamtalk/lib/$app/ebin/" -ErrorAction Stop; if (Get-ChildItem "$($ebinDir.FullName)/*.app" -ErrorAction SilentlyContinue) { Copy-Item "$($ebinDir.FullName)/*.app" "dist/lib/beamtalk/lib/$app/ebin/" -ErrorAction Stop }; $privSrc = Join-Path $appRoot "priv"; if (Test-Path $privSrc) { New-Item -ItemType Directory -Force -Path "dist/lib/beamtalk/lib/$app/priv" | Out-Null; Copy-Item "$privSrc/*" "dist/lib/beamtalk/lib/$app/priv/" -Recurse }; $appCount++ }; if ($appCount -eq 0) { Write-Error "No OTP apps found in runtime/_build/default/lib/. Run 'just build-erlang' first."; exit 1 }
     if (!(Test-Path "runtime/tools/rebar3")) { Write-Error "Bundled rebar3 not found at runtime/tools/rebar3."; exit 1 }; New-Item -ItemType Directory -Force -Path "dist/lib/beamtalk/tools" | Out-Null; Copy-Item "runtime/tools/rebar3" "dist/lib/beamtalk/tools/rebar3"
-    if (Test-Path "stdlib/src/*.bt") { New-Item -ItemType Directory -Force -Path "dist/share/beamtalk/stdlib/src" | Out-Null; Copy-Item "stdlib/src/*.bt" "dist/share/beamtalk/stdlib/src/" }
+    if (Test-Path "stdlib/src") { $stdlibRoot = (Resolve-Path "stdlib/src").Path; foreach ($bt in (Get-ChildItem -Path "stdlib/src" -Recurse -File -Filter *.bt)) { $rel = $bt.FullName.Substring($stdlibRoot.Length).TrimStart('\', '/'); $dest = Join-Path "dist/share/beamtalk/stdlib/src" $rel; New-Item -ItemType Directory -Force -Path (Split-Path $dest -Parent) | Out-Null; Copy-Item $bt.FullName $dest } }
     just dist-vscode
     @echo "✅ Distribution ready in dist/"
     @echo "   Run: dist\bin\beamtalk.exe repl"
