@@ -106,7 +106,16 @@ pub fn run(dry_run: bool) -> Result<()> {
 
     write_index_entry(&entry_path, &new_entry_content)?;
     match &location {
-        RegistryLocation::Git(_) => commit_and_push_index(&index_root, name, version)?,
+        RegistryLocation::Git(_) => {
+            // The index lives in a separate clone from the project (typically
+            // `_build/registry/index/`), so it does not inherit a git identity
+            // the user has configured only locally in their project repo.
+            // Resolve identity there and pass it through explicitly, rather
+            // than relying on whatever the index clone's own local/global
+            // config happens to be.
+            let (author_name, author_email) = get_git_identity(&project_root)?;
+            commit_and_push_index(&index_root, name, version, &author_name, &author_email)?;
+        }
         RegistryLocation::LocalDir(dir) => {
             println!(
                 "Updated local registry index file at '{entry_path}' (no git commit — \
@@ -174,6 +183,38 @@ fn get_origin_remote_url(project_root: &Utf8Path) -> Result<String> {
         miette::bail!("The 'origin' remote has an empty URL");
     }
     Ok(url)
+}
+
+/// Resolve the git identity (`user.name`, `user.email`) that authored the
+/// release, from the project repo's own config (local, falling back to
+/// global — the normal git resolution order).
+///
+/// The registry index is a *separate* clone (typically
+/// `_build/registry/index/`), so it does not inherit an identity the user
+/// configured only locally in their project repo. That identity is resolved
+/// here and passed through explicitly when committing to the index, rather
+/// than depending on whatever the index clone's own local/global config
+/// happens to be.
+fn get_git_identity(project_root: &Utf8Path) -> Result<(String, String)> {
+    let read = |key: &str| -> Result<String> {
+        let output = Command::new("git")
+            .args(["config", key])
+            .current_dir(project_root)
+            .output()
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to run 'git config {key}'"))?;
+        if !output.status.success() {
+            miette::bail!(
+                "git has no '{key}' configured for this repository.\n\n  \
+                 'beamtalk publish' commits the registry index update using your git \
+                 identity. Set it with:\n    git config user.name \"Your Name\"\n    \
+                 git config user.email you@example.com"
+            );
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    };
+
+    Ok((read("user.name")?, read("user.email")?))
 }
 
 /// Ensure the release tag doesn't already exist locally or on `origin`.
@@ -340,7 +381,13 @@ fn write_index_entry(entry_path: &Utf8Path, content: &str) -> Result<()> {
 }
 
 /// Commit the working index tree and push it upstream.
-fn commit_and_push_index(index_root: &Utf8Path, name: &str, version: &str) -> Result<()> {
+fn commit_and_push_index(
+    index_root: &Utf8Path,
+    name: &str,
+    version: &str,
+    author_name: &str,
+    author_email: &str,
+) -> Result<()> {
     let add = Command::new("git")
         .args(["add", "."])
         .current_dir(index_root)
@@ -354,7 +401,15 @@ fn commit_and_push_index(index_root: &Utf8Path, name: &str, version: &str) -> Re
 
     let commit_message = format!("Publish {name} v{version}");
     let commit = Command::new("git")
-        .args(["commit", "-m", &commit_message])
+        .args([
+            "-c",
+            &format!("user.name={author_name}"),
+            "-c",
+            &format!("user.email={author_email}"),
+            "commit",
+            "-m",
+            &commit_message,
+        ])
         .current_dir(index_root)
         .output()
         .into_diagnostic()
