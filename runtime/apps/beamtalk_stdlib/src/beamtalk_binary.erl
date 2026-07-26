@@ -21,6 +21,9 @@ iteration, slicing, and conversion (ADR 0086 Phase 1).
 | `deserialize:`  | Binary → term (via `binary_to_term/2`, safe mode) |
 | `size:`         | Binary → byte size                                |
 | `fromIolist:`   | Iolist → binary                                  |
+| `fromBase64:`   | Standard base64 string → Result(Binary, Error)   |
+| `fromBase64Url:` | URL-safe base64 string → Result(Binary, Error)  |
+| `fromHex:`      | Hex string → Result(Binary, Error)               |
 
 ## Instance Methods
 
@@ -38,6 +41,9 @@ iteration, slicing, and conversion (ADR 0086 Phase 1).
 | `as_string_unchecked/1` | Return binary as-is (no validation)           |
 | `print_string/1`      | Printable representation                       |
 | `deserialize_with_used/1` | binary_to_term with byte count             |
+| `asBase64:/1`         | Standard base64 encode                         |
+| `asBase64Url:/1`      | URL-safe base64 encode                         |
+| `asHex:/1`            | Lowercase hex encode                           |
 """.
 
 %% Class methods
@@ -47,15 +53,23 @@ iteration, slicing, and conversion (ADR 0086 Phase 1).
     'size:'/1,
     'fromIolist:'/1,
     'fromBytes:'/1,
-    'deserializeWithUsed:'/1
+    'deserializeWithUsed:'/1,
+    'fromBase64:'/1,
+    'fromBase64Url:'/1,
+    'fromHex:'/1
 ]).
 -export([serialize/1, deserialize/1, size/1, fromIolist/1, fromBytes/1, deserializeWithUsed/1]).
+-export([fromBase64/1, fromBase64Url/1, fromHex/1]).
 
 %% Instance methods (ADR 0086 Phase 1)
 -export([do/2, at/2, byte_at/2, byte_size/1, part/3, concat/2]).
 -export([to_bytes/1, from_bytes/1]).
 -export([as_string/1, as_string_unchecked/1, print_string/1]).
 -export([deserialize_with_used/1]).
+
+%% Instance methods — encoding
+-export(['asBase64:'/1, 'asBase64Url:'/1, 'asHex:'/1]).
+-export([asBase64/1, asBase64Url/1, asHex/1]).
 
 %%% ============================================================================
 %%% Public API
@@ -102,6 +116,58 @@ input. Atoms not already in the atom table will cause an error.
                 <<"Argument must be a valid iolist (list of binaries, integers 0-255, or nested iolists)">>
             )
     end.
+
+-doc """
+Decode a standard (RFC 4648 §4) base64 string. Returns a Result: `Result ok:`
+with the decoded Binary, or `Result error:` on malformed base64 (wrong
+padding, invalid alphabet characters, etc.).
+""".
+-spec 'fromBase64:'(binary()) -> beamtalk_result:t().
+'fromBase64:'(Str) when is_binary(Str) ->
+    try
+        beamtalk_result:from_tagged_tuple({ok, base64:decode(Str)})
+    catch
+        error:_ ->
+            beamtalk_result:from_tagged_tuple({error, base64_decode_error('fromBase64:')})
+    end;
+'fromBase64:'(_) ->
+    raise_type_error('fromBase64:', <<"Argument must be a String">>).
+
+-doc """
+Decode a URL-safe (RFC 4648 §5) base64 string (`-`/`_` in place of `+`/`/`).
+Returns a Result, as `fromBase64:/1`.
+""".
+-spec 'fromBase64Url:'(binary()) -> beamtalk_result:t().
+'fromBase64Url:'(Str) when is_binary(Str) ->
+    try
+        beamtalk_result:from_tagged_tuple({ok, base64:decode(Str, #{mode => urlsafe})})
+    catch
+        error:_ ->
+            beamtalk_result:from_tagged_tuple({error, base64_decode_error('fromBase64Url:')})
+    end;
+'fromBase64Url:'(_) ->
+    raise_type_error('fromBase64Url:', <<"Argument must be a String">>).
+
+-doc """
+Decode a hexadecimal string (upper- or lower-case digits accepted). Returns
+a Result: `Result error:` on odd length or non-hex-digit characters.
+""".
+-spec 'fromHex:'(binary()) -> beamtalk_result:t().
+'fromHex:'(Str) when is_binary(Str) ->
+    try
+        beamtalk_result:from_tagged_tuple({ok, binary:decode_hex(Str)})
+    catch
+        error:_ ->
+            Error0 = beamtalk_error:new(parse_error, 'Binary'),
+            Error1 = beamtalk_error:with_selector(Error0, 'fromHex:'),
+            Error2 = beamtalk_error:with_hint(
+                Error1,
+                <<"Expected a string of hexadecimal digits (even length, 0-9/a-f/A-F)">>
+            ),
+            beamtalk_result:from_tagged_tuple({error, Error2})
+    end;
+'fromHex:'(_) ->
+    raise_type_error('fromHex:', <<"Argument must be a String">>).
 
 %%% ============================================================================
 %%% Instance Methods (ADR 0086 Phase 1)
@@ -258,6 +324,30 @@ as_string_unchecked(Bin) when is_binary(Bin) ->
 as_string_unchecked(_) ->
     raise_type_error(as_string_unchecked, <<"Receiver must be a Binary">>).
 
+-doc "Encode as a standard (RFC 4648 §4) base64 string, with `=` padding.".
+-spec 'asBase64:'(binary()) -> binary().
+'asBase64:'(Bin) when is_binary(Bin) ->
+    base64:encode(Bin);
+'asBase64:'(_) ->
+    raise_type_error('asBase64:', <<"Receiver must be a Binary">>).
+
+-doc """
+Encode as a URL-safe (RFC 4648 §5) base64 string, with `=` padding
+(`-`/`_` in place of `+`/`/`).
+""".
+-spec 'asBase64Url:'(binary()) -> binary().
+'asBase64Url:'(Bin) when is_binary(Bin) ->
+    base64:encode(Bin, #{mode => urlsafe});
+'asBase64Url:'(_) ->
+    raise_type_error('asBase64Url:', <<"Receiver must be a Binary">>).
+
+-doc "Encode as a lowercase hexadecimal string.".
+-spec 'asHex:'(binary()) -> binary().
+'asHex:'(Bin) when is_binary(Bin) ->
+    binary:encode_hex(Bin, lowercase);
+'asHex:'(_) ->
+    raise_type_error('asHex:', <<"Receiver must be a Binary">>).
+
 -doc "Printable representation: hex for non-UTF-8, quoted for valid UTF-8.".
 -spec print_string(binary()) -> binary().
 print_string(Bin) when is_binary(Bin) ->
@@ -320,6 +410,16 @@ bytes_to_hex(Bin) ->
     HexParts = [io_lib:format("~2.16.0B", [B]) || <<B>> <= Bin],
     iolist_to_binary(lists:join(<<" ">>, HexParts)).
 
+-doc "Build a structured parse_error for a malformed base64 string.".
+-spec base64_decode_error(atom()) -> beamtalk_error:error().
+base64_decode_error(Selector) ->
+    Error0 = beamtalk_error:new(parse_error, 'Binary'),
+    Error1 = beamtalk_error:with_selector(Error0, Selector),
+    beamtalk_error:with_hint(
+        Error1,
+        <<"Expected a well-formed base64 string (correct alphabet and padding)">>
+    ).
+
 %%% ============================================================================
 %%% FFI aliases — no-colon names for Erlang FFI dispatch
 %%% ============================================================================
@@ -355,3 +455,27 @@ fromBytes(Bytes) -> from_bytes(Bytes).
 -doc "FFI alias for deserializeWithUsed:/1.".
 -spec deserializeWithUsed(term()) -> {term(), non_neg_integer()}.
 deserializeWithUsed(Bin) -> deserialize_with_used(Bin).
+
+-doc "FFI alias for fromBase64:/1.".
+-spec fromBase64(binary()) -> beamtalk_result:t().
+fromBase64(Str) -> 'fromBase64:'(Str).
+
+-doc "FFI alias for fromBase64Url:/1.".
+-spec fromBase64Url(binary()) -> beamtalk_result:t().
+fromBase64Url(Str) -> 'fromBase64Url:'(Str).
+
+-doc "FFI alias for fromHex:/1.".
+-spec fromHex(binary()) -> beamtalk_result:t().
+fromHex(Str) -> 'fromHex:'(Str).
+
+-doc "FFI alias for asBase64:/1.".
+-spec asBase64(binary()) -> binary().
+asBase64(Bin) -> 'asBase64:'(Bin).
+
+-doc "FFI alias for asBase64Url:/1.".
+-spec asBase64Url(binary()) -> binary().
+asBase64Url(Bin) -> 'asBase64Url:'(Bin).
+
+-doc "FFI alias for asHex:/1.".
+-spec asHex(binary()) -> binary().
+asHex(Bin) -> 'asHex:'(Bin).

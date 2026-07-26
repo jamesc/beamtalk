@@ -35,6 +35,7 @@
             #{name => 'Console', module => 'bt@stdlib@console', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'DateTime', module => 'bt@stdlib@date_time', parent => 'Value', package => 'stdlib', kind => value, type_params => []},
             #{name => 'Dictionary', module => 'bt@stdlib@dictionary', parent => 'Collection', package => 'stdlib', kind => object, type_params => ['K', 'V']},
+            #{name => 'Digest', module => 'bt@stdlib@digest', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Duration', module => 'bt@stdlib@duration', parent => 'Value', package => 'stdlib', kind => value, type_params => []},
             #{name => 'DynamicSupervisor', module => 'bt@stdlib@dynamic_supervisor', parent => 'Object', package => 'stdlib', kind => object, type_params => ['C']},
             #{name => 'Erlang', module => 'bt@stdlib@erlang', parent => 'ProtoObject', package => 'stdlib', kind => object, type_params => []},

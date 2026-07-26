@@ -42,6 +42,12 @@ All operations are grapheme-aware and handle UTF-8 correctly.
     from_iolist/1
 ]).
 
+%% Instance methods — URL encoding (explicit `(Erlang beamtalk_string) sel:
+%% self` FFI dispatch, not @primitive — see docs/beamtalk-native-erlang.md
+%% "The naming rule": function name is the first keyword with its colon
+%% removed, no case conversion, so these are camelCase not snake_case).
+-export([urlEncoded/1, urlDecoded/1]).
+
 -doc "1-based grapheme access. Returns the grapheme at the given index.".
 -spec at(binary(), integer()) -> binary().
 at(Str, Idx) when is_binary(Str), is_integer(Idx), Idx >= 1 ->
@@ -356,6 +362,23 @@ from_iolist(_) ->
     beamtalk_error:raise_type_error(
         'String', 'fromIolist:', <<"Expected an iolist (List) or String">>
     ).
+
+-doc """
+Percent-encode characters outside the URL-safe unreserved set (RFC 3986 §2.3:
+letters, digits, `-`, `.`, `_`, `~`) via `uri_string:quote/1`.
+""".
+-spec urlEncoded(binary()) -> binary().
+urlEncoded(Str) when is_binary(Str) ->
+    uri_string:quote(Str);
+urlEncoded(_) ->
+    beamtalk_error:raise_type_error('String', 'urlEncoded', <<"Receiver must be a String">>).
+
+-doc "Decode a percent-encoded string via `uri_string:unquote/1`.".
+-spec urlDecoded(binary()) -> binary().
+urlDecoded(Str) when is_binary(Str) ->
+    uri_string:unquote(Str);
+urlDecoded(_) ->
+    beamtalk_error:raise_type_error('String', 'urlDecoded', <<"Receiver must be a String">>).
 
 %%% ============================================================================
 %%% Internal Functions

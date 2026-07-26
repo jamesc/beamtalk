@@ -48,6 +48,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "Console"
             | "DateTime"
             | "Dictionary"
+            | "Digest"
             | "Duration"
             | "DynamicSupervisor"
             | "Erlang"
@@ -615,6 +616,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "toBytes".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("List(Integer)".into()), param_types: vec![], doc: Some("Convert this binary to a list of byte integers (0-255).\n\n## Examples\n```beamtalk\n(Binary fromBytes: #(104, 101)) toBytes   // => #(104, 101)\n```".into()) },
                 MethodInfo { selector: "asString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Object".into()), param_types: vec![], doc: Some("Validate UTF-8 and return the binary as a String.\n\nReturns a Result: success gives a String, failure gives an error\nwith the byte offset of the invalid sequence.\n\n## Examples\n```beamtalk\n(Binary fromBytes: #(104, 101, 108, 108, 111)) asString   // => _\n```".into()) },
                 MethodInfo { selector: "asStringUnchecked".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Return this binary as a String without UTF-8 validation.\n\nUse when you trust the source data is valid UTF-8.\n\n## Examples\n```beamtalk\n(Binary fromBytes: #(104, 101, 108, 108, 111)) asStringUnchecked   // => \"hello\"\n```".into()) },
+                MethodInfo { selector: "asBase64".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Encode as a standard (RFC 4648 §4) base64 string, with `=` padding.\n\n## Examples\n```beamtalk\n(Binary fromBytes: #(104, 101, 108, 108, 111)) asBase64   // => \"aGVsbG8=\"\n```\n\nThe underlying FFI spec types the result `binary()` (`String | Binary`),\nbut `beamtalk_binary:'asBase64:'/1` always builds an ASCII base64\nstring — suppress the resulting `String | Binary` vs. declared `String`\nreturn-type mismatch.".into()) },
+                MethodInfo { selector: "asBase64Url".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Encode as a URL-safe (RFC 4648 §5) base64 string, with `=` padding.\n\nUses `-`/`_` in place of `+`/`/` so the result is safe to embed\ndirectly in a URL path or query component without further escaping.\n\n## Examples\n```beamtalk\n(Binary fromBytes: #(251, 239)) asBase64      // => \"++8=\"\n(Binary fromBytes: #(251, 239)) asBase64Url   // => \"--8=\"\n```".into()) },
+                MethodInfo { selector: "asHex".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Encode as a lowercase hexadecimal string.\n\n## Examples\n```beamtalk\n(Binary fromBytes: #(104, 101, 108, 108, 111)) asHex   // => \"68656c6c6f\"\n```".into()) },
             ],
             class_methods: vec![
                 MethodInfo { selector: "serialize:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Binary".into()), param_types: vec![Some("Object".into())], doc: Some("Serialize any value to a binary (class method).\n\nConverts a Beamtalk value to its binary representation using\nErlang's external term format.\n\n## Examples\n```beamtalk\n(Binary serialize: 42) class name   // => \"Binary\"\n```".into()) },
@@ -622,6 +626,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "fromIolist:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Binary".into()), param_types: vec![Some("Object".into())], doc: Some("Convert an iolist to a flat binary (class method).\n\nAn iolist is a (possibly nested) list of binaries and integers\n(0-255). This flattens it into a single binary.\n\n## Examples\n```beamtalk\nBinary fromIolist: #(\"hello\", \" \", \"world\")\n// => _\n```".into()) },
                 MethodInfo { selector: "fromBytes:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Binary".into()), param_types: vec![Some("List".into())], doc: Some("Create a binary from a list of byte integers (0-255).\n\n## Examples\n```beamtalk\nBinary fromBytes: #(104, 101, 108, 108, 111)   // => _\n```".into()) },
                 MethodInfo { selector: "deserializeWithUsed:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Object".into()), param_types: vec![Some("Binary".into())], doc: Some("Deserialize a binary and return both the value and bytes consumed.\n\nReturns a tuple of (value, bytesConsumed). Useful for parsing\nconcatenated ETF values from a binary stream.\n\n## Examples\n```beamtalk\nbin := Binary serialize: 42\nresult := Binary deserializeWithUsed: bin\nresult first    // => 42\nresult second   // => bytes consumed\n```".into()) },
+                MethodInfo { selector: "fromBase64:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Result(Binary, Error)".into()), param_types: vec![Some("String".into())], doc: Some("Decode a standard (RFC 4648 §4) base64 string to a Binary.\n\nReturns a Result: success gives the decoded Binary, failure gives a\nstructured error (malformed base64, e.g. wrong padding or invalid\nalphabet characters).\n\n## Examples\n```beamtalk\n(Binary fromBase64: \"aGVsbG8=\") unwrap asStringUnchecked   // => \"hello\"\n(Binary fromBase64: \"not base64!!\") isError                // => true\n```".into()) },
+                MethodInfo { selector: "fromBase64Url:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Result(Binary, Error)".into()), param_types: vec![Some("String".into())], doc: Some("Decode a URL-safe (RFC 4648 §5) base64 string to a Binary.\n\nUses `-`/`_` in place of `+`/`/`. Returns a Result, as `fromBase64:`.\n\n## Examples\n```beamtalk\n(Binary fromBase64Url: \"aGVsbG8h\") unwrap asStringUnchecked   // => \"hello!\"\n```".into()) },
+                MethodInfo { selector: "fromHex:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Result(Binary, Error)".into()), param_types: vec![Some("String".into())], doc: Some("Decode a hexadecimal string to a Binary.\n\nAccepts upper- or lower-case hex digits. Returns a Result: failure\ncovers odd length or non-hex-digit characters.\n\n## Examples\n```beamtalk\n(Binary fromHex: \"68656c6c6f\") unwrap asStringUnchecked   // => \"hello\"\n(Binary fromHex: \"zz\") isError                             // => true\n```".into()) },
             ],
             class_variables: vec![],
             type_params: vec![],
@@ -1285,6 +1292,38 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             type_params: vec!["K".into(), "V".into()],
             type_param_bounds: vec![None, None],
             superclass_type_args: vec![SuperclassTypeArg::ParamRef { param_index: 1 }],
+        },
+    );
+
+    classes.insert(
+        "Digest".into(),
+        ClassInfo {
+            name: "Digest".into(),
+            superclass: Some("Object".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: false,
+            is_native: false,
+            handle_scope: None,
+            surface_incomplete: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![
+                MethodInfo { selector: "sha256:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Digest".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Binary".into()), param_types: vec![Some("String | Binary".into())], doc: Some("SHA-256 digest (32 bytes) of `input`.\n\n## Examples\n```beamtalk\n(Digest sha256: \"abc\") byteSize   // => 32\n```".into()) },
+                MethodInfo { selector: "sha512:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Digest".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Binary".into()), param_types: vec![Some("String | Binary".into())], doc: Some("SHA-512 digest (64 bytes) of `input`.\n\n## Examples\n```beamtalk\n(Digest sha512: \"abc\") byteSize   // => 64\n```".into()) },
+                MethodInfo { selector: "md5:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Digest".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Binary".into()), param_types: vec![Some("String | Binary".into())], doc: Some("MD5 digest (16 bytes) of `input`.\n\n**Legacy/non-cryptographic use only** — MD5 is not collision-resistant.\nDo not use it for signatures, password storage, or integrity checks on\nuntrusted data; it is provided only for interoperating with legacy\nprotocols and non-security checksums (e.g. cache keys). Prefer\n`sha256:`/`sha512:` for anything security-sensitive.\n\n## Examples\n```beamtalk\n(Digest md5: \"abc\") byteSize      // => 16\n```".into()) },
+                MethodInfo { selector: "hmacSha256:key:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Digest".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Binary".into()), param_types: vec![Some("String | Binary".into()), Some("String | Binary".into())], doc: Some("HMAC-SHA256 message authentication code of `input` using `key`.\n\n## Examples\n```beamtalk\n(Digest hmacSha256: \"message\" key: \"secret\") byteSize   // => 32\n```".into()) },
+                MethodInfo { selector: "hmacSha512:key:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Digest".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Binary".into()), param_types: vec![Some("String | Binary".into()), Some("String | Binary".into())], doc: Some("HMAC-SHA512 message authentication code of `input` using `key`.\n\n## Examples\n```beamtalk\n(Digest hmacSha512: \"message\" key: \"secret\") byteSize   // => 64\n```".into()) },
+            ],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
         },
     );
 
@@ -3109,6 +3148,8 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Return a developer-readable string representation (with surrounding quotes).\nEmbedded double-quote characters are doubled (Beamtalk string literal convention).\n\n## Examples\n```beamtalk\n\"hello\" printString         // => \"\"\"hello\"\"\"\n```".into()) },
                 MethodInfo { selector: "asString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Return the string itself (identity conversion).\n\n## Examples\n```beamtalk\n\"hello\" asString             // => \"hello\"\n```".into()) },
                 MethodInfo { selector: "displayString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Return the string itself for user-facing display (no surrounding quotes).\n\n## Examples\n```beamtalk\n\"hello\" displayString       // => \"hello\"\n```".into()) },
+                MethodInfo { selector: "urlEncoded".into(), arity: 0, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Percent-encode characters outside the URL-safe unreserved set\n(RFC 3986 §2.3: letters, digits, `-`, `.`, `_`, `~`).\n\nEncodes every reserved/special character, including `/`, `+`, and\nspace — use this for a value that will be placed inside a single URL\npath segment or query component, not for a value that already is a\nfull URL.\n\n## Examples\n```beamtalk\n\"hello world\" urlEncoded    // => \"hello%20world\"\n\"a/b+c\" urlEncoded          // => \"a%2Fb%2Bc\"\n```\n\nThe underlying FFI spec types the result `binary()` (`String | Binary`),\nbut `beamtalk_string:urlEncoded/1` always builds an ASCII string —\nsuppress the resulting `String | Binary` vs. declared `String`\nreturn-type mismatch.".into()) },
+                MethodInfo { selector: "urlDecoded".into(), arity: 0, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Decode a percent-encoded string.\n\nInverse of `urlEncoded`. Any `%XX` escape is decoded to its byte;\ncharacters with no escape pass through unchanged.\n\n## Examples\n```beamtalk\n\"hello%20world\" urlDecoded  // => \"hello world\"\n\"a%2Fb%2Bc\" urlDecoded      // => \"a/b+c\"\n```".into()) },
             ],
             class_methods: vec![
                 MethodInfo { selector: "withAll:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "String".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![Some("List".into())], doc: Some("Create a String by joining a list of grapheme cluster strings.\n\nUseful for constructing a String from the result of `asList` or\n`select:` operations. Each element should be a grapheme string.\n\n## Examples\n```beamtalk\nString class withAll: #(\"h\", \"e\", \"l\", \"l\", \"o\")  // => \"hello\"\n```".into()) },
