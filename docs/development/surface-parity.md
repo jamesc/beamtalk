@@ -212,9 +212,9 @@ These CLI subcommands are build/tooling commands that operate offline (no worksp
 | `test-script` | -- | -- | `surface-specific: btscript expression tests (CI)` |
 | `test-docs` | -- | -- | `surface-specific: doctest runner (CI)` |
 | `doctor` | -- | -- | `surface-specific: environment health check` |
-| `deps add` | -- | -- | `surface-specific: package management` |
-| `deps list` | -- | -- | `surface-specific: package management` |
-| `deps update` | -- | -- | `surface-specific: package management` |
+| `deps add` | -- | -- | `surface-specific: package management`. With none of `--path`/`--git` given, `NAME` resolves through the package registry (`deps::registry`, BT-2978) — pinned to `--version` if given, else the latest published release (BT-2979) — then flows through the same git-dependency machinery a `--git` dependency uses. |
+| `deps list` | -- | -- | `surface-specific: package management`. A registry dependency's row shows its resolved git URL/tag/commit provenance alongside the requested version, matching a `--git` dependency's row (BT-2979). |
+| `deps update` | -- | -- | `surface-specific: package management`. For a registry dependency, refreshes the registry index and re-resolves the already-pinned version to a fresh commit SHA (a moved tag or corrected index entry) — the pinned version itself only changes via a `beamtalk.toml` edit (BT-2979). |
 | `version` | -- | -- | `surface-specific: package release workflow` (BT-2980). Shows, sets, or bumps the `version` field in `beamtalk.toml` via a surgical text edit (same approach as `deps add`'s manifest write) — no workspace, offline. Distinct from clap's own `--version`/`-V` flag on the top-level `beamtalk` binary. |
 | `publish` | -- | -- | `surface-specific: package release workflow` (BT-2980). Tags and pushes a release, then updates the package registry index (`deps::registry`, BT-2978) — network/git side-effecting, CLI-only; there is no REPL/MCP/LSP analogue for authoring a registry release. |
 | `generate native` | -- | -- | `surface-specific: code generation` |

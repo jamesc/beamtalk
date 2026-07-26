@@ -42,10 +42,13 @@ licenses = ["Apache-2.0"]
 
 ### `[dependencies]` Section
 
-Dependencies are declared with two source types — path and git:
+Dependencies are declared with three source types — registry, path, and git:
 
 ```toml
 [dependencies]
+# Registry — resolved by name + exact version through the package registry
+yaml = "0.2.1"
+
 # Local path — for monorepos and local development
 utils = { path = "../my-utils" }
 
@@ -58,6 +61,8 @@ crypto_utils = { git = "https://github.com/someone/bt-crypto", rev = "abc1234" }
 Each dependency must point to a directory containing its own `beamtalk.toml`. Dependencies are resolved transitively — if `json` depends on `utils`, both are compiled and available.
 
 **Git references:** Exactly one of `tag`, `branch`, or `rev` must be specified for git dependencies. Tags are recommended for stable releases; branches track a moving target; revs pin an exact commit.
+
+**Registry versions:** A bare string value (`name = "X.Y.Z"`) is a registry dependency — see [Package Registry](#package-registry) below. Registry dependencies pin an exact `major.minor.patch` version; version ranges (`~>`, `>=`, `^`, etc.) are deliberately not supported, so the resolved graph is always reproducible without a constraint solver. For a moving target or a pre-release commit, use a git dependency instead.
 
 ### `[application]` Section
 
@@ -119,6 +124,12 @@ The `beamtalk deps` subcommand manages dependencies declared in `beamtalk.toml`.
 ### Adding Dependencies
 
 ```bash
+# Add a registry dependency, pinned to the latest published version
+beamtalk deps add yaml
+
+# Add a registry dependency, pinned to a specific version
+beamtalk deps add yaml --version 0.2.1
+
 # Add a path dependency
 beamtalk deps add utils --path ../my-utils
 
@@ -132,7 +143,7 @@ beamtalk deps add http --git https://github.com/someone/beamtalk-http --branch m
 beamtalk deps add crypto_utils --git https://github.com/someone/bt-crypto --rev abc1234
 ```
 
-`deps add` writes the entry to `beamtalk.toml`, resolves the dependency (cloning git repos, validating path deps), and updates the lockfile.
+`deps add` writes the entry to `beamtalk.toml`, resolves the dependency (cloning git repos, validating path deps, or resolving a registry version through the index — see [Package Registry](#package-registry)), and updates the lockfile. With none of `--path`/`--git`/`--version` given, the name is looked up in the registry and pinned to its latest published release.
 
 ### Listing Dependencies
 
@@ -145,20 +156,162 @@ Shows all resolved dependencies with their sources and pinned versions:
 ```text
 json  v1.0.0  (git: github.com/jamesc/beamtalk-json @ abc1234)
 utils 0.1.0   (path: ../my-utils)
+yaml  0.2.1   (registry: github.com/jamesc/beamtalk-yaml tag: v0.2.1 @ fed4321)
 ```
+
+A registry dependency's row shows the resolved git URL, tag, and locked commit SHA behind the version, the same provenance a git dependency's row shows.
 
 ### Updating Dependencies
 
 ```bash
-beamtalk deps update          # Update all git dependencies
+beamtalk deps update          # Update all git and registry dependencies
 beamtalk deps update json     # Update a single dependency
 ```
 
-Advances git dependencies to the latest commit matching their spec (the latest tag, the head of the branch, etc.) and updates the lockfile.
+Advances git dependencies to the latest commit matching their spec (the latest tag, the head of the branch, etc.). For a registry dependency, `deps update` refreshes the registry index and re-resolves the dependency's *already-pinned* version to a fresh commit SHA — picking up a moved tag or a corrected index entry. It does not change which version is pinned; to take a newer release, edit the version string directly in `beamtalk.toml` (`yaml = "0.3.0"`) and run `beamtalk deps update yaml` (or any build) to re-resolve it. Either way, the lockfile is updated.
 
 ### Manual Editing
 
 You can always edit `beamtalk.toml` directly instead of using `beamtalk deps add`. The CLI commands are convenience wrappers — the manifest file is the source of truth.
+
+## Package Registry
+
+A **registry dependency** (`yaml = "0.2.1"` in `[dependencies]`) is resolved through a *registry index* into a `(git url, tag)` pair, which then flows through the same git-dependency machinery a `{ git = ..., tag = ... }` entry uses — cloned into `_build/deps/`, pinned to an exact commit SHA in `beamtalk.lock`. The registry itself never hosts source code; it is only a lookup table from `(name, version)` to a git repository and tag.
+
+### Registry Location
+
+The index location is resolved in priority order:
+
+1. the `BEAMTALK_REGISTRY` environment variable
+2. `[registry] url` in the project's `beamtalk.toml`
+3. the default registry, `https://github.com/jamesc/beamtalk-registry`
+
+```toml
+[registry]
+url = "https://github.com/jamesc/beamtalk-registry"
+```
+
+```bash
+# Override for a single command, without touching beamtalk.toml
+BEAMTALK_REGISTRY=https://github.com/my-org/internal-registry beamtalk deps add yaml
+```
+
+A value naming an existing local directory is read in place — no git, no network; a relative path is resolved against the project root (not the process's current directory), so the same `beamtalk.toml` names the same registry regardless of where a surface (CLI, LSP, MCP) happens to run from. Anything else is treated as a git URL and cloned into `_build/registry/index/`, refreshed only on a lookup miss (a package or version not found in the on-disk clone triggers one retry against a freshly pulled index, so a dependency published moments ago resolves without a manual step). A local-directory registry is useful for CI fixtures, air-gapped environments, and testing a not-yet-published package before pushing its index entry.
+
+### Index Format
+
+The index is a directory (typically a git repository) containing one TOML file per package under `packages/`. Copy this template for a new package's first release:
+
+```toml
+# packages/<name>.toml
+name = "<name>"
+description = "One-line description of the package"
+
+[[versions]]
+version = "0.1.0"
+git = "https://github.com/<owner>/beamtalk-<name>"
+tag = "v0.1.0"   # optional — defaults to "v" + the version field (e.g. "v0.1.0")
+```
+
+A package with multiple published releases simply has more `[[versions]]` blocks, oldest first:
+
+```toml
+name = "yaml"
+description = "YAML parsing for Beamtalk"
+
+[[versions]]
+version = "0.1.0"
+git = "https://github.com/jamesc/beamtalk-yaml"
+tag = "v0.1.0"
+
+[[versions]]
+version = "0.2.1"
+git = "https://github.com/jamesc/beamtalk-yaml"
+tag = "v0.2.1"
+```
+
+Unknown top-level or per-version keys are accepted (not rejected) — the index is a separately versioned artifact served to clients this binary doesn't control, so a future index format can add fields like `yanked` or `checksum` without breaking older `beamtalk` binaries reading it.
+
+### Hosting Your Own Registry
+
+A registry index is nothing more than a git repository with a `packages/` directory — there is no server, database, or publishing service to run. To host one:
+
+1. Create a new (usually public) git repository, e.g. `github.com/your-org/beamtalk-registry`.
+2. Add an empty `packages/` directory (a `.gitkeep` file, or the first package's `.toml`) and commit it.
+3. Point consumers at it via `[registry] url = "https://github.com/your-org/beamtalk-registry"` in their `beamtalk.toml`, or `BEAMTALK_REGISTRY` for a one-off override.
+4. Authors publish releases with `beamtalk publish` (below) — each run appends a `[[versions]]` block (or creates the package's first `packages/<name>.toml`) and pushes the commit, so the registry needs no maintainer intervention for ordinary releases.
+
+#### Bootstrapping `jamesc/beamtalk-registry`
+
+The default registry (`https://github.com/jamesc/beamtalk-registry`) is bootstrapped the same way any self-hosted registry is — there is nothing Beamtalk-specific about creating it beyond the `packages/` layout above. A minimal `README.md` for the index repo:
+
+```markdown
+# beamtalk-registry
+
+The default package registry index for [Beamtalk](https://github.com/jamesc/beamtalk).
+
+This repository has no code — it is a lookup table from package name + version to a
+git repository and tag, read by the Beamtalk CLI's `deps` and `publish` commands. See
+[Package Registry](https://github.com/jamesc/beamtalk/blob/main/docs/beamtalk-packages.md#package-registry)
+in the main repo's docs for the full format.
+
+## Publishing
+
+Publish a release from your package's own repository — do not edit this repository
+by hand:
+
+    beamtalk version bump minor   # or `beamtalk version X.Y.Z`
+    git add beamtalk.toml && git commit -m "release 0.3.0"
+    beamtalk publish
+
+`beamtalk publish` tags your repository, pushes the tag, and opens (or updates)
+`packages/<your-package>.toml` here on your behalf, provided you have push access
+to this repository (or the `[registry] url` in your project points at a fork or
+private mirror you do have access to).
+
+## Layout
+
+    packages/
+      <name>.toml   # one file per published package — see the template linked above
+```
+
+Repository settings worth setting up before the first publish: branch protection on the default branch is *not* required — `beamtalk publish` pushes a plain commit, not a PR — but requiring signed commits or a CI check that validates every `packages/*.toml` still parses (`toml::from_str`, matching name field, no duplicate versions — the same checks `beamtalk` itself applies when reading an entry) catches a hand-edited or corrupted entry before it reaches consumers.
+
+### Author Workflow
+
+Publishing a new version of a package you maintain:
+
+```bash
+beamtalk version bump minor      # or: beamtalk version 0.3.0
+git add beamtalk.toml && git commit -m "release 0.3.0"
+beamtalk publish
+```
+
+`beamtalk version` shows, sets, or bumps the `[package] version` field in your own `beamtalk.toml` (a surgical text edit — comments and formatting elsewhere in the file are untouched):
+
+```bash
+beamtalk version               # print the current version
+beamtalk version 0.3.0         # set an exact version (must be greater than current)
+beamtalk version bump patch    # 1.2.3 -> 1.2.4
+beamtalk version bump minor    # 1.2.3 -> 1.3.0
+beamtalk version bump major    # 1.2.3 -> 2.0.0
+```
+
+`beamtalk publish` then, for the version currently in `beamtalk.toml`:
+
+1. **Preflights:** a clean git working tree, an `origin` remote, the release tag (`vX.Y.Z`) absent both locally and on `origin`, and the version not already recorded in the registry index (the index is refreshed first so this check is never stale).
+2. Creates an annotated tag `vX.Y.Z` and pushes it to `origin` — `origin`'s URL becomes the index entry's `git` field.
+3. Updates the registry index: creates `packages/<name>.toml` for a package's first release, or appends a `[[versions]]` block for a subsequent one, then commits and pushes the change (skipped, with a note, when the registry is a plain local directory rather than a git checkout).
+
+```bash
+beamtalk publish --dry-run     # print what would happen without tagging, pushing, or writing anything
+```
+
+**If step 3 fails** (stage, commit, or push), the tag from step 2 is already live on `origin`. `beamtalk publish`'s error message names exactly what's left to do — if the *push* failed, `git pull --rebase && git push` from `_build/registry/index/` (a plain `git push` suffices for a transient network error; `git pull --rebase` is needed if another author pushed to the same registry concurrently — if the rebase itself conflicts, resolve the conflict in `packages/<name>.toml`, then `git add packages/<name>.toml && git rebase --continue && git push`); if staging or the *commit* failed instead, there is no local commit yet, so `git add . && git commit -m "registry: <name> vX.Y.Z"` there first (substituting your package name and version, e.g. `registry: yaml v0.2.1`), then `git push`. Do **not** re-run `beamtalk publish` or bump the version in either case: the tag already exists, so a retry reports "already published" and suggests bumping, which would silently skip the release you just tagged.
+
+**If step 2's tag push itself fails** (before step 3 runs at all), the annotated tag exists locally but not on `origin` — the opposite situation. Here the preflight's *local-tag check* rejects a retry with "Tag 'vX.Y.Z' already exists locally." Delete it first with `git tag -d vX.Y.Z`, then re-run `beamtalk publish`.
+
+A registry dependency and the package it names always agree on which registry is authoritative — `beamtalk publish` resolves the target registry through the exact same `BEAMTALK_REGISTRY` → `[registry] url` → default chain that consuming a registry dependency does, using the *library's own* `beamtalk.toml`.
 
 ## Lockfile (`beamtalk.lock`)
 
@@ -174,6 +327,16 @@ url = "https://github.com/jamesc/beamtalk-json"
 reference = "tag:v1.0.0"
 sha = "abc1234def5678..."
 
+# A registry dependency additionally records the exact version requested in
+# beamtalk.toml, so a resolve that finds a matching lock entry can skip the
+# registry index entirely and go straight to the git checkout.
+[[package]]
+name = "yaml"
+version = "0.2.1"
+url = "https://github.com/jamesc/beamtalk-yaml"
+reference = "tag:v0.2.1"
+sha = "fed4321cba9876..."
+
 [[native_package]]
 name = "gun"
 version = "2.1.3"
@@ -183,6 +346,7 @@ sha = "def456..."
 **Key points:**
 - **Commit to version control.** The lockfile should be checked into git so all developers and CI use the same dependency versions.
 - **Path dependencies are not locked.** They resolve to whatever is on disk, so they are only reproducible within a single repository checkout.
+- **Registry dependencies lock like git dependencies**, plus the requested `version` field shown above.
 - **Implicit fetch on build.** `beamtalk build`, `beamtalk test`, and `beamtalk repl` automatically fetch and compile dependencies if the lockfile is missing or stale. No separate "deps get" step is needed.
 
 ## Qualified Names (`package@Class`)
@@ -388,3 +552,5 @@ The package system is specified in these Architecture Decision Records:
 - [ADR 0070](ADR/0070-package-namespaces-and-dependencies.md) — Package namespaces, dependencies, qualified names, and collision detection
 - [ADR 0072](ADR/0072-user-erlang-sources-in-packages.md) — User Erlang sources in packages
 - [ADR 0100](ADR/0100-open-world-diagnostic-policy.md) — Open-world diagnostic policy; the `[diagnostics]` section's severity-override schema (Rule 3)
+
+The [Package Registry](#package-registry) section above (registry dependency resolution, `deps add`/`update` registry support, and the `beamtalk version`/`beamtalk publish` author workflow) implements the registry phase ADR 0070 explicitly deferred ("out of scope for this ADR"; see its Alternatives section, "Registry-Based Dependencies"). It shipped as Linear epic BT-2977 (BT-2978, BT-2979, BT-2980) without a dedicated ADR — the git-repository-as-index design and its module-level rationale are documented in `crates/beamtalk-cli/src/commands/deps/registry.rs`, `publish.rs`, and `version.rs`.
