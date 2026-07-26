@@ -234,8 +234,9 @@ fn add_registry_dependency(
     let release = if let Some(v) = version {
         // Validate the exact-version format up front, with the same message a
         // manual beamtalk.toml edit would get, before touching the registry
-        // index.
-        manifest::validate_registry_dependency(name, v)?;
+        // index. Only the error side of `validate_registry_dependency` is
+        // wanted here — the `DependencySpec` it also builds is unused.
+        manifest::validate_registry_dependency(name, v).map(|_| ())?;
         registry::resolve_release(project_root, &registry_location, name, v)?
     } else {
         registry::resolve_latest_release(project_root, &registry_location, name)?
@@ -246,7 +247,7 @@ fn add_registry_dependency(
     // version it reports before writing it into the user's manifest. This
     // matters most on the `--version`-omitted path above: `release.version`
     // there comes straight from index TOML, unchecked.
-    manifest::validate_registry_dependency(name, &release.version)?;
+    manifest::validate_registry_dependency(name, &release.version).map(|_| ())?;
 
     let fragment = format!("{name} = \"{}\"", release.version);
 
