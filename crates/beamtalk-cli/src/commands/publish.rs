@@ -266,14 +266,20 @@ fn get_git_identity(project_root: &Utf8Path) -> Result<(String, String)> {
 /// pushed the tag (step 2) and then died before updating the registry index
 /// (step 3), rather than this being a real republish attempt.
 ///
-/// The remote check is evaluated before the local one and takes priority
-/// when both the tag and its remote counterpart exist: a partial failure of
-/// the kind above leaves the tag both on `origin` *and* locally (it was
-/// created before being pushed), so treating the local tag as the
-/// controlling signal would always report the true-republish message even
-/// when the index disagrees. `version_published` is resolved by the caller
-/// from the same index read used for the "already published" preflight, so
-/// both checks agree on the index's state.
+/// The remote check's result takes priority over the local one when both the
+/// tag and its remote counterpart exist: a partial failure of the kind above
+/// leaves the tag both on `origin` *and* locally (it was created before
+/// being pushed), so treating the local tag as the controlling signal would
+/// always report the true-republish message even when the index disagrees.
+/// `version_published` is resolved by the caller from the same index read
+/// used for the "already published" preflight, so both checks agree on the
+/// index's state.
+///
+/// The remote check needs network access to `origin`; the local one doesn't.
+/// If it fails (offline, VPN down) and a local tag already gives an
+/// actionable answer, this falls back to the local-only verdict rather than
+/// turning what used to be an instant, network-free local conflict into a
+/// network error.
 ///
 /// # Errors
 ///
@@ -281,7 +287,8 @@ fn get_git_identity(project_root: &Utf8Path) -> Result<(String, String)> {
 /// `version_published` is `true`), if `origin` has the tag but the version
 /// isn't published yet (the partial-failure case — the error names the
 /// manual recovery steps instead of suggesting a version bump), or if the
-/// underlying `git` commands fail.
+/// underlying `git` commands fail and there's no local tag to fall back to
+/// reporting instead.
 fn ensure_tag_absent(
     project_root: &Utf8Path,
     tag: &str,
@@ -303,17 +310,30 @@ fn ensure_tag_absent(
     }
     let local_exists = !String::from_utf8_lossy(&local.stdout).trim().is_empty();
 
-    let remote = Command::new("git")
+    // Checking `origin` needs network access; a tag already known to exist
+    // locally does not. When the remote check itself fails (offline, VPN
+    // down) and there's a local tag to report instead, fall back to the
+    // local-only verdict rather than turning what used to be an instant,
+    // network-free local conflict into a network error.
+    let remote_exists = match Command::new("git")
         .args(["ls-remote", "--tags", "origin", tag])
         .current_dir(project_root)
         .output()
-        .into_diagnostic()
-        .wrap_err("Failed to list remote git tags on 'origin'")?;
-    if !remote.status.success() {
-        let stderr = String::from_utf8_lossy(&remote.stderr);
-        miette::bail!("Failed to check remote tags on 'origin':\n{stderr}");
-    }
-    let remote_exists = !String::from_utf8_lossy(&remote.stdout).trim().is_empty();
+    {
+        Ok(output) if output.status.success() => {
+            !String::from_utf8_lossy(&output.stdout).trim().is_empty()
+        }
+        Ok(output) if !local_exists => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            miette::bail!("Failed to check remote tags on 'origin':\n{stderr}");
+        }
+        Err(e) if !local_exists => {
+            return Err(e)
+                .into_diagnostic()
+                .wrap_err("Failed to list remote git tags on 'origin'");
+        }
+        Ok(_) | Err(_) => false,
+    };
 
     if remote_exists {
         if version_published {
@@ -776,6 +796,46 @@ mod tests {
         run_git(
             dir.path(),
             &["remote", "add", "origin", &file_url(origin_bare.path())],
+        );
+
+        let err = ensure_tag_absent(
+            &utf8(&dir),
+            "v1.0.0",
+            "pkg",
+            "1.0.0",
+            false,
+            &RegistryLocation::Git("https://example.test/registry".to_string()),
+            Utf8Path::new("unused-index-root"),
+        )
+        .unwrap_err();
+        assert!(flat_err(&err).contains("already exists locally"), "{err:?}");
+    }
+
+    /// A local-only tag conflict must stay reportable without network
+    /// access: if `origin` can't be reached (offline, VPN down), fall back
+    /// to the local verdict instead of surfacing the remote check's own
+    /// network failure — the local answer is already actionable on its own.
+    #[test]
+    fn test_ensure_tag_absent_local_tag_survives_unreachable_origin() {
+        let dir = TempDir::new().unwrap();
+        run_git(dir.path(), &["init"]);
+        configure_git_identity(dir.path());
+        std::fs::write(dir.path().join("a.txt"), "x").unwrap();
+        run_git(dir.path(), &["add", "."]);
+        run_git(dir.path(), &["commit", "-m", "initial"]);
+        run_git(dir.path(), &["tag", "-a", "v1.0.0", "-m", "v1.0.0"]);
+
+        // A directory that isn't a git repository at all — `git ls-remote`
+        // against it fails the way it would offline against a real host.
+        let unreachable = TempDir::new().unwrap();
+        run_git(
+            dir.path(),
+            &[
+                "remote",
+                "add",
+                "origin",
+                unreachable.path().to_str().unwrap(),
+            ],
         );
 
         let err = ensure_tag_absent(
