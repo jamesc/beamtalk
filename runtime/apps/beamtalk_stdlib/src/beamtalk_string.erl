@@ -394,6 +394,7 @@ urlDecoded(Str) when is_binary(Str) ->
 urlDecoded(_) ->
     beamtalk_error:raise_type_error('String', 'urlDecoded', <<"Receiver must be a String">>).
 
+-doc "Raise a structured parse_error for a malformed percent-encoded string.".
 -spec raise_url_decode_error() -> no_return().
 raise_url_decode_error() ->
     Error0 = beamtalk_error:new(parse_error, 'String'),
