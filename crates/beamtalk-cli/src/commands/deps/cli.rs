@@ -287,7 +287,7 @@ fn add_registry_dependency(
         resolved_sha: resolved.resolved_sha.clone(),
         registry_version: Some(super::lockfile::RegistryVersion {
             version: release.version.clone(),
-            registry: Some(registry_location.to_string()),
+            registry: Some(registry::registry_identity(registry_config)),
         }),
     });
     lockfile.write(project_root)?;
@@ -545,10 +545,17 @@ fn run_update(project_root: &Utf8Path, name: Option<&str>) -> Result<()> {
             let version = registry_deps[target_name];
             let registry_location =
                 registry::resolve_registry_location(project_root, manifest.registry.as_ref());
+            let registry_identity = registry::registry_identity(manifest.registry.as_ref());
             // Refresh once up front so a moved tag or corrected index entry is
             // picked up before resolving.
             registry::ensure_index(&registry_location, project_root, true)?;
-            update_single_registry_dep(target_name, version, &registry_location, project_root)?;
+            update_single_registry_dep(
+                target_name,
+                version,
+                &registry_location,
+                &registry_identity,
+                project_root,
+            )?;
         } else if git_deps.contains_key(target_name) {
             let (url, reference) = git_deps[target_name];
             update_single_git_dep(target_name, url, reference, project_root)?;
@@ -574,12 +581,19 @@ fn run_update(project_root: &Utf8Path, name: Option<&str>) -> Result<()> {
         if has_registry_deps {
             let registry_location =
                 registry::resolve_registry_location(project_root, manifest.registry.as_ref());
+            let registry_identity = registry::registry_identity(manifest.registry.as_ref());
             // Refresh once for the whole batch rather than once per
             // dependency — same effect, without N redundant index
             // clones/pulls when a git-backed registry has several deps.
             registry::ensure_index(&registry_location, project_root, true)?;
             for (dep_name, version) in &registry_deps {
-                update_single_registry_dep(dep_name, version, &registry_location, project_root)?;
+                update_single_registry_dep(
+                    dep_name,
+                    version,
+                    &registry_location,
+                    &registry_identity,
+                    project_root,
+                )?;
             }
         }
 
@@ -647,10 +661,16 @@ fn update_single_git_dep(
 /// per `deps update` invocation, not once per dependency — see call sites).
 /// The pinned version itself never changes here — bumping it is a manifest
 /// edit. This only picks up a moved tag or a corrected index entry.
+///
+/// `identity` is `location`'s stable identity (see
+/// [`registry::registry_identity`]) — passed separately because, unlike
+/// `location`, it must not be `location.to_string()` (see that function's
+/// doc comment for why).
 fn update_single_registry_dep(
     name: &str,
     version: &str,
     location: &RegistryLocation,
+    identity: &str,
     project_root: &Utf8Path,
 ) -> Result<()> {
     let release = registry::resolve_release(project_root, location, name, version)?;
@@ -680,7 +700,7 @@ fn update_single_registry_dep(
         resolved_sha: resolved.resolved_sha.clone(),
         registry_version: Some(super::lockfile::RegistryVersion {
             version: version.to_string(),
-            registry: Some(location.to_string()),
+            registry: Some(identity.to_string()),
         }),
     });
     lockfile.write(project_root)?;

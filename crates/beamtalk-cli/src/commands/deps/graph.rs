@@ -89,6 +89,7 @@ pub fn resolve_dependency_graph(
             project_root,
             root_manifest.registry.as_ref(),
         ),
+        registry_identity: registry::registry_identity(root_manifest.registry.as_ref()),
     };
 
     discover_deps(&mut ctx, project_root, &root_name, &root_manifest)?;
@@ -207,6 +208,10 @@ struct DiscoveryContext<'a> {
     new_lock_entries: Vec<LockEntry>,
     /// Where registry dependencies resolve from, taken from the root manifest.
     registry_location: RegistryLocation,
+    /// The stable identity of `registry_location`, recorded on lock entries
+    /// and compared against on later builds (BT-2993). Distinct from
+    /// `registry_location.to_string()` — see [`registry::registry_identity`].
+    registry_identity: String,
 }
 
 /// Recursively discover dependencies by walking manifests.
@@ -305,7 +310,7 @@ fn resolve_registry_dep(
     parent_name: &str,
 ) -> Result<Utf8PathBuf> {
     let locked = ctx.lockfile.get(dep_name);
-    let current_registry = ctx.registry_location.to_string();
+    let current_registry = ctx.registry_identity.clone();
 
     // Fast path: the lockfile already pins this exact version *from this
     // registry*, so we can go straight to the git checkout without reading
