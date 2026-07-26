@@ -3,7 +3,7 @@
     {vsn, {cmd, "escript ../../../scripts/version.escript"}},
     {modules, []},
     {registered, []},
-    {applications, [kernel, stdlib, beamtalk_runtime]},
+    {applications, [kernel, stdlib, crypto, beamtalk_runtime]},
     {env, [
         {classes, [
             #{name => 'Actor', module => 'bt@stdlib@actor', parent => 'Object', package => 'stdlib', kind => object, type_params => []},

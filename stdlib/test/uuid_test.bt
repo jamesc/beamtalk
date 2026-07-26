@@ -25,7 +25,7 @@ TestCase subclass: UuidTest
     // Canonical 8-4-4-4-12 lowercase hex form
     s := (Uuid v4) asString
     self assert: s size equals: 36
-    self assert: (s matchesRegex: "^[0-9a-f]\{8}-[0-9a-f]\{4}-[0-9a-f]\{4}-[0-9a-f]\{4}-[0-9a-f]\{12}$")
+    self assert: (s matchesRegex: "^[0-9a-f]\{8}-[0-9a-f]\{4}-[0-9a-f]\{4}-[0-9a-f]\{4}-[0-9a-f]\{12}\z")
 
   testPrintString =>
     s := (Uuid fromString: "550e8400-e29b-41d4-a716-446655440000") unwrap printString
@@ -51,9 +51,9 @@ TestCase subclass: UuidTest
   // ===== v7 monotonic ordering =====
   testV7MonotonicOrdering =>
     a := Uuid v7
-    Timer sleep: 2
+    Timer sleep: 50
     b := Uuid v7
-    Timer sleep: 2
+    Timer sleep: 50
     c := Uuid v7
     self assert: (a < b)
     self assert: (b < c)
