@@ -17,12 +17,7 @@
 ///
 /// ## Examples
 /// ```beamtalk
-/// rp := RetryPolicy new: #{
-///   #initialInterval => 500,
-///   #backoffCoefficient => 1.5,
-///   #maximumAttempts => 5,
-///   #nonRetryableErrors => #("InvalidInput")
-/// }
+/// rp := RetryPolicy new: #{#initialInterval => 500, #backoffCoefficient => 1.5, #maximumAttempts => 5, #nonRetryableErrors => #("InvalidInput")}
 /// rp intervalForAttempt: 1     // => 500
 /// rp intervalForAttempt: 2     // => 750
 ///
@@ -65,14 +60,16 @@ typed Value subclass: RetryPolicy
   /// ```
   intervalForAttempt: attempt :: Integer -> Integer =>
     raw := (self.initialInterval * (self.backoffCoefficient raisedTo: attempt - 1)) ceiling
-    capped := self.maximumInterval
-      ifNil: [raw]
-      ifNotNil: [:maxMs | raw < maxMs ifTrue: [raw] ifFalse: [maxMs]]
+    capped := self.maximumInterval ifNil: [
+      raw
+    ] ifNotNil: [:maxMs | raw < maxMs ifTrue: [raw] ifFalse: [maxMs]]
     self.jitter ifTrue: [self jitteredDelay: capped] ifFalse: [capped]
 
   /// Full-jitter randomization: a random integer in `[0, cappedDelay]`.
   internal jitteredDelay: cappedDelay :: Integer -> Integer =>
-    cappedDelay <= 0 ifTrue: [0] ifFalse: [(Random nextInteger: cappedDelay + 1) - 1]
+    cappedDelay <= 0 ifTrue: [
+      0
+    ] ifFalse: [(Random nextInteger: cappedDelay + 1) - 1]
 
   /// True once `attempt` has reached `maximumAttempts`. Always false when
   /// `maximumAttempts` is `nil` or `0` (unlimited).
