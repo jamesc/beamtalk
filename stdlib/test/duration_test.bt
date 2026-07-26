@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// Stdlib tests for Duration class (BT-2969)
+// Stdlib tests for Duration class
 
 TestCase subclass: DurationTest
 

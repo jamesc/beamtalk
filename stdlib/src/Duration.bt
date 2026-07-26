@@ -76,6 +76,8 @@ sealed typed Value subclass: Duration native: beamtalk_duration
   ///
   /// Accepts an optional leading "-" for negative durations. Round-trips with
   /// `asString`. Weeks/months/years are not supported (calendar-dependent).
+  /// Fractional seconds need a leading digit before the decimal point
+  /// ("PT0.5S", not "PT.5S").
   ///
   /// ## Examples
   /// ```beamtalk

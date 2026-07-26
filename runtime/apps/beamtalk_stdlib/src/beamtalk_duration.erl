@@ -94,7 +94,8 @@ Parse an ISO 8601 duration string, e.g. `PT1H30M`, `P1DT2H`, `PT0.250S`.
 
 Accepts an optional leading `-` for negative durations. Weeks/months/years
 are not supported (calendar-dependent). Fractional seconds are supported
-up to millisecond precision.
+up to millisecond precision, but require a leading digit before the
+decimal point (`PT0.5S`, not `PT.5S`).
 """.
 -spec 'fromString:'(binary()) -> t().
 'fromString:'(Str) when is_binary(Str) ->

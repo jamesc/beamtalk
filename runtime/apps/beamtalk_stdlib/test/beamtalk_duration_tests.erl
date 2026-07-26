@@ -6,10 +6,10 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-EUnit tests for beamtalk_duration module (BT-2969).
+EUnit tests for beamtalk_duration module.
 
 Tests constructors, conversions, arithmetic, comparison, formatting,
-ISO 8601 round-trips, FFI shims, cross-module helpers, and error paths.
+ISO 8601 round-trips, FFI shims, the cross-module helper, and error paths.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
