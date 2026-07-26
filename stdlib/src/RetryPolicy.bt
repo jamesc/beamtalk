@@ -122,9 +122,18 @@ typed Value subclass: RetryPolicy
   /// to return the outcome or sleep and retry.
   internal attempt: attempt :: Integer do: aBlock :: Block(Integer, R) -> Result(R, Exception) =>
     outcome := Result tryDo: [aBlock value: attempt]
-    outcome ok ifTrue: [^outcome]
-    err := outcome error
-    (self isNonRetryable: err) ifTrue: [^outcome]
-    (self retriesExhausted: attempt) ifTrue: [^outcome]
-    Timer sleep: (self intervalForAttempt: attempt)
-    self attempt: attempt + 1 do: aBlock
+    outcome ok
+      ifTrue: [outcome]
+      ifFalse: [
+        err := outcome error
+        (self isNonRetryable: err)
+          ifTrue: [outcome]
+          ifFalse: [
+            (self retriesExhausted: attempt)
+              ifTrue: [outcome]
+              ifFalse: [
+                Timer sleep: (self intervalForAttempt: attempt)
+                self attempt: attempt + 1 do: aBlock
+              ]
+          ]
+      ]

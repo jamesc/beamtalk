@@ -157,6 +157,33 @@ TestCase subclass: RetryPolicyTest
     self assert: result isError
     self assert: self.counter value equals: 3
 
+  testDoHandlesManyAttemptsWithoutStackGrowth =>
+    // Regression test: attempt:do:'s recursive step must be a genuine BEAM
+    // tail call. An earlier version used `^` (non-local return) inside
+    // ifTrue: blocks, which wraps the whole method body in a try/catch and
+    // defeats tail-call optimization — every retry would add a stack frame,
+    // eventually crashing an unlimited-attempts policy retrying a
+    // fast-failing block.
+    //
+    // 300 attempts is far deeper than a non-tail-call version would survive,
+    // while staying well clear of a separate, pre-existing gap (filed
+    // separately): intervalForAttempt: computes
+    // backoffCoefficient raisedTo: (attempt - 1) before applying
+    // maximumInterval, so attempt counts near Float's overflow point raise a
+    // low-level arithmetic error regardless of the cap.
+    rp := RetryPolicy new: #{
+      #initialInterval => 0,
+      #maximumInterval => 1,
+      #maximumAttempts => 300
+    }
+    result := rp
+      do: [:attempt |
+        self.counter increment
+        Error signal: "always fails"
+      ]
+    self assert: result isError
+    self assert: self.counter value equals: 300
+
   testDoShortCircuitsNonRetryableError =>
     rp := RetryPolicy
       new: #{
