@@ -49,15 +49,15 @@ pub enum DepsCommand {
         version: Option<String>,
 
         /// Git tag to check out (e.g. `v1.0.0`)
-        #[arg(long, group = "git_ref")]
+        #[arg(long, group = "git_ref", requires = "git")]
         tag: Option<String>,
 
         /// Git branch to track (e.g. `main`)
-        #[arg(long, group = "git_ref")]
+        #[arg(long, group = "git_ref", requires = "git")]
         branch: Option<String>,
 
         /// Exact git commit SHA
-        #[arg(long, group = "git_ref")]
+        #[arg(long, group = "git_ref", requires = "git")]
         rev: Option<String>,
     },
 
@@ -240,6 +240,13 @@ fn add_registry_dependency(
     } else {
         registry::resolve_latest_release(project_root, &registry_location, name)?
     };
+
+    // The index is third-party data (same threat model as the git URLs it
+    // hands out — see BT-2978's `validate_git_url`), so validate whatever
+    // version it reports before writing it into the user's manifest. This
+    // matters most on the `--version`-omitted path above: `release.version`
+    // there comes straight from index TOML, unchecked.
+    manifest::validate_registry_dependency(name, &release.version)?;
 
     let fragment = format!("{name} = \"{}\"", release.version);
 
@@ -712,6 +719,7 @@ fn find_project_root() -> Result<Utf8PathBuf> {
 mod tests {
     use super::*;
     use crate::commands::deps::lockfile::LOCKFILE_NAME;
+    use clap::Parser;
     use std::process::Command;
     use tempfile::TempDir;
 
@@ -1126,6 +1134,55 @@ utils = { path = \"utils\" }
         assert!(
             content.contains("yaml = \"1.0.0\""),
             "should pin the latest (only) published version: {content}"
+        );
+    }
+
+    /// Minimal parser wrapping `DepsCommand`, for exercising clap's own
+    /// argument-group constraints (`requires`/`conflicts_with`) directly,
+    /// independent of `run_add`'s runtime logic.
+    #[derive(Debug, clap::Parser)]
+    struct DepsCli {
+        #[command(subcommand)]
+        cmd: DepsCommand,
+    }
+
+    #[test]
+    fn test_add_tag_without_git_is_rejected_by_clap() {
+        // `--tag`/`--branch`/`--rev` only make sense alongside `--git`; without
+        // it, `run_add` falls into the registry-resolution arm and would
+        // otherwise silently discard the ref instead of erroring.
+        let err = DepsCli::try_parse_from(["deps", "add", "yaml", "--tag", "v1.0.0"])
+            .expect_err("clap should reject --tag without --git");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("--git") || msg.contains("required arguments"),
+            "expected a missing-requirement error: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_add_registry_dep_latest_rejects_malformed_index_version() {
+        // The index is third-party data (BT-2978's threat model for the git
+        // URLs it hands out applies equally to the version string): a
+        // malformed `version` in the index must not reach the manifest
+        // unvalidated just because `--version` was omitted. The bad version
+        // must be caught before any git clone is attempted, so a bogus `git`
+        // field here is fine — it's never touched.
+        let (_dir, root) = create_project("my_app");
+        let entry =
+            "name = \"yaml\"\n\n[[versions]]\nversion = \"1.0\"\ngit = \"file:///nonexistent\"\n";
+        let (_index_dir, index_root) = create_registry_index("yaml", entry);
+        set_registry_url(&root, &index_root);
+
+        let result = run_add(&root, "yaml", None, None, None, None, None, None);
+        assert!(result.is_err(), "malformed index version must be rejected");
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(err.contains("exact version"), "Error: {err}");
+
+        let content = std::fs::read_to_string(root.join("beamtalk.toml")).unwrap();
+        assert!(
+            !content.contains("yaml"),
+            "manifest must not gain a fragment for a rejected version: {content}"
         );
     }
 
