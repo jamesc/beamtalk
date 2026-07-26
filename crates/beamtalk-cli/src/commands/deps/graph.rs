@@ -85,7 +85,10 @@ pub fn resolve_dependency_graph(
         // The registry is a property of the project being built, so the root
         // manifest's `[registry]` governs the whole graph — a transitive
         // dependency cannot redirect resolution to a registry of its own.
-        registry_location: registry::resolve_registry_location(root_manifest.registry.as_ref()),
+        registry_location: registry::resolve_registry_location(
+            project_root,
+            root_manifest.registry.as_ref(),
+        ),
     };
 
     discover_deps(&mut ctx, project_root, &root_name, &root_manifest)?;
@@ -300,14 +303,21 @@ fn resolve_registry_dep(
     version: &str,
     parent_name: &str,
 ) -> Result<Utf8PathBuf> {
-    let lock_entry = ctx.lockfile.get(dep_name);
+    let locked = ctx.lockfile.get(dep_name);
 
     // Fast path: the lockfile already pins this exact version, so we can go
     // straight to the git checkout without reading (or fetching) the index.
-    let (url, reference) = match lock_entry {
+    //
+    // The lock entry is forwarded to `resolve_git_dep` *only* on that hit.
+    // On a miss the entry is deliberately dropped: it pins the previously
+    // resolved SHA, and `resolve_git_dep` reuses an existing checkout whose
+    // HEAD matches that SHA without looking at the reference we pass. Keeping
+    // it across a version bump would leave the old version checked out while
+    // we believe we fetched the new tag.
+    let (url, reference, lock_entry) = match locked {
         Some(entry) if entry.registry_version.as_deref() == Some(version) => {
             debug!(dep = %dep_name, version, "Registry dependency satisfied from lockfile");
-            (entry.url.clone(), entry.reference.clone())
+            (entry.url.clone(), entry.reference.clone(), locked)
         }
         _ => {
             let release = registry::resolve_release(
@@ -322,7 +332,7 @@ fn resolve_registry_dep(
                              (required by '{parent_name}')"
                 )
             })?;
-            (release.git, GitReference::Tag(release.tag))
+            (release.git, GitReference::Tag(release.tag), None)
         }
     };
 
@@ -1292,6 +1302,90 @@ middle = {{ path = "{middle_str}" }}"#
         );
     }
 
+    /// A git repo carrying two released versions, each with its own tag and a
+    /// `beamtalk.toml` declaring that version.
+    fn create_two_version_repo(pkg_name: &str) -> (TempDir, String) {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path();
+
+        run_git_cmd(path, &["init"]);
+        run_git_cmd(path, &["config", "user.email", "test@test.com"]);
+        run_git_cmd(path, &["config", "user.name", "Test"]);
+        run_git_cmd(path, &["config", "commit.gpgsign", "false"]);
+
+        write_manifest(path, pkg_name, "1.0.0", "");
+        run_git_cmd(path, &["add", "."]);
+        run_git_cmd(path, &["commit", "-m", "v1"]);
+        run_git_cmd(path, &["tag", "-m", "v1.0.0", "v1.0.0"]);
+
+        write_manifest(path, pkg_name, "2.0.0", "");
+        run_git_cmd(path, &["add", "."]);
+        run_git_cmd(path, &["commit", "-m", "v2"]);
+        run_git_cmd(path, &["tag", "-m", "v2.0.0", "v2.0.0"]);
+
+        let mut path_str = path.display().to_string().replace('\\', "/");
+        if !path_str.starts_with('/') {
+            path_str.insert(0, '/');
+        }
+        (dir, format!("file://{path_str}"))
+    }
+
+    /// Bumping the version in `beamtalk.toml` must re-checkout the new tag.
+    ///
+    /// Regression: the stale lock entry was forwarded to `resolve_git_dep`,
+    /// which reuses a checkout whose HEAD matches the locked SHA regardless of
+    /// the reference asked for — leaving the old version on disk.
+    #[test]
+    fn test_registry_dep_version_bump_refetches_checkout() {
+        let (_git_dir, url) = create_two_version_repo("my_pkg");
+        let (_index_dir, index_root) = create_registry_index(
+            "my_pkg",
+            &format!(
+                "[[versions]]\nversion = \"1.0.0\"\ngit = \"{url}\"\n\
+                 [[versions]]\nversion = \"2.0.0\"\ngit = \"{url}\"\n"
+            ),
+        );
+
+        let root_dir = TempDir::new().unwrap();
+        let root = root_dir.path().join("root");
+        write_registry_project(&root, &index_root, "my_pkg", "1.0.0");
+        let root_path = Utf8PathBuf::from_path_buf(root.clone()).unwrap();
+        let options = beamtalk_core::CompilerOptions::default();
+
+        resolve_dependency_graph(&root_path, &options).unwrap();
+        let checkout_manifest = crate::commands::build_layout::BuildLayout::new(&root_path)
+            .dep_checkout_dir("my_pkg")
+            .join("beamtalk.toml");
+        assert!(
+            fs::read_to_string(&checkout_manifest)
+                .unwrap()
+                .contains("version = \"1.0.0\""),
+            "first resolve should check out 1.0.0"
+        );
+
+        // Bump the manifest to 2.0.0 and re-resolve.
+        write_registry_project(&root, &index_root, "my_pkg", "2.0.0");
+        resolve_dependency_graph(&root_path, &options)
+            .expect("version bump should re-resolve cleanly");
+
+        assert!(
+            fs::read_to_string(&checkout_manifest)
+                .unwrap()
+                .contains("version = \"2.0.0\""),
+            "the checkout must be updated to the newly requested version"
+        );
+
+        let lock = Lockfile::read(&root_path).unwrap().unwrap();
+        assert_eq!(
+            lock.get("my_pkg").unwrap().registry_version.as_deref(),
+            Some("2.0.0")
+        );
+        assert_eq!(
+            lock.get("my_pkg").unwrap().reference,
+            GitReference::Tag("v2.0.0".to_string())
+        );
+    }
+
     #[test]
     fn test_registry_dep_version_mismatch_is_an_error() {
         // The repo's package declares 0.1.0, but the index advertises the same
@@ -1338,6 +1432,62 @@ middle = {{ path = "{middle_str}" }}"#
             .collect::<Vec<_>>()
             .join(" ");
         assert!(msg.contains("Available versions: 1.0.0"), "{msg}");
+    }
+
+    /// A transitive registry dependency resolves through the *root* project's
+    /// registry — a dependency cannot redirect resolution to a registry of its
+    /// own, which would let a package choose where its own deps come from.
+    #[test]
+    fn test_transitive_registry_dep_uses_root_registry() {
+        let (_git_dir, url, _sha) = create_git_dep_repo("leaf_pkg", "1.0.0", "");
+        let (_index_dir, index_root) = create_registry_index(
+            "leaf_pkg",
+            &format!("[[versions]]\nversion = \"1.0.0\"\ngit = \"{url}\"\n"),
+        );
+
+        let workspace = TempDir::new().unwrap();
+
+        // The intermediate path dep declares the registry dep, and points at a
+        // registry that does not exist — it must be ignored.
+        let middle = workspace.path().join("middle");
+        fs::create_dir_all(&middle).unwrap();
+        write_manifest(
+            &middle,
+            "middle",
+            "0.1.0",
+            "[registry]\nurl = \"https://nonexistent.invalid/registry\"\n\n\
+             [dependencies]\nleaf_pkg = \"1.0.0\"\n",
+        );
+        write_source(&middle, "middle.bt", "Object subclass: Middle\n");
+
+        let root = workspace.path().join("root");
+        fs::create_dir_all(&root).unwrap();
+        write_manifest(
+            &root,
+            "my_app",
+            "0.1.0",
+            &format!(
+                "[registry]\nurl = \"{index_root}\"\n\n\
+                 [dependencies]\nmiddle = {{ path = \"../middle\" }}\n"
+            ),
+        );
+
+        let root_path = Utf8PathBuf::from_path_buf(root).unwrap();
+        let resolved =
+            resolve_dependency_graph(&root_path, &beamtalk_core::CompilerOptions::default())
+                .expect("root registry should govern the whole graph");
+
+        let names: Vec<&str> = resolved.iter().map(|r| r.name.as_str()).collect();
+        assert!(
+            names.contains(&"leaf_pkg"),
+            "transitive registry dep should resolve: {names:?}"
+        );
+        assert!(names.contains(&"middle"), "{names:?}");
+
+        // Leaves compile before the package that depends on them.
+        let leaf_at = names.iter().position(|n| *n == "leaf_pkg").unwrap();
+        let middle_at = names.iter().position(|n| *n == "middle").unwrap();
+        assert!(leaf_at < middle_at, "wrong compilation order: {names:?}");
     }
 
     #[test]

@@ -33,9 +33,10 @@
 //! 3. [`DEFAULT_REGISTRY_URL`]
 //!
 //! A value naming an existing local directory is read in place — no git, no
-//! network. Anything else is treated as a git URL and cloned into
-//! `_build/registry/index/`. The clone is refreshed only on a lookup miss
-//! (retried once) and by `beamtalk deps update`.
+//! network; a relative path is taken relative to the project root. Anything
+//! else is treated as a git URL and cloned into `_build/registry/index/`. The
+//! clone is refreshed only on a lookup miss, retried once. (Refreshing it from
+//! `beamtalk deps update` arrives with registry support for that command.)
 
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
@@ -115,8 +116,12 @@ impl RegistryEntry {
 
 // ── Index entry TOML ─────────────────────────────────────────────────
 
+// Unknown fields are deliberately *accepted* here, unlike in `beamtalk.toml`.
+// The index is a separately versioned artifact served to clients this binary
+// does not control: the day it starts carrying `checksum`, `yanked`, or
+// `licenses`, every already-released beamtalk must keep reading it rather than
+// hard-failing on every package that adopts the new key.
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct TomlIndexEntry {
     name: String,
     #[serde(default)]
@@ -126,7 +131,6 @@ struct TomlIndexEntry {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct TomlIndexRelease {
     version: String,
     git: String,
@@ -142,8 +146,9 @@ struct TomlIndexRelease {
 ///
 /// # Errors
 ///
-/// Returns an error if the TOML is malformed, carries unknown fields, or
-/// declares a name other than `expected_name`.
+/// Returns an error if the TOML is malformed, declares a name other than
+/// `expected_name`, or lists the same version more than once. Unknown fields
+/// are accepted so a newer index format stays readable.
 pub fn parse_index_entry(expected_name: &str, content: &str) -> Result<RegistryEntry> {
     let parsed: TomlIndexEntry = toml::from_str(content)
         .into_diagnostic()
@@ -157,7 +162,7 @@ pub fn parse_index_entry(expected_name: &str, content: &str) -> Result<RegistryE
         );
     }
 
-    let versions = parsed
+    let versions: Vec<RegistryRelease> = parsed
         .versions
         .into_iter()
         .map(|r| RegistryRelease {
@@ -166,6 +171,18 @@ pub fn parse_index_entry(expected_name: &str, content: &str) -> Result<RegistryE
             git: r.git,
         })
         .collect();
+
+    // A duplicated version would otherwise resolve to whichever block happens
+    // to come first — possibly a different repository than intended.
+    for (i, release) in versions.iter().enumerate() {
+        if versions[..i].iter().any(|r| r.version == release.version) {
+            miette::bail!(
+                "Registry index entry for '{expected_name}' lists version '{}' more than once.\n  \
+                 The index is inconsistent — report this to the registry maintainer.",
+                release.version
+            );
+        }
+    }
 
     Ok(RegistryEntry {
         name: parsed.name,
@@ -181,15 +198,19 @@ pub fn parse_index_entry(expected_name: &str, content: &str) -> Result<RegistryE
 /// Priority: `BEAMTALK_REGISTRY` → `[registry] url` → [`DEFAULT_REGISTRY_URL`].
 /// A value naming an existing directory becomes [`RegistryLocation::LocalDir`];
 /// anything else is treated as a git URL.
-pub fn resolve_registry_location(registry: Option<&RegistryConfig>) -> RegistryLocation {
+pub fn resolve_registry_location(
+    project_root: &Utf8Path,
+    registry: Option<&RegistryConfig>,
+) -> RegistryLocation {
     let env_value = std::env::var(REGISTRY_ENV_VAR).ok();
-    resolve_registry_location_from(env_value.as_deref(), registry)
+    resolve_registry_location_from(project_root, env_value.as_deref(), registry)
 }
 
 /// The pure core of [`resolve_registry_location`], with the environment
 /// supplied by the caller so it can be exercised without mutating the
 /// process-wide environment.
 fn resolve_registry_location_from(
+    project_root: &Utf8Path,
     env_value: Option<&str>,
     registry: Option<&RegistryConfig>,
 ) -> RegistryLocation {
@@ -199,17 +220,28 @@ fn resolve_registry_location_from(
         .or_else(|| registry.map(|r| r.url.clone()))
         .unwrap_or_else(|| DEFAULT_REGISTRY_URL.to_string());
 
-    classify_location(&raw)
+    classify_location(project_root, &raw)
 }
 
 /// Classify a raw registry location string as a local directory or a git URL.
-fn classify_location(raw: &str) -> RegistryLocation {
+///
+/// A relative path is resolved against `project_root`, not the process working
+/// directory: the CLI, LSP and MCP servers all run with different cwds, and the
+/// same `beamtalk.toml` must name the same registry from each of them.
+fn classify_location(project_root: &Utf8Path, raw: &str) -> RegistryLocation {
     let candidate = Utf8Path::new(raw);
-    if candidate.is_dir() {
-        RegistryLocation::LocalDir(candidate.to_path_buf())
+    if candidate.is_absolute() {
+        if candidate.is_dir() {
+            return RegistryLocation::LocalDir(candidate.to_path_buf());
+        }
     } else {
-        RegistryLocation::Git(raw.to_string())
+        let joined = project_root.join(candidate);
+        if joined.is_dir() {
+            return RegistryLocation::LocalDir(joined);
+        }
     }
+
+    RegistryLocation::Git(raw.to_string())
 }
 
 // ── Index materialisation ────────────────────────────────────────────
@@ -251,7 +283,9 @@ pub fn ensure_index(
 fn ensure_git_index(url: &str, project_root: &Utf8Path, refresh: bool) -> Result<Utf8PathBuf> {
     let index_dir = BuildLayout::new(project_root).registry_index_dir();
 
-    if index_dir.join("packages").is_dir() {
+    let has_index = index_dir.join("packages").is_dir();
+
+    if has_index {
         if !refresh {
             debug!(%index_dir, "Using existing registry index");
             return Ok(index_dir);
@@ -264,8 +298,57 @@ fn ensure_git_index(url: &str, project_root: &Utf8Path, refresh: bool) -> Result
         debug!(%index_dir, "Fast-forward failed, re-cloning registry index");
     }
 
-    clone_index(url, &index_dir)?;
-    Ok(index_dir)
+    // Clone into a scratch directory and swap it in only once it is complete.
+    // A refresh that fails (offline, VPN down, transient DNS) must leave the
+    // usable index that is already on disk exactly where it was, rather than
+    // deleting it up front and then failing to replace it.
+    let staging_dir = BuildLayout::new(project_root)
+        .registry_dir()
+        .join("index.staging");
+
+    match clone_index(url, &staging_dir) {
+        Ok(()) => {
+            swap_in_index(&staging_dir, &index_dir)?;
+            Ok(index_dir)
+        }
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(&staging_dir);
+            if has_index {
+                // Keep serving the stale index — a refresh is best-effort, and
+                // the lookup that triggered it reports its own error if the
+                // package really is absent.
+                debug!(%index_dir, error = %e, "Registry refresh failed, keeping existing index");
+                Ok(index_dir)
+            } else {
+                Err(e)
+            }
+        }
+    }
+}
+
+/// Replace `index_dir` with the freshly cloned `staging_dir`.
+fn swap_in_index(staging_dir: &Utf8Path, index_dir: &Utf8Path) -> Result<()> {
+    if index_dir.exists() {
+        let previous = index_dir.with_extension("previous");
+        let _ = std::fs::remove_dir_all(&previous);
+        std::fs::rename(index_dir, &previous)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to move aside registry index '{index_dir}'"))?;
+        let result = std::fs::rename(staging_dir, index_dir)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to install registry index at '{index_dir}'"));
+        if result.is_err() {
+            // Put the working index back rather than leaving nothing behind.
+            let _ = std::fs::rename(&previous, index_dir);
+            return result;
+        }
+        let _ = std::fs::remove_dir_all(&previous);
+        return Ok(());
+    }
+
+    std::fs::rename(staging_dir, index_dir)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to install registry index at '{index_dir}'"))
 }
 
 /// Try to fast-forward an existing index clone. Returns `false` when the
@@ -278,23 +361,38 @@ fn fast_forward_index(index_dir: &Utf8Path) -> bool {
         .is_ok_and(|out| out.status.success())
 }
 
-/// Clone the registry index, replacing any existing directory.
-fn clone_index(url: &str, index_dir: &Utf8Path) -> Result<()> {
-    if index_dir.exists() {
-        std::fs::remove_dir_all(index_dir)
+/// Clone the registry index into `target`, replacing anything already there.
+fn clone_index(url: &str, target: &Utf8Path) -> Result<()> {
+    // The registry URL can come from the environment or the manifest; screen it
+    // with the same rules as a dependency URL so `ext::` and option-lookalikes
+    // can't reach `git clone`.
+    super::git::validate_git_url("<registry>", url)?;
+
+    if target.exists() {
+        std::fs::remove_dir_all(target)
             .into_diagnostic()
-            .wrap_err_with(|| format!("Failed to remove stale registry index '{index_dir}'"))?;
+            .wrap_err_with(|| format!("Failed to remove stale registry clone '{target}'"))?;
     }
 
-    if let Some(parent) = index_dir.parent() {
+    if let Some(parent) = target.parent() {
         std::fs::create_dir_all(parent)
             .into_diagnostic()
             .wrap_err_with(|| format!("Failed to create registry directory '{parent}'"))?;
     }
 
-    info!(url, %index_dir, "Cloning registry index");
+    info!(url, %target, "Cloning registry index");
     let output = Command::new("git")
-        .args(["clone", "--quiet", "--depth", "1", url, index_dir.as_str()])
+        .args([
+            "-c",
+            "protocol.ext.allow=never",
+            "clone",
+            "--quiet",
+            "--depth",
+            "1",
+            "--",
+            url,
+            target.as_str(),
+        ])
         .output()
         .into_diagnostic()
         .wrap_err("Failed to execute 'git clone' for the registry index")?;
@@ -546,9 +644,39 @@ tag = "release-0.2.1"
     }
 
     #[test]
-    fn test_parse_index_entry_rejects_unknown_fields() {
-        let content = "name = \"yaml\"\nbogus = true\n";
-        assert!(parse_index_entry("yaml", content).is_err());
+    fn test_parse_index_entry_accepts_unknown_fields() {
+        // The index is versioned independently of this binary: a future key
+        // must not break clients that predate it.
+        let content = r#"
+name = "yaml"
+yanked = false
+licenses = ["Apache-2.0"]
+
+[[versions]]
+version = "0.1.0"
+git = "https://example.test/yaml"
+checksum = "sha256:deadbeef"
+"#;
+        let entry = parse_index_entry("yaml", content).unwrap();
+        assert_eq!(entry.versions.len(), 1);
+        assert_eq!(entry.find_version("0.1.0").unwrap().tag, "v0.1.0");
+    }
+
+    #[test]
+    fn test_parse_index_entry_rejects_duplicate_versions() {
+        let content = r#"
+name = "yaml"
+
+[[versions]]
+version = "1.0.0"
+git = "https://example.test/yaml"
+
+[[versions]]
+version = "1.0.0"
+git = "https://evil.test/yaml"
+"#;
+        let err = parse_index_entry("yaml", content).unwrap_err();
+        assert!(flat_err(&err).contains("more than once"), "{err:?}");
     }
 
     #[test]
@@ -594,61 +722,90 @@ git = "g"
 
     // ── Location resolution ──────────────────────────────────────────
 
+    /// A project root that exists but contains no registry directory.
+    fn empty_root(dir: &TempDir) -> Utf8PathBuf {
+        utf8(dir)
+    }
+
     #[test]
     fn test_classify_location_existing_dir_is_local() {
         let dir = TempDir::new().unwrap();
         let root = utf8(&dir);
+        let project = TempDir::new().unwrap();
         assert_eq!(
-            classify_location(root.as_str()),
+            classify_location(&empty_root(&project), root.as_str()),
             RegistryLocation::LocalDir(root)
         );
     }
 
     #[test]
     fn test_classify_location_url_is_git() {
+        let project = TempDir::new().unwrap();
         assert_eq!(
-            classify_location("https://example.test/registry"),
+            classify_location(&empty_root(&project), "https://example.test/registry"),
             RegistryLocation::Git("https://example.test/registry".to_string())
         );
     }
 
     #[test]
-    fn test_location_falls_back_to_default() {
+    fn test_classify_location_relative_path_resolves_against_project_root() {
+        // Not the process cwd — the CLI, LSP and MCP servers all run with
+        // different working directories.
+        let project = TempDir::new().unwrap();
+        let root = utf8(&project);
+        std::fs::create_dir_all(root.join("vendor/registry/packages")).unwrap();
+
         assert_eq!(
-            resolve_registry_location_from(None, None),
+            classify_location(&root, "vendor/registry"),
+            RegistryLocation::LocalDir(root.join("vendor/registry"))
+        );
+    }
+
+    #[test]
+    fn test_location_falls_back_to_default() {
+        let project = TempDir::new().unwrap();
+        assert_eq!(
+            resolve_registry_location_from(&empty_root(&project), None, None),
             RegistryLocation::Git(DEFAULT_REGISTRY_URL.to_string())
         );
     }
 
     #[test]
     fn test_location_prefers_manifest_over_default() {
+        let project = TempDir::new().unwrap();
         let cfg = RegistryConfig {
             url: "https://example.test/custom".to_string(),
         };
         assert_eq!(
-            resolve_registry_location_from(None, Some(&cfg)),
+            resolve_registry_location_from(&empty_root(&project), None, Some(&cfg)),
             RegistryLocation::Git("https://example.test/custom".to_string())
         );
     }
 
     #[test]
     fn test_location_prefers_env_over_manifest() {
+        let project = TempDir::new().unwrap();
         let cfg = RegistryConfig {
             url: "https://example.test/from-manifest".to_string(),
         };
         assert_eq!(
-            resolve_registry_location_from(Some("https://example.test/from-env"), Some(&cfg)),
+            resolve_registry_location_from(
+                &empty_root(&project),
+                Some("https://example.test/from-env"),
+                Some(&cfg)
+            ),
             RegistryLocation::Git("https://example.test/from-env".to_string())
         );
     }
 
     #[test]
     fn test_location_ignores_blank_env() {
+        let project = TempDir::new().unwrap();
         let cfg = RegistryConfig {
             url: "https://example.test/from-manifest".to_string(),
         };
         assert_eq!(
-            resolve_registry_location_from(Some("   "), Some(&cfg)),
+            resolve_registry_location_from(&empty_root(&project), Some("   "), Some(&cfg)),
             RegistryLocation::Git("https://example.test/from-manifest".to_string())
         );
     }
@@ -666,6 +823,133 @@ git = "g"
         )
         .unwrap();
         assert_eq!(resolved, root);
+    }
+
+    // ── Git-backed index ─────────────────────────────────────────────
+    //
+    // Exercised through a local `file://` repository, so still network-free.
+
+    fn run_git(dir: &std::path::Path, args: &[&str]) {
+        let out = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    /// A git repository serving as a registry index. Returns the repo dir and
+    /// a `file://` URL for it.
+    fn make_git_index(entries: &[(&str, &str)]) -> (TempDir, String) {
+        let (dir, root) = make_index(entries);
+        let path = dir.path();
+        run_git(path, &["init"]);
+        run_git(path, &["config", "user.email", "t@t.com"]);
+        run_git(path, &["config", "user.name", "T"]);
+        run_git(path, &["config", "commit.gpgsign", "false"]);
+        run_git(path, &["add", "."]);
+        run_git(path, &["commit", "-m", "index"]);
+
+        let mut s = root.as_str().replace('\\', "/");
+        if !s.starts_with('/') {
+            s.insert(0, '/');
+        }
+        (dir, format!("file://{s}"))
+    }
+
+    #[test]
+    fn test_ensure_index_clones_git_registry() {
+        let (_repo, url) = make_git_index(&[("yaml", YAML_ENTRY)]);
+        let project = TempDir::new().unwrap();
+        let project_root = utf8(&project);
+
+        let index_root = ensure_index(&RegistryLocation::Git(url), &project_root, false).unwrap();
+
+        assert_eq!(
+            index_root,
+            BuildLayout::new(&project_root).registry_index_dir()
+        );
+        assert!(index_root.join("packages/yaml.toml").is_file());
+        assert_eq!(
+            read_entry(&index_root, "yaml").unwrap().unwrap().name,
+            "yaml"
+        );
+    }
+
+    #[test]
+    fn test_resolve_release_through_git_registry() {
+        let (_repo, url) = make_git_index(&[("yaml", YAML_ENTRY)]);
+        let project = TempDir::new().unwrap();
+        let location = RegistryLocation::Git(url);
+
+        let release = resolve_release(&utf8(&project), &location, "yaml", "0.2.1").unwrap();
+        assert_eq!(release.tag, "release-0.2.1");
+    }
+
+    /// A newly published version is picked up by the miss-then-refresh retry.
+    #[test]
+    fn test_resolve_release_refresh_picks_up_new_version() {
+        let (repo, url) = make_git_index(&[("yaml", YAML_ENTRY)]);
+        let project = TempDir::new().unwrap();
+        let project_root = utf8(&project);
+        let location = RegistryLocation::Git(url);
+
+        // Populate the local clone at the current index state.
+        resolve_release(&project_root, &location, "yaml", "0.2.1").unwrap();
+
+        // Publish 0.3.0 upstream.
+        let mut updated = YAML_ENTRY.to_string();
+        updated
+            .push_str("\n[[versions]]\nversion = \"0.3.0\"\ngit = \"https://example.test/yaml\"\n");
+        std::fs::write(repo.path().join("packages/yaml.toml"), updated).unwrap();
+        run_git(repo.path(), &["add", "."]);
+        run_git(repo.path(), &["commit", "-m", "publish 0.3.0"]);
+
+        let release = resolve_release(&project_root, &location, "yaml", "0.3.0").unwrap();
+        assert_eq!(release.version, "0.3.0");
+        assert_eq!(release.tag, "v0.3.0");
+    }
+
+    /// A refresh that cannot reach the remote must leave the working index
+    /// intact rather than deleting it and failing.
+    #[test]
+    fn test_failed_refresh_keeps_existing_index() {
+        let (repo, url) = make_git_index(&[("yaml", YAML_ENTRY)]);
+        let project = TempDir::new().unwrap();
+        let project_root = utf8(&project);
+        let location = RegistryLocation::Git(url);
+
+        resolve_release(&project_root, &location, "yaml", "0.2.1").unwrap();
+        let index_dir = BuildLayout::new(&project_root).registry_index_dir();
+        assert!(index_dir.join("packages/yaml.toml").is_file());
+
+        // Destroy the remote, then force a refresh via a lookup miss.
+        repo.close().unwrap();
+        let err = resolve_release(&project_root, &location, "yaml", "9.9.9").unwrap_err();
+
+        // The failure is about the missing version, not a broken registry, and
+        // the cached index survives for the next build.
+        assert!(flat_err(&err).contains("Available versions"), "{err:?}");
+        assert!(
+            index_dir.join("packages/yaml.toml").is_file(),
+            "a failed refresh must not delete the usable index"
+        );
+    }
+
+    #[test]
+    fn test_ensure_index_rejects_dangerous_registry_url() {
+        let project = TempDir::new().unwrap();
+        let err = ensure_index(
+            &RegistryLocation::Git("ext::sh -c 'touch /tmp/pwned'".to_string()),
+            &utf8(&project),
+            false,
+        )
+        .unwrap_err();
+        assert!(flat_err(&err).contains("unsupported git URL"), "{err:?}");
     }
 
     #[test]
