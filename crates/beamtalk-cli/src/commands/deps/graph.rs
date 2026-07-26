@@ -364,7 +364,11 @@ fn resolve_registry_dep(
 /// Guards against a registry index that points a version at the wrong tag, and
 /// against a package whose tag and `beamtalk.toml` have drifted apart — either
 /// would otherwise silently build the wrong code.
-fn validate_checkout_version(
+///
+/// `pub(crate)` so `deps add` (`cli.rs`, BT-2979) can run the same check
+/// immediately when adding a registry dependency, rather than only
+/// discovering a bad index entry on the next `beamtalk build`.
+pub(crate) fn validate_checkout_version(
     dep_name: &str,
     requested: &str,
     checkout_path: &Utf8Path,

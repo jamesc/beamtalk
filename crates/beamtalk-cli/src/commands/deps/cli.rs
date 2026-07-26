@@ -19,6 +19,7 @@ use crate::commands::manifest::{self, format_name_error, validate_package_name};
 
 use super::git;
 use super::lockfile::{LockEntry, Lockfile};
+use super::registry::{self, RegistryLocation};
 
 /// Dependency management subcommands.
 #[derive(Debug, Subcommand)]
@@ -26,7 +27,10 @@ pub enum DepsCommand {
     /// Add a dependency to beamtalk.toml
     ///
     /// Writes the dependency entry to `beamtalk.toml` and resolves it
-    /// (cloning git repos, validating path deps).
+    /// (cloning git repos, validating path deps, or resolving a registry
+    /// version). With none of `--path`/`--git` given, NAME is resolved
+    /// through the package registry — pinned to `--version` if given, else
+    /// the latest published version.
     Add {
         /// Dependency package name (e.g. `json`, `utils`)
         name: String,
@@ -38,6 +42,11 @@ pub enum DepsCommand {
         /// Git repository URL
         #[arg(long, group = "source", requires = "git_ref")]
         git: Option<String>,
+
+        /// Exact registry version to pin (default: latest in the index).
+        /// Only valid without `--path`/`--git`.
+        #[arg(long, conflicts_with_all = ["path", "git", "tag", "branch", "rev"])]
+        version: Option<String>,
 
         /// Git tag to check out (e.g. `v1.0.0`)
         #[arg(long, group = "git_ref")]
@@ -55,9 +64,14 @@ pub enum DepsCommand {
     /// List resolved dependencies with sources and pinned versions
     List,
 
-    /// Update lockfile — advance git deps to latest matching their spec
+    /// Update lockfile — advance git deps to latest matching their spec, and
+    /// re-resolve registry deps to a fresh SHA
     ///
-    /// With no arguments, updates all git dependencies.
+    /// Refreshing a registry dep picks up a moved tag or a corrected index
+    /// entry; the pinned version itself never changes here — bumping it is a
+    /// manifest edit.
+    ///
+    /// With no arguments, updates all git and registry dependencies.
     /// With a name, updates only that dependency.
     Update {
         /// Name of a single dependency to update (default: all)
@@ -73,6 +87,7 @@ pub fn run(command: DepsCommand) -> Result<()> {
             name,
             path,
             git,
+            version,
             tag,
             branch,
             rev,
@@ -81,6 +96,7 @@ pub fn run(command: DepsCommand) -> Result<()> {
             &name,
             path.as_deref(),
             git.as_deref(),
+            version.as_deref(),
             tag,
             branch,
             rev,
@@ -95,11 +111,13 @@ pub fn run(command: DepsCommand) -> Result<()> {
 // ---------------------------------------------------------------------------
 
 /// Add a dependency to `beamtalk.toml` and resolve it.
+#[allow(clippy::too_many_arguments)] // one field per clap flag on `DepsCommand::Add`
 fn run_add(
     project_root: &Utf8Path,
     name: &str,
     path: Option<&str>,
     git_url: Option<&str>,
+    version: Option<&str>,
     tag: Option<String>,
     branch: Option<String>,
     rev: Option<String>,
@@ -186,7 +204,10 @@ fn run_add(
         );
         (fragment, display)
     } else {
-        miette::bail!("Dependency '{name}' requires a source — specify --path or --git");
+        // No --path or --git — resolve the dependency through the package
+        // registry: pin to --version if given, else the latest published
+        // release.
+        add_registry_dependency(project_root, name, version, manifest.registry.as_ref())?
     };
 
     // Append to beamtalk.toml
@@ -194,6 +215,76 @@ fn run_add(
 
     println!("Added dependency '{name}' ({source_display})");
     Ok(())
+}
+
+/// Resolve `name` (optionally pinned to `version`, else the latest published
+/// release) through the package registry, fetch it via the ordinary git
+/// machinery, and record it in the lockfile.
+///
+/// Returns the `beamtalk.toml` fragment (`name = "X.Y.Z"`) and a
+/// human-readable display string for the "Added dependency" message.
+fn add_registry_dependency(
+    project_root: &Utf8Path,
+    name: &str,
+    version: Option<&str>,
+    registry_config: Option<&manifest::RegistryConfig>,
+) -> Result<(String, String)> {
+    let registry_location = registry::resolve_registry_location(project_root, registry_config);
+
+    let release = if let Some(v) = version {
+        // Validate the exact-version format up front, with the same message a
+        // manual beamtalk.toml edit would get, before touching the registry
+        // index.
+        manifest::validate_registry_dependency(name, v)?;
+        registry::resolve_release(project_root, &registry_location, name, v)?
+    } else {
+        registry::resolve_latest_release(project_root, &registry_location, name)?
+    };
+
+    let fragment = format!("{name} = \"{}\"", release.version);
+
+    // Resolve the release's (git url, tag) through the ordinary git machinery
+    // to validate it and pin an exact SHA.
+    let reference = GitReference::Tag(release.tag.clone());
+    let resolved = git::resolve_git_dep(name, &release.git, &reference, project_root, None)?;
+
+    // Catch a registry index that points this version at the wrong tag (or a
+    // package whose tag and beamtalk.toml have drifted apart) right now,
+    // rather than leaving it to surface on the next `beamtalk build` — the
+    // same check `graph.rs` runs on every resolve.
+    super::graph::validate_checkout_version(
+        name,
+        &release.version,
+        &resolved.checkout_path,
+        &release.git,
+        &reference,
+    )?;
+
+    info!(
+        name,
+        version = %release.version,
+        sha = %resolved.resolved_sha,
+        "Resolved registry dependency"
+    );
+
+    // Update the lockfile
+    let mut lockfile = Lockfile::read(project_root)?.unwrap_or_default();
+    lockfile.insert(LockEntry {
+        name: name.to_string(),
+        url: release.git.clone(),
+        reference,
+        resolved_sha: resolved.resolved_sha.clone(),
+        registry_version: Some(release.version.clone()),
+    });
+    lockfile.write(project_root)?;
+
+    let display = format!(
+        "registry: {} (tag: {} @ {})",
+        shorten_git_url(&release.git),
+        release.tag,
+        &resolved.resolved_sha[..7.min(resolved.resolved_sha.len())]
+    );
+    Ok((fragment, display))
 }
 
 /// Build a `GitReference` from optional tag/branch/rev flags.
@@ -320,13 +411,7 @@ fn run_list(project_root: &Utf8Path) -> Result<()> {
                 }
             }
             DependencySource::Registry { version } => {
-                if let Some(entry) = lockfile.get(dep_name) {
-                    let short_sha = &entry.resolved_sha[..7.min(entry.resolved_sha.len())];
-                    let short_url = shorten_git_url(&entry.url);
-                    format!("(registry: {version} -> {short_url} @ {short_sha})")
-                } else {
-                    format!("(registry: {version})")
-                }
+                format_registry_source_info(version, lockfile.get(dep_name))
             }
         };
 
@@ -362,6 +447,26 @@ fn dep_version(project_root: &Utf8Path, name: &str, source: &DependencySource) -
     }
 }
 
+/// Format a registry dependency's provenance for `deps list` display, e.g.
+/// `(registry: github.com/jamesc/beamtalk-yaml tag: v0.2.1 @ abc1234)`.
+///
+/// Falls back to just the requested version when there is no lockfile entry
+/// yet (e.g. a manifest edited by hand before the next resolve).
+fn format_registry_source_info(version: &str, lock_entry: Option<&LockEntry>) -> String {
+    let Some(entry) = lock_entry else {
+        return format!("(registry: {version})");
+    };
+
+    let short_url = shorten_git_url(&entry.url);
+    let ref_str = match &entry.reference {
+        GitReference::Tag(t) => format!("tag: {t}"),
+        GitReference::Branch(b) => format!("branch: {b}"),
+        GitReference::Rev(r) => format!("rev: {}", &r[..7.min(r.len())]),
+    };
+    let short_sha = &entry.resolved_sha[..7.min(entry.resolved_sha.len())];
+    format!("(registry: {short_url} {ref_str} @ {short_sha})")
+}
+
 /// Shorten a git URL for display (strip scheme and trailing `.git`).
 fn shorten_git_url(url: &str) -> String {
     let s = url
@@ -379,6 +484,10 @@ fn shorten_git_url(url: &str) -> String {
 /// Update dependencies to the latest matching their spec.
 ///
 /// For git deps: re-fetches and resolves to the latest SHA.
+/// For registry deps: refreshes the registry index and re-resolves the
+/// pinned version to a fresh SHA (picks up a moved tag or a corrected index
+/// entry — the pinned version itself never changes; bumping it is a manifest
+/// edit).
 /// For native (hex) deps: clears locked versions so the next build
 /// re-resolves against hex.pm via rebar3 (ADR 0072 Phase 2).
 fn run_update(project_root: &Utf8Path, name: Option<&str>) -> Result<()> {
@@ -398,6 +507,18 @@ fn run_update(project_root: &Utf8Path, name: Option<&str>) -> Result<()> {
         })
         .collect();
 
+    let registry_deps: BTreeMap<&str, &str> = manifest
+        .dependencies
+        .iter()
+        .filter_map(|(dep_name, spec)| {
+            if let DependencySource::Registry { version } = &spec.source {
+                Some((dep_name.as_str(), version.as_str()))
+            } else {
+                None
+            }
+        })
+        .collect();
+
     let has_native_deps = !manifest.native_dependencies.is_empty();
 
     if let Some(target_name) = name {
@@ -405,34 +526,47 @@ fn run_update(project_root: &Utf8Path, name: Option<&str>) -> Result<()> {
         if !manifest.dependencies.contains_key(target_name) {
             miette::bail!("Dependency '{target_name}' not found in beamtalk.toml");
         }
-        if !git_deps.contains_key(target_name) {
-            // Registry deps are pinned to an exact version in beamtalk.toml, so
-            // "updating" one means editing that version (BT-2979 adds
-            // first-class registry support to `deps update`).
-            let kind = match &manifest.dependencies[target_name].source {
-                DependencySource::Registry { version } => {
-                    format!(
-                        "is pinned to registry version {version} — edit the version in \
-                         beamtalk.toml to change it"
-                    )
-                }
-                _ => "is a path dependency — only git dependencies can be updated".to_string(),
-            };
-            miette::bail!("Dependency '{target_name}' {kind}");
-        }
 
-        let (url, reference) = git_deps[target_name];
-        update_single_git_dep(target_name, url, reference, project_root)?;
+        if registry_deps.contains_key(target_name) {
+            let version = registry_deps[target_name];
+            let registry_location =
+                registry::resolve_registry_location(project_root, manifest.registry.as_ref());
+            // Refresh once up front so a moved tag or corrected index entry is
+            // picked up before resolving.
+            registry::ensure_index(&registry_location, project_root, true)?;
+            update_single_registry_dep(target_name, version, &registry_location, project_root)?;
+        } else if git_deps.contains_key(target_name) {
+            let (url, reference) = git_deps[target_name];
+            update_single_git_dep(target_name, url, reference, project_root)?;
+        } else {
+            miette::bail!(
+                "Dependency '{target_name}' is a path dependency — \
+                 only git and registry dependencies can be updated"
+            );
+        }
     } else {
-        // Update all git deps
+        // Update all git and registry deps
         let has_git_deps = !git_deps.is_empty();
-        if !has_git_deps && !has_native_deps {
-            println!("No git or native dependencies to update");
+        let has_registry_deps = !registry_deps.is_empty();
+        if !has_git_deps && !has_registry_deps && !has_native_deps {
+            println!("No git, registry, or native dependencies to update");
             return Ok(());
         }
 
         for (dep_name, (url, reference)) in &git_deps {
             update_single_git_dep(dep_name, url, reference, project_root)?;
+        }
+
+        if has_registry_deps {
+            let registry_location =
+                registry::resolve_registry_location(project_root, manifest.registry.as_ref());
+            // Refresh once for the whole batch rather than once per
+            // dependency — same effect, without N redundant index
+            // clones/pulls when a git-backed registry has several deps.
+            registry::ensure_index(&registry_location, project_root, true)?;
+            for (dep_name, version) in &registry_deps {
+                update_single_registry_dep(dep_name, version, &registry_location, project_root)?;
+            }
         }
 
         // Clear native package locks so the next build re-resolves via rebar3
@@ -474,6 +608,63 @@ fn update_single_git_dep(
         reference: reference.clone(),
         resolved_sha: resolved.resolved_sha.clone(),
         registry_version: None,
+    });
+    lockfile.write(project_root)?;
+
+    let short_sha = &resolved.resolved_sha[..7.min(resolved.resolved_sha.len())];
+    if let Some(old) = old_sha {
+        let old_short = &old[..7.min(old.len())];
+        if old == resolved.resolved_sha {
+            println!("  {name}: already up-to-date ({short_sha})");
+        } else {
+            println!("  {name}: {old_short} -> {short_sha}");
+        }
+    } else {
+        println!("  {name}: resolved to {short_sha}");
+    }
+
+    Ok(())
+}
+
+/// Re-resolve a single registry dependency's pinned version to a (possibly
+/// new) git SHA, and update the lockfile.
+///
+/// Callers are expected to have already refreshed `location`'s index (once
+/// per `deps update` invocation, not once per dependency — see call sites).
+/// The pinned version itself never changes here — bumping it is a manifest
+/// edit. This only picks up a moved tag or a corrected index entry.
+fn update_single_registry_dep(
+    name: &str,
+    version: &str,
+    location: &RegistryLocation,
+    project_root: &Utf8Path,
+) -> Result<()> {
+    let release = registry::resolve_release(project_root, location, name, version)?;
+
+    // Force a fresh resolve (ignore any existing checkout's lockfile pin)
+    let reference = GitReference::Tag(release.tag.clone());
+    let resolved = git::resolve_git_dep(name, &release.git, &reference, project_root, None)?;
+
+    // Same guard `deps add` and every `beamtalk build` apply: catch a moved
+    // tag whose package now declares a different version than the one this
+    // manifest still pins.
+    super::graph::validate_checkout_version(
+        name,
+        version,
+        &resolved.checkout_path,
+        &release.git,
+        &reference,
+    )?;
+
+    let mut lockfile = Lockfile::read(project_root)?.unwrap_or_default();
+    let old_sha = lockfile.get(name).map(|e| e.resolved_sha.clone());
+
+    lockfile.insert(LockEntry {
+        name: name.to_string(),
+        url: release.git.clone(),
+        reference,
+        resolved_sha: resolved.resolved_sha.clone(),
+        registry_version: Some(version.to_string()),
     });
     lockfile.write(project_root)?;
 
@@ -725,6 +916,7 @@ supervisor = \"AppSup\"
             None,
             None,
             None,
+            None,
         );
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
@@ -738,7 +930,16 @@ supervisor = \"AppSup\"
         // Create a dep directory without beamtalk.toml
         std::fs::create_dir_all(root.join("nodeps")).unwrap();
 
-        let result = run_add(&root, "nodeps", Some("nodeps"), None, None, None, None);
+        let result = run_add(
+            &root,
+            "nodeps",
+            Some("nodeps"),
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(
@@ -752,7 +953,7 @@ supervisor = \"AppSup\"
         let (_dir, root) = create_project("my_app");
         create_path_dep(&root, "utils");
 
-        let result = run_add(&root, "utils", Some("utils"), None, None, None, None);
+        let result = run_add(&root, "utils", Some("utils"), None, None, None, None, None);
         assert!(result.is_ok(), "Error: {:?}", result.unwrap_err());
 
         let content = std::fs::read_to_string(root.join("beamtalk.toml")).unwrap();
@@ -775,7 +976,7 @@ utils = { path = \"utils\" }
 ";
         std::fs::write(root.join("beamtalk.toml"), content).unwrap();
 
-        let result = run_add(&root, "utils", Some("utils"), None, None, None, None);
+        let result = run_add(&root, "utils", Some("utils"), None, None, None, None, None);
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(err.contains("already exists"), "Error: {err}");
@@ -784,7 +985,16 @@ utils = { path = \"utils\" }
     #[test]
     fn test_add_rejects_invalid_name() {
         let (_dir, root) = create_project("my_app");
-        let result = run_add(&root, "BadName", Some("whatever"), None, None, None, None);
+        let result = run_add(
+            &root,
+            "BadName",
+            Some("whatever"),
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(err.contains("Invalid dependency name"), "Error: {err}");
@@ -793,19 +1003,19 @@ utils = { path = \"utils\" }
     #[test]
     fn test_add_rejects_self_dependency() {
         let (_dir, root) = create_project("my_app");
-        let result = run_add(&root, "my_app", Some("somewhere"), None, None, None, None);
+        let result = run_add(
+            &root,
+            "my_app",
+            Some("somewhere"),
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(err.contains("this package itself"), "Error: {err}");
-    }
-
-    #[test]
-    fn test_add_requires_source() {
-        let (_dir, root) = create_project("my_app");
-        let result = run_add(&root, "dep", None, None, None, None, None);
-        assert!(result.is_err());
-        let err = format!("{:?}", result.unwrap_err());
-        assert!(err.contains("requires a source"), "Error: {err}");
     }
 
     #[test]
@@ -818,6 +1028,7 @@ utils = { path = \"utils\" }
             "json_lib",
             None,
             Some(&url),
+            None,
             Some("v1.0.0".to_string()),
             None,
             None,
@@ -834,6 +1045,147 @@ utils = { path = \"utils\" }
         let lock_content = std::fs::read_to_string(root.join(LOCKFILE_NAME)).unwrap();
         assert!(lock_content.contains("json_lib"));
         assert!(lock_content.contains("tag:v1.0.0"));
+    }
+
+    // -----------------------------------------------------------------------
+    // deps add — registry dependencies (BT-2979)
+    // -----------------------------------------------------------------------
+    //
+    // These use a local-directory registry index and `file://` git repos —
+    // no network access, mirroring `deps/graph.rs`'s registry test pattern.
+
+    /// Create a local registry index directory holding one package entry.
+    fn create_registry_index(pkg_name: &str, entry_toml: &str) -> (TempDir, Utf8PathBuf) {
+        let dir = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap();
+        std::fs::create_dir_all(root.join("packages")).unwrap();
+        std::fs::write(
+            root.join("packages").join(format!("{pkg_name}.toml")),
+            entry_toml,
+        )
+        .unwrap();
+        (dir, root)
+    }
+
+    /// Point a project's `beamtalk.toml` at a local registry index directory.
+    fn set_registry_url(root: &Utf8Path, index_root: &Utf8Path) {
+        let manifest_path = root.join("beamtalk.toml");
+        let content = std::fs::read_to_string(&manifest_path).unwrap();
+        let updated = format!("{content}\n[registry]\nurl = '{index_root}'\n");
+        std::fs::write(&manifest_path, updated).unwrap();
+    }
+
+    /// Build a single-release registry index entry pointing at a real
+    /// `file://` git repo tagged `v1.0.0` (matching `create_git_dep`'s fixed
+    /// tag), and point `root`'s manifest at that index.
+    fn setup_registry_dep(
+        root: &Utf8Path,
+        pkg_name: &str,
+    ) -> (TempDir, Utf8PathBuf, TempDir, String) {
+        let (git_dir, url, _sha) = create_git_dep(pkg_name, "1.0.0");
+        let entry = format!(
+            "name = \"{pkg_name}\"\n\n[[versions]]\nversion = \"1.0.0\"\ngit = \"{url}\"\n"
+        );
+        let (index_dir, index_root) = create_registry_index(pkg_name, &entry);
+        set_registry_url(root, &index_root);
+        (index_dir, index_root, git_dir, url)
+    }
+
+    #[test]
+    fn test_add_registry_dep_with_version() {
+        let (_dir, root) = create_project("my_app");
+        let (_index_dir, _index_root, _git_dir, url) = setup_registry_dep(&root, "yaml");
+
+        let result = run_add(&root, "yaml", None, None, Some("1.0.0"), None, None, None);
+        assert!(result.is_ok(), "Error: {:?}", result.unwrap_err());
+
+        let content = std::fs::read_to_string(root.join("beamtalk.toml")).unwrap();
+        assert!(
+            content.contains("yaml = \"1.0.0\""),
+            "manifest should have the bare-string fragment: {content}"
+        );
+
+        let lock_content = std::fs::read_to_string(root.join(LOCKFILE_NAME)).unwrap();
+        assert!(lock_content.contains("yaml"));
+        assert!(lock_content.contains(&url));
+        assert!(
+            lock_content.contains("version = \"1.0.0\""),
+            "lock entry should record the registry version: {lock_content}"
+        );
+    }
+
+    #[test]
+    fn test_add_registry_dep_without_version_uses_latest() {
+        let (_dir, root) = create_project("my_app");
+        let (_index_dir, _index_root, _git_dir, _url) = setup_registry_dep(&root, "yaml");
+
+        let result = run_add(&root, "yaml", None, None, None, None, None, None);
+        assert!(result.is_ok(), "Error: {:?}", result.unwrap_err());
+
+        let content = std::fs::read_to_string(root.join("beamtalk.toml")).unwrap();
+        assert!(
+            content.contains("yaml = \"1.0.0\""),
+            "should pin the latest (only) published version: {content}"
+        );
+    }
+
+    #[test]
+    fn test_add_registry_dep_unknown_package() {
+        let (_dir, root) = create_project("my_app");
+        let (_index_dir, index_root) = create_registry_index("yaml", "name = \"yaml\"\n");
+        set_registry_url(&root, &index_root);
+
+        let result = run_add(&root, "does_not_exist", None, None, None, None, None, None);
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(err.contains("not found in the registry"), "Error: {err}");
+    }
+
+    #[test]
+    fn test_add_registry_dep_unknown_version() {
+        let (_dir, root) = create_project("my_app");
+        let (_index_dir, _index_root, _git_dir, _url) = setup_registry_dep(&root, "yaml");
+
+        let result = run_add(&root, "yaml", None, None, Some("9.9.9"), None, None, None);
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(err.contains("Available versions"), "Error: {err}");
+    }
+
+    #[test]
+    fn test_add_registry_dep_rejects_malformed_version() {
+        let (_dir, root) = create_project("my_app");
+        let (_index_dir, _index_root, _git_dir, _url) = setup_registry_dep(&root, "yaml");
+
+        let result = run_add(&root, "yaml", None, None, Some("1.0"), None, None, None);
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("exact version"),
+            "should reject a non major.minor.patch version: {err}"
+        );
+    }
+
+    #[test]
+    fn test_add_registry_dep_version_mismatch_is_an_error() {
+        let (_dir, root) = create_project("my_app");
+        // The index claims "1.0.0", but the tag it points at (defaulting to
+        // "v1.0.0", matching `create_git_dep`'s fixed tag) actually declares
+        // "2.0.0" — a packaging error the index alone can't catch.
+        let (_git_dir, url, _sha) = create_git_dep("yaml", "2.0.0");
+        let entry =
+            format!("name = \"yaml\"\n\n[[versions]]\nversion = \"1.0.0\"\ngit = \"{url}\"\n");
+        let (_index_dir, index_root) = create_registry_index("yaml", &entry);
+        set_registry_url(&root, &index_root);
+
+        let result = run_add(&root, "yaml", None, None, Some("1.0.0"), None, None, None);
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(err.contains("version mismatch"), "Error: {err}");
+
+        // A failed add must not leave a dangling manifest entry.
+        let content = std::fs::read_to_string(root.join("beamtalk.toml")).unwrap();
+        assert!(!content.contains("yaml"), "manifest: {content}");
     }
 
     // -----------------------------------------------------------------------
@@ -864,6 +1216,44 @@ utils = { path = \"utils\" }
 
         let result = run_list(&root);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_list_with_registry_dep() {
+        let (_dir, root) = create_project("my_app");
+        let (_index_dir, _index_root, _git_dir, _url) = setup_registry_dep(&root, "yaml");
+
+        run_add(&root, "yaml", None, None, Some("1.0.0"), None, None, None).unwrap();
+
+        let result = run_list(&root);
+        assert!(result.is_ok(), "Error: {:?}", result.unwrap_err());
+    }
+
+    // -----------------------------------------------------------------------
+    // format_registry_source_info tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_format_registry_source_info_with_lock_entry() {
+        let entry = LockEntry {
+            name: "yaml".to_string(),
+            url: "https://github.com/jamesc/beamtalk-yaml".to_string(),
+            reference: GitReference::Tag("v0.2.1".to_string()),
+            resolved_sha: "abc1234def5678".to_string(),
+            registry_version: Some("0.2.1".to_string()),
+        };
+        assert_eq!(
+            format_registry_source_info("0.2.1", Some(&entry)),
+            "(registry: github.com/jamesc/beamtalk-yaml tag: v0.2.1 @ abc1234)"
+        );
+    }
+
+    #[test]
+    fn test_format_registry_source_info_without_lock_entry() {
+        assert_eq!(
+            format_registry_source_info("0.2.1", None),
+            "(registry: 0.2.1)"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -969,5 +1359,94 @@ dep_b = {{ git = \"{url2}\", tag = \"v1.0.0\" }}
         let lock_content = std::fs::read_to_string(root.join(LOCKFILE_NAME)).unwrap();
         assert!(lock_content.contains("dep_a"));
         assert!(lock_content.contains("dep_b"));
+    }
+
+    // -----------------------------------------------------------------------
+    // deps update — registry dependencies (BT-2979)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_update_registry_dep_reresolves_sha() {
+        let (_dir, root) = create_project("my_app");
+        let (_index_dir, _index_root, _git_dir, url) = setup_registry_dep(&root, "yaml");
+
+        run_add(&root, "yaml", None, None, Some("1.0.0"), None, None, None).unwrap();
+
+        let result = run_update(&root, Some("yaml"));
+        assert!(result.is_ok(), "Error: {:?}", result.unwrap_err());
+
+        // The pinned version is untouched — only the resolved SHA may move.
+        let lock_content = std::fs::read_to_string(root.join(LOCKFILE_NAME)).unwrap();
+        assert!(lock_content.contains("yaml"));
+        assert!(lock_content.contains(&url));
+        assert!(lock_content.contains("version = \"1.0.0\""));
+    }
+
+    #[test]
+    fn test_update_all_includes_registry_deps() {
+        let (_dir, root) = create_project("my_app");
+        let (_index_dir, _index_root, _git_dir, _url) = setup_registry_dep(&root, "yaml");
+        let (_git_dir2, url2, _sha2) = create_git_dep("dep_b", "2.0.0");
+
+        run_add(&root, "yaml", None, None, Some("1.0.0"), None, None, None).unwrap();
+        run_add(
+            &root,
+            "dep_b",
+            None,
+            Some(&url2),
+            None,
+            Some("v1.0.0".to_string()),
+            None,
+            None,
+        )
+        .unwrap();
+
+        let result = run_update(&root, None);
+        assert!(result.is_ok(), "Error: {:?}", result.unwrap_err());
+
+        let lock_content = std::fs::read_to_string(root.join(LOCKFILE_NAME)).unwrap();
+        assert!(lock_content.contains("yaml"));
+        assert!(lock_content.contains("dep_b"));
+    }
+
+    #[test]
+    fn test_update_registry_dep_unknown_version_is_an_error() {
+        let (_dir, root) = create_project("my_app");
+        let (_index_dir, _index_root, _git_dir, _url) = setup_registry_dep(&root, "yaml");
+
+        run_add(&root, "yaml", None, None, Some("1.0.0"), None, None, None).unwrap();
+
+        // Simulate the version having been removed from the index after it
+        // was pinned — a real scenario `deps update` should surface clearly.
+        let content = std::fs::read_to_string(root.join("beamtalk.toml")).unwrap();
+        let content = content.replace("yaml = \"1.0.0\"", "yaml = \"9.9.9\"");
+        std::fs::write(root.join("beamtalk.toml"), content).unwrap();
+
+        let result = run_update(&root, Some("yaml"));
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(err.contains("Available versions"), "Error: {err}");
+    }
+
+    #[test]
+    fn test_update_registry_dep_version_mismatch_is_an_error() {
+        let (_dir, root) = create_project("my_app");
+        let (_index_dir, index_root, _git_dir, _url) = setup_registry_dep(&root, "yaml");
+
+        run_add(&root, "yaml", None, None, Some("1.0.0"), None, None, None).unwrap();
+
+        // Simulate the index later being repointed at a repo that still
+        // tags "v1.0.0" (the default `deps update` re-resolves to) but whose
+        // beamtalk.toml declares a different version — a packaging error
+        // `deps update`'s re-resolve should catch, not silently relock.
+        let (_bad_git_dir, bad_url, _sha) = create_git_dep("yaml", "2.0.0");
+        let bad_entry =
+            format!("name = \"yaml\"\n\n[[versions]]\nversion = \"1.0.0\"\ngit = \"{bad_url}\"\n");
+        std::fs::write(index_root.join("packages").join("yaml.toml"), bad_entry).unwrap();
+
+        let result = run_update(&root, Some("yaml"));
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(err.contains("version mismatch"), "Error: {err}");
     }
 }
