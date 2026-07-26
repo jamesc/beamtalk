@@ -236,6 +236,17 @@ fn checkout_ref(name: &str, reference: &GitReference, repo_path: &Utf8Path) -> R
         GitReference::Rev(rev) => rev.clone(),
     };
 
+    // `git checkout` has no end-of-options marker that works with `--detach`
+    // (`--` marks pathspecs, not a commit-ish), so reject option-looking targets
+    // outright. Only `Rev` can reach this — tags and branches are prefixed above.
+    if checkout_target.starts_with('-') {
+        miette::bail!(
+            "Invalid {ref_type} '{ref_value}' for dependency '{name}'\n\n\
+             A git reference must not start with '-'; git would read it as an option.\n\n\
+             Check the {ref_type} in your beamtalk.toml."
+        );
+    }
+
     let output = Command::new("git")
         .args(["checkout", "--quiet", "--detach", &checkout_target])
         .current_dir(repo_path)
@@ -424,6 +435,28 @@ mod tests {
         .unwrap();
 
         assert_eq!(result.resolved_sha, expected_sha);
+    }
+
+    #[test]
+    fn test_rev_starting_with_dash_is_rejected() {
+        let (_repo, url, _sha) = create_test_repo();
+        let project_dir = TempDir::new().unwrap();
+        let project_root = Utf8PathBuf::from_path_buf(project_dir.path().to_path_buf()).unwrap();
+
+        let err = resolve_git_dep(
+            "test_dep",
+            &url,
+            &GitReference::Rev("--exec=touch owned".to_string()),
+            &project_root,
+            None,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(
+            err.contains("must not start with '-'"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

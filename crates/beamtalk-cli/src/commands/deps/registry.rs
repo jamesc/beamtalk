@@ -344,7 +344,9 @@ fn recover_orphaned_index(index_dir: &Utf8Path) {
     let previous = index_dir.with_extension("previous");
     if previous.join("packages").is_dir() {
         debug!(%previous, %index_dir, "Restoring registry index left by an interrupted swap");
-        let _ = std::fs::rename(&previous, index_dir);
+        if let Err(e) = std::fs::rename(&previous, index_dir) {
+            debug!(%e, "Failed to restore orphaned registry index — will re-clone");
+        }
     }
 }
 
