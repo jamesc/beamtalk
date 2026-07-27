@@ -310,7 +310,6 @@ fn resolve_registry_dep(
     parent_name: &str,
 ) -> Result<Utf8PathBuf> {
     let locked = ctx.lockfile.get(dep_name);
-    let current_registry = ctx.registry_identity.clone();
 
     // Fast path: the lockfile already pins this exact version *from this
     // registry*, so we can go straight to the git checkout without reading
@@ -331,7 +330,8 @@ fn resolve_registry_dep(
     let (url, reference, lock_entry) = match locked {
         Some(entry)
             if entry.registry_version.as_ref().is_some_and(|rv| {
-                rv.version == version && rv.registry.as_deref() == Some(current_registry.as_str())
+                rv.version == version
+                    && rv.registry.as_deref() == Some(ctx.registry_identity.as_str())
             }) =>
         {
             debug!(dep = %dep_name, version, "Registry dependency satisfied from lockfile");
@@ -373,7 +373,7 @@ fn resolve_registry_dep(
         resolved_sha: resolved.resolved_sha,
         registry_version: Some(RegistryVersion {
             version: version.to_string(),
-            registry: Some(current_registry),
+            registry: Some(ctx.registry_identity.clone()),
         }),
     });
 
@@ -1654,10 +1654,13 @@ middle = {{ path = "{middle_str}" }}"#
         );
 
         // The on-disk checkout was actually refetched from repo B, not just
-        // the lockfile bookkeeping.
-        let checkout_manifest = crate::commands::build_layout::BuildLayout::new(&root_path)
-            .dep_checkout_dir("my_pkg")
-            .join("beamtalk.toml");
-        assert!(fs::read_to_string(&checkout_manifest).is_ok());
+        // the lockfile bookkeeping: repo B's MARKER file must be present
+        // with repo B's content (repo A has no MARKER file at all).
+        let checkout_dir =
+            crate::commands::build_layout::BuildLayout::new(&root_path).dep_checkout_dir("my_pkg");
+        assert!(fs::read_to_string(checkout_dir.join("beamtalk.toml")).is_ok());
+        let marker = fs::read_to_string(checkout_dir.join("MARKER"))
+            .expect("checkout must come from repo B, which has a MARKER file");
+        assert_eq!(marker, "marker-b");
     }
 }

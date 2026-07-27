@@ -371,12 +371,18 @@ impl Default for Lockfile {
 /// Escape a value for embedding in a TOML basic string.
 ///
 /// Unlike `url`/`name`/`sha`, a registry identity can be a raw filesystem
-/// path (`[registry] url` pointing at a local directory) rather than
-/// validated git-URL syntax, so it can contain backslashes (Windows paths)
-/// or quotes. An unescaped Windows path here corrupts the lockfile with an
-/// invalid `\` escape, and every later `Lockfile::read` hard-fails.
+/// path (`[registry] url` pointing at a local directory) or an unvalidated
+/// `BEAMTALK_REGISTRY` env value, rather than validated git-URL syntax, so
+/// it can contain backslashes (Windows paths), quotes, or literal control
+/// characters. TOML basic strings prohibit unescaped control characters
+/// (U+0000-U+001F, U+007F); an unescaped backslash, quote, or newline here
+/// corrupts the lockfile, and every later `Lockfile::read` hard-fails.
 fn escape_toml_string(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
 }
 
 /// Format a `GitReference` for lockfile storage.
@@ -696,6 +702,36 @@ mod tests {
             registry_version: Some(registry_version(
                 "0.2.1",
                 r#"C:\vendor\registry with "quotes""#,
+            )),
+        });
+
+        let content = original.serialize();
+        let parsed = Lockfile::parse(&content).unwrap_or_else(|e| {
+            panic!("serialized lockfile failed to re-parse: {e}\n\ncontent:\n{content}")
+        });
+        assert_eq!(
+            parsed.get("yaml").unwrap().registry_version,
+            original.get("yaml").unwrap().registry_version,
+        );
+    }
+
+    #[test]
+    fn test_registry_field_with_control_characters_roundtrips() {
+        // `BEAMTALK_REGISTRY` is an unvalidated env value -- a literal
+        // newline, carriage return, or tab in it is a valid `String` but not
+        // a valid unescaped TOML basic string character. Unlike the
+        // backslash/quote case above, an unescaped control character isn't
+        // just wrong output: it can inject a bogus extra line (e.g. a fake
+        // `sha = "..."` key) into the serialized lockfile.
+        let mut original = Lockfile::new();
+        original.insert(LockEntry {
+            name: "yaml".to_string(),
+            url: "https://github.com/jamesc/beamtalk-yaml".to_string(),
+            reference: GitReference::Tag("v0.2.1".to_string()),
+            resolved_sha: "abc1234def5678abc1234def5678abc1234def56".to_string(),
+            registry_version: Some(registry_version(
+                "0.2.1",
+                "https://example.test/registry\nsha = \"injected\"\t\r",
             )),
         });
 
