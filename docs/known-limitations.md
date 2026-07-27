@@ -47,15 +47,6 @@ cls class           // => Counter class (metaclass object)
 
 ## Concurrency
 
-### `parallelCollect:` Has No Bounded-Concurrency Option
-
-`Collection>>parallelCollect:` (BT-2974) spawns one process per element with
-no pooling or throttling — for very large collections this means an
-unbounded process fan-out. Chunk the collection yourself, or call `Parallel
-all:` directly with your own work queue, if that's undesirable. A
-bounded-concurrency variant (e.g. `parallelCollect:maxConcurrency:`) is a
-natural follow-up, not yet implemented.
-
 ### Supervision API Is Low-Level
 
 The `Supervisor` and `DynamicSupervisor` classes provide programmatic access to OTP supervision trees, but there is no declarative DSL for defining supervision hierarchies or restart strategies inline with class definitions.

@@ -130,13 +130,8 @@ abstract typed Value subclass: Collection(E)
   /// instead of sequentially.
   ///
   /// **Concurrency is unbounded** — one process is spawned per element, with
-  /// no pooling or throttling. This is a deliberate v1 scope decision (a
-  /// simple, correct combinator now beats a bounded scheduler nobody has
-  /// asked for yet). For very large collections, chunk the collection
-  /// yourself before calling `parallelCollect:`, or call `Parallel all:`
-  /// directly with your own work queue. A bounded-concurrency variant (e.g.
-  /// `parallelCollect:maxConcurrency:`) is a natural follow-up, not
-  /// implemented here.
+  /// no pooling or throttling. Use `parallelCollect:maxConcurrency:` for
+  /// very large collections where that matters.
   ///
   /// If any element's `block` evaluation fails, `parallelCollect:` re-raises
   /// that failure (the first one, in element order) — matching `collect:`'s
@@ -160,6 +155,65 @@ abstract typed Value subclass: Collection(E)
     ]) reversed
     results := Parallel all: blocks
     self species withAll: (results collect: [:r | r unwrap])
+
+  /// Like `parallelCollect:`, but bounds concurrency to `maxConcurrency`
+  /// processes at a time instead of spawning one per element.
+  ///
+  /// The receiver is split into consecutive chunks of at most
+  /// `maxConcurrency` elements; each chunk runs concurrently (via `Parallel
+  /// all:`), and the next chunk only starts once every element of the
+  /// current one has finished. This is *chunked* bounded concurrency, not a
+  /// streaming worker pool — a chunk's slowest element gates the next
+  /// chunk's start, so a pool where finished slots immediately pick up new
+  /// work would use fewer total processes over time for uneven workloads.
+  /// Chunking is simple, correct, and enough to cap resource usage for very
+  /// large collections; reach for `Parallel all:` directly with your own
+  /// work-stealing queue if you need true streaming concurrency.
+  ///
+  /// Raises `#type_error` if `maxConcurrency` is not a positive Integer.
+  ///
+  /// Failure behaviour matches `parallelCollect:`: the first failure (in
+  /// element order within the failing chunk) is re-raised.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(1, 2, 3, 4, 5) parallelCollect: [:x | x * 2] maxConcurrency: 2
+  ///   // => #(2, 4, 6, 8, 10)
+  /// ```
+  parallelCollect: block :: Block(E, R) maxConcurrency: maxConcurrency :: Integer -> Self =>
+    maxConcurrency > 0
+      ifFalse: [
+        ^TypeError signal: "maxConcurrency must be a positive Integer, got: " ++ maxConcurrency printString
+      ]
+    blocks := (self inject: #() into: [:acc :each |
+      acc addFirst: [block value: each]
+    ]) reversed
+    results := self runChunked: blocks maxConcurrency: maxConcurrency
+    self species withAll: (results collect: [:r | r unwrap])
+
+  /// Runs `blocks` in consecutive `Parallel all:` chunks of at most
+  /// `maxConcurrency` elements, preserving overall order.
+  internal runChunked: blocks :: List(Block) maxConcurrency: maxConcurrency :: Integer -> List(Result) =>
+    self
+      runChunked: blocks
+      maxConcurrency: maxConcurrency
+      acc: #()
+
+  /// Tail-recursive helper for `runChunked:maxConcurrency:` — `acc` builds
+  /// up in reverse (each chunk's results prepended via `addFirst:`, one at a
+  /// time, so the recursive step stays a genuine BEAM tail call regardless
+  /// of how many chunks there are) and is reversed once at the end.
+  internal runChunked: blocks :: List(Block) maxConcurrency: maxConcurrency :: Integer acc: acc :: List(Result) -> List(Result) =>
+    blocks isEmpty
+      ifTrue: [acc reversed]
+      ifFalse: [
+        chunkResults := Parallel all: (blocks take: maxConcurrency)
+        newAcc := chunkResults inject: acc into: [:a :r | a addFirst: r]
+        self
+          runChunked: (blocks drop: maxConcurrency)
+          maxConcurrency: maxConcurrency
+          acc: newAcc
+      ]
 
   /// Select elements for which `block` returns true.
   ///

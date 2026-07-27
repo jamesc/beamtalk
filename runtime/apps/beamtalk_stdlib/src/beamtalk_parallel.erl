@@ -32,8 +32,10 @@ Each block is spawned with `erlang:spawn_opt/2` using **both** `link` and
   caller.
 
 A worker normally terminates with reason `normal` (it sends its result, then
-its function returns) — a `normal` exit never propagates across a link, so
-the link is harmless in the common case. The case that needs care is
+its function returns) — a `normal` exit does not kill a linked caller, so
+the link is harmless in the common case (a caller with `trap_exit` set
+receives a `{'EXIT', Pid, normal}` message instead, which is simply left
+unmatched in its mailbox). The case that needs care is
 *deliberately* killing a still-running worker (an `all:timeout:` deadline, or
 a losing `any:` competitor): `exit(Pid, kill)` reaches the caller through the
 link too (as reason `killed`) unless the link is removed first, so every
@@ -181,11 +183,11 @@ Worker body: evaluate `Block`, catching any exception, and send
 `{CallRef, Idx, Result}` back to `Caller`. `Result` is always a fully formed
 `beamtalk_result:t()` — the caller never has to interpret a raw exception
 from a worker that reached this far (only an unhandled kill/crash that
-bypasses this `catch` shows up as a `'DOWN'` instead — see `gather_all/4`
-and `gather_any/4`).
+bypasses this `catch` shows up as a `'DOWN'` instead — see `gather_all/5`
+and `gather_any/5`).
 
 Messages are tagged with `CallRef` (rather than sent as `{self(), Idx,
-Result}`) so `gather_all/4`/`gather_any/4` can pattern-match on an exact,
+Result}`) so `gather_all/5`/`gather_any/5` can pattern-match on an exact,
 per-invocation reference instead of an unbound sender/index pair — the
 caller may be a long-lived process (e.g. an actor) with unrelated messages
 already in its mailbox that could otherwise coincidentally match a bare
@@ -293,7 +295,7 @@ all_impl(Blocks, Timeout) ->
     Workers = spawn_workers(Blocks, CallRef),
     Pending = maps:from_list([{Idx, {Pid, Ref}} || {Idx, Pid, Ref} <- Workers]),
     Deadline = deadline_for(Timeout),
-    ResultsByIndex = gather_all(CallRef, Pending, Deadline, #{}),
+    ResultsByIndex = gather_all(CallRef, Pending, pending_by_ref(Pending), Deadline, #{}),
     [maps:get(Idx, ResultsByIndex) || {Idx, _Pid, _Ref} <- Workers].
 
 -spec deadline_for(timeout()) -> infinity | integer().
@@ -307,17 +309,37 @@ time_left(infinity) ->
 time_left(Deadline) ->
     max(0, Deadline - erlang:monotonic_time(millisecond)).
 
--spec gather_all(reference(), pending(), infinity | integer(), #{pos_integer() => worker_result()}) ->
-    #{pos_integer() => worker_result()}.
-gather_all(_CallRef, Pending, _Deadline, Acc) when map_size(Pending) =:= 0 ->
+-doc """
+Threads `PendingByRef` (the `Ref -> Idx` reverse map) as an explicit
+accumulator instead of recomputing it from `Pending` on every invocation.
+It only changes on the `'DOWN'` branch (the rare path —
+a worker crashing without sending a result), so it is updated there and
+left untouched on the normal-completion branch, where the caller already
+knows `Ref` and can remove it in O(log N) instead of rebuilding the whole
+map in O(N). Keeps the normal all-workers-complete path at O(N log N)
+total instead of O(N^2).
+""".
+-spec gather_all(
+    reference(),
+    pending(),
+    #{reference() => pos_integer()},
+    infinity | integer(),
+    #{pos_integer() => worker_result()}
+) -> #{pos_integer() => worker_result()}.
+gather_all(_CallRef, Pending, _PendingByRef, _Deadline, Acc) when map_size(Pending) =:= 0 ->
     Acc;
-gather_all(CallRef, Pending, Deadline, Acc) ->
-    PendingByRef = pending_by_ref(Pending),
+gather_all(CallRef, Pending, PendingByRef, Deadline, Acc) ->
     receive
         {CallRef, Idx, Result} when is_map_key(Idx, Pending) ->
             {_WPid, Ref} = maps:get(Idx, Pending),
             erlang:demonitor(Ref, [flush]),
-            gather_all(CallRef, maps:remove(Idx, Pending), Deadline, Acc#{Idx => Result});
+            gather_all(
+                CallRef,
+                maps:remove(Idx, Pending),
+                maps:remove(Ref, PendingByRef),
+                Deadline,
+                Acc#{Idx => Result}
+            );
         {'DOWN', Ref, process, _Pid, Reason} when is_map_key(Ref, PendingByRef) ->
             %% Worker vanished without sending a result (killed by something
             %% other than us, or an exit signal that bypassed run_worker/4's
@@ -328,7 +350,13 @@ gather_all(CallRef, Pending, Deadline, Acc) ->
             Idx = maps:get(Ref, PendingByRef),
             ExObj = beamtalk_exception_handler:ensure_wrapped(exit, Reason, []),
             Result = beamtalk_result:from_tagged_tuple({error, ExObj}),
-            gather_all(CallRef, maps:remove(Idx, Pending), Deadline, Acc#{Idx => Result})
+            gather_all(
+                CallRef,
+                maps:remove(Idx, Pending),
+                maps:remove(Ref, PendingByRef),
+                Deadline,
+                Acc#{Idx => Result}
+            )
     after time_left(Deadline) ->
         kill_pending(Pending),
         drain_pending_messages(CallRef, Pending),
@@ -356,19 +384,27 @@ any_impl(Blocks) ->
     Workers = spawn_workers(Blocks, CallRef),
     Pending = maps:from_list([{Idx, {Pid, Ref}} || {Idx, Pid, Ref} <- Workers]),
     IndexOrder = [Idx || {Idx, _Pid, _Ref} <- Workers],
-    gather_any(CallRef, Pending, IndexOrder, #{}).
+    gather_any(CallRef, Pending, pending_by_ref(Pending), IndexOrder, #{}).
 
--spec gather_any(reference(), pending(), [pos_integer()], #{pos_integer() => term()}) ->
-    worker_result().
-gather_any(_CallRef, Pending, IndexOrder, Errors) when map_size(Pending) =:= 0 ->
+-doc """
+Like `gather_all/5`, `PendingByRef` is threaded as an explicit accumulator
+(updated incrementally on each branch that removes an entry from `Pending`)
+instead of being rebuilt from scratch on every invocation — see
+`gather_all/5`'s doc for why.
+""".
+-spec gather_any(
+    reference(), pending(), #{reference() => pos_integer()}, [pos_integer()], #{
+        pos_integer() => term()
+    }
+) -> worker_result().
+gather_any(_CallRef, Pending, _PendingByRef, IndexOrder, Errors) when map_size(Pending) =:= 0 ->
     %% Every block failed — aggregate the reasons (already-wrapped Exception
     %% objects) into a List, in input order. `makeError:` stores the reason
     %% as-is (unlike `from_tagged_tuple/1`, which would try to re-wrap the
     %% whole List as if it were a single raw exception reason).
     Reasons = [maps:get(Idx, Errors) || Idx <- IndexOrder],
     beamtalk_result:'makeError:'(Reasons);
-gather_any(CallRef, Pending, IndexOrder, Errors) ->
-    PendingByRef = pending_by_ref(Pending),
+gather_any(CallRef, Pending, PendingByRef, IndexOrder, Errors) ->
     receive
         {CallRef, Idx, #{'isOk' := true} = Result} when is_map_key(Idx, Pending) ->
             {_WPid, Ref} = maps:get(Idx, Pending),
@@ -380,13 +416,25 @@ gather_any(CallRef, Pending, IndexOrder, Errors) ->
         {CallRef, Idx, #{'isOk' := false, 'errReason' := Reason}} when is_map_key(Idx, Pending) ->
             {_WPid, Ref} = maps:get(Idx, Pending),
             erlang:demonitor(Ref, [flush]),
-            gather_any(CallRef, maps:remove(Idx, Pending), IndexOrder, Errors#{Idx => Reason});
+            gather_any(
+                CallRef,
+                maps:remove(Idx, Pending),
+                maps:remove(Ref, PendingByRef),
+                IndexOrder,
+                Errors#{Idx => Reason}
+            );
         {'DOWN', Ref, process, _Pid, Reason} when is_map_key(Ref, PendingByRef) ->
-            %% See gather_all/4's matching clause for why this is guarded by
+            %% See gather_all/5's matching clause for why this is guarded by
             %% is_map_key/2 instead of matching an unbound Ref.
             Idx = maps:get(Ref, PendingByRef),
             ExObj = beamtalk_exception_handler:ensure_wrapped(exit, Reason, []),
-            gather_any(CallRef, maps:remove(Idx, Pending), IndexOrder, Errors#{Idx => ExObj})
+            gather_any(
+                CallRef,
+                maps:remove(Idx, Pending),
+                maps:remove(Ref, PendingByRef),
+                IndexOrder,
+                Errors#{Idx => ExObj}
+            )
     end.
 
 %%% ============================================================================

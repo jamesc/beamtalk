@@ -40,13 +40,28 @@ typed Value subclass: RetryPolicy
   /// raises one of these is returned immediately, without further attempts.
   field: nonRetryableErrors :: List(String) = #()
 
+  /// Cap used for `intervalForAttempt:`/`do:` when `maximumInterval` is
+  /// `nil` (unbounded) — keeps the computed delay finite for arbitrarily
+  /// large `attempt` without implying any real-world retry actually waits
+  /// this long (~34 years in milliseconds; `do:` only ever sleeps one
+  /// computed delay before checking `retriesExhausted:`/`isNonRetryable:`).
+  class internal unlimitedIntervalCap -> Integer =>
+    1000 * 60 * 60 * 24 * 365 * 34
+
   // ===== Interval Math (pure, no sleeping) =====
 
   /// The backoff delay before attempt `attempt + 1`, in milliseconds.
   ///
   /// Computed as `initialInterval * backoffCoefficient ^ (attempt - 1)`,
-  /// capped at `maximumInterval` when set, then randomized within
+  /// capped at `maximumInterval` when set (or at an internal near-unlimited
+  /// sentinel when not — see `unlimitedIntervalCap`), then randomized within
   /// `[0, cappedDelay]` when `jitter` is true.
+  ///
+  /// Grows by repeated multiplication and stops the instant the running
+  /// value would reach the cap, rather than raising `backoffCoefficient` to
+  /// the full `attempt - 1` power up front — that would overflow `Float` and
+  /// raise for `attempt` in the thousands, regardless of `maximumInterval`
+  /// (BT-3006).
   ///
   /// ## Examples
   /// ```beamtalk
@@ -57,13 +72,65 @@ typed Value subclass: RetryPolicy
   ///
   /// capped := RetryPolicy new: #{#initialInterval => 1000, #maximumInterval => 1500}
   /// capped intervalForAttempt: 3   // => 1500
+  ///
+  /// unbounded := RetryPolicy new: #{#backoffCoefficient => 2.0}
+  /// (unbounded intervalForAttempt: 2000) isKindOf: Integer   // => true
   /// ```
   intervalForAttempt: attempt :: Integer -> Integer =>
-    raw := (self.initialInterval * (self.backoffCoefficient raisedTo: attempt - 1)) ceiling
-    capped := self.maximumInterval ifNil: [
-      raw
-    ] ifNotNil: [:maxMs | raw < maxMs ifTrue: [raw] ifFalse: [maxMs]]
+    capped := self cappedRawIntervalForAttempt: attempt
     self.jitter ifTrue: [self jitteredDelay: capped] ifFalse: [capped]
+
+  /// `initialInterval * backoffCoefficient ^ (attempt - 1)`, capped at
+  /// `maximumInterval` (or `unlimitedIntervalCap` when unset).
+  internal cappedRawIntervalForAttempt: attempt :: Integer -> Integer =>
+    effectiveCap := self.maximumInterval ifNil: [
+      self class unlimitedIntervalCap
+    ] ifNotNil: [:m | m]
+    self
+      growInterval: self.initialInterval
+      remaining: attempt - 1
+      cap: effectiveCap
+
+  /// Multiplies `current` by `backoffCoefficient`, `remaining` times, never
+  /// stepping past `cap`. Checks *before* each multiplication whether it
+  /// would cross `cap` (via division, itself overflow-free) so the running
+  /// value never has to grow past a cap that is always far below Float's
+  /// overflow point — the multiplication that would overflow never happens.
+  ///
+  /// A non-positive `backoffCoefficient` (unusual, but not rejected by
+  /// `RetryPolicy`'s field type) skips the division check entirely: it never
+  /// grows `current` past a positive `cap`, and `cap / backoffCoefficient`
+  /// would itself raise for `backoffCoefficient = 0` (Erlang has no infinite
+  /// float). A negative coefficient would otherwise alternate the sign of
+  /// `current` on each multiplication — clamped at 0 (a "negative delay"
+  /// isn't meaningful, and an actual negative value reaching `Timer sleep:`
+  /// would raise there instead), so `intervalForAttempt:` stays a
+  /// non-negative Integer for every `backoffCoefficient`.
+  internal growInterval: current :: Integer remaining: remaining :: Integer cap: cap :: Integer -> Integer =>
+    (remaining <= 0 or: [current >= cap])
+      ifTrue: [current > cap ifTrue: [cap] ifFalse: [current]]
+      ifFalse: [
+        self.backoffCoefficient <= 0
+          ifTrue: [
+            raw := (current * self.backoffCoefficient) ceiling
+            next := raw < 0 ifTrue: [0] ifFalse: [raw]
+            self
+              growInterval: next
+              remaining: remaining - 1
+              cap: cap
+          ]
+          ifFalse: [
+            (current > (cap / self.backoffCoefficient))
+              ifTrue: [cap]
+              ifFalse: [
+                next := (current * self.backoffCoefficient) ceiling
+                self
+                  growInterval: next
+                  remaining: remaining - 1
+                  cap: cap
+              ]
+          ]
+      ]
 
   /// Full-jitter randomization: a random integer in `[0, cappedDelay]`.
   internal jitteredDelay: cappedDelay :: Integer -> Integer =>
