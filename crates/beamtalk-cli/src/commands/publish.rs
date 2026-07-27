@@ -1135,10 +1135,12 @@ mod tests {
     fn test_render_new_index_entry_with_multiline_description_produces_valid_toml() {
         // A `description` containing a raw newline (reachable via a TOML
         // multi-line basic string in beamtalk.toml) must not corrupt the
-        // generated single-line index entry.
+        // generated single-line index entry. Also covers a `\uXXXX`-escaped
+        // control character (VT, U+000B) — the named escapes (`\n`, `\t`)
+        // above don't exercise that fallback arm of `escape_toml_string`.
         let content = render_new_index_entry(
             "yaml",
-            Some("Line one\nLine two\twith a tab"),
+            Some("Line one\nLine two\twith a tab\u{b}VT"),
             "0.1.0",
             "https://example.test/yaml",
             "v0.1.0",
@@ -1149,7 +1151,7 @@ mod tests {
         });
         assert_eq!(
             parsed.description.as_deref(),
-            Some("Line one\nLine two\twith a tab")
+            Some("Line one\nLine two\twith a tab\u{b}VT")
         );
     }
 
