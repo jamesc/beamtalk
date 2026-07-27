@@ -1,0 +1,45 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+#
+# NOT a member of the root Cargo workspace (see root Cargo.toml's
+# `exclude`) — this crate depends on `tauri`, which needs `webkit2gtk-4.1`
+# (Linux) / WebView2 (Windows) / WKWebView (macOS) system dependencies that
+# are not guaranteed to be present in every environment that builds the
+# rest of the workspace (they are not installed in the sandbox this crate
+# was authored in — see ../README.md). Excluding it from the workspace
+# keeps `just build`/`just ci`'s `cargo build --workspace` from failing on
+# machines without the Tauri toolchain, mirroring how `fuzz/` (root
+# Cargo.toml) is excluded for its own toolchain reasons. Wiring this crate
+# into a CI build lane that installs the system deps is BT-2987's job.
+
+[workspace]
+# Explicit empty table: this package is deliberately its own Cargo
+# workspace root, never swept into the main repo's `[workspace]` (see the
+# comment above) — matters most in a git-worktree checkout, where this
+# directory can be physically nested under the main checkout's own
+# workspace root on disk, which would otherwise make Cargo walk up and find
+# that other workspace as a candidate.
+
+[package]
+name = "beamtalk-desktop"
+description = "Desktop picker: attach to live Beamtalk workspaces (ADR 0097, BT-2986)"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "Apache-2.0"
+publish = false
+
+[[bin]]
+name = "beamtalk-desktop"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-single-instance = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+beamtalk-desktop-broker = { path = "../../crates/beamtalk-desktop-broker" }
+beamtalk-desktop-shell = { path = "../../crates/beamtalk-desktop-shell" }
