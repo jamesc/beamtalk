@@ -152,6 +152,16 @@ struct DiscoveredDep {
     is_path_dep: bool,
     /// For transitive deps, the chain of intermediate dep names.
     via_chain: Vec<String>,
+    /// How this dependency was declared by its immediate parent manifest
+    /// (path / git / registry, with the declared version or reference).
+    ///
+    /// Carried so freshness checks (`deps_are_fresh`'s `has_locked_deps` and
+    /// `locked_deps_match`) can compare the *declared* spec against the
+    /// lockfile for every dependency in the transitive graph, not just the
+    /// root manifest's `[dependencies]` (BT-2994) — a monorepo's root
+    /// commonly declares only a path dependency, with the git/registry dep
+    /// whose version actually matters appearing several levels down.
+    source: beamtalk_core::compilation::DependencySource,
 }
 
 /// Recursively discover all dependency names and roots by walking manifests.
@@ -228,6 +238,7 @@ fn discover_all_dep_roots(
                 } else {
                     via_chain.clone()
                 },
+                source: spec.source.clone(),
             });
 
             // Enqueue this dep's own dependencies for discovery
@@ -288,23 +299,38 @@ fn collect_fresh_deps(
     Ok(resolved)
 }
 
-/// Check that every registry dependency's manifest version is the one the
-/// lockfile actually pinned, *from the currently configured registry*.
+/// Check that every git/registry dependency discovered anywhere in the
+/// transitive graph — not just the root manifest's `[dependencies]` — still
+/// matches what the lockfile actually pinned.
 ///
-/// A version bump in `beamtalk.toml` must force re-resolution even when the
-/// lockfile's mtime still looks current. So must switching registries
-/// (`BEAMTALK_REGISTRY`, or a `[registry] url` edit) — otherwise a lock hit
-/// silently keeps building from whatever registry originally produced the
-/// entry, and the newly configured one is never consulted (BT-2993).
-fn registry_versions_match(project_root: &Utf8Path, manifest: &manifest::ParsedManifest) -> bool {
+/// For a registry dep this means the locked version *and* registry
+/// (`BEAMTALK_REGISTRY`, or a `[registry] url` edit — BT-2993) still match
+/// the manifest's request. For a plain git dep it means the locked URL and
+/// reference (tag/branch/rev) still match.
+///
+/// A version or tag bump must force re-resolution even when it's declared by
+/// an *intermediate* path dependency's own manifest several levels below the
+/// root (BT-2994) — e.g. the root declares only `utils = { path = "../utils" }`
+/// and `utils/beamtalk.toml` bumps `yaml` from `"0.2.1"` to `"0.3.0"`. Mtime
+/// comparisons can miss this (edits landing within the same timestamp
+/// granularity, or an intermediate dep's own ebin mtime happening to still
+/// look current), so this is a deterministic field comparison against the
+/// lockfile instead — the same technique BT-2993 used for registry switches,
+/// generalized to the whole transitive graph and to plain git deps too.
+fn locked_deps_match(
+    project_root: &Utf8Path,
+    all_deps: &[DiscoveredDep],
+    root_manifest: &manifest::ParsedManifest,
+) -> bool {
     use beamtalk_core::compilation::DependencySource;
 
-    let requested: Vec<(&String, &String)> = manifest
-        .dependencies
+    let requested: Vec<&DiscoveredDep> = all_deps
         .iter()
-        .filter_map(|(name, spec)| match &spec.source {
-            DependencySource::Registry { version } => Some((name, version)),
-            _ => None,
+        .filter(|dep| {
+            matches!(
+                dep.source,
+                DependencySource::Git { .. } | DependencySource::Registry { .. }
+            )
         })
         .collect();
 
@@ -315,7 +341,7 @@ fn registry_versions_match(project_root: &Utf8Path, manifest: &manifest::ParsedM
     let lock = match lockfile::Lockfile::read(project_root) {
         Ok(Some(lock)) => lock,
         Ok(None) => {
-            debug!("Lockfile missing for registry deps — deps are stale");
+            debug!("Lockfile missing for git/registry deps — deps are stale");
             return false;
         }
         Err(e) => {
@@ -324,26 +350,51 @@ fn registry_versions_match(project_root: &Utf8Path, manifest: &manifest::ParsedM
         }
     };
 
-    let current_registry = registry::registry_identity(manifest.registry.as_ref());
+    // The registry is a property of the whole project being built — the
+    // root manifest's `[registry]` governs every registry dependency in the
+    // graph, direct or transitive, because a dependency cannot redirect
+    // resolution to a registry of its own (see graph.rs's
+    // `DiscoveryContext::registry_location`). So it's resolved once here
+    // rather than per dependency.
+    let current_registry = registry::registry_identity(root_manifest.registry.as_ref());
 
-    for (name, version) in requested {
-        match lock.get(name) {
-            Some(entry)
-                if entry.registry_version.as_ref().is_some_and(|rv| {
-                    &rv.version == version
-                        && rv.registry.as_deref() == Some(current_registry.as_str())
-                }) => {}
-            Some(_) => {
-                debug!(
-                    dep = %name,
-                    version = %version,
-                    "Registry dep version or registry differs from lockfile — deps are stale"
-                );
-                return false;
-            }
-            None => {
-                debug!(dep = %name, "Registry dep not in lockfile — deps are stale");
-                return false;
+    for dep in requested {
+        match &dep.source {
+            DependencySource::Registry { version } => match lock.get(&dep.name) {
+                Some(entry)
+                    if entry.registry_version.as_ref().is_some_and(|rv| {
+                        &rv.version == version
+                            && rv.registry.as_deref() == Some(current_registry.as_str())
+                    }) => {}
+                Some(_) => {
+                    debug!(
+                        dep = %dep.name,
+                        version = %version,
+                        "Registry dep version or registry differs from lockfile — deps are stale"
+                    );
+                    return false;
+                }
+                None => {
+                    debug!(dep = %dep.name, "Registry dep not in lockfile — deps are stale");
+                    return false;
+                }
+            },
+            DependencySource::Git { url, reference } => match lock.get(&dep.name) {
+                Some(entry) if &entry.url == url && &entry.reference == reference => {}
+                Some(_) => {
+                    debug!(
+                        dep = %dep.name,
+                        "Git dep url or reference differs from lockfile — deps are stale"
+                    );
+                    return false;
+                }
+                None => {
+                    debug!(dep = %dep.name, "Git dep not in lockfile — deps are stale");
+                    return false;
+                }
+            },
+            DependencySource::Path { .. } => {
+                unreachable!("filtered to Git/Registry sources above")
             }
         }
     }
@@ -357,17 +408,35 @@ fn registry_versions_match(project_root: &Utf8Path, manifest: &manifest::ParsedM
 /// Returns `true` (fresh) when:
 /// 1. All dependency ebin directories exist under `_build/deps/{name}/ebin/`
 /// 2. The lockfile exists and is newer than `beamtalk.toml` (for git and
-///    registry deps), OR there are only path dependencies (which don't use a
-///    lockfile)
-/// 3. Every registry dep's locked version still matches the manifest
+///    registry deps anywhere in the transitive graph), OR there are only
+///    path dependencies (which don't use a lockfile)
+/// 3. Every git/registry dep's locked version or reference still matches
+///    what its declaring manifest (root or transitive) currently requests
 fn deps_are_fresh(project_root: &Utf8Path, manifest: &manifest::ParsedManifest) -> bool {
     use beamtalk_core::compilation::DependencySource;
 
+    // Discover the full transitive graph up front: both the lockfile
+    // requirement below and the version/reference-match check need to see
+    // every git/registry dep in the graph, not just the root manifest's
+    // `[dependencies]` — a monorepo's root commonly declares only a path
+    // dependency, with the git/registry dep whose version actually matters
+    // declared several levels down (BT-2994). If discovery itself fails
+    // (e.g. non-UTF-8 path), treat as stale.
+    let all_deps = match discover_all_dep_roots(project_root, manifest) {
+        Ok(deps) => deps,
+        Err(e) => {
+            debug!(error = %e, "Failed to discover dep roots — deps are stale");
+            return false;
+        }
+    };
+
     // Registry deps resolve into git checkouts and are pinned in the lockfile
-    // just like git deps, so they carry the same lockfile requirement.
-    let has_locked_deps = manifest.dependencies.values().any(|spec| {
+    // just like git deps, so they carry the same lockfile requirement —
+    // whether declared directly by the root or by a path dependency several
+    // levels down.
+    let has_locked_deps = all_deps.iter().any(|dep| {
         matches!(
-            spec.source,
+            dep.source,
             DependencySource::Git { .. } | DependencySource::Registry { .. }
         )
     });
@@ -396,23 +465,16 @@ fn deps_are_fresh(project_root: &Utf8Path, manifest: &manifest::ParsedManifest) 
             }
         }
 
-        // The mtime check above can miss a manifest edit that lands within the
-        // same timestamp granularity, so compare the requested registry
-        // versions against what is actually locked.
-        if !registry_versions_match(project_root, manifest) {
+        // The mtime check above only looks at the root manifest, and even
+        // there can miss an edit that lands within the same timestamp
+        // granularity — so compare every discovered git/registry dep's
+        // declared version or reference against what is actually locked,
+        // wherever in the transitive graph it was declared.
+        if !locked_deps_match(project_root, &all_deps, manifest) {
             return false;
         }
     }
 
-    // Discover all deps (direct + transitive) and check their ebin directories.
-    // If discovery itself fails (e.g. non-UTF-8 path), treat as stale.
-    let all_deps = match discover_all_dep_roots(project_root, manifest) {
-        Ok(deps) => deps,
-        Err(e) => {
-            debug!(error = %e, "Failed to discover dep roots — deps are stale");
-            return false;
-        }
-    };
     let layout = BuildLayout::new(project_root);
 
     for dep in &all_deps {
@@ -1483,5 +1545,233 @@ mod tests {
         );
         assert!(!deps[0].is_path_dep);
         assert!(deps[0].is_direct);
+    }
+
+    // --- Transitive freshness checks (BT-2994) ---
+    //
+    // `has_locked_deps` and the version/reference-vs-lockfile comparison must
+    // account for git/registry deps declared by a *transitive* dependency,
+    // not just the root manifest's `[dependencies]` — the standard monorepo
+    // layout has the root declare only a path dependency, with the
+    // git/registry dependency whose version actually matters declared
+    // several levels down. Each helper below writes its dep's manifest,
+    // then sleeps and writes that dep's compiled ebin, so its own
+    // `manifest_newer_than_ebin` check never fires — isolating these tests
+    // to the new transitive-lockfile comparison rather than the pre-existing
+    // per-dep mtime fallback.
+
+    /// Lay out `root -> utils (path) -> yaml (registry)`, with `utils`'s
+    /// manifest requesting `manifest_version` of `yaml` and the lockfile
+    /// pinning `locked_version`. `root` declares no dependency of its own
+    /// other than the `utils` path dep.
+    fn setup_transitive_registry_project(
+        temp: &TempDir,
+        manifest_version: &str,
+        locked_version: &str,
+    ) -> camino::Utf8PathBuf {
+        let root = camino::Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let layout = BuildLayout::new(&root);
+
+        // yaml: registry dep, checked out and compiled at `locked_version`.
+        let checkout = layout.dep_checkout_dir("yaml");
+        fs::create_dir_all(&checkout).unwrap();
+        fs::write(
+            checkout.join("beamtalk.toml"),
+            format!("[package]\nname = \"yaml\"\nversion = \"{locked_version}\"\n"),
+        )
+        .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        create_dep_ebin_with_beam(temp.path(), "yaml");
+
+        // utils: path dep declaring yaml, itself compiled fresh afterwards.
+        let utils_dir = temp.path().join("utils");
+        fs::create_dir_all(&utils_dir).unwrap();
+        write_manifest(
+            &utils_dir,
+            "utils",
+            "0.1.0",
+            &format!("[dependencies]\nyaml = \"{manifest_version}\"\n"),
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        create_dep_ebin_with_beam(temp.path(), "utils");
+
+        // root: only a path dep — no direct git/registry dep at all.
+        write_manifest(
+            temp.path(),
+            "my_app",
+            "0.1.0",
+            "[dependencies]\nutils = { path = \"utils\" }",
+        );
+
+        // Lockfile, newer than everything above, pinning yaml at
+        // `locked_version` from the default registry.
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        fs::write(
+            temp.path().join("beamtalk.lock"),
+            format!(
+                "# This file is auto-generated by beamtalk. Do not edit manually.\n\n\
+                 [[package]]\n\
+                 name = \"yaml\"\n\
+                 version = \"{locked_version}\"\n\
+                 registry = \"{}\"\n\
+                 url = \"https://example.test/yaml\"\n\
+                 reference = \"tag:v{locked_version}\"\n\
+                 sha = \"abc123\"\n",
+                registry::DEFAULT_REGISTRY_URL
+            ),
+        )
+        .unwrap();
+
+        root
+    }
+
+    #[test]
+    fn test_transitive_registry_dep_fresh_when_locked_version_matches() {
+        let temp = TempDir::new().unwrap();
+        let root = setup_transitive_registry_project(&temp, "0.2.1", "0.2.1");
+        let parsed = manifest::parse_manifest_full(&root.join("beamtalk.toml")).unwrap();
+
+        assert!(
+            deps_are_fresh(&root, &parsed),
+            "A transitive registry dep locked at the requested version should be fresh"
+        );
+    }
+
+    #[test]
+    fn test_transitive_registry_dep_requires_lockfile() {
+        // The root manifest itself declares only a path dep, so
+        // `has_locked_deps` must still come out true because `utils`
+        // transitively declares a registry dep.
+        let temp = TempDir::new().unwrap();
+        let root = setup_transitive_registry_project(&temp, "0.2.1", "0.2.1");
+        fs::remove_file(temp.path().join("beamtalk.lock")).unwrap();
+        let parsed = manifest::parse_manifest_full(&root.join("beamtalk.toml")).unwrap();
+
+        assert!(
+            !deps_are_fresh(&root, &parsed),
+            "A registry dep declared by a transitive path dependency must still require a lockfile"
+        );
+    }
+
+    #[test]
+    fn test_transitive_registry_dep_stale_when_manifest_version_bumped() {
+        // utils/beamtalk.toml asks for 0.3.0 but the lockfile pins 0.2.1 —
+        // this is the exact scenario from BT-2994: the root declares no
+        // registry dependency of its own at all.
+        let temp = TempDir::new().unwrap();
+        let root = setup_transitive_registry_project(&temp, "0.3.0", "0.2.1");
+        let parsed = manifest::parse_manifest_full(&root.join("beamtalk.toml")).unwrap();
+
+        assert!(
+            !deps_are_fresh(&root, &parsed),
+            "A version bump in a transitive dependency's manifest must force re-resolution"
+        );
+    }
+
+    /// Lay out `root -> middle (path) -> leaf (git)`, with `middle`'s
+    /// manifest requesting `manifest_tag` for `leaf` and the lockfile
+    /// pinning `locked_tag`. `root` declares no dependency of its own other
+    /// than the `middle` path dep.
+    fn setup_transitive_git_project(
+        temp: &TempDir,
+        manifest_tag: &str,
+        locked_tag: &str,
+    ) -> camino::Utf8PathBuf {
+        let root = camino::Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let layout = BuildLayout::new(&root);
+
+        // leaf: git dep, checked out and compiled.
+        let checkout = layout.dep_checkout_dir("leaf");
+        fs::create_dir_all(&checkout).unwrap();
+        fs::write(
+            checkout.join("beamtalk.toml"),
+            "[package]\nname = \"leaf\"\nversion = \"1.0.0\"\n",
+        )
+        .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        create_dep_ebin_with_beam(temp.path(), "leaf");
+
+        // middle: path dep declaring leaf as a git dependency, itself
+        // compiled fresh afterwards.
+        let middle_dir = temp.path().join("middle");
+        fs::create_dir_all(&middle_dir).unwrap();
+        write_manifest(
+            &middle_dir,
+            "middle",
+            "0.1.0",
+            &format!(
+                "[dependencies]\nleaf = {{ git = \"https://example.com/leaf\", tag = \"{manifest_tag}\" }}\n"
+            ),
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        create_dep_ebin_with_beam(temp.path(), "middle");
+
+        // root: only a path dep — no direct git/registry dep at all.
+        write_manifest(
+            temp.path(),
+            "my_app",
+            "0.1.0",
+            "[dependencies]\nmiddle = { path = \"middle\" }",
+        );
+
+        // Lockfile, newer than everything above, pinning leaf at `locked_tag`.
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        fs::write(
+            temp.path().join("beamtalk.lock"),
+            format!(
+                "# This file is auto-generated by beamtalk. Do not edit manually.\n\n\
+                 [[package]]\n\
+                 name = \"leaf\"\n\
+                 url = \"https://example.com/leaf\"\n\
+                 reference = \"tag:{locked_tag}\"\n\
+                 sha = \"abc123\"\n"
+            ),
+        )
+        .unwrap();
+
+        root
+    }
+
+    #[test]
+    fn test_transitive_git_dep_fresh_when_locked_tag_matches() {
+        let temp = TempDir::new().unwrap();
+        let root = setup_transitive_git_project(&temp, "v1.0", "v1.0");
+        let parsed = manifest::parse_manifest_full(&root.join("beamtalk.toml")).unwrap();
+
+        assert!(
+            deps_are_fresh(&root, &parsed),
+            "A transitive git dep locked at the requested tag should be fresh"
+        );
+    }
+
+    #[test]
+    fn test_transitive_git_dep_requires_lockfile() {
+        // The root manifest itself declares only a path dep, so
+        // `has_locked_deps` must still come out true because `middle`
+        // transitively declares a git dep.
+        let temp = TempDir::new().unwrap();
+        let root = setup_transitive_git_project(&temp, "v1.0", "v1.0");
+        fs::remove_file(temp.path().join("beamtalk.lock")).unwrap();
+        let parsed = manifest::parse_manifest_full(&root.join("beamtalk.toml")).unwrap();
+
+        assert!(
+            !deps_are_fresh(&root, &parsed),
+            "A git dep declared by a transitive path dependency must still require a lockfile"
+        );
+    }
+
+    #[test]
+    fn test_transitive_git_dep_stale_when_tag_bumped() {
+        // middle/beamtalk.toml asks for tag v2.0 but the lockfile pins v1.0 —
+        // the git-dep analogue of BT-2994: the root declares no git
+        // dependency of its own at all.
+        let temp = TempDir::new().unwrap();
+        let root = setup_transitive_git_project(&temp, "v2.0", "v1.0");
+        let parsed = manifest::parse_manifest_full(&root.join("beamtalk.toml")).unwrap();
+
+        assert!(
+            !deps_are_fresh(&root, &parsed),
+            "A tag bump in a transitive git dependency's manifest must force re-resolution"
+        );
     }
 }
