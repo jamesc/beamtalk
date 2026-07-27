@@ -24,9 +24,9 @@ beamtalk_error records.
 | `writeBinary:contents:`      | Write binary data to file              |
 | `appendBinary:contents:`     | Append binary data to file             |
 | `lines:`                     | Lazy Stream of lines (constant memory) |
-| `open:do:`                   | Block-scoped read handle with auto-close|
-| `open:mode:`                 | Open a FileHandle the caller must close|
-| `open:mode:do:`              | Block-scoped handle with auto-close    |
+| `open:do:`                   | Block-scoped read handle, auto-closed  |
+| `open:mode:`                 | Open a FileHandle the caller closes    |
+| `open:mode:do:`              | Block-scoped handle, auto-closed       |
 
 ## Usage
 
@@ -429,8 +429,12 @@ Modes map onto binary `file:open/2` option sets:
 | `#readWrite` | `[read, write, binary]` | Create if absent, keeps content |
 
 Write-capable modes auto-create parent directories, matching
-`writeBinary:contents:`. The caller is responsible for `close` — use
-`open:mode:do:` when a block scope will do.
+`writeBinary:contents:`.
+
+The caller is responsible for `close`. The descriptor is owned by the File
+class process rather than the caller, so an unclosed handle survives the
+caller's death and stays open for the lifetime of the node — use
+`open:mode:do:` whenever a block scope will do.
 
 Returns a Result ok map holding the handle, or a Result error map.
 """.

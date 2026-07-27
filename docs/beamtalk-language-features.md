@@ -4899,6 +4899,10 @@ write on a `#read` handle:
 Handles are process-scoped values (`HandleScoped(#process)`): they can be held
 across calls but not sent to another actor.
 
+A handle from `open:mode:` is yours to close. Its descriptor is not tied to the
+calling process, so an unclosed handle stays open for the lifetime of the node
+— reach for `open:mode:do:` whenever a block scope will do.
+
 #### Side-Effect Timing ⚠️
 
 Side effects in lazy pipelines run at **terminal** time, not at definition time:

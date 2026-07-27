@@ -137,9 +137,13 @@ typed Object subclass: File native: beamtalk_file
   /// | `#append`    | Create if absent; every write goes to the end|
   /// | `#readWrite` | Create if absent; existing contents kept     |
   ///
-  /// Write-capable modes create missing parent directories. The caller owns
-  /// the handle and must `close` it — prefer `open:mode:do:` when a block
-  /// scope will do. Returns `Result ok: handle`, or `Result error: err`.
+  /// Write-capable modes create missing parent directories. Returns
+  /// `Result ok: handle`, or `Result error: err`.
+  ///
+  /// The caller owns the handle and must `close` it. The descriptor is not
+  /// tied to the calling process, so an unclosed handle stays open for the
+  /// lifetime of the node — prefer `open:mode:do:` whenever a block scope
+  /// will do.
   ///
   /// ## Examples
   /// ```beamtalk
