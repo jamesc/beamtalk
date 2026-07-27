@@ -18,6 +18,20 @@
   bundling desktop app needs (see ADR 0097 Prior Art re: Livebook) — not
   yet confirmed against a real `cargo tauri build` in this sandbox (no
   macOS/Tauri toolchain available; see desktop/README.md).
+
+  Deliberate over-grant, flagged in review: this same set is applied to
+  EVERY signed binary (beam.smp, but also epmd/run_erl/to_erl/and other
+  small ERTS helpers that never touch JIT-allocated memory or load NIFs).
+  Only beam.smp strictly needs allow-jit/allow-unsigned-executable-memory;
+  only beam.smp (and anything hosting NIFs) needs disable-library-
+  validation. A narrower per-binary entitlement set is more correct but
+  requires knowing exactly which ERTS helper binaries exist and what each
+  does across OTP versions — the single-set approach here trades that
+  precision for simplicity, matching the approach the ADR's own prior-art
+  comparison (Livebook) takes. The entitlements do not expand the app's
+  OS-level sandbox regardless, so the practical exposure is limited; if a
+  future review wants the narrower version, it needs a real macOS build to
+  verify each helper binary still works signed with a reduced set.
 -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">

@@ -66,7 +66,7 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: 'Upload archives to the GitHub Release (otherwise build artifacts only)'
+        description: 'Has no effect here — the upload step also requires github.event_name == release, which a manual dispatch never is (no release tag exists for it to attach to). Only meaningful when this workflow is called from release.yml via workflow_call.'
         required: false
         type: boolean
         default: false
@@ -347,18 +347,21 @@ jobs:
               --clobber
           done <<< "${ARCHIVES}"
 
-      # Drop the temporary signing keychain regardless of job outcome — the
-      # runner itself is ephemeral, but leaving private-key material
-      # referenced from the login keychain's search list for the rest of the
-      # job (or a self-hosted runner's next job) is unnecessary exposure.
-      # Checks for the keychain file directly rather than gating on
-      # `steps.apple_cert.outputs.configured` — that output is only written
-      # at the END of the import step, so a mid-import failure (bad
-      # password, corrupt cert) would otherwise leave a partially-created
-      # keychain behind uncleaned.
+      # Drop the temporary signing keychain and decoded .p12 regardless of
+      # job outcome — the runner itself is ephemeral, but leaving private-
+      # key material referenced from the login keychain's search list (or,
+      # for the .p12, just sitting in RUNNER_TEMP as plaintext-on-disk) for
+      # the rest of the job — or a self-hosted runner's next job — is
+      # unnecessary exposure. Checks for both files directly rather than
+      # gating on `steps.apple_cert.outputs.configured`: that output is only
+      # written at the END of the import step, so a mid-import failure (bad
+      # password, corrupt cert — the `.p12` is decoded before any of that
+      # can fail) would otherwise leave both uncleaned.
       - name: Clean up signing keychain
         if: always() && runner.os == 'macOS'
         run: |
           keychain="${RUNNER_TEMP}/desktop-signing.keychain-db"
+          cert="${RUNNER_TEMP}/apple_cert.p12"
           [ -f "${keychain}" ] && security delete-keychain "${keychain}"
+          rm -f "${cert}"
           true
