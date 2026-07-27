@@ -57,7 +57,7 @@ dirs = "6"
 # Cryptography
 sha2 = "0.11"
 rand = "0.10"
-base64 = "0.22"
+base64 = "0.23"
 
 # Logging
 tracing = "0.1"
