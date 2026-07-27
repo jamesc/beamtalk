@@ -815,8 +815,7 @@ impl Backend {
             for root in &roots_owned {
                 // Missing or unreadable manifest → empty table → no-op merge.
                 // Parse errors are logged inside load_diagnostics_table_for_root.
-                let root_table =
-                    beamtalk_core::compilation::load_diagnostics_table_for_root(root);
+                let root_table = beamtalk_core::compilation::load_diagnostics_table_for_root(root);
                 for (category, severity) in root_table {
                     if let Some(previous) = merged.get(&category) {
                         if *previous != severity {
