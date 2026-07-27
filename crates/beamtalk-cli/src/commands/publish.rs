@@ -73,9 +73,18 @@ pub fn run(dry_run: bool) -> Result<()> {
     let location = registry::resolve_registry_location(&project_root, manifest.registry.as_ref());
     let index_root = registry::ensure_index(&location, &project_root, true)?;
     let existing_entry = registry::read_entry(&index_root, name)?;
-    let version_published = existing_entry
+    let version_recorded = existing_entry
         .as_ref()
         .is_some_and(|entry| entry.find_version(version).is_some());
+    // A version recorded in the on-disk entry only really counts as
+    // *published* once it's committed to the index repository — otherwise
+    // this is reading back a previous `publish`'s partial failure (BT-3000
+    // sibling): `write_index_entry` succeeded but `git add`/`git commit`
+    // (`commit_and_push_index`) never landed, so the file sits in the index
+    // clone staged or untracked. Without this check, that leftover file
+    // would make a retry falsely report "already published" and tell the
+    // user to bump the version — permanently orphaning the tagged release.
+    let version_published = version_recorded && is_entry_committed(&index_root, name, &location)?;
 
     // Preflight 4: the release tag doesn't already exist, locally or on
     // origin — unless the tag is on origin and `version_published` is
@@ -258,6 +267,56 @@ fn get_git_identity(project_root: &Utf8Path) -> Result<(String, String)> {
     };
 
     Ok((read("user.name")?, read("user.email")?))
+}
+
+/// Whether the registry index's on-disk entry for `name` is actually
+/// committed at `HEAD` in the index repository — as opposed to merely
+/// present on disk (staged or untracked) from a previous `publish` that
+/// wrote the file but never got as far as `commit_and_push_index`.
+///
+/// Only meaningful for a git-backed index: `RegistryLocation::LocalDir`
+/// registries aren't necessarily git checkouts at all (a CI fixture, a
+/// hand-maintained directory), so "committed" has no meaning there and
+/// filesystem presence — what [`registry::read_entry`] already reports — is
+/// authoritative, the same as it is for normal dependency resolution
+/// (`resolve_release`/`resolve_latest_release`) against such a registry.
+///
+/// Deliberately checks membership in the `HEAD` tree (`git cat-file -e
+/// HEAD:<path>`) rather than `git ls-files` or `git status`: the git index
+/// (staging area) is not the commit history, so a file that's been `git
+/// add`-ed but not yet committed would still satisfy `git ls-files` — this
+/// must return `false` for that case too, not just for a fully untracked
+/// file.
+///
+/// # Errors
+///
+/// Returns an error if the underlying `git` command cannot be run at all
+/// (e.g. `git` itself is missing). A `HEAD` that doesn't exist yet, or a path
+/// absent from it, is reported as `Ok(false)` — both are "not committed",
+/// not failures.
+fn is_entry_committed(
+    index_root: &Utf8Path,
+    name: &str,
+    location: &RegistryLocation,
+) -> Result<bool> {
+    match location {
+        RegistryLocation::LocalDir(_) => Ok(true),
+        RegistryLocation::Git(_) => {
+            let rel_path = format!("packages/{name}.toml");
+            let output = Command::new("git")
+                .args(["cat-file", "-e", &format!("HEAD:{rel_path}")])
+                .current_dir(index_root)
+                .output()
+                .into_diagnostic()
+                .wrap_err_with(|| {
+                    format!(
+                        "Failed to check whether '{rel_path}' is committed in the registry \
+                         index at '{index_root}'"
+                    )
+                })?;
+            Ok(output.status.success())
+        }
+    }
 }
 
 /// Ensure the release tag doesn't already exist locally or on `origin` —
@@ -489,8 +548,40 @@ fn render_version_block(version: &str, git_url: &str, tag: &str) -> String {
 }
 
 /// Escape a value for embedding in a TOML basic string.
+///
+/// `name`, `version`, `git_url`, `tag` all come from validated sources (the
+/// manifest parser, a computed `v{version}` tag), but `description` is
+/// free-form text from `beamtalk.toml`'s `description` field — reachable via
+/// a TOML multi-line basic string (`"""..."""`), which permits literal
+/// newlines and other control characters. TOML basic strings prohibit
+/// unescaped control characters (U+0000-U+001F, U+007F); an unescaped
+/// newline, tab, or other control character here would produce invalid TOML
+/// (caught by the round-trip check in `render_index_entry_content`, but as
+/// an unhelpful "this is a bug" error) or, if it happened to look like `key
+/// = "value"`, could inject a bogus extra line into the index entry.
+///
+/// Mirrors `deps::lockfile::escape_toml_string`'s coverage of the same TOML
+/// basic-string escape rules; the two aren't shared because they escape
+/// different kinds of value (a registry identity there, a package
+/// description/version/URL/tag here) with no natural common home.
 fn escape_toml_string(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
+    use std::fmt::Write as _;
+
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 || c == '\x7f' => {
+                let _ = write!(out, "\\u{:04X}", c as u32);
+            }
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 fn write_index_entry(entry_path: &Utf8Path, content: &str) -> Result<()> {
@@ -543,8 +634,11 @@ fn commit_and_push_index(
         let stderr = String::from_utf8_lossy(&commit.stderr);
         miette::bail!(
             "Failed to commit registry index changes:\n{stderr}\n\n  \
-             The release tag was already pushed. Resolve the index issue and push the \
-             commit at '{index_root}' manually, or contact the registry maintainer."
+             The release tag was already pushed, but no commit was created — 'git commit' \
+             itself failed, so there is nothing to push yet. Resolve the issue and stage and \
+             commit the change at '{index_root}' manually (`cd {index_root} && git add . && \
+             git commit -m \"registry: {name} v{version}\"`), then push it, or contact the \
+             registry maintainer."
         );
     }
 
@@ -1019,6 +1113,48 @@ mod tests {
         assert_eq!(escape_toml_string(r"a\b"), r"a\\b");
     }
 
+    /// A `description` reaching this function can carry a literal newline
+    /// (via a TOML multi-line basic string in `beamtalk.toml`) or any other
+    /// control character — not just quotes and backslashes. Covers the full
+    /// TOML-prohibited range (U+0000-U+001F, U+007F), mirroring
+    /// `deps::lockfile`'s `test_registry_field_with_full_control_character_range_roundtrips`.
+    #[test]
+    fn test_escape_toml_string_escapes_full_control_character_range() {
+        assert_eq!(escape_toml_string("a\nb"), r"a\nb");
+        assert_eq!(escape_toml_string("a\rb"), r"a\rb");
+        assert_eq!(escape_toml_string("a\tb"), r"a\tb");
+        // NUL, VT (U+000B, no short escape), a mid-range control (U+001F),
+        // and DEL (U+007F) — all fall back to the `\uXXXX` form.
+        assert_eq!(
+            escape_toml_string("a\u{0}\u{b}\u{1f}\u{7f}b"),
+            "a\\u0000\\u000B\\u001F\\u007Fb"
+        );
+    }
+
+    #[test]
+    fn test_render_new_index_entry_with_multiline_description_produces_valid_toml() {
+        // A `description` containing a raw newline (reachable via a TOML
+        // multi-line basic string in beamtalk.toml) must not corrupt the
+        // generated single-line index entry. Also covers a `\uXXXX`-escaped
+        // control character (VT, U+000B) — the named escapes (`\n`, `\t`)
+        // above don't exercise that fallback arm of `escape_toml_string`.
+        let content = render_new_index_entry(
+            "yaml",
+            Some("Line one\nLine two\twith a tab\u{b}VT"),
+            "0.1.0",
+            "https://example.test/yaml",
+            "v0.1.0",
+        );
+
+        let parsed = registry::parse_index_entry("yaml", &content).unwrap_or_else(|e| {
+            panic!("generated index entry failed to re-parse: {e}\n\ncontent:\n{content}")
+        });
+        assert_eq!(
+            parsed.description.as_deref(),
+            Some("Line one\nLine two\twith a tab\u{b}VT")
+        );
+    }
+
     // -----------------------------------------------------------------------
     // End-to-end `run()` against local bare repos
     // -----------------------------------------------------------------------
@@ -1241,5 +1377,170 @@ mod tests {
         let result = with_cwd(&utf8(&temp), || run(false));
         assert!(result.is_err());
         assert!(flat_err(&result.unwrap_err()).contains("No 'origin' remote"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Uncommitted index entry (BT-3002)
+    // -----------------------------------------------------------------------
+
+    /// A previous `publish` can push the release tag (step 2), have
+    /// `write_index_entry` write `packages/{name}.toml` into the index
+    /// clone, `git add` it (step 3)... and then have `git commit` itself
+    /// fail or never run. The entry file is then present in the index
+    /// clone's working tree but not committed. A retry must not read that
+    /// filesystem presence as "already published" — `read_entry` alone
+    /// can't tell staged-but-uncommitted from truly published, so
+    /// `is_entry_committed` must gate `version_published` on `HEAD`, not
+    /// just the working tree.
+    #[test]
+    #[serial(cwd)]
+    fn test_republish_after_staged_uncommitted_index_entry_is_not_already_published() {
+        let fixture = setup("yaml", "0.1.0", None);
+
+        // Simulate the tag half of a partial failure: push the release tag
+        // exactly as `create_and_push_tag` would (step 2 succeeded).
+        run_git(
+            fixture.library.path(),
+            &["tag", "-a", "v0.1.0", "-m", "Release 0.1.0"],
+        );
+        run_git(fixture.library.path(), &["push", "origin", "v0.1.0"]);
+
+        // Simulate the index half: `write_index_entry` wrote the file and it
+        // was `git add`-ed, but `git commit` never landed.
+        let index_dir = fixture.index_dir();
+        let entry_path = index_dir.join("packages/yaml.toml");
+        let origin_url = "https://example.test/yaml";
+        std::fs::write(
+            &entry_path,
+            format!(
+                "name = \"yaml\"\n\n[[versions]]\nversion = \"0.1.0\"\ngit = \"{origin_url}\"\n\
+                 tag = \"v0.1.0\"\n"
+            ),
+        )
+        .unwrap();
+        run_git(index_dir.as_std_path(), &["add", "."]);
+
+        let result = with_cwd(&utf8(&fixture.library), || run(false));
+        assert!(result.is_err());
+        let msg = flat_err(&result.unwrap_err());
+
+        assert!(
+            !msg.contains("bump the version first"),
+            "a staged-but-uncommitted index entry must not read as 'already published': {msg}"
+        );
+        assert!(
+            msg.contains("partial failure"),
+            "should report the partial-failure recovery, not a republish: {msg}"
+        );
+    }
+
+    /// As above, but the entry file was written and never staged at all
+    /// (fully untracked) — e.g. `write_index_entry` succeeded but `git add`
+    /// itself never ran before the process died.
+    #[test]
+    #[serial(cwd)]
+    fn test_republish_after_untracked_index_entry_is_not_already_published() {
+        let fixture = setup("yaml", "0.1.0", None);
+
+        run_git(
+            fixture.library.path(),
+            &["tag", "-a", "v0.1.0", "-m", "Release 0.1.0"],
+        );
+        run_git(fixture.library.path(), &["push", "origin", "v0.1.0"]);
+
+        let index_dir = fixture.index_dir();
+        let entry_path = index_dir.join("packages/yaml.toml");
+        let origin_url = "https://example.test/yaml";
+        std::fs::write(
+            &entry_path,
+            format!(
+                "name = \"yaml\"\n\n[[versions]]\nversion = \"0.1.0\"\ngit = \"{origin_url}\"\n\
+                 tag = \"v0.1.0\"\n"
+            ),
+        )
+        .unwrap();
+        // Deliberately no `git add` — the file is fully untracked.
+
+        let result = with_cwd(&utf8(&fixture.library), || run(false));
+        assert!(result.is_err());
+        let msg = flat_err(&result.unwrap_err());
+
+        assert!(
+            !msg.contains("bump the version first"),
+            "an untracked index entry must not read as 'already published': {msg}"
+        );
+        assert!(
+            msg.contains("partial failure"),
+            "should report the partial-failure recovery, not a republish: {msg}"
+        );
+    }
+
+    /// A package's `description` containing a newline (reachable via a TOML
+    /// multi-line basic string in `beamtalk.toml`) must round-trip through
+    /// a real `publish` run, not just through `render_new_index_entry`
+    /// directly — covering the full path including the round-trip
+    /// validation in `render_index_entry_content`.
+    #[test]
+    #[serial(cwd)]
+    fn test_publish_description_with_newline_roundtrips() {
+        let fixture = setup("yaml", "0.1.0", None);
+
+        // `setup()`'s naive `description = "{d}"` interpolation can't carry a
+        // raw newline (that's invalid TOML), so write a multi-line basic
+        // string directly, the way a real `beamtalk.toml` author would.
+        let manifest_path = fixture.library.path().join("beamtalk.toml");
+        let manifest = format!(
+            "[package]\nname = \"yaml\"\nversion = \"0.1.0\"\ndescription = \"\"\"\nLine one\n\
+             Line two\twith a tab\"\"\"\n\n[registry]\nurl = \"{}\"\n",
+            file_url(fixture.index_bare.path())
+        );
+        std::fs::write(&manifest_path, manifest).unwrap();
+        run_git(
+            fixture.library.path(),
+            &["commit", "-am", "add description"],
+        );
+
+        let result = with_cwd(&utf8(&fixture.library), || run(false));
+        assert!(result.is_ok(), "{:?}", result.err());
+
+        let index_dir = fixture.index_dir();
+        let entry = registry::read_entry(&index_dir, "yaml").unwrap().unwrap();
+        assert_eq!(
+            entry.description.as_deref(),
+            Some("Line one\nLine two\twith a tab")
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Commit-failure error message (BT-3002)
+    // -----------------------------------------------------------------------
+
+    /// If `git commit` itself fails, no local commit exists yet — the user
+    /// needs to stage and commit first, not push. An empty repository
+    /// reproduces this deterministically: `git add .` is a no-op (nothing to
+    /// add) and the subsequent `git commit` fails with "nothing to commit",
+    /// exercising the commit-failure branch without a contrived hook
+    /// rejection.
+    #[test]
+    fn test_commit_and_push_index_commit_failure_says_stage_and_commit_not_push() {
+        let dir = TempDir::new().unwrap();
+        run_git(dir.path(), &["init"]);
+        configure_git_identity(dir.path());
+
+        let index_root = utf8(&dir);
+        let err = commit_and_push_index(&index_root, "yaml", "0.1.0", "Test", "test@test.com")
+            .unwrap_err();
+        let msg = flat_err(&err);
+
+        assert!(msg.contains("git add"), "{msg}");
+        assert!(msg.contains("git commit"), "{msg}");
+        assert!(
+            !msg.contains("push the commit"),
+            "must not tell the user to push a commit that was never created: {msg}"
+        );
+        assert!(
+            !msg.contains("commit exists locally"),
+            "must not claim a commit already exists when 'git commit' itself failed: {msg}"
+        );
     }
 }

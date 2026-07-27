@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Beamtalk</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Beamtalk</h1>
+      <button id="quit-button" title="Quit">Quit</button>
+    </header>
+
+    <main id="app">
+      <p id="status" class="status">Loading workspaces…</p>
+
+      <section id="empty-state" hidden>
+        <p id="empty-state-message"></p>
+        <div id="empty-state-cli-found" hidden>
+          <input id="new-workspace-name" type="text" placeholder="workspace name" />
+          <button id="create-workspace-button">Create workspace</button>
+        </div>
+        <div id="empty-state-cli-missing" hidden>
+          <p>
+            The <code>beamtalk</code> CLI could not be found. Install it, or
+            set <code>BEAMTALK_CLI_PATH</code> to its location, then reopen
+            this window.
+          </p>
+        </div>
+      </section>
+
+      <ul id="workspace-list" hidden></ul>
+    </main>
+
+    <script src="main.js"></script>
+  </body>
+</html>

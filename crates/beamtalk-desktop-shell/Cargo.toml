@@ -1,0 +1,25 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "beamtalk-desktop-shell"
+description = "Desktop picker shell-agnostic logic: attach/focus decisions, first-run empty state (ADR 0097, BT-2986)"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["beam", "smalltalk", "desktop"]
+categories = ["development-tools"]
+
+[lib]
+name = "beamtalk_desktop_shell"
+path = "src/lib.rs"
+
+[dependencies]
+beamtalk-desktop-broker.workspace = true
+
+[lints]
+workspace = true

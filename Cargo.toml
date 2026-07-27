@@ -4,7 +4,13 @@
 [workspace]
 resolver = "2"
 members = ["crates/*", "crates/beamtalk-examples/build-corpus", "test-package-compiler"]
-exclude = ["fuzz"]
+# desktop/src-tauri (BT-2986): needs webkit2gtk-4.1 (Linux) / WebView2
+# (Windows) / WKWebView (macOS) system deps + the cargo-tauri toolchain,
+# neither guaranteed present everywhere the rest of the workspace builds —
+# see desktop/README.md. Excluded so `cargo build --workspace` (`just
+# build`/`just ci`) doesn't require them; wiring a CI build lane that
+# installs them is BT-2987's job.
+exclude = ["fuzz", "desktop/src-tauri"]
 
 [profile.dev]
 debug = "line-tables-only"
@@ -30,6 +36,7 @@ beamtalk-build = { path = "crates/beamtalk-build" }
 # (BT-2823) via this lib target.
 beamtalk-cli = { path = "crates/beamtalk-cli" }
 beamtalk-core = { path = "crates/beamtalk-core" }
+beamtalk-desktop-broker = { path = "crates/beamtalk-desktop-broker" }
 beamtalk-etf = { path = "crates/beamtalk-etf" }
 beamtalk-examples = { path = "crates/beamtalk-examples" }
 beamtalk-repl-protocol = { path = "crates/beamtalk-repl-protocol" }
