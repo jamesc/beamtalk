@@ -194,7 +194,9 @@ pub struct SweepReport {
     pub pid_reused_skipped: Vec<FrontRecord>,
 }
 
-/// Grace period between `SIGTERM`/graceful-close and a forced kill.
+/// Grace period between `SIGTERM` and a forced `SIGKILL` (Unix only —
+/// Windows' `TerminateProcess` has no graceful-signal equivalent to wait on).
+#[cfg(unix)]
 const TERMINATE_GRACE: Duration = Duration::from_millis(300);
 
 /// Sweep `dir` for orphaned fronts, killing (with a `SIGTERM` → `SIGKILL`

@@ -304,8 +304,11 @@ mod tests {
     fn run_cli_reports_failure_with_stderr() {
         // `false` (POSIX) always exits 1 with no output — exercise the
         // non-zero-exit path without depending on the real beamtalk binary.
+        // /usr/bin/false, not /bin/false: macOS only ships the former (/bin
+        // is a much smaller BSD set there); Linux has both (/bin is usually
+        // a symlink into /usr/bin on merged-usr distros).
         if cfg!(unix) {
-            let result = run_cli(Path::new("/bin/false"), &[]);
+            let result = run_cli(Path::new("/usr/bin/false"), &[]);
             assert!(matches!(result, Err(BrokerError::CliFailed(_, code, _)) if code != 0));
         }
     }
@@ -313,7 +316,7 @@ mod tests {
     #[test]
     fn run_cli_succeeds_on_zero_exit() {
         if cfg!(unix) {
-            let result = run_cli(Path::new("/bin/true"), &[]);
+            let result = run_cli(Path::new("/usr/bin/true"), &[]);
             assert!(result.is_ok());
         }
     }
