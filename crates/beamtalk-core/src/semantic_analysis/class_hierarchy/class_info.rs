@@ -324,29 +324,56 @@ impl ClassInfo {
 
 /// Formats an AST expression as a compact string for use in generated doc comments.
 ///
-/// Only handles simple literal values (integer, float, string, boolean, nil).
+/// Only handles simple literal values (integer, float, string, boolean, nil, list).
 /// Complex expressions fall back to `"..."`.
 pub fn format_default_value(expr: &Expression) -> String {
     match expr {
-        Expression::Literal(lit, _) => match lit {
-            Literal::Integer(n) => n.to_string(),
-            Literal::Float(f) => {
-                let rendered = f.to_string();
-                // Preserve decimal point so 1.0 stays as "1.0" not "1"
-                if rendered.contains('.') || rendered.contains('e') || rendered.contains('E') {
-                    rendered
-                } else {
-                    format!("{rendered}.0")
-                }
-            }
-            Literal::String(s) => format!("{s:?}"),
-            Literal::Symbol(s) => format!("#{s}"),
-            Literal::Character(c) => format!("${}", c.escape_default()),
-            Literal::List(_) => "...".to_string(),
-        },
+        Expression::Literal(lit, _) => format_literal_default(lit),
         Expression::Identifier(ident) if ident.name == "nil" => "nil".to_string(),
         Expression::Identifier(ident) if ident.name == "true" => "true".to_string(),
         Expression::Identifier(ident) if ident.name == "false" => "false".to_string(),
+        // `#(...)` list literal defaults (e.g. `field: xs :: List(String) = #()`)
+        // parse as ListLiteral, not Literal::List — only the no-tail (non-cons)
+        // form is renderable as flat Beamtalk source.
+        Expression::ListLiteral {
+            elements,
+            tail: None,
+            ..
+        } => {
+            let inner = elements
+                .iter()
+                .map(format_default_value)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("#({inner})")
+        }
         _ => "...".to_string(),
+    }
+}
+
+/// Formats a single literal (recursing into list elements) as Beamtalk source syntax.
+fn format_literal_default(lit: &Literal) -> String {
+    match lit {
+        Literal::Integer(n) => n.to_string(),
+        Literal::Float(f) => {
+            let rendered = f.to_string();
+            // Preserve decimal point so 1.0 stays as "1.0" not "1"
+            if rendered.contains('.') || rendered.contains('e') || rendered.contains('E') {
+                rendered
+            } else {
+                format!("{rendered}.0")
+            }
+        }
+        Literal::String(s) => format!("{s:?}"),
+        Literal::Symbol(s) => format!("#{s}"),
+        Literal::Character(c) => format!("${}", c.escape_default()),
+        Literal::List(items) => {
+            let inner = items
+                .iter()
+                .map(format_literal_default)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("#({inner})")
+        }
     }
 }

@@ -987,39 +987,26 @@ fn diagnostics_overrides() -> &'static beamtalk_core::compilation::DiagnosticsTa
 /// Load the `[diagnostics]` severity-override table from `<root>/beamtalk.toml`
 /// (ADR 0100 Rule 3).
 ///
-/// Lenient by design, mirroring the LSP's `load_diagnostics_table`: a root
-/// with no `beamtalk.toml`, or one that fails to parse, yields an empty table
-/// (Rule 1 defaults) rather than blocking diagnostics — a malformed manifest
-/// already fails loudly at `beamtalk build` time, and the REPL must keep
-/// evaluating regardless. Parse failures are logged so the mismatch is
-/// discoverable. Pure function of `root` (no global state) so it is directly
-/// unit-testable without touching the process's real working directory.
+/// Delegates to [`beamtalk_core::compilation::load_diagnostics_table_for_root`]
+/// for the lenient read-parse-or-empty semantics: missing manifest → empty
+/// table (silent), non-`NotFound` I/O errors (permissions, EISDIR, etc.) →
+/// `WARN` log + empty table, parse failure → `WARN` log + empty table / Rule 1
+/// defaults. The `debug!` log on a non-empty result is compiler-port-specific
+/// telemetry kept here in the caller.
+///
+/// Pure function of `root` (no global state) so it is directly unit-testable
+/// without touching the process's real working directory.
 fn load_diagnostics_overrides_from(
     root: &std::path::Path,
 ) -> beamtalk_core::compilation::DiagnosticsTable {
-    let manifest_path = root.join("beamtalk.toml");
-    let Ok(content) = std::fs::read_to_string(&manifest_path) else {
-        return beamtalk_core::compilation::DiagnosticsTable::new();
-    };
-    match beamtalk_core::compilation::parse_diagnostics_table_from_manifest_toml(&content) {
-        Ok(table) => {
-            if !table.is_empty() {
-                tracing::debug!(
-                    count = table.len(),
-                    "Loaded [diagnostics] severity override(s) from beamtalk.toml"
-                );
-            }
-            table
-        }
-        Err(e) => {
-            tracing::warn!(
-                path = %manifest_path.display(),
-                error = %e,
-                "failed to parse [diagnostics] table in beamtalk.toml; using Rule 1 defaults"
-            );
-            beamtalk_core::compilation::DiagnosticsTable::new()
-        }
+    let table = beamtalk_core::compilation::load_diagnostics_table_for_root(root);
+    if !table.is_empty() {
+        tracing::debug!(
+            count = table.len(),
+            "Loaded [diagnostics] severity override(s) from beamtalk.toml"
+        );
     }
+    table
 }
 
 /// Process-wide cache of the project's Erlang FFI type signatures (ADR 0075,
