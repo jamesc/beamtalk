@@ -80,6 +80,12 @@ sealed typed Object subclass: Parallel native: beamtalk_parallel
   ///
   /// Raises `#type_error` if `blocks` is empty.
   ///
+  /// **No overall timeout**: unlike `all:timeout:`, there is no `any:timeout:`
+  /// today. If every block hangs (blocked I/O, an infinite loop, a deadlock),
+  /// this call blocks its caller forever — there is no escape. Give every
+  /// block its own internal deadline (e.g. via `Timer`) if it calls into
+  /// anything that might not return.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// (Parallel any: #([1], [2])) isOk           // => true

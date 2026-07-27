@@ -157,15 +157,19 @@ any(Blocks) -> 'any:'(Blocks).
 -doc """
 Spawn one linked+monitored worker process per block, numbered from 1 in
 input order. Returns `[{Index, Pid, MonitorRef}]`.
+
+`CallRef` is a fresh reference (one per `all:`/`all:timeout:`/`any:`
+invocation) that every worker stamps onto its result message — see
+`run_worker/4` for why.
 """.
--spec spawn_workers([function()]) -> [{pos_integer(), pid(), reference()}].
-spawn_workers(Blocks) ->
+-spec spawn_workers([function()], reference()) -> [{pos_integer(), pid(), reference()}].
+spawn_workers(Blocks, CallRef) ->
     Caller = self(),
     Indexed = lists:zip(lists:seq(1, length(Blocks)), Blocks),
     lists:map(
         fun({Idx, Block}) ->
             {Pid, Ref} = erlang:spawn_opt(
-                fun() -> run_worker(Caller, Idx, Block) end, [link, monitor]
+                fun() -> run_worker(Caller, CallRef, Idx, Block) end, [link, monitor]
             ),
             {Idx, Pid, Ref}
         end,
@@ -174,14 +178,21 @@ spawn_workers(Blocks) ->
 
 -doc """
 Worker body: evaluate `Block`, catching any exception, and send
-`{self(), Idx, Result}` back to `Caller`. `Result` is always a fully formed
+`{CallRef, Idx, Result}` back to `Caller`. `Result` is always a fully formed
 `beamtalk_result:t()` — the caller never has to interpret a raw exception
 from a worker that reached this far (only an unhandled kill/crash that
-bypasses this `catch` shows up as a `'DOWN'` instead — see `gather_all/3`
-and `gather_any/3`).
+bypasses this `catch` shows up as a `'DOWN'` instead — see `gather_all/4`
+and `gather_any/4`).
+
+Messages are tagged with `CallRef` (rather than sent as `{self(), Idx,
+Result}`) so `gather_all/4`/`gather_any/4` can pattern-match on an exact,
+per-invocation reference instead of an unbound sender/index pair — the
+caller may be a long-lived process (e.g. an actor) with unrelated messages
+already in its mailbox that could otherwise coincidentally match a bare
+`{_Pid, Idx, Result}` shape.
 """.
--spec run_worker(pid(), pos_integer(), function()) -> ok.
-run_worker(Caller, Idx, Block) ->
+-spec run_worker(pid(), reference(), pos_integer(), function()) -> ok.
+run_worker(Caller, CallRef, Idx, Block) ->
     Result =
         try
             Value = Block(),
@@ -191,7 +202,7 @@ run_worker(Caller, Idx, Block) ->
                 ExObj = beamtalk_exception_handler:ensure_wrapped(Class, Reason, Stack),
                 beamtalk_result:from_tagged_tuple({error, ExObj})
         end,
-    Caller ! {self(), Idx, Result},
+    Caller ! {CallRef, Idx, Result},
     ok.
 
 -doc "Validate that every element of `Blocks` is a zero-argument Block (fun/0).".
@@ -206,17 +217,16 @@ validate_blocks(Selector, Blocks) ->
             )
     end.
 
--doc "Find the pending Index whose stored monitor ref matches `Ref`.".
--spec find_by_ref(reference(), pending()) -> {ok, pos_integer()} | error.
-find_by_ref(Ref, Pending) ->
-    maps:fold(
-        fun
-            (Idx, {_Pid, R}, error) when R =:= Ref -> {ok, Idx};
-            (_Idx, _V, Acc) -> Acc
-        end,
-        error,
-        Pending
-    ).
+-doc """
+Build a `Ref -> Idx` reverse map of `Pending`, so a `receive` clause can
+guard on `is_map_key(Ref, PendingByRef)` — a real guard BIF — instead of an
+unbound `Ref`/`_Pid` that would match (and silently discard) an unrelated
+`'DOWN'` message already destined for this process for some other reason
+(e.g. a monitor the caller itself set up before calling into `Parallel`).
+""".
+-spec pending_by_ref(pending()) -> #{reference() => pos_integer()}.
+pending_by_ref(Pending) ->
+    maps:fold(fun(Idx, {_Pid, Ref}, Acc) -> Acc#{Ref => Idx} end, #{}, Pending).
 
 -doc """
 Kill every still-pending worker. Each is unlinked first so the kill signal
@@ -241,22 +251,22 @@ kill_pending(Pending) ->
     ).
 
 -doc """
-Non-blocking drain of any already-in-flight `{Pid, Idx, Result}` message for
-workers in `Pending`. A worker killed at the exact moment it finished may
+Non-blocking drain of any already-in-flight `{CallRef, Idx, Result}` message
+for workers in `Pending`. A worker killed at the exact moment it finished may
 have already enqueued its result before the kill signal took effect; without
 this, that message would sit in the caller's mailbox indefinitely after
 `all:timeout:`/`any:` returns — surprising a caller that is itself a
 long-lived process (e.g. an actor) with an unexpected message later. Always
 called right after `kill_pending/1`, with the same `Pending` map.
 """.
--spec drain_pending_messages(pending()) -> ok.
-drain_pending_messages(Pending) ->
-    maps:foreach(fun(Idx, {Pid, _Ref}) -> drain_one_message(Pid, Idx) end, Pending).
+-spec drain_pending_messages(reference(), pending()) -> ok.
+drain_pending_messages(CallRef, Pending) ->
+    maps:foreach(fun(Idx, {_Pid, _Ref}) -> drain_one_message(CallRef, Idx) end, Pending).
 
--spec drain_one_message(pid(), pos_integer()) -> ok.
-drain_one_message(Pid, Idx) ->
+-spec drain_one_message(reference(), pos_integer()) -> ok.
+drain_one_message(CallRef, Idx) ->
     receive
-        {Pid, Idx, _Result} -> ok
+        {CallRef, Idx, _Result} -> ok
     after 0 -> ok
     end.
 
@@ -268,10 +278,11 @@ drain_one_message(Pid, Idx) ->
 all_impl([], _Timeout) ->
     [];
 all_impl(Blocks, Timeout) ->
-    Workers = spawn_workers(Blocks),
+    CallRef = erlang:make_ref(),
+    Workers = spawn_workers(Blocks, CallRef),
     Pending = maps:from_list([{Idx, {Pid, Ref}} || {Idx, Pid, Ref} <- Workers]),
     Deadline = deadline_for(Timeout),
-    ResultsByIndex = gather_all(Pending, Deadline, #{}),
+    ResultsByIndex = gather_all(CallRef, Pending, Deadline, #{}),
     [maps:get(Idx, ResultsByIndex) || {Idx, _Pid, _Ref} <- Workers].
 
 -spec deadline_for(timeout()) -> infinity | integer().
@@ -285,32 +296,31 @@ time_left(infinity) ->
 time_left(Deadline) ->
     max(0, Deadline - erlang:monotonic_time(millisecond)).
 
--spec gather_all(pending(), infinity | integer(), #{pos_integer() => worker_result()}) ->
+-spec gather_all(reference(), pending(), infinity | integer(), #{pos_integer() => worker_result()}) ->
     #{pos_integer() => worker_result()}.
-gather_all(Pending, _Deadline, Acc) when map_size(Pending) =:= 0 ->
+gather_all(_CallRef, Pending, _Deadline, Acc) when map_size(Pending) =:= 0 ->
     Acc;
-gather_all(Pending, Deadline, Acc) ->
+gather_all(CallRef, Pending, Deadline, Acc) ->
+    PendingByRef = pending_by_ref(Pending),
     receive
-        {_Pid, Idx, Result} when is_map_key(Idx, Pending) ->
+        {CallRef, Idx, Result} when is_map_key(Idx, Pending) ->
             {_WPid, Ref} = maps:get(Idx, Pending),
             erlang:demonitor(Ref, [flush]),
-            gather_all(maps:remove(Idx, Pending), Deadline, Acc#{Idx => Result});
-        {'DOWN', Ref, process, _Pid, Reason} ->
-            case find_by_ref(Ref, Pending) of
-                {ok, Idx} ->
-                    %% Worker vanished without sending a result (killed by
-                    %% something other than us, or an exit signal that
-                    %% bypassed run_worker/3's own catch-all).
-                    ExObj = beamtalk_exception_handler:ensure_wrapped(exit, Reason, []),
-                    Result = beamtalk_result:from_tagged_tuple({error, ExObj}),
-                    gather_all(maps:remove(Idx, Pending), Deadline, Acc#{Idx => Result});
-                error ->
-                    %% Stray DOWN for an already-resolved worker — ignore.
-                    gather_all(Pending, Deadline, Acc)
-            end
+            gather_all(CallRef, maps:remove(Idx, Pending), Deadline, Acc#{Idx => Result});
+        {'DOWN', Ref, process, _Pid, Reason} when is_map_key(Ref, PendingByRef) ->
+            %% Worker vanished without sending a result (killed by something
+            %% other than us, or an exit signal that bypassed run_worker/4's
+            %% own catch-all). The is_map_key/2 guard (rather than an unbound
+            %% Ref matched against every 'DOWN') ensures a 'DOWN' belonging to
+            %% some other monitor the caller set up is left in the mailbox
+            %% untouched, instead of being silently consumed here.
+            Idx = maps:get(Ref, PendingByRef),
+            ExObj = beamtalk_exception_handler:ensure_wrapped(exit, Reason, []),
+            Result = beamtalk_result:from_tagged_tuple({error, ExObj}),
+            gather_all(CallRef, maps:remove(Idx, Pending), Deadline, Acc#{Idx => Result})
     after time_left(Deadline) ->
         kill_pending(Pending),
-        drain_pending_messages(Pending),
+        drain_pending_messages(CallRef, Pending),
         TimedOut = maps:map(fun(_Idx, _WorkerRef) -> make_timeout_result() end, Pending),
         maps:merge(Acc, TimedOut)
     end.
@@ -331,40 +341,41 @@ make_timeout_result() ->
 
 -spec any_impl([function()]) -> worker_result().
 any_impl(Blocks) ->
-    Workers = spawn_workers(Blocks),
+    CallRef = erlang:make_ref(),
+    Workers = spawn_workers(Blocks, CallRef),
     Pending = maps:from_list([{Idx, {Pid, Ref}} || {Idx, Pid, Ref} <- Workers]),
     IndexOrder = [Idx || {Idx, _Pid, _Ref} <- Workers],
-    gather_any(Pending, IndexOrder, #{}).
+    gather_any(CallRef, Pending, IndexOrder, #{}).
 
--spec gather_any(pending(), [pos_integer()], #{pos_integer() => term()}) -> worker_result().
-gather_any(Pending, IndexOrder, Errors) when map_size(Pending) =:= 0 ->
+-spec gather_any(reference(), pending(), [pos_integer()], #{pos_integer() => term()}) ->
+    worker_result().
+gather_any(_CallRef, Pending, IndexOrder, Errors) when map_size(Pending) =:= 0 ->
     %% Every block failed — aggregate the reasons (already-wrapped Exception
     %% objects) into a List, in input order. `makeError:` stores the reason
     %% as-is (unlike `from_tagged_tuple/1`, which would try to re-wrap the
     %% whole List as if it were a single raw exception reason).
     Reasons = [maps:get(Idx, Errors) || Idx <- IndexOrder],
     beamtalk_result:'makeError:'(Reasons);
-gather_any(Pending, IndexOrder, Errors) ->
+gather_any(CallRef, Pending, IndexOrder, Errors) ->
+    PendingByRef = pending_by_ref(Pending),
     receive
-        {_Pid, Idx, #{'isOk' := true} = Result} when is_map_key(Idx, Pending) ->
+        {CallRef, Idx, #{'isOk' := true} = Result} when is_map_key(Idx, Pending) ->
             {_WPid, Ref} = maps:get(Idx, Pending),
             erlang:demonitor(Ref, [flush]),
             Losers = maps:remove(Idx, Pending),
             kill_pending(Losers),
-            drain_pending_messages(Losers),
+            drain_pending_messages(CallRef, Losers),
             Result;
-        {_Pid, Idx, #{'isOk' := false, 'errReason' := Reason}} when is_map_key(Idx, Pending) ->
+        {CallRef, Idx, #{'isOk' := false, 'errReason' := Reason}} when is_map_key(Idx, Pending) ->
             {_WPid, Ref} = maps:get(Idx, Pending),
             erlang:demonitor(Ref, [flush]),
-            gather_any(maps:remove(Idx, Pending), IndexOrder, Errors#{Idx => Reason});
-        {'DOWN', Ref, process, _Pid, Reason} ->
-            case find_by_ref(Ref, Pending) of
-                {ok, Idx} ->
-                    ExObj = beamtalk_exception_handler:ensure_wrapped(exit, Reason, []),
-                    gather_any(maps:remove(Idx, Pending), IndexOrder, Errors#{Idx => ExObj});
-                error ->
-                    gather_any(Pending, IndexOrder, Errors)
-            end
+            gather_any(CallRef, maps:remove(Idx, Pending), IndexOrder, Errors#{Idx => Reason});
+        {'DOWN', Ref, process, _Pid, Reason} when is_map_key(Ref, PendingByRef) ->
+            %% See gather_all/4's matching clause for why this is guarded by
+            %% is_map_key/2 instead of matching an unbound Ref.
+            Idx = maps:get(Ref, PendingByRef),
+            ExObj = beamtalk_exception_handler:ensure_wrapped(exit, Reason, []),
+            gather_any(CallRef, maps:remove(Idx, Pending), IndexOrder, Errors#{Idx => ExObj})
     end.
 
 %%% ============================================================================

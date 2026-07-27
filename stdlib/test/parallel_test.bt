@@ -45,18 +45,19 @@ TestCase subclass: ParallelTest
     // process is killed and its slot becomes `Result error:` (timeout),
     // while block 2 (already finished) keeps its real result.
     cache := Ets new: #bt2974AllTimeoutTest type: #set
-    results := Parallel
-      all: #([
-        cache at: #slowPid put: (Erlang erlang self)
-        Timer sleep: 5000
-        #neverSeen
-      ], [#fast])
-      timeout: 50
-    self assert: (results at: 2) value equals: #fast
-    self assert: (results at: 1) isError
-    slowPid := cache at: #slowPid
-    self assert: ((Erlang erlang) is_process_alive: slowPid) not
-    cache delete
+    [
+      results := Parallel
+        all: #([
+          cache at: #slowPid put: (Erlang erlang self)
+          Timer sleep: 5000
+          #neverSeen
+        ], [#fast])
+        timeout: 50
+      self assert: (results at: 2) value equals: #fast
+      self assert: (results at: 1) isError
+      slowPid := cache at: #slowPid
+      self assert: ((Erlang erlang) is_process_alive: slowPid) not
+    ] ensure: [cache delete]
 
   testAllTimeoutAcceptsDuration =>
     // `all:timeout:` also accepts a Duration, matching Timer's convention.
@@ -78,21 +79,22 @@ TestCase subclass: ParallelTest
     // it; block 2 waits just long enough for that registration to land
     // before "winning".
     cache := Ets new: #bt2974AnyLoserTest type: #set
-    result := Parallel
-      any: #([
-        cache at: #loserPid put: (Erlang erlang self)
-        Timer sleep: 5000
-        #slow
-      ], [
-        Timer sleep: 20
-        #fast
-      ])
-    self assert: result value equals: #fast
-    loserPid := cache at: #loserPid
-    // Give the kill signal a moment to land before checking liveness.
-    Timer sleep: 30
-    self assert: ((Erlang erlang) is_process_alive: loserPid) not
-    cache delete
+    [
+      result := Parallel
+        any: #([
+          cache at: #loserPid put: (Erlang erlang self)
+          Timer sleep: 5000
+          #slow
+        ], [
+          Timer sleep: 20
+          #fast
+        ])
+      self assert: result value equals: #fast
+      loserPid := cache at: #loserPid
+      // Give the kill signal a moment to land before checking liveness.
+      Timer sleep: 30
+      self assert: ((Erlang erlang) is_process_alive: loserPid) not
+    ] ensure: [cache delete]
 
   testAnyErrorsOnlyWhenEveryBlockFails =>
     // Every block failing surfaces as `Result error:` wrapping a List of
