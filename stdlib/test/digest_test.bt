@@ -63,3 +63,32 @@ TestCase subclass: DigestTest
 
   testSha256AndSha512Differ =>
     self deny: ((Digest sha256: "abc") asHex =:= (Digest sha512: "abc") asHex)
+
+  // ===== Error paths: type_error on non-binary inputs =====
+  testSha256NonBinaryRaisesTypeError =>
+    @expect type
+    self should: [Digest sha256: 42] raise: #type_error
+
+  testSha512NonBinaryRaisesTypeError =>
+    @expect type
+    self should: [Digest sha512: 42] raise: #type_error
+
+  testMd5NonBinaryRaisesTypeError =>
+    @expect type
+    self should: [Digest md5: 42] raise: #type_error
+
+  testHmacSha256NonBinaryInputRaisesTypeError =>
+    @expect type
+    self should: [Digest hmacSha256: 42 key: "secret"] raise: #type_error
+
+  testHmacSha256NonBinaryKeyRaisesTypeError =>
+    @expect type
+    self should: [Digest hmacSha256: "hello" key: 42] raise: #type_error
+
+  testHmacSha512NonBinaryInputRaisesTypeError =>
+    @expect type
+    self should: [Digest hmacSha512: 42 key: "secret"] raise: #type_error
+
+  testHmacSha512NonBinaryKeyRaisesTypeError =>
+    @expect type
+    self should: [Digest hmacSha512: "hello" key: 42] raise: #type_error
