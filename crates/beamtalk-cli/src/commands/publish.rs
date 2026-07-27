@@ -1213,8 +1213,7 @@ mod tests {
             "should tell the user not to just retry publish: {msg}"
         );
 
-        let index_dir = crate::commands::build_layout::BuildLayout::new(utf8(&fixture.library))
-            .registry_index_dir();
+        let index_dir = fixture.index_dir();
         assert!(
             msg.contains(index_dir.as_str()),
             "should point at the registry index checkout for manual recovery: {msg}"
