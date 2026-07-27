@@ -76,6 +76,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "Object"
             | "ObjectStateChanged"
             | "Package"
+            | "Parallel"
             | "Pid"
             | "Port"
             | "ProcessNavigation"
@@ -1095,6 +1096,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "includes:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Collection".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![Some("E".into())], doc: Some("Test if the collection contains the given element.\n\nDefault implementation iterates with `do:` and returns early on match.\nSubclasses may override with more efficient lookup.\n\n## Examples\n```beamtalk\n#(1, 2, 3) includes: 2      // => true\n#(1, 2, 3) includes: 9      // => false\n```".into()) },
                 MethodInfo { selector: "inject:into:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Collection".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("A".into()), param_types: vec![Some("A".into()), Some("Block(A, E, A)".into())], doc: Some("Reduce the collection with an accumulator.\n\nEvaluates `block` with `(accumulator, element)` for each element.\nReturns the final accumulator value.\n\nKept as `@primitive` because the pure-BT implementation using `do:` with\nlocal-variable mutation does not work for abstract-class methods: the\ncompiler generates `lists:foreach` (no state threading) instead of\n`lists:foldl`.  The Erlang helper calls the block as `Block(Acc, Elem)`\n(accumulator first) to match the Beamtalk `block value: acc value: each`\nconvention expected by `collect:`, `select:`, and `reject:`.\n\n## Examples\n```beamtalk\n#(1, 2, 3) inject: 0 into: [:sum :x | sum + x]  // => 6\n```".into()) },
                 MethodInfo { selector: "collect:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Collection".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Self".into()), param_types: vec![Some("Block(E, R)".into())], doc: Some("Collect results of evaluating `block` on each element.\n\nReturns a collection of the same type as the receiver (species pattern).\nBuilds the result in reverse using `addFirst:` then converts via `species withAll:`.\n\n## Examples\n```beamtalk\n#(1, 2, 3) collect: [:x | x * 2]  // => #(2, 4, 6)\n```".into()) },
+                MethodInfo { selector: "parallelCollect:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Collection".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Self".into()), param_types: vec![Some("Block(E, R)".into())], doc: Some("Like `collect:`, but evaluates `block` for every element concurrently\n(one spawned process per element, via `Parallel all:` — BT-2974)\ninstead of sequentially.\n\n**Concurrency is unbounded** — one process is spawned per element, with\nno pooling or throttling. This is a deliberate v1 scope decision (a\nsimple, correct combinator now beats a bounded scheduler nobody has\nasked for yet). For very large collections, chunk the collection\nyourself before calling `parallelCollect:`, or call `Parallel all:`\ndirectly with your own work queue. A bounded-concurrency variant (e.g.\n`parallelCollect:maxConcurrency:`) is a natural follow-up, not\nimplemented here.\n\nIf any element's `block` evaluation fails, `parallelCollect:` re-raises\nthat failure (the first one, in element order) — matching `collect:`'s\nown behaviour of propagating an exception raised by `block`. Use\n`Parallel all:` directly (on `self collect: [:each | [block value:\neach]]`) if you need every per-element `Result`, including partial\nfailures, instead of a raise.\n\n## Examples\n```beamtalk\n#(1, 2, 3) parallelCollect: [:x | x * 2]  // => #(2, 4, 6)\n```".into()) },
                 MethodInfo { selector: "select:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Collection".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Self".into()), param_types: vec![Some("Block(E, Boolean)".into())], doc: Some("Select elements for which `block` returns true.\n\nReturns a collection of the same type as the receiver (species pattern).\nBuilds the result in reverse using `addFirst:` then converts via `species withAll:`.\n\n## Examples\n```beamtalk\n#(1, 2, 3, 4) select: [:x | x > 2]  // => #(3, 4)\n```".into()) },
                 MethodInfo { selector: "reject:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Collection".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Self".into()), param_types: vec![Some("Block(E, Boolean)".into())], doc: Some("Reject elements for which `block` returns true.\n\n## Examples\n```beamtalk\n#(1, 2, 3, 4) reject: [:x | x > 2]  // => #(1, 2)\n```".into()) },
                 MethodInfo { selector: "detect:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Collection".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("E | Nil".into()), param_types: vec![Some("Block(E, Boolean)".into())], doc: Some("Find the first element for which `block` returns true.\n\nReturns nil if no element matches. Uses `^` (non-local return) for\nearly exit — this compiles to throw/catch on BEAM.\n\n## Examples\n```beamtalk\n#(1, 2, 3) detect: [:x | x > 1]     // => 2\n```".into()) },
@@ -2420,6 +2422,36 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "dependencies:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Package".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("List(String)".into()), param_types: vec![Some("String".into())], doc: Some("Return a List of dependency package names (Strings) for the given package.\n\nReturns an empty List if the package is not found.\n\n## Examples\n```beamtalk\nPackage dependencies: \"stdlib\"\n// => _\n```".into()) },
                 MethodInfo { selector: "packageNameFor:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Package".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("String | Nil".into()), param_types: vec![Some("Symbol".into())], doc: Some("Return the package name (String) that owns the given class name (Symbol).\n\nReturns nil if the class is not found or has no package.\n\n## Examples\n```beamtalk\nPackage packageNameFor: #Object\n// => _\n```".into()) },
                 MethodInfo { selector: "name:version:classes:dependencies:source:".into(), arity: 5, kind: MethodKind::Primary, defined_in: "Package".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Package".into()), param_types: vec![Some("String".into()), Some("String".into()), Some("List(Symbol)".into()), Some("List(String)".into()), Some("String".into())], doc: Some("Creates a new `Package`. Args: name (default: \"\"), version (default: \"\"), classes (default: ...), dependencies (default: ...), source (default: \"\").\n\n*(compiler-generated)*".into()) },
+            ],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    );
+
+    classes.insert(
+        "Parallel".into(),
+        ClassInfo {
+            name: "Parallel".into(),
+            superclass: Some("Object".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: false,
+            is_native: true,
+            handle_scope: None,
+            surface_incomplete: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![
+                MethodInfo { selector: "all:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Parallel".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("List(Result)".into()), param_types: vec![Some("List(Block)".into())], doc: Some("Run each zero-argument block in `blocks` in its own process; block the\ncaller until every block finishes. Returns one `Result` per block, in\nthe same order as `blocks` — a block that raises yields `Result\nerror:` for its slot, but the other blocks still run to completion.\n\n## Examples\n```beamtalk\n(Parallel all: #([1 + 1], [2 + 2])) collect: [:r | r value]  // => #(2, 4)\n((Parallel all: #([1 / 0], [42])) at: 1) isError             // => true\nParallel all: #()                                            // => #()\n```".into()) },
+                MethodInfo { selector: "all:timeout:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Parallel".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("List(Result)".into()), param_types: vec![Some("List(Block)".into()), Some("Integer | Duration".into())], doc: Some("Like `all:`, but with an overall wall-clock deadline (Integer\nmilliseconds or a `Duration`), measured from when `all:timeout:` is\nsent — not per block.\n\nOn timeout, every block still running is killed and its slot becomes\n`Result error:` with a `#timeout` error; blocks that already finished\nkeep their real result.\n\n## Examples\n```beamtalk\nresults := Parallel all: #([Timer sleep: 2000. 1], [2]) timeout: 50\n(results at: 1) isError    // => true\n(results at: 2) value      // => 2\n```".into()) },
+                MethodInfo { selector: "any:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Parallel".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Result".into()), param_types: vec![Some("List(Block)".into())], doc: Some("Run each zero-argument block in `blocks` in its own process; return the\nfirst successful `Result`. Every still-running block is killed as soon\nas a winner is found. If every block fails, returns `Result error:`\nwrapping a `List` of the individual failure reasons, in input order.\n\nRaises `#type_error` if `blocks` is empty.\n\n## Examples\n```beamtalk\n(Parallel any: #([1], [2])) isOk           // => true\n(Parallel any: #([1 / 0], [2 / 0])) isError // => true\n```".into()) },
             ],
             class_variables: vec![],
             type_params: vec![],

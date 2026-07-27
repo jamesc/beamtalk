@@ -1,0 +1,88 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Parallel — block-based fan-out/join combinators (no awaitable futures).
+///
+/// Beamtalk sends are synchronous by default (ADR 0104): a `.` send blocks
+/// the caller and types as the method's return value. The `Future` stub was
+/// deliberately removed (BT-1057) to avoid reintroducing async/await
+/// "function coloring". `Parallel` gives that same blocking contract to
+/// *fan-out* work: each block runs in its own spawned process, but `all:`/
+/// `any:` themselves block the caller and return plain `Result` values —
+/// no future/promise handle ever escapes into user code.
+///
+/// A dedicated class (rather than adding these as `Block`/`Collection`
+/// methods) was chosen because these combinators operate over a *collection
+/// of blocks*, not a single block or a single collection of data — `Parallel`
+/// names that operation the way `OS`/`Random`/`System` name other class-side
+/// utility namespaces. `Collection>>parallelCollect:` (see `Collection.bt`)
+/// is the ergonomic "map my elements in parallel" convenience built on top
+/// of `Parallel all:`.
+///
+/// ## Examples
+/// ```beamtalk
+/// (Parallel all: #([1 + 1], [2 + 2])) collect: [:r | r value]
+///   // => #(2, 4)
+///
+/// results := Parallel all: #([1 / 0], [42])
+/// (results at: 1) isError    // => true
+/// (results at: 2) value      // => 42
+///
+/// (Parallel any: #([1], [2])) isOk   // => true
+/// ```
+///
+/// ## Process model
+/// Each block is spawned in its own process, both linked and monitored to
+/// the caller: the link guarantees a worker cannot outlive the caller (no
+/// orphans if the caller dies mid-flight); the monitor lets the caller
+/// observe each worker's completion without a worker's exit being able to
+/// kill it in return. Every block runs inside an exception boundary, so a
+/// raised exception — or a non-local return (`^`) that can no longer reach
+/// its enclosing method once running in another process — always becomes a
+/// `Result error:` for that slot rather than crashing the caller. See
+/// `beamtalk_parallel.erl` for the full process-model writeup.
+sealed typed Object subclass: Parallel native: beamtalk_parallel
+
+  /// Run each zero-argument block in `blocks` in its own process; block the
+  /// caller until every block finishes. Returns one `Result` per block, in
+  /// the same order as `blocks` — a block that raises yields `Result
+  /// error:` for its slot, but the other blocks still run to completion.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Parallel all: #([1 + 1], [2 + 2])) collect: [:r | r value]  // => #(2, 4)
+  /// ((Parallel all: #([1 / 0], [42])) at: 1) isError             // => true
+  /// Parallel all: #()                                            // => #()
+  /// ```
+  class sealed all: blocks :: List(Block) -> List(Result) => self delegate
+
+  /// Like `all:`, but with an overall wall-clock deadline (Integer
+  /// milliseconds or a `Duration`), measured from when `all:timeout:` is
+  /// sent — not per block.
+  ///
+  /// On timeout, every block still running is killed and its slot becomes
+  /// `Result error:` with a `#timeout` error; blocks that already finished
+  /// keep their real result.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// results := Parallel all: #([Timer sleep: 2000. 1], [2]) timeout: 50
+  /// (results at: 1) isError    // => true
+  /// (results at: 2) value      // => 2
+  /// ```
+  class sealed all: blocks :: List(Block) timeout: ms :: Integer | Duration -> List(Result) =>
+    self delegate
+
+  /// Run each zero-argument block in `blocks` in its own process; return the
+  /// first successful `Result`. Every still-running block is killed as soon
+  /// as a winner is found. If every block fails, returns `Result error:`
+  /// wrapping a `List` of the individual failure reasons, in input order.
+  ///
+  /// Raises `#type_error` if `blocks` is empty.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Parallel any: #([1], [2])) isOk           // => true
+  /// (Parallel any: #([1 / 0], [2 / 0])) isError // => true
+  /// ```
+  class sealed any: blocks :: List(Block) -> Result => self delegate

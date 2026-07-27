@@ -1,0 +1,380 @@
+%% Copyright 2026 James Casey
+%% SPDX-License-Identifier: Apache-2.0
+
+-module(beamtalk_parallel).
+
+%%% **DDD Context:** Runtime Context
+
+-moduledoc """
+Parallel class implementation — block-based fan-out/join combinators (BT-2974).
+
+Beamtalk sends are synchronous by default (ADR 0104): a `.` send blocks the
+caller and types as the method's return value. This module gives that same
+blocking contract to *fan-out* work, instead of exposing an awaitable
+future/promise handle to Beamtalk code (the `Future` stub was deliberately
+removed for exactly this reason — BT-1057, superseding the exploration in
+BT-507). `all/1`, `all/2`, and `any/1` spawn one process per block, block the
+calling process until the combinator is done, and return plain `Result`
+values (`beamtalk_result:t()`) built with `beamtalk_result:from_tagged_tuple/1`
+— no future handle ever escapes to Beamtalk code.
+
+## Process model
+
+Each block is spawned with `erlang:spawn_opt/2` using **both** `link` and
+`monitor` (see `spawn_workers/1`):
+
+- `link` means a worker dies automatically if the calling process dies —
+  no orphaned worker processes are left running after the caller crashes,
+  even mid-block (BT-2974 acceptance criteria: "no orphans").
+- `monitor` lets the caller observe each worker's completion (or an
+  unexpected crash that bypassed the worker's own `try`/`catch`) as an
+  ordinary message, without a worker's exit signal being able to kill the
+  caller.
+
+A worker normally terminates with reason `normal` (it sends its result, then
+its function returns) — a `normal` exit never propagates across a link, so
+the link is harmless in the common case. The case that needs care is
+*deliberately* killing a still-running worker (an `all:timeout:` deadline, or
+a losing `any:` competitor): `exit(Pid, kill)` reaches the caller through the
+link too (as reason `killed`) unless the link is removed first, so every
+deliberate kill in this module calls `erlang:unlink/1` immediately before
+`exit(Pid, kill)` (see `kill_pending/1`).
+
+Every block runs inside a `try ... catch Class:Reason:Stack -> ...` in the
+worker process (see `run_worker/3`), so a raised exception — including a
+stray non-local-return throw from `^`, which cannot cross the process
+boundary back into the block's enclosing method — always becomes a `Result
+error:` for that slot. It never crashes the caller.
+""".
+
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
+
+%% Class methods (canonical colon forms)
+-export(['all:'/1, 'all:timeout:'/2, 'any:'/1]).
+
+%% FFI shims for (Erlang beamtalk_parallel) / `self delegate` dispatch
+-export([all/1, all/2, any/1]).
+
+-type worker_result() :: beamtalk_result:t().
+-type pending() :: #{pos_integer() => {pid(), reference()}}.
+
+%%% ============================================================================
+%%% Class Methods
+%%% ============================================================================
+
+-doc """
+Run each zero-argument block in its own linked+monitored process. Blocks the
+caller until every block has finished (successfully or not). Returns one
+`Result` per block, in the same order as `Blocks` — a block that raises
+yields `Result error:` for its slot; the other blocks still run to
+completion.
+""".
+-spec 'all:'([function()]) -> [worker_result()].
+'all:'(Blocks) when is_list(Blocks) ->
+    validate_blocks('all:', Blocks),
+    all_impl(Blocks, infinity);
+'all:'(Blocks) ->
+    raise_type_error('all:', <<"Argument must be a List of zero-argument Blocks">>, #{
+        got => Blocks
+    }).
+
+-doc """
+Like `all:`, but with an overall wall-clock deadline (Integer milliseconds
+or a Duration) measured from when `all:timeout:` is sent — not per block.
+
+On timeout, every block still running is killed (`unlink` + `exit(Pid,
+kill)`, so the kill cannot reach the caller) and its slot becomes `Result
+error:` with a `timeout`-kind error; blocks that already finished keep their
+real `Result`.
+""".
+-spec 'all:timeout:'([function()], integer() | beamtalk_duration:t()) -> [worker_result()].
+'all:timeout:'(Blocks, #{'$beamtalk_class' := 'Duration'} = D) when is_list(Blocks) ->
+    'all:timeout:'(Blocks, beamtalk_duration:'asMilliseconds'(D));
+'all:timeout:'(Blocks, TimeoutMs) when
+    is_list(Blocks), is_integer(TimeoutMs), TimeoutMs >= 0
+->
+    validate_blocks('all:timeout:', Blocks),
+    all_impl(Blocks, TimeoutMs);
+'all:timeout:'(Blocks, TimeoutMs) when is_list(Blocks) ->
+    raise_type_error(
+        'all:timeout:',
+        <<"Timeout must be a non-negative Integer or a non-negative Duration">>,
+        #{got => TimeoutMs}
+    );
+'all:timeout:'(Blocks, _TimeoutMs) ->
+    raise_type_error(
+        'all:timeout:', <<"Argument must be a List of zero-argument Blocks">>, #{got => Blocks}
+    ).
+
+-doc """
+Run each zero-argument block in its own linked+monitored process; return the
+first successful `Result` (whichever block finishes first with a value).
+Every still-running block is killed as soon as a winner is found (`unlink` +
+`exit(Pid, kill)`). If every block fails, returns `Result error:` wrapping a
+`List` of the individual failure reasons, in input order.
+
+Raises a `type_error` if `Blocks` is empty — "first of nothing" is not a
+meaningful call.
+""".
+-spec 'any:'([function()]) -> worker_result().
+'any:'([]) ->
+    raise_type_error(
+        'any:', <<"Argument must be a non-empty List of zero-argument Blocks">>, #{got => []}
+    );
+'any:'(Blocks) when is_list(Blocks) ->
+    validate_blocks('any:', Blocks),
+    any_impl(Blocks);
+'any:'(Blocks) ->
+    raise_type_error('any:', <<"Argument must be a List of zero-argument Blocks">>, #{
+        got => Blocks
+    }).
+
+%%% ============================================================================
+%%% FFI Shims
+%%%
+%%% `self delegate` / `(Erlang beamtalk_parallel) ...` dispatch derives the
+%%% Erlang function name from the first keyword of the Beamtalk selector
+%%% (stripping the trailing colon) — these shims bridge to the canonical
+%%% colon-quoted implementations above.
+%%% ============================================================================
+
+-doc "FFI shim: `(Erlang beamtalk_parallel) all: blocks`".
+-spec all([function()]) -> [worker_result()].
+all(Blocks) -> 'all:'(Blocks).
+
+-doc "FFI shim: `(Erlang beamtalk_parallel) all: blocks timeout: ms`".
+-spec all([function()], integer() | beamtalk_duration:t()) -> [worker_result()].
+all(Blocks, TimeoutMs) -> 'all:timeout:'(Blocks, TimeoutMs).
+
+-doc "FFI shim: `(Erlang beamtalk_parallel) any: blocks`".
+-spec any([function()]) -> worker_result().
+any(Blocks) -> 'any:'(Blocks).
+
+%%% ============================================================================
+%%% Internal — shared worker spawn
+%%% ============================================================================
+
+-doc """
+Spawn one linked+monitored worker process per block, numbered from 1 in
+input order. Returns `[{Index, Pid, MonitorRef}]`.
+""".
+-spec spawn_workers([function()]) -> [{pos_integer(), pid(), reference()}].
+spawn_workers(Blocks) ->
+    Caller = self(),
+    Indexed = lists:zip(lists:seq(1, length(Blocks)), Blocks),
+    lists:map(
+        fun({Idx, Block}) ->
+            {Pid, Ref} = erlang:spawn_opt(
+                fun() -> run_worker(Caller, Idx, Block) end, [link, monitor]
+            ),
+            {Idx, Pid, Ref}
+        end,
+        Indexed
+    ).
+
+-doc """
+Worker body: evaluate `Block`, catching any exception, and send
+`{self(), Idx, Result}` back to `Caller`. `Result` is always a fully formed
+`beamtalk_result:t()` — the caller never has to interpret a raw exception
+from a worker that reached this far (only an unhandled kill/crash that
+bypasses this `catch` shows up as a `'DOWN'` instead — see `gather_all/3`
+and `gather_any/3`).
+""".
+-spec run_worker(pid(), pos_integer(), function()) -> ok.
+run_worker(Caller, Idx, Block) ->
+    Result =
+        try
+            Value = Block(),
+            beamtalk_result:from_tagged_tuple({ok, Value})
+        catch
+            Class:Reason:Stack ->
+                ExObj = beamtalk_exception_handler:ensure_wrapped(Class, Reason, Stack),
+                beamtalk_result:from_tagged_tuple({error, ExObj})
+        end,
+    Caller ! {self(), Idx, Result},
+    ok.
+
+-doc "Validate that every element of `Blocks` is a zero-argument Block (fun/0).".
+-spec validate_blocks(atom(), [term()]) -> ok.
+validate_blocks(Selector, Blocks) ->
+    case lists:all(fun(B) -> is_function(B, 0) end, Blocks) of
+        true ->
+            ok;
+        false ->
+            raise_type_error(
+                Selector, <<"Every element must be a zero-argument Block">>, #{got => Blocks}
+            )
+    end.
+
+-doc "Find the pending Index whose stored monitor ref matches `Ref`.".
+-spec find_by_ref(reference(), pending()) -> {ok, pos_integer()} | error.
+find_by_ref(Ref, Pending) ->
+    maps:fold(
+        fun
+            (Idx, {_Pid, R}, error) when R =:= Ref -> {ok, Idx};
+            (_Idx, _V, Acc) -> Acc
+        end,
+        error,
+        Pending
+    ).
+
+-doc """
+Kill every still-pending worker. Each is unlinked first so the kill signal
+cannot reach the caller through the link, then demonitored (flushing any
+in-flight `'DOWN'`) before the kill so a race can't deliver a stray message.
+
+Does **not** drain a worker's `{Pid, Idx, Result}` message on its own — a
+worker that finished (sent its result) in the instant before being killed
+can still have that message sitting in the caller's mailbox. Callers pair
+this with `drain_pending_messages/1` so no stray message survives into the
+caller's process after `all:timeout:`/`any:` returns.
+""".
+-spec kill_pending(pending()) -> ok.
+kill_pending(Pending) ->
+    maps:foreach(
+        fun(_Idx, {Pid, Ref}) ->
+            erlang:unlink(Pid),
+            erlang:demonitor(Ref, [flush]),
+            exit(Pid, kill)
+        end,
+        Pending
+    ).
+
+-doc """
+Non-blocking drain of any already-in-flight `{Pid, Idx, Result}` message for
+workers in `Pending`. A worker killed at the exact moment it finished may
+have already enqueued its result before the kill signal took effect; without
+this, that message would sit in the caller's mailbox indefinitely after
+`all:timeout:`/`any:` returns — surprising a caller that is itself a
+long-lived process (e.g. an actor) with an unexpected message later. Always
+called right after `kill_pending/1`, with the same `Pending` map.
+""".
+-spec drain_pending_messages(pending()) -> ok.
+drain_pending_messages(Pending) ->
+    maps:foreach(fun(Idx, {Pid, _Ref}) -> drain_one_message(Pid, Idx) end, Pending).
+
+-spec drain_one_message(pid(), pos_integer()) -> ok.
+drain_one_message(Pid, Idx) ->
+    receive
+        {Pid, Idx, _Result} -> ok
+    after 0 -> ok
+    end.
+
+%%% ============================================================================
+%%% Internal — all:
+%%% ============================================================================
+
+-spec all_impl([function()], timeout()) -> [worker_result()].
+all_impl([], _Timeout) ->
+    [];
+all_impl(Blocks, Timeout) ->
+    Workers = spawn_workers(Blocks),
+    Pending = maps:from_list([{Idx, {Pid, Ref}} || {Idx, Pid, Ref} <- Workers]),
+    Deadline = deadline_for(Timeout),
+    ResultsByIndex = gather_all(Pending, Deadline, #{}),
+    [maps:get(Idx, ResultsByIndex) || {Idx, _Pid, _Ref} <- Workers].
+
+-spec deadline_for(timeout()) -> infinity | integer().
+deadline_for(infinity) -> infinity;
+deadline_for(Ms) -> erlang:monotonic_time(millisecond) + Ms.
+
+-doc "Milliseconds left before `Deadline`, clamped to zero — suitable as a `receive ... after` value.".
+-spec time_left(infinity | integer()) -> timeout().
+time_left(infinity) ->
+    infinity;
+time_left(Deadline) ->
+    max(0, Deadline - erlang:monotonic_time(millisecond)).
+
+-spec gather_all(pending(), infinity | integer(), #{pos_integer() => worker_result()}) ->
+    #{pos_integer() => worker_result()}.
+gather_all(Pending, _Deadline, Acc) when map_size(Pending) =:= 0 ->
+    Acc;
+gather_all(Pending, Deadline, Acc) ->
+    receive
+        {_Pid, Idx, Result} when is_map_key(Idx, Pending) ->
+            {_WPid, Ref} = maps:get(Idx, Pending),
+            erlang:demonitor(Ref, [flush]),
+            gather_all(maps:remove(Idx, Pending), Deadline, Acc#{Idx => Result});
+        {'DOWN', Ref, process, _Pid, Reason} ->
+            case find_by_ref(Ref, Pending) of
+                {ok, Idx} ->
+                    %% Worker vanished without sending a result (killed by
+                    %% something other than us, or an exit signal that
+                    %% bypassed run_worker/3's own catch-all).
+                    ExObj = beamtalk_exception_handler:ensure_wrapped(exit, Reason, []),
+                    Result = beamtalk_result:from_tagged_tuple({error, ExObj}),
+                    gather_all(maps:remove(Idx, Pending), Deadline, Acc#{Idx => Result});
+                error ->
+                    %% Stray DOWN for an already-resolved worker — ignore.
+                    gather_all(Pending, Deadline, Acc)
+            end
+    after time_left(Deadline) ->
+        kill_pending(Pending),
+        drain_pending_messages(Pending),
+        TimedOut = maps:map(fun(_Idx, _WorkerRef) -> make_timeout_result() end, Pending),
+        maps:merge(Acc, TimedOut)
+    end.
+
+-spec make_timeout_result() -> worker_result().
+make_timeout_result() ->
+    Error0 = beamtalk_error:new(timeout, 'Parallel'),
+    Error1 = beamtalk_error:with_selector(Error0, 'all:timeout:'),
+    Error2 = beamtalk_error:with_hint(
+        Error1,
+        <<"Increase the timeout, or make the block itself faster/cancellable">>
+    ),
+    beamtalk_result:from_tagged_tuple({error, Error2}).
+
+%%% ============================================================================
+%%% Internal — any:
+%%% ============================================================================
+
+-spec any_impl([function()]) -> worker_result().
+any_impl(Blocks) ->
+    Workers = spawn_workers(Blocks),
+    Pending = maps:from_list([{Idx, {Pid, Ref}} || {Idx, Pid, Ref} <- Workers]),
+    IndexOrder = [Idx || {Idx, _Pid, _Ref} <- Workers],
+    gather_any(Pending, IndexOrder, #{}).
+
+-spec gather_any(pending(), [pos_integer()], #{pos_integer() => term()}) -> worker_result().
+gather_any(Pending, IndexOrder, Errors) when map_size(Pending) =:= 0 ->
+    %% Every block failed — aggregate the reasons (already-wrapped Exception
+    %% objects) into a List, in input order. `makeError:` stores the reason
+    %% as-is (unlike `from_tagged_tuple/1`, which would try to re-wrap the
+    %% whole List as if it were a single raw exception reason).
+    Reasons = [maps:get(Idx, Errors) || Idx <- IndexOrder],
+    beamtalk_result:'makeError:'(Reasons);
+gather_any(Pending, IndexOrder, Errors) ->
+    receive
+        {_Pid, Idx, #{'isOk' := true} = Result} when is_map_key(Idx, Pending) ->
+            {_WPid, Ref} = maps:get(Idx, Pending),
+            erlang:demonitor(Ref, [flush]),
+            Losers = maps:remove(Idx, Pending),
+            kill_pending(Losers),
+            drain_pending_messages(Losers),
+            Result;
+        {_Pid, Idx, #{'isOk' := false, 'errReason' := Reason}} when is_map_key(Idx, Pending) ->
+            {_WPid, Ref} = maps:get(Idx, Pending),
+            erlang:demonitor(Ref, [flush]),
+            gather_any(maps:remove(Idx, Pending), IndexOrder, Errors#{Idx => Reason});
+        {'DOWN', Ref, process, _Pid, Reason} ->
+            case find_by_ref(Ref, Pending) of
+                {ok, Idx} ->
+                    ExObj = beamtalk_exception_handler:ensure_wrapped(exit, Reason, []),
+                    gather_any(maps:remove(Idx, Pending), IndexOrder, Errors#{Idx => ExObj});
+                error ->
+                    gather_any(Pending, IndexOrder, Errors)
+            end
+    end.
+
+%%% ============================================================================
+%%% Internal — errors
+%%% ============================================================================
+
+-spec raise_type_error(atom(), binary(), map()) -> no_return().
+raise_type_error(Selector, Hint, Details) ->
+    Error0 = beamtalk_error:new(type_error, 'Parallel'),
+    Error1 = beamtalk_error:with_selector(Error0, Selector),
+    Error2 = beamtalk_error:with_hint(Error1, Hint),
+    Error3 = beamtalk_error:with_details(Error2, Details),
+    beamtalk_error:raise(Error3).

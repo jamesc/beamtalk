@@ -1,0 +1,120 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Stdlib tests for Parallel class (BT-2974): block-based fan-out/join
+// combinators. Covers result ordering, partial failure, timeout kill, and
+// `any:` winner/loser process cleanup, plus the `Collection>>parallelCollect:`
+// convenience.
+
+TestCase subclass: ParallelTest
+
+  testAllPreservesInputOrder =>
+    // Results come back in the same order as the input blocks, regardless
+    // of which block finishes first.
+    results := Parallel
+      all: #([
+        Timer sleep: 30
+        1
+      ], [2], [
+        Timer sleep: 10
+        3
+      ])
+    self assert: (results collect: [:r | r value]) equals: #(1, 2, 3)
+
+  testAllWithEmptyListReturnsEmptyList =>
+    self assert: (Parallel all: #()) equals: #()
+
+  testAllPartialFailureOthersStillComplete =>
+    // A crashed block yields `Result error:` for its own slot; the other
+    // blocks still run to completion and return their real values.
+    results := Parallel all: #([1 / 0], [42], [2 + 2])
+    self assert: (results at: 1) isError
+    self assert: (results at: 2) value equals: 42
+    self assert: (results at: 3) value equals: 4
+
+  testAllRejectsNonBlockElements =>
+    self should: [Parallel all: #(1, 2)] raise: #type_error
+
+  testAllTimeoutReturnsRealResultsWhenNotExceeded =>
+    // A generous timeout that every block finishes within: normal results.
+    results := Parallel all: #([1 + 1], [2 + 2]) timeout: 5000
+    self assert: (results collect: [:r | r value]) equals: #(2, 4)
+
+  testAllTimeoutKillsRemainingAndMarksThemAsErrors =>
+    // The overall deadline fires while block 1 is still sleeping; block 1's
+    // process is killed and its slot becomes `Result error:` (timeout),
+    // while block 2 (already finished) keeps its real result.
+    cache := Ets new: #bt2974AllTimeoutTest type: #set
+    results := Parallel
+      all: #([
+        cache at: #slowPid put: (Erlang erlang self)
+        Timer sleep: 5000
+        #neverSeen
+      ], [#fast])
+      timeout: 50
+    self assert: (results at: 2) value equals: #fast
+    self assert: (results at: 1) isError
+    slowPid := cache at: #slowPid
+    self assert: ((Erlang erlang) is_process_alive: slowPid) not
+    cache delete
+
+  testAllTimeoutAcceptsDuration =>
+    // `all:timeout:` also accepts a Duration, matching Timer's convention.
+    results := Parallel all: #([1 + 1]) timeout: (Duration milliseconds: 500)
+    self assert: (results at: 1) value equals: 2
+
+  testAnyReturnsFirstSuccess =>
+    // The fast block wins even though the slow block was spawned first.
+    result := Parallel
+      any: #([
+        Timer sleep: 200
+        #slow
+      ], [#fast])
+    self assert: result value equals: #fast
+
+  testAnyKillsLosingCompetitors =>
+    // Once a winner is found, every still-running competitor is killed.
+    // Block 1 registers its own pid before sleeping so the test can verify
+    // it; block 2 waits just long enough for that registration to land
+    // before "winning".
+    cache := Ets new: #bt2974AnyLoserTest type: #set
+    result := Parallel
+      any: #([
+        cache at: #loserPid put: (Erlang erlang self)
+        Timer sleep: 5000
+        #slow
+      ], [
+        Timer sleep: 20
+        #fast
+      ])
+    self assert: result value equals: #fast
+    loserPid := cache at: #loserPid
+    // Give the kill signal a moment to land before checking liveness.
+    Timer sleep: 30
+    self assert: ((Erlang erlang) is_process_alive: loserPid) not
+    cache delete
+
+  testAnyErrorsOnlyWhenEveryBlockFails =>
+    // Every block failing surfaces as `Result error:` wrapping a List of
+    // the individual failure reasons, in input order.
+    result := Parallel any: #([1 / 0], [2 / 0])
+    self assert: result isError
+    self assert: result error size equals: 2
+
+  testAnyWithEmptyListRaises =>
+    self should: [Parallel any: #()] raise: #type_error
+
+  testParallelCollectPreservesOrder =>
+    self assert: (#(1, 2, 3) parallelCollect: [:x | x * 2]) equals: #(2, 4, 6)
+
+  testParallelCollectOnEmptyCollection =>
+    self assert: (#() parallelCollect: [:x | x * 2]) equals: #()
+
+  testParallelCollectPropagatesElementFailure =>
+    // A raising element block re-raises, matching `collect:`'s own
+    // exception-propagation behaviour (no partial-failure Result here —
+    // use `Parallel all:` directly for that). The block runs inside a
+    // Parallel worker, so the raw `badarith` is classified to `type_error`
+    // by `ensure_wrapped/3` before `unwrap` re-raises it — the same
+    // classification any other FFI-boundary error goes through.
+    self should: [#(1, 0, 2) parallelCollect: [:x | 10 / x]] raise: #type_error
