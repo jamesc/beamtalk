@@ -258,6 +258,17 @@ this, that message would sit in the caller's mailbox indefinitely after
 `all:timeout:`/`any:` returns — surprising a caller that is itself a
 long-lived process (e.g. an actor) with an unexpected message later. Always
 called right after `kill_pending/1`, with the same `Pending` map.
+
+**Residual race**: on a multi-scheduler BEAM node, `exit(Pid, kill)` only
+enqueues the kill signal — a worker running concurrently on another
+scheduler can still execute `Caller ! {CallRef, Idx, Result}` in the window
+between that enqueue and the signal actually being processed, i.e. *after*
+this drain's `receive ... after 0` has already scanned the mailbox and found
+nothing. The result message then lands after the drain returns. `CallRef`
+scoping means it can never be misread as belonging to a later `Parallel`
+call, so this is not a correctness bug, but a long-lived caller (an actor)
+can accumulate a handful of these stray tuples in its mailbox over many
+`all:timeout:`/`any:` calls that happen to race a kill this way.
 """.
 -spec drain_pending_messages(reference(), pending()) -> ok.
 drain_pending_messages(CallRef, Pending) ->
