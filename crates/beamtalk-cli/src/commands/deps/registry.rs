@@ -47,12 +47,15 @@
 //! share their registry caches. [`REGISTRY_CACHE_DIR_ENV_VAR`] overrides the
 //! cache root — a hash of the URL is still appended underneath it, so two
 //! different registry URLs pointed at the same override never clobber each
-//! other's clone. Set it to a fixed path (e.g. `_build/registry`) for a
-//! per-project cache close to the pre-BT-2996 layout, or to a team-wide
-//! mount to share a pre-warmed clone across machines. A stale or corrupt
-//! cache is
-//! cleared by deleting its directory (or `~/.beamtalk/registry/` entirely) —
-//! it is rebuilt from a fresh clone on the next lookup.
+//! other's clone. A relative override (e.g. `_build/registry`, for a
+//! per-project cache close to the pre-BT-2996 layout) is resolved against the
+//! project root, not the process's working directory, so the CLI, LSP and
+//! MCP server — which do not necessarily share a cwd — still agree on one
+//! absolute cache directory and one advisory lock file for the same project
+//! (BT-3007); an absolute path (e.g. a team-wide mount, to share a
+//! pre-warmed clone across machines) is used as-is. A stale or corrupt cache
+//! is cleared by deleting its directory (or `~/.beamtalk/registry/`
+//! entirely) — it is rebuilt from a fresh clone on the next lookup.
 //!
 //! Every clone/refresh/swap of a git-backed index takes an exclusive
 //! advisory file lock (`fs2`) scoped to that registry's cache directory, so
@@ -340,7 +343,9 @@ pub fn ensure_index(
 ///    *root* rather than a direct cache directory: `cache_key(url)` is
 ///    still appended, so two different registry URLs sharing the same
 ///    override (e.g. a team-wide mount) get distinct subdirectories instead
-///    of one clobbering the other's `index/`.
+///    of one clobbering the other's `index/`. A relative override is
+///    resolved against `project_root`, never the process working directory
+///    — see the note below.
 /// 2. A shared, user-level cache at `~/.beamtalk/registry/<hash>/`, keyed by
 ///    a hash of `url` so every project pointing at the same registry shares
 ///    one clone instead of each cloning it into its own `_build/`.
@@ -353,7 +358,22 @@ fn registry_cache_root(url: &str, project_root: &Utf8Path) -> Utf8PathBuf {
     if let Ok(dir) = std::env::var(REGISTRY_CACHE_DIR_ENV_VAR) {
         let trimmed = dir.trim();
         if !trimmed.is_empty() {
-            return Utf8PathBuf::from(trimmed).join(cache_key(url));
+            // A relative override is resolved against `project_root`, not the
+            // process working directory: the CLI, LSP and MCP servers all run
+            // with different cwds, so resolving against cwd would give each
+            // of them a *different* absolute cache directory (and therefore
+            // a different `.lock` file) for what's meant to be one shared
+            // cache — silently defeating `lock_registry_cache`'s whole
+            // purpose (BT-3007). `project_root` is the same stable root
+            // `BEAMTALK_REGISTRY`/`[registry] url` already resolve relative
+            // paths against (see `classify_location`).
+            let override_root = Utf8Path::new(trimmed);
+            let resolved = if override_root.is_absolute() {
+                override_root.to_path_buf()
+            } else {
+                project_root.join(override_root)
+            };
+            return resolved.join(cache_key(url));
         }
     }
 
@@ -1373,6 +1393,67 @@ git = "g"
         assert_ne!(root_a, root_b);
         assert!(root_a.starts_with(utf8(&override_dir)));
         assert!(root_b.starts_with(utf8(&override_dir)));
+    }
+
+    /// RAII guard restoring the process cwd on drop. The working directory is
+    /// process-global, so callers must serialize tests using this with
+    /// `#[serial(cwd)]` — including against each other, or a panic in one
+    /// could strand the process cwd inside a tempdir another test then
+    /// deletes out from under it.
+    struct CwdGuard(std::path::PathBuf);
+
+    impl Drop for CwdGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.0);
+        }
+    }
+
+    #[test]
+    #[serial_test::serial(env_var)]
+    fn test_registry_cache_root_relative_env_var_override_resolves_against_project_root() {
+        // BT-3007: a relative override must resolve against `project_root`,
+        // not the process cwd — matching how a relative `BEAMTALK_REGISTRY`/
+        // `[registry] url` already resolves (see `classify_location`).
+        let project = TempDir::new().unwrap();
+        let project_root = utf8(&project);
+        // SAFETY: serialized via #[serial(env_var)].
+        let _guard = unsafe { EnvVarGuard::set(REGISTRY_CACHE_DIR_ENV_VAR, "_build/registry") };
+
+        let url = "https://example.test/registry";
+        let cache_root = registry_cache_root(url, &project_root);
+        assert_eq!(
+            cache_root,
+            project_root.join("_build/registry").join(cache_key(url))
+        );
+    }
+
+    #[test]
+    #[serial_test::serial(env_var, cwd)]
+    fn test_registry_cache_root_relative_env_var_override_ignores_process_cwd() {
+        // BT-3007 regression: the CLI and the LSP server can run with
+        // different working directories. If a relative override resolved
+        // against the process cwd instead of `project_root`, they would
+        // compute different absolute cache directories — and therefore
+        // different `.lock` files — for the very same project, silently
+        // defeating the advisory lock's whole purpose. Resolving the same
+        // `project_root` from two different cwds must give the same answer.
+        let project = TempDir::new().unwrap();
+        let project_root = utf8(&project);
+        let elsewhere = TempDir::new().unwrap();
+        // SAFETY: serialized via #[serial(env_var, cwd)].
+        let _env_guard = unsafe { EnvVarGuard::set(REGISTRY_CACHE_DIR_ENV_VAR, "_build/registry") };
+        let url = "https://example.test/registry";
+
+        let original_cwd = std::env::current_dir().unwrap();
+        let _cwd_guard = CwdGuard(original_cwd);
+
+        std::env::set_current_dir(project_root.as_std_path()).unwrap();
+        let from_project_root_cwd = registry_cache_root(url, &project_root);
+
+        std::env::set_current_dir(elsewhere.path()).unwrap();
+        let from_elsewhere_cwd = registry_cache_root(url, &project_root);
+
+        assert_eq!(from_project_root_cwd, from_elsewhere_cwd);
     }
 
     #[test]
