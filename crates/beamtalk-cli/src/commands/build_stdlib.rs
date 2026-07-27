@@ -835,21 +835,36 @@ fn mark_parallel_spawns(class_methods: &mut [MethodMeta]) -> Result<()> {
     Ok(())
 }
 
-/// Mark `Collection>>parallelCollect:` as spawning its block argument (BT-2974)
-/// — it delegates to `Parallel all:` under the hood, same rationale as
-/// `mark_parallel_spawns`.
+/// Mark `Collection>>parallelCollect:` and `parallelCollect:maxConcurrency:`
+/// as spawning their block argument (BT-2974, BT-3006 follow-up) — both
+/// delegate to `Parallel all:` under the hood (directly, or via the internal
+/// `runChunked:maxConcurrency:` helper), same rationale as
+/// `mark_parallel_spawns`. The internal `runChunked:...` helpers are not
+/// marked: their own parameter is an already-wrapped `List(Block)`, not the
+/// user's raw block, so the same-actor-deadlock risk this metadata guards
+/// against doesn't apply to their own call sites the way it does to the two
+/// public entry points.
 fn mark_parallel_collect_spawns(methods: &mut [MethodMeta]) -> Result<()> {
     let mut found = false;
+    let mut found_max_concurrency = false;
     for m in methods.iter_mut() {
-        if m.selector == "parallelCollect:" {
-            m.spawns_block = true;
-            found = true;
+        match m.selector.as_str() {
+            "parallelCollect:" => {
+                m.spawns_block = true;
+                found = true;
+            }
+            "parallelCollect:maxConcurrency:" => {
+                m.spawns_block = true;
+                found_max_concurrency = true;
+            }
+            _ => {}
         }
     }
-    if !found {
+    if !found || !found_max_concurrency {
         miette::bail!(
-            "Collection metadata mismatch: expected instance method `parallelCollect:` \
-             but it was not found"
+            "Collection metadata mismatch: expected instance methods `parallelCollect:` \
+             and `parallelCollect:maxConcurrency:` but found={found}, \
+             found_max_concurrency={found_max_concurrency}"
         );
     }
     Ok(())
