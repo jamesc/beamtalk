@@ -1016,13 +1016,21 @@ open(Path, Mode) when
 ->
     'open:mode:'(Path, Mode);
 open(_Path, _Other) ->
-    beamtalk_error:raise_type_error(
-        'File',
-        'open:',
-        <<
-            "Expected a Block with 1 argument (open:do:) or a mode Symbol "
-            "#read, #write, #append, #readWrite (open:mode:)"
-        >>
+    %% Deliberately no selector on the error: we cannot tell which of
+    %% `open:do:` / `open:mode:` was meant, and a made-up `open:` would mislead
+    %% anyone reading the record's selector field. The message names both.
+    Error0 = beamtalk_error:new(type_error, 'File'),
+    Error1 = beamtalk_error:with_message(
+        Error0, <<"File 'open:' — second argument is neither a Block nor a mode Symbol">>
+    ),
+    beamtalk_error:raise(
+        beamtalk_error:with_hint(
+            Error1,
+            <<
+                "Pass a 1-argument Block for 'open:do:', or one of #read, #write, "
+                "#append, #readWrite for 'open:mode:'"
+            >>
+        )
     ).
 -spec open(binary(), atom(), Do :: fun((map()) -> term())) -> beamtalk_result:t().
 open(Path, Mode, Block) -> 'open:mode:do:'(Path, Mode, Block).

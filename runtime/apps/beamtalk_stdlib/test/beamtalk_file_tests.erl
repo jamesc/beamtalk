@@ -2522,9 +2522,14 @@ open_mode_do_non_block_raises_test() ->
 
 open_shim_rejects_ambiguous_second_argument_test() ->
     %% open/2 backs both open:do: and open:mode:; nil is neither a Block nor a
-    %% mode, and guessing would report the wrong selector's error.
+    %% mode, and guessing would report the wrong selector's error. The error
+    %% carries no selector at all — naming a made-up 'open:' would mislead
+    %% anyone reading the record — and names both candidates in the message.
     ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = type_error, selector = undefined}
+        },
         beamtalk_file:open(<<"x.txt">>, nil)
     ).
 
