@@ -59,6 +59,12 @@ while IFS= read -r -d '' f; do
     # `file -b` reports Mach-O executables, dylibs, and bundles; skip shell
     # scripts (bin/server, bin/bt_attach's launcher wrapper), text config,
     # and .beam bytecode (interpreted by beam.smp, not itself Mach-O).
+    #
+    # `find -L` (below) follows symlinks: mix releases are full of them
+    # (see package-liveview-release.sh's own `cp -RL` comment) — without
+    # `-L`, `-type f` would skip a symlinked Mach-O outright, and if Tauri's
+    # resource copy later dereferences it into a real file in the .app
+    # bundle, that copy would carry no signature at all.
     if file -b "${f}" | grep -q "Mach-O"; then
         rel="${f#"${RELEASE_DIR}"/}"
         echo "  signing: ${rel}"
@@ -68,7 +74,7 @@ while IFS= read -r -d '' f; do
             "${f}"
         count=$((count + 1))
     fi
-done < <(find "${RELEASE_DIR}" -type f -print0)
+done < <(find -L "${RELEASE_DIR}" -type f -print0)
 
 if [ "${count}" -eq 0 ]; then
     echo "⚠️  No Mach-O binaries found under ${RELEASE_DIR} — is the path correct?" >&2

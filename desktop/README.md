@@ -24,8 +24,17 @@ desktop/
       dto.rs             JSON view models for the frontend
     entitlements.plist  Hardened Runtime entitlements for the bundled BEAM
                          release (BT-2987 — see the packaging section below)
+    icons/               Placeholder icon set (resized from
+                         editors/vscode/images/icon.png — the existing
+                         Beamtalk brand asset) so the bundler has something
+                         to embed; swap for real desktop-app art before a
+                         real release
     tauri.conf.json
     capabilities/default.json
+    Cargo.lock            Committed (unlike the main workspace's) — this is a
+                         shipped binary application, not a library; see the
+                         root .gitignore's Cargo.lock exception and its
+                         comment
   ui/                  Frontend: plain HTML/CSS/JS, no build step
 ```
 
@@ -97,9 +106,15 @@ root/sudo access to install them). What that means concretely:
   `tauri-plugin-single-instance = "2"`, `tauri-build = "2"`, plus every
   transitive dependency) and started compiling — it got as far as building
   several dozen crates before failing at `glib-sys`'s build script, which
-  needs `pkg-config` to find `glib-2.0` (not installed here). The resulting
-  `Cargo.lock` is committed, so the dependency graph itself is pinned and
-  known-good.
+  needs `pkg-config` to find `glib-2.0` (not installed here, and this
+  environment has no root/sudo to add it either — re-confirmed identically
+  in the BT-2987 packaging session, same missing-`glib-2.0` failure).
+  `Cargo.lock` is now actually committed (BT-2987 — the BT-2986 session that
+  first wrote this paragraph generated one locally but it was silently
+  caught by the root `.gitignore`'s blanket `Cargo.lock` rule and never
+  made it into git; see that file's `desktop/src-tauri/Cargo.lock`
+  exception), so the dependency graph is genuinely pinned now, not just
+  described as such.
 - **Not verified**: this crate's own Rust source (`main.rs`, `commands.rs`,
   `state.rs`, `launcher.rs`, `dto.rs`) has **not** been type-checked by
   `rustc` — the build never got far enough to reach this crate's own

@@ -77,6 +77,31 @@ on:
         required: false
         type: boolean
         default: true
+    # All optional: their absence is the documented fail-open path (unsigned
+    # build), not a missing-input error. A future caller (release.yml, per
+    # the header note above) needs to pass these explicitly — reusable
+    # workflows only see secrets a caller maps here or forwards via
+    # `secrets: inherit` — e.g.:
+    #   secrets:
+    #     APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+    #     APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+    #     APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+    #     APPLE_ID: ${{ secrets.APPLE_ID }}
+    #     APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+    #     APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    secrets:
+      APPLE_CERTIFICATE:
+        required: false
+      APPLE_CERTIFICATE_PASSWORD:
+        required: false
+      APPLE_SIGNING_IDENTITY:
+        required: false
+      APPLE_ID:
+        required: false
+      APPLE_PASSWORD:
+        required: false
+      APPLE_TEAM_ID:
+        required: false
 
 concurrency:
   group: desktop-release-${{ github.ref }}
@@ -168,21 +193,25 @@ jobs:
         with:
           workspaces: desktop/src-tauri -> target
 
-      # Tauri v2 Linux prerequisites (WebKitGTK 4.1 branch + AppImage/deb
-      # bundler deps). https://v2.tauri.app/start/prerequisites/
+      # Tauri v2's documented Debian/Ubuntu prerequisites
+      # (https://v2.tauri.app/start/prerequisites/), plus `patchelf` for the
+      # AppImage bundle target. Note: `libayatana-appindicator3-dev`, not the
+      # older `libappindicator3-dev` — the latter is gone on current Ubuntu.
       - name: Install Linux Tauri prerequisites
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
-            librsvg2-dev \
-            patchelf \
             build-essential \
-            libssl-dev \
+            curl \
+            wget \
+            file \
             libxdo-dev \
-            file
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
 
       # No `--locked`: we don't control tauri-cli's own published lockfile,
       # and pinning purely by `^2.0.0` here is deliberate (matches the `"2"`
@@ -211,8 +240,11 @@ jobs:
           security create-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
           security set-keychain-settings -lut 21600 "${KEYCHAIN_PATH}"
           security unlock-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+          # -T (not -A): scope key access to codesign/security specifically,
+          # rather than granting every app on the runner unprompted use.
           security import "${CERT_PATH}" -P "${APPLE_CERTIFICATE_PASSWORD}" \
-            -A -t cert -f pkcs12 -k "${KEYCHAIN_PATH}"
+            -t cert -f pkcs12 -k "${KEYCHAIN_PATH}" \
+            -T /usr/bin/codesign -T /usr/bin/security
           security set-key-partition-list -S apple-tool:,apple:,codesign: \
             -s -k "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
           security list-keychains -d user -s "${KEYCHAIN_PATH}" login.keychain
@@ -264,9 +296,18 @@ jobs:
         id: package
         run: scripts/ci/package-desktop-release.sh "${{ steps.version.outputs.version }}" "${{ matrix.platform }}"
 
+      # Values come via `env:`, not interpolated straight into the script
+      # body — GitHub Actions' `${{ }}` substitution is a literal text
+      # replacement done before the shell ever sees the script, so a value
+      # containing a stray quote or `$(...)` would otherwise be executed,
+      # not just printed. Not currently reachable by anything but this job's
+      # own script output, but cheap to close off categorically.
       - name: Record artifact sizes
+        env:
+          ARCHIVES: ${{ steps.package.outputs.archives }}
         run: |
           {
+            echo ""
             echo "| Artifact | Size |"
             echo "|---|---|"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -274,7 +315,7 @@ jobs:
             [ -n "${archive}" ] || continue
             size=$(du -h "${archive}" | cut -f1)
             echo "| \`$(basename "${archive}")\` | ${size} |" >> "$GITHUB_STEP_SUMMARY"
-          done <<< "${{ steps.package.outputs.archives }}"
+          done <<< "${ARCHIVES}"
 
       # A glob, not the multiline `archives` output directly: interpolating
       # a multiline string twice (once bare, once with `.sha256` appended)
@@ -295,11 +336,29 @@ jobs:
         if: github.event_name == 'release' && inputs.publish
         env:
           GH_TOKEN: ${{ github.token }}
+          ARCHIVES: ${{ steps.package.outputs.archives }}
+          REPO: ${{ github.repository }}
         run: |
           while IFS= read -r archive; do
             [ -n "${archive}" ] || continue
             gh release upload "${GITHUB_REF_NAME}" \
               "${archive}" "${archive}.sha256" \
-              --repo "${{ github.repository }}" \
+              --repo "${REPO}" \
               --clobber
-          done <<< "${{ steps.package.outputs.archives }}"
+          done <<< "${ARCHIVES}"
+
+      # Drop the temporary signing keychain regardless of job outcome — the
+      # runner itself is ephemeral, but leaving private-key material
+      # referenced from the login keychain's search list for the rest of the
+      # job (or a self-hosted runner's next job) is unnecessary exposure.
+      # Checks for the keychain file directly rather than gating on
+      # `steps.apple_cert.outputs.configured` — that output is only written
+      # at the END of the import step, so a mid-import failure (bad
+      # password, corrupt cert) would otherwise leave a partially-created
+      # keychain behind uncleaned.
+      - name: Clean up signing keychain
+        if: always() && runner.os == 'macOS'
+        run: |
+          keychain="${RUNNER_TEMP}/desktop-signing.keychain-db"
+          [ -f "${keychain}" ] && security delete-keychain "${keychain}"
+          true

@@ -15,6 +15,14 @@
 Cargo.lock
 .cargo/
 
+# ...except desktop/src-tauri's: it's a shipped binary application (its own
+# Cargo workspace, excluded from the root one — see root Cargo.toml), and
+# unlike the main workspace's libraries, an application's Cargo.lock should
+# be committed so the desktop-release.yml packaging lane (BT-2987) builds a
+# reproducible, versioned artifact rather than re-resolving the full Tauri
+# dependency graph fresh on every CI run.
+!/desktop/src-tauri/Cargo.lock
+
 # IDEs and editors
 *.swp
 *.swo

@@ -331,6 +331,11 @@ dist-liveview:
 # dist-liveview/ release as a Tauri resource, so run `just dist-liveview`
 # first (or after any editors/liveview change). Same recipe
 # .github/workflows/desktop-release.yml runs in CI, per platform.
+#
+# The app version is overridden from the repo's VERSION file via `--config`
+# (a merge patch, not an in-place edit of tauri.conf.json — its own committed
+# "0.1.0" is just a fallback for `cargo tauri dev`) so shipped .deb/.dmg/.app
+# metadata never drifts from the version every other release artifact uses.
 [unix]
 dist-desktop-platform bundles:
     #!/usr/bin/env bash
@@ -343,9 +348,10 @@ dist-desktop-platform bundles:
         echo "❌ cargo-tauri not found. Install: cargo install tauri-cli --version \"^2.0.0\""
         exit 1
     fi
-    echo "📦 Building desktop app ({{bundles}})..."
+    VERSION="$(tr -d '[:space:]' < VERSION)"
+    echo "📦 Building desktop app v${VERSION} ({{bundles}})..."
     cd desktop
-    cargo tauri build --bundles "{{bundles}}"
+    cargo tauri build --bundles "{{bundles}}" --config "{\"version\":\"${VERSION}\"}"
     echo "✅ Desktop app bundle(s) in desktop/src-tauri/target/release/bundle/"
 
 # Build the desktop app bundle for the host platform (BT-2987), auto-picking
