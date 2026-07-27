@@ -410,11 +410,16 @@ mode_error_hint_names_the_denied_direction_test() ->
         #{'errReason' := #{error := #beamtalk_error{hint = H}}} = Result,
         H
     end,
+    %% Match the mode being prescribed (`mode: #read`), not a bare `#read`:
+    %% both hints mention #readWrite as the both-ways option, and `#read` is a
+    %% prefix of it, so the bare form would match either hint and prove nothing.
     with_temp_handle(<<"data">>, read, fun(ReadOnly) ->
         WriteHint = Hint(beamtalk_file_handle:write(ReadOnly, <<"x">>)),
-        ?assertNotEqual(nomatch, binary:match(WriteHint, <<"#write">>))
+        ?assertNotEqual(nomatch, binary:match(WriteHint, <<"mode: #write">>)),
+        ?assertEqual(nomatch, binary:match(WriteHint, <<"mode: #read">>))
     end),
     with_temp_handle(<<>>, append, fun(AppendOnly) ->
         ReadHint = Hint(beamtalk_file_handle:read(AppendOnly, 1)),
-        ?assertNotEqual(nomatch, binary:match(ReadHint, <<"#read'">>))
+        ?assertNotEqual(nomatch, binary:match(ReadHint, <<"mode: #read">>)),
+        ?assertEqual(nomatch, binary:match(ReadHint, <<"mode: #write">>))
     end).
