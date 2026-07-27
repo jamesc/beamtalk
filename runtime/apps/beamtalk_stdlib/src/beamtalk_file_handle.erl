@@ -441,9 +441,14 @@ mode_error_record(Handle, Selector, Mode, Intent) ->
         iolist_to_binary([<<"FileHandle was not opened for ">>, Intent])
     ),
     Error3 = beamtalk_error:with_details(Error2, #{path => path_of(Handle), mode => Mode}),
-    beamtalk_error:with_hint(
-        Error3, <<"Reopen with 'File open: path mode: #readWrite' to both read and write">>
-    ).
+    beamtalk_error:with_hint(Error3, mode_hint(Intent)).
+
+-doc "Name the mode that grants the direction the caller was denied.".
+-spec mode_hint(binary()) -> binary().
+mode_hint(<<"reading">>) ->
+    <<"Reopen with 'File open: path mode: #read', or #readWrite to also write">>;
+mode_hint(_Writing) ->
+    <<"Reopen with 'File open: path mode: #write' or #append, or #readWrite to also read">>.
 
 -spec path_of(map()) -> binary().
 path_of(Handle) ->

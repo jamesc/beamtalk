@@ -402,3 +402,19 @@ dispatch_and_has_method_agree_test() ->
          || {Selector, Args} <- Selectors
         ]
     end).
+
+mode_error_hint_names_the_denied_direction_test() ->
+    %% The hint should name the mode that grants what the caller was denied,
+    %% not blanket-recommend #readWrite in both directions.
+    Hint = fun(Result) ->
+        #{'errReason' := #{error := #beamtalk_error{hint = H}}} = Result,
+        H
+    end,
+    with_temp_handle(<<"data">>, read, fun(ReadOnly) ->
+        WriteHint = Hint(beamtalk_file_handle:write(ReadOnly, <<"x">>)),
+        ?assertNotEqual(nomatch, binary:match(WriteHint, <<"#write">>))
+    end),
+    with_temp_handle(<<>>, append, fun(AppendOnly) ->
+        ReadHint = Hint(beamtalk_file_handle:read(AppendOnly, 1)),
+        ?assertNotEqual(nomatch, binary:match(ReadHint, <<"#read'">>))
+    end).
