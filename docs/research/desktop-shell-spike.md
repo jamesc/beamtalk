@@ -274,6 +274,19 @@ coordinator front would have to spawn children with the same care anyway").
 Orphan-reaping is not a Tauri-only cost; it is a **spawn-a-child-process** cost,
 paid by whichever shell does the spawning.
 
+**Caveat found on review, to carry into BT-2985**: the coordinator spawns via
+`Port.open/2`, not `setsid ... & disown` — a different lifetime relationship
+than `broker.sh` uses. A BEAM port ties the front's OS process to the port's
+connected process (here, the Bandit request handler that served
+`/attach/:id`); when that handler exits, the BEAM's port driver can signal
+the spawned process. In practice `pkill -f coordinator.exs` sends SIGTERM
+then SIGKILL to the whole BEAM without a clean shutdown, so the observed
+orphan-survival above still held — but a *graceful* coordinator exit (Ctrl-C,
+triggering OTP's normal shutdown, which does close ports) could behave
+differently, and wasn't tested. A Rust broker spawning via Tauri's process
+API should confirm which lifetime model it gets rather than assume it
+matches `setsid & disown`.
+
 ## No-shell coordinator — built, and it works
 
 `coordinator/coordinator.exs`: a single-file, throwaway Elixir/Plug/Bandit app

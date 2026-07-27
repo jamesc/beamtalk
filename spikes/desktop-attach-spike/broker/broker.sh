@@ -151,8 +151,8 @@ _spawn() {
       ${extra_env} \
       setsid "${LIVEVIEW_SERVER}" >"${logfile}" 2>&1 &
   fi
-  disown
   local pid=$!
+  disown
   echo "${pid}" >"${pidfile}"
   printf 'workspace=%s\nport=%s\nnode=%s\npid=%s\n' "${ws_id}" "${port}" "${node}" "${pid}" >"${metafile}"
   echo "${pid}"

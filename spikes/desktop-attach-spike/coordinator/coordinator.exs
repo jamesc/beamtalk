@@ -156,7 +156,6 @@ defmodule Coordinator.Spawner do
         _ -> nil
       end
 
-    Coordinator.State.put(ws_id, port, os_pid)
     {port, os_pid}
   end
 
@@ -265,13 +264,25 @@ defmodule Coordinator.Router do
     Plug.Conn.send_resp(conn, 404, "not found")
   end
 
+  # BT-2984 review finding: State.put/3 must not happen until wait_ready
+  # confirms the front is actually serving /readiness. A concurrent
+  # /attach/:id request only stops racing a second spawn (claim_or_get) — a
+  # waiter in await/2 still returns as soon as it sees a %{port: _} entry, so
+  # writing the entry before readiness would hand a not-yet-ready port to a
+  # concurrent caller. On timeout, drop the :pending claim so a later attach
+  # isn't permanently blocked by a claim that will never resolve.
   defp spawn_and_wait(ws_id, deadline) do
-    {port, _os_pid} = Coordinator.Spawner.spawn_front(ws_id)
+    {port, os_pid} = Coordinator.Spawner.spawn_front(ws_id)
     remaining = max(deadline - System.monotonic_time(:millisecond), 0)
 
     case wait_ready(port, remaining) do
-      :ok -> {:ok, port}
-      :timeout -> :timeout
+      :ok ->
+        Coordinator.State.put(ws_id, port, os_pid)
+        {:ok, port}
+
+      :timeout ->
+        Coordinator.State.drop(ws_id)
+        :timeout
     end
   end
 
