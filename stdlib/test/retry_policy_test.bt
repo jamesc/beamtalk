@@ -121,6 +121,31 @@ TestCase subclass: RetryPolicyTest
       self assert: (negativeCoefficient intervalForAttempt: attempt) >= 0
     ]
 
+  // Regression: cappedRawIntervalForAttempt: used to unconditionally route
+  // through growInterval:remaining:cap:, an O(attempt) loop — for a
+  // constant-backoff (backoffCoefficient = 1.0) or decaying-backoff (< 1.0)
+  // policy, that loop never reaches its early-exit (the interval never
+  // grows to cross the cap), so intervalForAttempt:'s cost grew linearly
+  // with attempt, making an unlimited-attempts do: loop's total
+  // interval-computation cost quadratic in the number of retries. Both
+  // cases now use a direct O(1) closed-form computation instead (safe from
+  // Float overflow in this range, since the value only shrinks or stays
+  // constant). A 50-million-attempt call finishing at all demonstrates the
+  // O(1) path is actually taken — the old O(attempt) loop would not
+  // complete in any reasonable test time at this scale.
+  testIntervalForAttemptNonGrowingBackoffStaysFastForHugeAttemptCounts =>
+    constant := RetryPolicy new: #{
+      #initialInterval => 1000,
+      #backoffCoefficient => 1.0
+    }
+    self assert: (constant intervalForAttempt: 50000000) equals: 1000
+
+    decaying := RetryPolicy new: #{
+      #initialInterval => 1000,
+      #backoffCoefficient => 0.5
+    }
+    self assert: (decaying intervalForAttempt: 50000000) equals: 0
+
   testIntervalForAttemptCappedWellPastOldFloatOverflowPoint =>
     capped := RetryPolicy new: #{
       #backoffCoefficient => 2.0,
