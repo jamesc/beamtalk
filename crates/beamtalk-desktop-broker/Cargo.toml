@@ -1,0 +1,41 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "beamtalk-desktop-broker"
+description = "Desktop attach connection-broker core: discovery, spawn, readiness, reaping (ADR 0097)"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["beam", "smalltalk", "desktop"]
+categories = ["development-tools"]
+
+[lib]
+name = "beamtalk_desktop_broker"
+path = "src/lib.rs"
+
+[dependencies]
+beamtalk-workspace.workspace = true
+dirs.workspace = true
+miette.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+tracing.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
+
+[dev-dependencies]
+tempfile = "3.14"
+
+[lints]
+workspace = true

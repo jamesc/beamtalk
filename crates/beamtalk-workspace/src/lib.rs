@@ -17,6 +17,10 @@ use std::fmt::Write;
 use miette::{IntoDiagnostic, Result, miette};
 use sha2::{Digest, Sha256};
 
+/// epmd (Erlang Port Mapper Daemon) client: `NAMES_REQ` TCP protocol,
+/// deregistration polling, registration lookup.
+pub mod epmd;
+
 /// Generate a workspace ID from a project path.
 ///
 /// Uses SHA256 hash of the canonicalized absolute path (first 12 hex chars).
