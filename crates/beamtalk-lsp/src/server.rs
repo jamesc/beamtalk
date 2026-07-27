@@ -795,12 +795,13 @@ impl Backend {
     /// without a `beamtalk-lsp -> beamtalk-cli` dependency (forbidden — see
     /// `docs/development/architecture-principles.md`).
     ///
-    /// Lenient by design: a root with no `beamtalk.toml`, or one that fails
-    /// to parse, contributes an empty table for that root (Rule 1 defaults)
-    /// rather than blocking diagnostics entirely — a malformed manifest
-    /// already fails loudly at `beamtalk build` time, and the LSP must keep
-    /// publishing diagnostics for open files regardless. Parse failures are
-    /// logged so the mismatch is discoverable. A multi-root workspace merges
+    /// Lenient by design: a root with no `beamtalk.toml`, an I/O error reading
+    /// it (permissions, EISDIR, etc.), or one that fails to parse, contributes
+    /// an empty table for that root (Rule 1 defaults) rather than blocking
+    /// diagnostics entirely — a malformed manifest already fails loudly at
+    /// `beamtalk build` time, and the LSP must keep publishing diagnostics for
+    /// open files regardless. Non-`NotFound` I/O errors and parse failures are
+    /// logged as `WARN` so the mismatch is discoverable. A multi-root workspace merges
     /// every root's table into one (later roots win on category collisions);
     /// like `set_has_package_dependencies`, this is a whole-session
     /// simplification, not a per-file lookup.
