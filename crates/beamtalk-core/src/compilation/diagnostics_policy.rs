@@ -249,6 +249,36 @@ pub fn parse_diagnostics_table_from_manifest_toml(
     parse_diagnostics_table(value.get("diagnostics"))
 }
 
+/// Load and parse the `[diagnostics]` severity-override table from
+/// `<root>/beamtalk.toml` (ADR 0100 Rule 3).
+///
+/// Lenient by design: a root with no `beamtalk.toml`, or one whose manifest
+/// fails to parse, yields an empty table (Rule 1 defaults) — a malformed
+/// manifest already fails loudly at `beamtalk build` time. Parse failures are
+/// logged at `WARN` level so the mismatch is discoverable without blocking
+/// compilation or diagnostics.
+///
+/// This is the shared per-root loader for both `beamtalk-compiler-port` and
+/// `beamtalk-lsp`, which each previously reimplemented the same pattern.
+#[must_use]
+pub fn load_diagnostics_table_for_root(root: &std::path::Path) -> DiagnosticsTable {
+    let manifest_path = root.join("beamtalk.toml");
+    let Ok(content) = std::fs::read_to_string(&manifest_path) else {
+        return DiagnosticsTable::new();
+    };
+    match parse_diagnostics_table_from_manifest_toml(&content) {
+        Ok(table) => table,
+        Err(e) => {
+            tracing::warn!(
+                path = %manifest_path.display(),
+                error = %e,
+                "failed to parse [diagnostics] table in beamtalk.toml; using Rule 1 defaults"
+            );
+            DiagnosticsTable::new()
+        }
+    }
+}
+
 /// Parse `[package] name` directly out of a `beamtalk.toml` file's raw TOML
 /// content (BT-2960), for the same reason
 /// [`parse_diagnostics_table_from_manifest_toml`] exists: the LSP has no
