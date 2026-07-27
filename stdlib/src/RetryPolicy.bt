@@ -57,11 +57,14 @@ typed Value subclass: RetryPolicy
   /// sentinel when not — see `unlimitedIntervalCap`), then randomized within
   /// `[0, cappedDelay]` when `jitter` is true.
   ///
-  /// Grows by repeated multiplication and stops the instant the running
-  /// value would reach the cap, rather than raising `backoffCoefficient` to
-  /// the full `attempt - 1` power up front — that would overflow `Float` and
-  /// raise for `attempt` in the thousands, regardless of `maximumInterval`
-  /// (BT-3006).
+  /// When `backoffCoefficient` exceeds 1 (real exponential growth) or is
+  /// negative, this grows by repeated multiplication and stops the instant
+  /// the running value would reach the cap, rather than raising
+  /// `backoffCoefficient` to the full `attempt - 1` power up front — that
+  /// would overflow `Float` and raise for `attempt` in the thousands,
+  /// regardless of `maximumInterval` (BT-3006). A coefficient in `[0, 1]`
+  /// (constant or decaying backoff) can never overflow this way, so it uses
+  /// the direct power computation instead — see `cappedRawIntervalForAttempt:`.
   ///
   /// ## Examples
   /// ```beamtalk
