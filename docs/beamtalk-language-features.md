@@ -4521,6 +4521,7 @@ See [ADR 0071](ADR/0071-class-visibility-internal-modifier.md) for the full desi
 | **Supervisor**, **DynamicSupervisor** | OTP supervision trees ([ADR 0059](ADR/0059-supervision-tree-syntax.md)) |
 | **AtomicCounter** | Lock-free shared counter |
 | **Timer** | Periodic and one-shot timers (linked to calling process via `spawn_link`) |
+| **Parallel** | Block-based fan-out/join combinators (`all:`, `all:timeout:`, `any:`) — spawns one linked+monitored process per block, blocks the caller, returns plain `Result` values; no awaitable future/promise value is ever exposed (BT-2974) |
 | **Pid**, **Reference**, **Port** | BEAM primitive types |
 
 **Error handling:**

@@ -63,6 +63,7 @@
             #{name => 'Object', module => 'bt@stdlib@object', parent => 'ProtoObject', package => 'stdlib', kind => object, type_params => []},
             #{name => 'ObjectStateChanged', module => 'bt@stdlib@object_state_changed', parent => 'Announcement', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Package', module => 'bt@stdlib@package', parent => 'Value', package => 'stdlib', kind => value, type_params => []},
+            #{name => 'Parallel', module => 'bt@stdlib@parallel', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Pid', module => 'bt@stdlib@pid', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Port', module => 'bt@stdlib@port', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'ProcessNavigation', module => 'bt@stdlib@process_navigation', parent => 'Value', package => 'stdlib', kind => value, type_params => []},
