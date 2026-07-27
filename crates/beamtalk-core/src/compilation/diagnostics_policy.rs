@@ -272,7 +272,7 @@ pub fn load_diagnostics_table_for_root(root: &std::path::Path) -> DiagnosticsTab
             tracing::warn!(
                 path = %manifest_path.display(),
                 error = %e,
-                "failed to parse [diagnostics] table in beamtalk.toml; using Rule 1 defaults"
+                "failed to parse [diagnostics] table in beamtalk.toml; using Rule 1 defaults for this root"
             );
             DiagnosticsTable::new()
         }
@@ -560,5 +560,34 @@ dnu = "error"
         let result = apply_diagnostics_table(diags, &table);
         assert_eq!(result.len(), 1, "hard Error must survive an 'off' entry");
         assert_eq!(result[0].severity, Severity::Error);
+    }
+
+    #[test]
+    fn load_diagnostics_table_for_root_missing_manifest_is_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let table = load_diagnostics_table_for_root(dir.path());
+        assert!(table.is_empty());
+    }
+
+    #[test]
+    fn load_diagnostics_table_for_root_invalid_toml_is_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("beamtalk.toml"), "not [ valid toml").unwrap();
+        let table = load_diagnostics_table_for_root(dir.path());
+        assert!(table.is_empty());
+    }
+
+    #[test]
+    fn load_diagnostics_table_for_root_valid_diagnostics_section_is_parsed() {
+        let dir = tempfile::tempdir().unwrap();
+        let manifest =
+            "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n\n[diagnostics]\ndnu = \"error\"\n";
+        std::fs::write(dir.path().join("beamtalk.toml"), manifest).unwrap();
+        let table = load_diagnostics_table_for_root(dir.path());
+        assert_eq!(table.len(), 1);
+        assert_eq!(
+            table[&DiagnosticCategory::Dnu],
+            DiagnosticSeverityOverride::Error
+        );
     }
 }
