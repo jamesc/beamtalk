@@ -1,0 +1,6 @@
+{
+  "identifier": "default",
+  "description": "Capabilities for the picker window: our own app commands only, no plugin surface beyond single-instance (which exposes no invokable JS API).",
+  "windows": ["picker"],
+  "permissions": ["core:default"]
+}
