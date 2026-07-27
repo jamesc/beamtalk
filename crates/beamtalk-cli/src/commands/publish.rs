@@ -541,10 +541,27 @@ mod tests {
     /// library's manifest via `[registry] url` (so tests never touch process
     /// environment variables).
     struct TestFixture {
-        // Kept alive for the duration of the test — dropping deletes the tempdirs.
+        // Kept alive for the duration of the test — dropping deletes the tempdir.
         _origin_bare: TempDir,
-        _index_bare: TempDir,
+        // Read back by `index_dir()` (BT-2996) — not just kept alive, hence no
+        // leading underscore.
+        index_bare: TempDir,
         library: TempDir,
+    }
+
+    impl TestFixture {
+        /// Where `run()` cached this fixture's registry index clone.
+        ///
+        /// BT-2996 moved the default cache out of the project (previously a
+        /// fixed `_build/registry/index/`) into a shared, user-level
+        /// directory keyed by the registry URL, so tests resolve it the same
+        /// way production code does — via `ensure_index` — rather than
+        /// hardcoding a path. `refresh: false` is safe here: every caller
+        /// only inspects this after a `run()` that already cloned it.
+        fn index_dir(&self) -> Utf8PathBuf {
+            let location = RegistryLocation::Git(file_url(self.index_bare.path()));
+            registry::ensure_index(&location, &utf8(&self.library), false).unwrap()
+        }
     }
 
     fn setup(pkg_name: &str, version: &str, description: Option<&str>) -> TestFixture {
@@ -587,9 +604,12 @@ mod tests {
             file_url(index_bare.path())
         );
         std::fs::write(library.path().join("beamtalk.toml"), manifest).unwrap();
-        // Real projects scaffolded by `beamtalk new` ignore `_build/`; publish
-        // itself clones the registry index into `_build/registry/index/`, so
-        // without this the working tree would look dirty on a re-publish.
+        // Real projects scaffolded by `beamtalk new` ignore `_build/` — keep
+        // that convention here too so the working tree never looks dirty on
+        // a re-publish, regardless of where the registry index is cached
+        // (BT-2996: normally a shared, user-level cache outside the project
+        // entirely, but `BEAMTALK_REGISTRY_CACHE_DIR` can still point it at
+        // `_build/registry`).
         std::fs::write(library.path().join(".gitignore"), "/_build/\n").unwrap();
         run_git(library.path(), &["add", "."]);
         run_git(library.path(), &["commit", "-m", "initial"]);
@@ -601,7 +621,7 @@ mod tests {
 
         TestFixture {
             _origin_bare: origin_bare,
-            _index_bare: index_bare,
+            index_bare,
             library,
         }
     }
@@ -770,9 +790,8 @@ mod tests {
             .unwrap();
         assert!(String::from_utf8_lossy(&remote_tags.stdout).contains("refs/tags/v0.1.0"));
 
-        // The index entry landed in `_build/registry/index/` and was pushed.
-        let index_dir = crate::commands::build_layout::BuildLayout::new(utf8(&fixture.library))
-            .registry_index_dir();
+        // The index entry landed in the registry index cache and was pushed.
+        let index_dir = fixture.index_dir();
         let entry_path = index_dir.join("packages/yaml.toml");
         assert!(entry_path.is_file());
         let entry_content = std::fs::read_to_string(&entry_path).unwrap();
@@ -860,8 +879,7 @@ mod tests {
 
         // No index clone was pushed to / left with new content beyond the
         // read-only clone `ensure_index` makes for the preflight check.
-        let index_dir = crate::commands::build_layout::BuildLayout::new(utf8(&fixture.library))
-            .registry_index_dir();
+        let index_dir = fixture.index_dir();
         assert!(!index_dir.join("packages/yaml.toml").is_file());
     }
 
@@ -881,8 +899,7 @@ mod tests {
         let result = with_cwd(&utf8(&fixture.library), || run(false));
         assert!(result.is_ok(), "{:?}", result.err());
 
-        let index_dir = crate::commands::build_layout::BuildLayout::new(utf8(&fixture.library))
-            .registry_index_dir();
+        let index_dir = fixture.index_dir();
         let entry = registry::read_entry(&index_dir, "yaml").unwrap().unwrap();
         assert_eq!(entry.versions.len(), 2);
         assert!(entry.find_version("0.1.0").is_some());

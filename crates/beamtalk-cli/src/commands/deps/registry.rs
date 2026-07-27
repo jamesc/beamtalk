@@ -34,14 +34,37 @@
 //!
 //! A value naming an existing local directory is read in place — no git, no
 //! network; a relative path is taken relative to the project root. Anything
-//! else is treated as a git URL and cloned into `_build/registry/index/`. The
-//! clone is refreshed only on a lookup miss, retried once. (Refreshing it from
-//! `beamtalk deps update` arrives with registry support for that command.)
+//! else is treated as a git URL and cloned into a shared, user-level cache
+//! (see "Cache location" below). The clone is refreshed only on a lookup
+//! miss, retried once. (Refreshing it from `beamtalk deps update` arrives
+//! with registry support for that command.)
+//!
+//! ## Cache location (BT-2996)
+//!
+//! A git-backed index is cloned once per *registry*, not once per *project*:
+//! every project pointing at the same registry URL shares one clone under
+//! `~/.beamtalk/registry/<hash of the URL>/`, the same way Cargo and Gleam
+//! share their registry caches. [`REGISTRY_CACHE_DIR_ENV_VAR`] overrides the
+//! cache root directly — set it to a fixed path (e.g. `_build/registry`) to
+//! restore the pre-BT-2996 per-project layout, or to a team-wide mount to
+//! share a pre-warmed clone across machines. A stale or corrupt cache is
+//! cleared by deleting its directory (or `~/.beamtalk/registry/` entirely) —
+//! it is rebuilt from a fresh clone on the next lookup.
+//!
+//! Every clone/refresh/swap of a git-backed index takes an exclusive
+//! advisory file lock (`fs2`) scoped to that registry's cache directory, so
+//! two beamtalk processes racing on the same cache — a CLI `build` alongside
+//! the LSP server, an MCP `lint` mid-refresh, parallel test invocations —
+//! serialise instead of interleaving and observing a partially-swapped
+//! index.
 
 use camino::{Utf8Path, Utf8PathBuf};
+use fs2::FileExt;
 use miette::{Context, IntoDiagnostic, Result};
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use std::cmp::Ordering;
+use std::fmt::Write as _;
 use std::process::Command;
 use tracing::{debug, info};
 
@@ -50,6 +73,10 @@ use crate::commands::manifest::RegistryConfig;
 
 /// The environment variable overriding the registry index location.
 pub const REGISTRY_ENV_VAR: &str = "BEAMTALK_REGISTRY";
+
+/// The environment variable overriding where a git-backed registry index is
+/// cached on disk (BT-2996). See the "Cache location" section above.
+pub const REGISTRY_CACHE_DIR_ENV_VAR: &str = "BEAMTALK_REGISTRY_CACHE_DIR";
 
 /// The registry index used when neither the environment nor the manifest
 /// selects one.
@@ -279,9 +306,100 @@ pub fn ensure_index(
     }
 }
 
-/// Clone or refresh the git registry index into `_build/registry/index/`.
+/// Where a git-backed registry index for `url` is cached on disk (BT-2996).
+///
+/// Everything the clone touches — `index/`, `index.staging/`,
+/// `index.previous/`, and the advisory lock file — lives directly under the
+/// returned directory.
+///
+/// Priority:
+/// 1. [`REGISTRY_CACHE_DIR_ENV_VAR`] — an explicit override.
+/// 2. A shared, user-level cache at `~/.beamtalk/registry/<hash>/`, keyed by
+///    a hash of `url` so every project pointing at the same registry shares
+///    one clone instead of each cloning it into its own `_build/`.
+///
+/// Falls back to the legacy per-project location (`_build/registry/`) when
+/// the home directory cannot be determined (e.g. a minimal sandbox with no
+/// `$HOME`) — sharing the cache is a nice-to-have, resolving a dependency is
+/// not.
+fn registry_cache_root(url: &str, project_root: &Utf8Path) -> Utf8PathBuf {
+    if let Ok(dir) = std::env::var(REGISTRY_CACHE_DIR_ENV_VAR) {
+        let trimmed = dir.trim();
+        if !trimmed.is_empty() {
+            return Utf8PathBuf::from(trimmed);
+        }
+    }
+
+    dirs::home_dir()
+        .and_then(|home| Utf8PathBuf::from_path_buf(home).ok())
+        .map_or_else(
+            || BuildLayout::new(project_root).registry_dir(),
+            |home| home.join(".beamtalk").join("registry").join(cache_key(url)),
+        )
+}
+
+/// A short, filesystem-safe cache key derived from a registry URL.
+///
+/// Two different registries must never share a cache directory (their
+/// `packages/` entries would collide), so the key is derived from the full
+/// URL rather than, say, just the host.
+fn cache_key(url: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(url.as_bytes());
+    let digest = hasher.finalize();
+    digest
+        .iter()
+        .take(8)
+        .fold(String::with_capacity(16), |mut s, b| {
+            let _ = write!(s, "{b:02x}");
+            s
+        })
+}
+
+/// Acquire the exclusive advisory lock covering `cache_root`'s clone,
+/// refresh, and swap (BT-2996).
+///
+/// Returns the locked file; the lock releases when it drops. Hold it for no
+/// longer than the clone/refresh/swap sequence — it blocks every other
+/// beamtalk process trying to touch the same cache.
+///
+/// # Errors
+///
+/// Returns an error if `cache_root` cannot be created, or the lock file
+/// cannot be opened or locked.
+fn lock_registry_cache(cache_root: &Utf8Path) -> Result<std::fs::File> {
+    std::fs::create_dir_all(cache_root)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to create registry cache directory '{cache_root}'"))?;
+
+    let lock_path = cache_root.join(".lock");
+    let lockfile = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to open registry lock file '{lock_path}'"))?;
+
+    lockfile
+        .lock_exclusive()
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to acquire registry lock '{lock_path}'"))?;
+
+    Ok(lockfile)
+}
+
+/// Clone or refresh the git registry index into its cache directory
+/// (BT-2996; see the module-level "Cache location" section).
 fn ensure_git_index(url: &str, project_root: &Utf8Path, refresh: bool) -> Result<Utf8PathBuf> {
-    let index_dir = BuildLayout::new(project_root).registry_index_dir();
+    let cache_root = registry_cache_root(url, project_root);
+    let index_dir = cache_root.join("index");
+
+    // Hold the lock for the whole clone/refresh/swap sequence, so a
+    // concurrent beamtalk process (CLI build, LSP, MCP) can never observe a
+    // half-swapped index — one process mid-rename while another's
+    // `read_entry` lands in the instant the directory doesn't exist.
+    let _lock = lock_registry_cache(&cache_root)?;
 
     // `swap_in_index` moves the old index aside before renaming the new one
     // into place. If a previous run was killed between those two renames, the
@@ -308,9 +426,7 @@ fn ensure_git_index(url: &str, project_root: &Utf8Path, refresh: bool) -> Result
     // A refresh that fails (offline, VPN down, transient DNS) must leave the
     // usable index that is already on disk exactly where it was, rather than
     // deleting it up front and then failing to replace it.
-    let staging_dir = BuildLayout::new(project_root)
-        .registry_dir()
-        .join("index.staging");
+    let staging_dir = cache_root.join("index.staging");
 
     match clone_index(url, &staging_dir) {
         Ok(()) => {
@@ -578,13 +694,23 @@ pub fn resolve_latest_release(
 }
 
 /// Describe which packages the index does contain, for a not-found error.
+///
+/// The scan stops as soon as it has collected more than [`MAX_LISTED`]
+/// names — the message only ever displays the first `MAX_LISTED` of them, so
+/// a registry with thousands of packages must not pay to read, collect, and
+/// sort every one of them on every typo (BT-2996).
 fn describe_available_packages(index_root: &Utf8Path) -> String {
-    let mut names = Vec::new();
+    let mut names = Vec::with_capacity(MAX_LISTED);
+    let mut more = false;
     if let Ok(entries) = std::fs::read_dir(index_root.join("packages")) {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.extension().is_some_and(|e| e == "toml") {
                 if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                    if names.len() == MAX_LISTED {
+                        more = true;
+                        break;
+                    }
                     names.push(stem.to_string());
                 }
             }
@@ -597,7 +723,14 @@ fn describe_available_packages(index_root: &Utf8Path) -> String {
 
     names.sort();
     let refs: Vec<&str> = names.iter().map(String::as_str).collect();
-    format!("Packages in the registry: {}", truncated_list(&refs))
+    if more {
+        format!(
+            "Packages in the registry (first {MAX_LISTED}): {}, ...",
+            refs.join(", ")
+        )
+    } else {
+        format!("Packages in the registry: {}", refs.join(", "))
+    }
 }
 
 /// Join a list for display, truncating past [`MAX_LISTED`] entries.
@@ -934,17 +1067,26 @@ git = "g"
         let project = TempDir::new().unwrap();
         let project_root = utf8(&project);
 
-        let index_root = ensure_index(&RegistryLocation::Git(url), &project_root, false).unwrap();
+        let index_root =
+            ensure_index(&RegistryLocation::Git(url.clone()), &project_root, false).unwrap();
 
-        assert_eq!(
-            index_root,
-            BuildLayout::new(&project_root).registry_index_dir()
+        // BT-2996: the clone lands in the shared, user-level cache — never
+        // inside the project's `_build/` — so N projects pointing at the
+        // same registry URL share one clone instead of each cloning it
+        // separately.
+        let cache_root = registry_cache_root(&url, &project_root);
+        assert_eq!(index_root, cache_root.join("index"));
+        assert!(
+            !index_root.starts_with(&project_root),
+            "expected the index outside the project, got {index_root}"
         );
         assert!(index_root.join("packages/yaml.toml").is_file());
         assert_eq!(
             read_entry(&index_root, "yaml").unwrap().unwrap().name,
             "yaml"
         );
+
+        let _ = std::fs::remove_dir_all(&cache_root);
     }
 
     #[test]
@@ -955,6 +1097,11 @@ git = "g"
 
         let release = resolve_release(&utf8(&project), &location, "yaml", "0.2.1").unwrap();
         assert_eq!(release.tag, "release-0.2.1");
+
+        let RegistryLocation::Git(url) = &location else {
+            unreachable!()
+        };
+        let _ = std::fs::remove_dir_all(registry_cache_root(url, &utf8(&project)));
     }
 
     /// A newly published version is picked up by the miss-then-refresh retry.
@@ -963,7 +1110,7 @@ git = "g"
         let (repo, url) = make_git_index(&[("yaml", YAML_ENTRY)]);
         let project = TempDir::new().unwrap();
         let project_root = utf8(&project);
-        let location = RegistryLocation::Git(url);
+        let location = RegistryLocation::Git(url.clone());
 
         // Populate the local clone at the current index state.
         resolve_release(&project_root, &location, "yaml", "0.2.1").unwrap();
@@ -979,6 +1126,8 @@ git = "g"
         let release = resolve_release(&project_root, &location, "yaml", "0.3.0").unwrap();
         assert_eq!(release.version, "0.3.0");
         assert_eq!(release.tag, "v0.3.0");
+
+        let _ = std::fs::remove_dir_all(registry_cache_root(&url, &project_root));
     }
 
     /// A refresh that cannot reach the remote must leave the working index
@@ -988,10 +1137,11 @@ git = "g"
         let (repo, url) = make_git_index(&[("yaml", YAML_ENTRY)]);
         let project = TempDir::new().unwrap();
         let project_root = utf8(&project);
-        let location = RegistryLocation::Git(url);
+        let location = RegistryLocation::Git(url.clone());
 
         resolve_release(&project_root, &location, "yaml", "0.2.1").unwrap();
-        let index_dir = BuildLayout::new(&project_root).registry_index_dir();
+        let cache_root = registry_cache_root(&url, &project_root);
+        let index_dir = cache_root.join("index");
         assert!(index_dir.join("packages/yaml.toml").is_file());
 
         // Destroy the remote, then force a refresh via a lookup miss.
@@ -1005,6 +1155,8 @@ git = "g"
             index_dir.join("packages/yaml.toml").is_file(),
             "a failed refresh must not delete the usable index"
         );
+
+        let _ = std::fs::remove_dir_all(&cache_root);
     }
 
     #[test]
@@ -1031,6 +1183,141 @@ git = "g"
         .unwrap_err();
         let msg = flat_err(&err);
         assert!(msg.contains("packages"), "{msg}");
+    }
+
+    // ── Cache location & locking (BT-2996) ────────────────────────────
+
+    /// RAII guard restoring an environment variable's previous value on drop.
+    /// Callers must serialize tests using this with `#[serial(env_var)]`.
+    struct EnvVarGuard {
+        key: &'static str,
+        prev: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        /// SAFETY: caller must ensure tests using this are `#[serial(env_var)]`.
+        unsafe fn set(key: &'static str, value: &str) -> Self {
+            let prev = std::env::var(key).ok();
+            // SAFETY: caller ensures tests are serialized.
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self { key, prev }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            // SAFETY: test cleanup — restores previous env var state.
+            unsafe {
+                match &self.prev {
+                    Some(val) => std::env::set_var(self.key, val),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_cache_key_is_stable_and_differs_by_url() {
+        assert_eq!(
+            cache_key("https://example.test/a"),
+            cache_key("https://example.test/a")
+        );
+        assert_ne!(
+            cache_key("https://example.test/a"),
+            cache_key("https://example.test/b")
+        );
+    }
+
+    #[test]
+    #[serial_test::serial(env_var)]
+    fn test_registry_cache_root_env_var_override() {
+        let project = TempDir::new().unwrap();
+        let override_dir = TempDir::new().unwrap();
+        // SAFETY: serialized via #[serial(env_var)].
+        let _guard = unsafe {
+            EnvVarGuard::set(
+                REGISTRY_CACHE_DIR_ENV_VAR,
+                override_dir.path().to_str().unwrap(),
+            )
+        };
+
+        let cache_root = registry_cache_root("https://example.test/registry", &utf8(&project));
+        assert_eq!(cache_root, utf8(&override_dir));
+    }
+
+    #[test]
+    #[serial_test::serial(env_var)]
+    fn test_registry_cache_root_blank_env_var_falls_back_to_shared_cache() {
+        let project = TempDir::new().unwrap();
+        // SAFETY: serialized via #[serial(env_var)].
+        let _guard = unsafe { EnvVarGuard::set(REGISTRY_CACHE_DIR_ENV_VAR, "   ") };
+
+        let url = "https://example.test/registry";
+        let project_root = utf8(&project);
+        let cache_root = registry_cache_root(url, &project_root);
+        assert!(
+            !cache_root.starts_with(project_root),
+            "a blank override must not be treated as a project-local path: {cache_root}"
+        );
+        assert!(cache_root.ends_with(cache_key(url)));
+    }
+
+    #[test]
+    fn test_registry_cache_root_shared_across_projects() {
+        // Two different projects pointing at the same registry URL must
+        // resolve to the *same* cache directory — that sharing is the whole
+        // point of BT-2996.
+        let project_a = TempDir::new().unwrap();
+        let project_b = TempDir::new().unwrap();
+        let url = "https://example.test/shared-registry";
+
+        assert_eq!(
+            registry_cache_root(url, &utf8(&project_a)),
+            registry_cache_root(url, &utf8(&project_b))
+        );
+    }
+
+    #[test]
+    fn test_registry_cache_root_differs_by_url() {
+        let project = TempDir::new().unwrap();
+        assert_ne!(
+            registry_cache_root("https://example.test/one", &utf8(&project)),
+            registry_cache_root("https://example.test/two", &utf8(&project))
+        );
+    }
+
+    /// Two "processes" (threads, standing in for a CLI build racing an LSP
+    /// or MCP lookup) resolving against the same git registry at once must
+    /// both succeed, and must never see a half-swapped index (BT-2996).
+    #[test]
+    fn test_concurrent_resolutions_against_same_registry_both_succeed() {
+        let (_repo, url) = make_git_index(&[("yaml", YAML_ENTRY)]);
+        let location = RegistryLocation::Git(url.clone());
+
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let location = location.clone();
+                std::thread::spawn(move || {
+                    // Each thread gets its own project root — sharing is
+                    // across *projects*, so the interesting race is threads
+                    // with different project_root values converging on the
+                    // same cache directory.
+                    let project = TempDir::new().unwrap();
+                    let release =
+                        resolve_release(&utf8(&project), &location, "yaml", "0.2.1").unwrap();
+                    assert_eq!(release.tag, "release-0.2.1");
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            handle.join().expect("thread panicked");
+        }
+
+        let project = TempDir::new().unwrap();
+        let _ = std::fs::remove_dir_all(registry_cache_root(&url, &utf8(&project)));
     }
 
     // ── Lookup ───────────────────────────────────────────────────────
@@ -1089,6 +1376,31 @@ git = "g"
         assert!(
             msg.contains("yaml"),
             "should list available packages: {msg}"
+        );
+    }
+
+    /// BT-2996: a not-found error against a huge index must not materialise
+    /// every package name — the scan stops once it has enough to display.
+    #[test]
+    fn test_describe_available_packages_caps_the_scan() {
+        let entries: Vec<(String, &str)> = (0..(MAX_LISTED * 3))
+            .map(|i| (format!("pkg{i:03}"), "name = \"placeholder\"\n"))
+            .collect();
+        let entry_refs: Vec<(&str, &str)> = entries
+            .iter()
+            .map(|(name, content)| (name.as_str(), *content))
+            .collect();
+        let (_dir, root) = make_index(&entry_refs);
+
+        let description = describe_available_packages(&root);
+        assert!(
+            description.contains("..."),
+            "a registry with far more than MAX_LISTED packages should be shown as truncated: {description}"
+        );
+        assert_eq!(
+            description.matches(", pkg").count() + 1,
+            MAX_LISTED,
+            "should list exactly MAX_LISTED names: {description}"
         );
     }
 

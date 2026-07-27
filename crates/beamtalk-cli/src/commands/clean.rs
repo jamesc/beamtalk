@@ -14,7 +14,10 @@
 //! Scopes:
 //! - default: the project's `_build/<profile>/` output plus the type cache.
 //! - `--deps`: additionally the fetched/compiled dependency artifacts
-//!   (`_build/deps/`).
+//!   (`_build/deps/`) and any project-local registry index (`_build/registry/`,
+//!   BT-2996 — the shared, user-level registry cache at
+//!   `~/.beamtalk/registry/` lives outside `_build/` entirely and is cleared
+//!   by deleting that directory directly).
 //! - `--all`: the entire `_build/` directory, including any shared caches.
 //! - `--dry-run`: list what would be removed without deleting anything.
 
@@ -153,6 +156,7 @@ fn clean_targets(layout: &BuildLayout, scope: CleanScope) -> Vec<Utf8PathBuf> {
             layout.profile_dir(),
             layout.type_cache_dir(),
             layout.deps_dir(),
+            layout.registry_dir(),
         ],
     }
 }
@@ -256,6 +260,30 @@ mod tests {
         let targets = clean_targets(&layout, CleanScope::Deps);
         assert!(targets.contains(&layout.deps_dir()));
         assert!(targets.contains(&layout.profile_dir()));
+    }
+
+    /// BT-2996: `--deps` must be able to clear a corrupted project-local
+    /// registry index too — previously only `--all` reached `_build/registry/`.
+    #[test]
+    fn deps_targets_add_registry_dir() {
+        let temp = TempDir::new().unwrap();
+        let layout = layout_in(&temp);
+        let targets = clean_targets(&layout, CleanScope::Deps);
+        assert!(targets.contains(&layout.registry_dir()));
+    }
+
+    #[test]
+    fn deps_clean_removes_registry_dir() {
+        let temp = TempDir::new().unwrap();
+        let layout = layout_in(&temp);
+        touch(&layout.registry_index_dir().join("packages/yaml.toml"));
+
+        clean_with_layout(&layout, CleanScope::Deps, false).unwrap();
+
+        assert!(
+            !layout.registry_dir().exists(),
+            "registry dir should be gone"
+        );
     }
 
     #[test]

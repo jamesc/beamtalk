@@ -134,12 +134,21 @@ impl BuildLayout {
 
     // ── Registry ─────────────────────────────────────────────────────
 
-    /// `_build/registry/` — package registry storage root.
+    /// `_build/registry/` — legacy/override registry storage root.
+    ///
+    /// A git-backed registry index is cached in a shared, user-level
+    /// directory by default (`~/.beamtalk/registry/<hash>/`, see
+    /// `commands::deps::registry`'s "Cache location" docs — BT-2996), so
+    /// this path is only used as the fallback when the home directory can't
+    /// be determined, or when a project explicitly overrides the cache
+    /// location (`BEAMTALK_REGISTRY_CACHE_DIR`) back to a project-local
+    /// path. `beamtalk clean --deps` still clears it either way.
     pub fn registry_dir(&self) -> Utf8PathBuf {
         self.build_root().join("registry")
     }
 
-    /// `_build/registry/index/` — the cloned registry index checkout.
+    /// `_build/registry/index/` — the cloned registry index checkout, when
+    /// [`registry_dir`](Self::registry_dir) is the active cache location.
     ///
     /// Only used when the registry resolves to a git URL; a registry that
     /// points at a local directory is read in place.
