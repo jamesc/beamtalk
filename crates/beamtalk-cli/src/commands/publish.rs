@@ -609,8 +609,21 @@ mod tests {
         );
     }
 
+    /// Flatten a diagnostic's message to single-spaced text for substring
+    /// assertions.
+    ///
+    /// Uses `Display` (the raw message), not `Debug` (miette's graphical
+    /// renderer): the graphical renderer word-wraps at a fixed column width
+    /// and injects a `│` continuation marker at each wrap point, which
+    /// silently splits any substring — e.g. a temp-dir path — that happens
+    /// to straddle the wrap column. Whether a given path straddles it
+    /// depends on the OS's temp-dir prefix length (`/tmp/...` on Linux vs.
+    /// the much longer `/var/folders/.../T/...` on macOS or
+    /// `C:\Users\RUNNER~1\AppData\Local\Temp\...` on Windows), so a
+    /// `Debug`-based flatten can pass on Linux CI and fail on macOS/Windows
+    /// CI for the exact same diagnostic.
     fn flat_err(err: &miette::Report) -> String {
-        format!("{err:?}")
+        format!("{err}")
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" ")
