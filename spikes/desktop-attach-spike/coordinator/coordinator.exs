@@ -286,7 +286,8 @@ defmodule Coordinator.Router do
         :timeout
     end
   rescue
-    _ ->
+    e ->
+      IO.warn("spawn_and_wait: exception for #{ws_id}: #{Exception.message(e)}")
       Coordinator.State.drop(ws_id)
       :timeout
   end
