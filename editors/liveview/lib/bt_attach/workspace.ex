@@ -45,9 +45,34 @@ defmodule BtAttach.Workspace do
     * `BT_WORKSPACE_NODE`   — e.g. `beamtalk_workspace_spike@localhost`
     * `BT_WORKSPACE_COOKIE` — contents of `~/.beamtalk/workspaces/<id>/vm.args`
                               (`-setcookie <token>`), token only
+
+  ## Self node name (ADR 0097 Implementation §1a)
+
+  `ensure_distributed/0` self-assigns this front's own distribution sname.
+  With no `BT_ATTACH_NODE_SUFFIX` set, it falls back to today's
+  `bt_attach_<unique_integer>@localhost` — fine for the single-workspace
+  `just web` flow, where at most one front runs per dev machine. The desktop
+  broker (BT-2985) sets `BT_ATTACH_NODE_SUFFIX` to the workspace id so a crash
+  → respawn or a second window re-derives a related name; per-process entropy
+  (the OS pid) is *always* appended on top of that id so two separate front
+  processes attached to the **same** workspace can never collide on epmd —
+  an id-only seed would collide deterministically in exactly that scenario.
+
+  ## Readiness handshake (ADR 0097 Implementation §1c)
+
+  `readiness/0` is the RPC target behind the desktop-attach `GET /readiness`
+  endpoint: it forces `connect/0` plus one cheap RPC (`beamtalk_version:get/0`,
+  BT-2991) and distinguishes *why* an unreachable workspace failed —
+  `:epmd_absent` (this node couldn't even publish itself to the local epmd),
+  `:bad_cookie` (epmd knows the target node but the dist handshake was
+  rejected), or `:dead_workspace` (epmd has no record of the target node at
+  all) — so the broker can surface a precise error before opening a window,
+  and the version report lets it warn/refuse on a runtime/protocol mismatch.
   """
 
   require Logger
+
+  @epmd_port 4369
 
   @doc "The configured workspace node name as an atom."
   def node_name do
@@ -58,14 +83,60 @@ defmodule BtAttach.Workspace do
   @doc """
   Ensure this Phoenix node is distributed, shares the workspace cookie, and is
   connected to the workspace node. Idempotent — safe to call on every mount.
+
+  Returns `:ok`, or `{:error, :epmd_absent}` if this node could not even
+  publish itself to the local epmd (ADR 0097 Implementation §1c), or
+  `{:error, {:connect_failed, node, reason}}` if distribution started fine but
+  the target workspace node didn't accept the connection.
   """
   def connect do
-    ensure_distributed()
-    set_cookie()
+    with :ok <- ensure_distributed() do
+      set_cookie()
 
-    case Node.connect(node_name()) do
-      true -> :ok
-      reason -> {:error, {:connect_failed, node_name(), reason}}
+      case Node.connect(node_name()) do
+        true -> :ok
+        reason -> {:error, {:connect_failed, node_name(), reason}}
+      end
+    end
+  end
+
+  @doc """
+  Full connectivity check for the desktop-attach `/readiness` endpoint (ADR
+  0097 Implementation §1c). Calls `connect/0` (rather than re-implementing its
+  steps, so the two can never drift) plus one cheap RPC — the workspace's
+  version report (`beamtalk_version:get/0`, BT-2991) — and classifies failure
+  into the taxonomy the endpoint surfaces:
+
+    * `{:error, :epmd_absent}`   — no local dist name server to publish to.
+    * `{:error, :bad_cookie}`    — epmd knows the target node; dist handshake
+                                   rejected (mismatched cookie).
+    * `{:error, :dead_workspace}` — epmd has no record of the target node, the
+                                    workspace died between connect and RPC, or
+                                    (the rare `:ignored` case) this node's own
+                                    distribution unexpectedly went away between
+                                    `connect/0`'s two internal calls — a local
+                                    dist failure, not the target's epmd being
+                                    absent, so it is *not* reported as
+                                    `:epmd_absent`.
+
+  Returns `{:ok, version_report}` (see `beamtalk_version:get/0`) on success.
+  """
+  def readiness do
+    case connect() do
+      :ok ->
+        readiness_rpc()
+
+      {:error, :epmd_absent} = err ->
+        err
+
+      {:error, {:connect_failed, node, false}} ->
+        {:error, classify_unreachable(node)}
+
+      {:error, {:connect_failed, _node, :ignored}} ->
+        # :ignored means this node's own dist went away, not the workspace's —
+        # see the taxonomy doc above. No better bucket exists, so it's folded
+        # into :dead_workspace.
+        {:error, :dead_workspace}
     end
   end
 
@@ -1948,17 +2019,27 @@ defmodule BtAttach.Workspace do
 
   # ── internals ─────────────────────────────────────────────────────────────
 
+  # Returns `:ok`, or `{:error, :epmd_absent}` if the local epmd isn't
+  # reachable — the lazy `:net_kernel.start/1` this uses (unlike an `erl
+  # -sname` boot) does not auto-start epmd, so probing first turns that
+  # failure into a classifiable error instead of the `raise` below (ADR 0097
+  # Implementation §1c names this failure mode explicitly).
   defp ensure_distributed do
-    unless Node.alive?() do
-      # A unique short name so multiple dev runs don't collide on epmd.
-      name = :"bt_attach_#{System.unique_integer([:positive])}@localhost"
+    if Node.alive?() do
+      :ok
+    else
+      if epmd_reachable?() do
+        name = attach_sname()
 
-      # Two connected mounts can both pass Node.alive?/0 and race here; the
-      # loser sees {:error, {:already_started, _}}, which is fine.
-      case :net_kernel.start([name, :shortnames]) do
-        {:ok, _pid} -> :ok
-        {:error, {:already_started, _pid}} -> :ok
-        {:error, reason} -> raise "failed to start distributed node: #{inspect(reason)}"
+        # Two connected mounts can both pass Node.alive?/0 and race here; the
+        # loser sees {:error, {:already_started, _}}, which is fine.
+        case :net_kernel.start([name, :shortnames]) do
+          {:ok, _pid} -> :ok
+          {:error, {:already_started, _pid}} -> :ok
+          {:error, reason} -> raise "failed to start distributed node: #{inspect(reason)}"
+        end
+      else
+        {:error, :epmd_absent}
       end
     end
   end
@@ -1968,6 +2049,93 @@ defmodule BtAttach.Workspace do
       nil -> Logger.warning("BT_WORKSPACE_COOKIE not set; relying on ~/.erlang.cookie")
       "" -> :ok
       token -> Node.set_cookie(node_name(), String.to_atom(token))
+    end
+  end
+
+  @doc """
+  This front's self-assigned distribution sname (ADR 0097 Implementation
+  §1a). Exposed (not `defp`) purely so its pure naming logic — no
+  distribution/network I/O — is unit-testable in isolation.
+
+  With `suffix` unset/empty, keeps today's collision-avoidance-by-luck
+  behaviour: `bt_attach_<unique_integer>@localhost`. With a suffix (the
+  desktop broker passes the workspace id via `BT_ATTACH_NODE_SUFFIX`),
+  per-process entropy (`os_pid`, defaulting to this VM's OS pid) is always
+  appended — an id-only seed would collide deterministically when two fronts
+  attach to the *same* workspace (a second window, a second broker instance,
+  or a crash→respawn racing the dying front's epmd deregistration).
+  """
+  def attach_sname(
+        suffix \\ System.get_env("BT_ATTACH_NODE_SUFFIX"),
+        os_pid \\ System.pid()
+      )
+
+  def attach_sname(suffix, _os_pid) when suffix in [nil, ""] do
+    :"bt_attach_#{System.unique_integer([:positive])}@localhost"
+  end
+
+  def attach_sname(suffix, os_pid) do
+    :"bt_attach_#{suffix}_#{os_pid}@localhost"
+  end
+
+  # Raw TCP probe of the local epmd port — cheaper and more reliable than
+  # inferring epmd absence from :net_kernel.start/1's opaque error reasons.
+  # Exposed (not `defp`) with injectable host/port so tests can point it at a
+  # throwaway listener/closed port instead of the real system epmd.
+  @doc false
+  def epmd_reachable?(host \\ ~c"localhost", port \\ @epmd_port) do
+    case :gen_tcp.connect(host, port, [:binary, active: false], 500) do
+      {:ok, socket} ->
+        :gen_tcp.close(socket)
+        true
+
+      {:error, _reason} ->
+        false
+    end
+  end
+
+  @doc """
+  Classify why `Node.connect(target_node)` returned `false`, given an
+  `:net_adm.names/0`-shaped result — `:bad_cookie` if epmd still knows about
+  `target_node` (so the dist handshake itself was rejected), `:dead_workspace`
+  if epmd has no record of it at all, `:epmd_absent` if the names query itself
+  failed. Exposed (not `defp`) so the pure classification is unit-testable
+  against a fabricated names list, without a real epmd/workspace.
+  """
+  def classify_unreachable(target_node, epmd_names \\ :net_adm.names())
+
+  def classify_unreachable(_target_node, {:error, _reason}), do: :epmd_absent
+
+  def classify_unreachable(target_node, {:ok, names}) do
+    short_name =
+      target_node
+      |> Atom.to_string()
+      |> String.split("@")
+      |> List.first()
+      |> String.to_charlist()
+
+    if List.keymember?(names, short_name, 0), do: :bad_cookie, else: :dead_workspace
+  end
+
+  # The one cheap RPC behind `readiness/0` — the workspace's version report
+  # (`beamtalk_version:get/0`, BT-2991). A `:badrpc` here (workspace died
+  # between `Node.connect/1` succeeding and this call landing) reports the
+  # same `:dead_workspace` reason as epmd never having heard of the node.
+  defp readiness_rpc do
+    case rpc(:beamtalk_version, :get, []) do
+      {:badrpc, _reason} ->
+        {:error, :dead_workspace}
+
+      report when is_map(report) ->
+        {:ok, report}
+
+      # Defensive catch-all matching the rest of this module's degrade-
+      # gracefully contract (e.g. eval/2's `other -> {:unexpected_reply, _}`):
+      # an older workspace predating beamtalk_version (BT-2991) or a future
+      # shape change should surface as a clean :dead_workspace 503, not crash
+      # the /readiness controller with a CaseClauseError.
+      _other ->
+        {:error, :dead_workspace}
     end
   end
 

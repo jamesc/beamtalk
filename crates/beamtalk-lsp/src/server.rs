@@ -795,12 +795,13 @@ impl Backend {
     /// without a `beamtalk-lsp -> beamtalk-cli` dependency (forbidden — see
     /// `docs/development/architecture-principles.md`).
     ///
-    /// Lenient by design: a root with no `beamtalk.toml`, or one that fails
-    /// to parse, contributes an empty table for that root (Rule 1 defaults)
-    /// rather than blocking diagnostics entirely — a malformed manifest
-    /// already fails loudly at `beamtalk build` time, and the LSP must keep
-    /// publishing diagnostics for open files regardless. Parse failures are
-    /// logged so the mismatch is discoverable. A multi-root workspace merges
+    /// Lenient by design: a root with no `beamtalk.toml`, an I/O error reading
+    /// it (permissions, EISDIR, etc.), or one that fails to parse, contributes
+    /// an empty table for that root (Rule 1 defaults) rather than blocking
+    /// diagnostics entirely — a malformed manifest already fails loudly at
+    /// `beamtalk build` time, and the LSP must keep publishing diagnostics for
+    /// open files regardless. Non-`NotFound` I/O errors and parse failures are
+    /// logged as `WARN` so the mismatch is discoverable. A multi-root workspace merges
     /// every root's table into one (later roots win on category collisions);
     /// like `set_has_package_dependencies`, this is a whole-session
     /// simplification, not a per-file lookup.
@@ -809,43 +810,28 @@ impl Backend {
     /// `beamtalk.toml` edits made while the server is running require an LSP
     /// restart to take effect.
     async fn load_diagnostics_table(&self, roots: &[PathBuf]) {
-        use beamtalk_core::compilation::diagnostics_policy::parse_diagnostics_table_from_manifest_toml;
-
         let roots_owned: Vec<PathBuf> = roots.to_vec();
         let table = tokio::task::spawn_blocking(move || {
             let mut merged = beamtalk_core::compilation::DiagnosticsTable::new();
             for root in &roots_owned {
-                let manifest_path = root.join("beamtalk.toml");
-                let Ok(content) = std::fs::read_to_string(&manifest_path) else {
-                    continue;
-                };
-                match parse_diagnostics_table_from_manifest_toml(&content) {
-                    Ok(root_table) => {
-                        for (category, severity) in root_table {
-                            if let Some(previous) = merged.get(&category) {
-                                if *previous != severity {
-                                    tracing::warn!(
-                                        root = %root.display(),
-                                        category = ?category,
-                                        previous = ?previous,
-                                        new = ?severity,
-                                        "[diagnostics] category set differently by multiple \
-                                         workspace roots; this root's value wins for the \
-                                         whole session"
-                                    );
-                                }
-                            }
-                            merged.insert(category, severity);
+                // Missing or unreadable manifest → empty table → no-op merge.
+                // Parse errors are logged inside load_diagnostics_table_for_root.
+                let root_table = beamtalk_core::compilation::load_diagnostics_table_for_root(root);
+                for (category, severity) in root_table {
+                    if let Some(previous) = merged.get(&category) {
+                        if *previous != severity {
+                            tracing::warn!(
+                                root = %root.display(),
+                                category = ?category,
+                                previous = ?previous,
+                                new = ?severity,
+                                "[diagnostics] category set differently by multiple \
+                                 workspace roots; this root's value wins for the \
+                                 whole session"
+                            );
                         }
                     }
-                    Err(e) => {
-                        tracing::warn!(
-                            path = %manifest_path.display(),
-                            error = %e,
-                            "failed to parse [diagnostics] table in beamtalk.toml; \
-                             using Rule 1 defaults for this root"
-                        );
-                    }
+                    merged.insert(category, severity);
                 }
             }
             merged

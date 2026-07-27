@@ -244,13 +244,33 @@ fn resolve_registry_location_from(
     env_value: Option<&str>,
     registry: Option<&RegistryConfig>,
 ) -> RegistryLocation {
-    let raw = env_value
+    classify_location(project_root, &raw_registry_value(env_value, registry))
+}
+
+/// The raw, unresolved registry configuration value: `BEAMTALK_REGISTRY` →
+/// `[registry] url` → [`DEFAULT_REGISTRY_URL`], with no filesystem
+/// classification applied.
+fn raw_registry_value(env_value: Option<&str>, registry: Option<&RegistryConfig>) -> String {
+    env_value
         .filter(|v| !v.trim().is_empty())
         .map(str::to_string)
         .or_else(|| registry.map(|r| r.url.clone()))
-        .unwrap_or_else(|| DEFAULT_REGISTRY_URL.to_string());
+        .unwrap_or_else(|| DEFAULT_REGISTRY_URL.to_string())
+}
 
-    classify_location(project_root, &raw)
+/// The stable identity of the currently configured registry, for recording
+/// on a lock entry and comparing against on a later build (BT-2993).
+///
+/// Deliberately the *raw* configuration value, not [`resolve_registry_location`]'s
+/// resolved [`RegistryLocation`]: a relative `[registry] url` resolves to a
+/// different absolute path on every checkout (a dev machine, a CI runner,
+/// another dev's clone), so recording that resolved path would make a
+/// lockfile pinned against a locally vendored registry perpetually "stale"
+/// the moment it's built somewhere else — the opposite of the stable
+/// identity a lock entry needs.
+pub fn registry_identity(registry: Option<&RegistryConfig>) -> String {
+    let env_value = std::env::var(REGISTRY_ENV_VAR).ok();
+    raw_registry_value(env_value.as_deref(), registry)
 }
 
 /// Classify a raw registry location string as a local directory or a git URL.
@@ -1021,6 +1041,54 @@ git = "g"
             resolve_registry_location_from(&empty_root(&project), Some("   "), Some(&cfg)),
             RegistryLocation::Git("https://example.test/from-manifest".to_string())
         );
+    }
+
+    // ── Registry identity (BT-2993) ────────────────────────────────────
+
+    /// The identity recorded on a lock entry must be the raw configured
+    /// value, not the resolved (and machine-specific) `LocalDir` path — a
+    /// relative `[registry] url` resolves to a different absolute path on
+    /// every checkout, but the identity must stay comparable across all of
+    /// them.
+    #[test]
+    fn test_registry_identity_is_raw_not_resolved_path() {
+        let project = TempDir::new().unwrap();
+        let root = utf8(&project);
+        std::fs::create_dir_all(root.join("vendor/registry/packages")).unwrap();
+
+        let cfg = RegistryConfig {
+            url: "vendor/registry".to_string(),
+        };
+
+        let resolved = resolve_registry_location_from(&root, None, Some(&cfg));
+        assert_eq!(
+            resolved,
+            RegistryLocation::LocalDir(root.join("vendor/registry"))
+        );
+
+        let identity = raw_registry_value(None, Some(&cfg));
+        assert_eq!(identity, "vendor/registry");
+        assert_ne!(
+            identity,
+            resolved.to_string(),
+            "identity must not be the resolved, checkout-specific path"
+        );
+    }
+
+    #[test]
+    fn test_raw_registry_value_prefers_env_over_manifest() {
+        let cfg = RegistryConfig {
+            url: "https://example.test/from-manifest".to_string(),
+        };
+        assert_eq!(
+            raw_registry_value(Some("https://example.test/from-env"), Some(&cfg)),
+            "https://example.test/from-env"
+        );
+    }
+
+    #[test]
+    fn test_raw_registry_value_falls_back_to_default() {
+        assert_eq!(raw_registry_value(None, None), DEFAULT_REGISTRY_URL);
     }
 
     // ── ensure_index ─────────────────────────────────────────────────

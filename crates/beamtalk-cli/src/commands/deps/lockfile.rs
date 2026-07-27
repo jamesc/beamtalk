@@ -25,10 +25,13 @@
 //! sha = "abc1234def5678..."
 //!
 //! # A registry dependency additionally records the exact version requested
-//! # in beamtalk.toml, so resolution can skip the registry index on a hit.
+//! # in beamtalk.toml, plus which registry produced it, so resolution can
+//! # skip the registry index on a hit — and re-consult it when the
+//! # configured registry changes (BT-2993).
 //! [[package]]
 //! name = "yaml"
 //! version = "0.2.1"
+//! registry = "https://github.com/jamesc/beamtalk-registry"
 //! url = "https://github.com/jamesc/beamtalk-yaml"
 //! reference = "tag:v0.2.1"
 //! sha = "fed4321cba9876..."
@@ -74,12 +77,32 @@ pub struct LockEntry {
     /// The exact commit SHA this reference resolved to.
     pub resolved_sha: String,
     /// For a registry dependency, the exact version requested in
-    /// `beamtalk.toml` (serialized as the optional `version` field).
+    /// `beamtalk.toml` plus which registry produced this entry.
     ///
     /// `None` for plain git dependencies. A lock entry whose recorded version
-    /// still matches the manifest lets resolution skip the registry index
-    /// entirely and go straight to the git checkout.
-    pub registry_version: Option<String>,
+    /// *and* registry both still match lets resolution skip the registry
+    /// index entirely and go straight to the git checkout.
+    pub registry_version: Option<RegistryVersion>,
+}
+
+/// Registry provenance recorded on a [`LockEntry`] for a dependency resolved
+/// through a registry index (BT-2978/BT-2993).
+///
+/// Serialized as two separate lockfile fields: `version` and `registry` (the
+/// latter's name matches the field ADR 0073 reserves for this purpose).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegistryVersion {
+    /// The exact version requested in `beamtalk.toml` when this entry was
+    /// resolved.
+    pub version: String,
+    /// Where the registry index that produced this entry was resolved from
+    /// (its location string — a git URL or local directory path).
+    ///
+    /// `None` for a lock entry written before this field existed (BT-2993) —
+    /// such an entry never matches the currently configured registry, so it
+    /// is always treated as a miss and re-resolved once, after which it
+    /// carries a real value.
+    pub registry: Option<String>,
 }
 
 /// A locked native (hex.pm) dependency entry (ADR 0072 Phase 2).
@@ -125,6 +148,11 @@ struct TomlLockEntry {
     /// therefore still parse, and their entries simply carry no version.
     #[serde(default)]
     version: Option<String>,
+    /// Which registry produced this entry (BT-2993). Absent in lockfiles
+    /// written before this field existed, and in plain git-dependency
+    /// entries — both still parse.
+    #[serde(default)]
+    registry: Option<String>,
     url: String,
     reference: String,
     sha: String,
@@ -237,6 +265,11 @@ impl Lockfile {
                 )
             })?;
 
+            let registry_version = entry.version.map(|version| RegistryVersion {
+                version,
+                registry: entry.registry,
+            });
+
             packages.insert(
                 entry.name.clone(),
                 LockEntry {
@@ -244,7 +277,7 @@ impl Lockfile {
                     url: entry.url,
                     reference,
                     resolved_sha: entry.sha,
-                    registry_version: entry.version,
+                    registry_version,
                 },
             );
         }
@@ -301,8 +334,11 @@ impl Lockfile {
         for entry in self.packages.values() {
             output.push_str("[[package]]\n");
             let _ = writeln!(output, "name = \"{}\"", entry.name);
-            if let Some(version) = &entry.registry_version {
-                let _ = writeln!(output, "version = \"{version}\"");
+            if let Some(rv) = &entry.registry_version {
+                let _ = writeln!(output, "version = \"{}\"", rv.version);
+                if let Some(registry) = &rv.registry {
+                    let _ = writeln!(output, "registry = \"{}\"", escape_toml_string(registry));
+                }
             }
             let _ = writeln!(output, "url = \"{}\"", entry.url);
             let _ = writeln!(
@@ -330,6 +366,33 @@ impl Default for Lockfile {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Escape a value for embedding in a TOML basic string.
+///
+/// Unlike `url`/`name`/`sha`, a registry identity can be a raw filesystem
+/// path (`[registry] url` pointing at a local directory) or an unvalidated
+/// `BEAMTALK_REGISTRY` env value, rather than validated git-URL syntax, so
+/// it can contain backslashes (Windows paths), quotes, or literal control
+/// characters. TOML basic strings prohibit unescaped control characters
+/// (U+0000-U+001F, U+007F); an unescaped backslash, quote, or newline here
+/// corrupts the lockfile, and every later `Lockfile::read` hard-fails.
+fn escape_toml_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 || c == '\x7f' => {
+                let _ = write!(out, "\\u{:04X}", c as u32);
+            }
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 /// Format a `GitReference` for lockfile storage.
@@ -559,6 +622,13 @@ mod tests {
 
     // --- Registry version field (BT-2978) ---
 
+    fn registry_version(version: &str, registry: &str) -> RegistryVersion {
+        RegistryVersion {
+            version: version.to_string(),
+            registry: Some(registry.to_string()),
+        }
+    }
+
     #[test]
     fn test_registry_version_is_serialized_as_version() {
         let mut lockfile = Lockfile::new();
@@ -567,7 +637,10 @@ mod tests {
             url: "https://github.com/jamesc/beamtalk-yaml".to_string(),
             reference: GitReference::Tag("v0.2.1".to_string()),
             resolved_sha: "abc1234def5678abc1234def5678abc1234def56".to_string(),
-            registry_version: Some("0.2.1".to_string()),
+            registry_version: Some(registry_version(
+                "0.2.1",
+                "https://github.com/jamesc/beamtalk-registry",
+            )),
         });
 
         let content = lockfile.serialize();
@@ -582,14 +655,158 @@ mod tests {
             url: "https://github.com/jamesc/beamtalk-yaml".to_string(),
             reference: GitReference::Tag("v0.2.1".to_string()),
             resolved_sha: "abc1234def5678abc1234def5678abc1234def56".to_string(),
-            registry_version: Some("0.2.1".to_string()),
+            registry_version: Some(registry_version(
+                "0.2.1",
+                "https://github.com/jamesc/beamtalk-registry",
+            )),
         });
 
         let parsed = Lockfile::parse(&original.serialize()).unwrap();
         assert_eq!(original, parsed);
         assert_eq!(
-            parsed.get("yaml").unwrap().registry_version.as_deref(),
-            Some("0.2.1")
+            parsed.get("yaml").unwrap().registry_version,
+            Some(registry_version(
+                "0.2.1",
+                "https://github.com/jamesc/beamtalk-registry"
+            ))
+        );
+    }
+
+    // --- Registry field (BT-2993) ---
+
+    #[test]
+    fn test_registry_field_is_serialized_alongside_version() {
+        let mut lockfile = Lockfile::new();
+        lockfile.insert(LockEntry {
+            name: "yaml".to_string(),
+            url: "https://github.com/jamesc/beamtalk-yaml".to_string(),
+            reference: GitReference::Tag("v0.2.1".to_string()),
+            resolved_sha: "abc1234def5678abc1234def5678abc1234def56".to_string(),
+            registry_version: Some(registry_version(
+                "0.2.1",
+                "https://github.com/jamesc/beamtalk-registry",
+            )),
+        });
+
+        let content = lockfile.serialize();
+        assert!(
+            content.contains("registry = \"https://github.com/jamesc/beamtalk-registry\""),
+            "{content}"
+        );
+    }
+
+    #[test]
+    fn test_registry_field_with_backslash_and_quote_roundtrips() {
+        // A local-directory registry (`[registry] url` pointing at a
+        // filesystem path) is a raw, unvalidated string -- unlike `url`,
+        // which only ever holds a validated git URL. A Windows path or a
+        // quote in the identity must not corrupt the TOML: an unescaped `\`
+        // is not a valid TOML escape sequence, so `Lockfile::read` would
+        // hard-fail on every subsequent command with no self-healing.
+        let mut original = Lockfile::new();
+        original.insert(LockEntry {
+            name: "yaml".to_string(),
+            url: "https://github.com/jamesc/beamtalk-yaml".to_string(),
+            reference: GitReference::Tag("v0.2.1".to_string()),
+            resolved_sha: "abc1234def5678abc1234def5678abc1234def56".to_string(),
+            registry_version: Some(registry_version(
+                "0.2.1",
+                r#"C:\vendor\registry with "quotes""#,
+            )),
+        });
+
+        let content = original.serialize();
+        let parsed = Lockfile::parse(&content).unwrap_or_else(|e| {
+            panic!("serialized lockfile failed to re-parse: {e}\n\ncontent:\n{content}")
+        });
+        assert_eq!(
+            parsed.get("yaml").unwrap().registry_version,
+            original.get("yaml").unwrap().registry_version,
+        );
+    }
+
+    #[test]
+    fn test_registry_field_with_control_characters_roundtrips() {
+        // `BEAMTALK_REGISTRY` is an unvalidated env value -- a literal
+        // newline, carriage return, or tab in it is a valid `String` but not
+        // a valid unescaped TOML basic string character. Unlike the
+        // backslash/quote case above, an unescaped control character isn't
+        // just wrong output: it can inject a bogus extra line (e.g. a fake
+        // `sha = "..."` key) into the serialized lockfile.
+        let mut original = Lockfile::new();
+        original.insert(LockEntry {
+            name: "yaml".to_string(),
+            url: "https://github.com/jamesc/beamtalk-yaml".to_string(),
+            reference: GitReference::Tag("v0.2.1".to_string()),
+            resolved_sha: "abc1234def5678abc1234def5678abc1234def56".to_string(),
+            registry_version: Some(registry_version(
+                "0.2.1",
+                "https://example.test/registry\nsha = \"injected\"\t\r",
+            )),
+        });
+
+        let content = original.serialize();
+        let parsed = Lockfile::parse(&content).unwrap_or_else(|e| {
+            panic!("serialized lockfile failed to re-parse: {e}\n\ncontent:\n{content}")
+        });
+        assert_eq!(
+            parsed.get("yaml").unwrap().registry_version,
+            original.get("yaml").unwrap().registry_version,
+        );
+    }
+
+    #[test]
+    fn test_registry_field_with_full_control_character_range_roundtrips() {
+        // The doc comment on `escape_toml_string` claims the full TOML-
+        // prohibited range (U+0000-U+001F, U+007F), not just \n/\r/\t. Cover
+        // the boundary and mid-range characters the \n/\r/\t-only test above
+        // doesn't exercise: NUL, VT (U+000B), a mid-range control (U+001F),
+        // and DEL (U+007F).
+        let mut original = Lockfile::new();
+        original.insert(LockEntry {
+            name: "yaml".to_string(),
+            url: "https://github.com/jamesc/beamtalk-yaml".to_string(),
+            reference: GitReference::Tag("v0.2.1".to_string()),
+            resolved_sha: "abc1234def5678abc1234def5678abc1234def56".to_string(),
+            registry_version: Some(registry_version(
+                "0.2.1",
+                "https://example.test/registry\u{0}\u{b}\u{1f}\u{7f}",
+            )),
+        });
+
+        let content = original.serialize();
+        let parsed = Lockfile::parse(&content).unwrap_or_else(|e| {
+            panic!("serialized lockfile failed to re-parse: {e}\n\ncontent:\n{content}")
+        });
+        assert_eq!(
+            parsed.get("yaml").unwrap().registry_version,
+            original.get("yaml").unwrap().registry_version,
+        );
+    }
+
+    #[test]
+    fn test_lockfile_without_registry_still_parses_and_omits_registry() {
+        // A lockfile written after BT-2978 but before BT-2993 carried `version`
+        // but no `registry` key. It must still parse — the entry simply
+        // carries no recorded registry, which a resolution-freshness check
+        // (graph.rs / mod.rs) treats as an unconditional miss.
+        let legacy = r#"
+[[package]]
+name = "yaml"
+version = "0.2.1"
+url = "https://github.com/jamesc/beamtalk-yaml"
+reference = "tag:v0.2.1"
+sha = "abc1234def5678abc1234def5678abc1234def56"
+"#;
+
+        let parsed = Lockfile::parse(legacy).unwrap();
+        let entry = parsed.get("yaml").unwrap();
+        assert_eq!(
+            entry.registry_version,
+            Some(RegistryVersion {
+                version: "0.2.1".to_string(),
+                registry: None,
+            })
         );
     }
 

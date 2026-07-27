@@ -260,6 +260,20 @@ handle_describe_contains_versions_test() ->
     ?assert(maps:is_key(<<"protocol">>, Versions)),
     ?assert(maps:is_key(<<"beamtalk">>, Versions)).
 
+%% BT-2991: beamtalk_version:get/0 (the desktop-attach readiness RPC target)
+%% hardcodes its own "2.0" protocol_version literal, separate from the
+%% "protocol" value describe reports here. beamtalk_workspace already depends
+%% on beamtalk_runtime (dependencies flow down only, and workspace sits above
+%% runtime), so this cross-module check can live here to catch the two
+%% literals drifting when the wire protocol changes.
+handle_describe_protocol_version_matches_beamtalk_version_test() ->
+    Msg = make_msg(<<"describe">>, <<"d-4">>, undefined),
+    Result = beamtalk_repl_ops_dev:handle(<<"describe">>, #{}, Msg, self()),
+    Decoded = json:decode(Result),
+    Versions = maps:get(<<"versions">>, Decoded),
+    #{protocol_version := FromVersionModule} = beamtalk_version:get(),
+    ?assertEqual(maps:get(<<"protocol">>, Versions), FromVersionModule).
+
 %%====================================================================
 %% handle/4 -- show-codegen with empty code
 %%====================================================================

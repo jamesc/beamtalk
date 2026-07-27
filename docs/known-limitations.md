@@ -47,13 +47,14 @@ cls class           // => Counter class (metaclass object)
 
 ## Concurrency
 
-### No Async Combinators
+### `parallelCollect:` Has No Bounded-Concurrency Option
 
-`Future all:` and `Future any:` are not yet implemented. You cannot wait on multiple futures simultaneously.
-
-**Workaround:** Await futures sequentially.
-
-**Tracking:** [BT-507](https://linear.app/beamtalk/issue/BT-507)
+`Collection>>parallelCollect:` (BT-2974) spawns one process per element with
+no pooling or throttling — for very large collections this means an
+unbounded process fan-out. Chunk the collection yourself, or call `Parallel
+all:` directly with your own work queue, if that's undesirable. A
+bounded-concurrency variant (e.g. `parallelCollect:maxConcurrency:`) is a
+natural follow-up, not yet implemented.
 
 ### Supervision API Is Low-Level
 

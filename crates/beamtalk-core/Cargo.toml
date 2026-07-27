@@ -52,7 +52,7 @@ tempfile = "3.14"
 regex = "1"
 # why: BT-2859 — serialises env-var-mutating tests in `ffi_type_specs`
 # (mirrors the same pattern in `beamtalk-cli`).
-serial_test = "3"
+serial_test = "4"
 
 [[bench]]
 name = "compiler_pipeline"

@@ -40,7 +40,7 @@ c getValue
 
 // Replace increment to add 10 instead of 1
 Counter >> increment => self.value := self.value + 10
-// => _
+// => Counter>>increment
 
 // Existing actor 'c' should use the NEW increment (not old +1)
 c increment
@@ -57,7 +57,7 @@ c getValue
 // ===========================================================================
 
 Counter >> increment => self.value := self.value * 2
-// => _
+// => Counter>>increment
 
 // Same actor, now uses multiplication
 c increment
@@ -71,7 +71,7 @@ c increment
 // ===========================================================================
 
 Counter >> reset => self.value := 0
-// => _
+// => Counter>>reset
 
 // Existing actor can call the brand new method
 c reset
@@ -79,7 +79,7 @@ c reset
 
 // Restore additive increment and verify from clean state
 Counter >> increment => self.value := self.value + 5
-// => _
+// => Counter>>increment
 
 c increment
 // => 5

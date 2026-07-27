@@ -1,0 +1,200 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for RetryPolicy value type and do: retry executor (BT-2973).
+//
+// Reuses the shared MyCustomError fixture (stdlib/test/fixtures/custom_error.bt)
+// as a distinguishable error class for nonRetryableErrors matching.
+
+TestCase subclass: RetryPolicyTest
+  field: counter = nil
+
+  setUp =>
+    // Defensively clean up any leftover table from a crashed previous run
+    [
+      (AtomicCounter named: #retryPolicyBUnitTestCounter) delete
+    ] on: Error do: [:e | nil]
+    self withCounter: (AtomicCounter new: #retryPolicyBUnitTestCounter)
+
+  tearDown =>
+    self.counter isNil ifFalse: [[self.counter delete] on: Error do: [:e | nil]]
+
+  // ===== Construction & Defaults =====
+  testDefaultConstruction =>
+    rp := RetryPolicy new
+    self assert: rp initialInterval equals: 1000
+    self assert: rp backoffCoefficient equals: 2.0
+    self assert: rp maximumInterval equals: nil
+    self assert: rp maximumAttempts equals: nil
+    self assert: rp jitter equals: false
+    self assert: rp nonRetryableErrors equals: #()
+
+  testNewWithMap =>
+    rp := RetryPolicy
+      new: #{
+        #initialInterval => 500,
+        #backoffCoefficient => 1.5,
+        #maximumInterval => 30000,
+        #maximumAttempts => 5,
+        #jitter => true,
+        #nonRetryableErrors => #("InvalidInput", "NotFound")
+      }
+    self assert: rp initialInterval equals: 500
+    self assert: rp backoffCoefficient equals: 1.5
+    self assert: rp maximumInterval equals: 30000
+    self assert: rp maximumAttempts equals: 5
+    self assert: rp jitter equals: true
+    self assert: rp nonRetryableErrors equals: #("InvalidInput", "NotFound")
+
+  testEquality =>
+    rp1 := RetryPolicy new: #{
+      #initialInterval => 1000,
+      #backoffCoefficient => 2.0
+    }
+    rp2 := RetryPolicy new: #{
+      #initialInterval => 1000,
+      #backoffCoefficient => 2.0
+    }
+    self assert: rp1 equals: rp2
+
+  // ===== intervalForAttempt: (pure interval math, no sleeps) =====
+  testIntervalForAttemptDefaultBackoff =>
+    rp := RetryPolicy new
+    self assert: (rp intervalForAttempt: 1) equals: 1000
+    self assert: (rp intervalForAttempt: 2) equals: 2000
+    self assert: (rp intervalForAttempt: 3) equals: 4000
+
+  testIntervalForAttemptCustomCoefficient =>
+    rp := RetryPolicy new: #{
+      #initialInterval => 500,
+      #backoffCoefficient => 1.5
+    }
+    self assert: (rp intervalForAttempt: 1) equals: 500
+    self assert: (rp intervalForAttempt: 2) equals: 750
+    self assert: (rp intervalForAttempt: 3) equals: 1125
+
+  testIntervalForAttemptCappedByMaximumInterval =>
+    rp := RetryPolicy new: #{#initialInterval => 1000, #maximumInterval => 1500}
+    self assert: (rp intervalForAttempt: 1) equals: 1000
+    self assert: (rp intervalForAttempt: 2) equals: 1500
+    self assert: (rp intervalForAttempt: 3) equals: 1500
+
+  testIntervalForAttemptJitterStaysWithinBounds =>
+    plain := RetryPolicy new: #{
+      #initialInterval => 1000,
+      #maximumInterval => 4000
+    }
+    jittered := RetryPolicy new: #{
+      #initialInterval => 1000,
+      #maximumInterval => 4000,
+      #jitter => true
+    }
+    1
+      to: 3
+      do: [:attempt |
+        raw := plain intervalForAttempt: attempt
+        10
+          timesRepeat: [
+            delay := jittered intervalForAttempt: attempt
+            self assert: delay >= 0
+            self assert: delay <= raw
+          ]
+      ]
+
+  // ===== retriesExhausted: =====
+  testRetriesExhaustedNilIsUnlimited =>
+    rp := RetryPolicy new
+    self deny: (rp retriesExhausted: 999)
+
+  testRetriesExhaustedZeroIsUnlimited =>
+    rp := RetryPolicy new: #{#maximumAttempts => 0}
+    self deny: (rp retriesExhausted: 999)
+
+  testRetriesExhaustedAtLimit =>
+    rp := RetryPolicy new: #{#maximumAttempts => 3}
+    self deny: (rp retriesExhausted: 2)
+    self assert: (rp retriesExhausted: 3)
+
+  // ===== isNonRetryable: =====
+  testIsNonRetryableTrueForListedClass =>
+    rp := RetryPolicy new: #{#nonRetryableErrors => #("MyCustomError")}
+    outcome := Result tryDo: [MyCustomError signal: "boom"]
+    self assert: (rp isNonRetryable: outcome error)
+
+  testIsNonRetryableFalseForUnlistedClass =>
+    rp := RetryPolicy new: #{#nonRetryableErrors => #("MyCustomError")}
+    outcome := Result tryDo: [Error signal: "boom"]
+    self deny: (rp isNonRetryable: outcome error)
+
+  // ===== do: executor =====
+  testDoSucceedsOnFirstAttempt =>
+    rp := RetryPolicy new: #{#initialInterval => 1, #maximumAttempts => 3}
+    result := rp
+      do: [:attempt |
+        self.counter increment
+        attempt
+      ]
+    self assert: (self assertOk: result) equals: 1
+    self assert: self.counter value equals: 1
+
+  testDoRetriesUntilSuccess =>
+    rp := RetryPolicy new: #{#initialInterval => 1, #maximumAttempts => 5}
+    result := rp
+      do: [:attempt |
+        self.counter increment
+        attempt < 3 ifTrue: [Error signal: "not yet"] ifFalse: [attempt]
+      ]
+    self assert: (self assertOk: result) equals: 3
+    self assert: self.counter value equals: 3
+
+  testDoExhaustsMaximumAttempts =>
+    rp := RetryPolicy new: #{#initialInterval => 1, #maximumAttempts => 3}
+    result := rp
+      do: [:attempt |
+        self.counter increment
+        Error signal: "always fails"
+      ]
+    self assert: result isError
+    self assert: self.counter value equals: 3
+
+  testDoHandlesManyAttemptsWithoutStackGrowth =>
+    // Regression test: attempt:do:'s recursive step must be a genuine BEAM
+    // tail call. An earlier version used `^` (non-local return) inside
+    // ifTrue: blocks, which wraps the whole method body in a try/catch and
+    // defeats tail-call optimization — every retry would add a stack frame,
+    // eventually crashing an unlimited-attempts policy retrying a
+    // fast-failing block.
+    //
+    // 300 attempts is far deeper than a non-tail-call version would survive,
+    // while staying well clear of a separate, pre-existing gap (filed
+    // separately): intervalForAttempt: computes
+    // backoffCoefficient raisedTo: (attempt - 1) before applying
+    // maximumInterval, so attempt counts near Float's overflow point raise a
+    // low-level arithmetic error regardless of the cap.
+    rp := RetryPolicy new: #{
+      #initialInterval => 0,
+      #maximumInterval => 1,
+      #maximumAttempts => 300
+    }
+    result := rp
+      do: [:attempt |
+        self.counter increment
+        Error signal: "always fails"
+      ]
+    self assert: result isError
+    self assert: self.counter value equals: 300
+
+  testDoShortCircuitsNonRetryableError =>
+    rp := RetryPolicy
+      new: #{
+        #initialInterval => 1,
+        #maximumAttempts => 5,
+        #nonRetryableErrors => #("MyCustomError")
+      }
+    result := rp
+      do: [:attempt |
+        self.counter increment
+        MyCustomError signal: "nope"
+      ]
+    self assert: result isError
+    self assert: self.counter value equals: 1

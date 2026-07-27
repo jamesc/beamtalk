@@ -125,6 +125,42 @@ abstract typed Value subclass: Collection(E)
     // resolves class-side and returns the receiver's collection type.
     self species withAll: result
 
+  /// Like `collect:`, but evaluates `block` for every element concurrently
+  /// (one spawned process per element, via `Parallel all:` — BT-2974)
+  /// instead of sequentially.
+  ///
+  /// **Concurrency is unbounded** — one process is spawned per element, with
+  /// no pooling or throttling. This is a deliberate v1 scope decision (a
+  /// simple, correct combinator now beats a bounded scheduler nobody has
+  /// asked for yet). For very large collections, chunk the collection
+  /// yourself before calling `parallelCollect:`, or call `Parallel all:`
+  /// directly with your own work queue. A bounded-concurrency variant (e.g.
+  /// `parallelCollect:maxConcurrency:`) is a natural follow-up, not
+  /// implemented here.
+  ///
+  /// If any element's `block` evaluation fails, `parallelCollect:` re-raises
+  /// that failure (the first one, in element order) — matching `collect:`'s
+  /// own behaviour of propagating an exception raised by `block`. Use
+  /// `Parallel all:` directly (on `self collect: [:each | [block value:
+  /// each]]`) if you need every per-element `Result`, including partial
+  /// failures, instead of a raise.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(1, 2, 3) parallelCollect: [:x | x * 2]  // => #(2, 4, 6)
+  /// ```
+  parallelCollect: block :: Block(E, R) -> Self =>
+    // Built the same way `collect:` builds its own result (`inject:into:`
+    // seeded by a `#()` List literal, not `self collect:`) — `Self` doesn't
+    // resolve to a concrete List type from inside this abstract class, so
+    // going through `self collect:` here would type as `Collection`, not
+    // `List(Block)`, and `Parallel all:` requires the latter.
+    blocks := (self inject: #() into: [:acc :each |
+      acc addFirst: [block value: each]
+    ]) reversed
+    results := Parallel all: blocks
+    self species withAll: (results collect: [:r | r unwrap])
+
   /// Select elements for which `block` returns true.
   ///
   /// Returns a collection of the same type as the receiver (species pattern).

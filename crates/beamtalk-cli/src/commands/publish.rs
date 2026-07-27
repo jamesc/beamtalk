@@ -57,26 +57,52 @@ pub fn run(dry_run: bool) -> Result<()> {
     // check below (which queries `origin` over `git ls-remote`).
     let origin_url = get_origin_remote_url(&project_root)?;
 
-    // Preflight 3: the release tag doesn't already exist, locally or on origin.
-    ensure_tag_absent(&project_root, &tag)?;
-
-    // Preflight 4: the version isn't already published. Refresh the index
-    // first so a publish run always sees the latest state, not a stale local
-    // clone from an earlier `deps` resolution.
+    // Preflight 3: resolve the registry index and check whether `version` is
+    // already recorded there. Refresh the index first so this always sees
+    // the latest state, not a stale local clone from an earlier `deps`
+    // resolution.
+    //
+    // This must run *before* the tag-absence check below: a tag that already
+    // exists on `origin` is ambiguous by itself — it means either "this
+    // version is already published" (it's in the index — bump the version)
+    // or "a previous `publish` pushed the tag but died before updating the
+    // index" (it's *not* in the index — that's a partial failure, recover it
+    // manually, see docs/beamtalk-packages.md, "If step 3 fails"). Knowing
+    // the index state up front is what lets the tag-absence check tell those
+    // two cases apart instead of always blaming the version.
     let location = registry::resolve_registry_location(&project_root, manifest.registry.as_ref());
     let index_root = registry::ensure_index(&location, &project_root, true)?;
     let existing_entry = registry::read_entry(&index_root, name)?;
-    if let Some(entry) = &existing_entry {
-        if entry.find_version(version).is_some() {
-            miette::bail!(
-                "Version '{version}' of package '{name}' is already published in the \
-                 registry ({location}).\n\n  \
-                 Bump the version first: beamtalk version bump patch"
-            );
-        }
+    let version_published = existing_entry
+        .as_ref()
+        .is_some_and(|entry| entry.find_version(version).is_some());
+
+    // Preflight 4: the release tag doesn't already exist, locally or on
+    // origin — unless the tag is on origin and `version_published` is
+    // false, which is the partial-failure case described above.
+    ensure_tag_absent(
+        &project_root,
+        &tag,
+        name,
+        version,
+        version_published,
+        &location,
+        &index_root,
+    )?;
+
+    // Preflight 5: guards the (unusual) case where the tag doesn't exist at
+    // all — locally or on `origin` — yet the version is already recorded in
+    // the index, e.g. because the tag was deleted by hand after a successful
+    // publish.
+    if version_published {
+        miette::bail!(
+            "Version '{version}' of package '{name}' is already published in the \
+             registry ({location}).\n\n  \
+             Bump the version first: beamtalk version bump patch"
+        );
     }
 
-    // Preflight 5: for a git-backed registry, resolve the identity that will
+    // Preflight 6: for a git-backed registry, resolve the identity that will
     // author the index commit *before* anything is mutated. The index lives
     // in a separate clone from the project (typically
     // `_build/registry/index/`), so it does not inherit an identity the user
@@ -234,8 +260,44 @@ fn get_git_identity(project_root: &Utf8Path) -> Result<(String, String)> {
     Ok((read("user.name")?, read("user.email")?))
 }
 
-/// Ensure the release tag doesn't already exist locally or on `origin`.
-fn ensure_tag_absent(project_root: &Utf8Path, tag: &str) -> Result<()> {
+/// Ensure the release tag doesn't already exist locally or on `origin` —
+/// unless it exists on `origin` but `version` is genuinely not yet published
+/// (`version_published` is `false`), which means a *previous* `publish` run
+/// pushed the tag (step 2) and then died before updating the registry index
+/// (step 3), rather than this being a real republish attempt.
+///
+/// The remote check's result takes priority over the local one when both the
+/// tag and its remote counterpart exist: a partial failure of the kind above
+/// leaves the tag both on `origin` *and* locally (it was created before
+/// being pushed), so treating the local tag as the controlling signal would
+/// always report the true-republish message even when the index disagrees.
+/// `version_published` is resolved by the caller from the same index read
+/// used for the "already published" preflight, so both checks agree on the
+/// index's state.
+///
+/// The remote check needs network access to `origin`; the local one doesn't.
+/// If it fails (offline, VPN down) and a local tag already gives an
+/// actionable answer, this falls back to the local-only verdict rather than
+/// turning what used to be an instant, network-free local conflict into a
+/// network error.
+///
+/// # Errors
+///
+/// Returns an error if the tag already exists (locally, or on `origin` when
+/// `version_published` is `true`), if `origin` has the tag but the version
+/// isn't published yet (the partial-failure case — the error names the
+/// manual recovery steps instead of suggesting a version bump), or if the
+/// underlying `git` commands fail and there's no local tag to fall back to
+/// reporting instead.
+fn ensure_tag_absent(
+    project_root: &Utf8Path,
+    tag: &str,
+    name: &str,
+    version: &str,
+    version_published: bool,
+    location: &RegistryLocation,
+    index_root: &Utf8Path,
+) -> Result<()> {
     let local = Command::new("git")
         .args(["tag", "--list", tag])
         .current_dir(project_root)
@@ -246,29 +308,75 @@ fn ensure_tag_absent(project_root: &Utf8Path, tag: &str) -> Result<()> {
         let stderr = String::from_utf8_lossy(&local.stderr);
         miette::bail!("Failed to check local tags:\n{stderr}");
     }
-    if !String::from_utf8_lossy(&local.stdout).trim().is_empty() {
+    let local_exists = !String::from_utf8_lossy(&local.stdout).trim().is_empty();
+
+    // Checking `origin` needs network access; a tag already known to exist
+    // locally does not. When the remote check itself fails (offline, VPN
+    // down) and there's a local tag to report instead, fall back to the
+    // local-only verdict rather than turning what used to be an instant,
+    // network-free local conflict into a network error.
+    let remote_exists = match Command::new("git")
+        .args(["ls-remote", "--tags", "origin", tag])
+        .current_dir(project_root)
+        .output()
+    {
+        Ok(output) if output.status.success() => {
+            !String::from_utf8_lossy(&output.stdout).trim().is_empty()
+        }
+        Ok(output) if !local_exists => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            miette::bail!("Failed to check remote tags on 'origin':\n{stderr}");
+        }
+        Err(e) if !local_exists => {
+            return Err(e)
+                .into_diagnostic()
+                .wrap_err("Failed to list remote git tags on 'origin'");
+        }
+        Ok(_) | Err(_) => false,
+    };
+
+    if remote_exists {
+        if version_published {
+            miette::bail!(
+                "Tag '{tag}' already exists on 'origin'.\n\n  \
+                 This version has already been published — bump the version first."
+            );
+        }
+
+        let recovery = match location {
+            RegistryLocation::Git(_) => format!(
+                "1. Check '{index_root}' for an uncommitted or unpushed change.\n  \
+                 2. If it's uncommitted: (cd {index_root} && git add . && git commit -m \
+                 \"registry: {name} v{version}\")\n  \
+                 3. Push it: (cd {index_root} && git push)\n  \
+                 If the push fails (another author pushed to the registry concurrently): \
+                 (cd {index_root} && git pull --rebase && git push)"
+            ),
+            RegistryLocation::LocalDir(_) => format!(
+                "Check '{index_root}/packages/{name}.toml' for a '{version}' entry and add it \
+                 by hand if it's missing."
+            ),
+        };
+
+        miette::bail!(
+            "Tag '{tag}' already exists on 'origin', but version '{version}' of package \
+             '{name}' is not yet in the registry index ({location}).\n\n  \
+             A previous 'beamtalk publish' pushed the release tag but failed before the \
+             registry index was updated — this is a partial failure, not a republish. Do \
+             NOT bump the version and do NOT re-run 'beamtalk publish': the tag already \
+             exists, so a retry only reports this same error, and bumping the version would \
+             permanently abandon the release you already tagged.\n\n  \
+             Finish the index update manually instead:\n  {recovery}\n\n  \
+             See docs/beamtalk-packages.md, \"If step 3 fails\", for details."
+        );
+    }
+
+    if local_exists {
         miette::bail!(
             "Tag '{tag}' already exists locally.\n\n  \
              This version may already have been published — bump the version first, or \
              delete the stale tag with `git tag -d {tag}` if the previous publish failed \
              partway through."
-        );
-    }
-
-    let remote = Command::new("git")
-        .args(["ls-remote", "--tags", "origin", tag])
-        .current_dir(project_root)
-        .output()
-        .into_diagnostic()
-        .wrap_err("Failed to list remote git tags on 'origin'")?;
-    if !remote.status.success() {
-        let stderr = String::from_utf8_lossy(&remote.stderr);
-        miette::bail!("Failed to check remote tags on 'origin':\n{stderr}");
-    }
-    if !String::from_utf8_lossy(&remote.stdout).trim().is_empty() {
-        miette::bail!(
-            "Tag '{tag}' already exists on 'origin'.\n\n  \
-             This version has already been published — bump the version first."
         );
     }
 
@@ -503,8 +611,21 @@ mod tests {
         );
     }
 
+    /// Flatten a diagnostic's message to single-spaced text for substring
+    /// assertions.
+    ///
+    /// Uses `Display` (the raw message), not `Debug` (miette's graphical
+    /// renderer): the graphical renderer word-wraps at a fixed column width
+    /// and injects a `│` continuation marker at each wrap point, which
+    /// silently splits any substring — e.g. a temp-dir path — that happens
+    /// to straddle the wrap column. Whether a given path straddles it
+    /// depends on the OS's temp-dir prefix length (`/tmp/...` on Linux vs.
+    /// the much longer `/var/folders/.../T/...` on macOS or
+    /// `C:\Users\RUNNER~1\AppData\Local\Temp\...` on Windows), so a
+    /// `Debug`-based flatten can pass on Linux CI and fail on macOS/Windows
+    /// CI for the exact same diagnostic.
     fn flat_err(err: &miette::Report) -> String {
-        format!("{err:?}")
+        format!("{err}")
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" ")
@@ -701,13 +822,148 @@ mod tests {
         run_git(dir.path(), &["add", "."]);
         run_git(dir.path(), &["commit", "-m", "initial"]);
         run_git(dir.path(), &["tag", "-a", "v1.0.0", "-m", "v1.0.0"]);
+
+        // A real `origin` that does *not* have the tag — a self-referencing
+        // "remote" would see the just-created tag too (it's the same repo),
+        // which would exercise the remote branch below instead of this one.
+        let origin_bare = TempDir::new().unwrap();
+        run_git(origin_bare.path(), &["init", "--bare"]);
         run_git(
             dir.path(),
-            &["remote", "add", "origin", dir.path().to_str().unwrap()],
+            &["remote", "add", "origin", &file_url(origin_bare.path())],
         );
 
-        let err = ensure_tag_absent(&utf8(&dir), "v1.0.0").unwrap_err();
+        let err = ensure_tag_absent(
+            &utf8(&dir),
+            "v1.0.0",
+            "pkg",
+            "1.0.0",
+            false,
+            &RegistryLocation::Git("https://example.test/registry".to_string()),
+            Utf8Path::new("unused-index-root"),
+        )
+        .unwrap_err();
         assert!(flat_err(&err).contains("already exists locally"), "{err:?}");
+    }
+
+    /// A local-only tag conflict must stay reportable without network
+    /// access: if `origin` can't be reached (offline, VPN down), fall back
+    /// to the local verdict instead of surfacing the remote check's own
+    /// network failure — the local answer is already actionable on its own.
+    #[test]
+    fn test_ensure_tag_absent_local_tag_survives_unreachable_origin() {
+        let dir = TempDir::new().unwrap();
+        run_git(dir.path(), &["init"]);
+        configure_git_identity(dir.path());
+        std::fs::write(dir.path().join("a.txt"), "x").unwrap();
+        run_git(dir.path(), &["add", "."]);
+        run_git(dir.path(), &["commit", "-m", "initial"]);
+        run_git(dir.path(), &["tag", "-a", "v1.0.0", "-m", "v1.0.0"]);
+
+        // A directory that isn't a git repository at all — `git ls-remote`
+        // against it fails the way it would offline against a real host.
+        let unreachable = TempDir::new().unwrap();
+        run_git(
+            dir.path(),
+            &[
+                "remote",
+                "add",
+                "origin",
+                unreachable.path().to_str().unwrap(),
+            ],
+        );
+
+        let err = ensure_tag_absent(
+            &utf8(&dir),
+            "v1.0.0",
+            "pkg",
+            "1.0.0",
+            false,
+            &RegistryLocation::Git("https://example.test/registry".to_string()),
+            Utf8Path::new("unused-index-root"),
+        )
+        .unwrap_err();
+        assert!(flat_err(&err).contains("already exists locally"), "{err:?}");
+    }
+
+    #[test]
+    fn test_ensure_tag_absent_rejects_remote_tag_when_version_published() {
+        let dir = TempDir::new().unwrap();
+        run_git(dir.path(), &["init"]);
+        configure_git_identity(dir.path());
+        std::fs::write(dir.path().join("a.txt"), "x").unwrap();
+        run_git(dir.path(), &["add", "."]);
+        run_git(dir.path(), &["commit", "-m", "initial"]);
+
+        let origin_bare = TempDir::new().unwrap();
+        run_git(origin_bare.path(), &["init", "--bare"]);
+        run_git(
+            dir.path(),
+            &["remote", "add", "origin", &file_url(origin_bare.path())],
+        );
+        run_git(dir.path(), &["tag", "-a", "v1.0.0", "-m", "v1.0.0"]);
+        run_git(dir.path(), &["push", "origin", "v1.0.0"]);
+
+        // A true republish attempt: the tag is on origin *and* the version
+        // is already recorded in the index — the original message is
+        // correct here.
+        let err = ensure_tag_absent(
+            &utf8(&dir),
+            "v1.0.0",
+            "pkg",
+            "1.0.0",
+            true,
+            &RegistryLocation::Git("https://example.test/registry".to_string()),
+            Utf8Path::new("unused-index-root"),
+        )
+        .unwrap_err();
+        let msg = flat_err(&err);
+        assert!(msg.contains("already exists on 'origin'"), "{msg}");
+        assert!(msg.contains("bump the version first"), "{msg}");
+    }
+
+    #[test]
+    fn test_ensure_tag_absent_reports_partial_failure_when_version_not_published() {
+        let dir = TempDir::new().unwrap();
+        run_git(dir.path(), &["init"]);
+        configure_git_identity(dir.path());
+        std::fs::write(dir.path().join("a.txt"), "x").unwrap();
+        run_git(dir.path(), &["add", "."]);
+        run_git(dir.path(), &["commit", "-m", "initial"]);
+
+        let origin_bare = TempDir::new().unwrap();
+        run_git(origin_bare.path(), &["init", "--bare"]);
+        run_git(
+            dir.path(),
+            &["remote", "add", "origin", &file_url(origin_bare.path())],
+        );
+        run_git(dir.path(), &["tag", "-a", "v1.0.0", "-m", "v1.0.0"]);
+        run_git(dir.path(), &["push", "origin", "v1.0.0"]);
+
+        // The tag is on origin (step 2 succeeded) but the version is *not*
+        // in the index (step 3 never happened) — a partial failure, not a
+        // republish. The old unconditional "bump the version" message would
+        // be actively harmful here: it abandons the release just tagged.
+        let index_root = utf8(&dir).join("_build/registry/index");
+        let err = ensure_tag_absent(
+            &utf8(&dir),
+            "v1.0.0",
+            "pkg",
+            "1.0.0",
+            false,
+            &RegistryLocation::Git("https://example.test/registry".to_string()),
+            &index_root,
+        )
+        .unwrap_err();
+        let msg = flat_err(&err);
+        assert!(
+            !msg.contains("bump the version first"),
+            "must not suggest bumping the version on a partial failure: {msg}"
+        );
+        assert!(msg.contains("Do NOT bump the version"), "{msg}");
+        assert!(msg.contains("partial failure"), "{msg}");
+        assert!(msg.contains(index_root.as_str()), "{msg}");
+        assert!(msg.contains("git push"), "{msg}");
     }
 
     // -----------------------------------------------------------------------
@@ -811,14 +1067,21 @@ mod tests {
         let fixture = setup("yaml", "0.1.0", None);
         with_cwd(&utf8(&fixture.library), || run(false)).unwrap();
 
-        // Re-running against the same (already-tagged) version must fail —
-        // the local tag preflight catches it before any network operation.
+        // Re-running against the same (already-tagged, already-published)
+        // version must fail — a real republish attempt, so the original
+        // "bump the version" message is correct. The tag exists on `origin`
+        // (a successful first publish pushes it there), which the
+        // remote-tag check reports in preference to the local one — it's
+        // the stronger signal that this version really was published, not
+        // just tagged locally and abandoned mid-publish (BT-3000).
         let result = with_cwd(&utf8(&fixture.library), || run(false));
         assert!(result.is_err());
+        let msg = flat_err(&result.unwrap_err());
         assert!(
-            flat_err(&result.unwrap_err()).contains("already exists locally"),
-            "expected a tag-exists error"
+            msg.contains("already exists on 'origin'"),
+            "expected a tag-exists error: {msg}"
         );
+        assert!(msg.contains("bump the version first"), "{msg}");
     }
 
     #[test]
@@ -906,6 +1169,60 @@ mod tests {
         assert!(entry.find_version("0.2.0").is_some());
         // The description from the first publish survives the second.
         assert_eq!(entry.description.as_deref(), Some("YAML parsing"));
+    }
+
+    /// BT-3000: a `publish` that pushes the release tag (step 2) and then
+    /// dies before the registry index is updated (step 3) — e.g. the index
+    /// remote went unreachable — must not tell a retrying user to bump the
+    /// version. That advice, correct for a *true* republish, is actively
+    /// harmful for a partial failure: it abandons the release already live
+    /// on `origin` with no way to add it to the index later. See
+    /// `docs/beamtalk-packages.md`, "If step 3 fails".
+    #[test]
+    #[serial(cwd)]
+    fn test_publish_after_tag_pushed_but_index_not_updated_reports_manual_recovery() {
+        let fixture = setup("yaml", "0.1.0", None);
+
+        // Simulate the partial failure directly: push the release tag
+        // exactly as `create_and_push_tag` would, without ever touching the
+        // registry index (as if the process died right after step 2).
+        run_git(
+            fixture.library.path(),
+            &["tag", "-a", "v0.1.0", "-m", "Release 0.1.0"],
+        );
+        run_git(fixture.library.path(), &["push", "origin", "v0.1.0"]);
+
+        // A retry (`beamtalk publish` run again) must recognize the version
+        // is not actually published yet and report the partial-failure
+        // recovery, not the "already published" message.
+        let result = with_cwd(&utf8(&fixture.library), || run(false));
+        assert!(result.is_err());
+        let msg = flat_err(&result.unwrap_err());
+
+        assert!(
+            !msg.contains("bump the version first"),
+            "must not tell the user to bump the version — that would abandon \
+             the release already tagged on origin: {msg}"
+        );
+        assert!(
+            msg.contains("partial failure"),
+            "should explain this is a partial failure, not a republish: {msg}"
+        );
+        assert!(
+            msg.contains("re-run 'beamtalk publish'"),
+            "should tell the user not to just retry publish: {msg}"
+        );
+
+        let index_dir = crate::commands::build_layout::BuildLayout::new(utf8(&fixture.library))
+            .registry_index_dir();
+        assert!(
+            msg.contains(index_dir.as_str()),
+            "should point at the registry index checkout for manual recovery: {msg}"
+        );
+        assert!(msg.contains("git push"), "{msg}");
+
+        // And indeed: the index was never updated with the 0.1.0 entry.
+        assert!(registry::read_entry(&index_dir, "yaml").unwrap().is_none());
     }
 
     #[test]
