@@ -92,6 +92,20 @@ TestCase subclass: RetryPolicyTest
     self assert: ((uncapped intervalForAttempt: 5000) isKindOf: Integer)
     self assert: (uncapped intervalForAttempt: 5000) > 0
 
+  // Regression: the cap-guard in growInterval:remaining:cap: divides by
+  // backoffCoefficient to check whether the next multiplication would cross
+  // the cap. A zero (or negative) coefficient must skip that division
+  // instead of raising — the original raisedTo:-based computation never had
+  // this failure mode (0.0 raisedTo: N is just 0.0, never an error).
+  testIntervalForAttemptHandlesNonPositiveBackoffCoefficient =>
+    zeroCoefficient := RetryPolicy new: #{
+      #initialInterval => 1000,
+      #backoffCoefficient => 0.0
+    }
+    self assert: (zeroCoefficient intervalForAttempt: 1) equals: 1000
+    self assert: (zeroCoefficient intervalForAttempt: 2) equals: 0
+    self assert: (zeroCoefficient intervalForAttempt: 5) equals: 0
+
   testIntervalForAttemptCappedWellPastOldFloatOverflowPoint =>
     capped := RetryPolicy new: #{
       #backoffCoefficient => 2.0,

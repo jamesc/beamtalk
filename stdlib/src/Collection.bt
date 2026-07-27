@@ -194,11 +194,25 @@ abstract typed Value subclass: Collection(E)
   /// Runs `blocks` in consecutive `Parallel all:` chunks of at most
   /// `maxConcurrency` elements, preserving overall order.
   internal runChunked: blocks :: List(Block) maxConcurrency: maxConcurrency :: Integer -> List(Result) =>
+    self
+      runChunked: blocks
+      maxConcurrency: maxConcurrency
+      acc: #()
+
+  /// Tail-recursive helper for `runChunked:maxConcurrency:` — `acc` builds
+  /// up in reverse (each chunk's results prepended via `addFirst:`, one at a
+  /// time, so the recursive step stays a genuine BEAM tail call regardless
+  /// of how many chunks there are) and is reversed once at the end.
+  internal runChunked: blocks :: List(Block) maxConcurrency: maxConcurrency :: Integer acc: acc :: List(Result) -> List(Result) =>
     blocks isEmpty
-      ifTrue: [#()]
+      ifTrue: [acc reversed]
       ifFalse: [
-        (Parallel all: (blocks take: maxConcurrency))
-          ++ (self runChunked: (blocks drop: maxConcurrency) maxConcurrency: maxConcurrency)
+        chunkResults := Parallel all: (blocks take: maxConcurrency)
+        newAcc := chunkResults inject: acc into: [:a :r | a addFirst: r]
+        self
+          runChunked: (blocks drop: maxConcurrency)
+          maxConcurrency: maxConcurrency
+          acc: newAcc
       ]
 
   /// Select elements for which `block` returns true.

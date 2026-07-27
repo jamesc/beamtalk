@@ -96,18 +96,34 @@ typed Value subclass: RetryPolicy
   /// would cross `cap` (via division, itself overflow-free) so the running
   /// value never has to grow past a cap that is always far below Float's
   /// overflow point — the multiplication that would overflow never happens.
+  ///
+  /// A non-positive `backoffCoefficient` (unusual, but not rejected by
+  /// `RetryPolicy`'s field type) skips the division check entirely: it can
+  /// only shrink or zero out `current`, never grow it past a positive `cap`,
+  /// and `cap / backoffCoefficient` would itself raise for
+  /// `backoffCoefficient = 0` (Erlang has no infinite float).
   internal growInterval: current :: Integer remaining: remaining :: Integer cap: cap :: Integer -> Integer =>
     (remaining <= 0 or: [current >= cap])
       ifTrue: [current > cap ifTrue: [cap] ifFalse: [current]]
       ifFalse: [
-        (current > (cap / self.backoffCoefficient))
-          ifTrue: [cap]
-          ifFalse: [
+        self.backoffCoefficient <= 0
+          ifTrue: [
             next := (current * self.backoffCoefficient) ceiling
             self
               growInterval: next
               remaining: remaining - 1
               cap: cap
+          ]
+          ifFalse: [
+            (current > (cap / self.backoffCoefficient))
+              ifTrue: [cap]
+              ifFalse: [
+                next := (current * self.backoffCoefficient) ceiling
+                self
+                  growInterval: next
+                  remaining: remaining - 1
+                  cap: cap
+              ]
           ]
       ]
 

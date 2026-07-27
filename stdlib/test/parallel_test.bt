@@ -150,6 +150,18 @@ TestCase subclass: ParallelTest
       #(1, 2) parallelCollect: [:x | x] maxConcurrency: -1
     ] raise: #type_error
 
+  testParallelCollectMaxConcurrencyHandlesManyChunksWithoutStackGrowth =>
+    // Regression test: runChunked:maxConcurrency:'s recursive step must be a
+    // genuine BEAM tail call. An earlier version built the flattened result
+    // as `(Parallel all: chunk) ++ (self runChunked: ...)`, wrapping the
+    // recursive call inside a `++` send and defeating tail-call
+    // optimization — every chunk would add a stack frame. With
+    // maxConcurrency: 1, a 2000-element collection produces 2000
+    // one-element chunks: far deeper than a non-tail-call version survives.
+    elements := (1 to: 2000) asList
+    results := elements parallelCollect: [:x | x] maxConcurrency: 1
+    self assert: results equals: elements
+
   testParallelCollectMaxConcurrencyPropagatesElementFailure =>
     self should: [
       #(1, 0, 2) parallelCollect: [:x | 10 / x] maxConcurrency: 2
