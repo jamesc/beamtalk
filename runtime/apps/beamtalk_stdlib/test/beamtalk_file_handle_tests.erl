@@ -308,3 +308,97 @@ lines_on_closed_handle_raises_test() ->
             beamtalk_file_handle:dispatch('lines', [], Handle)
         )
     end).
+
+lines_on_write_only_handle_raises_test() ->
+    %% BT-2975: reading a write-only descriptor crashes the file_io_server, so
+    %% every later write on the handle fails silently. `lines` must refuse
+    %% before touching it — and the handle must survive intact.
+    with_temp_handle(<<>>, append, fun(Handle) ->
+        ?assertError(
+            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = io_error}},
+            beamtalk_file_handle:dispatch('lines', [], Handle)
+        ),
+        ?assert(beamtalk_file_handle:isOpen(Handle)),
+        ?assertEqual(nil, ok_value(beamtalk_file_handle:writeLine(Handle, <<"still works">>))),
+        Path = maps:get(path, Handle),
+        ?assertEqual({ok, <<"still works\n">>}, file:read_file(Path))
+    end).
+
+is_open_false_once_descriptor_dies_test() ->
+    %% A non-raw descriptor is a process: it can die without anyone calling
+    %% close (owner exit, file_io_server crash). isOpen must not keep saying
+    %% true, or callers get a bare `terminated` instead of a clear error.
+    with_temp_handle(<<"data">>, fun(Handle) ->
+        Fd = maps:get(fd, Handle),
+        ok = file:close(Fd),
+        ?assertNot(beamtalk_file_handle:isOpen(Handle)),
+        ?assert(is_error_result(beamtalk_file_handle:read(Handle, 1)))
+    end).
+
+read_zero_bytes_is_a_no_op_test() ->
+    %% `read: 0` answers <<>> without moving the position — an empty result
+    %% only means end-of-file when the requested count was positive.
+    with_temp_handle(<<"0123456789">>, fun(Handle) ->
+        ?assertEqual(<<>>, ok_value(beamtalk_file_handle:read(Handle, 0))),
+        ?assertEqual(0, ok_value(beamtalk_file_handle:position(Handle))),
+        ?assertEqual(<<"01">>, ok_value(beamtalk_file_handle:read(Handle, 2)))
+    end).
+
+seek_past_eof_then_write_leaves_a_hole_test() ->
+    with_temp_handle(<<"abc">>, readWrite, fun(Handle) ->
+        ?assertEqual(6, ok_value(beamtalk_file_handle:seek(Handle, 6))),
+        ?assertEqual(nil, ok_value(beamtalk_file_handle:write(Handle, <<"z">>))),
+        Path = maps:get(path, Handle),
+        ?assertEqual({ok, <<"abc", 0, 0, 0, "z">>}, file:read_file(Path))
+    end).
+
+handle_shared_across_processes_test() ->
+    %% The atomics cell exists so a close through one holder is visible to
+    %% every other. Exercise that across a real process boundary.
+    with_temp_handle(<<"data">>, fun(Handle) ->
+        Parent = self(),
+        spawn(fun() ->
+            beamtalk_file_handle:close(Handle),
+            Parent ! closed
+        end),
+        receive
+            closed -> ok
+        after 5000 -> error(timeout)
+        end,
+        ?assertNot(beamtalk_file_handle:isOpen(Handle))
+    end).
+
+dispatch_and_has_method_agree_test() ->
+    %% The selector table is split: dispatch/3 lives here, has_method/1
+    %% delegates to beamtalk_file:handle_has_method/1. Adding a selector to one
+    %% and not the other makes respondsTo: lie about a method that works (or
+    %% claim one that raises). Assert both directions for every selector.
+    Selectors = [
+        {'read:', [1]},
+        {'readAll', []},
+        {'write:', [<<"x">>]},
+        {'writeLine:', [<<"x">>]},
+        {'position', []},
+        {'seek:', [0]},
+        {'flush', []},
+        {'sync', []},
+        {'isOpen', []},
+        {'lines', []}
+    ],
+    with_temp_handle(<<"data">>, readWrite, fun(Handle) ->
+        [
+            begin
+                ?assert(beamtalk_file_handle:has_method(Selector)),
+                %% Routed, not a does_not_understand: the call may answer an
+                %% error Result, but it must not raise DNU.
+                try
+                    beamtalk_file_handle:dispatch(Selector, Args, Handle),
+                    ok
+                catch
+                    error:#{error := #beamtalk_error{kind = does_not_understand}} ->
+                        ?assert(false)
+                end
+            end
+         || {Selector, Args} <- Selectors
+        ]
+    end).

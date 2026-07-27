@@ -4897,11 +4897,28 @@ write on a `#read` handle:
 ```
 
 Handles are process-scoped values (`HandleScoped(#process)`): they can be held
-across calls but not sent to another actor.
+across calls but not sent to another actor. The descriptor underneath is a BEAM
+process, so it keeps working wherever the handle is held on this node — but it
+does not survive crossing a node boundary.
 
 A handle from `open:mode:` is yours to close. Its descriptor is not tied to the
 calling process, so an unclosed handle stays open for the lifetime of the node
 — reach for `open:mode:do:` whenever a block scope will do.
+
+**Keep open blocks short.** The block of `open:do:` and `open:mode:do:` runs
+inside the `File` class, so it must not send another message to `File` (that
+deadlocks), it serializes every other `File` call in the system behind it, and
+it has to finish within the 60-second class-call timeout. Long write loops
+belong behind `open:mode:`, which releases the class as soon as it returns:
+
+```beamtalk
+// Deadlocks — File exists: is sent while File is running the block
+File open: "a.txt" mode: #read do: [:h | File exists: "b.txt"]
+
+// Fine — the other File call happens outside the block
+other := File exists: "b.txt"
+File open: "a.txt" mode: #read do: [:h | h readAll]
+```
 
 #### Side-Effect Timing ⚠️
 

@@ -58,7 +58,7 @@ See also: beamtalk_file for File class-side methods (`open:mode:`, `readAll:`, e
 ]).
 
 %% Handle lifecycle — used by beamtalk_file's open:mode: / open:do: family.
--export([new/3, close_handle/1, is_open/1]).
+-export([new/3, close_handle/1, is_open/1, ensure_readable/2]).
 
 -type mode() :: read | write | append | readWrite.
 -type t() :: #{
@@ -70,8 +70,8 @@ See also: beamtalk_file for File class-side methods (`open:mode:`, `readAll:`, e
 }.
 -export_type([t/0, mode/0]).
 
-%% Modes that permit reading / writing. A handle opened outside `open:mode:`
-%% (no `mode` key) is treated as read-only, matching legacy `open:do:` handles.
+%% Modes that permit reading / writing. `new/3` always records a mode, so the
+%% `read` default in `with_mode/5` only guards a malformed handle.
 -define(READ_MODES, [read, readWrite]).
 -define(WRITE_MODES, [write, append, readWrite]).
 
@@ -111,19 +111,35 @@ close_handle(#{fd := Fd, state := Ref}) ->
         _ -> ok
     end;
 close_handle(#{fd := Fd}) ->
-    %% Legacy handle with no state cell — nothing to mark, just close.
+    %% No state cell to claim — close best-effort rather than crash.
     file:close(Fd).
 
--doc "Whether a handle is still open. Non-handles and closed handles are false.".
+-doc """
+Whether a handle is still open.
+
+Two things have to hold. The state cell must say nobody has closed the handle,
+and the descriptor itself must still be alive — a non-raw descriptor is a BEAM
+process, and it can die without anyone calling `close`: the owning process
+exits, or an illegal request (a read on a write-only descriptor) crashes the
+`file_io_server`. Checking only the cell would leave `isOpen` answering `true`
+for a dead descriptor, and every later operation would report a bare
+`terminated` instead of a clear closed-handle error.
+
+`new/3` is the only constructor, so every real handle carries a state cell. A
+map missing one is malformed and reports closed: callers then produce a
+closed-handle error instead of reaching for an `fd` key that may not be there.
+""".
 -spec is_open(term()) -> boolean().
-is_open(#{'$beamtalk_class' := 'FileHandle', state := Ref}) ->
-    atomics:get(Ref, 1) =:= 1;
-is_open(#{'$beamtalk_class' := 'FileHandle'}) ->
-    %% Legacy handle with no state cell: its lifetime is owned by open:do:,
-    %% which keeps it open for the whole block.
-    true;
+is_open(#{'$beamtalk_class' := 'FileHandle', state := Ref, fd := Fd}) ->
+    atomics:get(Ref, 1) =:= 1 andalso descriptor_alive(Fd);
 is_open(_) ->
     false.
+
+-spec descriptor_alive(file:io_device()) -> boolean().
+descriptor_alive(Fd) when is_pid(Fd) -> is_process_alive(Fd);
+%% A raw descriptor is a #file_descriptor{} record with no liveness to check;
+%% the state cell is all we have.
+descriptor_alive(_Fd) -> true.
 
 %%% ============================================================================
 %%% Instance methods (BT-2975)
@@ -132,8 +148,10 @@ is_open(_) ->
 -doc """
 Read up to `Count` bytes from the current position.
 
-Returns `Result ok: binary` — a binary shorter than `Count` means end-of-file
-was reached, and an empty binary means the handle was already at end-of-file.
+Returns `Result ok: binary`. For a `Count` above zero, a shorter binary means
+end-of-file was reached and an empty binary means the handle was already there.
+`Count` of zero is a no-op that always answers an empty binary without moving
+the position, so an empty result only implies end-of-file when `Count > 0`.
 """.
 -spec read(t(), integer()) -> beamtalk_result:t().
 read(#{'$beamtalk_class' := 'FileHandle'} = Handle, Count) when
@@ -157,6 +175,11 @@ Read from the current position to end-of-file.
 
 Returns `Result ok: binary`. Reading a handle already at end-of-file yields an
 empty binary.
+
+Unbounded: the whole remainder is accumulated in memory, and on a descriptor
+that never reports end-of-file (a device or FIFO) this does not return. Both
+matter more than usual here because the caller is the File class process — see
+`beamtalk_file:'open:mode:do:'`.
 """.
 -spec readAll(t()) -> beamtalk_result:t().
 readAll(#{'$beamtalk_class' := 'FileHandle'} = Handle) ->
@@ -250,6 +273,31 @@ close(#{'$beamtalk_class' := 'FileHandle'} = Handle) ->
     end;
 close(_) ->
     beamtalk_error:raise_type_error('FileHandle', 'close', <<"Expected a FileHandle">>).
+
+-doc """
+Raise unless the handle is open and readable.
+
+For callers whose return type has no room for a `Result` — `lines` hands back a
+Stream, so a wrong-mode handle has to raise. Reading a write-only descriptor is
+not a recoverable error at the OS level: it crashes the `file_io_server`, after
+which every later write on that handle fails silently. Gate before touching it.
+""".
+-spec ensure_readable(map(), atom()) -> ok | no_return().
+ensure_readable(Handle, Selector) ->
+    case is_open(Handle) of
+        false ->
+            beamtalk_error:raise(closed_error_record(Handle, Selector));
+        true ->
+            Mode = maps:get(mode, Handle, read),
+            case lists:member(Mode, ?READ_MODES) of
+                true ->
+                    ok;
+                false ->
+                    beamtalk_error:raise(
+                        mode_error_record(Handle, Selector, Mode, <<"reading">>)
+                    )
+            end
+    end.
 
 -doc "Whether the handle is still open.".
 -spec isOpen(t()) -> boolean().
@@ -366,17 +414,26 @@ io_error(Handle, Selector, Reason) ->
 
 -spec closed_error(map(), atom()) -> beamtalk_result:t().
 closed_error(Handle, Selector) ->
+    beamtalk_result:from_tagged_tuple({error, closed_error_record(Handle, Selector)}).
+
+-spec closed_error_record(map(), atom()) -> beamtalk_error:error().
+closed_error_record(Handle, Selector) ->
     Error0 = beamtalk_error:new(io_error, 'FileHandle'),
     Error1 = beamtalk_error:with_selector(Error0, Selector),
     Error2 = beamtalk_error:with_message(Error1, <<"FileHandle is closed">>),
     Error3 = beamtalk_error:with_details(Error2, #{path => path_of(Handle)}),
-    Error4 = beamtalk_error:with_hint(
+    beamtalk_error:with_hint(
         Error3, <<"The handle was already closed — reopen it with 'File open:mode:'">>
-    ),
-    beamtalk_result:from_tagged_tuple({error, Error4}).
+    ).
 
 -spec mode_error(map(), atom(), mode(), binary()) -> beamtalk_result:t().
 mode_error(Handle, Selector, Mode, Intent) ->
+    beamtalk_result:from_tagged_tuple(
+        {error, mode_error_record(Handle, Selector, Mode, Intent)}
+    ).
+
+-spec mode_error_record(map(), atom(), mode(), binary()) -> beamtalk_error:error().
+mode_error_record(Handle, Selector, Mode, Intent) ->
     Error0 = beamtalk_error:new(io_error, 'FileHandle'),
     Error1 = beamtalk_error:with_selector(Error0, Selector),
     Error2 = beamtalk_error:with_message(
@@ -384,10 +441,9 @@ mode_error(Handle, Selector, Mode, Intent) ->
         iolist_to_binary([<<"FileHandle was not opened for ">>, Intent])
     ),
     Error3 = beamtalk_error:with_details(Error2, #{path => path_of(Handle), mode => Mode}),
-    Error4 = beamtalk_error:with_hint(
+    beamtalk_error:with_hint(
         Error3, <<"Reopen with 'File open: path mode: #readWrite' to both read and write">>
-    ),
-    beamtalk_result:from_tagged_tuple({error, Error4}).
+    ).
 
 -spec path_of(map()) -> binary().
 path_of(Handle) ->

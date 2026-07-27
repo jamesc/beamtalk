@@ -457,6 +457,13 @@ the way out — normal return, raised error, or non-local return alike (the same
 guarantee `ensure:` gives at the Beamtalk level). A block that closes the
 handle itself is fine: closing is idempotent.
 
+The block runs in the File class process, which bounds what belongs in one.
+It cannot send another message to `File` (that deadlocks), it serialises every
+other `File` call in the node behind it, and it must finish inside
+`beamtalk_class_dispatch`'s 60-second class-call timeout — past that the caller
+gets a timeout while the block keeps running. Long write loops belong behind
+`open:mode:`, where the class process is released as soon as the handle exists.
+
 Returns a Result ok map holding the block's value, or a Result error map if the
 file could not be opened.
 """.
@@ -492,6 +499,11 @@ do_open(Path, Mode, Selector) ->
             PathStr = unicode:characters_to_list(Path),
             case ensure_parent_dir(Mode, PathStr) of
                 ok ->
+                    %% Do NOT add `raw` to Options. This call runs in the File
+                    %% class process, not the caller's, and a raw descriptor may
+                    %% only be used by the process that opened it — every handle
+                    %% `open:mode:` hands back would fail with
+                    %% not_on_controlling_process. See mode_options/1.
                     case file:open(PathStr, Options) of
                         {ok, Fd} -> {ok, beamtalk_file_handle:new(Fd, Mode, Path)};
                         {error, Reason} -> {error, open_error(Selector, Path, Reason)}
@@ -992,12 +1004,26 @@ appendBinary(Path, Contents) -> 'appendBinary:contents:'(Path, Contents).
 lines(Path) -> 'lines:'(Path).
 %% `open:do:` and `open:mode:` both lower to the arity-2 shim (the shim name is
 %% the first keyword), so they are told apart by their second argument: a Block
-%% is a fun, a mode is a Symbol. Neither Beamtalk selector accepts the other's
-%% argument type, so the split is total.
+%% is a fun, a mode is one of the four mode Symbols. Anything else is a typo in
+%% one of the two selectors and we cannot tell which — guessing would report
+%% "Mode must be #read, ..." for a call that said `do:` (`nil` and the booleans
+%% are atoms too), so name both candidates instead.
 -spec open(binary(), Do :: fun((map()) -> term()) | atom()) -> beamtalk_result:t().
-open(Path, Block) when is_function(Block, 1) -> 'open:do:'(Path, Block);
-open(Path, Mode) when is_atom(Mode) -> 'open:mode:'(Path, Mode);
-open(Path, Other) -> 'open:do:'(Path, Other).
+open(Path, Block) when is_function(Block, 1) ->
+    'open:do:'(Path, Block);
+open(Path, Mode) when
+    Mode =:= read; Mode =:= write; Mode =:= append; Mode =:= readWrite
+->
+    'open:mode:'(Path, Mode);
+open(_Path, _Other) ->
+    beamtalk_error:raise_type_error(
+        'File',
+        'open:',
+        <<
+            "Expected a Block with 1 argument (open:do:) or a mode Symbol "
+            "#read, #write, #append, #readWrite (open:mode:)"
+        >>
+    ).
 -spec open(binary(), atom(), Do :: fun((map()) -> term())) -> beamtalk_result:t().
 open(Path, Mode, Block) -> 'open:mode:do:'(Path, Mode, Block).
 isDirectory(Path) -> 'isDirectory:'(Path).
@@ -1026,21 +1052,12 @@ already-open file handle. The handle's lifetime is managed by open:do:.
 """.
 -spec handle_lines(file_handle()) -> beamtalk_stream:t().
 handle_lines(#{'$beamtalk_class' := 'FileHandle', fd := Fd} = Handle) ->
-    case beamtalk_file_handle:is_open(Handle) of
-        true ->
-            make_line_stream_from_fd(Fd);
-        false ->
-            %% BT-2975: `lines` returns a Stream, not a Result, so a closed
-            %% handle has to raise — otherwise the generator's read failure
-            %% would surface as a silently empty stream.
-            Error0 = beamtalk_error:new(io_error, 'FileHandle', 'lines'),
-            Error1 = beamtalk_error:with_message(Error0, <<"FileHandle is closed">>),
-            beamtalk_error:raise(
-                beamtalk_error:with_hint(
-                    Error1, <<"The handle was already closed — reopen it with 'File open:mode:'">>
-                )
-            )
-    end;
+    %% BT-2975: `lines` returns a Stream, not a Result, so a closed or
+    %% write-only handle has to raise. Reading a write-only descriptor crashes
+    %% the file_io_server, silently breaking every later write on the handle —
+    %% and a closed one would surface only as a mysteriously empty stream.
+    ok = beamtalk_file_handle:ensure_readable(Handle, 'lines'),
+    make_line_stream_from_fd(Fd);
 handle_lines(_) ->
     beamtalk_error:raise_type_error('FileHandle', 'lines', <<"Expected a FileHandle">>).
 

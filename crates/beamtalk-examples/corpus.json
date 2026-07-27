@@ -1549,6 +1549,27 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-198",
+      "title": "Incremental File I/O — FileHandle (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "for each",
+        "for-each",
+        "forEach",
+        "iterate",
+        "iteration",
+        "loop",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "// Deadlocks — File exists: is sent while File is running the block\nFile open: \"a.txt\" mode: #read do: [:h | File exists: \"b.txt\"]\n\n// Fine — the other File call happens outside the block\nother := File exists: \"b.txt\"\nFile open: \"a.txt\" mode: #read do: [:h | h readAll]",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-199",
       "title": "Side-Effect Timing ⚠️ (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1563,21 +1584,6 @@
         "transform"
       ],
       "source": "// This prints NOTHING — the pipeline is just a recipe\ns := (Stream on: #(1, 2, 3)) collect: [:n | Transcript show: n. n * 2]\n\n// This is when printing actually happens\ns asList\n// Transcript shows: 1, 2, 3\n// => [2,4,6]",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-199",
-      "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "@expect dnu\nsomeObject unknownMessage   // DNU hint suppressed\n\n@expect type\n42 + \"hello\"                // type warning suppressed\n\n@expect type\n42 unknownMethod            // also suppresses method-not-found (DNU) hints\n\n@expect unused\nx := computeSomething       // unused-variable warning suppressed\n\n@expect all\nanything                    // any diagnostic suppressed (discouraged — use a specific category)",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -1610,13 +1616,28 @@
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "@expect dnu\nsomeObject unknownMessage   // DNU hint suppressed\n\n@expect type\n42 + \"hello\"                // type warning suppressed\n\n@expect type\n42 unknownMethod            // also suppresses method-not-found (DNU) hints\n\n@expect unused\nx := computeSomething       // unused-variable warning suppressed\n\n@expect all\nanything                    // any diagnostic suppressed (discouraged — use a specific category)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-201",
+      "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
         "beamtalk-language-features"
       ],
       "source": "// Result.unwrap returns Object — the type system cannot verify 'size' exists\n@expect type\nself assert: someResult unwrap size equals: 10",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-201",
+      "id": "docs-beamtalk-language-features-block-202",
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1634,7 +1655,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-204",
+      "id": "docs-beamtalk-language-features-block-205",
       "title": "Creating a Table (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1657,7 +1678,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-205",
+      "id": "docs-beamtalk-language-features-block-206",
       "title": "Reading and Writing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1667,7 +1688,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-206",
+      "id": "docs-beamtalk-language-features-block-207",
       "title": "Other Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1677,7 +1698,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-207",
+      "id": "docs-beamtalk-language-features-block-208",
       "title": "Cross-Actor Sharing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1697,21 +1718,6 @@
         "set"
       ],
       "source": "// Actor A — create the table\ncache := Ets new: #requestCache type: #set\ncache at: \"token\" put: \"abc123\"\n\n// Actor B — retrieve by name\ncache := Ets named: #requestCache\ncache at: \"token\"               // => \"abc123\"",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-209",
-      "title": "Enqueueing and Dequeueing (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "q2 := q enqueue: 1\nq3 := q2 enqueue: 2\nresult := q3 dequeue         // => {1, <Queue with [2]>}\nvalue := result at: 1       // => 1\nrest := result at: 2        // => Queue containing [2]",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -1741,6 +1747,21 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-210",
+      "title": "Enqueueing and Dequeueing (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "q2 := q enqueue: 1\nq3 := q2 enqueue: 2\nresult := q3 dequeue         // => {1, <Queue with [2]>}\nvalue := result at: 1       // => 1\nrest := result at: 2        // => Queue containing [2]",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-211",
       "title": "Other Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1750,7 +1771,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-212",
+      "id": "docs-beamtalk-language-features-block-213",
       "title": "Atomic Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1763,7 +1784,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-213",
+      "id": "docs-beamtalk-language-features-block-214",
       "title": "Cross-Actor Sharing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1786,7 +1807,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-214",
+      "id": "docs-beamtalk-language-features-block-215",
       "title": "TestCase — BUnit Testing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1809,7 +1830,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-215",
+      "id": "docs-beamtalk-language-features-block-216",
       "title": "TestCase — BUnit Testing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1832,7 +1853,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-216",
+      "id": "docs-beamtalk-language-features-block-217",
       "title": "Suite-Level Setup — setUpOnce / tearDownOnce (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1863,7 +1884,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-217",
+      "id": "docs-beamtalk-language-features-block-218",
       "title": "Parallel Test Execution (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -16120,6 +16141,7 @@
         "concatenate",
         "constructor",
         "create",
+        "duck typing",
         "extends",
         "file_handle_io_test",
         "for each",
@@ -16128,12 +16150,15 @@
         "inherit",
         "inheritance",
         "instantiate",
+        "interface",
         "iterate",
         "iteration",
         "loop",
+        "method check",
         "mutate",
         "mutation",
         "object",
+        "protocol",
         "set",
         "string conversion",
         "string join",
@@ -16142,6 +16167,7 @@
         "testAppendThenReopenRoundTrip",
         "testCallerOwnedHandleRoundTrip",
         "testCloseIsIdempotent",
+        "testDoesNotRespondToUnknownSelector",
         "testFlushOnOpenHandleSucceeds",
         "testIsOpenTrueInsideBlock",
         "testLinesOnReadHandle",
@@ -16157,17 +16183,19 @@
         "testReadOnClosedHandleErrors",
         "testReadOnWriteOnlyHandleErrors",
         "testReadWriteKeepsExistingContents",
+        "testRespondsToIoSelectors",
         "testSeekReturnsNewPosition",
         "testSeekThenRead",
         "testSyncAfterWriteSucceeds",
         "testSyncOnClosedHandleErrors",
+        "testWriteAcceptsBinaryData",
         "testWriteOnClosedHandleErrors",
         "testWriteOnReadOnlyHandleErrors",
         "testWriteTruncatesExistingFile",
         "toString",
         "to_string"
       ],
-      "source": "// FileHandle incremental I/O tests (BT-2975)\n//\n// Covers read:/readAll/write:/writeLine:/position/seek:/flush/sync/close/isOpen\n// on handles from File open:mode: and File open:mode:do:.\n//\n// All paths are relative to the stdlib test working directory — never /tmp.\n\nTestCase subclass: FileHandleIoTest\n\n  // === open:mode:do: — block-scoped handles ===\n  testOpenModeDoReturnsBlockValue =>\n    File writeAll: \"target/bt-test-tmp/handle_block.txt\" contents: \"abcdef\"\n    result := File\n      open: \"target/bt-test-tmp/handle_block.txt\"\n      mode: #read\n      do: [:h | (h read: 3) unwrap]\n    self assert: result isOk\n    self assert: result unwrap equals: \"abc\"\n\n  testOpenModeDoClosesHandle =>\n    File writeAll: \"target/bt-test-tmp/handle_autoclose.txt\" contents: \"data\"\n    escaped := (File\n      open: \"target/bt-test-tmp/handle_autoclose.txt\"\n      mode: #read\n      do: [:h | h]) unwrap\n    self deny: escaped isOpen\n\n  testOpenModeDoFileNotFound =>\n    result := File\n      open: \"target/bt-test-tmp/no_such_handle_file.txt\"\n      mode: #read\n      do: [:h | h readAll]\n    self assert: result isError\n    self assert: (result error printString includesSubstring: \"file not found\")\n\n  testOpenModeDoUnknownMode =>\n    result := File\n      open: \"target/bt-test-tmp/handle_badmode.txt\"\n      mode: #sideways\n      do: [:h | h readAll]\n    self assert: result isError\n    self assert: (result error printString includesSubstring: \"Mode must be #read\")\n\n  // === append + reopen round-trip ===\n  testAppendThenReopenRoundTrip =>\n    nl := $\\n asString\n    File delete: \"target/bt-test-tmp/handle_append.log\"\n    File\n      open: \"target/bt-test-tmp/handle_append.log\"\n      mode: #append\n      do: [:h |\n        h writeLine: \"first\"\n        h writeLine: \"second\"\n      ]\n    File\n      open: \"target/bt-test-tmp/handle_append.log\"\n      mode: #append\n      do: [:h | h writeLine: \"third\"]\n    reread := File\n      open: \"target/bt-test-tmp/handle_append.log\"\n      mode: #read\n      do: [:h | h readAll unwrap]\n    self assert: reread unwrap equals: \"first\" ++ nl ++ \"second\" ++ nl ++ \"third\" ++ nl\n\n  testAppendCreatesParentDirectories =>\n    File deleteAll: \"target/bt-test-tmp/handle-nested\"\n    result := File\n      open: \"target/bt-test-tmp/handle-nested/deep/log.txt\"\n      mode: #append\n      do: [:h | h write: \"nested\"]\n    self assert: result isOk\n    self assert: (File readAll: \"target/bt-test-tmp/handle-nested/deep/log.txt\") unwrap equals: \"nested\"\n\n  // === seek / position / read ===\n  testSeekThenRead =>\n    File writeAll: \"target/bt-test-tmp/handle_seek.txt\" contents: \"0123456789\"\n    result := File\n      open: \"target/bt-test-tmp/handle_seek.txt\"\n      mode: #read\n      do: [:h |\n        (h seek: 4) unwrap\n        (h read: 3) unwrap\n      ]\n    self assert: result unwrap equals: \"456\"\n\n  testSeekReturnsNewPosition =>\n    File writeAll: \"target/bt-test-tmp/handle_seek_pos.txt\" contents: \"0123456789\"\n    result := File\n      open: \"target/bt-test-tmp/handle_seek_pos.txt\"\n      mode: #read\n      do: [:h | (h seek: 7) unwrap]\n    self assert: result unwrap equals: 7\n\n  testPositionAdvancesWithReads =>\n    File writeAll: \"target/bt-test-tmp/handle_position.txt\" contents: \"0123456789\"\n    result := File\n      open: \"target/bt-test-tmp/handle_position.txt\"\n      mode: #read\n      do: [:h |\n        h read: 6\n        h position unwrap\n      ]\n    self assert: result unwrap equals: 6\n\n  testReadAtEndOfFileReturnsEmpty =>\n    File writeAll: \"target/bt-test-tmp/handle_eof.txt\" contents: \"ab\"\n    result := File\n      open: \"target/bt-test-tmp/handle_eof.txt\"\n      mode: #read\n      do: [:h |\n        h read: 10\n        (h read: 10) unwrap\n      ]\n    self assert: result unwrap isEmpty\n\n  testReadAllFromCurrentPosition =>\n    File writeAll: \"target/bt-test-tmp/handle_readall.txt\" contents: \"header|body\"\n    result := File\n      open: \"target/bt-test-tmp/handle_readall.txt\"\n      mode: #read\n      do: [:h |\n        (h seek: 7) unwrap\n        h readAll unwrap\n      ]\n    self assert: result unwrap equals: \"body\"\n\n  testReadNegativeCountRaisesTypeError =>\n    File writeAll: \"target/bt-test-tmp/handle_negread.txt\" contents: \"abc\"\n    self\n      should: [\n        File\n          open: \"target/bt-test-tmp/handle_negread.txt\"\n          mode: #read\n          do: [:h | h read: -1]\n      ]\n      raise: #type_error\n\n  // === readWrite ===\n  testReadWriteKeepsExistingContents =>\n    File writeAll: \"target/bt-test-tmp/handle_rw.txt\" contents: \"0123456789\"\n    File\n      open: \"target/bt-test-tmp/handle_rw.txt\"\n      mode: #readWrite\n      do: [:h |\n        (h seek: 5) unwrap\n        h write: \"XXXXX\"\n      ]\n    self assert: (File readAll: \"target/bt-test-tmp/handle_rw.txt\") unwrap equals: \"01234XXXXX\"\n\n  testWriteTruncatesExistingFile =>\n    File writeAll: \"target/bt-test-tmp/handle_trunc.txt\" contents: \"0123456789\"\n    File\n      open: \"target/bt-test-tmp/handle_trunc.txt\"\n      mode: #write\n      do: [:h | h write: \"ab\"]\n    self assert: (File readAll: \"target/bt-test-tmp/handle_trunc.txt\") unwrap equals: \"ab\"\n\n  // === flush / sync ===\n  testSyncAfterWriteSucceeds =>\n    nl := $\\n asString\n    File delete: \"target/bt-test-tmp/handle_sync.log\"\n    result := File\n      open: \"target/bt-test-tmp/handle_sync.log\"\n      mode: #append\n      do: [:h |\n        h writeLine: \"durable\"\n        h sync\n      ]\n    self assert: result unwrap isOk\n    self assert: (File readAll: \"target/bt-test-tmp/handle_sync.log\") unwrap equals: \"durable\" ++ nl\n\n  testFlushOnOpenHandleSucceeds =>\n    File delete: \"target/bt-test-tmp/handle_flush.log\"\n    result := File\n      open: \"target/bt-test-tmp/handle_flush.log\"\n      mode: #append\n      do: [:h |\n        h write: \"x\"\n        h flush\n      ]\n    self assert: result unwrap isOk\n\n  // === close / isOpen ===\n  testIsOpenTrueInsideBlock =>\n    File writeAll: \"target/bt-test-tmp/handle_isopen.txt\" contents: \"x\"\n    result := File\n      open: \"target/bt-test-tmp/handle_isopen.txt\"\n      mode: #read\n      do: [:h | h isOpen]\n    self assert: result unwrap\n\n  testCloseIsIdempotent =>\n    File writeAll: \"target/bt-test-tmp/handle_double_close.txt\" contents: \"x\"\n    result := File\n      open: \"target/bt-test-tmp/handle_double_close.txt\"\n      mode: #read\n      do: [:h |\n        h close\n        h close\n      ]\n    self assert: result unwrap isOk\n\n  testCallerOwnedHandleRoundTrip =>\n    nl := $\\n asString\n    File delete: \"target/bt-test-tmp/handle_owned.log\"\n    handle := (File open: \"target/bt-test-tmp/handle_owned.log\" mode: #append) unwrap\n    handle writeLine: \"owned\"\n    handle sync\n    handle close\n    self deny: handle isOpen\n    self assert: (File readAll: \"target/bt-test-tmp/handle_owned.log\") unwrap equals: \"owned\" ++ nl\n\n  // === closed-handle errors ===\n  testReadOnClosedHandleErrors =>\n    File writeAll: \"target/bt-test-tmp/handle_closed_read.txt\" contents: \"abc\"\n    result := File\n      open: \"target/bt-test-tmp/handle_closed_read.txt\"\n      mode: #read\n      do: [:h |\n        h close\n        h read: 1\n      ]\n    inner := result unwrap\n    self assert: inner isError\n    self assert: (inner error printString includesSubstring: \"FileHandle is closed\")\n\n  testWriteOnClosedHandleErrors =>\n    File delete: \"target/bt-test-tmp/handle_closed_write.log\"\n    result := File\n      open: \"target/bt-test-tmp/handle_closed_write.log\"\n      mode: #append\n      do: [:h |\n        h close\n        h write: \"nope\"\n      ]\n    inner := result unwrap\n    self assert: inner isError\n\n  testPositionOnClosedHandleErrors =>\n    File writeAll: \"target/bt-test-tmp/handle_closed_pos.txt\" contents: \"abc\"\n    result := File\n      open: \"target/bt-test-tmp/handle_closed_pos.txt\"\n      mode: #read\n      do: [:h |\n        h close\n        h position\n      ]\n    inner := result unwrap\n    self assert: inner isError\n\n  testSyncOnClosedHandleErrors =>\n    File delete: \"target/bt-test-tmp/handle_closed_sync.log\"\n    result := File\n      open: \"target/bt-test-tmp/handle_closed_sync.log\"\n      mode: #append\n      do: [:h |\n        h close\n        h sync\n      ]\n    inner := result unwrap\n    self assert: inner isError\n\n  // === mode enforcement ===\n  testWriteOnReadOnlyHandleErrors =>\n    File writeAll: \"target/bt-test-tmp/handle_readonly.txt\" contents: \"abc\"\n    result := File\n      open: \"target/bt-test-tmp/handle_readonly.txt\"\n      mode: #read\n      do: [:h | h write: \"nope\"]\n    inner := result unwrap\n    self assert: inner isError\n    self assert: (inner error printString includesSubstring: \"not opened for writing\")\n\n  testReadOnWriteOnlyHandleErrors =>\n    result := File\n      open: \"target/bt-test-tmp/handle_writeonly.txt\"\n      mode: #write\n      do: [:h | h read: 1]\n    inner := result unwrap\n    self assert: inner isError\n    self assert: (inner error printString includesSubstring: \"not opened for reading\")\n\n  // === lines still works on a mode-opened handle ===\n  testLinesOnReadHandle =>\n    nl := $\\n asString\n    File writeAll: \"target/bt-test-tmp/handle_lines.txt\" contents: \"a\" ++ nl ++ \"b\" ++ nl ++ \"c\" ++ nl\n    result := File\n      open: \"target/bt-test-tmp/handle_lines.txt\"\n      mode: #read\n      do: [:h | h lines asList]\n    self assert: result unwrap size equals: 3",
+      "source": "// FileHandle incremental I/O tests (BT-2975)\n//\n// Covers read:/readAll/write:/writeLine:/position/seek:/flush/sync/close/isOpen\n// on handles from File open:mode: and File open:mode:do:.\n//\n// All paths are relative to the stdlib test working directory — never /tmp.\n\nTestCase subclass: FileHandleIoTest\n\n  // === open:mode:do: — block-scoped handles ===\n  testOpenModeDoReturnsBlockValue =>\n    File writeAll: \"target/bt-test-tmp/handle_block.txt\" contents: \"abcdef\"\n    result := File\n      open: \"target/bt-test-tmp/handle_block.txt\"\n      mode: #read\n      do: [:h | (h read: 3) unwrap]\n    self assert: result isOk\n    self assert: result unwrap equals: \"abc\"\n\n  testOpenModeDoClosesHandle =>\n    File writeAll: \"target/bt-test-tmp/handle_autoclose.txt\" contents: \"data\"\n    escaped := (File\n      open: \"target/bt-test-tmp/handle_autoclose.txt\"\n      mode: #read\n      do: [:h | h]) unwrap\n    self deny: escaped isOpen\n\n  testOpenModeDoFileNotFound =>\n    result := File\n      open: \"target/bt-test-tmp/no_such_handle_file.txt\"\n      mode: #read\n      do: [:h | h readAll]\n    self assert: result isError\n    self assert: (result error printString includesSubstring: \"file not found\")\n\n  testOpenModeDoUnknownMode =>\n    result := File\n      open: \"target/bt-test-tmp/handle_badmode.txt\"\n      mode: #sideways\n      do: [:h | h readAll]\n    self assert: result isError\n    self assert: (result error printString includesSubstring: \"Mode must be #read\")\n\n  // === append + reopen round-trip ===\n  testAppendThenReopenRoundTrip =>\n    nl := $\\n asString\n    File delete: \"target/bt-test-tmp/handle_append.log\"\n    File\n      open: \"target/bt-test-tmp/handle_append.log\"\n      mode: #append\n      do: [:h |\n        h writeLine: \"first\"\n        h writeLine: \"second\"\n      ]\n    File\n      open: \"target/bt-test-tmp/handle_append.log\"\n      mode: #append\n      do: [:h | h writeLine: \"third\"]\n    reread := File\n      open: \"target/bt-test-tmp/handle_append.log\"\n      mode: #read\n      do: [:h | h readAll unwrap]\n    self assert: reread unwrap equals: \"first\" ++ nl ++ \"second\" ++ nl ++ \"third\" ++ nl\n\n  testAppendCreatesParentDirectories =>\n    File deleteAll: \"target/bt-test-tmp/handle-nested\"\n    result := File\n      open: \"target/bt-test-tmp/handle-nested/deep/log.txt\"\n      mode: #append\n      do: [:h | h write: \"nested\"]\n    self assert: result isOk\n    self assert: (File readAll: \"target/bt-test-tmp/handle-nested/deep/log.txt\") unwrap equals: \"nested\"\n\n  // === seek / position / read ===\n  testSeekThenRead =>\n    File writeAll: \"target/bt-test-tmp/handle_seek.txt\" contents: \"0123456789\"\n    result := File\n      open: \"target/bt-test-tmp/handle_seek.txt\"\n      mode: #read\n      do: [:h |\n        (h seek: 4) unwrap\n        (h read: 3) unwrap\n      ]\n    self assert: result unwrap equals: \"456\"\n\n  testSeekReturnsNewPosition =>\n    File writeAll: \"target/bt-test-tmp/handle_seek_pos.txt\" contents: \"0123456789\"\n    result := File\n      open: \"target/bt-test-tmp/handle_seek_pos.txt\"\n      mode: #read\n      do: [:h | (h seek: 7) unwrap]\n    self assert: result unwrap equals: 7\n\n  testPositionAdvancesWithReads =>\n    File writeAll: \"target/bt-test-tmp/handle_position.txt\" contents: \"0123456789\"\n    result := File\n      open: \"target/bt-test-tmp/handle_position.txt\"\n      mode: #read\n      do: [:h |\n        h read: 6\n        h position unwrap\n      ]\n    self assert: result unwrap equals: 6\n\n  testReadAtEndOfFileReturnsEmpty =>\n    File writeAll: \"target/bt-test-tmp/handle_eof.txt\" contents: \"ab\"\n    result := File\n      open: \"target/bt-test-tmp/handle_eof.txt\"\n      mode: #read\n      do: [:h |\n        h read: 10\n        (h read: 10) unwrap\n      ]\n    self assert: result unwrap isEmpty\n\n  testReadAllFromCurrentPosition =>\n    File writeAll: \"target/bt-test-tmp/handle_readall.txt\" contents: \"header|body\"\n    result := File\n      open: \"target/bt-test-tmp/handle_readall.txt\"\n      mode: #read\n      do: [:h |\n        (h seek: 7) unwrap\n        h readAll unwrap\n      ]\n    self assert: result unwrap equals: \"body\"\n\n  testReadNegativeCountRaisesTypeError =>\n    File writeAll: \"target/bt-test-tmp/handle_negread.txt\" contents: \"abc\"\n    self\n      should: [\n        File\n          open: \"target/bt-test-tmp/handle_negread.txt\"\n          mode: #read\n          do: [:h | h read: -1]\n      ]\n      raise: #type_error\n\n  // === readWrite ===\n  testReadWriteKeepsExistingContents =>\n    File writeAll: \"target/bt-test-tmp/handle_rw.txt\" contents: \"0123456789\"\n    File\n      open: \"target/bt-test-tmp/handle_rw.txt\"\n      mode: #readWrite\n      do: [:h |\n        (h seek: 5) unwrap\n        h write: \"XXXXX\"\n      ]\n    self assert: (File readAll: \"target/bt-test-tmp/handle_rw.txt\") unwrap equals: \"01234XXXXX\"\n\n  testWriteTruncatesExistingFile =>\n    File writeAll: \"target/bt-test-tmp/handle_trunc.txt\" contents: \"0123456789\"\n    File\n      open: \"target/bt-test-tmp/handle_trunc.txt\"\n      mode: #write\n      do: [:h | h write: \"ab\"]\n    self assert: (File readAll: \"target/bt-test-tmp/handle_trunc.txt\") unwrap equals: \"ab\"\n\n  // === flush / sync ===\n  testSyncAfterWriteSucceeds =>\n    nl := $\\n asString\n    File delete: \"target/bt-test-tmp/handle_sync.log\"\n    result := File\n      open: \"target/bt-test-tmp/handle_sync.log\"\n      mode: #append\n      do: [:h |\n        h writeLine: \"durable\"\n        h sync\n      ]\n    self assert: result unwrap isOk\n    self assert: (File readAll: \"target/bt-test-tmp/handle_sync.log\") unwrap equals: \"durable\" ++ nl\n\n  testFlushOnOpenHandleSucceeds =>\n    File delete: \"target/bt-test-tmp/handle_flush.log\"\n    result := File\n      open: \"target/bt-test-tmp/handle_flush.log\"\n      mode: #append\n      do: [:h |\n        h write: \"x\"\n        h flush\n      ]\n    self assert: result unwrap isOk\n\n  // === close / isOpen ===\n  testIsOpenTrueInsideBlock =>\n    File writeAll: \"target/bt-test-tmp/handle_isopen.txt\" contents: \"x\"\n    result := File\n      open: \"target/bt-test-tmp/handle_isopen.txt\"\n      mode: #read\n      do: [:h | h isOpen]\n    self assert: result unwrap\n\n  testCloseIsIdempotent =>\n    File writeAll: \"target/bt-test-tmp/handle_double_close.txt\" contents: \"x\"\n    result := File\n      open: \"target/bt-test-tmp/handle_double_close.txt\"\n      mode: #read\n      do: [:h |\n        h close\n        h close\n      ]\n    self assert: result unwrap isOk\n\n  // Also the regression guard for non-raw descriptors: `File open:mode:` runs\n  // in the File class process, so a raw (opener-locked) descriptor would fail\n  // here with not_on_controlling_process the moment this process touches it.\n  testCallerOwnedHandleRoundTrip =>\n    nl := $\\n asString\n    File delete: \"target/bt-test-tmp/handle_owned.log\"\n    handle := (File open: \"target/bt-test-tmp/handle_owned.log\" mode: #append) unwrap\n    handle writeLine: \"owned\"\n    handle sync\n    handle close\n    self deny: handle isOpen\n    self assert: (File readAll: \"target/bt-test-tmp/handle_owned.log\") unwrap equals: \"owned\" ++ nl\n\n  // === closed-handle errors ===\n  testReadOnClosedHandleErrors =>\n    File writeAll: \"target/bt-test-tmp/handle_closed_read.txt\" contents: \"abc\"\n    result := File\n      open: \"target/bt-test-tmp/handle_closed_read.txt\"\n      mode: #read\n      do: [:h |\n        h close\n        h read: 1\n      ]\n    inner := result unwrap\n    self assert: inner isError\n    self assert: (inner error printString includesSubstring: \"FileHandle is closed\")\n\n  testWriteOnClosedHandleErrors =>\n    File delete: \"target/bt-test-tmp/handle_closed_write.log\"\n    result := File\n      open: \"target/bt-test-tmp/handle_closed_write.log\"\n      mode: #append\n      do: [:h |\n        h close\n        h write: \"nope\"\n      ]\n    inner := result unwrap\n    self assert: inner isError\n\n  testPositionOnClosedHandleErrors =>\n    File writeAll: \"target/bt-test-tmp/handle_closed_pos.txt\" contents: \"abc\"\n    result := File\n      open: \"target/bt-test-tmp/handle_closed_pos.txt\"\n      mode: #read\n      do: [:h |\n        h close\n        h position\n      ]\n    inner := result unwrap\n    self assert: inner isError\n\n  testSyncOnClosedHandleErrors =>\n    File delete: \"target/bt-test-tmp/handle_closed_sync.log\"\n    result := File\n      open: \"target/bt-test-tmp/handle_closed_sync.log\"\n      mode: #append\n      do: [:h |\n        h close\n        h sync\n      ]\n    inner := result unwrap\n    self assert: inner isError\n\n  // === mode enforcement ===\n  testWriteOnReadOnlyHandleErrors =>\n    File writeAll: \"target/bt-test-tmp/handle_readonly.txt\" contents: \"abc\"\n    result := File\n      open: \"target/bt-test-tmp/handle_readonly.txt\"\n      mode: #read\n      do: [:h | h write: \"nope\"]\n    inner := result unwrap\n    self assert: inner isError\n    self assert: (inner error printString includesSubstring: \"not opened for writing\")\n\n  testReadOnWriteOnlyHandleErrors =>\n    result := File\n      open: \"target/bt-test-tmp/handle_writeonly.txt\"\n      mode: #write\n      do: [:h | h read: 1]\n    inner := result unwrap\n    self assert: inner isError\n    self assert: (inner error printString includesSubstring: \"not opened for reading\")\n\n  // === lines still works on a mode-opened handle ===\n  testLinesOnReadHandle =>\n    nl := $\\n asString\n    File writeAll: \"target/bt-test-tmp/handle_lines.txt\" contents: \"a\" ++ nl ++ \"b\" ++ nl ++ \"c\" ++ nl\n    result := File\n      open: \"target/bt-test-tmp/handle_lines.txt\"\n      mode: #read\n      do: [:h | h lines asList]\n    self assert: result unwrap size equals: 3\n\n  // === respondsTo: sees the incremental I/O surface ===\n  testRespondsToIoSelectors =>\n    File writeAll: \"target/bt-test-tmp/handle_responds.txt\" contents: \"x\"\n    result := File\n      open: \"target/bt-test-tmp/handle_responds.txt\"\n      mode: #read\n      do: [:h |\n        (h respondsTo: #sync)\n          and: [\n            (h respondsTo: #close) and: [\n              (h respondsTo: #isOpen) and: [h respondsTo: #seek:]\n            ]\n          ]\n      ]\n    self assert: result unwrap\n\n  testDoesNotRespondToUnknownSelector =>\n    File writeAll: \"target/bt-test-tmp/handle_responds2.txt\" contents: \"x\"\n    result := File\n      open: \"target/bt-test-tmp/handle_responds2.txt\"\n      mode: #read\n      do: [:h | h respondsTo: #totallyBogusHandleMethod]\n    self deny: result unwrap\n\n  testWriteAcceptsBinaryData =>\n    File delete: \"target/bt-test-tmp/handle_binwrite.dat\"\n    payload := (File readBinary: \"target/bt-test-tmp/handle_responds.txt\") unwrap\n    File\n      open: \"target/bt-test-tmp/handle_binwrite.dat\"\n      mode: #append\n      do: [:h | h write: payload]\n    self assert: (File readBinary: \"target/bt-test-tmp/handle_binwrite.dat\") unwrap equals: \"x\"",
       "explanation": "FileHandle incremental I/O tests (BT-2975)  Covers read:/readAll/write:/writeLine:/position/seek:/flush/sync/close/isOpen on handles from File open:mode: and File open:mode:do:.  All paths are relative to the stdlib test working directory — never /tmp."
     },
     {

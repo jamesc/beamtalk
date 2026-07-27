@@ -203,6 +203,9 @@ TestCase subclass: FileHandleIoTest
       ]
     self assert: result unwrap isOk
 
+  // Also the regression guard for non-raw descriptors: `File open:mode:` runs
+  // in the File class process, so a raw (opener-locked) descriptor would fail
+  // here with not_on_controlling_process the moment this process touches it.
   testCallerOwnedHandleRoundTrip =>
     nl := $\n asString
     File delete: "target/bt-test-tmp/handle_owned.log"
@@ -292,3 +295,36 @@ TestCase subclass: FileHandleIoTest
       mode: #read
       do: [:h | h lines asList]
     self assert: result unwrap size equals: 3
+
+  // === respondsTo: sees the incremental I/O surface ===
+  testRespondsToIoSelectors =>
+    File writeAll: "target/bt-test-tmp/handle_responds.txt" contents: "x"
+    result := File
+      open: "target/bt-test-tmp/handle_responds.txt"
+      mode: #read
+      do: [:h |
+        (h respondsTo: #sync)
+          and: [
+            (h respondsTo: #close) and: [
+              (h respondsTo: #isOpen) and: [h respondsTo: #seek:]
+            ]
+          ]
+      ]
+    self assert: result unwrap
+
+  testDoesNotRespondToUnknownSelector =>
+    File writeAll: "target/bt-test-tmp/handle_responds2.txt" contents: "x"
+    result := File
+      open: "target/bt-test-tmp/handle_responds2.txt"
+      mode: #read
+      do: [:h | h respondsTo: #totallyBogusHandleMethod]
+    self deny: result unwrap
+
+  testWriteAcceptsBinaryData =>
+    File delete: "target/bt-test-tmp/handle_binwrite.dat"
+    payload := (File readBinary: "target/bt-test-tmp/handle_responds.txt") unwrap
+    File
+      open: "target/bt-test-tmp/handle_binwrite.dat"
+      mode: #append
+      do: [:h | h write: payload]
+    self assert: (File readBinary: "target/bt-test-tmp/handle_binwrite.dat") unwrap equals: "x"

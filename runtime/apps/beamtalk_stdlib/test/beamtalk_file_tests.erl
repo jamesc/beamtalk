@@ -2356,3 +2356,182 @@ temp_directory_platform_default_test() ->
             V3 -> os:putenv("TEMP", V3)
         end
     end.
+
+%%% ============================================================================
+%%% open:mode: / open:mode:do: (BT-2975)
+%%%
+%%% These exercise do_open/3, mode_options/1, ensure_parent_dir/2 and
+%%% open_error/3 — the open path the FileHandle tests skip by constructing
+%%% handles with beamtalk_file_handle:new/3 directly.
+%%% ============================================================================
+
+open_mode_read_returns_handle_test() ->
+    with_temp_file("_bt_test_open_mode_read.txt", <<"contents">>, fun() ->
+        R = beamtalk_file:'open:mode:'(<<"_bt_test_open_mode_read.txt">>, read),
+        ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, R),
+        #{'okValue' := Handle} = R,
+        ?assertMatch(#{'$beamtalk_class' := 'FileHandle', mode := read}, Handle),
+        beamtalk_file_handle:close_handle(Handle)
+    end).
+
+open_mode_read_missing_file_test() ->
+    R = beamtalk_file:'open:mode:'(<<"_bt_test_open_mode_absent.txt">>, read),
+    ?assertMatch(
+        #{
+            '$beamtalk_class' := 'Result',
+            'isOk' := false,
+            'errReason' := #{
+                error := #beamtalk_error{
+                    kind = file_not_found, class = 'File', selector = 'open:mode:'
+                }
+            }
+        },
+        R
+    ).
+
+open_mode_write_truncates_test() ->
+    with_temp_file("_bt_test_open_mode_write.txt", <<"0123456789">>, fun() ->
+        #{'okValue' := Handle} = beamtalk_file:'open:mode:'(
+            <<"_bt_test_open_mode_write.txt">>, write
+        ),
+        beamtalk_file_handle:write(Handle, <<"ab">>),
+        beamtalk_file_handle:close_handle(Handle),
+        ?assertEqual({ok, <<"ab">>}, file:read_file("_bt_test_open_mode_write.txt"))
+    end).
+
+open_mode_read_write_creates_missing_file_test() ->
+    Name = "_bt_test_open_mode_rw_new.txt",
+    file:delete(Name),
+    try
+        #{'okValue' := Handle} = beamtalk_file:'open:mode:'(list_to_binary(Name), readWrite),
+        beamtalk_file_handle:write(Handle, <<"fresh">>),
+        beamtalk_file_handle:close_handle(Handle),
+        ?assertEqual({ok, <<"fresh">>}, file:read_file(Name))
+    after
+        file:delete(Name)
+    end.
+
+open_mode_append_creates_parent_directories_test() ->
+    Dir = "_bt_test_open_mode_dir/nested",
+    Name = Dir ++ "/log.txt",
+    file:del_dir_r("_bt_test_open_mode_dir"),
+    try
+        #{'okValue' := Handle} = beamtalk_file:'open:mode:'(list_to_binary(Name), append),
+        beamtalk_file_handle:write(Handle, <<"entry">>),
+        beamtalk_file_handle:close_handle(Handle),
+        ?assertEqual({ok, <<"entry">>}, file:read_file(Name))
+    after
+        file:del_dir_r("_bt_test_open_mode_dir")
+    end.
+
+open_mode_unknown_mode_returns_type_error_test() ->
+    R = beamtalk_file:'open:mode:'(<<"_bt_test_open_mode_read.txt">>, sideways),
+    ?assertMatch(
+        #{
+            '$beamtalk_class' := 'Result',
+            'isOk' := false,
+            'errReason' := #{
+                error := #beamtalk_error{
+                    kind = type_error, class = 'File', selector = 'open:mode:'
+                }
+            }
+        },
+        R
+    ).
+
+open_mode_non_atom_mode_raises_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_file:'open:mode:'(<<"x.txt">>, <<"read">>)
+    ).
+
+open_mode_non_binary_path_raises_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_file:'open:mode:'(42, read)
+    ).
+
+open_mode_permission_denied_test() ->
+    case {os:type(), running_as_root()} of
+        {{unix, _}, false} ->
+            FileName = "_bt_test_noperm_open_mode.txt",
+            ok = file:write_file(FileName, <<"data\n">>),
+            ok = file:change_mode(FileName, 8#000),
+            try
+                R = beamtalk_file:'open:mode:'(list_to_binary(FileName), read),
+                ?assertMatch(
+                    #{
+                        '$beamtalk_class' := 'Result',
+                        'isOk' := false,
+                        'errReason' := #{
+                            error := #beamtalk_error{
+                                kind = permission_denied,
+                                class = 'File',
+                                selector = 'open:mode:'
+                            }
+                        }
+                    },
+                    R
+                )
+            after
+                file:change_mode(FileName, 8#644),
+                file:delete(FileName)
+            end;
+        _ ->
+            ok
+    end.
+
+open_mode_do_closes_handle_on_exception_test() ->
+    with_temp_file("_bt_test_open_mode_do_raise.txt", <<"data">>, fun() ->
+        Ref = make_ref(),
+        Self = self(),
+        ?assertThrow(
+            Ref,
+            beamtalk_file:'open:mode:do:'(
+                <<"_bt_test_open_mode_do_raise.txt">>,
+                read,
+                fun(Handle) ->
+                    Self ! {handle, Handle},
+                    throw(Ref)
+                end
+            )
+        ),
+        Handle =
+            receive
+                {handle, H} -> H
+            after 5000 -> error(timeout)
+            end,
+        ?assertNot(beamtalk_file_handle:isOpen(Handle))
+    end).
+
+open_mode_do_block_closing_handle_is_fine_test() ->
+    with_temp_file("_bt_test_open_mode_do_close.txt", <<"data">>, fun() ->
+        R = beamtalk_file:'open:mode:do:'(
+            <<"_bt_test_open_mode_do_close.txt">>,
+            read,
+            fun(Handle) -> beamtalk_file_handle:close(Handle) end
+        ),
+        ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, R)
+    end).
+
+open_mode_do_non_block_raises_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_file:'open:mode:do:'(<<"x.txt">>, read, not_a_block)
+    ).
+
+open_shim_rejects_ambiguous_second_argument_test() ->
+    %% open/2 backs both open:do: and open:mode:; nil is neither a Block nor a
+    %% mode, and guessing would report the wrong selector's error.
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_file:open(<<"x.txt">>, nil)
+    ).
+
+open_shim_routes_mode_atoms_test() ->
+    with_temp_file("_bt_test_open_shim.txt", <<"data">>, fun() ->
+        R = beamtalk_file:open(<<"_bt_test_open_shim.txt">>, read),
+        ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, R),
+        #{'okValue' := Handle} = R,
+        beamtalk_file_handle:close_handle(Handle)
+    end).

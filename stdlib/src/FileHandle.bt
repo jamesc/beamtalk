@@ -10,8 +10,12 @@
 ///
 /// A handle from a block, and any Stream derived from it, must be consumed
 /// within that block — they must not escape, as the file descriptor is closed
-/// when the block returns. Handles are process-local: they cannot be sent to
-/// another actor.
+/// when the block returns.
+///
+/// The type system scopes a handle to one process (`HandleScoped(#process)`),
+/// so it cannot be sent to another actor. The descriptor underneath is a BEAM
+/// process rather than a raw file, so it does keep working wherever the handle
+/// is held on this node — but it does not survive being sent to another node.
 ///
 /// Every operation returns a `Result`, and operations on a closed handle
 /// return a structured error rather than crashing.
@@ -48,8 +52,11 @@ sealed typed Object subclass: FileHandle
 
   /// Read up to `count` bytes from the current position.
   ///
-  /// A binary shorter than `count` means end-of-file was reached; an empty
-  /// binary means the handle was already at end-of-file.
+  /// For a `count` above zero, a shorter binary means end-of-file was reached
+  /// and an empty binary means the handle was already at end-of-file.
+  /// `read: 0` is a no-op that always answers an empty binary without moving
+  /// the position — don't drive a read loop off `isEmpty` unless the chunk
+  /// size is known to be positive.
   ///
   /// ## Examples
   ///
@@ -60,6 +67,10 @@ sealed typed Object subclass: FileHandle
     (Erlang beamtalk_file_handle) read: self count: count
 
   /// Read from the current position to end-of-file.
+  ///
+  /// The whole remainder is held in memory at once, so reach for `read:` or
+  /// `lines` on a file large enough to matter. Only use this on regular files:
+  /// on a device or FIFO that never reports end-of-file it never returns.
   ///
   /// ## Examples
   ///
