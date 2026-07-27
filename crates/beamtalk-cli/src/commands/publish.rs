@@ -348,7 +348,9 @@ fn ensure_tag_absent(
                 "1. Check '{index_root}' for an uncommitted or unpushed change.\n  \
                  2. If it's uncommitted: (cd {index_root} && git add . && git commit -m \
                  \"registry: {name} v{version}\")\n  \
-                 3. Push it: (cd {index_root} && git push)"
+                 3. Push it: (cd {index_root} && git push)\n  \
+                 If the push fails (another author pushed to the registry concurrently): \
+                 (cd {index_root} && git pull --rebase && git push)"
             ),
             RegistryLocation::LocalDir(_) => format!(
                 "Check '{index_root}/packages/{name}.toml' for a '{version}' entry and add it \
