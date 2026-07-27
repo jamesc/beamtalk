@@ -173,6 +173,10 @@ TestCase subclass: ParallelTest
     // decrements before returning. Reading back every recorded sample (not
     // a racy compare-and-update against a shared running max) gives the
     // true high-water mark, which must never exceed maxConcurrency.
+    // Defensively clean up any leftover resources from a crashed previous run
+    [(AtomicCounter named: #bt2974MaxConcurrencyActive) delete] on: Error do: [:e | nil]
+    [(AtomicCounter named: #bt2974MaxConcurrencySampleIdx) delete] on: Error do: [:e | nil]
+    [(Ets named: #bt2974MaxConcurrencySamples) delete] on: Error do: [:e | nil]
     active := AtomicCounter new: #bt2974MaxConcurrencyActive
     idx := AtomicCounter new: #bt2974MaxConcurrencySampleIdx
     samples := Ets new: #bt2974MaxConcurrencySamples type: #set

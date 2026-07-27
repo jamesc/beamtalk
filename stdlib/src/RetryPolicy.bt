@@ -98,17 +98,22 @@ typed Value subclass: RetryPolicy
   /// overflow point — the multiplication that would overflow never happens.
   ///
   /// A non-positive `backoffCoefficient` (unusual, but not rejected by
-  /// `RetryPolicy`'s field type) skips the division check entirely: it can
-  /// only shrink or zero out `current`, never grow it past a positive `cap`,
-  /// and `cap / backoffCoefficient` would itself raise for
-  /// `backoffCoefficient = 0` (Erlang has no infinite float).
+  /// `RetryPolicy`'s field type) skips the division check entirely: it never
+  /// grows `current` past a positive `cap`, and `cap / backoffCoefficient`
+  /// would itself raise for `backoffCoefficient = 0` (Erlang has no infinite
+  /// float). A negative coefficient would otherwise alternate the sign of
+  /// `current` on each multiplication — clamped at 0 (a "negative delay"
+  /// isn't meaningful, and an actual negative value reaching `Timer sleep:`
+  /// would raise there instead), so `intervalForAttempt:` stays a
+  /// non-negative Integer for every `backoffCoefficient`.
   internal growInterval: current :: Integer remaining: remaining :: Integer cap: cap :: Integer -> Integer =>
     (remaining <= 0 or: [current >= cap])
       ifTrue: [current > cap ifTrue: [cap] ifFalse: [current]]
       ifFalse: [
         self.backoffCoefficient <= 0
           ifTrue: [
-            next := (current * self.backoffCoefficient) ceiling
+            raw := (current * self.backoffCoefficient) ceiling
+            next := raw < 0 ifTrue: [0] ifFalse: [raw]
             self
               growInterval: next
               remaining: remaining - 1
