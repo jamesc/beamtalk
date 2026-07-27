@@ -362,11 +362,36 @@ mod tests {
 
     /// Write an executable shell script to `dir` that ignores its argv
     /// (the workspace id `spawn_front` always appends) and runs `body`.
+    ///
+    /// The returned executable is produced by an out-of-process `cp` rather
+    /// than by writing `dir/name` directly, to avoid `ETXTBSY` ("Text file
+    /// busy") when it is later `exec`'d. A file *this* process has open for
+    /// writing is inherited by any concurrent `fork()` — every other test in
+    /// this binary that calls `Command::spawn` (`reap`'s `sleep` children,
+    /// the sibling launcher tests) forks — and the forked child keeps that
+    /// descriptor open until it `exec`s. The kernel refuses to `exec` a file
+    /// any process holds open for writing, so a sibling fork landing inside
+    /// the write window here makes our own spawn fail. Copying via a child
+    /// process means the launcher inode is never write-open in this process,
+    /// so no sibling fork can ever inherit a writer for it (`chmod` below
+    /// opens nothing).
     #[cfg(unix)]
     fn write_launcher_script(dir: &std::path::Path, name: &str, body: &str) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
+        let source = dir.join(format!("{name}.source"));
+        std::fs::write(&source, format!("#!/bin/sh\n{body}\n")).unwrap();
+
         let path = dir.join(name);
-        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        let status = Command::new("cp")
+            .arg(&source)
+            .arg(&path)
+            .status()
+            .expect("cp should be runnable");
+        assert!(
+            status.success(),
+            "cp {source:?} -> {path:?} failed: {status}"
+        );
+
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
         path
     }
