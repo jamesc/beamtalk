@@ -1,0 +1,294 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// FileHandle incremental I/O tests (BT-2975)
+//
+// Covers read:/readAll/write:/writeLine:/position/seek:/flush/sync/close/isOpen
+// on handles from File open:mode: and File open:mode:do:.
+//
+// All paths are relative to the stdlib test working directory — never /tmp.
+
+TestCase subclass: FileHandleIoTest
+
+  // === open:mode:do: — block-scoped handles ===
+  testOpenModeDoReturnsBlockValue =>
+    File writeAll: "target/bt-test-tmp/handle_block.txt" contents: "abcdef"
+    result := File
+      open: "target/bt-test-tmp/handle_block.txt"
+      mode: #read
+      do: [:h | (h read: 3) unwrap]
+    self assert: result isOk
+    self assert: result unwrap equals: "abc"
+
+  testOpenModeDoClosesHandle =>
+    File writeAll: "target/bt-test-tmp/handle_autoclose.txt" contents: "data"
+    escaped := (File
+      open: "target/bt-test-tmp/handle_autoclose.txt"
+      mode: #read
+      do: [:h | h]) unwrap
+    self deny: escaped isOpen
+
+  testOpenModeDoFileNotFound =>
+    result := File
+      open: "target/bt-test-tmp/no_such_handle_file.txt"
+      mode: #read
+      do: [:h | h readAll]
+    self assert: result isError
+    self assert: (result error printString includesSubstring: "file not found")
+
+  testOpenModeDoUnknownMode =>
+    result := File
+      open: "target/bt-test-tmp/handle_badmode.txt"
+      mode: #sideways
+      do: [:h | h readAll]
+    self assert: result isError
+    self assert: (result error printString includesSubstring: "Mode must be #read")
+
+  // === append + reopen round-trip ===
+  testAppendThenReopenRoundTrip =>
+    nl := $\n asString
+    File delete: "target/bt-test-tmp/handle_append.log"
+    File
+      open: "target/bt-test-tmp/handle_append.log"
+      mode: #append
+      do: [:h |
+        h writeLine: "first"
+        h writeLine: "second"
+      ]
+    File
+      open: "target/bt-test-tmp/handle_append.log"
+      mode: #append
+      do: [:h | h writeLine: "third"]
+    reread := File
+      open: "target/bt-test-tmp/handle_append.log"
+      mode: #read
+      do: [:h | h readAll unwrap]
+    self assert: reread unwrap equals: "first" ++ nl ++ "second" ++ nl ++ "third" ++ nl
+
+  testAppendCreatesParentDirectories =>
+    File deleteAll: "target/bt-test-tmp/handle-nested"
+    result := File
+      open: "target/bt-test-tmp/handle-nested/deep/log.txt"
+      mode: #append
+      do: [:h | h write: "nested"]
+    self assert: result isOk
+    self assert: (File readAll: "target/bt-test-tmp/handle-nested/deep/log.txt") unwrap equals: "nested"
+
+  // === seek / position / read ===
+  testSeekThenRead =>
+    File writeAll: "target/bt-test-tmp/handle_seek.txt" contents: "0123456789"
+    result := File
+      open: "target/bt-test-tmp/handle_seek.txt"
+      mode: #read
+      do: [:h |
+        (h seek: 4) unwrap
+        (h read: 3) unwrap
+      ]
+    self assert: result unwrap equals: "456"
+
+  testSeekReturnsNewPosition =>
+    File writeAll: "target/bt-test-tmp/handle_seek_pos.txt" contents: "0123456789"
+    result := File
+      open: "target/bt-test-tmp/handle_seek_pos.txt"
+      mode: #read
+      do: [:h | (h seek: 7) unwrap]
+    self assert: result unwrap equals: 7
+
+  testPositionAdvancesWithReads =>
+    File writeAll: "target/bt-test-tmp/handle_position.txt" contents: "0123456789"
+    result := File
+      open: "target/bt-test-tmp/handle_position.txt"
+      mode: #read
+      do: [:h |
+        h read: 6
+        h position unwrap
+      ]
+    self assert: result unwrap equals: 6
+
+  testReadAtEndOfFileReturnsEmpty =>
+    File writeAll: "target/bt-test-tmp/handle_eof.txt" contents: "ab"
+    result := File
+      open: "target/bt-test-tmp/handle_eof.txt"
+      mode: #read
+      do: [:h |
+        h read: 10
+        (h read: 10) unwrap
+      ]
+    self assert: result unwrap isEmpty
+
+  testReadAllFromCurrentPosition =>
+    File writeAll: "target/bt-test-tmp/handle_readall.txt" contents: "header|body"
+    result := File
+      open: "target/bt-test-tmp/handle_readall.txt"
+      mode: #read
+      do: [:h |
+        (h seek: 7) unwrap
+        h readAll unwrap
+      ]
+    self assert: result unwrap equals: "body"
+
+  testReadNegativeCountRaisesTypeError =>
+    File writeAll: "target/bt-test-tmp/handle_negread.txt" contents: "abc"
+    self
+      should: [
+        File
+          open: "target/bt-test-tmp/handle_negread.txt"
+          mode: #read
+          do: [:h | h read: -1]
+      ]
+      raise: #type_error
+
+  // === readWrite ===
+  testReadWriteKeepsExistingContents =>
+    File writeAll: "target/bt-test-tmp/handle_rw.txt" contents: "0123456789"
+    File
+      open: "target/bt-test-tmp/handle_rw.txt"
+      mode: #readWrite
+      do: [:h |
+        (h seek: 5) unwrap
+        h write: "XXXXX"
+      ]
+    self assert: (File readAll: "target/bt-test-tmp/handle_rw.txt") unwrap equals: "01234XXXXX"
+
+  testWriteTruncatesExistingFile =>
+    File writeAll: "target/bt-test-tmp/handle_trunc.txt" contents: "0123456789"
+    File
+      open: "target/bt-test-tmp/handle_trunc.txt"
+      mode: #write
+      do: [:h | h write: "ab"]
+    self assert: (File readAll: "target/bt-test-tmp/handle_trunc.txt") unwrap equals: "ab"
+
+  // === flush / sync ===
+  testSyncAfterWriteSucceeds =>
+    nl := $\n asString
+    File delete: "target/bt-test-tmp/handle_sync.log"
+    result := File
+      open: "target/bt-test-tmp/handle_sync.log"
+      mode: #append
+      do: [:h |
+        h writeLine: "durable"
+        h sync
+      ]
+    self assert: result unwrap isOk
+    self assert: (File readAll: "target/bt-test-tmp/handle_sync.log") unwrap equals: "durable" ++ nl
+
+  testFlushOnOpenHandleSucceeds =>
+    File delete: "target/bt-test-tmp/handle_flush.log"
+    result := File
+      open: "target/bt-test-tmp/handle_flush.log"
+      mode: #append
+      do: [:h |
+        h write: "x"
+        h flush
+      ]
+    self assert: result unwrap isOk
+
+  // === close / isOpen ===
+  testIsOpenTrueInsideBlock =>
+    File writeAll: "target/bt-test-tmp/handle_isopen.txt" contents: "x"
+    result := File
+      open: "target/bt-test-tmp/handle_isopen.txt"
+      mode: #read
+      do: [:h | h isOpen]
+    self assert: result unwrap
+
+  testCloseIsIdempotent =>
+    File writeAll: "target/bt-test-tmp/handle_double_close.txt" contents: "x"
+    result := File
+      open: "target/bt-test-tmp/handle_double_close.txt"
+      mode: #read
+      do: [:h |
+        h close
+        h close
+      ]
+    self assert: result unwrap isOk
+
+  testCallerOwnedHandleRoundTrip =>
+    nl := $\n asString
+    File delete: "target/bt-test-tmp/handle_owned.log"
+    handle := (File open: "target/bt-test-tmp/handle_owned.log" mode: #append) unwrap
+    handle writeLine: "owned"
+    handle sync
+    handle close
+    self deny: handle isOpen
+    self assert: (File readAll: "target/bt-test-tmp/handle_owned.log") unwrap equals: "owned" ++ nl
+
+  // === closed-handle errors ===
+  testReadOnClosedHandleErrors =>
+    File writeAll: "target/bt-test-tmp/handle_closed_read.txt" contents: "abc"
+    result := File
+      open: "target/bt-test-tmp/handle_closed_read.txt"
+      mode: #read
+      do: [:h |
+        h close
+        h read: 1
+      ]
+    inner := result unwrap
+    self assert: inner isError
+    self assert: (inner error printString includesSubstring: "FileHandle is closed")
+
+  testWriteOnClosedHandleErrors =>
+    File delete: "target/bt-test-tmp/handle_closed_write.log"
+    result := File
+      open: "target/bt-test-tmp/handle_closed_write.log"
+      mode: #append
+      do: [:h |
+        h close
+        h write: "nope"
+      ]
+    inner := result unwrap
+    self assert: inner isError
+
+  testPositionOnClosedHandleErrors =>
+    File writeAll: "target/bt-test-tmp/handle_closed_pos.txt" contents: "abc"
+    result := File
+      open: "target/bt-test-tmp/handle_closed_pos.txt"
+      mode: #read
+      do: [:h |
+        h close
+        h position
+      ]
+    inner := result unwrap
+    self assert: inner isError
+
+  testSyncOnClosedHandleErrors =>
+    File delete: "target/bt-test-tmp/handle_closed_sync.log"
+    result := File
+      open: "target/bt-test-tmp/handle_closed_sync.log"
+      mode: #append
+      do: [:h |
+        h close
+        h sync
+      ]
+    inner := result unwrap
+    self assert: inner isError
+
+  // === mode enforcement ===
+  testWriteOnReadOnlyHandleErrors =>
+    File writeAll: "target/bt-test-tmp/handle_readonly.txt" contents: "abc"
+    result := File
+      open: "target/bt-test-tmp/handle_readonly.txt"
+      mode: #read
+      do: [:h | h write: "nope"]
+    inner := result unwrap
+    self assert: inner isError
+    self assert: (inner error printString includesSubstring: "not opened for writing")
+
+  testReadOnWriteOnlyHandleErrors =>
+    result := File
+      open: "target/bt-test-tmp/handle_writeonly.txt"
+      mode: #write
+      do: [:h | h read: 1]
+    inner := result unwrap
+    self assert: inner isError
+    self assert: (inner error printString includesSubstring: "not opened for reading")
+
+  // === lines still works on a mode-opened handle ===
+  testLinesOnReadHandle =>
+    nl := $\n asString
+    File writeAll: "target/bt-test-tmp/handle_lines.txt" contents: "a" ++ nl ++ "b" ++ nl ++ "c" ++ nl
+    result := File
+      open: "target/bt-test-tmp/handle_lines.txt"
+      mode: #read
+      do: [:h | h lines asList]
+    self assert: result unwrap size equals: 3
