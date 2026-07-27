@@ -45,9 +45,12 @@
 //! every project pointing at the same registry URL shares one clone under
 //! `~/.beamtalk/registry/<hash of the URL>/`, the same way Cargo and Gleam
 //! share their registry caches. [`REGISTRY_CACHE_DIR_ENV_VAR`] overrides the
-//! cache root directly — set it to a fixed path (e.g. `_build/registry`) to
-//! restore the pre-BT-2996 per-project layout, or to a team-wide mount to
-//! share a pre-warmed clone across machines. A stale or corrupt cache is
+//! cache root — a hash of the URL is still appended underneath it, so two
+//! different registry URLs pointed at the same override never clobber each
+//! other's clone. Set it to a fixed path (e.g. `_build/registry`) for a
+//! per-project cache close to the pre-BT-2996 layout, or to a team-wide
+//! mount to share a pre-warmed clone across machines. A stale or corrupt
+//! cache is
 //! cleared by deleting its directory (or `~/.beamtalk/registry/` entirely) —
 //! it is rebuilt from a fresh clone on the next lookup.
 //!
@@ -313,7 +316,11 @@ pub fn ensure_index(
 /// returned directory.
 ///
 /// Priority:
-/// 1. [`REGISTRY_CACHE_DIR_ENV_VAR`] — an explicit override.
+/// 1. [`REGISTRY_CACHE_DIR_ENV_VAR`] — an explicit override, treated as a
+///    *root* rather than a direct cache directory: `cache_key(url)` is
+///    still appended, so two different registry URLs sharing the same
+///    override (e.g. a team-wide mount) get distinct subdirectories instead
+///    of one clobbering the other's `index/`.
 /// 2. A shared, user-level cache at `~/.beamtalk/registry/<hash>/`, keyed by
 ///    a hash of `url` so every project pointing at the same registry shares
 ///    one clone instead of each cloning it into its own `_build/`.
@@ -326,7 +333,7 @@ fn registry_cache_root(url: &str, project_root: &Utf8Path) -> Utf8PathBuf {
     if let Ok(dir) = std::env::var(REGISTRY_CACHE_DIR_ENV_VAR) {
         let trimmed = dir.trim();
         if !trimmed.is_empty() {
-            return Utf8PathBuf::from(trimmed);
+            return Utf8PathBuf::from(trimmed).join(cache_key(url));
         }
     }
 
@@ -395,10 +402,16 @@ fn ensure_git_index(url: &str, project_root: &Utf8Path, refresh: bool) -> Result
     let cache_root = registry_cache_root(url, project_root);
     let index_dir = cache_root.join("index");
 
-    // Hold the lock for the whole clone/refresh/swap sequence, so a
-    // concurrent beamtalk process (CLI build, LSP, MCP) can never observe a
-    // half-swapped index — one process mid-rename while another's
-    // `read_entry` lands in the instant the directory doesn't exist.
+    // Hold the lock for the whole clone/refresh/swap sequence, so two
+    // concurrent beamtalk processes (CLI build, LSP, MCP) racing the same
+    // registry can never interleave their renames into a corrupt mix of
+    // both — one waits for the other's swap to finish before starting its
+    // own. This does not extend to the caller's later `read_entry`: the
+    // lock is released as soon as `ensure_git_index` returns, so another
+    // process's swap can still start in the gap before `read_entry` runs.
+    // That race only produces a spurious `Ok(None)` miss (the directory is
+    // momentarily absent mid-rename), which the miss-path retry — itself
+    // lock-protected — recovers from transparently.
     let _lock = lock_registry_cache(&cache_root)?;
 
     // `swap_in_index` moves the old index aside before renaming the new one
@@ -1243,8 +1256,32 @@ git = "g"
             )
         };
 
-        let cache_root = registry_cache_root("https://example.test/registry", &utf8(&project));
-        assert_eq!(cache_root, utf8(&override_dir));
+        let url = "https://example.test/registry";
+        let cache_root = registry_cache_root(url, &utf8(&project));
+        assert_eq!(cache_root, utf8(&override_dir).join(cache_key(url)));
+    }
+
+    #[test]
+    #[serial_test::serial(env_var)]
+    fn test_registry_cache_root_env_var_override_keys_by_url() {
+        // Two different registries pointing at the same override root (e.g.
+        // a team-wide mount) must not clobber each other's `index/`.
+        let project = TempDir::new().unwrap();
+        let override_dir = TempDir::new().unwrap();
+        // SAFETY: serialized via #[serial(env_var)].
+        let _guard = unsafe {
+            EnvVarGuard::set(
+                REGISTRY_CACHE_DIR_ENV_VAR,
+                override_dir.path().to_str().unwrap(),
+            )
+        };
+
+        let project_root = utf8(&project);
+        let root_a = registry_cache_root("https://example.test/registry-a", &project_root);
+        let root_b = registry_cache_root("https://example.test/registry-b", &project_root);
+        assert_ne!(root_a, root_b);
+        assert!(root_a.starts_with(utf8(&override_dir)));
+        assert!(root_b.starts_with(utf8(&override_dir)));
     }
 
     #[test]
