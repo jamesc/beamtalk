@@ -1021,8 +1021,22 @@ Used within File open:do: blocks. The Stream reads lines from the
 already-open file handle. The handle's lifetime is managed by open:do:.
 """.
 -spec handle_lines(file_handle()) -> beamtalk_stream:t().
-handle_lines(#{'$beamtalk_class' := 'FileHandle', fd := Fd}) ->
-    make_line_stream_from_fd(Fd);
+handle_lines(#{'$beamtalk_class' := 'FileHandle', fd := Fd} = Handle) ->
+    case beamtalk_file_handle:is_open(Handle) of
+        true ->
+            make_line_stream_from_fd(Fd);
+        false ->
+            %% BT-2975: `lines` returns a Stream, not a Result, so a closed
+            %% handle has to raise — otherwise the generator's read failure
+            %% would surface as a silently empty stream.
+            Error0 = beamtalk_error:new(io_error, 'FileHandle', 'lines'),
+            Error1 = beamtalk_error:with_message(Error0, <<"FileHandle is closed">>),
+            beamtalk_error:raise(
+                beamtalk_error:with_hint(
+                    Error1, <<"The handle was already closed — reopen it with 'File open:mode:'">>
+                )
+            )
+    end;
 handle_lines(_) ->
     beamtalk_error:raise_type_error('FileHandle', 'lines', <<"Expected a FileHandle">>).
 

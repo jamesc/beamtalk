@@ -297,3 +297,14 @@ write_with_non_binary_raises_type_error_test() ->
             beamtalk_file_handle:write(Handle, 42)
         )
     end).
+
+lines_on_closed_handle_raises_test() ->
+    %% BT-2975: `lines` returns a Stream, not a Result, so a closed handle
+    %% raises rather than handing back a silently empty stream.
+    with_temp_handle(<<"a\nb\n">>, fun(Handle) ->
+        beamtalk_file_handle:close(Handle),
+        ?assertError(
+            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = io_error}},
+            beamtalk_file_handle:dispatch('lines', [], Handle)
+        )
+    end).
