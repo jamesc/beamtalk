@@ -378,11 +378,21 @@ impl Default for Lockfile {
 /// (U+0000-U+001F, U+007F); an unescaped backslash, quote, or newline here
 /// corrupts the lockfile, and every later `Lockfile::read` hard-fails.
 fn escape_toml_string(s: &str) -> String {
-    s.replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
-        .replace('\r', "\\r")
-        .replace('\t', "\\t")
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 || c == '\x7f' => {
+                let _ = write!(out, "\\u{:04X}", c as u32);
+            }
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 /// Format a `GitReference` for lockfile storage.
@@ -732,6 +742,35 @@ mod tests {
             registry_version: Some(registry_version(
                 "0.2.1",
                 "https://example.test/registry\nsha = \"injected\"\t\r",
+            )),
+        });
+
+        let content = original.serialize();
+        let parsed = Lockfile::parse(&content).unwrap_or_else(|e| {
+            panic!("serialized lockfile failed to re-parse: {e}\n\ncontent:\n{content}")
+        });
+        assert_eq!(
+            parsed.get("yaml").unwrap().registry_version,
+            original.get("yaml").unwrap().registry_version,
+        );
+    }
+
+    #[test]
+    fn test_registry_field_with_full_control_character_range_roundtrips() {
+        // The doc comment on `escape_toml_string` claims the full TOML-
+        // prohibited range (U+0000-U+001F, U+007F), not just \n/\r/\t. Cover
+        // the boundary and mid-range characters the \n/\r/\t-only test above
+        // doesn't exercise: NUL, VT (U+000B), a mid-range control (U+001F),
+        // and DEL (U+007F).
+        let mut original = Lockfile::new();
+        original.insert(LockEntry {
+            name: "yaml".to_string(),
+            url: "https://github.com/jamesc/beamtalk-yaml".to_string(),
+            reference: GitReference::Tag("v0.2.1".to_string()),
+            resolved_sha: "abc1234def5678abc1234def5678abc1234def56".to_string(),
+            registry_version: Some(registry_version(
+                "0.2.1",
+                "https://example.test/registry\u{0}\u{b}\u{1f}\u{7f}",
             )),
         });
 
