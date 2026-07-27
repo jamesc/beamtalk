@@ -94,19 +94,31 @@ typed Value subclass: RetryPolicy
   /// pay for a full `attempt - 1` iterations on every single call, turning
   /// an unlimited-attempts `do:` loop's total interval-computation cost
   /// quadratic in the number of retries.
+  ///
+  /// `initialInterval` is nothing but a plain `field:` default —
+  /// `RetryPolicy`'s `new:` is entirely compiler-generated from the `field:`
+  /// declarations, so there's no constructor hook to validate a negative
+  /// value against (BT-3016). Clamped to 0 here, before either path runs,
+  /// for the same reason `growInterval:remaining:cap:` clamps a
+  /// going-negative running interval: a negative delay isn't meaningful,
+  /// and letting it flow through to `Timer sleep:` in `do:`'s executor
+  /// would raise there, breaking `do:`'s `Result(R, Exception)` contract.
   internal cappedRawIntervalForAttempt: attempt :: Integer -> Integer =>
     effectiveCap := self.maximumInterval ifNil: [
       self class unlimitedIntervalCap
     ] ifNotNil: [:m | m]
+    effectiveInitialInterval := self.initialInterval < 0 ifTrue: [
+      0
+    ] ifFalse: [self.initialInterval]
     (self.backoffCoefficient > 1.0 or: [self.backoffCoefficient < 0])
       ifTrue: [
         self
-          growInterval: self.initialInterval
+          growInterval: effectiveInitialInterval
           remaining: attempt - 1
           cap: effectiveCap
       ]
       ifFalse: [
-        raw := (self.initialInterval * (self.backoffCoefficient raisedTo: attempt - 1)) ceiling
+        raw := (effectiveInitialInterval * (self.backoffCoefficient raisedTo: attempt - 1)) ceiling
         raw < effectiveCap ifTrue: [raw] ifFalse: [effectiveCap]
       ]
 
