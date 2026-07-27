@@ -322,7 +322,10 @@ TestCase subclass: FileHandleIoTest
 
   testWriteAcceptsBinaryData =>
     File delete: "target/bt-test-tmp/handle_binwrite.dat"
-    payload := (File readBinary: "target/bt-test-tmp/handle_responds.txt") unwrap
+    // Read the payload before opening — a File send from inside the block
+    // would deadlock, since the block runs in the File class process.
+    File writeAll: "target/bt-test-tmp/handle_binwrite_src.txt" contents: "x"
+    payload := (File readBinary: "target/bt-test-tmp/handle_binwrite_src.txt") unwrap
     File
       open: "target/bt-test-tmp/handle_binwrite.dat"
       mode: #append
