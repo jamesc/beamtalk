@@ -21,7 +21,7 @@ use tauri::Manager;
 use state::AppState;
 
 fn main() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             // Second launch: focus the existing picker rather than starting
             // a second broker (ADR 0097 / BT-2984 spike: "the broker/
@@ -50,6 +50,20 @@ fn main() {
             commands::create_workspace,
             commands::quit,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running the beamtalk desktop app");
+        .build(tauri::generate_context!())
+        .expect("error while building the beamtalk desktop app");
+
+    app.run(|app_handle, event| {
+        // OS-level quit (Cmd-Q, taskbar close, SIGTERM, …) delivers
+        // `ExitRequested` directly — it does not go through the `quit`
+        // command's own detach-all (that only runs for the in-app "Quit"
+        // button). Without this handler, an OS-level quit would leave every
+        // attached front running as an orphan until the next broker
+        // restart's sweep found it, instead of terminating it immediately
+        // (ADR 0097 Broker §4 — "Detach/quit terminates the front process").
+        if let tauri::RunEvent::ExitRequested { .. } = event {
+            let state = app_handle.state::<AppState>();
+            commands::detach_all(app_handle, &state);
+        }
+    });
 }

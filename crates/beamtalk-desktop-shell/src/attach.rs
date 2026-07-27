@@ -10,7 +10,23 @@
 //! second one.** [`AttachManager`] is the pure state that decision needs — it
 //! tracks which workspaces currently have a live front attached (by
 //! workspace id) and, given a click on "Attach" for some workspace, decides
-//! [`AttachDecision::Spawn`] or [`AttachDecision::FocusExisting`].
+//! [`AttachDecision::Spawn`], [`AttachDecision::FocusExisting`], or
+//! [`AttachDecision::AlreadyInFlight`].
+//!
+//! [`AttachManager::decide_and_claim`] is the whole reason this is a
+//! stateful `&mut self` method rather than a read-only `decide`: the spike's
+//! own throwaway coordinator hit exactly this race — two near-simultaneous
+//! attach clicks for the same workspace both observing "nothing tracked" and
+//! both spawning a front — and fixed it with an atomic claim-or-wait
+//! (`Coordinator.State.claim_or_get/1`, `docs/research/desktop-shell-spike.md`
+//! "No-shell coordinator"). A separate `decide()` read followed later by a
+//! separate `record_attached()` write, with the lock released in between (as
+//! a naive Tauri command handler would do — check under the lock, spawn
+//! without it, re-lock to record), reopens the identical race: a Rust
+//! `Mutex<AttachManager>` provides no atomicity across two separate
+//! `lock()` calls. `decide_and_claim` closes it by making "check and mark
+//! as in-progress" one atomic step, so a caller only ever needs a single
+//! lock acquisition for the decision itself.
 //!
 //! Window-per-workspace (ADR 0097 Implementation §4) falls out of the same
 //! bookkeeping: [`window_label`] is the deterministic Tauri window label a
@@ -47,23 +63,46 @@ pub struct AttachedFront {
     pub pid: u32,
 }
 
+/// Internal per-workspace bookkeeping state. Not exposed directly — callers
+/// only see it through [`AttachDecision`]/[`AttachManager`]'s accessor
+/// methods, which already collapse it to what they need.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Slot {
+    /// [`AttachManager::decide_and_claim`] has handed out [`AttachDecision::Spawn`]
+    /// for this workspace and no matching [`AttachManager::record_attached`]
+    /// or [`AttachManager::release_claim`] has happened yet — a spawn +
+    /// readiness wait is presumed in flight.
+    Claiming,
+    /// A front is attached and its window should already exist.
+    Attached(AttachedFront),
+}
+
 /// What a GUI shell should do in response to an "Attach" action on some
 /// workspace.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AttachDecision {
-    /// No existing front for this workspace: spawn one (the normal path).
+    /// No existing or in-flight front for this workspace: spawn one, and the
+    /// workspace is now claimed — call [`AttachManager::record_attached`] on
+    /// success or [`AttachManager::release_claim`] on failure so the claim
+    /// doesn't linger forever.
     Spawn,
     /// A front is already attached: focus/reuse its window rather than
     /// spawning a second one (BT-2984 spike decision).
     FocusExisting { window_id: WindowId, port: u16 },
+    /// A concurrent attach for this same workspace is already in flight
+    /// (racing this one) — do not spawn a second front. The in-flight
+    /// attach will open the window once it resolves; there is nothing new
+    /// for this caller to do.
+    AlreadyInFlight,
 }
 
-/// Tracks which workspaces currently have an attached front, keyed by
-/// workspace id (at most one front per workspace at a time — the spike's
-/// decided semantics, not a hard technical limit; see the module docs).
+/// Tracks which workspaces currently have an attached (or in-flight) front,
+/// keyed by workspace id (at most one front per workspace at a time — the
+/// spike's decided semantics, not a hard technical limit; see the module
+/// docs).
 #[derive(Debug, Default)]
 pub struct AttachManager {
-    attached: HashMap<String, AttachedFront>,
+    attached: HashMap<String, Slot>,
 }
 
 impl AttachManager {
@@ -72,48 +111,126 @@ impl AttachManager {
         Self::default()
     }
 
-    /// Decide what an "Attach" click on `workspace_id` should do.
-    #[must_use]
-    pub fn decide(&self, workspace_id: &str) -> AttachDecision {
+    /// Atomically decide what an "Attach" click on `workspace_id` should do
+    /// *and*, if the answer is [`AttachDecision::Spawn`], claim the
+    /// workspace in the same step — see the module docs for why this must be
+    /// one atomic operation rather than a separate read-then-write.
+    pub fn decide_and_claim(&mut self, workspace_id: &str) -> AttachDecision {
         match self.attached.get(workspace_id) {
-            Some(front) => AttachDecision::FocusExisting {
+            Some(Slot::Attached(front)) => AttachDecision::FocusExisting {
                 window_id: window_label(workspace_id),
                 port: front.port,
             },
-            None => AttachDecision::Spawn,
+            Some(Slot::Claiming) => AttachDecision::AlreadyInFlight,
+            None => {
+                self.attached
+                    .insert(workspace_id.to_string(), Slot::Claiming);
+                AttachDecision::Spawn
+            }
         }
     }
 
     /// Record a newly attached front after a successful spawn + readiness
-    /// wait. Overwrites any prior record for the same workspace id (a
-    /// detach must have called [`Self::remove`] first in the normal flow,
-    /// but this stays a plain overwrite rather than panicking on the
-    /// unexpected case — a stale record is still corrected).
+    /// wait, resolving an earlier [`Self::decide_and_claim`]'s claim (or, if
+    /// called without a prior claim, still records — a plain overwrite
+    /// rather than panicking on the unexpected case).
     pub fn record_attached(&mut self, front: AttachedFront) {
-        self.attached.insert(front.workspace_id.clone(), front);
+        self.attached
+            .insert(front.workspace_id.clone(), Slot::Attached(front));
+    }
+
+    /// Like [`Self::record_attached`], but refuses to record if
+    /// `front.workspace_id` is no longer [`Slot::Claiming`] — i.e. a
+    /// concurrent [`Self::remove`] (from `detach`/`quit` racing the tail end
+    /// of this same attach's spawn-and-probe) already cleared the claim out
+    /// from under the caller. Returns `false` in that case so the caller
+    /// (which just finished spawning a process and opening a window) knows
+    /// to tear both back down instead of leaving a ghost [`Slot::Attached`]
+    /// entry for a front nothing supervises anymore: nothing would ever
+    /// clean it up, `is_attached` would wrongly report `true` for this
+    /// workspace forever, and a future attach click would try to
+    /// [`AttachDecision::FocusExisting`] a window that may already be
+    /// closed — a permanently stuck workspace with no way to re-attach short
+    /// of restarting the whole app.
+    ///
+    /// This is the real-world-reachable race [`Self::record_attached`]'s own
+    /// "or, if called without a prior claim, still records" leniency does
+    /// *not* protect against — that leniency exists for callers (like this
+    /// crate's own tests) that never called [`Self::decide_and_claim`] at
+    /// all, not for a claim that existed and was legitimately cleared by a
+    /// concurrent detach.
+    #[must_use]
+    pub fn record_attached_if_claiming(&mut self, front: AttachedFront) -> bool {
+        if !matches!(self.attached.get(&front.workspace_id), Some(Slot::Claiming)) {
+            return false;
+        }
+        self.attached
+            .insert(front.workspace_id.clone(), Slot::Attached(front));
+        true
+    }
+
+    /// Release a claim that didn't pan out (spawn or readiness failed) so
+    /// the next attach click is free to try again instead of being stuck
+    /// behind a claim nothing will ever resolve. A no-op if `workspace_id`
+    /// isn't currently claiming (e.g. it was already attached, or already
+    /// released) — safe to call defensively from every failure path.
+    pub fn release_claim(&mut self, workspace_id: &str) {
+        if matches!(self.attached.get(workspace_id), Some(Slot::Claiming)) {
+            self.attached.remove(workspace_id);
+        }
     }
 
     /// Remove bookkeeping for `workspace_id` (detach, quit, or front death).
-    /// Returns the removed record, if any, so a caller can use its `port`/
-    /// `pid` to actually kill the process and clear a front record.
+    /// Returns the removed front record, if it was actually attached (not
+    /// merely claiming) — a caller uses its `port`/`pid` to kill the process
+    /// and clear a front record.
     pub fn remove(&mut self, workspace_id: &str) -> Option<AttachedFront> {
-        self.attached.remove(workspace_id)
+        match self.attached.remove(workspace_id) {
+            Some(Slot::Attached(front)) => Some(front),
+            Some(Slot::Claiming) | None => None,
+        }
     }
 
     #[must_use]
     pub fn is_attached(&self, workspace_id: &str) -> bool {
-        self.attached.contains_key(workspace_id)
+        matches!(self.attached.get(workspace_id), Some(Slot::Attached(_)))
+    }
+
+    /// Is `port` the port of the *currently* attached front for
+    /// `workspace_id`? A post-attach monitor loop must use this, not
+    /// [`Self::is_attached`], as its stop condition: detach-then-re-attach
+    /// spawns a fresh front on a fresh port (a free-port allocation, not a
+    /// reused one), so an older monitor thread still polling the *old* port
+    /// would otherwise see `is_attached` flip back to `true` for the new
+    /// attachment and wrongly keep running — polling a dead port and
+    /// fighting the new monitor over the same window's title/events. Tying
+    /// the stop condition to the exact `(workspace_id, port)` pair a monitor
+    /// was started for makes a stale monitor recognize its own generation
+    /// has ended, even though the workspace id itself is attached again.
+    #[must_use]
+    pub fn is_current_front(&self, workspace_id: &str, port: u16) -> bool {
+        matches!(self.attached.get(workspace_id), Some(Slot::Attached(front)) if front.port == port)
     }
 
     #[must_use]
     pub fn get(&self, workspace_id: &str) -> Option<&AttachedFront> {
-        self.attached.get(workspace_id)
+        match self.attached.get(workspace_id) {
+            Some(Slot::Attached(front)) => Some(front),
+            Some(Slot::Claiming) | None => None,
+        }
     }
 
-    /// Every currently-attached workspace id, for "detach all" on quit.
+    /// Every currently-attached (not merely claiming) workspace id, for
+    /// "detach all" on quit.
     #[must_use]
     pub fn attached_ids(&self) -> Vec<&str> {
-        self.attached.keys().map(String::as_str).collect()
+        self.attached
+            .iter()
+            .filter_map(|(id, slot)| match slot {
+                Slot::Attached(_) => Some(id.as_str()),
+                Slot::Claiming => None,
+            })
+            .collect()
     }
 }
 
@@ -141,18 +258,32 @@ mod tests {
     }
 
     #[test]
-    fn decide_spawns_when_nothing_attached() {
-        let manager = AttachManager::new();
-        assert_eq!(manager.decide("abc123"), AttachDecision::Spawn);
+    fn decide_and_claim_spawns_when_nothing_tracked() {
+        let mut manager = AttachManager::new();
+        assert_eq!(manager.decide_and_claim("abc123"), AttachDecision::Spawn);
     }
 
     #[test]
-    fn decide_focuses_the_existing_window_on_a_second_attach() {
+    fn decide_and_claim_reports_already_in_flight_on_a_racing_second_call() {
+        // The exact race the BT-2984 spike found: two near-simultaneous
+        // attach clicks for the same workspace. The first claims; the
+        // second, before any record_attached/release_claim, must not also
+        // get Spawn.
+        let mut manager = AttachManager::new();
+        assert_eq!(manager.decide_and_claim("abc123"), AttachDecision::Spawn);
+        assert_eq!(
+            manager.decide_and_claim("abc123"),
+            AttachDecision::AlreadyInFlight
+        );
+    }
+
+    #[test]
+    fn decide_and_claim_focuses_the_existing_window_on_a_second_attach() {
         let mut manager = AttachManager::new();
         manager.record_attached(front("abc123", 4567));
 
         assert_eq!(
-            manager.decide("abc123"),
+            manager.decide_and_claim("abc123"),
             AttachDecision::FocusExisting {
                 window_id: "ws-abc123".to_string(),
                 port: 4567,
@@ -161,12 +292,135 @@ mod tests {
     }
 
     #[test]
-    fn decide_is_scoped_per_workspace() {
+    fn decide_and_claim_is_scoped_per_workspace() {
         let mut manager = AttachManager::new();
         manager.record_attached(front("abc123", 4567));
 
         // A different, never-attached workspace still spawns.
-        assert_eq!(manager.decide("def456"), AttachDecision::Spawn);
+        assert_eq!(manager.decide_and_claim("def456"), AttachDecision::Spawn);
+    }
+
+    #[test]
+    fn release_claim_lets_a_failed_attach_be_retried() {
+        let mut manager = AttachManager::new();
+        assert_eq!(manager.decide_and_claim("abc123"), AttachDecision::Spawn);
+
+        manager.release_claim("abc123");
+
+        assert_eq!(manager.decide_and_claim("abc123"), AttachDecision::Spawn);
+    }
+
+    #[test]
+    fn release_claim_does_not_clear_a_real_attachment() {
+        let mut manager = AttachManager::new();
+        manager.record_attached(front("abc123", 4567));
+
+        // Defensive call from a failure path must never undo a real,
+        // already-recorded attachment.
+        manager.release_claim("abc123");
+
+        assert!(manager.is_attached("abc123"));
+    }
+
+    #[test]
+    fn release_claim_of_an_untracked_workspace_is_a_no_op() {
+        let mut manager = AttachManager::new();
+        manager.release_claim("nonexistent"); // must not panic
+        assert!(!manager.is_attached("nonexistent"));
+    }
+
+    #[test]
+    fn record_attached_resolves_a_prior_claim() {
+        let mut manager = AttachManager::new();
+        assert_eq!(manager.decide_and_claim("abc123"), AttachDecision::Spawn);
+
+        manager.record_attached(front("abc123", 4567));
+
+        assert!(manager.is_attached("abc123"));
+        assert_eq!(manager.get("abc123"), Some(&front("abc123", 4567)));
+    }
+
+    #[test]
+    fn record_attached_if_claiming_succeeds_and_resolves_a_live_claim() {
+        let mut manager = AttachManager::new();
+        assert_eq!(manager.decide_and_claim("abc123"), AttachDecision::Spawn);
+
+        assert!(manager.record_attached_if_claiming(front("abc123", 4567)));
+
+        assert!(manager.is_attached("abc123"));
+        assert_eq!(manager.get("abc123"), Some(&front("abc123", 4567)));
+    }
+
+    #[test]
+    fn record_attached_if_claiming_refuses_when_the_claim_was_cleared_concurrently() {
+        // The exact race this method exists to close: `decide_and_claim`
+        // hands out `Spawn`, but a concurrent `remove` (a `detach`/`quit`
+        // racing the tail end of this same attach's spawn-and-probe) clears
+        // the claim before the in-flight attach gets to record success.
+        let mut manager = AttachManager::new();
+        assert_eq!(manager.decide_and_claim("abc123"), AttachDecision::Spawn);
+        manager.remove("abc123"); // simulates the racing detach/quit
+
+        assert!(!manager.record_attached_if_claiming(front("abc123", 4567)));
+        assert!(
+            !manager.is_attached("abc123"),
+            "a refused record must not leave a ghost Attached entry"
+        );
+    }
+
+    #[test]
+    fn record_attached_if_claiming_refuses_when_nothing_was_ever_claimed() {
+        let mut manager = AttachManager::new();
+        assert!(!manager.record_attached_if_claiming(front("abc123", 4567)));
+        assert!(!manager.is_attached("abc123"));
+    }
+
+    #[test]
+    fn record_attached_if_claiming_refuses_when_already_attached() {
+        // Can't happen via the real `decide_and_claim`/`record_attached_if_claiming`
+        // flow (a second `decide_and_claim` for an attached workspace returns
+        // `FocusExisting`, never `Spawn`), but the guard must still hold: this
+        // method only ever resolves a `Claiming` slot, never overwrites an
+        // existing real attachment the way `record_attached` will.
+        let mut manager = AttachManager::new();
+        manager.record_attached(front("abc123", 4567));
+
+        assert!(!manager.record_attached_if_claiming(front("abc123", 9999)));
+        assert_eq!(manager.get("abc123"), Some(&front("abc123", 4567)));
+    }
+
+    #[test]
+    fn is_current_front_matches_the_attached_port() {
+        let mut manager = AttachManager::new();
+        manager.record_attached(front("abc123", 4567));
+        assert!(manager.is_current_front("abc123", 4567));
+    }
+
+    #[test]
+    fn is_current_front_is_false_for_a_stale_port_after_re_attach() {
+        // The exact scenario a post-attach monitor must survive: detach,
+        // then re-attach on a fresh (different) port. A monitor still
+        // holding the old port must recognize it's stale.
+        let mut manager = AttachManager::new();
+        manager.record_attached(front("abc123", 4567));
+        manager.remove("abc123");
+        manager.record_attached(front("abc123", 9999));
+
+        assert!(!manager.is_current_front("abc123", 4567));
+        assert!(manager.is_current_front("abc123", 9999));
+    }
+
+    #[test]
+    fn is_current_front_is_false_while_merely_claiming() {
+        let mut manager = AttachManager::new();
+        assert_eq!(manager.decide_and_claim("abc123"), AttachDecision::Spawn);
+        assert!(!manager.is_current_front("abc123", 4567));
+    }
+
+    #[test]
+    fn is_current_front_is_false_for_an_untracked_workspace() {
+        let manager = AttachManager::new();
+        assert!(!manager.is_current_front("nonexistent", 4567));
     }
 
     #[test]
@@ -176,13 +430,22 @@ mod tests {
 
         let removed = manager.remove("abc123");
         assert_eq!(removed, Some(front("abc123", 4567)));
-        assert_eq!(manager.decide("abc123"), AttachDecision::Spawn);
+        assert_eq!(manager.decide_and_claim("abc123"), AttachDecision::Spawn);
     }
 
     #[test]
     fn remove_of_an_unattached_workspace_is_a_no_op() {
         let mut manager = AttachManager::new();
         assert_eq!(manager.remove("nonexistent"), None);
+    }
+
+    #[test]
+    fn remove_of_a_merely_claiming_workspace_returns_none() {
+        let mut manager = AttachManager::new();
+        assert_eq!(manager.decide_and_claim("abc123"), AttachDecision::Spawn);
+        // Never actually attached (no record_attached yet) — nothing real
+        // to return, even though something is tracked.
+        assert_eq!(manager.remove("abc123"), None);
     }
 
     #[test]
@@ -193,6 +456,16 @@ mod tests {
         assert!(manager.is_attached("abc123"));
         manager.remove("abc123");
         assert!(!manager.is_attached("abc123"));
+    }
+
+    #[test]
+    fn is_attached_is_false_while_merely_claiming() {
+        let mut manager = AttachManager::new();
+        assert_eq!(manager.decide_and_claim("abc123"), AttachDecision::Spawn);
+        assert!(
+            !manager.is_attached("abc123"),
+            "a claim in flight is not yet a real attachment"
+        );
     }
 
     #[test]
@@ -220,6 +493,15 @@ mod tests {
         let mut ids = manager.attached_ids();
         ids.sort_unstable();
         assert_eq!(ids, vec!["abc123", "def456"]);
+    }
+
+    #[test]
+    fn attached_ids_excludes_merely_claiming_workspaces() {
+        let mut manager = AttachManager::new();
+        manager.record_attached(front("abc123", 4567));
+        assert_eq!(manager.decide_and_claim("def456"), AttachDecision::Spawn);
+
+        assert_eq!(manager.attached_ids(), vec!["abc123"]);
     }
 
     #[test]

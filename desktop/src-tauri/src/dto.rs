@@ -112,4 +112,10 @@ pub struct AttachProgressEvent {
 pub enum AttachOutcome {
     Opened,
     Focused,
+    /// A concurrent attach for the same workspace was already in flight
+    /// (`beamtalk_desktop_shell::attach::AttachDecision::AlreadyInFlight`) —
+    /// nothing new happened; the frontend should keep showing a
+    /// loading/probing state and let the next `list_workspaces` poll pick up
+    /// the result once the in-flight attach resolves.
+    AlreadyAttaching,
 }

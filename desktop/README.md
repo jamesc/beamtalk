@@ -15,7 +15,8 @@ and single-instance policy this app implements.
 desktop/
   src-tauri/          Rust backend (NOT a Cargo workspace member — see below)
     src/
-      main.rs          App setup: single-instance plugin, orphan-sweep, state
+      main.rs          App setup: single-instance plugin, orphan-sweep, state,
+                         OS-level-quit (Cmd-Q/SIGTERM) detach-all cleanup
       commands.rs       Tauri commands: list_workspaces, attach, detach,
                          create_workspace, quit
       state.rs          AppState: AttachManager + spawned Child handles
@@ -79,10 +80,43 @@ root/sudo access to install them). What that means concretely:
   single-instance plugin's runtime focus behavior, `WebviewWindow::set_title`
   actually updating a real title bar, or criterion (e) (keybinding/rendering
   parity) at all.
+- **Specific risk flagged by adversarial review, worth checking first**:
+  `commands.rs`'s post-attach monitor (`spawn_monitor`) is a raw
+  `std::thread::spawn` loop that calls `WebviewWindow::set_title` (via
+  `reflect_connection_state`) and `Child::try_wait` (via `reap_if_exited`)
+  from that background thread, not Tauri's own command-dispatch thread pool.
+  Tauri's window handles are documented as safe to call from any thread
+  (internally proxied to the main event loop), so this is expected to be
+  fine — but that expectation is unverified here. If `cargo tauri dev`
+  shows title updates not applying, or a panic/hang originating from
+  `spawn_monitor`, route the window-mutating calls through
+  `AppHandle::run_on_main_thread` instead.
 - **Fully verified**: the shell-agnostic decision logic
   (`beamtalk-desktop-shell`'s `attach`/`empty_state` modules) — that crate has
   no GUI dependency, is a normal workspace member, and its full test suite
   passes under `just test`.
+- **A second adversarial review pass found, and this crate's source now
+  fixes, several issues verified against the exact pinned Tauri source in
+  `Cargo.lock`** (read directly from `~/.cargo/registry/src/`, not just
+  documented API surface, since this environment still can't compile the
+  crate to check any of it against `rustc`): every command is now
+  `#[tauri::command(async)]` — a plain (non-`async`) command's body runs
+  inline on the thread that delivered the IPC message, which desktop
+  platforms bind to the webview's UI/main thread, so `attach`'s up-to-30s
+  readiness wait would otherwise have frozen the whole app; `detach_internal`
+  now uses `WebviewWindow::destroy()` instead of `.close()`, since `.close()`
+  re-emits `CloseRequested` and this function is itself that event's handler
+  (an unbounded reentrant loop on every workspace-window close); a claim a
+  concurrent `quit` clears mid-attach can no longer produce a permanently
+  stuck ghost `AttachManager` entry (`AttachManager::record_attached_if_claiming`);
+  OS-level quit (`Cmd-Q`, `SIGTERM`, …) now runs the same detach-all cleanup
+  as the in-app Quit button via a `RunEvent::ExitRequested` handler in
+  `main.rs`; and the picker's free-text "create a workspace" field is
+  validated (`empty_state::validate_new_workspace_id`) before the typed
+  string ever reaches the CLI subprocess as a positional argument. None of
+  this is a substitute for actually building and running the app — see
+  "Before this ships" below — but it closes the gaps a real compiler and a
+  real webview would otherwise have been the first to catch.
 
 **Before this ships**, someone with a real Linux/macOS/Windows desktop needs
 to: install the Tauri prerequisites (`https://v2.tauri.app/start/prerequisites/`),
