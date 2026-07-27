@@ -4866,7 +4866,9 @@ Write-capable modes create missing parent directories.
 | `handle isOpen` | `Boolean` | Whether the handle is still open |
 | `handle lines` | `Stream(String)` | Lazy lines from the current position |
 
-Every method except `isOpen` returns a `Result`.
+Every method returns a `Result` except `isOpen`, which answers a Boolean, and
+`lines`, which answers a Stream — with no Result to carry an error, `lines`
+raises on a closed or write-only handle instead.
 
 ```beamtalk
 // Block scope — the handle is closed however the block exits

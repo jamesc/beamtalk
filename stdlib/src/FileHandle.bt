@@ -38,8 +38,13 @@ sealed typed Object subclass: FileHandle
   /// Return a lazy Stream of lines from this file handle.
   ///
   /// The Stream reads lines one at a time, starting from the handle's current
-  /// position. It must be consumed within the `File open:do:` block — the
-  /// Stream must not escape the block.
+  /// position, and is bounded by the handle's lifetime: from a `open:do:` or
+  /// `open:mode:do:` block it must be consumed inside that block, and from a
+  /// caller-owned `open:mode:` handle it must not outlive your `close`.
+  ///
+  /// Unlike the rest of the handle protocol this answers a Stream rather than
+  /// a `Result`, so there is nowhere to put an error — a closed or write-only
+  /// handle raises instead.
   ///
   /// ## Examples
   ///
