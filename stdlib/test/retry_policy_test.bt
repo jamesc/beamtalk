@@ -79,6 +79,27 @@ TestCase subclass: RetryPolicyTest
     self assert: (rp intervalForAttempt: 2) equals: 1500
     self assert: (rp intervalForAttempt: 3) equals: 1500
 
+  // BT-3006 regression: `backoffCoefficient raisedTo: (attempt - 1)` used
+  // to be computed unconditionally, before `maximumInterval` was ever
+  // applied — IEEE-754 doubles overflow to +infinity around
+  // `2.0 raisedTo: 1024` (attempt ~1025 with the default coefficient), and
+  // `ceiling` on an infinite Float raised a low-level arithmetic error.
+  // `intervalForAttempt:` must stay finite well past that point, whether or
+  // not `maximumInterval` is set.
+  testIntervalForAttemptStaysFiniteWellPastOldFloatOverflowPoint =>
+    uncapped := RetryPolicy new: #{#backoffCoefficient => 2.0}
+    self assert: ((uncapped intervalForAttempt: 1025) isKindOf: Integer)
+    self assert: ((uncapped intervalForAttempt: 5000) isKindOf: Integer)
+    self assert: (uncapped intervalForAttempt: 5000) > 0
+
+  testIntervalForAttemptCappedWellPastOldFloatOverflowPoint =>
+    capped := RetryPolicy new: #{
+      #backoffCoefficient => 2.0,
+      #maximumInterval => 5000
+    }
+    self assert: (capped intervalForAttempt: 1025) equals: 5000
+    self assert: (capped intervalForAttempt: 5000) equals: 5000
+
   testIntervalForAttemptJitterStaysWithinBounds =>
     plain := RetryPolicy new: #{
       #initialInterval => 1000,
@@ -165,12 +186,7 @@ TestCase subclass: RetryPolicyTest
     // eventually crashing an unlimited-attempts policy retrying a
     // fast-failing block.
     //
-    // 300 attempts is far deeper than a non-tail-call version would survive,
-    // while staying well clear of a separate, pre-existing gap (filed
-    // separately): intervalForAttempt: computes
-    // backoffCoefficient raisedTo: (attempt - 1) before applying
-    // maximumInterval, so attempt counts near Float's overflow point raise a
-    // low-level arithmetic error regardless of the cap.
+    // 300 attempts is far deeper than a non-tail-call version would survive.
     rp := RetryPolicy new: #{
       #initialInterval => 0,
       #maximumInterval => 1,
@@ -183,6 +199,26 @@ TestCase subclass: RetryPolicyTest
       ]
     self assert: result isError
     self assert: self.counter value equals: 300
+
+  testDoHandlesAttemptsPastOldFloatOverflowPoint =>
+    // BT-3006 regression: intervalForAttempt: used to overflow Float and
+    // raise around attempt ~1025 regardless of maximumInterval (the cap was
+    // applied after the overflow-prone computation), which meant do:'s
+    // documented Result(R, Exception) contract could break under an
+    // otherwise-ordinary policy retried enough times. 1100 attempts stays
+    // safely past that old crash point.
+    rp := RetryPolicy new: #{
+      #initialInterval => 0,
+      #maximumInterval => 1,
+      #maximumAttempts => 1100
+    }
+    result := rp
+      do: [:attempt |
+        self.counter increment
+        Error signal: "always fails"
+      ]
+    self assert: result isError
+    self assert: self.counter value equals: 1100
 
   testDoShortCircuitsNonRetryableError =>
     rp := RetryPolicy
