@@ -323,6 +323,44 @@ dist-liveview:
     echo "   Run: dist-liveview/bin/server <workspace-id>   (resolves node+cookie like 'just web')"
     echo "   Or:  PHX_SERVER=true SECRET_KEY_BASE=... dist-liveview/bin/bt_attach start"
 
+# Usage: just dist-desktop-platform appimage,deb
+# Build the desktop app (Tauri shell, ADR 0097) bundle(s) for specific Tauri
+# bundle targets (BT-2987). Needs the Tauri toolchain — `cargo install
+# tauri-cli --version "^2.0.0"` plus, on Linux, the webkit2gtk-4.1/glib/gtk3
+# dev packages listed in desktop/README.md. Bundles a freshly-built
+# dist-liveview/ release as a Tauri resource, so run `just dist-liveview`
+# first (or after any editors/liveview change). Same recipe
+# .github/workflows/desktop-release.yml runs in CI, per platform.
+[unix]
+dist-desktop-platform bundles:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ ! -x dist-liveview/bin/server ]; then
+        echo "❌ dist-liveview/bin/server not found. Run 'just dist-liveview' first."
+        exit 1
+    fi
+    if ! command -v cargo-tauri >/dev/null 2>&1; then
+        echo "❌ cargo-tauri not found. Install: cargo install tauri-cli --version \"^2.0.0\""
+        exit 1
+    fi
+    echo "📦 Building desktop app ({{bundles}})..."
+    cd desktop
+    cargo tauri build --bundles "{{bundles}}"
+    echo "✅ Desktop app bundle(s) in desktop/src-tauri/target/release/bundle/"
+
+# Build the desktop app bundle for the host platform (BT-2987), auto-picking
+# the bundle targets Tauri supports there (.AppImage/.deb on Linux, .app/.dmg
+# on macOS — Windows is BT-2988).
+[unix]
+dist-desktop:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "$(uname -s)" in
+        Linux)  just dist-desktop-platform appimage,deb ;;
+        Darwin) just dist-desktop-platform app,dmg ;;
+        *)      echo "❌ Unsupported platform: $(uname -s)"; exit 1 ;;
+    esac
+
 # Ensure the loopback hex-bridge proxy is up before any rebar3/mix dep fetch.
 # Cloud containers only (gated on CLAUDE_CODE_REMOTE): a session can outlive the
 # SessionStart launch, and a dead bridge makes `rebar3 compile` fail to fetch

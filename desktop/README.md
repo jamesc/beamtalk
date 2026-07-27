@@ -22,10 +22,44 @@ desktop/
       state.rs          AppState: AttachManager + spawned Child handles
       launcher.rs        Resolves the bundled bt_attach `bin/server` path
       dto.rs             JSON view models for the frontend
+    entitlements.plist  Hardened Runtime entitlements for the bundled BEAM
+                         release (BT-2987 — see the packaging section below)
     tauri.conf.json
     capabilities/default.json
   ui/                  Frontend: plain HTML/CSS/JS, no build step
 ```
+
+## Packaging (BT-2987)
+
+`.github/workflows/desktop-release.yml` builds this app for Linux x86_64 and
+macOS arm64 + x86_64, bundling a freshly-built `dist-liveview` release
+(`just dist-liveview`) as a Tauri resource — `tauri.conf.json`'s
+`bundle.resources` maps repo-root `dist-liveview/` to `dist-liveview/` inside
+the app's resource dir, exactly where `launcher.rs`'s
+`BUNDLED_LAUNCHER_RELATIVE_PATH` expects it once no
+`BEAMTALK_ATTACH_LAUNCHER` override is set. `bin/server` itself is never
+modified — the workflow runs the same `just dist-liveview` recipe a
+from-source dev uses.
+
+On macOS, every nested Mach-O binary in that bundled release (`beam.smp`,
+`epmd`, any NIF `.so`/`.dylib`) is signed by
+`scripts/ci/sign-macos-nested-binaries.sh` *before* `cargo tauri build` copies
+them in, because Tauri's own macOS bundler only reliably signs the top-level
+`.app` — arbitrary resource binaries are a known gap
+(tauri-apps/tauri#11992) and Apple's notary service rejects a bundle
+containing any unsigned Mach-O. `entitlements.plist` grants the Hardened
+Runtime allowances BEAM needs (`allow-jit` +
+`allow-unsigned-executable-memory` for BeamAsm's JIT, `disable-library-
+validation` for independently-signed NIFs) to both that pre-pass and the
+top-level app (`bundle.macOS.entitlements`). See the workflow file's header
+comment for the full signing/notarization flow and the required secrets.
+
+**This packaging lane is unverified for the same reason the app itself is**
+(see below) — no macOS/Tauri toolchain has been available to actually run
+`cargo tauri build` end-to-end here, so it is wired as `workflow_dispatch`/
+`workflow_call` only, not yet called from `release.yml`'s `on: release`
+path. Flip that once a real run confirms the build (and, separately, the
+signing/notarization steps against real Apple secrets) works.
 
 ## Why this crate is excluded from the root Cargo workspace
 
@@ -129,8 +163,9 @@ picker end-to-end against a real `beamtalk workspace create --background
 ## Local development (once you have the Tauri toolchain)
 
 ```bash
-# Point the broker at a from-source dist-liveview build instead of a
-# packaged bundle (BT-2987 hasn't wired bundling yet):
+# Point the broker at a from-source dist-liveview build instead of the
+# resource-bundled one CI packages (BT-2987) — simplest for local iteration,
+# since it skips a full `cargo tauri build`:
 just dist-liveview   # from editors/liveview/, produces bin/server
 export BEAMTALK_ATTACH_LAUNCHER=/path/to/dist-liveview/bin/server
 

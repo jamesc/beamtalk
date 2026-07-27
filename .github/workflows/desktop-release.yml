@@ -1,0 +1,305 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+#
+# Desktop App Release Pipeline
+# ============================
+# Builds the Beamtalk desktop picker (Tauri shell, ADR 0097, BT-2986) bundled
+# with a self-contained bt_attach ERTS release, producing installable
+# artifacts for Linux x86_64 (.AppImage / .deb) and macOS arm64 + x86_64
+# (.dmg / .app). Windows is BT-2988 — `bin/server` is a POSIX `sh` script
+# with no Windows counterpart, so the broker's launch path differs there.
+#
+# Ships on its OWN release lane, mirroring liveview-release.yml, because:
+#   1. It needs the Tauri/webview toolchain (webkit2gtk on Linux), which
+#      `desktop/src-tauri` is deliberately excluded from the root Cargo
+#      workspace to avoid forcing onto every `cargo build --workspace`
+#      (see desktop/README.md).
+#   2. Its packaging cadence (picker fixes) is independent of both the
+#      compiler's release lane and the LiveView IDE's own (liveview-
+#      release.yml), which this lane bundles as a build input, not a
+#      dependency edge — `just dist-liveview` runs fresh here rather than
+#      downloading that workflow's artifact, same as `bin/server` resolving
+#      its own release directory unmodified (ADR 0097 Implementation §5).
+#
+# macOS signing/notarization: code-signs the top-level .app AND every
+# nested Mach-O binary in the bundled bt_attach release (beam.smp, epmd,
+# NIFs) — see scripts/ci/sign-macos-nested-binaries.sh for why the latter
+# needs an explicit pass Tauri's own bundler doesn't reliably cover
+# (tauri-apps/tauri#11992). Signing/notarization only runs when the Apple
+# secrets below are configured on this repo; their absence produces an
+# unsigned build instead of failing, so the lane stays exercisable (e.g. a
+# fork, or before secrets are provisioned) without every run going red:
+#   APPLE_CERTIFICATE           base64-encoded .p12 signing certificate
+#   APPLE_CERTIFICATE_PASSWORD  password for that .p12
+#   APPLE_SIGNING_IDENTITY      "Developer ID Application: ..." identity
+#   APPLE_ID                    Apple ID email for notarization
+#   APPLE_PASSWORD               app-specific password for that Apple ID
+#   APPLE_TEAM_ID                 Apple Developer Team ID
+# (Env var names match what `cargo tauri build` reads automatically —
+# https://v2.tauri.app/distribute/sign/macos/.)
+#
+# Verification status (read before relying on this lane): the app itself
+# has not been compiled end-to-end in any sandbox available to this project
+# — see desktop/README.md's "What was and wasn't verified". This workflow's
+# job logic (matrix, caching, artifact/version plumbing, signing
+# conditionals) follows the same structure already proven by
+# liveview-release.yml, but the `cargo tauri build` step is expected to
+# need fixes on its first real run. For that reason this lane is NOT yet
+# wired into release.yml's `on: release` path (unlike liveview-release.yml/
+# release-vscode.yml) — run it via workflow_dispatch until a real run
+# confirms the build succeeds, then add a `desktop-app: uses: ./.github/
+# workflows/desktop-release.yml` job to release.yml the same way those two
+# are wired in.
+#
+# Trigger modes (mirrors liveview-release.yml):
+#   - workflow_dispatch: manual build (artifacts only unless `publish` is set).
+#   - workflow_call: available for release.yml to invoke once verified (see
+#     above); also usable standalone by another workflow in the meantime.
+#
+# Related: liveview-release.yml (the bt_attach release this lane bundles),
+#          desktop/README.md, docs/ADR/0097-desktop-attach-client-node-per-workspace.md
+# Issue: BT-2987 (epic BT-2982)
+
+name: Desktop App Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Upload archives to the GitHub Release (otherwise build artifacts only)'
+        required: false
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      publish:
+        description: 'Upload archives to the GitHub Release'
+        required: false
+        type: boolean
+        default: true
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build desktop app (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    permissions:
+      contents: write # gh release upload on a full release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            platform: linux-x86_64
+            bundles: appimage,deb
+          - runner: macos-latest
+            platform: macos-arm64
+            bundles: app,dmg
+          - runner: macos-15-intel
+            platform: macos-x86_64
+            bundles: app,dmg
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The app version tracks the repo VERSION file, same convention as
+      # liveview-release.yml's IDE archives.
+      - name: Determine version
+        id: version
+        shell: bash
+        run: echo "version=$(tr -d '[:space:]' < VERSION)" >> "$GITHUB_OUTPUT"
+
+      # ─── Build the bt_attach release this app bundles ────────────────────
+      - name: Install Erlang/OTP + Elixir
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version-file: .tool-versions
+          cache: npm
+          cache-dependency-path: editors/liveview/assets/package-lock.json
+
+      - name: Cache Mix deps and build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        with:
+          path: |
+            editors/liveview/deps
+            editors/liveview/_build
+          key: ${{ runner.os }}-${{ matrix.platform }}-liveview-rel-${{ hashFiles('editors/liveview/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.platform }}-liveview-rel-
+
+      - name: Install just
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+
+      # Same recipe devs run locally (BT-2513) — reused unmodified here so
+      # the bundled release is never a packaging-lane-specific build.
+      - name: Build bt_attach release
+        run: just dist-liveview
+
+      - name: Smoke test bt_attach release boots
+        env:
+          SECRET_KEY_BASE: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+        run: |
+          test -x dist-liveview/bin/server
+          dist-liveview/bin/bt_attach version
+
+      # ─── Build the Tauri shell ────────────────────────────────────────────
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: stable
+
+      - name: Cache Rust dependencies (desktop/src-tauri)
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: desktop/src-tauri -> target
+
+      # Tauri v2 Linux prerequisites (WebKitGTK 4.1 branch + AppImage/deb
+      # bundler deps). https://v2.tauri.app/start/prerequisites/
+      - name: Install Linux Tauri prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            build-essential \
+            libssl-dev \
+            libxdo-dev \
+            file
+
+      # No `--locked`: we don't control tauri-cli's own published lockfile,
+      # and pinning purely by `^2.0.0` here is deliberate (matches the `"2"`
+      # tauri-cli/tauri version req in desktop/src-tauri/Cargo.toml).
+      - name: Install cargo-tauri CLI
+        run: cargo install tauri-cli --version "^2.0.0"
+
+      # ─── macOS signing setup (no-op without secrets) ─────────────────────
+      - name: Import Apple signing certificate
+        id: apple_cert
+        if: runner.os == 'macOS'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          if [ -z "${APPLE_CERTIFICATE}" ]; then
+            echo "⚠️  APPLE_CERTIFICATE not set — building unsigned, un-notarized (local artifact only)."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          KEYCHAIN_PATH="${RUNNER_TEMP}/desktop-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
+          CERT_PATH="${RUNNER_TEMP}/apple_cert.p12"
+
+          echo "${APPLE_CERTIFICATE}" | base64 --decode > "${CERT_PATH}"
+          security create-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+          security set-keychain-settings -lut 21600 "${KEYCHAIN_PATH}"
+          security unlock-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+          security import "${CERT_PATH}" -P "${APPLE_CERTIFICATE_PASSWORD}" \
+            -A -t cert -f pkcs12 -k "${KEYCHAIN_PATH}"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+          security list-keychains -d user -s "${KEYCHAIN_PATH}" login.keychain
+          rm -f "${CERT_PATH}"
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+
+      # Sign every nested Mach-O in the bundled release BEFORE `cargo tauri
+      # build` copies dist-liveview/ into the .app's Resources — see the
+      # script and the header comment above for why this can't be deferred
+      # to Tauri's own (top-level-only) signing pass.
+      - name: Sign nested Mach-O binaries in bt_attach release
+        if: runner.os == 'macOS' && steps.apple_cert.outputs.configured == 'true'
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: scripts/ci/sign-macos-nested-binaries.sh dist-liveview "${APPLE_SIGNING_IDENTITY}"
+
+      # ─── Build + bundle + (conditionally) sign & notarize ────────────────
+      # Same recipe a dev runs locally (`just dist-desktop-platform`) — one
+      # definition of the build, matching the dist-liveview convention above.
+      - name: Build desktop app bundle
+        id: build
+        env:
+          # Picked up automatically by the Tauri CLI's macOS bundler when
+          # present; on Linux (and on macOS without a configured identity)
+          # these are empty and the bundler produces an unsigned artifact.
+          APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && steps.apple_cert.outputs.configured == 'true' && secrets.APPLE_SIGNING_IDENTITY || '' }}
+          APPLE_ID: ${{ runner.os == 'macOS' && steps.apple_cert.outputs.configured == 'true' && secrets.APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ runner.os == 'macOS' && steps.apple_cert.outputs.configured == 'true' && secrets.APPLE_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ runner.os == 'macOS' && steps.apple_cert.outputs.configured == 'true' && secrets.APPLE_TEAM_ID || '' }}
+        run: |
+          start=$(date +%s)
+          just dist-desktop-platform ${{ matrix.bundles }}
+          end=$(date +%s)
+          echo "build_seconds=$((end - start))" >> "$GITHUB_OUTPUT"
+
+      - name: Record build time + artifact size baseline
+        run: |
+          {
+            echo "## 🖥️ Desktop app build — ${{ matrix.platform }}"
+            echo ""
+            echo "| Metric | Value |"
+            echo "|---|---|"
+            echo "| \`cargo tauri build\` time | ${{ steps.build.outputs.build_seconds }}s |"
+            echo "| Runner | ${{ matrix.runner }} |"
+            echo "| Bundles | ${{ matrix.bundles }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Package artifacts
+        id: package
+        run: scripts/ci/package-desktop-release.sh "${{ steps.version.outputs.version }}" "${{ matrix.platform }}"
+
+      - name: Record artifact sizes
+        run: |
+          {
+            echo "| Artifact | Size |"
+            echo "|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          while IFS= read -r archive; do
+            [ -n "${archive}" ] || continue
+            size=$(du -h "${archive}" | cut -f1)
+            echo "| \`$(basename "${archive}")\` | ${size} |" >> "$GITHUB_STEP_SUMMARY"
+          done <<< "${{ steps.package.outputs.archives }}"
+
+      # A glob, not the multiline `archives` output directly: interpolating
+      # a multiline string twice (once bare, once with `.sha256` appended)
+      # would only suffix the LAST line, not every archive — every packaged
+      # file (and its checksum) shares the `beamtalk-desktop-<version>-
+      # <platform>` prefix, so one pattern covers both.
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: beamtalk-desktop-${{ steps.version.outputs.version }}-${{ matrix.platform }}
+          path: beamtalk-desktop-${{ steps.version.outputs.version }}-${{ matrix.platform }}.*
+          retention-days: 7
+
+      # On a full release (release.yml calls this workflow with publish=true,
+      # once wired in per the header note above), attach each archive to the
+      # GitHub Release.
+      - name: Upload to GitHub Release
+        if: github.event_name == 'release' && inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          while IFS= read -r archive; do
+            [ -n "${archive}" ] || continue
+            gh release upload "${GITHUB_REF_NAME}" \
+              "${archive}" "${archive}.sha256" \
+              --repo "${{ github.repository }}" \
+              --clobber
+          done <<< "${{ steps.package.outputs.archives }}"
