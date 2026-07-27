@@ -117,11 +117,9 @@ TestCase subclass: RetryPolicyTest
       #initialInterval => 1000,
       #backoffCoefficient => -2.0
     }
-    1
-      to: 6
-      do: [:attempt |
-        self assert: (negativeCoefficient intervalForAttempt: attempt) >= 0
-      ]
+    1 to: 6 do: [:attempt |
+      self assert: (negativeCoefficient intervalForAttempt: attempt) >= 0
+    ]
 
   testIntervalForAttemptCappedWellPastOldFloatOverflowPoint =>
     capped := RetryPolicy new: #{
