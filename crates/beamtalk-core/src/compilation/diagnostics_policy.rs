@@ -601,6 +601,16 @@ dnu = "error"
     }
 
     #[test]
+    fn load_diagnostics_table_for_root_io_error_other_than_not_found_is_empty() {
+        // Place a directory where beamtalk.toml would live to trigger EISDIR
+        // (a non-NotFound I/O error), exercising the warn-and-return branch.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("beamtalk.toml")).unwrap();
+        let table = load_diagnostics_table_for_root(dir.path());
+        assert!(table.is_empty());
+    }
+
+    #[test]
     fn load_diagnostics_table_for_root_valid_diagnostics_section_is_parsed() {
         let dir = tempfile::tempdir().unwrap();
         let manifest =
