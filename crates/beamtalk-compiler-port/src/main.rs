@@ -988,9 +988,11 @@ fn diagnostics_overrides() -> &'static beamtalk_core::compilation::DiagnosticsTa
 /// (ADR 0100 Rule 3).
 ///
 /// Delegates to [`beamtalk_core::compilation::load_diagnostics_table_for_root`]
-/// for the lenient read-parse-or-empty semantics (missing manifest or parse
-/// failure → empty table / Rule 1 defaults). The `debug!` log on a non-empty
-/// result is compiler-port-specific telemetry kept here in the caller.
+/// for the lenient read-parse-or-empty semantics: missing manifest → empty
+/// table (silent), non-`NotFound` I/O errors (permissions, EISDIR, etc.) →
+/// `WARN` log + empty table, parse failure → `WARN` log + empty table / Rule 1
+/// defaults. The `debug!` log on a non-empty result is compiler-port-specific
+/// telemetry kept here in the caller.
 ///
 /// Pure function of `root` (no global state) so it is directly unit-testable
 /// without touching the process's real working directory.
