@@ -36,6 +36,7 @@ with_temp_handle(Contents, Mode, Fun) ->
     Options =
         case Mode of
             read -> [read, binary];
+            write -> [write, binary];
             append -> [append, binary];
             readWrite -> [read, write, binary]
         end,
@@ -422,4 +423,15 @@ mode_error_hint_names_the_denied_direction_test() ->
         ReadHint = Hint(beamtalk_file_handle:read(AppendOnly, 1)),
         ?assertNotEqual(nomatch, binary:match(ReadHint, <<"mode: #read">>)),
         ?assertEqual(nomatch, binary:match(ReadHint, <<"mode: #write">>))
+    end).
+
+write_mode_handle_writes_but_refuses_reads_test() ->
+    %% Exercises the helper's `write` branch: #write is write-only, so reads
+    %% come back as a structured error rather than crashing the descriptor.
+    with_temp_handle(<<"replaced">>, write, fun(Handle) ->
+        ?assertEqual(nil, ok_value(beamtalk_file_handle:write(Handle, <<"new">>))),
+        ?assert(is_error_result(beamtalk_file_handle:read(Handle, 1))),
+        beamtalk_file_handle:close(Handle),
+        Path = maps:get(path, Handle),
+        ?assertEqual({ok, <<"new">>}, file:read_file(Path))
     end).

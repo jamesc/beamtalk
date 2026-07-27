@@ -547,7 +547,9 @@ mode_options(_) -> error.
 ensure_parent_dir(read, _PathStr) ->
     ok;
 ensure_parent_dir(_Mode, PathStr) ->
-    filelib:ensure_dir(filename:join(filename:dirname(PathStr), "dummy")).
+    %% ensure_dir/1 creates the directories the *named file* sits in, and does
+    %% not create the file itself — no need to join a placeholder onto dirname.
+    filelib:ensure_dir(PathStr).
 
 -doc "Map a file:open/2 failure onto the structured error kinds File uses.".
 -spec open_error(atom(), binary(), term()) -> beamtalk_error:error().
