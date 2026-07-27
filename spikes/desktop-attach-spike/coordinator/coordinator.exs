@@ -269,8 +269,9 @@ defmodule Coordinator.Router do
   # /attach/:id request only stops racing a second spawn (claim_or_get) — a
   # waiter in await/2 still returns as soon as it sees a %{port: _} entry, so
   # writing the entry before readiness would hand a not-yet-ready port to a
-  # concurrent caller. On timeout, drop the :pending claim so a later attach
-  # isn't permanently blocked by a claim that will never resolve.
+  # concurrent caller. On timeout OR an exception (e.g. setsid missing,
+  # Port.open failure), drop the :pending claim so a later attach isn't
+  # permanently blocked by a claim that will never resolve.
   defp spawn_and_wait(ws_id, deadline) do
     {port, os_pid} = Coordinator.Spawner.spawn_front(ws_id)
     remaining = max(deadline - System.monotonic_time(:millisecond), 0)
@@ -284,6 +285,10 @@ defmodule Coordinator.Router do
         Coordinator.State.drop(ws_id)
         :timeout
     end
+  rescue
+    _ ->
+      Coordinator.State.drop(ws_id)
+      :timeout
   end
 
   # Two-stage probe (same contract as the broker's wait-ready): HTTP up, then
