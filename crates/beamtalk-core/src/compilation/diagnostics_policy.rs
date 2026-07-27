@@ -249,6 +249,47 @@ pub fn parse_diagnostics_table_from_manifest_toml(
     parse_diagnostics_table(value.get("diagnostics"))
 }
 
+/// Load and parse the `[diagnostics]` severity-override table from
+/// `<root>/beamtalk.toml` (ADR 0100 Rule 3).
+///
+/// Lenient by design: a root with no `beamtalk.toml`, or one whose manifest
+/// fails to parse, yields an empty table (Rule 1 defaults) — a malformed
+/// manifest already fails loudly at `beamtalk build` time. Non-`NotFound` I/O
+/// errors and parse failures are logged at `WARN` so the mismatch is
+/// discoverable without blocking compilation or diagnostics.
+///
+/// This is the shared per-root loader for both `beamtalk-compiler-port` and
+/// `beamtalk-lsp`, which each previously reimplemented the same pattern.
+#[must_use]
+pub fn load_diagnostics_table_for_root(root: &std::path::Path) -> DiagnosticsTable {
+    let manifest_path = root.join("beamtalk.toml");
+    let content = match std::fs::read_to_string(&manifest_path) {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return DiagnosticsTable::new(),
+        Err(e) => {
+            tracing::warn!(
+                path = %manifest_path.display(),
+                error = %e,
+                "could not read beamtalk.toml for [diagnostics] overrides; \
+                 using Rule 1 defaults for this root"
+            );
+            return DiagnosticsTable::new();
+        }
+    };
+    match parse_diagnostics_table_from_manifest_toml(&content) {
+        Ok(table) => table,
+        Err(e) => {
+            tracing::warn!(
+                path = %manifest_path.display(),
+                error = %e,
+                "failed to parse [diagnostics] table in beamtalk.toml; \
+                 using Rule 1 defaults for this root"
+            );
+            DiagnosticsTable::new()
+        }
+    }
+}
+
 /// Parse `[package] name` directly out of a `beamtalk.toml` file's raw TOML
 /// content (BT-2960), for the same reason
 /// [`parse_diagnostics_table_from_manifest_toml`] exists: the LSP has no
@@ -530,5 +571,56 @@ dnu = "error"
         let result = apply_diagnostics_table(diags, &table);
         assert_eq!(result.len(), 1, "hard Error must survive an 'off' entry");
         assert_eq!(result[0].severity, Severity::Error);
+    }
+
+    #[test]
+    fn load_diagnostics_table_for_root_missing_manifest_is_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let table = load_diagnostics_table_for_root(dir.path());
+        assert!(table.is_empty());
+    }
+
+    #[test]
+    fn load_diagnostics_table_for_root_invalid_toml_is_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("beamtalk.toml"), "not [ valid toml").unwrap();
+        let table = load_diagnostics_table_for_root(dir.path());
+        assert!(table.is_empty());
+    }
+
+    #[test]
+    fn load_diagnostics_table_for_root_manifest_without_diagnostics_section_is_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("beamtalk.toml"),
+            "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let table = load_diagnostics_table_for_root(dir.path());
+        assert!(table.is_empty());
+    }
+
+    #[test]
+    fn load_diagnostics_table_for_root_io_error_other_than_not_found_is_empty() {
+        // Place a directory where beamtalk.toml would live to trigger EISDIR
+        // (a non-NotFound I/O error), exercising the warn-and-return branch.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("beamtalk.toml")).unwrap();
+        let table = load_diagnostics_table_for_root(dir.path());
+        assert!(table.is_empty());
+    }
+
+    #[test]
+    fn load_diagnostics_table_for_root_valid_diagnostics_section_is_parsed() {
+        let dir = tempfile::tempdir().unwrap();
+        let manifest =
+            "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n\n[diagnostics]\ndnu = \"error\"\n";
+        std::fs::write(dir.path().join("beamtalk.toml"), manifest).unwrap();
+        let table = load_diagnostics_table_for_root(dir.path());
+        assert_eq!(table.len(), 1);
+        assert_eq!(
+            table[&DiagnosticCategory::Dnu],
+            DiagnosticSeverityOverride::Error
+        );
     }
 }

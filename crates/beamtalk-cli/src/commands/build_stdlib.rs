@@ -796,6 +796,65 @@ fn mark_timer_spawns(class_methods: &mut [MethodMeta]) -> Result<()> {
     Ok(())
 }
 
+/// Mark `Parallel` class methods that spawn their block arguments in separate
+/// BEAM processes.
+///
+/// BT-2974: mirrors `mark_timer_spawns` — feeds the same `spawns_block_selectors()`
+/// metadata a future lint uses to warn when a synchronous `self` send appears
+/// inside a spawned-block argument (deadlock risk: an actor blocks in
+/// `Parallel all:`, a block does a synchronous send back to the same actor,
+/// and hangs).
+fn mark_parallel_spawns(class_methods: &mut [MethodMeta]) -> Result<()> {
+    let mut found_all = false;
+    let mut found_all_timeout = false;
+    let mut found_any = false;
+    for m in class_methods.iter_mut() {
+        match m.selector.as_str() {
+            "all:" => {
+                m.spawns_block = true;
+                found_all = true;
+            }
+            "all:timeout:" => {
+                m.spawns_block = true;
+                found_all_timeout = true;
+            }
+            "any:" => {
+                m.spawns_block = true;
+                found_any = true;
+            }
+            _ => {}
+        }
+    }
+    if !found_all || !found_all_timeout || !found_any {
+        miette::bail!(
+            "Parallel metadata mismatch: expected class methods `all:`, `all:timeout:`, \
+             `any:` but found_all={found_all}, found_all_timeout={found_all_timeout}, \
+             found_any={found_any}"
+        );
+    }
+    Ok(())
+}
+
+/// Mark `Collection>>parallelCollect:` as spawning its block argument (BT-2974)
+/// — it delegates to `Parallel all:` under the hood, same rationale as
+/// `mark_parallel_spawns`.
+fn mark_parallel_collect_spawns(methods: &mut [MethodMeta]) -> Result<()> {
+    let mut found = false;
+    for m in methods.iter_mut() {
+        if m.selector == "parallelCollect:" {
+            m.spawns_block = true;
+            found = true;
+        }
+    }
+    if !found {
+        miette::bail!(
+            "Collection metadata mismatch: expected instance method `parallelCollect:` \
+             but it was not found"
+        );
+    }
+    Ok(())
+}
+
 /// A single stdlib type-alias declaration collected by
 /// `collect_stdlib_alias_sources` (BT-2935), carrying both its
 /// reconstructed `AliasInfo` (for immediately seeding *this* run's own
@@ -1022,6 +1081,14 @@ fn extract_class_metadata(path: &Utf8Path, module_name: &str) -> Result<ClassMet
     // Mark Timer methods that spawn their block argument
     if class_name == "Timer" {
         mark_timer_spawns(&mut class_methods)?;
+    }
+
+    // Mark Parallel/Collection methods that spawn their block argument(s) (BT-2974)
+    if class_name == "Parallel" {
+        mark_parallel_spawns(&mut class_methods)?;
+    }
+    if class_name == "Collection" {
+        mark_parallel_collect_spawns(&mut methods)?;
     }
 
     let type_params = class
