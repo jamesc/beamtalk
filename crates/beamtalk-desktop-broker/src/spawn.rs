@@ -331,10 +331,16 @@ mod tests {
     // `beamtalk-cli`'s own tests use (there's no HOME-override hook in
     // `beamtalk_workspace`), rather than pointing at a fake filesystem root.
 
+    // Only the #[cfg(unix)] spawn_front_with_port_retry_* tests below
+    // construct this (write_launcher_script needs a real #!/bin/sh script,
+    // which has no Windows equivalent) — gate it to match, or it's dead
+    // code on Windows.
+    #[cfg(unix)]
     struct TestWorkspaceDir {
         id: String,
     }
 
+    #[cfg(unix)]
     impl TestWorkspaceDir {
         fn new(prefix: &str) -> Self {
             let id = format!("{prefix}_{}", std::process::id());
@@ -345,6 +351,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     impl Drop for TestWorkspaceDir {
         fn drop(&mut self) {
             if let Ok(dir) = beamtalk_workspace::workspace_dir(&self.id) {

@@ -25,6 +25,7 @@
 
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
