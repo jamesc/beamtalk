@@ -69,7 +69,7 @@ use sha2::{Digest, Sha256};
 use std::cmp::Ordering;
 use std::fmt::Write as _;
 use std::process::Command;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::commands::build_layout::BuildLayout;
 use crate::commands::manifest::RegistryConfig;
@@ -360,7 +360,11 @@ fn registry_cache_root(url: &str, project_root: &Utf8Path) -> Utf8PathBuf {
     dirs::home_dir()
         .and_then(|home| Utf8PathBuf::from_path_buf(home).ok())
         .map_or_else(
-            || BuildLayout::new(project_root).registry_dir(),
+            || {
+                BuildLayout::new(project_root)
+                    .registry_dir()
+                    .join(cache_key(url))
+            },
             |home| home.join(".beamtalk").join("registry").join(cache_key(url)),
         )
 }
@@ -408,10 +412,19 @@ fn lock_registry_cache(cache_root: &Utf8Path) -> Result<std::fs::File> {
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to open registry lock file '{lock_path}'"))?;
 
-    lockfile
-        .lock_exclusive()
-        .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to acquire registry lock '{lock_path}'"))?;
+    // A blocking `lock_exclusive()` gives no indication *why* the process
+    // appears to hang if another beamtalk process is stuck holding the lock
+    // (e.g. a `git clone` against an unreachable host). Try non-blocking
+    // first so the common uncontended case pays no extra cost; only log
+    // when there's actually something to wait for.
+    if let Err(e) = lockfile.try_lock_exclusive() {
+        debug!(error = %e, "registry cache lock contended, waiting: {lock_path}");
+        warn!("Waiting for registry cache lock '{lock_path}' held by another beamtalk process...");
+        lockfile
+            .lock_exclusive()
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to acquire registry lock '{lock_path}'"))?;
+    }
 
     Ok(lockfile)
 }
@@ -758,7 +771,7 @@ fn describe_available_packages(index_root: &Utf8Path) -> String {
     let refs: Vec<&str> = names.iter().map(String::as_str).collect();
     if more {
         format!(
-            "Packages in the registry (first {MAX_LISTED}): {}, ...",
+            "Packages in the registry (showing {MAX_LISTED}): {}, ...",
             refs.join(", ")
         )
     } else {
@@ -1285,6 +1298,16 @@ git = "g"
             }
             Self { key, prev }
         }
+
+        /// SAFETY: caller must ensure tests using this are `#[serial(env_var)]`.
+        unsafe fn unset(key: &'static str) -> Self {
+            let prev = std::env::var(key).ok();
+            // SAFETY: caller ensures tests are serialized.
+            unsafe {
+                std::env::remove_var(key);
+            }
+            Self { key, prev }
+        }
     }
 
     impl Drop for EnvVarGuard {
@@ -1370,6 +1393,10 @@ git = "g"
     }
 
     #[test]
+    // Reads `dirs::home_dir()` (via `$HOME`); serialized against
+    // `test_registry_cache_root_no_home_dir_still_keys_by_url`, which
+    // unsets `$HOME` to exercise the fallback path.
+    #[serial_test::serial(env_var)]
     fn test_registry_cache_root_shared_across_projects() {
         // Two different projects pointing at the same registry URL must
         // resolve to the *same* cache directory — that sharing is the whole
@@ -1385,12 +1412,31 @@ git = "g"
     }
 
     #[test]
+    // See serialization note on `test_registry_cache_root_shared_across_projects`.
+    #[serial_test::serial(env_var)]
     fn test_registry_cache_root_differs_by_url() {
         let project = TempDir::new().unwrap();
         assert_ne!(
             registry_cache_root("https://example.test/one", &utf8(&project)),
             registry_cache_root("https://example.test/two", &utf8(&project))
         );
+    }
+
+    #[test]
+    #[serial_test::serial(env_var)]
+    fn test_registry_cache_root_no_home_dir_still_keys_by_url() {
+        // When the home directory can't be determined (e.g. a minimal
+        // sandbox with no $HOME), `registry_cache_root` falls back to a
+        // per-project `_build/registry/` root — but that fallback must
+        // still key by URL, or switching registries in that environment
+        // makes the second registry's clone silently overwrite the first's.
+        // SAFETY: serialized via #[serial(env_var)].
+        let _guard = unsafe { EnvVarGuard::unset("HOME") };
+
+        let project = TempDir::new().unwrap();
+        let root_a = registry_cache_root("https://example.test/one", &utf8(&project));
+        let root_b = registry_cache_root("https://example.test/two", &utf8(&project));
+        assert_ne!(root_a, root_b);
     }
 
     /// Two "processes" (threads, standing in for a CLI build racing an LSP
