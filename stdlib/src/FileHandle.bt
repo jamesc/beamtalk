@@ -74,8 +74,9 @@ sealed typed Object subclass: FileHandle
   /// Read from the current position to end-of-file.
   ///
   /// The whole remainder is held in memory at once, so reach for `read:` or
-  /// `lines` on a file large enough to matter. Only use this on regular files:
-  /// on a device or FIFO that never reports end-of-file it never returns.
+  /// `lines` on a file large enough to matter. `File open:mode:` only opens
+  /// regular files, so a FIFO or device that never reports end-of-file cannot
+  /// reach this.
   ///
   /// ## Examples
   ///

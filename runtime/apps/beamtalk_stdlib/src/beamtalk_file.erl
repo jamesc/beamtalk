@@ -499,14 +499,20 @@ do_open(Path, Mode, Selector) ->
             PathStr = unicode:characters_to_list(Path),
             case ensure_parent_dir(Mode, PathStr) of
                 ok ->
-                    %% Do NOT add `raw` to Options. This call runs in the File
-                    %% class process, not the caller's, and a raw descriptor may
-                    %% only be used by the process that opened it — every handle
-                    %% `open:mode:` hands back would fail with
-                    %% not_on_controlling_process. See mode_options/1.
-                    case file:open(PathStr, Options) of
-                        {ok, Fd} -> {ok, beamtalk_file_handle:new(Fd, Mode, Path)};
-                        {error, Reason} -> {error, open_error(Selector, Path, Reason)}
+                    case check_regular(PathStr, Selector, Path) of
+                        ok ->
+                            %% Do NOT add `raw` to Options. This call runs in
+                            %% the File class process, not the caller's, and a
+                            %% raw descriptor may only be used by the process
+                            %% that opened it — every handle `open:mode:` hands
+                            %% back would fail with not_on_controlling_process.
+                            %% See mode_options/1.
+                            case file:open(PathStr, Options) of
+                                {ok, Fd} -> {ok, beamtalk_file_handle:new(Fd, Mode, Path)};
+                                {error, Reason} -> {error, open_error(Selector, Path, Reason)}
+                            end;
+                        {error, _} = NotRegular ->
+                            NotRegular
                     end;
                 {error, Reason} ->
                     Error0 = beamtalk_error:new(io_error, 'File'),
@@ -541,6 +547,38 @@ mode_options(write) -> {ok, [write, binary]};
 mode_options(append) -> {ok, [append, binary]};
 mode_options(readWrite) -> {ok, [read, write, binary]};
 mode_options(_) -> error.
+
+-doc """
+Refuse to open something that exists but is not a regular file.
+
+A FIFO or character device never reports end-of-file, so `readAll` on one loops
+forever — and because the open runs in the File class process, a wedged read
+takes every other `File` operation in the node with it. A directory is rejected
+here too, turning a bare `eisdir` into a message that says what was wrong.
+
+A path that does not exist yet is fine: the write-capable modes create it.
+""".
+-spec check_regular(string(), atom(), binary()) -> ok | {error, beamtalk_error:error()}.
+check_regular(PathStr, Selector, Path) ->
+    case filelib:is_file(PathStr) andalso not filelib:is_regular(PathStr) of
+        false ->
+            ok;
+        true ->
+            Error0 = beamtalk_error:new(io_error, 'File'),
+            Error1 = beamtalk_error:with_selector(Error0, Selector),
+            Error2 = beamtalk_error:with_message(
+                Error1, <<"FileHandle path is not a regular file">>
+            ),
+            Error3 = beamtalk_error:with_details(Error2, #{path => Path}),
+            {error,
+                beamtalk_error:with_hint(
+                    Error3,
+                    <<
+                        "File handles are for regular files — a directory, FIFO or device "
+                        "cannot be read to end-of-file"
+                    >>
+                )}
+    end.
 
 -doc "Create missing parent directories for write-capable modes only.".
 -spec ensure_parent_dir(atom(), string()) -> ok | {error, term()}.

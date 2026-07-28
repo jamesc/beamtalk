@@ -176,10 +176,10 @@ Read from the current position to end-of-file.
 Returns `Result ok: binary`. Reading a handle already at end-of-file yields an
 empty binary.
 
-Unbounded: the whole remainder is accumulated in memory, and on a descriptor
-that never reports end-of-file (a device or FIFO) this does not return. Both
-matter more than usual here because the caller is the File class process — see
-`beamtalk_file:'open:mode:do:'`.
+Unbounded: the whole remainder is accumulated in memory, so this is the wrong
+call for a file large enough to matter — use `read:` or `lines`. `open:mode:`
+refuses non-regular paths (`beamtalk_file:check_regular/3`), so a descriptor
+that never reports end-of-file cannot reach this loop through that door.
 """.
 -spec readAll(t()) -> beamtalk_result:t().
 readAll(#{'$beamtalk_class' := 'FileHandle'} = Handle) ->
