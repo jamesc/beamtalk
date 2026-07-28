@@ -140,7 +140,9 @@ pub fn run(
 
     match format {
         OutputFormat::Text => print_text_report(&report, detail, &parsed_files),
-        OutputFormat::Json => print_json_report(&report, at_least, &mut std::io::stdout()),
+        OutputFormat::Json => {
+            print_json_report(&report, at_least, &mut std::io::stdout()).into_diagnostic()?
+        }
     }
 
     // --at-least: exit non-zero if coverage is below threshold.
@@ -212,7 +214,11 @@ fn print_text_report(
 }
 
 /// Print the machine-readable JSON report.
-fn print_json_report(report: &CoverageReport, at_least: Option<f64>, out: &mut dyn std::io::Write) {
+fn print_json_report(
+    report: &CoverageReport,
+    at_least: Option<f64>,
+    out: &mut dyn std::io::Write,
+) -> std::io::Result<()> {
     let pct = (report.coverage_percent() * 10.0).round() / 10.0;
 
     let classes: Vec<serde_json::Value> = report
@@ -244,7 +250,7 @@ fn print_json_report(report: &CoverageReport, at_least: Option<f64>, out: &mut d
     }
 
     let text = serde_json::to_string_pretty(&json).expect("valid JSON");
-    writeln!(out, "{text}").ok();
+    writeln!(out, "{text}")
 }
 
 /// Collect `.bt` source files, excluding deps, test, and stdlib directories.
@@ -390,20 +396,20 @@ mod tests {
 
     #[test]
     fn print_json_report_empty_report_does_not_panic() {
-        print_json_report(&empty_report(), None, &mut Vec::new());
+        print_json_report(&empty_report(), None, &mut Vec::new()).unwrap();
     }
 
     #[test]
     fn print_json_report_with_threshold_does_not_panic() {
         // threshold=0.0 → always passes; exercises the at_least branch
-        print_json_report(&empty_report(), Some(0.0), &mut Vec::new());
+        print_json_report(&empty_report(), Some(0.0), &mut Vec::new()).unwrap();
     }
 
     #[test]
     fn print_json_report_passed_true_when_threshold_met() {
         // empty_report has 100% coverage (0/0 → coverage_percent returns 100.0)
         let mut out = Vec::new();
-        print_json_report(&empty_report(), Some(0.0), &mut out);
+        print_json_report(&empty_report(), Some(0.0), &mut out).unwrap();
         let json: serde_json::Value = serde_json::from_slice(&out).unwrap();
         assert_eq!(json["passed"], serde_json::json!(true));
     }
@@ -411,7 +417,7 @@ mod tests {
     #[test]
     fn print_json_report_passed_false_when_threshold_not_met() {
         let mut out = Vec::new();
-        print_json_report(&empty_report(), Some(101.0), &mut out);
+        print_json_report(&empty_report(), Some(101.0), &mut out).unwrap();
         let json: serde_json::Value = serde_json::from_slice(&out).unwrap();
         assert_eq!(json["passed"], serde_json::json!(false));
     }
