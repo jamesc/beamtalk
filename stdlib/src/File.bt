@@ -17,6 +17,7 @@
 /// File appendBinary: "log.bin" contents: data
 /// (File lines: "data.csv") do: [:line | Transcript show: line]
 /// File open: "data.csv" do: [:handle | handle lines take: 10]
+/// File open: "events.log" mode: #append do: [:h | h writeLine: "e". h sync]
 /// ```
 ///
 /// @see System (for environment variables and OS information)
@@ -116,6 +117,9 @@ typed Object subclass: File native: beamtalk_file
   /// within the block — they must not escape, as the file descriptor
   /// is closed when the block returns.
   ///
+  /// The block runs inside the File class, so it must not send another
+  /// message to `File` — doing so deadlocks.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// (File open: "data.csv" do: [:handle |
@@ -123,6 +127,65 @@ typed Object subclass: File native: beamtalk_file
   /// ]) unwrap
   /// ```
   class sealed open: path :: String do: block :: Block(FileHandle, R) -> Result(R, Error) =>
+    self delegate
+
+  /// Open a file in the given mode and return a FileHandle (class method).
+  ///
+  /// Modes:
+  ///
+  /// | Mode         | Behaviour                                    |
+  /// |--------------|----------------------------------------------|
+  /// | `#read`      | Read only; the file must exist               |
+  /// | `#write`     | Truncate or create, write only               |
+  /// | `#append`    | Create if absent; every write goes to the end|
+  /// | `#readWrite` | Create if absent; existing contents kept     |
+  ///
+  /// Write-capable modes create missing parent directories. Returns
+  /// `Result ok: handle`, or `Result error: err`.
+  ///
+  /// The caller owns the handle and must `close` it. The descriptor is not
+  /// tied to the calling process, so an unclosed handle stays open for the
+  /// lifetime of the node — prefer `open:mode:do:` whenever a block scope
+  /// will do.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// handle := (File open: "events.log" mode: #append) unwrap
+  /// handle writeLine: "started".
+  /// handle sync.
+  /// handle close.
+  /// ```
+  class sealed open: path :: String mode: mode :: Symbol -> Result(FileHandle, Error) =>
+    self delegate
+
+  /// Block-scoped handle in the given mode, closed however the block exits
+  /// (class method).
+  ///
+  /// Opens the file, passes the FileHandle to the block, and guarantees the
+  /// handle is closed on the way out — normal return, raised error, or
+  /// non-local return alike. Returns `Result ok: blockResult` on success, or
+  /// `Result error: err` if the file could not be opened.
+  ///
+  /// The handle must not escape the block; the descriptor is closed when the
+  /// block returns. See `open:mode:` for the mode Symbols.
+  ///
+  /// The block runs inside the File class, which has three consequences.
+  /// It must not send another message to `File` — doing so deadlocks. Every
+  /// other `File` call in the system waits behind it. And it must finish
+  /// within the 60-second class-call timeout, or the caller gets a timeout
+  /// error while the block runs on.
+  ///
+  /// So keep blocks short. For a long write loop, or anything that has to
+  /// call `File` again, use `open:mode:` and close the handle yourself.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (File open: "events.log" mode: #append do: [:handle |
+  ///   handle writeLine: "an event".
+  ///   handle sync
+  /// ]) unwrap
+  /// ```
+  class sealed open: path :: String mode: mode :: Symbol do: block :: Block(FileHandle, R) -> Result(R, Error) =>
     self delegate
 
   /// Get the last modification time of a file (class method).

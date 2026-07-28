@@ -4823,6 +4823,8 @@ File open: "data.csv" do: [:handle |
 | `File rename: from to: to` | `nil` | Rename/move a file or directory |
 | `File absolutePath: path` | `String` | Resolve path to absolute |
 | `File tempDirectory` | `String` | OS temporary directory path |
+| `File open: path mode: mode` | `FileHandle` | Open a handle the caller must close |
+| `File open: path mode: mode do: block` | block value | Block-scoped handle, closed on exit |
 
 ```beamtalk
 File writeAll: "output.txt" contents: "hello"
@@ -4832,6 +4834,92 @@ File listDirectory: "target/data"       // => ["logs"]
 File rename: "output.txt" to: "target/data/output.txt"
 File delete: "target/data/output.txt"
 File deleteAll: "target/data"
+```
+
+#### Incremental File I/O — FileHandle
+
+`File open:mode:` and `File open:mode:do:` give you a `FileHandle` for reading
+and writing against the file's *current position*, instead of whole-file
+class methods. This is what an append-only log wants: one open handle, an
+explicit `sync` per record.
+
+| Mode | Behaviour |
+|------|-----------|
+| `#read` | Read only; the file must exist |
+| `#write` | Truncate or create, write only |
+| `#append` | Create if absent; every write lands at end-of-file |
+| `#readWrite` | Create if absent; existing contents kept |
+
+Write-capable modes create missing parent directories.
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `handle read: n` | `Binary` | Up to `n` bytes from the current position |
+| `handle readAll` | `Binary` | From the current position to end-of-file |
+| `handle write: data` | `nil` | Write a String or Binary |
+| `handle writeLine: data` | `nil` | Write followed by a newline |
+| `handle position` | `Integer` | Current byte offset |
+| `handle seek: offset` | `Integer` | Move to an absolute offset, returns it |
+| `handle flush` | `nil` | Push buffered writes to the OS |
+| `handle sync` | `nil` | fsync — force data to physical storage |
+| `handle close` | `nil` | Close the handle (idempotent) |
+| `handle isOpen` | `Boolean` | Whether the handle is still open |
+| `handle lines` | `Stream(String)` | Lazy lines from the current position |
+
+Every method returns a `Result` except `isOpen`, which answers a Boolean, and
+`lines`, which answers a Stream — with no Result to carry an error, `lines`
+raises on a closed or write-only handle instead.
+
+```beamtalk
+// Block scope — the handle is closed however the block exits
+(File open: "events.log" mode: #append do: [:handle |
+  handle writeLine: "an event".
+  handle sync
+]) unwrap
+
+// Caller-owned handle — you close it
+handle := (File open: "data.bin" mode: #read) unwrap
+(handle seek: 16) unwrap
+header := (handle read: 4) unwrap
+handle close
+```
+
+Reading past end-of-file is not an error: `read:` returns a binary shorter than
+requested, and an empty binary once the handle is at end-of-file.
+
+**Closed handles error, they don't crash.** Every operation on a closed handle
+returns a structured `Result error:`, as does a read on a `#write` handle or a
+write on a `#read` handle:
+
+```beamtalk
+(File open: "notes.txt" mode: #read do: [:handle |
+  handle close.
+  handle read: 1        // => Result error: FileHandle 'read:' is closed
+]) unwrap
+```
+
+Handles are process-scoped values (`HandleScoped(#process)`): they can be held
+across calls but not sent to another actor. The descriptor underneath is a BEAM
+process, so it keeps working wherever the handle is held on this node — but it
+does not survive crossing a node boundary.
+
+A handle from `open:mode:` is yours to close. Its descriptor is not tied to the
+calling process, so an unclosed handle stays open for the lifetime of the node
+— reach for `open:mode:do:` whenever a block scope will do.
+
+**Keep open blocks short.** The block of `open:do:` and `open:mode:do:` runs
+inside the `File` class, so it must not send another message to `File` (that
+deadlocks), it serializes every other `File` call in the system behind it, and
+it has to finish within the 60-second class-call timeout. Long write loops
+belong behind `open:mode:`, which releases the class as soon as it returns:
+
+```beamtalk
+// Deadlocks — File exists: is sent while File is running the block
+File open: "a.txt" mode: #read do: [:h | File exists: "b.txt"]
+
+// Fine — the other File call happens outside the block
+other := File exists: "b.txt"
+File open: "a.txt" mode: #read do: [:h | h readAll]
 ```
 
 #### Side-Effect Timing ⚠️

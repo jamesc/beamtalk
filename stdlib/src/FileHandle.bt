@@ -3,11 +3,22 @@
 
 /// FileHandle — a handle to an open file.
 ///
-/// A FileHandle is available within a `File open:do:` block. It provides
-/// access to the file contents while the block is executing. The handle
-/// and any Streams derived from it must be consumed within the block —
-/// they must not escape, as the file descriptor is closed when the block
-/// returns.
+/// A FileHandle comes from `File open:mode:` (caller closes it) or from a
+/// `File open:do:` / `File open:mode:do:` block (closed automatically when the
+/// block exits). It supports incremental reads and writes against the file's
+/// current position, plus `sync` for crash-safe durability.
+///
+/// A handle from a block, and any Stream derived from it, must be consumed
+/// within that block — they must not escape, as the file descriptor is closed
+/// when the block returns.
+///
+/// The type system scopes a handle to one process (`HandleScoped(#process)`),
+/// so it cannot be sent to another actor. The descriptor underneath is a BEAM
+/// process rather than a raw file, so it does keep working wherever the handle
+/// is held on this node — but it does not survive being sent to another node.
+///
+/// Every operation returns a `Result`, and operations on a closed handle
+/// return a structured error rather than crashing.
 ///
 /// ## Examples
 ///
@@ -15,13 +26,25 @@
 /// File open: "data.csv" do: [:handle |
 ///   handle lines take: 10.
 /// ].
+///
+/// // Append-only log with an explicit fsync per record
+/// File open: "events.log" mode: #append do: [:handle |
+///   handle writeLine: record.
+///   handle sync.
+/// ].
 /// ```
 sealed typed Object subclass: FileHandle
 
   /// Return a lazy Stream of lines from this file handle.
   ///
-  /// The Stream reads lines one at a time. It must be consumed within the
-  /// `File open:do:` block — the Stream must not escape the block.
+  /// The Stream reads lines one at a time, starting from the handle's current
+  /// position, and is bounded by the handle's lifetime: from a `open:do:` or
+  /// `open:mode:do:` block it must be consumed inside that block, and from a
+  /// caller-owned `open:mode:` handle it must not outlive your `close`.
+  ///
+  /// Unlike the rest of the handle protocol this answers a Stream rather than
+  /// a `Result`, so there is nowhere to put an error — a closed or write-only
+  /// handle raises instead.
   ///
   /// ## Examples
   ///
@@ -31,3 +54,125 @@ sealed typed Object subclass: FileHandle
   /// ].
   /// ```
   lines -> Stream(String) => (Erlang beamtalk_file) handleLines: self
+
+  /// Read up to `count` bytes from the current position.
+  ///
+  /// For a `count` above zero, a shorter binary means end-of-file was reached
+  /// and an empty binary means the handle was already at end-of-file.
+  /// `read: 0` is a no-op that always answers an empty binary without moving
+  /// the position — don't drive a read loop off `isEmpty` unless the chunk
+  /// size is known to be positive.
+  ///
+  /// ## Examples
+  ///
+  /// ```beamtalk
+  /// (handle read: 4) unwrap   // => the next 4 bytes
+  /// ```
+  read: count :: Integer -> Result(Binary, Error) =>
+    (Erlang beamtalk_file_handle) read: self count: count
+
+  /// Read from the current position to end-of-file.
+  ///
+  /// The whole remainder is held in memory at once, so reach for `read:` or
+  /// `lines` on a file large enough to matter. Only use this on regular files:
+  /// on a device or FIFO that never reports end-of-file it never returns.
+  ///
+  /// ## Examples
+  ///
+  /// ```beamtalk
+  /// (handle readAll) unwrap   // => the rest of the file
+  /// ```
+  readAll -> Result(Binary, Error) =>
+    (Erlang beamtalk_file_handle) readAll: self
+
+  /// Write a String or Binary at the current position.
+  ///
+  /// On a handle opened `#append`, writes always land at end-of-file
+  /// regardless of the current position.
+  ///
+  /// ## Examples
+  ///
+  /// ```beamtalk
+  /// handle write: "hello"
+  /// ```
+  write: data :: String | Binary -> Result(Nil, Error) =>
+    (Erlang beamtalk_file_handle) write: self data: data
+
+  /// Write a String or Binary followed by a newline.
+  ///
+  /// ## Examples
+  ///
+  /// ```beamtalk
+  /// handle writeLine: "a log line"
+  /// ```
+  writeLine: data :: String | Binary -> Result(Nil, Error) =>
+    (Erlang beamtalk_file_handle) writeLine: self data: data
+
+  /// Current byte offset from the start of the file.
+  ///
+  /// ## Examples
+  ///
+  /// ```beamtalk
+  /// (handle position) unwrap   // => 0
+  /// ```
+  position -> Result(Integer, Error) =>
+    (Erlang beamtalk_file_handle) position: self
+
+  /// Move to an absolute byte offset measured from the start of the file,
+  /// returning the new position.
+  ///
+  /// Seeking past end-of-file is allowed — writing there leaves a hole,
+  /// reading there returns an empty binary.
+  ///
+  /// ## Examples
+  ///
+  /// ```beamtalk
+  /// (handle seek: 0) unwrap   // => 0  (rewind)
+  /// ```
+  seek: offset :: Integer -> Result(Integer, Error) =>
+    (Erlang beamtalk_file_handle) seek: self to: offset
+
+  /// Push buffered writes to the operating system.
+  ///
+  /// File handles are unbuffered, so there is never anything to push and this
+  /// succeeds immediately on an open handle. Use `sync` for durability.
+  ///
+  /// ## Examples
+  ///
+  /// ```beamtalk
+  /// handle flush
+  /// ```
+  flush -> Result(Nil, Error) => (Erlang beamtalk_file_handle) flush: self
+
+  /// Force written data to physical storage (fsync).
+  ///
+  /// Returns once the OS reports the data durable — this is what a crash-safe
+  /// append-only log needs after each record.
+  ///
+  /// ## Examples
+  ///
+  /// ```beamtalk
+  /// handle write: record.
+  /// handle sync.
+  /// ```
+  sync -> Result(Nil, Error) => (Erlang beamtalk_file_handle) sync: self
+
+  /// Close the handle.
+  ///
+  /// Idempotent — closing an already-closed handle succeeds.
+  ///
+  /// ## Examples
+  ///
+  /// ```beamtalk
+  /// handle close
+  /// ```
+  close -> Result(Nil, Error) => (Erlang beamtalk_file_handle) close: self
+
+  /// Whether the handle is still open.
+  ///
+  /// ## Examples
+  ///
+  /// ```beamtalk
+  /// handle isOpen   // => true
+  /// ```
+  isOpen -> Boolean => (Erlang beamtalk_file_handle) isOpen: self
