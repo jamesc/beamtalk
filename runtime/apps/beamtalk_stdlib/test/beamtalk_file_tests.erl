@@ -2626,3 +2626,28 @@ open_mode_still_creates_missing_regular_file_test() ->
     after
         file:delete(Name)
     end.
+
+ffi_boundary_preserves_wrapped_error_test() ->
+    %% BT-3018: `beamtalk_error:raise/1` raises the *wrapped* map form, not a
+    %% bare #beamtalk_error{}. classify_ffi_exception/9 only had a clause for
+    %% the bare record, so an error raised inside an FFI call — here, by the
+    %% user block `open:do:` invokes — was reclassified and lost its kind,
+    %% selector and hint. Assert it survives the boundary intact.
+    Raiser = fun(_H) ->
+        beamtalk_error:raise(beamtalk_error:new(dispatch_error, 'File', 'exists:'))
+    end,
+    with_temp_file("_bt_test_ffi_raise.txt", <<"x">>, fun() ->
+        Got =
+            try
+                beamtalk_erlang_proxy:native_call(
+                    beamtalk_file,
+                    open,
+                    [<<"_bt_test_ffi_raise.txt">>, Raiser],
+                    {'File', 'open:do:'}
+                ),
+                no_raise
+            catch
+                error:#{error := #beamtalk_error{kind = K, selector = S}} -> {K, S}
+            end,
+        ?assertEqual({dispatch_error, 'exists:'}, Got)
+    end).
