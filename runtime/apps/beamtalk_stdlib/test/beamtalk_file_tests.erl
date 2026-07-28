@@ -2521,16 +2521,34 @@ open_mode_do_non_block_raises_test() ->
     ).
 
 open_shim_rejects_ambiguous_second_argument_test() ->
-    %% open/2 backs both open:do: and open:mode:; nil is neither a Block nor a
-    %% mode, and guessing would report the wrong selector's error. The error
-    %% carries no selector at all — naming a made-up 'open:' would mislead
-    %% anyone reading the record — and names both candidates in the message.
+    %% open/2 backs both open:do: and open:mode:; a non-atom, non-Block second
+    %% argument fits neither, and guessing would report the wrong selector's
+    %% error. The error carries no selector at all — naming a made-up 'open:'
+    %% would mislead anyone reading the record — and names both candidates.
     ?assertError(
         #{
             '$beamtalk_class' := _,
             error := #beamtalk_error{kind = type_error, selector = undefined}
         },
-        beamtalk_file:open(<<"x.txt">>, nil)
+        beamtalk_file:open(<<"x.txt">>, 42)
+    ).
+
+open_shim_routes_unknown_mode_symbol_to_open_mode_test() ->
+    %% A misspelled mode is the common mistake: it must reach 'open:mode:' and
+    %% come back as a Result naming the four valid modes, not a raise claiming
+    %% the Symbol you passed is not a Symbol.
+    R = beamtalk_file:open(<<"x.txt">>, notAMode),
+    ?assertMatch(
+        #{
+            '$beamtalk_class' := 'Result',
+            'isOk' := false,
+            'errReason' := #{
+                error := #beamtalk_error{
+                    kind = type_error, class = 'File', selector = 'open:mode:'
+                }
+            }
+        },
+        R
     ).
 
 open_shim_routes_mode_atoms_test() ->

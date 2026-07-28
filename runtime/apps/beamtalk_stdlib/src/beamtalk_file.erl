@@ -1006,16 +1006,19 @@ appendBinary(Path, Contents) -> 'appendBinary:contents:'(Path, Contents).
 lines(Path) -> 'lines:'(Path).
 %% `open:do:` and `open:mode:` both lower to the arity-2 shim (the shim name is
 %% the first keyword), so they are told apart by their second argument: a Block
-%% is a fun, a mode is one of the four mode Symbols. Anything else is a typo in
-%% one of the two selectors and we cannot tell which — guessing would report
-%% "Mode must be #read, ..." for a call that said `do:` (`nil` and the booleans
-%% are atoms too), so name both candidates instead.
+%% is a fun, a mode is a Symbol.
+%%
+%% Every atom goes to `open:mode:`, not just the four valid modes. A misspelled
+%% mode is the common mistake, and `open:mode:` answers it with a `Result
+%% error:` naming all four — far better than a raise claiming the Symbol you
+%% passed is not a Symbol. The cost is that `File open: p do: nil` (nil and the
+%% booleans are atoms too) is reported against `open:mode:`, but passing a
+%% non-Block as a block is the rarer and more obviously broken call, and the
+%% message still names what a valid mode looks like.
 -spec open(binary(), Do :: fun((map()) -> term()) | atom()) -> beamtalk_result:t().
 open(Path, Block) when is_function(Block, 1) ->
     'open:do:'(Path, Block);
-open(Path, Mode) when
-    Mode =:= read; Mode =:= write; Mode =:= append; Mode =:= readWrite
-->
+open(Path, Mode) when is_atom(Mode) ->
     'open:mode:'(Path, Mode);
 open(_Path, _Other) ->
     %% Deliberately no selector on the error: we cannot tell which of
@@ -1057,8 +1060,9 @@ handleLines(Handle) -> handle_lines(Handle).
 -doc """
 Return a lazy Stream of lines from a FileHandle.
 
-Used within File open:do: blocks. The Stream reads lines from the
-already-open file handle. The handle's lifetime is managed by open:do:.
+The Stream reads lines from the already-open file handle, so it is bounded by
+that handle's lifetime — the enclosing block for `open:do:` / `open:mode:do:`,
+or the caller's `close` for a handle from `open:mode:`.
 """.
 -spec handle_lines(file_handle()) -> beamtalk_stream:t().
 handle_lines(#{'$beamtalk_class' := 'FileHandle', fd := Fd} = Handle) ->
