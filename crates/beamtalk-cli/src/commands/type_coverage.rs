@@ -286,3 +286,225 @@ fn collect_coverage_files(source_path: &Utf8Path, path: &str) -> Result<Vec<Utf8
 
     Ok(files)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use beamtalk_core::semantic_analysis::CoverageReport;
+    use camino::Utf8PathBuf;
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn empty_report() -> CoverageReport {
+        CoverageReport {
+            classes: Vec::new(),
+            dynamic_entries: Vec::new(),
+            total_expressions: 0,
+            typed_expressions: 0,
+        }
+    }
+
+    // --- OutputFormat::from_str ---
+
+    #[test]
+    fn output_format_parses_text() {
+        assert_eq!("text".parse::<OutputFormat>().unwrap(), OutputFormat::Text);
+    }
+
+    #[test]
+    fn output_format_parses_json() {
+        assert_eq!("json".parse::<OutputFormat>().unwrap(), OutputFormat::Json);
+    }
+
+    #[test]
+    fn output_format_rejects_unknown_value() {
+        let err = "xml".parse::<OutputFormat>().unwrap_err();
+        assert!(
+            err.contains("xml"),
+            "error should name the bad value: {err}"
+        );
+    }
+
+    // --- collect_coverage_files ---
+
+    #[test]
+    fn collect_rejects_non_bt_file() {
+        let dir = TempDir::new().unwrap();
+        let p = Utf8PathBuf::from_path_buf(dir.path().join("main.txt")).unwrap();
+        fs::write(p.as_std_path(), "hello").unwrap();
+        assert!(collect_coverage_files(&p, p.as_str()).is_err());
+    }
+
+    #[test]
+    fn collect_accepts_single_bt_file() {
+        let dir = TempDir::new().unwrap();
+        let p = Utf8PathBuf::from_path_buf(dir.path().join("main.bt")).unwrap();
+        fs::write(p.as_std_path(), "// empty").unwrap();
+        let files = collect_coverage_files(&p, p.as_str()).unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0], p);
+    }
+
+    #[test]
+    fn collect_rejects_nonexistent_path() {
+        let p = Utf8PathBuf::from("/nonexistent/beamtalk/coverage/path");
+        assert!(collect_coverage_files(&p, p.as_str()).is_err());
+    }
+
+    #[test]
+    fn collect_empty_dir_returns_empty() {
+        let dir = TempDir::new().unwrap();
+        let p = Utf8PathBuf::from_path_buf(dir.path().to_owned()).unwrap();
+        assert!(collect_coverage_files(&p, p.as_str()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn collect_prefers_src_subdir_over_root() {
+        let dir = TempDir::new().unwrap();
+        let src = dir.path().join("src");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("lib.bt"), "// lib").unwrap();
+        // .bt at root level — ignored because src/ exists
+        fs::write(dir.path().join("root.bt"), "// root").unwrap();
+        let p = Utf8PathBuf::from_path_buf(dir.path().to_owned()).unwrap();
+        let files = collect_coverage_files(&p, p.as_str()).unwrap();
+        assert_eq!(files.len(), 1);
+        assert!(files[0].as_str().ends_with("lib.bt"));
+    }
+
+    #[test]
+    fn collect_excludes_standard_non_project_dirs() {
+        let dir = TempDir::new().unwrap();
+        for excluded in &["deps", "test", "_build", "stdlib", "bootstrap-test"] {
+            let d = dir.path().join(excluded);
+            fs::create_dir_all(&d).unwrap();
+            fs::write(d.join("something.bt"), "// excluded").unwrap();
+        }
+        // One file at root that should be found
+        fs::write(dir.path().join("main.bt"), "// main").unwrap();
+        let p = Utf8PathBuf::from_path_buf(dir.path().to_owned()).unwrap();
+        let files = collect_coverage_files(&p, p.as_str()).unwrap();
+        assert_eq!(files.len(), 1, "expected only main.bt, got: {files:?}");
+        assert!(files[0].as_str().ends_with("main.bt"));
+    }
+
+    // --- print_json_report ---
+
+    #[test]
+    fn print_json_report_empty_report_does_not_panic() {
+        print_json_report(&empty_report(), None);
+    }
+
+    #[test]
+    fn print_json_report_with_threshold_includes_passed_field() {
+        // threshold=0.0 → always passes; exercises the at_least branch
+        print_json_report(&empty_report(), Some(0.0));
+    }
+
+    // --- print_text_report ---
+
+    #[test]
+    fn print_text_report_empty_report_does_not_panic() {
+        let parsed: Vec<(Utf8PathBuf, String, beamtalk_core::ast::Module)> = Vec::new();
+        print_text_report(&empty_report(), false, &parsed);
+    }
+
+    #[test]
+    fn print_text_report_detail_mode_empty_does_not_panic() {
+        // detail=true with no dynamic_entries skips the detail block
+        let parsed: Vec<(Utf8PathBuf, String, beamtalk_core::ast::Module)> = Vec::new();
+        print_text_report(&empty_report(), true, &parsed);
+    }
+
+    // --- run() ---
+
+    fn write_minimal_bt(dir: &TempDir, name: &str, content: &str) -> Utf8PathBuf {
+        let p = dir.path().join(name);
+        fs::write(&p, content).unwrap();
+        Utf8PathBuf::from_path_buf(p).unwrap()
+    }
+
+    #[test]
+    fn run_text_format_on_valid_bt_file_returns_ok() {
+        let dir = TempDir::new().unwrap();
+        let p = write_minimal_bt(&dir, "Foo.bt", "Object subclass: Foo\n  bar => 42\n");
+        assert!(
+            run(p.as_str(), false, OutputFormat::Text, None, None).is_ok(),
+            "run() should succeed on a valid .bt file"
+        );
+    }
+
+    #[test]
+    fn run_json_format_on_valid_bt_file_returns_ok() {
+        let dir = TempDir::new().unwrap();
+        let p = write_minimal_bt(&dir, "Foo.bt", "Object subclass: Foo\n  bar => 42\n");
+        assert!(run(p.as_str(), false, OutputFormat::Json, None, None).is_ok());
+    }
+
+    #[test]
+    fn run_detail_mode_on_valid_bt_file_returns_ok() {
+        let dir = TempDir::new().unwrap();
+        let p = write_minimal_bt(&dir, "Foo.bt", "Object subclass: Foo\n  bar => 42\n");
+        assert!(run(p.as_str(), true, OutputFormat::Text, None, None).is_ok());
+    }
+
+    #[test]
+    fn run_with_nonexistent_path_returns_error() {
+        let result = run(
+            "/nonexistent/beamtalk/path",
+            false,
+            OutputFormat::Text,
+            None,
+            None,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn run_with_empty_dir_returns_error() {
+        let dir = TempDir::new().unwrap();
+        let p = Utf8PathBuf::from_path_buf(dir.path().to_owned()).unwrap();
+        let result = run(p.as_str(), false, OutputFormat::Text, None, None);
+        assert!(
+            result.is_err(),
+            "empty dir should error: no .bt source files found"
+        );
+    }
+
+    #[test]
+    fn run_at_least_above_actual_coverage_returns_error() {
+        let dir = TempDir::new().unwrap();
+        let p = write_minimal_bt(&dir, "Foo.bt", "Object subclass: Foo\n  bar => 42\n");
+        // 101% threshold is always unachievable, so run() should bail
+        let result = run(p.as_str(), false, OutputFormat::Text, Some(101.0), None);
+        assert!(result.is_err(), "threshold above 100% must always fail");
+    }
+
+    #[test]
+    fn run_at_least_zero_always_passes() {
+        let dir = TempDir::new().unwrap();
+        let p = write_minimal_bt(&dir, "Foo.bt", "Object subclass: Foo\n  bar => 42\n");
+        assert!(run(p.as_str(), false, OutputFormat::Text, Some(0.0), None).is_ok());
+    }
+
+    #[test]
+    fn run_class_filter_nonexistent_returns_error() {
+        let dir = TempDir::new().unwrap();
+        let p = write_minimal_bt(&dir, "Foo.bt", "Object subclass: Foo\n  bar => 42\n");
+        let result = run(
+            p.as_str(),
+            false,
+            OutputFormat::Text,
+            None,
+            Some("NonExistent"),
+        );
+        assert!(result.is_err(), "filter for unknown class should error");
+    }
+
+    #[test]
+    fn run_class_filter_matching_class_returns_ok() {
+        let dir = TempDir::new().unwrap();
+        let p = write_minimal_bt(&dir, "Foo.bt", "Object subclass: Foo\n  bar => 42\n");
+        assert!(run(p.as_str(), false, OutputFormat::Text, None, Some("Foo")).is_ok());
+    }
+}
