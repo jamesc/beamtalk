@@ -9,11 +9,13 @@ TestCase subclass: PidTest
   setUp =>
     // Spawn a process that sleeps forever; unlink so kill/exit signals don't
     // propagate to the test process.
-    self.pid := Erlang erlang spawn: #timer module: #sleep args: #(#infinity)
+    self.pid := Erlang erlang
+      spawn: #timer
+      module: #sleep
+      args: #(#infinity)
     Erlang erlang unlink: self.pid
 
-  tearDown =>
-    self.pid isAlive ifTrue: [self.pid kill]
+  tearDown => self.pid isAlive ifTrue: [self.pid kill]
 
   waitForPidDeath =>
     50 timesRepeat: [self.pid isAlive ifTrue: [Timer sleep: 10]]
