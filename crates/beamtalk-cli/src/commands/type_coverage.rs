@@ -141,7 +141,7 @@ pub fn run(
     match format {
         OutputFormat::Text => print_text_report(&report, detail, &parsed_files),
         OutputFormat::Json => {
-            print_json_report(&report, at_least, &mut std::io::stdout()).into_diagnostic()?
+            print_json_report(&report, at_least, &mut std::io::stdout()).into_diagnostic()?;
         }
     }
 
