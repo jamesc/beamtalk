@@ -36,7 +36,7 @@ at_out_of_bounds_test() ->
         #{
             '$beamtalk_class' := 'RuntimeError',
             error := #beamtalk_error{
-                kind = does_not_understand,
+                kind = index_out_of_bounds,
                 class = 'List',
                 selector = 'at:'
             }
@@ -50,7 +50,7 @@ at_zero_index_test() ->
         #{
             '$beamtalk_class' := 'RuntimeError',
             error := #beamtalk_error{
-                kind = does_not_understand,
+                kind = index_out_of_bounds,
                 class = 'List',
                 selector = 'at:'
             }
@@ -64,12 +64,55 @@ at_negative_index_test() ->
         #{
             '$beamtalk_class' := 'RuntimeError',
             error := #beamtalk_error{
-                kind = does_not_understand,
+                kind = index_out_of_bounds,
                 class = 'List',
                 selector = 'at:'
             }
         },
         beamtalk_list:at([1, 2, 3], -1)
+    ).
+
+%% BT-3021: indexing an *empty* List is `empty_collection`, a distinct
+%% condition from an out-of-range index into a populated one.
+at_empty_list_test() ->
+    ?assertException(
+        error,
+        #{
+            '$beamtalk_class' := 'RuntimeError',
+            error := #beamtalk_error{
+                kind = empty_collection,
+                class = 'List',
+                selector = 'at:'
+            }
+        },
+        beamtalk_list:at([], 1)
+    ).
+
+%% An index below 1 is malformed regardless of emptiness, so the out-of-bounds
+%% clause is checked before the emptiness clause.
+at_empty_list_zero_index_test() ->
+    ?assertException(
+        error,
+        #{
+            '$beamtalk_class' := 'RuntimeError',
+            error := #beamtalk_error{
+                kind = index_out_of_bounds,
+                class = 'List',
+                selector = 'at:'
+            }
+        },
+        beamtalk_list:at([], 0)
+    ).
+
+%% A non-integer index stays a type_error even on an empty List.
+at_empty_list_non_integer_test() ->
+    ?assertException(
+        error,
+        #{
+            '$beamtalk_class' := 'TypeError',
+            error := #beamtalk_error{kind = type_error, class = 'List', selector = 'at:'}
+        },
+        beamtalk_list:at([], foo)
     ).
 
 at_non_integer_test() ->

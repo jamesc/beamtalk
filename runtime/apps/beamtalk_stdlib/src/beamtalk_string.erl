@@ -16,6 +16,8 @@ All operations are grapheme-aware and handle UTF-8 correctly.
 """.
 -export([
     at/2,
+    first/1,
+    last/1,
     capitalize/1,
     reverse/1,
     includes/2,
@@ -67,6 +69,43 @@ at(Str, Idx) when is_binary(Str), is_integer(Idx) ->
             index_out_of_bounds, 'String', 'at:', <<"Index must be >= 1 (1-based indexing)">>
         )
     ).
+
+-doc """
+First grapheme cluster, as a String.
+
+BT-3021: raises `empty_collection` on `""` — the same kind `List first` raises,
+so `on:do:` can handle both with one clause.
+""".
+-spec first(binary()) -> binary().
+first(<<>>) ->
+    raise_empty('first');
+first(Str) when is_binary(Str) ->
+    case string:next_grapheme(Str) of
+        [Grapheme | _Rest] -> unicode:characters_to_binary([Grapheme]);
+        [] -> raise_empty('first')
+    end.
+
+-doc """
+Last grapheme cluster, as a String.
+
+BT-3021: raises `empty_collection` on `""` (see `first/1`).
+""".
+-spec last(binary()) -> binary().
+last(<<>>) ->
+    raise_empty('last');
+last(Str) when is_binary(Str) ->
+    %% `string:reverse/1` is grapheme-aware, so the head of the reversed string
+    %% is the final grapheme cluster — not the final byte or code point.
+    case string:next_grapheme(string:reverse(Str)) of
+        [Grapheme | _Rest] -> unicode:characters_to_binary([Grapheme]);
+        [] -> raise_empty('last')
+    end.
+
+-doc "Raise `empty_collection` for an accessor called on an empty String.".
+-spec raise_empty(atom()) -> no_return().
+raise_empty(Selector) ->
+    Hint = <<"String is empty — guard with `isEmpty` before indexing">>,
+    beamtalk_error:raise(beamtalk_error:new(empty_collection, 'String', Selector, Hint)).
 
 -doc "Capitalize the first grapheme, keep rest unchanged.".
 -spec capitalize(binary()) -> binary().

@@ -58,6 +58,10 @@ sealed typed Collection(E) subclass: List(E)
 
   /// Return the first element.
   ///
+  /// Raises `empty_collection` if the list is empty — there is no element to
+  /// answer, and `nil` would be indistinguishable from a stored `nil`. Guard
+  /// with `isEmpty`, or use `detect:ifNone:` when a default is wanted.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// #(1, 2, 3) first         // => 1
@@ -66,13 +70,22 @@ sealed typed Collection(E) subclass: List(E)
 
   /// Return all elements except the first (the tail).
   ///
+  /// Answers `#()` on an empty list rather than raising. `rest` is a
+  /// *subsequence* operation, not an element accessor: unlike `first`/`last`,
+  /// it has a well-defined total answer on empty, and staying total keeps the
+  /// `[:l | l isEmpty ifFalse: [... l rest ...]]` recursion idiom working. This
+  /// matches its neighbours `take:` and `drop:`, which are also total.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// #(1, 2, 3) rest          // => #(2, 3)
+  /// #() rest                 // => #()
   /// ```
   rest -> List(E) => @primitive
 
   /// Return the last element.
+  ///
+  /// Raises `empty_collection` if the list is empty (see `first`).
   ///
   /// ## Examples
   /// ```beamtalk
@@ -84,6 +97,10 @@ sealed typed Collection(E) subclass: List(E)
   ///
   /// **O(n)** — `List` is a cons list. For frequent random access by position,
   /// use `Array` (`aList asArray`), whose `at:` is O(log n).
+  ///
+  /// Raises `empty_collection` if the list is empty, `index_out_of_bounds` if
+  /// `index` is outside `1..self size`, and `type_error` if `index` is not an
+  /// Integer.
   ///
   /// ## Examples
   /// ```beamtalk

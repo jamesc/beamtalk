@@ -1,0 +1,140 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for empty-collection element access (BT-3021).
+//
+// Accessing an element of an empty collection used to raise
+// `does_not_understand` — a dispatch failure — which sent readers hunting for
+// a typo or a wrong receiver type instead of a missing emptiness guard, and
+// could not be caught selectively (a genuine typo surfaced identically).
+//
+// The element accessors (`first`, `last`, `at:`) now raise `empty_collection`.
+// The subsequence operations (`rest`, `take:`, `drop:`) stay total and answer
+// the empty collection — see the `rest` tests at the bottom.
+
+TestCase subclass: EmptyCollectionAccessTest
+
+  // ==========================================================================
+  // List — element accessors raise empty_collection
+  // ==========================================================================
+  testListFirstOnEmptyRaisesEmptyCollection =>
+    self should: [#() first] raise: #empty_collection
+
+  testListLastOnEmptyRaisesEmptyCollection =>
+    self should: [#() last] raise: #empty_collection
+
+  testListAtOnEmptyRaisesEmptyCollection =>
+    self should: [#() at: 1] raise: #empty_collection
+
+  // A List materialised from another collection behaves the same — this is the
+  // shape the bug was originally reported against.
+  testEmptySetAsListFirstRaisesEmptyCollection =>
+    self should: [Set new asList first] raise: #empty_collection
+
+  // The error names the condition, not a dispatch failure.
+  testListFirstMessageNamesTheCondition =>
+    message := [#() first] on: Error do: [:e | e message]
+    self assert: (message includesSubstring: "is empty")
+    self deny: (message includesSubstring: "does not understand")
+
+  testListAtMessageNamesTheCondition =>
+    message := [#() at: 1] on: Error do: [:e | e message]
+    self assert: (message includesSubstring: "is empty")
+    self deny: (message includesSubstring: "does not understand")
+
+  // empty_collection is catchable as a RuntimeError, so `on:do:` can
+  // discriminate it from an unrelated failure in the same block.
+  testEmptyCollectionIsCatchableAsRuntimeError =>
+    caught := [#() first] on: RuntimeError do: [:e | "caught"]
+    self assert: caught equals: "caught"
+
+  // ==========================================================================
+  // List — out-of-bounds is a *different* condition from empty
+  // ==========================================================================
+  testListAtBeyondSizeRaisesIndexOutOfBounds =>
+    self should: [#(1, 2, 3) at: 9] raise: #index_out_of_bounds
+
+  testListAtZeroRaisesIndexOutOfBounds =>
+    self should: [#(1, 2, 3) at: 0] raise: #index_out_of_bounds
+
+  // An index below 1 is malformed whether or not the List is empty, so it
+  // reports as out-of-bounds rather than as emptiness.
+  testEmptyListAtZeroRaisesIndexOutOfBounds =>
+    self should: [#() at: 0] raise: #index_out_of_bounds
+
+  // (A non-Integer index is rejected at compile time, so it has no runtime
+  // test here — the type checker reports it before the program runs.)
+
+  // ==========================================================================
+  // String — element accessors are grapheme-aware and raise on empty
+  // ==========================================================================
+  testStringFirstOnEmptyRaisesEmptyCollection =>
+    self should: ["" first] raise: #empty_collection
+
+  testStringLastOnEmptyRaisesEmptyCollection =>
+    self should: ["" last] raise: #empty_collection
+
+  testStringFirstReturnsFirstGrapheme => self assert: "hello" first equals: "h"
+
+  testStringLastReturnsLastGrapheme => self assert: "hello" last equals: "o"
+
+  // Grapheme-aware, not byte-aware: "ü" is two UTF-8 bytes.
+  testStringFirstIsGraphemeAware => self assert: "über" first equals: "ü"
+
+  testStringLastIsGraphemeAware => self assert: "grüß" last equals: "ß"
+
+  testStringFirstOnSingleCharacterString =>
+    self assert: "x" first equals: "x"
+    self assert: "x" last equals: "x"
+
+  // ==========================================================================
+  // Interval — pure-Beamtalk collection, same kind via the Erlang helper
+  // ==========================================================================
+  testEmptyIntervalFirstRaisesEmptyCollection =>
+    self should: [(1 to: 0) first] raise: #empty_collection
+
+  testEmptyIntervalLastRaisesEmptyCollection =>
+    self should: [(1 to: 0) last] raise: #empty_collection
+
+  testNonEmptyIntervalFirstAndLastStillWork =>
+    self assert: (1 to: 10) first equals: 1
+    self assert: (1 to: 10) last equals: 10
+
+  // ==========================================================================
+  // Collection aggregates — max/min/average over nothing
+  // ==========================================================================
+  testEmptyCollectionMaxRaisesEmptyCollection =>
+    self should: [#() max] raise: #empty_collection
+
+  testEmptyCollectionMinRaisesEmptyCollection =>
+    self should: [#() min] raise: #empty_collection
+
+  testEmptyCollectionAverageRaisesEmptyCollection =>
+    self should: [#() average] raise: #empty_collection
+
+  // `sum` has an identity element (0), so it stays total.
+  testEmptyCollectionSumIsZero => self assert: #() sum equals: 0
+
+  // ==========================================================================
+  // Subsequence operations stay total — the decided `rest` behaviour
+  // ==========================================================================
+
+  // `rest` is not an element accessor: unlike `first`/`last` it has a
+  // well-defined total answer on empty, so it answers `#()` rather than
+  // raising. This keeps the `isEmpty ifFalse: [... rest ...]` recursion idiom
+  // working and matches its neighbours `take:`/`drop:`.
+  testRestOnEmptyAnswersEmptyList => self assert: #() rest equals: #()
+
+  testRestOnEmptyDoesNotRaise =>
+    self assert: ([#() rest] on: Error do: [:e | "raised"]) equals: #()
+
+  testRestOnSingletonAnswersEmptyList => self assert: #(1) rest equals: #()
+
+  testTakeAndDropOnEmptyAreAlsoTotal =>
+    self assert: (#() take: 3) equals: #()
+    self assert: (#() drop: 3) equals: #()
+
+  // The whole point of the split: `first` raises where `rest` answers.
+  testElementAccessorsRaiseWhereSubsequenceOpsAnswer =>
+    self should: [#() first] raise: #empty_collection
+    self assert: #() rest equals: #()

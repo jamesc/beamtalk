@@ -79,6 +79,9 @@ kind_to_class(arity_mismatch) -> 'RuntimeError';
 kind_to_class(immutable_value) -> 'RuntimeError';
 kind_to_class(runtime_error) -> 'RuntimeError';
 kind_to_class(index_out_of_bounds) -> 'RuntimeError';
+%% BT-3021: accessing an element of an empty collection (List/String/Collection
+%% first/last/at:, Interval first/last, Collection max/min/average).
+kind_to_class(empty_collection) -> 'RuntimeError';
 kind_to_class(class_not_found) -> 'RuntimeError';
 kind_to_class(no_superclass) -> 'RuntimeError';
 kind_to_class(class_already_exists) -> 'RuntimeError';

@@ -10,7 +10,7 @@
 
 use super::super::document::Document;
 use super::super::document::leaf;
-use super::{build_dnu_error_doc, call_p0_self, call_self_p0, param};
+use super::{build_error_doc, call_p0_self, call_self_p0, param};
 use crate::docvec;
 
 /// List primitive implementations (BT-419).
@@ -32,9 +32,17 @@ fn generate_list_access_bif(selector: &str, params: &[String]) -> Option<Documen
     match selector {
         "size" => Some(Document::Str("call 'erlang':'length'(Self)")),
         "isEmpty" => Some(Document::Str("call 'erlang':'=:='(Self, [])")),
+        // BT-3021: `first`/`last` raise `empty_collection`, not
+        // `does_not_understand` — the receiver *does* understand the selector,
+        // it just has no element to answer. `rest` is deliberately total (see
+        // below), so only the element accessors raise here.
         "first" => {
-            let error =
-                build_dnu_error_doc("List", "first", "Cannot get first element of empty list");
+            let error = build_error_doc(
+                "empty_collection",
+                "List",
+                "first",
+                "List is empty — guard with `isEmpty` or use `detect:ifNone:`",
+            );
             Some(docvec![
                 "case Self of \
                  <[H|_T]> when 'true' -> H \
@@ -45,6 +53,9 @@ fn generate_list_access_bif(selector: &str, params: &[String]) -> Option<Documen
                  end",
             ])
         }
+        // BT-3021: `rest` is a *subsequence* op, not an element accessor — it
+        // has a well-defined total answer on empty (the empty list), matching
+        // `drop:`/`take:`. Only `first`/`last`/`at:` raise on empty.
         "rest" => Some(Document::Str(
             "case Self of \
              <[_H|T]> when 'true' -> T \
@@ -52,8 +63,12 @@ fn generate_list_access_bif(selector: &str, params: &[String]) -> Option<Documen
              end",
         )),
         "last" => {
-            let error =
-                build_dnu_error_doc("List", "last", "Cannot get last element of empty list");
+            let error = build_error_doc(
+                "empty_collection",
+                "List",
+                "last",
+                "List is empty — guard with `isEmpty` or use `detect:ifNone:`",
+            );
             Some(docvec![
                 "case Self of \
                  <[]> when 'true' -> \
@@ -224,7 +239,9 @@ mod tests {
         let output = result.expect("first should produce code");
         assert!(output.contains("case Self of"));
         assert!(output.contains("<[H|_T]> when 'true' -> H"));
-        assert!(output.contains("'does_not_understand'"));
+        // BT-3021: empty-collection access is not a dispatch failure.
+        assert!(output.contains("'empty_collection'"));
+        assert!(!output.contains("'does_not_understand'"));
         assert!(output.contains("'first'"));
     }
 
@@ -249,7 +266,9 @@ mod tests {
         let output = result.expect("last should produce code");
         assert!(output.contains("case Self of"));
         assert!(output.contains("call 'lists':'last'(Self)"));
-        assert!(output.contains("'does_not_understand'"));
+        // BT-3021: empty-collection access is not a dispatch failure.
+        assert!(output.contains("'empty_collection'"));
+        assert!(!output.contains("'does_not_understand'"));
         assert!(output.contains("'last'"));
     }
 
