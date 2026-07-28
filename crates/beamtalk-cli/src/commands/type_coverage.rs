@@ -407,9 +407,10 @@ mod tests {
 
     #[test]
     fn print_json_report_passed_true_when_threshold_met() {
-        // empty_report has 100% coverage (0/0 → coverage_percent returns 100.0)
+        // empty_report has 100% coverage (0/0 → coverage_percent returns 100.0);
+        // threshold=99.0 ensures the test fails if coverage_percent ever returns 0.0
         let mut out = Vec::new();
-        print_json_report(&empty_report(), Some(0.0), &mut out).unwrap();
+        print_json_report(&empty_report(), Some(99.0), &mut out).unwrap();
         let json: serde_json::Value = serde_json::from_slice(&out).unwrap();
         assert_eq!(json["passed"], serde_json::json!(true));
     }
