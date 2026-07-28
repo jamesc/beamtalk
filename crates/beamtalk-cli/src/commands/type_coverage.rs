@@ -364,7 +364,7 @@ mod tests {
         let src = dir.path().join("src");
         fs::create_dir_all(&src).unwrap();
         fs::write(src.join("lib.bt"), "// lib").unwrap();
-        // .bt at root level — ignored because src/ exists
+        // root.bt is at root level — not scanned because search root shifts to src/
         fs::write(dir.path().join("root.bt"), "// root").unwrap();
         let p = Utf8PathBuf::from_path_buf(dir.path().to_owned()).unwrap();
         let files = collect_coverage_files(&p, p.as_str()).unwrap();
@@ -396,7 +396,7 @@ mod tests {
     }
 
     #[test]
-    fn print_json_report_with_threshold_includes_passed_field() {
+    fn print_json_report_with_threshold_does_not_panic() {
         // threshold=0.0 → always passes; exercises the at_least branch
         print_json_report(&empty_report(), Some(0.0));
     }
@@ -485,6 +485,18 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let p = write_minimal_bt(&dir, "Foo.bt", "Object subclass: Foo\n  bar => 42\n");
         assert!(run(p.as_str(), false, OutputFormat::Text, Some(0.0), None).is_ok());
+    }
+
+    #[test]
+    fn run_json_format_with_threshold_above_coverage_returns_error() {
+        let dir = TempDir::new().unwrap();
+        let p = write_minimal_bt(&dir, "Foo.bt", "Object subclass: Foo\n  bar => 42\n");
+        // 101% threshold via JSON output path — exercises print_json_report + bail in one shot
+        let result = run(p.as_str(), false, OutputFormat::Json, Some(101.0), None);
+        assert!(
+            result.is_err(),
+            "json + threshold above 100% must always fail"
+        );
     }
 
     #[test]
