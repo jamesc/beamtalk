@@ -2558,3 +2558,71 @@ open_shim_routes_mode_atoms_test() ->
         #{'okValue' := Handle} = R,
         beamtalk_file_handle:close_handle(Handle)
     end).
+
+%%% ============================================================================
+%%% open:mode: rejects non-regular paths (BT-3019)
+%%% ============================================================================
+
+open_mode_rejects_directory_test() ->
+    Dir = "_bt_test_open_mode_isdir",
+    ok = filelib:ensure_dir(filename:join(Dir, "x")),
+    try
+        R = beamtalk_file:'open:mode:'(list_to_binary(Dir), read),
+        ?assertMatch(
+            #{
+                '$beamtalk_class' := 'Result',
+                'isOk' := false,
+                'errReason' := #{
+                    error := #beamtalk_error{
+                        kind = io_error,
+                        class = 'File',
+                        selector = 'open:mode:',
+                        message = <<"FileHandle path is not a regular file">>
+                    }
+                }
+            },
+            R
+        )
+    after
+        file:del_dir_r(Dir)
+    end.
+
+open_mode_rejects_fifo_test() ->
+    %% The reason the guard exists: readAll on a FIFO never reaches eof, and
+    %% because the open runs in the File class process a wedged read would take
+    %% every other File operation in the node with it.
+    case os:type() of
+        {unix, _} ->
+            Fifo = "_bt_test_open_mode_fifo",
+            file:delete(Fifo),
+            os:cmd("mkfifo " ++ Fifo),
+            try
+                case filelib:is_file(Fifo) andalso not filelib:is_regular(Fifo) of
+                    true ->
+                        R = beamtalk_file:'open:mode:'(list_to_binary(Fifo), read),
+                        ?assertMatch(
+                            #{'$beamtalk_class' := 'Result', 'isOk' := false}, R
+                        );
+                    false ->
+                        %% mkfifo unavailable in this sandbox — nothing to assert.
+                        ok
+                end
+            after
+                file:delete(Fifo)
+            end;
+        _ ->
+            ok
+    end.
+
+open_mode_still_creates_missing_regular_file_test() ->
+    %% The guard must not block the write modes' create-if-absent behaviour.
+    Name = "_bt_test_open_mode_absent_ok.txt",
+    file:delete(Name),
+    try
+        #{'okValue' := Handle} = beamtalk_file:'open:mode:'(list_to_binary(Name), append),
+        beamtalk_file_handle:write(Handle, <<"created">>),
+        beamtalk_file_handle:close_handle(Handle),
+        ?assertEqual({ok, <<"created">>}, file:read_file(Name))
+    after
+        file:delete(Name)
+    end.
