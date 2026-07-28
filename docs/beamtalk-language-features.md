@@ -106,6 +106,11 @@ String operations respect Unicode grapheme clusters (user-perceived characters):
 "Hello" at: 1         // => "H"
 "世界" at: 1           // => "世"
 
+// First / last grapheme
+"Hello" first         // => "H"
+"Hello" last          // => "o"
+"über" first          // => "ü" (one grapheme, two UTF-8 bytes)
+
 // Iteration over graphemes
 "Hello" each: [:char | Transcript show: char]
 
@@ -4632,6 +4637,50 @@ bin isEmpty                   // => false
 | `concat:` | byte concatenation, returns Binary | inherited — byte concatenation, returns Binary |
 | `asString` | UTF-8 validation, returns String | no-op, returns self |
 | `asStringUnchecked` | unchecked cast to String | no-op, returns self |
+
+### Accessing an Empty Collection
+
+Element accessors and subsequence operations differ deliberately on an empty
+collection ([BT-3021](https://linear.app/beamtalk/issue/BT-3021)):
+
+**Element accessors raise `empty_collection`.** `first`, `last`, and `at:` have
+no element to answer, and `nil` would be indistinguishable from a stored `nil`:
+
+```beamtalk
+#() first                  // raises empty_collection
+#() last                   // raises empty_collection
+#() at: 1                  // raises empty_collection
+"" first                   // raises empty_collection
+(1 to: 0) first            // raises empty_collection
+#() max                    // raises empty_collection (also min, average)
+```
+
+`empty_collection` is a `RuntimeError`, so it can be caught on its own —
+crucially, *separately* from a genuine typo, which raises
+`does_not_understand`:
+
+```beamtalk
+[orders first] on: RuntimeError do: [:e | e kind =:= #empty_collection]
+```
+
+**Subsequence operations stay total** and answer the empty collection. `rest`,
+`take:`, and `drop:` all have a well-defined answer on empty, so they never
+raise — which keeps recursive idioms working without a guard at every step:
+
+```beamtalk
+#() rest                   // => #()
+#() take: 3                // => #()
+#() drop: 3                // => #()
+#() sum                    // => 0 (identity element, unlike max/min)
+```
+
+An out-of-range index into a *non-empty* collection is a different condition
+again, and raises `index_out_of_bounds`:
+
+```beamtalk
+#(1, 2, 3) at: 9           // raises index_out_of_bounds
+#(1, 2, 3) at: 0           // raises index_out_of_bounds (index < 1 is malformed)
+```
 
 ### Interval — Arithmetic Sequences
 

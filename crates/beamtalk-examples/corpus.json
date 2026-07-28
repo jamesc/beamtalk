@@ -1338,61 +1338,22 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-187",
-      "title": "Interval — Arithmetic Sequences (beamtalk-language-features)",
+      "title": "Accessing an Empty Collection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
-        "beamtalk-language-features",
-        "filter",
-        "filtering",
-        "map",
-        "mapping",
-        "transform",
-        "where"
+        "beamtalk-language-features"
       ],
-      "source": "1 to: 10                    // => (1 to: 10) — 10 elements: 1, 2, ..., 10\n1 to: 10 by: 2             // => (1 to: 10 by: 2) — 5 elements: 1, 3, 5, 7, 9\n10 to: 1 by: -1            // => (10 to: 1 by: -1) — 10 elements: 10, 9, ..., 1\n\n(1 to: 10) size            // => 10\n(1 to: 10) first           // => 1\n(1 to: 10) last            // => 10\n(1 to: 10) includes: 5     // => true\n\n// Interval supports the full Collection protocol:\n(1 to: 5) inject: 0 into: [:sum :x | sum + x]   // => 15\n(1 to: 10) select: [:x | x isEven]              // => #(2, 4, 6, 8, 10)\n(1 to: 5) collect: [:x | x * x]                 // => #(1, 4, 9, 16, 25)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-188",
-      "title": "Bag(E) — Multisets (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "constructor",
-        "create",
-        "for each",
-        "for-each",
-        "forEach",
-        "instantiate",
-        "iterate",
-        "iteration",
-        "loop",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "Bag new class                           // => Bag\n(Bag new add: 1) occurrencesOf: 1      // => 1\n\nb := Bag withAll: #(1, 2, 1, 3, 1)\nb size                                  // => 5 (total occurrences)\nb occurrencesOf: 1                      // => 3\nb includes: 2                           // => true\nb includes: 9                           // => false\n\n// Bag mutating operations return new Bags:\nb2 := b add: 2                         // one more occurrence of 2\nb2 occurrencesOf: 2                    // => 2\nb3 := b add: 4 withCount: 5           // add 5 occurrences of 4\nb4 := b remove: 1                      // remove one occurrence of 1\nb4 occurrencesOf: 1                    // => 2\n\n// do: iterates each element once per occurrence:\n(Bag withAll: #(1, 1, 2)) inject: 0 into: [:sum :x | sum + x]  // => 4",
+      "source": "#() first                  // raises empty_collection\n#() last                   // raises empty_collection\n#() at: 1                  // raises empty_collection\n\"\" first                   // raises empty_collection\n(1 to: 0) first            // raises empty_collection\n#() max                    // raises empty_collection (also min, average)",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
       "id": "docs-beamtalk-language-features-block-189",
-      "title": "Constructors (beamtalk-language-features)",
+      "title": "Accessing an Empty Collection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
-        "beamtalk-language-features",
-        "constructor",
-        "create",
-        "for each",
-        "for-each",
-        "forEach",
-        "instantiate",
-        "iterate",
-        "iteration",
-        "loop"
+        "beamtalk-language-features"
       ],
-      "source": "// Infinite stream starting from a value, incrementing by 1\nStream from: 1                     // 1, 2, 3, 4, ...\n\n// Infinite stream with custom step function\nStream from: 1 by: [:n | n * 2]   // 1, 2, 4, 8, ...\n\n// Stream from a collection (List, String, Set)\nStream on: #(1, 2, 3)             // wraps collection lazily\n\n// Collection shorthand — List, String, and Set respond to `stream`\n#(1, 2, 3) stream                  // same as Stream on: #(1, 2, 3)\n\"hello\" stream                     // Stream over characters\n(Set new add: 1) stream            // Stream over set elements\n\n// Dictionary iteration — use doWithKey: instead of stream\n#{#a => 1} doWithKey: [:k :v | Transcript show: k]\n\n// File streaming — lazy, constant memory\nFile lines: \"data.csv\"            // Stream of lines\nFile open: \"data.csv\" do: [:handle |\n  handle lines take: 10           // block-scoped handle\n]",
+      "source": "#() rest                   // => #()\n#() take: 3                // => #()\n#() drop: 3                // => #()\n#() sum                    // => 0 (identity element, unlike max/min)",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -1416,7 +1377,66 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-190",
+      "id": "docs-beamtalk-language-features-block-191",
+      "title": "Interval — Arithmetic Sequences (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features",
+        "filter",
+        "filtering",
+        "map",
+        "mapping",
+        "transform",
+        "where"
+      ],
+      "source": "1 to: 10                    // => (1 to: 10) — 10 elements: 1, 2, ..., 10\n1 to: 10 by: 2             // => (1 to: 10 by: 2) — 5 elements: 1, 3, 5, 7, 9\n10 to: 1 by: -1            // => (10 to: 1 by: -1) — 10 elements: 10, 9, ..., 1\n\n(1 to: 10) size            // => 10\n(1 to: 10) first           // => 1\n(1 to: 10) last            // => 10\n(1 to: 10) includes: 5     // => true\n\n// Interval supports the full Collection protocol:\n(1 to: 5) inject: 0 into: [:sum :x | sum + x]   // => 15\n(1 to: 10) select: [:x | x isEven]              // => #(2, 4, 6, 8, 10)\n(1 to: 5) collect: [:x | x * x]                 // => #(1, 4, 9, 16, 25)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-192",
+      "title": "Bag(E) — Multisets (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "constructor",
+        "create",
+        "for each",
+        "for-each",
+        "forEach",
+        "instantiate",
+        "iterate",
+        "iteration",
+        "loop",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "Bag new class                           // => Bag\n(Bag new add: 1) occurrencesOf: 1      // => 1\n\nb := Bag withAll: #(1, 2, 1, 3, 1)\nb size                                  // => 5 (total occurrences)\nb occurrencesOf: 1                      // => 3\nb includes: 2                           // => true\nb includes: 9                           // => false\n\n// Bag mutating operations return new Bags:\nb2 := b add: 2                         // one more occurrence of 2\nb2 occurrencesOf: 2                    // => 2\nb3 := b add: 4 withCount: 5           // add 5 occurrences of 4\nb4 := b remove: 1                      // remove one occurrence of 1\nb4 occurrencesOf: 1                    // => 2\n\n// do: iterates each element once per occurrence:\n(Bag withAll: #(1, 1, 2)) inject: 0 into: [:sum :x | sum + x]  // => 4",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-193",
+      "title": "Constructors (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features",
+        "constructor",
+        "create",
+        "for each",
+        "for-each",
+        "forEach",
+        "instantiate",
+        "iterate",
+        "iteration",
+        "loop"
+      ],
+      "source": "// Infinite stream starting from a value, incrementing by 1\nStream from: 1                     // 1, 2, 3, 4, ...\n\n// Infinite stream with custom step function\nStream from: 1 by: [:n | n * 2]   // 1, 2, 4, 8, ...\n\n// Stream from a collection (List, String, Set)\nStream on: #(1, 2, 3)             // wraps collection lazily\n\n// Collection shorthand — List, String, and Set respond to `stream`\n#(1, 2, 3) stream                  // same as Stream on: #(1, 2, 3)\n\"hello\" stream                     // Stream over characters\n(Set new add: 1) stream            // Stream over set elements\n\n// Dictionary iteration — use doWithKey: instead of stream\n#{#a => 1} doWithKey: [:k :v | Transcript show: k]\n\n// File streaming — lazy, constant memory\nFile lines: \"data.csv\"            // Stream of lines\nFile open: \"data.csv\" do: [:handle |\n  handle lines take: 10           // block-scoped handle\n]",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-194",
       "title": "Lazy Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1437,7 +1457,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-191",
+      "id": "docs-beamtalk-language-features-block-195",
       "title": "Terminal Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1450,7 +1470,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-192",
+      "id": "docs-beamtalk-language-features-block-196",
       "title": "printString — Pipeline Inspection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1466,7 +1486,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-193",
+      "id": "docs-beamtalk-language-features-block-197",
       "title": "Eager vs Lazy — The Boundary (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1479,7 +1499,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-194",
+      "id": "docs-beamtalk-language-features-block-198",
       "title": "File Streaming (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1498,7 +1518,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-195",
+      "id": "docs-beamtalk-language-features-block-199",
       "title": "File I/O and Directory Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1508,7 +1528,32 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-196",
+      "id": "docs-beamtalk-language-features-block-2",
+      "title": "String Operations (Grapheme-Aware) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "// Length in graphemes, not bytes\n\"Hello\" length        // => 5\n\"世界\" length          // => 2 (not 6 bytes)\n\"👨‍👩‍👧‍👦\" length        // => 1 (family emoji is 1 grapheme, 7 codepoints)\n\n// Slicing by grapheme\n\"Hello\" at: 1         // => \"H\"\n\"世界\" at: 1           // => \"世\"\n\n// First / last grapheme\n\"Hello\" first         // => \"H\"\n\"Hello\" last          // => \"o\"\n\"über\" first          // => \"ü\" (one grapheme, two UTF-8 bytes)\n\n// Iteration over graphemes\n\"Hello\" each: [:char | Transcript show: char]\n\n// Case conversion (locale-aware)\n\"HELLO\" lowercase     // => \"hello\"\n\"straße\" uppercase    // => \"STRASSE\" (German ß → SS)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-20",
+      "title": "Field Access and Assignment (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "// Assignment as expression (returns 6)\n(self.x := 5) + 1\n\n// Field assignments as sequential statements\nself.x := 5\nself.y := self.x + 1\nself.y",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-200",
       "title": "Incremental File I/O — FileHandle (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1529,7 +1574,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-197",
+      "id": "docs-beamtalk-language-features-block-201",
       "title": "Incremental File I/O — FileHandle (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1548,7 +1593,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-198",
+      "id": "docs-beamtalk-language-features-block-202",
       "title": "Incremental File I/O — FileHandle (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1569,7 +1614,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-199",
+      "id": "docs-beamtalk-language-features-block-203",
       "title": "Side-Effect Timing ⚠️ (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1587,32 +1632,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-2",
-      "title": "String Operations (Grapheme-Aware) (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features"
-      ],
-      "source": "// Length in graphemes, not bytes\n\"Hello\" length        // => 5\n\"世界\" length          // => 2 (not 6 bytes)\n\"👨‍👩‍👧‍👦\" length        // => 1 (family emoji is 1 grapheme, 7 codepoints)\n\n// Slicing by grapheme\n\"Hello\" at: 1         // => \"H\"\n\"世界\" at: 1           // => \"世\"\n\n// Iteration over graphemes\n\"Hello\" each: [:char | Transcript show: char]\n\n// Case conversion (locale-aware)\n\"HELLO\" lowercase     // => \"hello\"\n\"straße\" uppercase    // => \"STRASSE\" (German ß → SS)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-20",
-      "title": "Field Access and Assignment (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "// Assignment as expression (returns 6)\n(self.x := 5) + 1\n\n// Field assignments as sequential statements\nself.x := 5\nself.y := self.x + 1\nself.y",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-200",
+      "id": "docs-beamtalk-language-features-block-204",
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1627,7 +1647,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-201",
+      "id": "docs-beamtalk-language-features-block-205",
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1637,7 +1657,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-202",
+      "id": "docs-beamtalk-language-features-block-206",
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1655,7 +1675,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-205",
+      "id": "docs-beamtalk-language-features-block-209",
       "title": "Creating a Table (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1675,49 +1695,6 @@
         "set"
       ],
       "source": "// Create a named public table\ncache := Ets new: #myCache type: #set\n\n// Table types\nEts new: #t1 type: #set          // one entry per key (unordered)\nEts new: #t2 type: #orderedSet   // one entry per key (sorted keys)\nEts new: #t3 type: #bag          // multiple entries per key, values differ\nEts new: #t4 type: #duplicateBag // multiple identical entries per key\n\n// Look up an existing named table from another actor\ncache := Ets named: #myCache",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-206",
-      "title": "Reading and Writing (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features"
-      ],
-      "source": "cache at: \"key\" put: 42         // insert or update\ncache at: \"key\"                 // => 42\ncache at: \"missing\"             // => nil (not an error)\ncache at: \"missing\" ifAbsent: [0]  // => 0 (evaluate block when absent)\ncache includesKey: \"key\"        // => true\ncache includesKey: \"other\"      // => false",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-207",
-      "title": "Other Operations (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features"
-      ],
-      "source": "cache size                      // => number of entries\ncache keys                      // => List of all keys (order unspecified for #set)\ncache removeKey: \"key\"          // delete entry; no-op if key is absent\ncache delete                    // destroy the table; frees all memory",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-208",
-      "title": "Cross-Actor Sharing (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "async",
-        "beamtalk-language-features",
-        "concurrent",
-        "constructor",
-        "create",
-        "gen_server",
-        "genserver",
-        "instantiate",
-        "mutate",
-        "mutation",
-        "process",
-        "set"
-      ],
-      "source": "// Actor A — create the table\ncache := Ets new: #requestCache type: #set\ncache at: \"token\" put: \"abc123\"\n\n// Actor B — retrieve by name\ncache := Ets named: #requestCache\ncache at: \"token\"               // => \"abc123\"",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -1747,6 +1724,49 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-210",
+      "title": "Reading and Writing (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "cache at: \"key\" put: 42         // insert or update\ncache at: \"key\"                 // => 42\ncache at: \"missing\"             // => nil (not an error)\ncache at: \"missing\" ifAbsent: [0]  // => 0 (evaluate block when absent)\ncache includesKey: \"key\"        // => true\ncache includesKey: \"other\"      // => false",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-211",
+      "title": "Other Operations (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "cache size                      // => number of entries\ncache keys                      // => List of all keys (order unspecified for #set)\ncache removeKey: \"key\"          // delete entry; no-op if key is absent\ncache delete                    // destroy the table; frees all memory",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-212",
+      "title": "Cross-Actor Sharing (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "async",
+        "beamtalk-language-features",
+        "concurrent",
+        "constructor",
+        "create",
+        "gen_server",
+        "genserver",
+        "instantiate",
+        "mutate",
+        "mutation",
+        "process",
+        "set"
+      ],
+      "source": "// Actor A — create the table\ncache := Ets new: #requestCache type: #set\ncache at: \"token\" put: \"abc123\"\n\n// Actor B — retrieve by name\ncache := Ets named: #requestCache\ncache at: \"token\"               // => \"abc123\"",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-214",
       "title": "Enqueueing and Dequeueing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1761,7 +1781,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-211",
+      "id": "docs-beamtalk-language-features-block-215",
       "title": "Other Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1771,7 +1791,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-213",
+      "id": "docs-beamtalk-language-features-block-217",
       "title": "Atomic Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1784,7 +1804,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-214",
+      "id": "docs-beamtalk-language-features-block-218",
       "title": "Cross-Actor Sharing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1807,7 +1827,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-215",
+      "id": "docs-beamtalk-language-features-block-219",
       "title": "TestCase — BUnit Testing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1830,7 +1850,22 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-216",
+      "id": "docs-beamtalk-language-features-block-22",
+      "title": "Blocks (Closures) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "// Block with no arguments\n[self doSomething]\n\n// Block with arguments\n[:x :y | x + y]\n\n// Block with local variables\n[:x | temp := x * 2. temp + 1]",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-220",
       "title": "TestCase — BUnit Testing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1853,7 +1888,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-217",
+      "id": "docs-beamtalk-language-features-block-221",
       "title": "Suite-Level Setup — setUpOnce / tearDownOnce (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1884,7 +1919,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-218",
+      "id": "docs-beamtalk-language-features-block-222",
       "title": "Parallel Test Execution (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1901,21 +1936,6 @@
         "testEnable"
       ],
       "source": "TestCase subclass: TracingTest\n\n  class serial -> Boolean => true\n\n  setUp => Tracing clear. Tracing disable\n  testEnable => self assert: Tracing enable equals: nil",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-22",
-      "title": "Blocks (Closures) (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "// Block with no arguments\n[self doSomething]\n\n// Block with arguments\n[:x :y | x + y]\n\n// Block with local variables\n[:x | temp := x * 2. temp + 1]",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -15695,7 +15715,7 @@
         "testTakeAndDropOnEmptyAreAlsoTotal",
         "unless"
       ],
-      "source": "// BUnit tests for empty-collection element access (BT-3021).\n//\n// Accessing an element of an empty collection used to raise\n// `does_not_understand` — a dispatch failure — which sent readers hunting for\n// a typo or a wrong receiver type instead of a missing emptiness guard, and\n// could not be caught selectively (a genuine typo surfaced identically).\n//\n// The element accessors (`first`, `last`, `at:`) now raise `empty_collection`.\n// The subsequence operations (`rest`, `take:`, `drop:`) stay total and answer\n// the empty collection — see the `rest` tests at the bottom.\n\nTestCase subclass: EmptyCollectionAccessTest\n\n  // ==========================================================================\n  // List — element accessors raise empty_collection\n  // ==========================================================================\n\n  testListFirstOnEmptyRaisesEmptyCollection =>\n    self should: [#() first] raise: #empty_collection\n\n  testListLastOnEmptyRaisesEmptyCollection =>\n    self should: [#() last] raise: #empty_collection\n\n  testListAtOnEmptyRaisesEmptyCollection =>\n    self should: [#() at: 1] raise: #empty_collection\n\n  // A List materialised from another collection behaves the same — this is the\n  // shape the bug was originally reported against.\n  testEmptySetAsListFirstRaisesEmptyCollection =>\n    self should: [Set new asList first] raise: #empty_collection\n\n  // The error names the condition, not a dispatch failure.\n  testListFirstMessageNamesTheCondition =>\n    message := [#() first] on: Error do: [:e | e message]\n    self assert: (message includesSubstring: \"is empty\")\n    self deny: (message includesSubstring: \"does not understand\")\n\n  testListAtMessageNamesTheCondition =>\n    message := [#() at: 1] on: Error do: [:e | e message]\n    self assert: (message includesSubstring: \"is empty\")\n    self deny: (message includesSubstring: \"does not understand\")\n\n  // empty_collection is catchable as a RuntimeError, so `on:do:` can\n  // discriminate it from an unrelated failure in the same block.\n  testEmptyCollectionIsCatchableAsRuntimeError =>\n    caught := [#() first] on: RuntimeError do: [:e | \"caught\"]\n    self assert: caught equals: \"caught\"\n\n  // ==========================================================================\n  // List — out-of-bounds is a *different* condition from empty\n  // ==========================================================================\n\n  testListAtBeyondSizeRaisesIndexOutOfBounds =>\n    self should: [#(1, 2, 3) at: 9] raise: #index_out_of_bounds\n\n  testListAtZeroRaisesIndexOutOfBounds =>\n    self should: [#(1, 2, 3) at: 0] raise: #index_out_of_bounds\n\n  // An index below 1 is malformed whether or not the List is empty, so it\n  // reports as out-of-bounds rather than as emptiness.\n  testEmptyListAtZeroRaisesIndexOutOfBounds =>\n    self should: [#() at: 0] raise: #index_out_of_bounds\n\n  // (A non-Integer index is rejected at compile time, so it has no runtime\n  // test here — the type checker reports it before the program runs.)\n\n  // ==========================================================================\n  // String — element accessors are grapheme-aware and raise on empty\n  // ==========================================================================\n\n  testStringFirstOnEmptyRaisesEmptyCollection =>\n    self should: [\"\" first] raise: #empty_collection\n\n  testStringLastOnEmptyRaisesEmptyCollection =>\n    self should: [\"\" last] raise: #empty_collection\n\n  testStringFirstReturnsFirstGrapheme =>\n    self assert: \"hello\" first equals: \"h\"\n\n  testStringLastReturnsLastGrapheme =>\n    self assert: \"hello\" last equals: \"o\"\n\n  // Grapheme-aware, not byte-aware: \"ü\" is two UTF-8 bytes.\n  testStringFirstIsGraphemeAware =>\n    self assert: \"über\" first equals: \"ü\"\n\n  testStringLastIsGraphemeAware =>\n    self assert: \"grüß\" last equals: \"ß\"\n\n  testStringFirstOnSingleCharacterString =>\n    self assert: \"x\" first equals: \"x\"\n    self assert: \"x\" last equals: \"x\"\n\n  // ==========================================================================\n  // Interval — pure-Beamtalk collection, same kind via the Erlang helper\n  // ==========================================================================\n\n  testEmptyIntervalFirstRaisesEmptyCollection =>\n    self should: [(1 to: 0) first] raise: #empty_collection\n\n  testEmptyIntervalLastRaisesEmptyCollection =>\n    self should: [(1 to: 0) last] raise: #empty_collection\n\n  testNonEmptyIntervalFirstAndLastStillWork =>\n    self assert: (1 to: 10) first equals: 1\n    self assert: (1 to: 10) last equals: 10\n\n  // ==========================================================================\n  // Collection aggregates — max/min/average over nothing\n  // ==========================================================================\n\n  testEmptyCollectionMaxRaisesEmptyCollection =>\n    self should: [#() max] raise: #empty_collection\n\n  testEmptyCollectionMinRaisesEmptyCollection =>\n    self should: [#() min] raise: #empty_collection\n\n  testEmptyCollectionAverageRaisesEmptyCollection =>\n    self should: [#() average] raise: #empty_collection\n\n  // `sum` has an identity element (0), so it stays total.\n  testEmptyCollectionSumIsZero =>\n    self assert: #() sum equals: 0\n\n  // ==========================================================================\n  // Subsequence operations stay total — the decided `rest` behaviour\n  // ==========================================================================\n\n  // `rest` is not an element accessor: unlike `first`/`last` it has a\n  // well-defined total answer on empty, so it answers `#()` rather than\n  // raising. This keeps the `isEmpty ifFalse: [... rest ...]` recursion idiom\n  // working and matches its neighbours `take:`/`drop:`.\n  testRestOnEmptyAnswersEmptyList =>\n    self assert: #() rest equals: #()\n\n  testRestOnEmptyDoesNotRaise =>\n    self assert: ([#() rest] on: Error do: [:e | \"raised\"]) equals: #()\n\n  testRestOnSingletonAnswersEmptyList =>\n    self assert: #(1) rest equals: #()\n\n  testTakeAndDropOnEmptyAreAlsoTotal =>\n    self assert: (#() take: 3) equals: #()\n    self assert: (#() drop: 3) equals: #()\n\n  // The whole point of the split: `first` raises where `rest` answers.\n  testElementAccessorsRaiseWhereSubsequenceOpsAnswer =>\n    self should: [#() first] raise: #empty_collection\n    self assert: #() rest equals: #()",
+      "source": "// BUnit tests for empty-collection element access (BT-3021).\n//\n// Accessing an element of an empty collection used to raise\n// `does_not_understand` — a dispatch failure — which sent readers hunting for\n// a typo or a wrong receiver type instead of a missing emptiness guard, and\n// could not be caught selectively (a genuine typo surfaced identically).\n//\n// The element accessors (`first`, `last`, `at:`) now raise `empty_collection`.\n// The subsequence operations (`rest`, `take:`, `drop:`) stay total and answer\n// the empty collection — see the `rest` tests at the bottom.\n\nTestCase subclass: EmptyCollectionAccessTest\n\n  // ==========================================================================\n  // List — element accessors raise empty_collection\n  // ==========================================================================\n  testListFirstOnEmptyRaisesEmptyCollection =>\n    self should: [#() first] raise: #empty_collection\n\n  testListLastOnEmptyRaisesEmptyCollection =>\n    self should: [#() last] raise: #empty_collection\n\n  testListAtOnEmptyRaisesEmptyCollection =>\n    self should: [#() at: 1] raise: #empty_collection\n\n  // A List materialised from another collection behaves the same — this is the\n  // shape the bug was originally reported against.\n  testEmptySetAsListFirstRaisesEmptyCollection =>\n    self should: [Set new asList first] raise: #empty_collection\n\n  // The error names the condition, not a dispatch failure.\n  testListFirstMessageNamesTheCondition =>\n    message := [#() first] on: Error do: [:e | e message]\n    self assert: (message includesSubstring: \"is empty\")\n    self deny: (message includesSubstring: \"does not understand\")\n\n  testListAtMessageNamesTheCondition =>\n    message := [#() at: 1] on: Error do: [:e | e message]\n    self assert: (message includesSubstring: \"is empty\")\n    self deny: (message includesSubstring: \"does not understand\")\n\n  // empty_collection is catchable as a RuntimeError, so `on:do:` can\n  // discriminate it from an unrelated failure in the same block.\n  testEmptyCollectionIsCatchableAsRuntimeError =>\n    caught := [#() first] on: RuntimeError do: [:e | \"caught\"]\n    self assert: caught equals: \"caught\"\n\n  // ==========================================================================\n  // List — out-of-bounds is a *different* condition from empty\n  // ==========================================================================\n  testListAtBeyondSizeRaisesIndexOutOfBounds =>\n    self should: [#(1, 2, 3) at: 9] raise: #index_out_of_bounds\n\n  testListAtZeroRaisesIndexOutOfBounds =>\n    self should: [#(1, 2, 3) at: 0] raise: #index_out_of_bounds\n\n  // An index below 1 is malformed whether or not the List is empty, so it\n  // reports as out-of-bounds rather than as emptiness.\n  testEmptyListAtZeroRaisesIndexOutOfBounds =>\n    self should: [#() at: 0] raise: #index_out_of_bounds\n\n  // (A non-Integer index is rejected at compile time, so it has no runtime\n  // test here — the type checker reports it before the program runs.)\n\n  // ==========================================================================\n  // String — element accessors are grapheme-aware and raise on empty\n  // ==========================================================================\n  testStringFirstOnEmptyRaisesEmptyCollection =>\n    self should: [\"\" first] raise: #empty_collection\n\n  testStringLastOnEmptyRaisesEmptyCollection =>\n    self should: [\"\" last] raise: #empty_collection\n\n  testStringFirstReturnsFirstGrapheme => self assert: \"hello\" first equals: \"h\"\n\n  testStringLastReturnsLastGrapheme => self assert: \"hello\" last equals: \"o\"\n\n  // Grapheme-aware, not byte-aware: \"ü\" is two UTF-8 bytes.\n  testStringFirstIsGraphemeAware => self assert: \"über\" first equals: \"ü\"\n\n  testStringLastIsGraphemeAware => self assert: \"grüß\" last equals: \"ß\"\n\n  testStringFirstOnSingleCharacterString =>\n    self assert: \"x\" first equals: \"x\"\n    self assert: \"x\" last equals: \"x\"\n\n  // ==========================================================================\n  // Interval — pure-Beamtalk collection, same kind via the Erlang helper\n  // ==========================================================================\n  testEmptyIntervalFirstRaisesEmptyCollection =>\n    self should: [(1 to: 0) first] raise: #empty_collection\n\n  testEmptyIntervalLastRaisesEmptyCollection =>\n    self should: [(1 to: 0) last] raise: #empty_collection\n\n  testNonEmptyIntervalFirstAndLastStillWork =>\n    self assert: (1 to: 10) first equals: 1\n    self assert: (1 to: 10) last equals: 10\n\n  // ==========================================================================\n  // Collection aggregates — max/min/average over nothing\n  // ==========================================================================\n  testEmptyCollectionMaxRaisesEmptyCollection =>\n    self should: [#() max] raise: #empty_collection\n\n  testEmptyCollectionMinRaisesEmptyCollection =>\n    self should: [#() min] raise: #empty_collection\n\n  testEmptyCollectionAverageRaisesEmptyCollection =>\n    self should: [#() average] raise: #empty_collection\n\n  // `sum` has an identity element (0), so it stays total.\n  testEmptyCollectionSumIsZero => self assert: #() sum equals: 0\n\n  // ==========================================================================\n  // Subsequence operations stay total — the decided `rest` behaviour\n  // ==========================================================================\n\n  // `rest` is not an element accessor: unlike `first`/`last` it has a\n  // well-defined total answer on empty, so it answers `#()` rather than\n  // raising. This keeps the `isEmpty ifFalse: [... rest ...]` recursion idiom\n  // working and matches its neighbours `take:`/`drop:`.\n  testRestOnEmptyAnswersEmptyList => self assert: #() rest equals: #()\n\n  testRestOnEmptyDoesNotRaise =>\n    self assert: ([#() rest] on: Error do: [:e | \"raised\"]) equals: #()\n\n  testRestOnSingletonAnswersEmptyList => self assert: #(1) rest equals: #()\n\n  testTakeAndDropOnEmptyAreAlsoTotal =>\n    self assert: (#() take: 3) equals: #()\n    self assert: (#() drop: 3) equals: #()\n\n  // The whole point of the split: `first` raises where `rest` answers.\n  testElementAccessorsRaiseWhereSubsequenceOpsAnswer =>\n    self should: [#() first] raise: #empty_collection\n    self assert: #() rest equals: #()",
       "explanation": "BUnit tests for empty-collection element access (BT-3021).  Accessing an element of an empty collection used to raise `does_not_understand` — a dispatch failure — which sent readers hunting for a typo or a wrong receiver type instead of a missing emptiness guard, and could not be caught selectively (a genuine typo surfaced identically).  The element accessors (`first`, `last`, `at:`) now raise `empty_collection`. The subsequence operations (`rest`, `take:`, `drop:`) stay total and answer the empty collection — see the `rest` tests at the bottom."
     },
     {
