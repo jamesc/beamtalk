@@ -2628,11 +2628,11 @@ open_mode_still_creates_missing_regular_file_test() ->
     end.
 
 ffi_boundary_preserves_wrapped_error_test() ->
-    %% BT-3018: `beamtalk_error:raise/1` raises the *wrapped* map form, not a
-    %% bare #beamtalk_error{}. classify_ffi_exception/9 only had a clause for
-    %% the bare record, so an error raised inside an FFI call — here, by the
-    %% user block `open:do:` invokes — was reclassified and lost its kind,
-    %% selector and hint. Assert it survives the boundary intact.
+    %% BT-3018: an error raised *inside* an FFI call — here by the user block
+    %% `open:do:` invokes — must cross the boundary with its kind and selector
+    %% intact rather than being reclassified. classify_ffi_exception/9 already
+    %% handles this via its wrapped-map clause; this pins the behaviour, which
+    %% the BT-3018 diagnostic depends on to reach a caller at all.
     Raiser = fun(_H) ->
         beamtalk_error:raise(beamtalk_error:new(dispatch_error, 'File', 'exists:'))
     end,

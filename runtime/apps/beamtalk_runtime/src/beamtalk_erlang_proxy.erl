@@ -348,25 +348,6 @@ classify_ffi_exception(error, #beamtalk_error{} = Rec, Stack, _M, _F, _Args, _Se
     %% not reclassify it as a generic runtime_error.
     erlang:raise(error, beamtalk_exception_handler:wrap(Rec), Stack);
 classify_ffi_exception(
-    error,
-    #{'$beamtalk_class' := _, error := #beamtalk_error{}} = Wrapped,
-    Stack,
-    _M,
-    _F,
-    _Args,
-    _Sel,
-    _Ctx,
-    _OnBadarg
-) ->
-    %% BT-3018: the *wrapped* form of the clause above. `beamtalk_error:raise/1`
-    %% raises `beamtalk_exception_handler:wrap(Rec)`, a map — not the bare
-    %% record — so every structured error raised through an FFI boundary used to
-    %% miss the clause above and get reclassified by the catch-all, losing its
-    %% kind, selector and hint. Reachable whenever a raise happens *inside* an
-    %% FFI call rather than by it: a user block passed to an FFI function, or a
-    %% class method whose body raises.
-    erlang:raise(error, Wrapped, Stack);
-classify_ffi_exception(
     error, badarg, Stack, Module, FunName, Args, OrigSelector, Context, OnBadarg
 ) ->
     OnBadarg(Module, FunName, Args, OrigSelector, Context, Stack);
