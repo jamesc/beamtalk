@@ -3,6 +3,30 @@
 
 //! CLI command implementations.
 
+/// Output format shared by commands that support `--format text|json`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OutputFormat {
+    /// Human-readable text output (default).
+    #[default]
+    Text,
+    /// Machine-readable JSON output.
+    Json,
+}
+
+impl std::str::FromStr for OutputFormat {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            "text" => Ok(Self::Text),
+            "json" => Ok(Self::Json),
+            other => Err(format!(
+                "unknown format '{other}': expected 'text' or 'json'"
+            )),
+        }
+    }
+}
+
 pub mod app_file;
 pub mod attach;
 pub mod beam_environment;

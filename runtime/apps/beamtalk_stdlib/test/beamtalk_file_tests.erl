@@ -831,15 +831,29 @@ open_do_type_error_non_block_test() ->
     ).
 
 open_do_closes_on_exception_test() ->
-    %% Verify the handle is closed even if the block raises
+    %% The handle is closed even if the block raises. The raise has to escape
+    %% the handle by message first — a raising block has no return value to
+    %% carry it out — otherwise this would only assert that the error
+    %% propagates, which is not the same claim. Mirrors
+    %% open_mode_do_closes_handle_on_exception_test/0.
+    Self = self(),
     with_temp_file("_bt_test_open_exc.txt", <<"data\n">>, fun() ->
         ?assertError(
             test_exception,
             beamtalk_file:'open:do:'(
                 <<"_bt_test_open_exc.txt">>,
-                fun(_Handle) -> error(test_exception) end
+                fun(Handle) ->
+                    Self ! {handle, Handle},
+                    error(test_exception)
+                end
             )
-        )
+        ),
+        Handle =
+            receive
+                {handle, H} -> H
+            after 5000 -> error(timeout)
+            end,
+        ?assertNot(beamtalk_file_handle:isOpen(Handle))
     end).
 
 open_do_block_return_value_test() ->
@@ -2626,3 +2640,28 @@ open_mode_still_creates_missing_regular_file_test() ->
     after
         file:delete(Name)
     end.
+
+ffi_boundary_preserves_wrapped_error_test() ->
+    %% BT-3018: an error raised *inside* an FFI call — here by the user block
+    %% `open:do:` invokes — must cross the boundary with its kind and selector
+    %% intact rather than being reclassified. classify_ffi_exception/9 already
+    %% handles this via its wrapped-map clause; this pins the behaviour, which
+    %% the BT-3018 diagnostic depends on to reach a caller at all.
+    Raiser = fun(_H) ->
+        beamtalk_error:raise(beamtalk_error:new(dispatch_error, 'File', 'exists:'))
+    end,
+    with_temp_file("_bt_test_ffi_raise.txt", <<"x">>, fun() ->
+        Got =
+            try
+                beamtalk_erlang_proxy:native_call(
+                    beamtalk_file,
+                    open,
+                    [<<"_bt_test_ffi_raise.txt">>, Raiser],
+                    {'File', 'open:do:'}
+                ),
+                no_raise
+            catch
+                error:#{error := #beamtalk_error{kind = K, selector = S}} -> {K, S}
+            end,
+        ?assertEqual({dispatch_error, 'exists:'}, Got)
+    end).

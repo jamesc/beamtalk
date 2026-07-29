@@ -117,8 +117,8 @@ typed Object subclass: File native: beamtalk_file
   /// within the block — they must not escape, as the file descriptor
   /// is closed when the block returns.
   ///
-  /// The block runs inside the File class, so it must not send another
-  /// message to `File` — doing so deadlocks.
+  /// The block runs in your own process (ADR 0109), so it may call `File`
+  /// again.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -169,14 +169,8 @@ typed Object subclass: File native: beamtalk_file
   /// The handle must not escape the block; the descriptor is closed when the
   /// block returns. See `open:mode:` for the mode Symbols.
   ///
-  /// The block runs inside the File class, which has three consequences.
-  /// It must not send another message to `File` — doing so deadlocks. Every
-  /// other `File` call in the system waits behind it. And it must finish
-  /// within the 60-second class-call timeout, or the caller gets a timeout
-  /// error while the block runs on.
-  ///
-  /// So keep blocks short. For a long write loop, or anything that has to
-  /// call `File` again, use `open:mode:` and close the handle yourself.
+  /// The block runs in your own process (ADR 0109), so it may call `File`
+  /// again, holds nothing else up, and is under no time limit.
   ///
   /// ## Examples
   /// ```beamtalk

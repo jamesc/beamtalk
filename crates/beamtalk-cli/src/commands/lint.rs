@@ -16,6 +16,7 @@
 //! Lint diagnostics are suppressed during normal `check`/`compile` — this is
 //! the only command that surfaces them.
 
+use crate::commands::OutputFormat;
 use crate::commands::build::collect_source_files_from_dir;
 use crate::commands::erlang_lint;
 use crate::diagnostic::CompileDiagnostic;
@@ -634,30 +635,6 @@ fn merge_dependency_infos(
                 "Failed to resolve dependencies for lint; \
                  dependency classes/protocols/aliases may not be available"
             );
-        }
-    }
-}
-
-/// Output format for lint diagnostics.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum OutputFormat {
-    /// Human-readable text output via miette (default).
-    #[default]
-    Text,
-    /// Machine-readable JSON (one object per line).
-    Json,
-}
-
-impl std::str::FromStr for OutputFormat {
-    type Err = String;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        match s {
-            "text" => Ok(Self::Text),
-            "json" => Ok(Self::Json),
-            other => Err(format!(
-                "unknown format '{other}': expected 'text' or 'json'"
-            )),
         }
     }
 }

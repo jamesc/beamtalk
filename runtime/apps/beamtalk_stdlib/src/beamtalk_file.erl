@@ -457,12 +457,18 @@ the way out — normal return, raised error, or non-local return alike (the same
 guarantee `ensure:` gives at the Beamtalk level). A block that closes the
 handle itself is fine: closing is idempotent.
 
-The block runs in the File class process, which bounds what belongs in one.
-It cannot send another message to `File` (that deadlocks), it serialises every
-other `File` call in the node behind it, and it must finish inside
-`beamtalk_class_dispatch`'s 60-second class-call timeout — past that the caller
-gets a timeout while the block keeps running. Long write loops belong behind
-`open:mode:`, where the class process is released as soon as the handle exists.
+The block normally runs in the *caller's* process: BT-3018 / ADR 0109 lowers
+`File open:…do:` at the call site to a direct call on the `open/3` shim below,
+so it never reaches the File class process. Nothing here bounds what the block
+may do — it can message `File` again, it holds nothing else up, and there is
+no time limit.
+
+The exception is reaching this function through dynamic dispatch (`perform:`),
+which still goes via the class gen_server and so runs the block there. In that
+case the pre-ADR-0109 constraints apply: the block cannot message `File` (that
+deadlocks), it serialises every other `File` call in the node behind it, and it
+must finish inside `beamtalk_class_dispatch`'s 60-second class-call timeout —
+past that the caller gets a timeout while the block keeps running.
 
 Returns a Result ok map holding the block's value, or a Result error map if the
 file could not be opened.
@@ -501,11 +507,12 @@ do_open(Path, Mode, Selector) ->
                 ok ->
                     case check_regular(PathStr, Selector, Path) of
                         ok ->
-                            %% Do NOT add `raw` to Options. This call runs in
-                            %% the File class process, not the caller's, and a
-                            %% raw descriptor may only be used by the process
-                            %% that opened it — every handle `open:mode:` hands
-                            %% back would fail with not_on_controlling_process.
+                            %% Do NOT add `raw` to Options. A raw descriptor may
+                            %% only be used by the process that opened it, and
+                            %% `open:mode:` still opens in the File class
+                            %% process — every handle it hands back would fail
+                            %% with not_on_controlling_process. (ADR 0109 moved
+                            %% only the block-scoped selectors to the caller.)
                             %% See mode_options/1.
                             case file:open(PathStr, Options) of
                                 {ok, Fd} -> {ok, beamtalk_file_handle:new(Fd, Mode, Path)};
@@ -536,8 +543,9 @@ do_open(Path, Mode, Selector) ->
 Binary `file:open/2` options for each Beamtalk mode Symbol.
 
 Deliberately **not** `raw`: a raw descriptor may only be used by the process
-that opened it, and File's class methods run in the File class process rather
-than the caller's. A handle returned by `open:mode:` would be dead on arrival.
+that opened it, and `open:mode:` is a class method, so it opens in the File
+class process rather than the caller's. The handle it returns would be dead on
+arrival. (ADR 0109 moved `open:…do:` to the caller, but not `open:mode:`.)
 Non-raw descriptors are BEAM processes, so a handle stays usable wherever it is
 held — the same property that lets `File lines:` streams outlive the open call.
 """.
@@ -552,9 +560,10 @@ mode_options(_) -> error.
 Refuse to open something that exists but is not a regular file.
 
 A FIFO or character device never reports end-of-file, so `readAll` on one loops
-forever — and because the open runs in the File class process, a wedged read
-takes every other `File` operation in the node with it. A directory is rejected
-here too, turning a bare `eisdir` into a message that says what was wrong.
+forever — and via `open:mode:`, which still opens in the File class process, a
+wedged read takes every other `File` operation in the node with it. A directory
+is rejected here too, turning a bare `eisdir` into a message that says what was
+wrong.
 
 A path that does not exist yet is fine: the write-capable modes create it.
 """.
@@ -1045,6 +1054,12 @@ lines(Path) -> 'lines:'(Path).
 %% `open:do:` and `open:mode:` both lower to the arity-2 shim (the shim name is
 %% the first keyword), so they are told apart by their second argument: a Block
 %% is a fun, a mode is a Symbol.
+%%
+%% These two shims have a second caller beyond the inline FFI: BT-3018 / ADR
+%% 0109 compiles `File open:…do:` straight to `native_call(beamtalk_file, open,
+%% …)` so the user's block runs in the caller rather than the File class
+%% process. Removing the fun clause below would send those call sites to
+%% `open:mode:` with a fun as the mode.
 %%
 %% Every atom goes to `open:mode:`, not just the four valid modes. A misspelled
 %% mode is the common mistake, and `open:mode:` answers it with a `Result

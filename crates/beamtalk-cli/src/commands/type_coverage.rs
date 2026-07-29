@@ -11,34 +11,13 @@
 //!
 //! **References:** ADR 0077 Section 3
 
+use crate::commands::OutputFormat;
 use crate::commands::build::collect_source_files_from_dir;
 use beamtalk_core::language_service::{ByteOffset, Position};
 use beamtalk_core::semantic_analysis::{ClassHierarchy, CoverageReport, infer_types};
 use beamtalk_core::source_analysis::{lex_with_eof, parse};
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{IntoDiagnostic, Result};
-
-/// Output format for the coverage report.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OutputFormat {
-    /// Human-readable table output (default).
-    Text,
-    /// Machine-readable JSON output.
-    Json,
-}
-
-impl std::str::FromStr for OutputFormat {
-    type Err = String;
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        match s {
-            "text" => Ok(Self::Text),
-            "json" => Ok(Self::Json),
-            other => Err(format!(
-                "unknown format '{other}', expected 'text' or 'json'"
-            )),
-        }
-    }
-}
 
 /// Run the `beamtalk type-coverage` command.
 ///

@@ -25,7 +25,7 @@
 
 // spawnAs: returns Result ok: actor when the name is free
 res1 := Counter spawnAs: #bt1991Counter
-// => _
+// => Result ok: Actor(Counter, _)
 
 res1 isOk
 // => true
@@ -52,14 +52,14 @@ c getValue
 
 // Base/untyped lookup via Actor returns the same actor as a proxy
 lookup := Actor named: #bt1991Counter
-// => _
+// => Result ok: Actor(Counter, _)
 
 lookup isOk
 // => true
 
 // Typed lookup via the concrete class — resolves `Self` to Counter
 counterLookup := Counter named: #bt1991Counter
-// => _
+// => Result ok: Actor(Counter, _)
 
 counterLookup isOk
 // => true
@@ -138,7 +138,7 @@ anon isRegistered
 // => false
 
 regRes := anon registerAs: #bt1991Registered
-// => _
+// => Result ok: Actor(Counter, _)
 
 regRes isOk
 // => true
