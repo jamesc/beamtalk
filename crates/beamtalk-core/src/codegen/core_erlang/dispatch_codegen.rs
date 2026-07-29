@@ -1175,14 +1175,7 @@ impl CoreErlangGenerator {
         for argument in arguments {
             arg_docs.push(self.expression_doc(argument)?);
         }
-        let mut args = Document::Str("");
-        for (index, doc) in arg_docs.into_iter().enumerate() {
-            args = if index == 0 {
-                doc
-            } else {
-                docvec![args, ", ", doc]
-            };
-        }
+        let args = Self::join_docs_with_commas(arg_docs);
 
         // Mirrors `native_delegate_body_doc`: the Erlang shim name is the first
         // keyword without its colon, and the `{Class, Selector}` context makes a
