@@ -1130,6 +1130,72 @@ impl CoreErlangGenerator {
         }
     }
 
+    /// BT-3018 / ADR 0109: lower `File open:do:` / `File open:mode:do:` to a
+    /// direct call rather than a class send, so the block runs in the caller.
+    ///
+    /// A class send is a `gen_server:call` into the singleton class process, so
+    /// the method body — *including the user's block* — executes there. For a
+    /// block-scoped resource method that is three separate problems: the block
+    /// cannot message `File` again (deadlock), it holds the class process for
+    /// its whole duration (every `File` call in the node queues behind it), and
+    /// it must finish inside the 60-second class-call timeout.
+    ///
+    /// Emitting the same `native_call` the class-method body would have emitted
+    /// — just here, in the caller — removes all three. The Erlang side is
+    /// unchanged: `beamtalk_file:open/2,3` still performs the open, the
+    /// `try`/`after` and the close, so the intercepted path and the
+    /// `perform:`-style dynamic path stay semantically identical.
+    ///
+    /// Deliberately a hard-coded selector list, per ADR 0109's "Not in scope":
+    /// the general mechanism (a continuation protocol for any Block-taking class
+    /// method) would change the hottest dispatch path in the language to benefit
+    /// the ~1% of class methods that take a Block. A fourth block-scoped method
+    /// is the trigger to revisit that.
+    fn try_generate_block_scoped_open(
+        &mut self,
+        class_name: &str,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<Option<Document<'static>>> {
+        if class_name != "File" {
+            return Ok(None);
+        }
+        let selector_atom = selector.to_erlang_atom();
+        if !matches!(selector_atom.as_str(), "open:do:" | "open:mode:do:") {
+            return Ok(None);
+        }
+
+        let mut arg_docs = Vec::with_capacity(arguments.len());
+        for argument in arguments {
+            arg_docs.push(self.expression_doc(argument)?);
+        }
+        let mut args = Document::Str("");
+        for (index, doc) in arg_docs.into_iter().enumerate() {
+            args = if index == 0 {
+                doc
+            } else {
+                docvec![args, ", ", doc]
+            };
+        }
+
+        // Mirrors `native_delegate_body_doc`: the Erlang shim name is the first
+        // keyword without its colon, and the `{Class, Selector}` context makes a
+        // wrapped error read `File>>open:mode:do:` rather than a bare MFA.
+        Ok(Some(docvec![
+            "call 'beamtalk_erlang_proxy':'native_call'(",
+            leaf::atom("beamtalk_file"),
+            ", ",
+            leaf::atom("open"),
+            ", [",
+            args,
+            "], {",
+            leaf::atom("File"),
+            ", ",
+            leaf::atom(selector_atom),
+            "})"
+        ]))
+    }
+
     /// Handles `ClassReference` receivers as class method calls.
     ///
     /// ADR 0019 Phase 3: In REPL context, checks REPL bindings first for
@@ -1148,6 +1214,15 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
         if let Expression::ClassReference { name, package, .. } = receiver {
+            // BT-3018 / ADR 0109: block-scoped `File open:…do:` must not reach
+            // the File class gen_server, or the user's block runs there. Checked
+            // ahead of every class-send path below, because the deadlock, the
+            // serialization and the 60s class-call ceiling apply to all of them.
+            if let Some(doc) =
+                self.try_generate_block_scoped_open(&name.name, selector, arguments)?
+            {
+                return Ok(Some(doc));
+            }
             let pkg = package.as_ref().map(|p| p.name.as_str());
             // BT-773: When inside a class method and the explicit class name matches
             // the current class, use direct dispatch (same as `self` sends) to avoid

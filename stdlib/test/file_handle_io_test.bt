@@ -332,30 +332,35 @@ TestCase subclass: FileHandleIoTest
       do: [:h | h write: payload]
     self assert: (File readBinary: "target/bt-test-tmp/handle_binwrite.dat") unwrap equals: "x"
 
-  // === BT-3018: messaging File from inside an open block is diagnosed ===
-  testNestedFileSendRaisesDispatchError =>
+  // === BT-3018 / ADR 0109: the block runs in the caller's process ===
+  // Before the call-site lowering these were the deadlock: the block ran inside
+  // the File class gen_server, so any further File send from it hit
+  // gen_server:call(self(), ...).
+  testBlockRunsInTheCallersProcess =>
+    File writeAll: "target/bt-test-tmp/handle_caller.txt" contents: "x"
+    outer := (Erlang erlang) self
+    inner := (File
+      open: "target/bt-test-tmp/handle_caller.txt"
+      mode: #read
+      do: [:h | (Erlang erlang) self]) unwrap
+    self assert: inner equals: outer
+
+  testNestedFileSendInsideBlockWorks =>
     File writeAll: "target/bt-test-tmp/handle_nested.txt" contents: "x"
-    self
-      should: [
-        File open: "target/bt-test-tmp/handle_nested.txt" do: [:h |
-          File exists: "target/bt-test-tmp/handle_nested.txt"
-        ]
-      ]
-      raise: #dispatch_error
+    result := File open: "target/bt-test-tmp/handle_nested.txt" do: [:h |
+      File exists: "target/bt-test-tmp/handle_nested.txt"
+    ]
+    self assert: result unwrap
 
-  testNestedFileSendNamesTheDeadlock =>
-    File writeAll: "target/bt-test-tmp/handle_nested2.txt" contents: "x"
-    caught := [
-      File
-        open: "target/bt-test-tmp/handle_nested2.txt"
-        mode: #read
-        do: [:h | File exists: "target/bt-test-tmp/handle_nested2.txt"]
-      nil
-    ] on: Error do: [:e | e printString]
-    self assert: (caught includesSubstring: "deadlock")
-    self assert: (caught includesSubstring: "File")
+  testNestedFileSendInsideModeBlockWorks =>
+    File writeAll: "target/bt-test-tmp/handle_nested2.txt" contents: "abc"
+    result := File
+      open: "target/bt-test-tmp/handle_nested2.txt"
+      mode: #read
+      do: [:h | (File readAll: "target/bt-test-tmp/handle_nested2.txt") unwrap]
+    self assert: result unwrap equals: "abc"
 
-  testPlainBlockUnaffectedByTheGuard =>
+  testPlainBlockStillReturnsItsValue =>
     File writeAll: "target/bt-test-tmp/handle_plain.txt" contents: "x"
     result := File open: "target/bt-test-tmp/handle_plain.txt" do: [:h | 42]
     self assert: result unwrap equals: 42
