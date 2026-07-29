@@ -1151,13 +1151,19 @@ impl CoreErlangGenerator {
     /// method) would change the hottest dispatch path in the language to benefit
     /// the ~1% of class methods that take a Block. A fourth block-scoped method
     /// is the trigger to revisit that.
+    ///
+    /// Scoped to the unqualified stdlib `File`: a package-qualified receiver
+    /// (`mylib@File open: p do: blk`) is some other class that happens to share
+    /// the name, and must keep its own implementation. Same reasoning as the
+    /// `pkg.is_none()` guard on BT-773's self-send case below.
     fn try_generate_block_scoped_open(
         &mut self,
         class_name: &str,
+        package: Option<&str>,
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
-        if class_name != "File" {
+        if class_name != "File" || package.is_some() {
             return Ok(None);
         }
         let selector_atom = selector.to_erlang_atom();
@@ -1214,16 +1220,16 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
         if let Expression::ClassReference { name, package, .. } = receiver {
+            let pkg = package.as_ref().map(|p| p.name.as_str());
             // BT-3018 / ADR 0109: block-scoped `File open:…do:` must not reach
             // the File class gen_server, or the user's block runs there. Checked
             // ahead of every class-send path below, because the deadlock, the
             // serialization and the 60s class-call ceiling apply to all of them.
             if let Some(doc) =
-                self.try_generate_block_scoped_open(&name.name, selector, arguments)?
+                self.try_generate_block_scoped_open(&name.name, pkg, selector, arguments)?
             {
                 return Ok(Some(doc));
             }
-            let pkg = package.as_ref().map(|p| p.name.as_str());
             // BT-773: When inside a class method and the explicit class name matches
             // the current class, use direct dispatch (same as `self` sends) to avoid
             // deadlock. The class actor is already processing the outer call, so
@@ -3422,6 +3428,54 @@ mod tests {
         // Arbitrary user selectors must fall through to inherited dispatch.
         assert!(!is_class_auto_export_selector("increment", 0));
         assert!(!is_class_auto_export_selector("at:put:", 2));
+    }
+
+    /// BT-3018 / ADR 0109: `File open:…do:` is lowered at the call site so the
+    /// user's block runs in the caller rather than the File class `gen_server`.
+    /// The interception is keyed on the *unqualified* stdlib `File` — a
+    /// package-qualified `mylib@File` is an unrelated class that happens to
+    /// share the name, and must keep reaching its own implementation.
+    #[test]
+    fn block_scoped_file_open_is_lowered_only_for_unqualified_file() {
+        fn lower(package: Option<&str>) -> String {
+            let mut generator = CoreErlangGenerator::new("test");
+            let receiver = Expression::ClassReference {
+                name: Identifier::new("File", s()),
+                package: package.map(|p| Identifier::new(p, s())),
+                span: s(),
+            };
+            let selector = MessageSelector::Keyword(vec![
+                KeywordPart::new("open:", s()),
+                KeywordPart::new("do:", s()),
+            ]);
+            let arguments = [
+                Expression::Literal(Literal::String("f.txt".into()), s()),
+                Expression::Identifier(Identifier::new("blk", s())),
+            ];
+            generator
+                .generate_message_send(&receiver, &selector, &arguments)
+                .unwrap()
+                .to_pretty_string()
+        }
+
+        let unqualified = lower(None);
+        assert!(
+            unqualified.contains("'native_call'(")
+                && unqualified.contains("'beamtalk_file'")
+                && unqualified.contains("'open:do:'"),
+            "unqualified File open:do: should lower to a native_call in the caller. Got: {unqualified}"
+        );
+        assert!(
+            !unqualified.contains("class_send"),
+            "the block must not reach the class gen_server. Got: {unqualified}"
+        );
+
+        let qualified = lower(Some("mylib"));
+        assert!(
+            !qualified.contains("'beamtalk_file'"),
+            "mylib@File is a different class and must not be redirected to the \
+             stdlib File shim. Got: {qualified}"
+        );
     }
 
     #[test]
