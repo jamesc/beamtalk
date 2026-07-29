@@ -58,6 +58,27 @@ at_negative_index_test() ->
         beamtalk_string:at(<<"hi">>, -1)
     ).
 
+%% BT-3021: indexing an *empty* String is `empty_collection`, matching
+%% `List at:`; an index below 1 stays `index_out_of_bounds` even when empty,
+%% since it is malformed either way.
+at_empty_string_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := 'RuntimeError',
+            error := #beamtalk_error{kind = empty_collection, class = 'String', selector = 'at:'}
+        },
+        beamtalk_string:at(<<>>, 1)
+    ).
+
+at_empty_string_zero_index_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := 'RuntimeError',
+            error := #beamtalk_error{kind = index_out_of_bounds, class = 'String', selector = 'at:'}
+        },
+        beamtalk_string:at(<<>>, 0)
+    ).
+
 %%% ============================================================================
 %%% first/1, last/1 (BT-3021)
 %%%

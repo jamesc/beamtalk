@@ -63,7 +63,7 @@ at(List, N) when is_list(List), is_integer(N), N >= 1 ->
 -doc "Raise `empty_collection` for an accessor called on an empty List.".
 -spec raise_empty(atom()) -> no_return().
 raise_empty(Selector) ->
-    Hint = <<"List is empty — guard with `isEmpty` before indexing">>,
+    Hint = <<"List is empty; guard with `isEmpty` before indexing">>,
     beamtalk_error:raise(beamtalk_error:new(empty_collection, 'List', Selector, Hint)).
 
 -doc "Raise `index_out_of_bounds` for an in-range-shaped but out-of-range index.".

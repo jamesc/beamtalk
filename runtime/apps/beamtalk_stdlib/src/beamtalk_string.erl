@@ -50,8 +50,17 @@ All operations are grapheme-aware and handle UTF-8 correctly.
 %% removed, no case conversion, so these are camelCase not snake_case).
 -export([urlEncoded/1, urlDecoded/1]).
 
--doc "1-based grapheme access. Returns the grapheme at the given index.".
+-doc """
+1-based grapheme access. Returns the grapheme at the given index.
+
+BT-3021: mirrors `beamtalk_list:at/2` — indexing an empty String is
+`empty_collection`, any other out-of-range index is `index_out_of_bounds`. An
+index below 1 is malformed whether or not the String is empty, so that clause
+is reached first (it is listed last, but `Idx >= 1` excludes it above).
+""".
 -spec at(binary(), integer()) -> binary().
+at(<<>>, Idx) when is_integer(Idx), Idx >= 1 ->
+    raise_empty('at:');
 at(Str, Idx) when is_binary(Str), is_integer(Idx), Idx >= 1 ->
     case get_nth_grapheme(Str, Idx) of
         {ok, Grapheme} ->
@@ -94,17 +103,19 @@ BT-3021: raises `empty_collection` on `""` (see `first/1`).
 last(<<>>) ->
     raise_empty('last');
 last(Str) when is_binary(Str) ->
-    %% `string:reverse/1` is grapheme-aware, so the head of the reversed string
-    %% is the final grapheme cluster — not the final byte or code point.
-    case string:next_grapheme(string:reverse(Str)) of
-        [Grapheme | _Rest] -> unicode:characters_to_binary([Grapheme]);
-        [] -> raise_empty('last')
+    %% `string:slice/3` is grapheme-aware, so this is the final grapheme cluster
+    %% — not the final byte or code point. Preferred over reversing the string:
+    %% both are O(n) to traverse, but `string:reverse/1` also allocates a full
+    %% reversed copy just to read one grapheme off the front.
+    case string:slice(Str, string:length(Str) - 1, 1) of
+        <<>> -> raise_empty('last');
+        Grapheme -> unicode:characters_to_binary(Grapheme)
     end.
 
 -doc "Raise `empty_collection` for an accessor called on an empty String.".
 -spec raise_empty(atom()) -> no_return().
 raise_empty(Selector) ->
-    Hint = <<"String is empty — guard with `isEmpty` before indexing">>,
+    Hint = <<"String is empty; guard with `isEmpty` before indexing">>,
     beamtalk_error:raise(beamtalk_error:new(empty_collection, 'String', Selector, Hint)).
 
 -doc "Capitalize the first grapheme, keep rest unchanged.".

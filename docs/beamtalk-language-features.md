@@ -4651,9 +4651,16 @@ no element to answer, and `nil` would be indistinguishable from a stored `nil`:
 #() last                   // raises empty_collection
 #() at: 1                  // raises empty_collection
 "" first                   // raises empty_collection
+"" at: 1                   // raises empty_collection
+(Array withAll: #()) at: 1 // raises empty_collection
+(Binary fromBytes: #()) at: 1   // raises empty_collection
 (1 to: 0) first            // raises empty_collection
 #() max                    // raises empty_collection (also min, average)
 ```
+
+`Queue` predates this kind and keeps its own `empty_queue` for compatibility,
+but classifies as a `RuntimeError` like the rest of the family, so a single
+`on: RuntimeError do:` covers both.
 
 `empty_collection` is a `RuntimeError`, so it can be caught on its own —
 crucially, *separately* from a genuine typo, which raises

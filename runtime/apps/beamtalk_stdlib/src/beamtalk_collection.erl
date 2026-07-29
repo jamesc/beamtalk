@@ -146,7 +146,7 @@ always yields `user_error` — so collection classes written in Beamtalk (e.g.
 raiseEmpty(Class, Selector) ->
     Hint = iolist_to_binary([
         atom_to_binary(Class, utf8),
-        <<" is empty — guard with `isEmpty` before calling `">>,
+        <<" is empty; guard with `isEmpty` before calling `">>,
         atom_to_binary(Selector, utf8),
         <<"`">>
     ]),

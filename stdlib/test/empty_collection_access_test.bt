@@ -74,6 +74,17 @@ TestCase subclass: EmptyCollectionAccessTest
   testStringLastOnEmptyRaisesEmptyCollection =>
     self should: ["" last] raise: #empty_collection
 
+  // `String at:` mirrors `List at:`: empty is empty_collection, out-of-range
+  // is index_out_of_bounds, and a sub-1 index is malformed either way.
+  testStringAtOnEmptyRaisesEmptyCollection =>
+    self should: ["" at: 1] raise: #empty_collection
+
+  testStringAtBeyondLengthRaisesIndexOutOfBounds =>
+    self should: ["abc" at: 9] raise: #index_out_of_bounds
+
+  testEmptyStringAtZeroRaisesIndexOutOfBounds =>
+    self should: ["" at: 0] raise: #index_out_of_bounds
+
   testStringFirstReturnsFirstGrapheme => self assert: "hello" first equals: "h"
 
   testStringLastReturnsLastGrapheme => self assert: "hello" last equals: "o"
@@ -86,6 +97,31 @@ TestCase subclass: EmptyCollectionAccessTest
   testStringFirstOnSingleCharacterString =>
     self assert: "x" first equals: "x"
     self assert: "x" last equals: "x"
+
+  // ==========================================================================
+  // Array — at: agrees with List and String
+  // ==========================================================================
+
+  // `Array withAll: #()` — Array has no `new`, only `withAll:` / `new:`.
+  testArrayAtOnEmptyRaisesEmptyCollection =>
+    self should: [(Array withAll: #()) at: 1] raise: #empty_collection
+
+  testArrayAtBeyondSizeRaisesIndexOutOfBounds =>
+    self should: [(Array withAll: #(1, 2, 3)) at: 9] raise: #index_out_of_bounds
+
+  testEmptyArrayAtZeroRaisesIndexOutOfBounds =>
+    self should: [(Array withAll: #()) at: 0] raise: #index_out_of_bounds
+
+  // ==========================================================================
+  // Queue — predates empty_collection and keeps its own kind, but classifies
+  // as RuntimeError like the rest of the family
+  // ==========================================================================
+  testQueuePeekOnEmptyStillRaisesEmptyQueue =>
+    self should: [Queue new peek] raise: #empty_queue
+
+  testEmptyQueueIsCatchableAsRuntimeError =>
+    caught := [Queue new peek] on: RuntimeError do: [:e | "caught"]
+    self assert: caught equals: "caught"
 
   // ==========================================================================
   // Interval — pure-Beamtalk collection, same kind via the Erlang helper

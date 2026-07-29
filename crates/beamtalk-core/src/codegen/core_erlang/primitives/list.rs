@@ -41,7 +41,7 @@ fn generate_list_access_bif(selector: &str, params: &[String]) -> Option<Documen
                 "empty_collection",
                 "List",
                 "first",
-                "List is empty — guard with `isEmpty` or use `detect:ifNone:`",
+                "List is empty; guard with `isEmpty` or use `detect:ifNone:`",
             );
             Some(docvec![
                 "case Self of \
@@ -67,7 +67,7 @@ fn generate_list_access_bif(selector: &str, params: &[String]) -> Option<Documen
                 "empty_collection",
                 "List",
                 "last",
-                "List is empty — guard with `isEmpty` or use `detect:ifNone:`",
+                "List is empty; guard with `isEmpty` or use `detect:ifNone:`",
             );
             Some(docvec![
                 "case Self of \

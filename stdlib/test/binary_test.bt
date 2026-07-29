@@ -247,9 +247,19 @@ TestCase subclass: BinaryTest
     bin := Binary fromBytes: #(1, 2, 3)
     self should: [bin at: 0] raise: #index_out_of_bounds
 
+  // BT-3021: indexing an empty collection is `empty_collection`, not
+  // `index_out_of_bounds` — the latter is reserved for an index that misses a
+  // populated receiver. Note an empty Binary and an empty String are the same
+  // term (`<<>>`), which classifies as String, so this actually dispatches to
+  // String's `at:`; `beamtalk_binary:at/2` raises the same kind so the result
+  // does not depend on that.
   testAtOnEmptyBinary =>
     bin := Binary fromBytes: #()
-    self should: [bin at: 1] raise: #index_out_of_bounds
+    self should: [bin at: 1] raise: #empty_collection
+
+  testAtBeyondSizeOnBinaryIsOutOfBounds =>
+    bin := Binary fromBytes: #(104, 105)
+    self should: [bin at: 9] raise: #index_out_of_bounds
 
   // ═══════════════════════════════════════════════════════════════════
   // Byte access: byteAt: (0-based) — Binary-only, not overridden
