@@ -31,7 +31,15 @@ BT-419: Created as part of Array→List rename and compiled stdlib migration.
     reverse_group_values/1
 ]).
 
--doc "Access element at 1-based index with bounds checking.".
+-doc """
+Access element at 1-based index with bounds checking.
+
+BT-3021: three distinct failures, three distinct kinds — a non-integer index is
+a `type_error`, indexing an empty List is `empty_collection`, and any other
+out-of-range index is `index_out_of_bounds` (matching `Array`/`String` `at:`).
+None of them is `does_not_understand`: the List understands `at:` perfectly
+well, so reporting a dispatch failure would send the reader hunting for a typo.
+""".
 -spec at(list(), term()) -> term().
 at(List, N) when is_list(List), not is_integer(N) ->
     Hint = iolist_to_binary(
@@ -39,25 +47,32 @@ at(List, N) when is_list(List), not is_integer(N) ->
     ),
     beamtalk_error:raise_type_error('List', 'at:', Hint);
 at(List, N) when is_list(List), is_integer(N), N =< 0 ->
-    Hint = iolist_to_binary(
-        io_lib:format("Index ~p is out of bounds (must be >= 1)", [N])
-    ),
-    beamtalk_error:raise(beamtalk_error:new(does_not_understand, 'List', 'at:', Hint));
+    %% An index below 1 is malformed whether or not the List is empty, so this
+    %% is checked before the emptiness clause.
+    raise_out_of_bounds(N, <<" (must be >= 1)">>);
+at([], _N) ->
+    raise_empty('at:');
 at(List, N) when is_list(List), is_integer(N), N >= 1 ->
     try
         lists:nth(N, List)
     catch
-        error:badarg ->
-            Hint = iolist_to_binary(
-                io_lib:format("Index ~p is out of bounds", [N])
-            ),
-            beamtalk_error:raise(beamtalk_error:new(does_not_understand, 'List', 'at:', Hint));
-        error:function_clause ->
-            Hint = iolist_to_binary(
-                io_lib:format("Index ~p is out of bounds", [N])
-            ),
-            beamtalk_error:raise(beamtalk_error:new(does_not_understand, 'List', 'at:', Hint))
+        error:badarg -> raise_out_of_bounds(N, <<>>);
+        error:function_clause -> raise_out_of_bounds(N, <<>>)
     end.
+
+-doc "Raise `empty_collection` for an accessor called on an empty List.".
+-spec raise_empty(atom()) -> no_return().
+raise_empty(Selector) ->
+    Hint = <<"List is empty; guard with `isEmpty` before indexing">>,
+    beamtalk_error:raise(beamtalk_error:new(empty_collection, 'List', Selector, Hint)).
+
+-doc "Raise `index_out_of_bounds` for an in-range-shaped but out-of-range index.".
+-spec raise_out_of_bounds(integer(), binary()) -> no_return().
+raise_out_of_bounds(N, Suffix) ->
+    Hint = iolist_to_binary(
+        io_lib:format("Index ~p is out of bounds~s", [N, Suffix])
+    ),
+    beamtalk_error:raise(beamtalk_error:new(index_out_of_bounds, 'List', 'at:', Hint)).
 
 -doc "Find first element matching block, error if not found.".
 -spec detect(list(), function()) -> term().

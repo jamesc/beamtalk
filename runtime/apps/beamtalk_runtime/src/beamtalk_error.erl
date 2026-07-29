@@ -328,6 +328,19 @@ generate_message(type_error, Class, undefined) ->
     iolist_to_binary(io_lib:format("Type error in ~s", [Class]));
 generate_message(type_error, Class, Selector) ->
     iolist_to_binary(io_lib:format("Type error in '~s' on ~s", [Selector, Class]));
+%% BT-3021: empty-collection access is a distinct condition from a dispatch
+%% failure — the receiver understands the selector, it just has no element to
+%% answer. Naming it lets `on:do:` discriminate it from a genuine typo.
+generate_message(empty_collection, Class, undefined) ->
+    iolist_to_binary(io_lib:format("~s is empty", [Class]));
+generate_message(empty_collection, Class, Selector) ->
+    %% Selector is quoted because keyword selectors already end in `:` —
+    %% an unquoted `at:` would render as `at:: List is empty`.
+    iolist_to_binary(io_lib:format("'~s': ~s is empty", [Selector, Class]));
+generate_message(index_out_of_bounds, Class, undefined) ->
+    iolist_to_binary(io_lib:format("Index out of bounds for ~s", [Class]));
+generate_message(index_out_of_bounds, Class, Selector) ->
+    iolist_to_binary(io_lib:format("'~s': index out of bounds for ~s", [Selector, Class]));
 generate_message(actor_dead, Class, undefined) ->
     iolist_to_binary(io_lib:format("~s actor process has terminated", [Class]));
 generate_message(actor_dead, Class, Selector) ->

@@ -244,10 +244,22 @@ at_type_error_not_integer_test() ->
         beamtalk_binary:at(<<"hello">>, <<"1">>)
     ).
 
+%% BT-3021: indexing an empty Binary is `empty_collection`, matching the other
+%% collection `at:` implementations.
 at_empty_binary_error_test() ->
     ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = index_out_of_bounds}},
+        #{
+            '$beamtalk_class' := 'RuntimeError',
+            error := #beamtalk_error{kind = empty_collection, class = 'Binary', selector = at}
+        },
         beamtalk_binary:at(<<>>, 1)
+    ).
+
+%% An index below 1 is malformed either way, so it stays index_out_of_bounds.
+at_empty_binary_zero_index_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = index_out_of_bounds}},
+        beamtalk_binary:at(<<>>, 0)
     ).
 
 %%% ============================================================================

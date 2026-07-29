@@ -20,8 +20,8 @@ Erlang helpers.
 
 BT-2695: Provides the numeric aggregates `sum/1`, `maximum/1`, `minimum/1`,
 and `average/1` — backing the `@primitive` `sum`/`max`/`min`/`average` on
-Collection. They fold over `to_list/1`; `max`/`min`/`average` raise a
-user_error on an empty collection.
+Collection. They fold over `to_list/1`; `max`/`min`/`average` raise
+`empty_collection` on an empty collection (BT-3021).
 """.
 
 -export([
@@ -33,6 +33,12 @@ user_error on an empty collection.
     sum/1,
     to_list/1
 ]).
+
+%% Explicit `(Erlang beamtalk_collection) raiseEmpty: ... selector: ...` FFI
+%% dispatch, not @primitive — see docs/beamtalk-native-erlang.md "The naming
+%% rule": the function name is the first keyword with its colon removed, no
+%% case conversion, hence camelCase.
+-export([raiseEmpty/2]).
 
 %%% ============================================================================
 %%% Public API
@@ -79,7 +85,7 @@ sum(Self) ->
 Return the largest element using Erlang's native term ordering (`>`), not a
 dispatched Beamtalk `>` message.
 
-Backs `@primitive "max"` on Collection. Raises a user_error on an empty
+Backs `@primitive "max"` on Collection. Raises `empty_collection` on an empty
 collection — there is no sensible maximum of nothing.
 """.
 -spec maximum(term()) -> term().
@@ -93,7 +99,7 @@ maximum(Self) ->
 Return the smallest element using Erlang's native term ordering (`<`), not a
 dispatched Beamtalk `<` message.
 
-Backs `@primitive "min"` on Collection. Raises a user_error on an empty
+Backs `@primitive "min"` on Collection. Raises `empty_collection` on an empty
 collection.
 """.
 -spec minimum(term()) -> term().
@@ -106,8 +112,8 @@ minimum(Self) ->
 -doc """
 Return the mean of the elements as a float.
 
-Backs `@primitive "average"` on Collection. Raises a user_error on an empty
-collection.
+Backs `@primitive "average"` on Collection. Raises `empty_collection` on an
+empty collection.
 """.
 -spec average(term()) -> float().
 average(Self) ->
@@ -116,14 +122,35 @@ average(Self) ->
         List -> lists:sum(List) / length(List)
     end.
 
+%% BT-3021: `empty_collection`, not `user_error` — this is the same condition as
+%% `#() first`, and callers need to discriminate it from an arbitrary
+%% `self error:` raised by user code inside the same `on:do:` block.
 -spec raise_empty(atom()) -> no_return().
 raise_empty(Selector) ->
-    Error0 = beamtalk_error:new(user_error, 'Collection'),
+    Error0 = beamtalk_error:new(empty_collection, 'Collection'),
     Error1 = beamtalk_error:with_selector(Error0, Selector),
     Hint = iolist_to_binary([
         <<"Cannot compute ">>, atom_to_binary(Selector, utf8), <<" of an empty collection">>
     ]),
     beamtalk_error:raise(beamtalk_error:with_hint(Error1, Hint)).
+
+-doc """
+Raise `empty_collection` naming `Class` and `Selector`.
+
+BT-3021: pure Beamtalk has no way to raise a *named* error kind — `self error:`
+always yields `user_error` — so collection classes written in Beamtalk (e.g.
+`Interval`) call this to report empty-collection access with the same kind the
+`@primitive` accessors on `List`/`String` raise.
+""".
+-spec raiseEmpty(atom(), atom()) -> no_return().
+raiseEmpty(Class, Selector) ->
+    Hint = iolist_to_binary([
+        atom_to_binary(Class, utf8),
+        <<" is empty; guard with `isEmpty` before calling `">>,
+        atom_to_binary(Selector, utf8),
+        <<"`">>
+    ]),
+    beamtalk_error:raise(beamtalk_error:new(empty_collection, Class, Selector, Hint)).
 
 -doc """
 Reconstruct a `collect:`/`select:`/`reject:` result so its type matches the

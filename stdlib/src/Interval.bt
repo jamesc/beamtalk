@@ -50,23 +50,40 @@ typed Collection subclass: Interval
 
   /// First element of the interval.
   ///
+  /// Raises `empty_collection` if the interval is empty, matching
+  /// `List first` / `String first`.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// (1 to: 10) first     // => 1
   /// ```
+  ///
+  /// BT-3021: the FFI spec types both params `atom()` (i.e. `Symbol`), and a
+  /// symbol literal is a *singleton* type (`#first`). `check_ffi_argument_types`
+  /// accepts a union of singletons against a `Symbol` param (BT-2846) but
+  /// compares a lone singleton by name equality, so `#first` warns — suppress.
+  @expect type
   first -> Integer =>
-    self isEmpty ifTrue: [self error: "Interval is empty"] ifFalse: [self.from]
+    self isEmpty ifTrue: [
+      (Erlang beamtalk_collection) raiseEmpty: #Interval selector: #first
+    ] ifFalse: [self.from]
 
   /// Last element of the interval.
+  ///
+  /// Raises `empty_collection` if the interval is empty (see `first`).
   ///
   /// ## Examples
   /// ```beamtalk
   /// (1 to: 10) last      // => 10
   /// (1 to: 10 by: 3) last  // => 10
   /// ```
+  ///
+  /// BT-3021: `@expect type` for the same singleton-vs-`Symbol` FFI reason as
+  /// `first` above.
+  @expect type
   last -> Integer =>
     self isEmpty ifTrue: [
-      self error: "Interval is empty"
+      (Erlang beamtalk_collection) raiseEmpty: #Interval selector: #last
     ] ifFalse: [self.from + ((self size - 1) * self.step)]
 
   /// Materialise the interval into a `List` of its elements (ADR 0095 §6 — the

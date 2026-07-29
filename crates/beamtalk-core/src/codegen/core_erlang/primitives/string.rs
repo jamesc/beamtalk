@@ -16,8 +16,10 @@ pub(crate) fn generate_string_bif(selector: &str, params: &[String]) -> Option<D
         // Comparison (ADR 0002: Erlang operators)
         "=:=" | "/=" | "=/=" | "<" | ">" | "<=" | ">=" => generate_comparison_bif(selector, params),
         // Concatenation, length, access, case, whitespace, reverse
-        "++" | "," | "length" | "at:" | "uppercase" | "lowercase" | "capitalize" | "trim"
-        | "trimLeft" | "trimRight" | "reverse" => generate_string_transform_bif(selector, params),
+        "++" | "," | "length" | "at:" | "first" | "last" | "uppercase" | "lowercase"
+        | "capitalize" | "trim" | "trimLeft" | "trimRight" | "reverse" => {
+            generate_string_transform_bif(selector, params)
+        }
         // Search, splitting, replace, substring, padding
         "includes:" | "startsWith:" | "endsWith:" | "indexOf:" | "split:" | "splitOn:"
         | "repeat:" | "lines" | "words" | "replaceAll:with:" | "replaceFirst:with:" | "take:"
@@ -47,6 +49,10 @@ fn generate_string_transform_bif(selector: &str, params: &[String]) -> Option<Do
         ]),
         "length" => Some(Document::Str("call 'string':'length'(Self)")),
         "at:" => Some(call_self_p0("beamtalk_string", "at", p0)),
+        // BT-3021: grapheme-aware element accessors; both raise
+        // `empty_collection` on `""`, matching `List first`/`last`.
+        "first" => Some(Document::Str("call 'beamtalk_string':'first'(Self)")),
+        "last" => Some(Document::Str("call 'beamtalk_string':'last'(Self)")),
         "uppercase" => Some(Document::Str(
             "call 'unicode':'characters_to_binary'(call 'string':'uppercase'(Self))",
         )),

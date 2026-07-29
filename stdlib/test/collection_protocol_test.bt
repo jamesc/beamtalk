@@ -118,9 +118,11 @@ TestCase subclass: CollectionProtocolTest
     self assert: (#() count: [:x | x > 0]) equals: 0
     // noneSatisfy: on empty is vacuously true
     self assert: (#() noneSatisfy: [:x | x > 0])
-    self should: [#() max] raise: #user_error
-    self should: [#() min] raise: #user_error
-    self should: [#() average] raise: #user_error
+    // BT-3021: these raise `empty_collection`, not the generic `user_error` —
+    // same kind as `#() first`, so one `on:do:` clause catches the family.
+    self should: [#() max] raise: #empty_collection
+    self should: [#() min] raise: #empty_collection
+    self should: [#() average] raise: #empty_collection
 
   testEachWithIndexInheritedFromCollection =>
     // List inherits eachWithIndex: from Collection: 1-based index paired
