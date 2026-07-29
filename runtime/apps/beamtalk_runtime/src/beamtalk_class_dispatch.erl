@@ -85,10 +85,62 @@ class_send(ClassPid, 'spawnWith:', [Map]) ->
 %% explicit clauses because they must route to the gen_server's {new, _} / {spawn, _}
 %% handlers, not to class_method_call. Moving them to the Behaviour/Class chain
 %% is future work (ADR 0032 Phase 4+).
+%% BT-3018: every other selector aimed at the class's own gen_server from
+%% inside that gen_server. `gen_server:call(self(), ...)` does not hang — it
+%% exits with `{calling_self, {gen_server, call, [...]}}`, a raw tuple that
+%% says nothing about what the caller did wrong. The commonest way to get here
+%% is a block running inside a class method that messages its own class:
+%%
+%%     File open: p mode: #read do: [:h | File exists: q]
+%%
+%% Report it the way BT-2005's `handle_metaclass_self_call/2` already reports
+%% the metaclass equivalent. No working path changes: the alternative was an
+%% exit, not a successful call.
+class_send(ClassPid, Selector, _Args) when ClassPid =:= self() ->
+    handle_class_self_call(Selector);
 class_send(ClassPid, Selector, Args) ->
     class_send_with_recovery(ClassPid, Selector, fun(P) ->
         class_send_dispatch(P, Selector, Args)
     end).
+
+-doc """
+Report a class-method self-send that would deadlock (BT-3018).
+
+The four instantiation selectors are short-circuited above; anything else
+sent to a class from inside that class's own process has no safe route, so
+raise a structured `dispatch_error` naming the deadlock instead of letting
+`gen_server:call/2` exit with an opaque `calling_self` tuple.
+""".
+-spec handle_class_self_call(selector()) -> no_return().
+handle_class_self_call(Selector) ->
+    ClassName =
+        case get(beamtalk_class_name) of
+            undefined -> 'the class';
+            CN -> CN
+        end,
+    Error0 = beamtalk_error:new(dispatch_error, ClassName, Selector),
+    %% Built with atom_to_binary rather than io_lib:format on purpose. A badarg
+    %% escaping from *inside* error construction is especially nasty here: the
+    %% FFI boundary treats it as a genuine badarg, retries the whole call with
+    %% charlist-coerced arguments, and the caller ends up seeing an unrelated
+    %% type_error from whichever guard the coerced arguments happen to miss.
+    Error1 = beamtalk_error:with_hint(
+        Error0,
+        iolist_to_binary([
+            <<"Sending '">>,
+            atom_to_binary(Selector, utf8),
+            <<"' to '">>,
+            atom_to_binary(ClassName, utf8),
+            <<
+                "' from inside one of its own class methods would deadlock "
+                "(gen_server:call to self). This usually means a block passed to a "
+                "class method is messaging that same class again — read what you "
+                "need before the call, or hold the resource yourself instead of "
+                "using the block form."
+            >>
+        ])
+    ),
+    beamtalk_error:raise(Error1).
 
 -doc """
 BT-2007: Dispatch an inherited class method from inside a class method body.

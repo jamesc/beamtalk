@@ -331,3 +331,31 @@ TestCase subclass: FileHandleIoTest
       mode: #append
       do: [:h | h write: payload]
     self assert: (File readBinary: "target/bt-test-tmp/handle_binwrite.dat") unwrap equals: "x"
+
+  // === BT-3018: messaging File from inside an open block is diagnosed ===
+  testNestedFileSendRaisesDispatchError =>
+    File writeAll: "target/bt-test-tmp/handle_nested.txt" contents: "x"
+    self
+      should: [
+        File open: "target/bt-test-tmp/handle_nested.txt" do: [:h |
+          File exists: "target/bt-test-tmp/handle_nested.txt"
+        ]
+      ]
+      raise: #dispatch_error
+
+  testNestedFileSendNamesTheDeadlock =>
+    File writeAll: "target/bt-test-tmp/handle_nested2.txt" contents: "x"
+    caught := [
+      File
+        open: "target/bt-test-tmp/handle_nested2.txt"
+        mode: #read
+        do: [:h | File exists: "target/bt-test-tmp/handle_nested2.txt"]
+      nil
+    ] on: Error do: [:e | e printString]
+    self assert: (caught includesSubstring: "deadlock")
+    self assert: (caught includesSubstring: "File")
+
+  testPlainBlockUnaffectedByTheGuard =>
+    File writeAll: "target/bt-test-tmp/handle_plain.txt" contents: "x"
+    result := File open: "target/bt-test-tmp/handle_plain.txt" do: [:h | 42]
+    self assert: result unwrap equals: 42
