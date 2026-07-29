@@ -831,15 +831,29 @@ open_do_type_error_non_block_test() ->
     ).
 
 open_do_closes_on_exception_test() ->
-    %% Verify the handle is closed even if the block raises
+    %% The handle is closed even if the block raises. The raise has to escape
+    %% the handle by message first — a raising block has no return value to
+    %% carry it out — otherwise this would only assert that the error
+    %% propagates, which is not the same claim. Mirrors
+    %% open_mode_do_closes_handle_on_exception_test/0.
+    Self = self(),
     with_temp_file("_bt_test_open_exc.txt", <<"data\n">>, fun() ->
         ?assertError(
             test_exception,
             beamtalk_file:'open:do:'(
                 <<"_bt_test_open_exc.txt">>,
-                fun(_Handle) -> error(test_exception) end
+                fun(Handle) ->
+                    Self ! {handle, Handle},
+                    error(test_exception)
+                end
             )
-        )
+        ),
+        Handle =
+            receive
+                {handle, H} -> H
+            after 5000 -> error(timeout)
+            end,
+        ?assertNot(beamtalk_file_handle:isOpen(Handle))
     end).
 
 open_do_block_return_value_test() ->

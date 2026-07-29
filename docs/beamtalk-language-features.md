@@ -4907,19 +4907,15 @@ A handle from `open:mode:` is yours to close. Its descriptor is not tied to the
 calling process, so an unclosed handle stays open for the lifetime of the node
 — reach for `open:mode:do:` whenever a block scope will do.
 
-**Keep open blocks short.** The block of `open:do:` and `open:mode:do:` runs
-inside the `File` class, so it must not send another message to `File` (that
-deadlocks), it serializes every other `File` call in the system behind it, and
-it has to finish within the 60-second class-call timeout. Long write loops
-belong behind `open:mode:`, which releases the class as soon as it returns:
+**Open blocks run in your own process.** `open:do:` and `open:mode:do:` are
+lowered at the call site (ADR 0109), so only the open itself touches the `File`
+class — the block, and the close that follows it, run where you called from.
+A block may therefore message `File` again, holds no shared resource, and is
+under no time limit:
 
 ```beamtalk
-// Deadlocks — File exists: is sent while File is running the block
+// Fine — the block is running in your process, not inside File
 File open: "a.txt" mode: #read do: [:h | File exists: "b.txt"]
-
-// Fine — the other File call happens outside the block
-other := File exists: "b.txt"
-File open: "a.txt" mode: #read do: [:h | h readAll]
 ```
 
 #### Side-Effect Timing ⚠️
