@@ -239,7 +239,7 @@ enum Command {
 
         /// Output format for lint diagnostics
         #[arg(long, default_value = "text")]
-        format: commands::lint::OutputFormat,
+        format: commands::OutputFormat,
     },
 
     /// Manage workspaces (list, stop, status, attach, transcript, logs, create)
@@ -391,7 +391,7 @@ enum Command {
 
         /// Output format (text or json)
         #[arg(long, default_value = "text")]
-        format: commands::type_coverage::OutputFormat,
+        format: commands::OutputFormat,
 
         /// Exit non-zero if total coverage < N% (CI ratchet)
         #[arg(long)]
