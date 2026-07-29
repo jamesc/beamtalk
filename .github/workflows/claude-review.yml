@@ -77,7 +77,10 @@ jobs:
           # Config-only PRs get the cheaper Haiku model; anything touching code OR docs
           # (incl. ADRs under docs/, whose review is valuable) stays on Sonnet. Unknown
           # extensions default to Sonnet — never silently downgrade a substantive change.
-          model='claude-sonnet-4-6'
+          # Sonnet 5 uses a new tokenizer (~30% more tokens for the same text than
+          # Sonnet 4.6) — the pre-computed diffs and -U20 context above are what keep
+          # that in check, so don't widen them without re-checking review cost.
+          model='claude-sonnet-5'
           files="$(git diff --name-only "${FULL_RANGE}")"
           # A file is "config" if it matches this pattern. If grep finds any changed file
           # that does NOT match (and is non-empty), the PR touches code/docs → Sonnet.
