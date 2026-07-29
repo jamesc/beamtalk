@@ -3437,45 +3437,60 @@ mod tests {
     /// share the name, and must keep reaching its own implementation.
     #[test]
     fn block_scoped_file_open_is_lowered_only_for_unqualified_file() {
-        fn lower(package: Option<&str>) -> String {
+        /// Lowers `[package@]File <keywords>` with one argument per keyword.
+        fn lower(package: Option<&str>, keywords: &[&str]) -> String {
             let mut generator = CoreErlangGenerator::new("test");
             let receiver = Expression::ClassReference {
                 name: Identifier::new("File", s()),
                 package: package.map(|p| Identifier::new(p, s())),
                 span: s(),
             };
-            let selector = MessageSelector::Keyword(vec![
-                KeywordPart::new("open:", s()),
-                KeywordPart::new("do:", s()),
-            ]);
-            let arguments = [
-                Expression::Literal(Literal::String("f.txt".into()), s()),
-                Expression::Identifier(Identifier::new("blk", s())),
-            ];
+            let selector = MessageSelector::Keyword(
+                keywords.iter().map(|k| KeywordPart::new(*k, s())).collect(),
+            );
+            let arguments: Vec<_> = keywords
+                .iter()
+                .map(|k| Expression::Identifier(Identifier::new(k.trim_end_matches(':'), s())))
+                .collect();
             generator
                 .generate_message_send(&receiver, &selector, &arguments)
                 .unwrap()
                 .to_pretty_string()
         }
 
-        let unqualified = lower(None);
-        assert!(
-            unqualified.contains("'native_call'(")
-                && unqualified.contains("'beamtalk_file'")
-                && unqualified.contains("'open:do:'"),
-            "unqualified File open:do: should lower to a native_call in the caller. Got: {unqualified}"
-        );
-        assert!(
-            !unqualified.contains("class_send"),
-            "the block must not reach the class gen_server. Got: {unqualified}"
-        );
+        // Both intercepted selectors, so dropping either from the `matches!`
+        // list fails here rather than silently reintroducing the deadlock.
+        for keywords in [&["open:", "do:"][..], &["open:", "mode:", "do:"][..]] {
+            let selector_atom = keywords.concat();
 
-        let qualified = lower(Some("mylib"));
-        assert!(
-            !qualified.contains("'beamtalk_file'"),
-            "mylib@File is a different class and must not be redirected to the \
-             stdlib File shim. Got: {qualified}"
-        );
+            let unqualified = lower(None, keywords);
+            assert!(
+                unqualified.contains("'native_call'(")
+                    && unqualified.contains("'beamtalk_file'")
+                    && unqualified.contains(&format!("'{selector_atom}'")),
+                "unqualified File {selector_atom} should lower to a native_call in the \
+                 caller. Got: {unqualified}"
+            );
+            assert!(
+                !unqualified.contains("class_send"),
+                "the block must not reach the class gen_server. Got: {unqualified}"
+            );
+
+            // A package-qualified receiver keeps the ordinary class-send path:
+            // asserted positively, so an empty or otherwise-shaped lowering
+            // cannot pass by merely lacking the stdlib module name.
+            let qualified = lower(Some("mylib"), keywords);
+            assert!(
+                !qualified.contains("'beamtalk_file'"),
+                "mylib@File {selector_atom} is a different class and must not be \
+                 redirected to the stdlib File shim. Got: {qualified}"
+            );
+            assert!(
+                qualified.contains("class_send"),
+                "mylib@File {selector_atom} should fall through to a normal class \
+                 send. Got: {qualified}"
+            );
+        }
     }
 
     #[test]

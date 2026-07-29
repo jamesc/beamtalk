@@ -322,8 +322,6 @@ TestCase subclass: FileHandleIoTest
 
   testWriteAcceptsBinaryData =>
     File delete: "target/bt-test-tmp/handle_binwrite.dat"
-    // Read the payload before opening — a File send from inside the block
-    // would deadlock, since the block runs in the File class process.
     File writeAll: "target/bt-test-tmp/handle_binwrite_src.txt" contents: "x"
     payload := (File readBinary: "target/bt-test-tmp/handle_binwrite_src.txt") unwrap
     File
@@ -364,3 +362,37 @@ TestCase subclass: FileHandleIoTest
     File writeAll: "target/bt-test-tmp/handle_plain.txt" contents: "x"
     result := File open: "target/bt-test-tmp/handle_plain.txt" do: [:h | 42]
     self assert: result unwrap equals: 42
+
+  // === The handle is closed however the block leaves ===
+  // ADR 0109 asked for this because it expected two lowering paths. There is
+  // only one `try … after close end` per selector — in `beamtalk_file`'s
+  // `'open:do:'/2` and `'open:mode:do:'/3` — and the intercepted call site
+  // reaches it through the `open/2,3` shims that dynamic dispatch also uses.
+  // These cover the intercepted path end to end; beamtalk_file_tests covers
+  // the dynamic entry points directly.
+  testHandleIsClosedWhenTheBlockReturns =>
+    File writeAll: "target/bt-test-tmp/handle_close_ok.txt" contents: "x"
+    escaped := (File open: "target/bt-test-tmp/handle_close_ok.txt" do: [:h |
+      h
+    ]) unwrap
+    self deny: escaped isOpen
+
+  testHandleIsClosedWhenTheBlockRaises =>
+    File writeAll: "target/bt-test-tmp/handle_close_raise.txt" contents: "abc"
+    // A raising block cannot return the handle, so stash it in the process
+    // dictionary on the way past. That is an FFI call rather than a captured
+    // variable, so the block stays capture-free — and it lands in *this*
+    // process precisely because ADR 0109 runs the block here.
+    self
+      should: [
+        File
+          open: "target/bt-test-tmp/handle_close_raise.txt"
+          mode: #read
+          do: [:h |
+            (Erlang erlang) put: #btHandleCloseProbe value: h
+            h read: -1
+          ]
+      ]
+      raise: #type_error
+    escaped := (Erlang erlang) get: #btHandleCloseProbe
+    self deny: escaped isOpen
