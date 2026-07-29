@@ -793,7 +793,7 @@ attach_telemetry_handlers() ->
     ),
     ok.
 
--doc "Detach telemetry handlers on shutdown (safe if telemetry not loaded).".
+-doc "Detach telemetry handlers on shutdown (safe if telemetry not loaded or handler table not running).".
 detach_telemetry_handlers() ->
     try
         telemetry:detach(beamtalk_trace_store_dispatch_stop),
@@ -804,7 +804,8 @@ detach_telemetry_handlers() ->
         telemetry:detach(beamtalk_trace_store_lifecycle_kill),
         telemetry:detach(beamtalk_trace_store_vm_measurements)
     catch
-        error:undef -> ok
+        error:undef -> ok;
+        exit:{noproc, _} -> ok
     end,
     ok.
 
