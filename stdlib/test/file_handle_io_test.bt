@@ -396,3 +396,18 @@ TestCase subclass: FileHandleIoTest
       raise: #type_error
     escaped := (Erlang erlang) get: #btHandleCloseProbe
     self deny: escaped isOpen
+
+  // The dynamic path is deliberately *not* intercepted (ADR 0109, "Not in
+  // scope"): `perform:` reaches `open:do:` through the class gen_server, so the
+  // block still runs there and a nested `File` send still fails. Part 1's
+  // `class_send` self-call guard is what turns that into a structured
+  // dispatch_error rather than an opaque `calling_self` exit. Pinned here so
+  // the gap between the two paths stays a decision rather than a surprise.
+  testPerformOpenDoStillRunsInTheClassProcess =>
+    File writeAll: "target/bt-test-tmp/handle_perform.txt" contents: "x"
+    nested := [:h | File exists: "target/bt-test-tmp/handle_perform.txt"]
+    self
+      should: [
+        File perform: #open:do: withArguments: #("target/bt-test-tmp/handle_perform.txt", nested)
+      ]
+      raise: #dispatch_error
