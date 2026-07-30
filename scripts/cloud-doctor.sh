@@ -98,6 +98,12 @@ if (( IN_CLOUD )); then
     else
       warn "hex-bridge reported no upstream — busy, wedged, or predates /__bridge/status"
     fi
+  elif (( BRIDGE_UP )); then
+    # No curl to ask with. Say so, so a later fetch failure blames the missing
+    # probe rather than the bridge — "did not report an upstream" would be true
+    # but point at the wrong thing.
+    BRIDGE_UPSTREAM="unknown"
+    warn "cannot read hex-bridge wiring — curl not installed"
   fi
   # Env wiring that routes BEAM package managers through the bridge.
   if [[ "${HEX_CDN:-}" == http://127.0.0.1:* ]]; then ok "HEX_CDN → bridge"
@@ -162,6 +168,10 @@ else
               "")
                 note "the bridge is up but did not report an upstream — restart it:"
                 note "  kill \$(lsof -t -i:${BP}) && just build"
+                ;;
+              unknown)
+                note "could not ask the bridge how it is wired (no curl), so its upstream"
+                note "is unverified — read its startup line, or install curl and re-run."
                 ;;
               *)
                 note "the bridge is up and tunnelling via ${BRIDGE_UPSTREAM}; that upstream"

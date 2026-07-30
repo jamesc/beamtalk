@@ -66,6 +66,16 @@ STATUS_PATH = "/__bridge/status"
 # "direct" means the environment named nothing usable — not that the first
 # variable set happened to hold junk.  (A proxy URL with an https:// scheme
 # parses fine but is not supported: the CONNECT below is sent in the clear.)
+#
+# On precedence: this bridge always talks HTTPS, so by the usual convention
+# HTTPS_PROXY is the semantically apt variable and would arguably deserve to
+# win.  HTTP_PROXY is kept first deliberately — BT-3030 requires unchanged
+# behaviour wherever it is set, and the older authenticated-proxy sandbox
+# (mode 1 in .claude/hooks/worktree-init.sh) is keyed on HTTP_PROXY carrying
+# credentials that its HTTPS_PROXY may not.  The two are identical in every
+# environment we run in, so the order is moot there; where a site really does
+# point them at different proxies, `just doctor` prints which variable won, so
+# a wrong pick is visible rather than silent.
 _PROXY_VARS = ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy")
 
 
