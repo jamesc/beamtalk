@@ -42,6 +42,35 @@ TestCase subclass: ListLookupErrorKindsTest
     ] on: RuntimeError do: [:e | "caught"]
     self assert: caught equals: "caught"
 
+  // The point of the fix: `e kind` now tells a no-match apart from a genuine
+  // misspelled selector, which both reported as #does_not_understand before.
+  // The typo goes via `perform:`, since a literal `detekt:` on a typed List is
+  // rejected at compile time and never reaches the runtime.
+  testDetectKindDiscriminatesFromATypo =>
+    noMatch := [
+      #(1, 2, 3) detect: [:x | x > 10]
+    ] on: RuntimeError do: [:e | e kind]
+    typo := [
+      #(1, 2, 3) perform: #detekt: withArguments: #(1)
+    ] on: RuntimeError do: [:e | e kind]
+    self assert: noMatch equals: #not_found
+    self assert: typo equals: #does_not_understand
+    self deny: noMatch == typo
+
+  testFromToKindIsIndexOutOfBounds =>
+    badIndex := [#(1, 2, 3) from: -1 to: 2] on: RuntimeError do: [:e | e kind]
+    self assert: badIndex equals: #index_out_of_bounds
+
+  // `beamtalk_error:format/1` runs a DNU-only enrichment pass that overwrites
+  // the hint with a "did you mean a class-side message?" suggestion. Off the
+  // does_not_understand branch, the hint we actually set survives to the user.
+  testDetectHintPointsAtDetectIfNone =>
+    hint := [
+      #(1, 2, 3) detect: [:x | x > 10]
+    ] on: RuntimeError do: [:e | e hint]
+    self assert: (hint includesSubstring: "detect:ifNone:")
+    self deny: (hint includesSubstring: "class-side message")
+
   testDetectStillAnswersTheFirstMatch =>
     self assert: (#(1, 2, 3) detect: [:x | x > 1]) equals: 2
 
