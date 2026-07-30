@@ -89,6 +89,10 @@ kind_to_class(empty_collection) -> 'RuntimeError';
 %% Error, so `on: Error do:` still catches it; `on: RuntimeError do:` now does
 %% too, making the family uniform.
 kind_to_class(empty_queue) -> 'RuntimeError';
+%% BT-3025: a search that completed but matched nothing (`detect:`). Distinct
+%% from `empty_collection` — the collection may be full, just of non-matches —
+%% and from `key_error`, which names a *key* the receiver was asked for.
+kind_to_class(not_found) -> 'RuntimeError';
 kind_to_class(class_not_found) -> 'RuntimeError';
 kind_to_class(no_superclass) -> 'RuntimeError';
 kind_to_class(class_already_exists) -> 'RuntimeError';

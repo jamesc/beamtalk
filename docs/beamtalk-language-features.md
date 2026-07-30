@@ -4720,6 +4720,35 @@ again, and raises `index_out_of_bounds`:
 #(1, 2, 3) at: 0           // raises index_out_of_bounds (index < 1 is malformed)
 ```
 
+### Lookups That Find Nothing
+
+A lookup on a *non-empty* collection can still fail, and each way it fails gets
+its own kind ([BT-3025](https://linear.app/beamtalk/issue/BT-3025)). None of
+them is `does_not_understand` — the receiver understands the selector, so
+reporting a dispatch failure would send the reader hunting for a typo.
+
+**`List detect:` raises `not_found`** when the search runs to completion with
+no element matching. `detect:ifNone:` is the non-raising alternative:
+
+```beamtalk
+#(1, 2, 3) detect: [:x | x > 10]            // raises not_found
+#(1, 2, 3) detect: [:x | x > 10] ifNone: [0] // => 0
+```
+
+**`List from:to:` raises `index_out_of_bounds`** for a start index below 1,
+matching `at:`. Its other edge cases stay total — an end below the start is an
+empty range, and an end past the last index is clamped:
+
+```beamtalk
+#(1, 2, 3) from: 0 to: 2   // raises index_out_of_bounds
+#(1, 2, 3) from: 3 to: 1   // => #()  (empty range, not an error)
+#(1, 2, 3) from: 2 to: 99  // => #(2, 3)  (clamped)
+```
+
+`not_found` is a `RuntimeError`, like `empty_collection` and
+`index_out_of_bounds`, so `on: RuntimeError do:` catches the whole family and
+`e kind` discriminates within it.
+
 ### Interval — Arithmetic Sequences
 
 An `Interval` represents an arithmetic sequence of integers without materialising a list. Create one with `to:` or `to:by:` on any `Integer`:

@@ -57,12 +57,6 @@ typed Collection subclass: Interval
   /// ```beamtalk
   /// (1 to: 10) first     // => 1
   /// ```
-  ///
-  /// BT-3021: the FFI spec types both params `atom()` (i.e. `Symbol`), and a
-  /// symbol literal is a *singleton* type (`#first`). `check_ffi_argument_types`
-  /// accepts a union of singletons against a `Symbol` param (BT-2846) but
-  /// compares a lone singleton by name equality, so `#first` warns — suppress.
-  @expect type
   first -> Integer =>
     self isEmpty ifTrue: [
       (Erlang beamtalk_collection) raiseEmpty: #Interval selector: #first
@@ -77,10 +71,6 @@ typed Collection subclass: Interval
   /// (1 to: 10) last      // => 10
   /// (1 to: 10 by: 3) last  // => 10
   /// ```
-  ///
-  /// BT-3021: `@expect type` for the same singleton-vs-`Symbol` FFI reason as
-  /// `first` above.
-  @expect type
   last -> Integer =>
     self isEmpty ifTrue: [
       (Erlang beamtalk_collection) raiseEmpty: #Interval selector: #last

@@ -242,8 +242,14 @@ abstract typed Value subclass: Collection(E)
 
   /// Find the first element for which `block` returns true.
   ///
-  /// Returns nil if no element matches. Uses `^` (non-local return) for
-  /// early exit — this compiles to throw/catch on BEAM.
+  /// This generic implementation returns nil if no element matches. `List`
+  /// overrides it with a primitive that instead raises `not_found`, because
+  /// its return type is `E` rather than `E | Nil` — so on a List, a
+  /// no-match is an error, not a nil answer. `detect:ifNone:` is the
+  /// non-raising alternative on either receiver.
+  ///
+  /// Uses `^` (non-local return) for early exit — this compiles to
+  /// throw/catch on BEAM.
   ///
   /// ## Examples
   /// ```beamtalk

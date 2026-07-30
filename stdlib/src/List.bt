@@ -151,6 +151,10 @@ sealed typed Collection(E) subclass: List(E)
 
   /// Find the first element for which `block` returns true.
   ///
+  /// Raises `not_found` if no element matches — the return type is `E`, so
+  /// there is no in-band way to say "nothing matched". Use `detect:ifNone:`
+  /// when a default is wanted; it is the non-raising alternative.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// #(1, 2, 3) detect: [:x | x > 1]   // => 2
@@ -289,6 +293,10 @@ sealed typed Collection(E) subclass: List(E)
   printString -> String => @primitive
 
   /// Return a subsequence from `start` to `end` (1-based, inclusive).
+  ///
+  /// Raises `index_out_of_bounds` if `start` is below 1, matching `at:`. An
+  /// `end` below `start` is an empty range rather than an error, and an `end`
+  /// past the last index is clamped.
   ///
   /// ## Examples
   /// ```beamtalk

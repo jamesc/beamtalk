@@ -74,17 +74,22 @@ raise_out_of_bounds(N, Suffix) ->
     ),
     beamtalk_error:raise(beamtalk_error:new(index_out_of_bounds, 'List', 'at:', Hint)).
 
--doc "Find first element matching block, error if not found.".
+-doc """
+Find first element matching block, error if not found.
+
+BT-3025: raises `not_found` when no element matches. It used to raise
+`does_not_understand`, which claimed the List had no `detect:` at all and sent
+readers hunting for a typo. Use `detect:ifNone:` for the non-raising form.
+""".
 -spec detect(list(), function()) -> term().
 detect(List, Block) when is_list(List), is_function(Block, 1) ->
     case detect_helper(Block, List) of
         {ok, Found} ->
             Found;
         not_found ->
+            Hint = <<"No element matched the block; use `detect:ifNone:` to supply a default">>,
             beamtalk_error:raise(
-                beamtalk_error:new(
-                    does_not_understand, 'List', 'detect:', <<"No element matched the block">>
-                )
+                beamtalk_error:new(not_found, 'List', 'detect:', Hint)
             )
     end;
 detect(List, Block) when is_list(List) ->
@@ -214,7 +219,13 @@ intersperse([], _Sep) -> [];
 intersperse([X], _Sep) -> [X];
 intersperse([H | T], Sep) -> [H, Sep | intersperse(T, Sep)].
 
--doc "Extract subsequence from Start to End (1-based, inclusive).".
+-doc """
+Extract subsequence from Start to End (1-based, inclusive).
+
+BT-3025: a start index below 1 raises `index_out_of_bounds`, matching `at/2`.
+It used to raise `does_not_understand`, which reported a malformed index as a
+dispatch failure. An `End` below `Start` is an empty range, not an error.
+""".
 -spec from_to(list(), term(), term()) -> list().
 from_to(List, Start, End) when
     is_list(List),
@@ -247,7 +258,7 @@ from_to(List, Start, _End) when is_list(List), is_integer(Start), Start < 1 ->
     Hint = iolist_to_binary(
         io_lib:format("Start index ~p is out of bounds (must be >= 1)", [Start])
     ),
-    beamtalk_error:raise(beamtalk_error:new(does_not_understand, 'List', 'from:to:', Hint)).
+    beamtalk_error:raise(beamtalk_error:new(index_out_of_bounds, 'List', 'from:to:', Hint)).
 
 %% Internal helpers
 
