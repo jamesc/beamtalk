@@ -1453,7 +1453,7 @@ field_change_note(ClassNameBin, {retyped, Name, OldType, NewType}, AmbiguousWith
     OtherNamesBin = retyped_names_bin(AmbiguousWith),
     <<"state field `", Name/binary, "` retyped by the reload of ", ClassNameBin/binary, " (",
         OldType/binary, " -> ", NewType/binary,
-        ") — ambiguous: could also be caused by the retyping of ", OtherNamesBin/binary>>.
+        "); ambiguous: could also be caused by the retyping of ", OtherNamesBin/binary>>.
 
 -spec retyped_names_bin([shape_field_change()]) -> binary().
 retyped_names_bin(FieldChanges) ->

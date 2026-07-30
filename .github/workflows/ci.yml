@@ -114,7 +114,10 @@ jobs:
         # On Windows, fmt-check skips Erlang/JS checks (platform-agnostic, Linux covers them).
         # lint-workaround-comments (BT-2347 ratchet) is a no-op on Windows and enforces
         # the same allowlist gate here that `just ci` enforces locally (BT-2841).
-        run: just build clippy fmt-check test-rust lint-workaround-comments
+        # lint-binary-literal-encoding (BT-3026) likewise no-ops on Windows; it rejects
+        # non-ASCII in Erlang binary literals lacking /utf8, which the compiler silently
+        # truncates to a control character.
+        run: just build clippy fmt-check test-rust lint-workaround-comments lint-binary-literal-encoding
 
       - name: Surface parity drift check (BT-2082)
         # Verifies REPL ops × CLI × MCP × LSP coverage matches

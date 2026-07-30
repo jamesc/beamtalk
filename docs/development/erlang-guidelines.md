@@ -494,6 +494,35 @@ to the tag are not recognized by the spec reader.
 <<First:8, Rest/binary>> = <<"hello">>
 ```
 
+#### Keep binary literals ASCII (BT-3026)
+
+Binary literals have **byte** semantics. A non-ASCII character is silently
+truncated to its low 8 bits — no compiler warning — so the mangled text reaches
+the user:
+
+```erlang
+%% ❌ WRONG - U+2014 truncates to 0x14, a DC4 control character
+<<"List is empty — guard with `isEmpty` before indexing">>
+
+%% ✅ RIGHT - ASCII; use `;` where an em-dash joined two clauses
+<<"List is empty; guard with `isEmpty` before indexing">>
+
+%% ✅ RIGHT - /utf8 when the character is genuinely needed (arrows, test data)
+<<"Actor → Inspector"/utf8>>
+```
+
+Prefer ASCII for error messages and hints: they are also consumed by tests, the
+JSON protocol, and log backends. Reach for `/utf8` only when the character
+carries meaning that ASCII cannot (the inspector's `→`/`↩`, Unicode test
+fixtures).
+
+Plain (non-binary) strings are unaffected — they are lists of codepoints, so
+`?LOG_ERROR("a — b")` and `-doc "a — b"` are fine.
+
+`just lint-binary-literal-encoding` enforces this across all tracked Erlang
+sources. It tokenises with `erl_scan` rather than grepping, so it sees through
+comments, escapes, and binaries spanning multiple lines.
+
 ### Exception Handling
 
 ```erlang

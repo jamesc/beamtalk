@@ -369,7 +369,7 @@ terminate_child_stale_handle(SupClass) ->
             stale_handle,
             SupClass,
             'terminateChild:',
-            <<"supervisor is not running — the handle is stale">>
+            <<"supervisor is not running; the handle is stale">>
         )}.
 
 %% Shared outcome dispatcher for both static and dynamic terminateChild paths.
@@ -1074,7 +1074,7 @@ stale_handle_error(ClassName, Selector) ->
         stale_handle,
         ClassName,
         Selector,
-        <<"supervisor is not running — the handle is stale">>
+        <<"supervisor is not running; the handle is stale">>
     ),
     {error, Error}.
 

@@ -134,7 +134,7 @@ handle_class_self_call(Selector) ->
             <<
                 "' from inside one of its own class methods would deadlock "
                 "(gen_server:call to self). This usually means a block passed to a "
-                "class method is messaging that same class again — read what you "
+                "class method is messaging that same class again; read what you "
                 "need before the call, or hold the resource yourself instead of "
                 "using the block form."
             >>

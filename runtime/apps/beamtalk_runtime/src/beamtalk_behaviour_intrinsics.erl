@@ -636,7 +636,7 @@ classRemoveFromSystemByName(ClassName) ->
                                 iolist_to_binary([
                                     <<"Cannot remove class '">>,
                                     atom_to_binary(ClassName, utf8),
-                                    <<"' — it has subclasses">>
+                                    <<"'; it has subclasses">>
                                 ])
                             ),
                             Error2 = beamtalk_error:with_hint(
@@ -681,7 +681,7 @@ classReload(Self) ->
             Error0 = beamtalk_error:new(no_source_file, ClassName),
             Msg = iolist_to_binary([
                 atom_to_binary(ClassName, utf8),
-                <<" has no source file — stdlib classes cannot be reloaded">>
+                <<" has no source file; stdlib classes cannot be reloaded">>
             ]),
             beamtalk_error:raise(beamtalk_error:with_message(Error0, Msg));
         SourcePath ->
@@ -729,7 +729,7 @@ classReload(Self) ->
                     beamtalk_error:raise(
                         beamtalk_error:with_message(
                             Error0,
-                            <<"Workspace not available — reload requires a running workspace">>
+                            <<"Workspace not available; reload requires a running workspace">>
                         )
                     )
             end
@@ -801,7 +801,7 @@ do_compile_source(Self, Selector, Source, Intent) ->
                 beamtalk_error:with_message(
                     Error0,
                     <<
-                        "Workspace not available — live method editing requires a "
+                        "Workspace not available; live method editing requires a "
                         "running workspace"
                     >>
                 )
@@ -858,7 +858,7 @@ classPrecheckCompileSource(Self, Selector, Source) ->
                 beamtalk_error:with_message(
                     Error0,
                     <<
-                        "Workspace not available — pre-save precheck requires a "
+                        "Workspace not available; pre-save precheck requires a "
                         "running workspace"
                     >>
                 )

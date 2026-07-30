@@ -423,7 +423,7 @@ closed_error_record(Handle, Selector) ->
     Error2 = beamtalk_error:with_message(Error1, <<"FileHandle is closed">>),
     Error3 = beamtalk_error:with_details(Error2, #{path => path_of(Handle)}),
     beamtalk_error:with_hint(
-        Error3, <<"The handle was already closed — reopen it with 'File open:mode:'">>
+        Error3, <<"The handle was already closed; reopen it with 'File open:mode:'">>
     ).
 
 -spec mode_error(map(), atom(), mode(), binary()) -> beamtalk_result:t().

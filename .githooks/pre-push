@@ -59,6 +59,13 @@ stamp_matches() {
 echo "🔍 Running lint-rust..."
 just lint-rust
 
+# Non-ASCII in Erlang binary literals is silently truncated to a control
+# character (BT-3026). Unstamped: it covers *.escript as well as *.erl/*.hrl,
+# and at ~1s it is cheap enough to run every push rather than track a fourth
+# fingerprint.
+echo "🔍 Running lint-binary-literal-encoding..."
+just lint-binary-literal-encoding
+
 ERLANG_FP="$(fingerprint '*.erl' '*.hrl')"
 if stamp_matches "$ERLANG_STAMP" "$ERLANG_FP"; then
   echo "⏭️  lint-erlang: no Erlang changes since last lint, skipping"

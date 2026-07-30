@@ -455,7 +455,7 @@ raise_url_decode_error() ->
     Error1 = beamtalk_error:with_selector(Error0, 'urlDecoded'),
     Error2 = beamtalk_error:with_hint(
         Error1,
-        <<"Malformed percent-encoding — a '%' must be followed by two hex digits">>
+        <<"Malformed percent-encoding; a '%' must be followed by two hex digits">>
     ),
     beamtalk_error:raise(Error2).
 
