@@ -33,6 +33,49 @@ TestCase subclass: ClassDrivenCollectionTest
   testClassDrivenDoesNotInclude =>
     self deny: ((ClassDrivenCollection of: #(1, 2, 3)) includes: 9)
 
+  // --- every inherited `^`-through-do: method, both arms ------------------
+
+  // `includes:` is not the only one: detect:, detect:ifNone:, anySatisfy: and
+  // allSatisfy: all escape their do: block with `^`, and allSatisfy: escapes on
+  // the *false* arm. Each relies on the non-local return crossing back out of
+  // the class process.
+  testClassDrivenDetectFound =>
+    self assert: ((ClassDrivenCollection of: #(1, 2, 3)) detect: [:x |
+      x > 1
+    ]) equals: 2
+
+  testClassDrivenDetectNotFound =>
+    self assert: ((ClassDrivenCollection of: #(1, 2, 3)) detect: [:x |
+      x > 9
+    ]) equals: nil
+
+  testClassDrivenDetectIfNone =>
+    c := ClassDrivenCollection of: #(1, 2, 3)
+    self assert: (c detect: [:x | x > 9] ifNone: [0]) equals: 0
+
+  testClassDrivenAnySatisfy =>
+    c := ClassDrivenCollection of: #(1, 2, 3)
+    self assert: (c anySatisfy: [:x | x > 2])
+    self deny: (c anySatisfy: [:x | x > 9])
+
+  testClassDrivenAllSatisfy =>
+    c := ClassDrivenCollection of: #(2, 4, 6)
+    self assert: (c allSatisfy: [:x | x isEven])
+    self deny: (c allSatisfy: [:x | x > 4])
+
+  // --- the fold-based inherited methods -----------------------------------
+  testClassDrivenCollect =>
+    c := ClassDrivenCollection of: #(1, 2, 3)
+    self assert: (c collect: [:x | x * 2]) equals: #(2, 4, 6)
+
+  testClassDrivenSelect =>
+    c := ClassDrivenCollection of: #(1, 2, 3, 4)
+    self assert: (c select: [:x | x isEven]) equals: #(2, 4)
+
+  testClassDrivenReject =>
+    c := ClassDrivenCollection of: #(1, 2, 3, 4)
+    self assert: (c reject: [:x | x isEven]) equals: #(1, 3)
+
   // --- iteration started from inside another class process ----------------
   testAsListFromInsideAClassMethod =>
     self assert: (CollectionProbe asListOf: #(1, 2, 3)) equals: #(1, 2, 3)
@@ -42,6 +85,9 @@ TestCase subclass: ClassDrivenCollectionTest
 
   testIncludesFromInsideAClassMethod =>
     self assert: (CollectionProbe includes: 2 in: #(1, 2, 3))
+
+  testNonLocalReturnThroughClassHeldInVariable =>
+    self assert: (CollectionProbe firstOver: #(1, 2, 3)) equals: 2
 
   // --- re-entrant: the iteration sends back to the running class process ---
 
@@ -59,3 +105,22 @@ TestCase subclass: ClassDrivenCollectionTest
       CollectionDriver reentrantAsListOf: #(1, 2, 3)
     ] on: Exception do: [:e | e selector]
     self assert: selector equals: #run:over:
+
+  // --- nesting: an inner to_list running inside the outer one's block ------
+
+  // The outer block runs in ClassDrivenCollection's class process, so the inner
+  // `asList` sets up its accumulator *there* and drains that process's mailbox
+  // mid-gen_server-callback. Distinct refs must keep the two from eating each
+  // other's elements, and neither may disturb the class process's own queue.
+  testNestedClassDrivenIteration =>
+    outer := ClassDrivenCollection of: #(1, 2)
+    self assert: (outer collect: [:x |
+      (ClassDrivenCollection of: #(x, x)) asList
+    ]) equals: #(#(1, 1), #(2, 2))
+
+  testNestedClassDrivenInjectAcrossProcesses =>
+    outer := ClassDrivenCollection of: #(1, 2, 3)
+    total := outer inject: 0 into: [:acc :x |
+      acc + (ClassDrivenCollection of: #(x, x)) sum
+    ]
+    self assert: total equals: 12

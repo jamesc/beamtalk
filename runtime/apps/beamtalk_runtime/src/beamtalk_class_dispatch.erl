@@ -490,6 +490,22 @@ metaclass_send_dispatch(Pid, Selector, Args, Self) ->
             %% metaclass-dispatched class method as the script-exit throw (parity
             %% with class_send_dispatch/3), so the worker adopts the status.
             throw(ScriptExit);
+        {error, Nlr} when ?IS_NLR(Nlr) ->
+            %% BT-3022: same relay as class_send_dispatch/3, and for the same
+            %% reason — a metaclass-dispatched class method also runs in the class
+            %% gen_server, so a `^` out of a caller-supplied block unwinds to here
+            %% with no frame holding its token. Without this clause
+            %% `unwrap_class_call/1` reraises it as an ordinary error and the raw
+            %% `{'$bt_nlr', ...}` tuple reaches user code.
+            %%
+            %% Carried by parity with the `beamtalk_script_exit` clause directly
+            %% above, which faces the identical problem at this identical site.
+            %% Not covered by a test: no Beamtalk source shape tried so far
+            %% (`SomeClass`, `SomeClass class`, `anInstance class`) routes a
+            %% block-taking class method through here rather than through
+            %% `class_send/3` — see BT-3031. Harmless if the path is in fact
+            %% dead: it only intercepts a shape that would otherwise leak.
+            throw(Nlr);
         Other ->
             unwrap_class_call(Other)
     end.

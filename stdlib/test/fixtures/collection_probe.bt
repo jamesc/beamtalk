@@ -16,3 +16,11 @@ Value subclass: CollectionProbe
 
   class includes: x :: Integer in: aList :: List -> Boolean =>
     (ClassDrivenCollection of: aList) includes: x
+
+  // BT-3022: reaches the driver through a class held in a *variable*. The `^`
+  // belongs to this method's frame, so the non-local return still has to cross
+  // back out of CollectionDriver's class process.
+  class firstOver: aList :: List -> Integer =>
+    k := CollectionDriver
+    k run: [:x | x > 1 ifTrue: [^x]] over: aList
+    0
