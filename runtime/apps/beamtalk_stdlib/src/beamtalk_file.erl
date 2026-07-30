@@ -583,7 +583,7 @@ check_regular(PathStr, Selector, Path) ->
                 beamtalk_error:with_hint(
                     Error3,
                     <<
-                        "File handles are for regular files — a directory, FIFO or device "
+                        "File handles are for regular files; a directory, FIFO or device "
                         "cannot be read to end-of-file"
                     >>
                 )}
@@ -1079,7 +1079,7 @@ open(_Path, _Other) ->
     %% anyone reading the record's selector field. The message names both.
     Error0 = beamtalk_error:new(type_error, 'File'),
     Error1 = beamtalk_error:with_message(
-        Error0, <<"File 'open:' — second argument is neither a Block nor a mode Symbol">>
+        Error0, <<"File 'open:': second argument is neither a Block nor a mode Symbol">>
     ),
     beamtalk_error:raise(
         beamtalk_error:with_hint(

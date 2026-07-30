@@ -1355,7 +1355,7 @@ actor_eval_unsupported_error() ->
         actor_eval_unsupported,
         'Inspector',
         'evaluate:',
-        <<"evaluate: runs against values; actor evaluate-in-context is not in v1 — drill with at:">>
+        <<"evaluate: runs against values; actor evaluate-in-context is not in v1; drill with at:">>
     ).
 
 %% A value `evaluate:` whose expression failed to compile or evaluate.

@@ -269,7 +269,7 @@ lookup_in_class_chain(Selector, Args, Self, State, ClassName) ->
                     does_not_understand,
                     ClassName,
                     Selector,
-                    <<"Hierarchy depth limit exceeded — possible cycle in class hierarchy">>
+                    <<"Hierarchy depth limit exceeded; possible cycle in class hierarchy">>
                 )};
         not_found ->
             %% Unreachable: class_chain_step/6 always resolves to

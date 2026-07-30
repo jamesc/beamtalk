@@ -995,8 +995,8 @@ field_change_note_retyped_unambiguous_names_the_field_test() ->
 
 field_change_note_retyped_with_ambiguous_candidates_renders_all_names_test() ->
     ?assertEqual(
-        <<"state field `count` retyped by the reload of ReCheckCounter (Integer -> String) ",
-            "— ambiguous: could also be caused by the retyping of `label`, `flag`">>,
+        <<"state field `count` retyped by the reload of ReCheckCounter (Integer -> String)",
+            "; ambiguous: could also be caused by the retyping of `label`, `flag`">>,
         beamtalk_recheck:field_change_note(
             <<"ReCheckCounter">>,
             {retyped, <<"count">>, <<"Integer">>, <<"String">>},

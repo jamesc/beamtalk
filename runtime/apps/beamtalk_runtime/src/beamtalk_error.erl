@@ -429,7 +429,7 @@ maybe_enrich_dnu_hint(#beamtalk_error{class = Class, selector = Selector} = Erro
             Hint = iolist_to_binary([
                 <<"'">>,
                 SelBin,
-                <<"' is a class-side message — use 'class ">>,
+                <<"' is a class-side message; use 'class ">>,
                 SelBin,
                 <<"' to send it to an instance's class">>
             ]),

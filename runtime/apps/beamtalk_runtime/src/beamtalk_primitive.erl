@@ -717,7 +717,7 @@ their slots in the underlying map and support read-only reflection (BT-924).
 """.
 -spec is_ivar_method(atom()) -> {true, binary()} | false.
 is_ivar_method('fieldAt:put:') ->
-    {true, <<"Cannot modify slot on value type — use withSlot: to create a new instance">>};
+    {true, <<"Cannot modify slot on value type; use withSlot: to create a new instance">>};
 is_ivar_method(_) ->
     false.
 

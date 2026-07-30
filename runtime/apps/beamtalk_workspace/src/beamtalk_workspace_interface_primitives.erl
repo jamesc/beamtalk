@@ -371,7 +371,7 @@ revert_method(ClassNameBin, SelectorBin) when
                         },
                         #{domain => [beamtalk, runtime]}
                     ),
-                    {error, revert_state_error(<<"revert: internal error — see node logs">>)}
+                    {error, revert_state_error(<<"revert: internal error; see node logs">>)}
             end;
         error ->
             %% No atom exists for this selector, so no method by that name has
@@ -384,7 +384,7 @@ revert_method(ClassNameBin, SelectorBin) when
                         ClassNameBin,
                         <<">>">>,
                         SelectorBin,
-                        <<" — nothing to revert">>
+                        <<"; nothing to revert">>
                     ])
                 )}
     end.
@@ -434,7 +434,7 @@ extract_revert_target_from_map(M) ->
             {error,
                 revert_type_error(
                     <<
-                        "revert: ChangeEntry is missing className/selector fields — pass an "
+                        "revert: ChangeEntry is missing className/selector fields; pass an "
                         "entry obtained from `Workspace changes do:` or `select:`"
                     >>
                 )}
@@ -464,7 +464,7 @@ do_revert(ClassNameBin, SelectorAtom) ->
                         ClassNameBin,
                         <<">>">>,
                         atom_to_binary(SelectorAtom, utf8),
-                        <<" — nothing to revert">>
+                        <<"; nothing to revert">>
                     ])
                 )
             );
@@ -495,7 +495,7 @@ revert_side(Other) ->
             iolist_to_binary([
                 <<"revert: cannot revert a ">>,
                 atom_to_binary(Other, utf8),
-                <<" entry as a method patch — use `Workspace changes clear` to discard it">>
+                <<" entry as a method patch; use `Workspace changes clear` to discard it">>
             ])
         )
     ).
@@ -896,7 +896,7 @@ do_start_supervisor(ClassName, Module) ->
                     raise_start_supervisor_error(
                         iolist_to_binary([
                             NameBin,
-                            <<" is already running — stop it first, then attach to the workspace">>
+                            <<" is already running; stop it first, then attach to the workspace">>
                         ])
                     )
             end;

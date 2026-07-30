@@ -100,7 +100,7 @@ send({beamtalk_supervisor, ClassName, _Module, Pid} = _Self, stop, []) ->
                 runtime_error,
                 ClassName,
                 stop,
-                <<"supervisor is not running — the handle is stale">>
+                <<"supervisor is not running; the handle is stale">>
             ),
             beamtalk_exception_handler:reraise(Error)
     end;
@@ -238,7 +238,7 @@ reraise_actor_dead(ClassName, Selector) ->
         actor_dead,
         ClassName,
         Selector,
-        <<"Actor process is not available — class may not be fully registered">>
+        <<"Actor process is not available; class may not be fully registered">>
     ),
     beamtalk_exception_handler:reraise(Error).
 

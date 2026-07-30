@@ -330,7 +330,7 @@ format_metaclass_docs() ->
         <<"== Metaclass ==\n">>,
         <<"The terminal sentinel of the class hierarchy.\n\n">>,
         <<"Every class object is an instance of its metaclass, and every metaclass\n">>,
-        <<"is an instance of Metaclass. Metaclass is its own class — the tower\n">>,
+        <<"is an instance of Metaclass. Metaclass is its own class; the tower\n">>,
         <<"terminates here.\n\n">>,
         <<"Common class-side methods:\n">>,
         <<"  new              Create a new instance\n">>,
@@ -855,7 +855,7 @@ format_see_also(Entries) ->
     Lines = [
         case Desc of
             <<>> -> iolist_to_binary([<<"  ">>, atom_to_binary(Name, utf8)]);
-            _ -> iolist_to_binary([<<"  ">>, atom_to_binary(Name, utf8), <<" — ">>, Desc])
+            _ -> iolist_to_binary([<<"  ">>, atom_to_binary(Name, utf8), <<" - ">>, Desc])
         end
      || {Name, Desc} <- Entries
     ],
