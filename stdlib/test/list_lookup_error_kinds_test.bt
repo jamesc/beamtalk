@@ -13,6 +13,10 @@
 // These are the sibling conditions to the empty-collection ones covered in
 // `empty_collection_access_test.bt` (BT-3021) — neither of these receivers is
 // empty.
+//
+// This file is about the *kinds* a List reports. That the other collections
+// report the same kind for a `detect:` no-match is BT-3028, covered in
+// `collection_detect_parity_test.bt`.
 
 TestCase subclass: ListLookupErrorKindsTest
 

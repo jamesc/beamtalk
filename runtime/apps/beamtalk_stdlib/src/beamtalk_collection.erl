@@ -38,7 +38,7 @@ Collection. They fold over `to_list/1`; `max`/`min`/`average` raise
 %% dispatch, not @primitive — see docs/beamtalk-native-erlang.md "The naming
 %% rule": the function name is the first keyword with its colon removed, no
 %% case conversion, hence camelCase.
--export([raiseEmpty/2]).
+-export([raiseEmpty/2, raiseDetectNotFound/1]).
 
 %%% ============================================================================
 %%% Public API
@@ -151,6 +151,23 @@ raiseEmpty(Class, Selector) ->
         <<"`">>
     ]),
     beamtalk_error:raise(beamtalk_error:new(empty_collection, Class, Selector, Hint)).
+
+-doc """
+Raise `not_found` for a `detect:` that ran to completion without matching.
+
+BT-3028: `Collection>>detect:` answers `E`, so there is no in-band way to say
+"nothing matched" — it raises, matching the `@primitive` `List>>detect:`. Pure
+Beamtalk cannot raise a *named* kind (`self error:` always yields `user_error`),
+so the generic implementation calls this. `Class` is the receiver's own class,
+so a `Set` reports `Set`, not the abstract `Collection` the method lives on.
+
+The hint deliberately matches `beamtalk_list:detect/2`'s, so a no-match reads
+the same whichever collection raised it.
+""".
+-spec raiseDetectNotFound(atom()) -> no_return().
+raiseDetectNotFound(Class) ->
+    Hint = <<"No element matched the block; use `detect:ifNone:` to supply a default">>,
+    beamtalk_error:raise(beamtalk_error:new(not_found, Class, 'detect:', Hint)).
 
 -doc """
 Reconstruct a `collect:`/`select:`/`reject:` result so its type matches the

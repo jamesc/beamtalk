@@ -1,0 +1,148 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for `detect:` no-match parity across the collections (BT-3028).
+//
+// `detect:` used to mean two different things depending on the receiver's
+// class. `List` overrode it with a primitive that raises `not_found`, while
+// every collection that did *not* override it — Set, Bag, Dictionary,
+// Interval — inherited a `Collection>>detect:` that answered nil, and
+// `Stream>>detect:` was a third variant that also answered nil. Swapping a Set
+// for a List at a call site silently turned a raise into a nil that flowed on
+// and failed somewhere unrelated.
+//
+// They all raise now: the declared return type is `E`, which has no in-band
+// way to say "nothing matched". `detect:ifNone:` is the non-raising
+// alternative, and it exists on all of them.
+//
+// The per-kind wording and the discrimination from `does_not_understand` live
+// in `list_lookup_error_kinds_test.bt` (BT-3025); this file is only about the
+// receivers agreeing with each other.
+
+TestCase subclass: CollectionDetectParityTest
+
+  // ==========================================================================
+  // No match raises `not_found` — same kind on every receiver
+  // ==========================================================================
+  testListDetectNoMatchRaisesNotFound =>
+    self should: [#(1, 2, 3) detect: [:x | x > 10]] raise: #not_found
+
+  testSetDetectNoMatchRaisesNotFound =>
+    self should: [#(1, 2, 3) asSet detect: [:x | x > 10]] raise: #not_found
+
+  testIntervalDetectNoMatchRaisesNotFound =>
+    self should: [(1 to: 3) detect: [:x | x > 10]] raise: #not_found
+
+  testBagDetectNoMatchRaisesNotFound =>
+    self should: [
+      (Bag withAll: #(1, 2, 3)) detect: [:x | x > 10]
+    ] raise: #not_found
+
+  // Dictionary iterates its values, so the predicate sees 1/2/3.
+  testDictionaryDetectNoMatchRaisesNotFound =>
+    self should: [
+      #{#a => 1, #b => 2, #c => 3} detect: [:v | v > 10]
+    ] raise: #not_found
+
+  testStreamDetectNoMatchRaisesNotFound =>
+    self should: [
+      (Stream on: #(1, 2, 3)) detect: [:n | n > 10]
+    ] raise: #not_found
+
+  // The kinds are equal, not merely all-raising — a caller switching receiver
+  // types keeps whatever `on:do:` discrimination it had.
+  testDetectNoMatchKindIsIdenticalAcrossReceivers =>
+    listKind := [
+      #(1, 2, 3) detect: [:x | x > 10]
+    ] on: RuntimeError do: [:e | e kind]
+    setKind := [
+      #(1, 2, 3) asSet detect: [:x | x > 10]
+    ] on: RuntimeError do: [:e | e kind]
+    intervalKind := [
+      (1 to: 3) detect: [:x | x > 10]
+    ] on: RuntimeError do: [:e | e kind]
+    streamKind := [
+      (Stream on: #(1, 2, 3)) detect: [:n | n > 10]
+    ] on: RuntimeError do: [:e | e kind]
+    self assert: listKind equals: #not_found
+    self assert: setKind equals: listKind
+    self assert: intervalKind equals: listKind
+    self assert: streamKind equals: listKind
+
+  // An empty receiver is the degenerate no-match case, not `empty_collection`:
+  // `detect:` is a search, not an element accessor.
+  testEmptyReceiversRaiseNotFoundRatherThanEmptyCollection =>
+    self should: [#() detect: [:x | x > 0]] raise: #not_found
+    self should: [#() asSet detect: [:x | x > 0]] raise: #not_found
+    self should: [(Stream on: #()) detect: [:x | x > 0]] raise: #not_found
+
+  // The error names the receiver's own class, not the abstract `Collection`
+  // the inherited implementation is defined on.
+  testDetectErrorNamesTheReceiverClass =>
+    setClass := [
+      #(1, 2, 3) asSet detect: [:x | x > 10]
+    ] on: RuntimeError do: [:e | e errorClass asString]
+    intervalClass := [
+      (1 to: 3) detect: [:x | x > 10]
+    ] on: RuntimeError do: [:e | e errorClass asString]
+    self assert: setClass equals: "Set"
+    self assert: intervalClass equals: "Interval"
+
+  // The hint is the same sentence whichever receiver raised, so the fix is
+  // signposted identically.
+  testDetectHintPointsAtDetectIfNoneOnEveryReceiver =>
+    listHint := [
+      #(1, 2, 3) detect: [:x | x > 10]
+    ] on: RuntimeError do: [:e | e hint]
+    setHint := [
+      #(1, 2, 3) asSet detect: [:x | x > 10]
+    ] on: RuntimeError do: [:e | e hint]
+    streamHint := [
+      (Stream on: #(1, 2, 3)) detect: [:n | n > 10]
+    ] on: RuntimeError do: [:e | e hint]
+    self assert: (listHint includesSubstring: "detect:ifNone:")
+    self assert: setHint equals: listHint
+    self assert: streamHint equals: listHint
+
+  // ==========================================================================
+  // A match still answers the element — the total cases stay total
+  // ==========================================================================
+  testDetectAnswersTheMatchOnEveryReceiver =>
+    self assert: (#(1, 2, 3) detect: [:x | x > 1]) equals: 2
+    self assert: (#(1, 2, 3) asSet detect: [:x | x == 2]) equals: 2
+    self assert: ((1 to: 3) detect: [:x | x > 1]) equals: 2
+    self assert: ((Bag withAll: #(1, 2, 3)) detect: [:x | x == 2]) equals: 2
+    self assert: (#{#a => 1, #b => 2} detect: [:v | v > 1]) equals: 2
+    self assert: ((Stream on: #(1, 2, 3)) detect: [:n | n > 1]) equals: 2
+
+  // ==========================================================================
+  // detect:ifNone: stays non-raising everywhere
+  // ==========================================================================
+  testDetectIfNoneDoesNotRaiseOnAnyReceiver =>
+    self assert: (#(1, 2, 3) detect: [:x | x > 10] ifNone: [0]) equals: 0
+    self assert: (#(1, 2, 3) asSet detect: [:x | x > 10] ifNone: [0]) equals: 0
+    self assert: ((1 to: 3) detect: [:x | x > 10] ifNone: [0]) equals: 0
+    self assert: ((Bag withAll: #(1, 2, 3)) detect: [:x |
+      x > 10
+    ] ifNone: [0]) equals: 0
+    self assert: (#{#a => 1} detect: [:v | v > 10] ifNone: [0]) equals: 0
+    self assert: ((Stream on: #(1, 2, 3)) detect: [:n |
+      n > 10
+    ] ifNone: [0]) equals: 0
+
+  // `detect:ifNone:` on an empty receiver answers the default rather than
+  // reporting the receiver is empty.
+  testDetectIfNoneOnEmptyReceiversAnswersTheDefault =>
+    self assert: (#() detect: [:x | x > 0] ifNone: [42]) equals: 42
+    self assert: (#() asSet detect: [:x | x > 0] ifNone: [42]) equals: 42
+    self assert: ((Stream on: #()) detect: [:x | x > 0] ifNone: [42]) equals: 42
+
+  // ==========================================================================
+  // nil is a value, not a sentinel
+  // ==========================================================================
+  // The pre-fix `Collection>>detect:` could not tell "found nil" from "found
+  // nothing". Now that a no-match raises, an element that *is* nil comes back
+  // as an ordinary answer.
+  testDetectAnswersNilWhenNilIsTheMatch =>
+    self assert: (#(1, nil, 3) detect: [:x | x isNil]) equals: nil
+    self assert: ((Stream on: #(1, nil, 3)) detect: [:x | x isNil]) equals: nil

@@ -4696,13 +4696,31 @@ its own kind ([BT-3025](https://linear.app/beamtalk/issue/BT-3025)). None of
 them is `does_not_understand` — the receiver understands the selector, so
 reporting a dispatch failure would send the reader hunting for a typo.
 
-**`List detect:` raises `not_found`** when the search runs to completion with
-no element matching. `detect:ifNone:` is the non-raising alternative:
+**`detect:` raises `not_found`** when the search runs to completion with no
+element matching. `detect:ifNone:` is the non-raising alternative:
 
 ```beamtalk
 #(1, 2, 3) detect: [:x | x > 10]            // raises not_found
 #(1, 2, 3) detect: [:x | x > 10] ifNone: [0] // => 0
 ```
+
+Every receiver agrees ([BT-3028](https://linear.app/beamtalk/issue/BT-3028)) —
+`List`, `Set`, `Bag`, `Dictionary`, `Interval`, `String`, and `Stream`. `detect:` answers
+`E`, and `E` has no in-band way to say "nothing matched", so the raise is the
+honest encoding; reach for `detect:ifNone:` whenever a miss is expected:
+
+```beamtalk
+#(1, 2, 3) asSet detect: [:x | x > 10]      // raises not_found
+(1 to: 3) detect: [:x | x > 10]             // raises not_found
+(Stream on: #(1, 2, 3)) detect: [:n | n > 10]  // raises not_found
+
+(1 to: 3) detect: [:x | x > 10] ifNone: [0] // => 0
+```
+
+The error names the *receiver's* class, so a no-match on a Set reports `Set`
+rather than the abstract `Collection` the shared implementation lives on. An
+empty receiver is just the degenerate no-match case and raises `not_found` too,
+not `empty_collection` — `detect:` is a search, not an element accessor.
 
 **`List from:to:` raises `index_out_of_bounds`** for a start index below 1,
 matching `at:`. Its other edge cases stay total — an end below the start is an
@@ -4825,7 +4843,8 @@ Terminal operations force evaluation and return a concrete result:
 | `asList` | Materialize entire stream to List | `s asList` → `[1,2,3]` |
 | `do:` | Iterate with side effects, return nil | `s do: [:n \| Transcript show: n]` |
 | `inject:into:` | Fold/reduce with initial value | `s inject: 0 into: [:sum :n \| sum + n]` |
-| `detect:` | First matching element, or nil | `s detect: [:n \| n > 10]` |
+| `detect:` | First matching element; raises `not_found` if none | `s detect: [:n \| n > 10]` |
+| `detect:ifNone:` | First matching element, or the default if none | `s detect: [:n \| n > 10] ifNone: [0]` |
 | `anySatisfy:` | True if any element matches | `s anySatisfy: [:n \| n > 2]` |
 | `allSatisfy:` | True if all elements match | `s allSatisfy: [:n \| n > 0]` |
 

@@ -104,13 +104,34 @@ sealed typed Object subclass: Stream(E) native: beamtalk_stream
   /// ```
   inject: initial :: A into: block :: Block(A, E, A) -> A => self delegate
 
-  /// Return first element matching predicate, or nil (terminal).
+  /// Return first element matching predicate (terminal).
+  ///
+  /// Raises `not_found` if the stream runs to exhaustion with no match — the
+  /// return type is `E`, so there is no in-band way to say "nothing matched".
+  /// An empty stream is just the degenerate no-match case and raises the same
+  /// kind. Matches `Collection>>detect:` and `List>>detect:`;
+  /// `detect:ifNone:` is the non-raising alternative.
   ///
   /// ## Examples
   /// ```beamtalk
   /// (Stream on: #(1, 2, 3, 4)) detect: [:n | n > 2]  // => 3
   /// ```
-  detect: predicate :: Block(E, Boolean) -> E | Nil => self delegate
+  detect: predicate :: Block(E, Boolean) -> E => self delegate
+
+  /// Return first element matching predicate, or evaluate `default` if none
+  /// matches (terminal).
+  ///
+  /// `default` is deliberately `Block(Object)`, not `Block(E)` — matching the
+  /// `Collection` and `List` versions. The fallback commonly produces a value
+  /// outside the element type (`ifNone: [nil]`, `ifNone: [#missing]`), hence
+  /// the `E | Object` return type.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Stream on: #(1, 2)) detect: [:n | n > 5] ifNone: [0]  // => 0
+  /// ```
+  detect: predicate :: Block(E, Boolean) ifNone: default :: Block(Object) -> E | Object =>
+    self delegate
 
   /// Materialize entire stream to a List (terminal).
   ///

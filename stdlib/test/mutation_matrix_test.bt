@@ -190,11 +190,17 @@ TestCase subclass: MutationMatrixTest
     self assert: count equals: 3
     self assert: self.a getLog equals: #(20)
 
-  // P3-1b: detect: with no match (returns nil) + mutation (BT-1486)
+  // P3-1b: detect: with no match + mutation (BT-1486, BT-3028)
+  //
+  // The mutation-threading fold used to answer nil here while the plain
+  // `beamtalk_list:detect/2` path raised — the same expression meant two
+  // different things depending on whether its block mutated state. BT-3028
+  // made the fold consult its found flag and raise like every other receiver.
+  // The all-elements-visited property this case was added for is still
+  // asserted by testDetectMutation above (counter reaches 3 despite an
+  // early match).
   testDetectMutationNoMatch =>
-    count := self.a detectMutation: #(1, 2, 3)
-    self assert: count equals: 3
-    self assert: self.a getLog equals: #(nil)
+    self should: [self.a detectMutation: #(1, 2, 3)] raise: #not_found
 
   // P3-2: detect:ifNone: with field mutation in predicate block (BT-1486)
   // Unlike P1-8 which mutates *before* detect:ifNone:, this mutates *inside* the predicate.
