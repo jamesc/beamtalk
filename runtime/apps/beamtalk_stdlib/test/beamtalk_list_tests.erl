@@ -178,7 +178,7 @@ detect_not_found_message_test() ->
         catch
             error:#{error := #beamtalk_error{message = M}} -> M
         end,
-    ?assertNotEqual(nomatch, binary:match(Message, <<"no matching element">>)),
+    ?assertNotEqual(nomatch, binary:match(Message, <<"not found">>)),
     ?assertEqual(nomatch, binary:match(Message, <<"does not understand">>)).
 
 detect_invalid_block_test() ->

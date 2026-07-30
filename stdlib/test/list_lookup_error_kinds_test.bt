@@ -31,7 +31,7 @@ TestCase subclass: ListLookupErrorKindsTest
 
   testDetectMessageNamesTheCondition =>
     message := [#(1, 2, 3) detect: [:x | x > 10]] on: Error do: [:e | e message]
-    self assert: (message includesSubstring: "no matching element")
+    self assert: (message includesSubstring: "not found")
     self deny: (message includesSubstring: "does not understand")
 
   // not_found classifies as RuntimeError, so `on:do:` can discriminate it
@@ -77,6 +77,25 @@ TestCase subclass: ListLookupErrorKindsTest
   // detect:ifNone: stays the non-raising alternative.
   testDetectIfNoneDoesNotRaise =>
     self assert: (#(1, 2, 3) detect: [:x | x > 10] ifNone: [0]) equals: 0
+
+  // ==========================================================================
+  // not_found is shared with non-collection receivers
+  // ==========================================================================
+
+  // `not_found` predates this fix on `AtomicCounter named:` / `Ets named:`,
+  // which had no generated message at all until BT-3025 added one. The wording
+  // has to stay neutral so it does not claim those have "elements" — the
+  // receiver-specific detail lives in the hint.
+  testNotFoundMessageReadsCorrectlyOnNonCollection =>
+    message := [
+      AtomicCounter named: #noSuchCounterXyz
+    ] on: Error do: [:e | e message]
+    self assert: (message includesSubstring: "not found")
+    self deny: (message includesSubstring: "element")
+
+  testNotFoundHintCarriesTheReceiverSpecifics =>
+    hint := [AtomicCounter named: #noSuchCounterXyz] on: Error do: [:e | e hint]
+    self assert: (hint includesSubstring: "counter")
 
   // ==========================================================================
   // from:to: — a start index below 1 is malformed, matching at:
