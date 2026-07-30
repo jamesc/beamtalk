@@ -36,11 +36,35 @@ main(_Args) ->
     %% Offender snippets are printed verbatim, so both devices must speak Unicode.
     io:setopts(standard_io, [{encoding, unicode}]),
     io:setopts(standard_error, [{encoding, unicode}]),
+    %% Anchor at the repo root so paths are stable regardless of cwd, and so a
+    %% git failure is caught here rather than surfacing as bogus "files" later
+    %% (os:cmd folds stderr into its output, so an error message would otherwise
+    %% be mistaken for a filename and the lint would report a false pass).
+    ok = goto_repo_root(),
     Files = erlang_sources(),
-    Offenders = lists:flatmap(fun scan_file/1, Files),
+    Files =:= [] andalso
+        begin
+            io:format(standard_error, "❌ No Erlang sources found under the repository root.~n", []),
+            halt(1)
+        end,
+    Results = [scan_file(F) || F <- Files],
+    Offenders = lists:append([O || {ok, O} <- Results]),
+    Skipped = [{F, Why} || {skipped, F, Why} <- Results],
     io:format("🔍 Linting ~b Erlang source file(s) for non-ASCII in binary literals...~n", [
         length(Files)
     ]),
+    %% A file this lint could not parse is not a file this lint has checked. Say
+    %% so rather than letting it pass silently, but do not fail the build: an
+    %% intentionally-malformed fixture is legitimate, and a real syntax error
+    %% fails the compile anyway.
+    Skipped =:= [] orelse
+        begin
+            io:format(standard_error, "~n⚠️  ~b file(s) could not be parsed and were NOT checked:~n", [
+                length(Skipped)
+            ]),
+            [io:format(standard_error, "  ~ts (~p)~n", [F, W]) || {F, W} <- Skipped],
+            io:format(standard_error, "~n", [])
+        end,
     case Offenders of
         [] ->
             io:format("✅ No non-ASCII binary literals missing /utf8.~n"),
@@ -71,17 +95,28 @@ describe(C) ->
 
 %% ── File discovery ──────────────────────────────────────────────────────────
 
+goto_repo_root() ->
+    case git(["rev-parse", "--show-toplevel"]) of
+        [Root] ->
+            file:set_cwd(Root);
+        _ ->
+            io:format(standard_error, "❌ Not a git repository - cannot enumerate sources.~n", []),
+            halt(1)
+    end.
+
 %% Tracked files plus untracked-but-not-ignored ones, so a new offender is
 %% caught before it is committed.
 erlang_sources() ->
-    Tracked = git(["ls-files", "*.erl", "*.hrl", "*.escript"]),
-    Untracked = git(["ls-files", "--others", "--exclude-standard", "*.erl", "*.hrl", "*.escript"]),
+    Pats = ["*.erl", "*.hrl", "*.escript"],
+    Tracked = git(["ls-files" | Pats]),
+    Untracked = git(["ls-files", "--others", "--exclude-standard" | Pats]),
     lists:usort(Tracked ++ Untracked).
 
+%% stderr is discarded rather than folded into the result: os:cmd merges it into
+%% stdout, where a git diagnostic would be indistinguishable from a filename.
 git(Args) ->
-    Cmd = "git " ++ lists:join(" ", [quote(A) || A <- Args]),
-    Out = os:cmd(Cmd),
-    [L || L <- string:lexemes(Out, "\n"), L =/= ""].
+    Cmd = "git " ++ lists:join(" ", [quote(A) || A <- Args]) ++ " 2>/dev/null",
+    [L || L <- string:lexemes(os:cmd(Cmd), "\n"), L =/= ""].
 
 quote(A) -> "'" ++ A ++ "'".
 
@@ -94,17 +129,16 @@ scan_file(File) ->
                 Chars when is_list(Chars) ->
                     scan_tokens(File, Chars);
                 _ ->
-                    %% Not valid UTF-8; leave it to the compiler to complain.
-                    []
+                    {skipped, File, not_utf8}
             end;
-        {error, _} ->
-            []
+        {error, Reason} ->
+            {skipped, File, Reason}
     end.
 
 scan_tokens(File, Chars) ->
     case erl_scan:string(Chars, 1) of
-        {ok, Tokens, _} -> walk(Tokens, 0, File, []);
-        {error, _, _} -> []
+        {ok, Tokens, _} -> {ok, walk(Tokens, 0, File, [])};
+        {error, {_, _, Reason}, _} -> {skipped, File, Reason}
     end.
 
 %% Walk the token stream tracking binary-literal nesting depth. Inside a binary
