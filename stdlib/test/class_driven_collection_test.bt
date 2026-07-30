@@ -1,0 +1,61 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3022: Collection subclass whose do: delegates to a class-side method.
+
+TestCase subclass: ClassDrivenCollectionTest
+
+  // --- controls: instance-side driver, no process hop ---------------------
+  testSelfDrivenAsList =>
+    self assert: (SelfDrivenCollection of: #(1, 2, 3)) asList equals: #(1, 2, 3)
+
+  testSelfDrivenInject =>
+    c := SelfDrivenCollection of: #(1, 2, 3)
+    self assert: (c inject: 0 into: [:a :x | a + x]) equals: 6
+
+  testSelfDrivenIncludes =>
+    self assert: ((SelfDrivenCollection of: #(1, 2, 3)) includes: 2)
+
+  // --- the class-driven path ---------------------------------------------
+  testClassDrivenAsList =>
+    self assert: (ClassDrivenCollection of: #(1, 2, 3)) asList equals: #(1, 2, 3)
+
+  testClassDrivenInject =>
+    c := ClassDrivenCollection of: #(1, 2, 3)
+    self assert: (c inject: 0 into: [:a :x | a + x]) equals: 6
+
+  testClassDrivenSum =>
+    self assert: (ClassDrivenCollection of: #(1, 2, 3)) sum equals: 6
+
+  testClassDrivenIncludes =>
+    self assert: ((ClassDrivenCollection of: #(1, 2, 3)) includes: 2)
+
+  testClassDrivenDoesNotInclude =>
+    self deny: ((ClassDrivenCollection of: #(1, 2, 3)) includes: 9)
+
+  // --- iteration started from inside another class process ----------------
+  testAsListFromInsideAClassMethod =>
+    self assert: (CollectionProbe asListOf: #(1, 2, 3)) equals: #(1, 2, 3)
+
+  testSumFromInsideAClassMethod =>
+    self assert: (CollectionProbe sumOf: #(1, 2, 3)) equals: 6
+
+  testIncludesFromInsideAClassMethod =>
+    self assert: (CollectionProbe includes: 2 in: #(1, 2, 3))
+
+  // --- re-entrant: the iteration sends back to the running class process ---
+
+  // Still unsupported (a class gen_server cannot call itself), but it must be a
+  // structured error rather than a bare `{calling_self, {gen_server, call, ...}}`.
+  testReentrantClassDrivenRaisesStructuredError =>
+    self should: [
+      CollectionDriver reentrantAsListOf: #(1, 2, 3)
+    ] raise: #dispatch_error
+
+  // Pins the diagnostic to the self-send that actually deadlocks, so a future
+  // regression cannot satisfy the test above with an unrelated dispatch_error.
+  testReentrantClassDrivenNamesTheSelfSend =>
+    selector := [
+      CollectionDriver reentrantAsListOf: #(1, 2, 3)
+    ] on: Exception do: [:e | e selector]
+    self assert: selector equals: #run:over:

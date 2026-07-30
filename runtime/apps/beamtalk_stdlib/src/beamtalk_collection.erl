@@ -180,19 +180,69 @@ Convert any collection to a list by iterating with do:.
 Called from compiler-generated Core Erlang for `do:`, `collect:`,
 `select:`, `reject:`, and `inject:into:` when the receiver is not
 already an Erlang list.
+
+BT-3022: the accumulator is the *caller's mailbox*, not its process dictionary.
+A `Collection` subclass may implement `do:` by delegating to a class-side method,
+and class-method dispatch runs the callee in the class gen_server process
+(`beamtalk_class_dispatch:class_send/3`). The iteration block is a plain fun, so
+it is copied across that boundary and invoked there — a `put/2` inside it would
+land in the *class* process's dictionary, and this function would read back its
+own untouched accumulator and answer `#()`. Posting each element back to the
+process that started the iteration is boundary-agnostic: it works whether the
+block runs here, in a class process, or in an actor.
+
+Ordering is preserved by BEAM's pairwise signal-ordering guarantee: the class
+process posts every element and then sends its `gen_server:call` reply over the
+same sender/receiver pair, so all the elements are already queued ahead of the
+reply that releases us.
+
+The `after` clause is load-bearing: on the exception path (a `^` non-local
+return or a raise from inside the block) elements may still be queued, and
+leaving them behind would hand stray `'$bt_to_list'` messages to whatever
+`handle_info/2` owns this process.
+
+Cost: each element costs a selective receive, which scans any unrelated messages
+already queued ahead of ours. That is free in an eval worker (empty mailbox) and
+bounded by the backlog when `to_list/1` runs inside a busy actor callback; both
+are dominated by the per-element `do:` dispatch this function drives. Routing
+through a dedicated collector process would make it independent of the backlog
+at the cost of a spawn per call — worth revisiting only if a profile says so.
 """.
 -spec to_list(term()) -> list().
 to_list(Self) when is_list(Self) ->
     Self;
 to_list(Self) ->
     Ref = make_ref(),
-    put(Ref, []),
+    Owner = self(),
     try
         Block = fun(Each) ->
-            put(Ref, [Each | get(Ref)])
+            Owner ! {'$bt_to_list', Ref, Each},
+            ok
         end,
         beamtalk_primitive:send(Self, 'do:', [Block]),
-        lists:reverse(get(Ref))
+        collect_posted(Ref, [])
     after
-        erase(Ref)
+        discard_posted(Ref)
+    end.
+
+%% Drain the elements posted by the iteration block, oldest first.
+-spec collect_posted(reference(), list()) -> list().
+collect_posted(Ref, Acc) ->
+    receive
+        {'$bt_to_list', Ref, Each} ->
+            collect_posted(Ref, [Each | Acc])
+    after 0 ->
+        lists:reverse(Acc)
+    end.
+
+%% Drop anything left over after an abnormal exit from the iteration. On the
+%% success path `collect_posted/2` has already emptied the queue, so this is a
+%% single non-matching mailbox scan.
+-spec discard_posted(reference()) -> ok.
+discard_posted(Ref) ->
+    receive
+        {'$bt_to_list', Ref, _Each} ->
+            discard_posted(Ref)
+    after 0 ->
+        ok
     end.

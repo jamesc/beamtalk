@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3022: reaches a class-driven Collection from *inside* a class method, so the
+// process that sets up the iteration accumulator is itself a class gen_server
+// rather than the eval worker.
+
+Value subclass: CollectionProbe
+
+  // The accumulating process is CollectionProbe's class process; the iteration
+  // block then hops on to CollectionDriver's.
+  class asListOf: aList :: List -> List =>
+    (ClassDrivenCollection of: aList) asList
+
+  class sumOf: aList :: List -> Number => (ClassDrivenCollection of: aList) sum
+
+  class includes: x :: Integer in: aList :: List -> Boolean =>
+    (ClassDrivenCollection of: aList) includes: x
