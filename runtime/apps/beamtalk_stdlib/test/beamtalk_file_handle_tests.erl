@@ -435,3 +435,134 @@ write_mode_handle_writes_but_refuses_reads_test() ->
         Path = maps:get(path, Handle),
         ?assertEqual({ok, <<"new">>}, file:read_file(Path))
     end).
+
+%%% ============================================================================
+%%% Type errors on non-handle receivers — missing methods (GH-3173)
+%%%
+%%% Each public function has a catch-all clause that raises a type_error when
+%%% called on a non-FileHandle value.  These tests exercise those clauses,
+%%% which the existing suite omits (only read/1 was covered).
+%%% ============================================================================
+
+read_all_on_non_handle_raises_type_error_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_file_handle:readAll(#{})
+    ).
+
+write_on_non_handle_raises_type_error_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_file_handle:write(#{}, <<"x">>)
+    ).
+
+write_line_with_non_binary_raises_type_error_test() ->
+    with_temp_handle(<<>>, append, fun(Handle) ->
+        ?assertError(
+            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+            beamtalk_file_handle:writeLine(Handle, 42)
+        )
+    end).
+
+write_line_on_non_handle_raises_type_error_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_file_handle:writeLine(#{}, <<"x">>)
+    ).
+
+position_on_non_handle_raises_type_error_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_file_handle:position(#{})
+    ).
+
+seek_with_bad_offset_raises_type_error_test() ->
+    with_temp_handle(<<"data">>, fun(Handle) ->
+        ?assertError(
+            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+            beamtalk_file_handle:seek(Handle, not_an_integer)
+        )
+    end).
+
+seek_on_non_handle_raises_type_error_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_file_handle:seek(#{}, 0)
+    ).
+
+flush_on_non_handle_raises_type_error_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_file_handle:flush(#{})
+    ).
+
+sync_on_non_handle_raises_type_error_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_file_handle:sync(#{})
+    ).
+
+close_on_non_handle_raises_type_error_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_file_handle:close(#{})
+    ).
+
+is_open_on_non_handle_raises_type_error_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_file_handle:isOpen(#{})
+    ).
+
+%%% ============================================================================
+%%% dispatch/3 — 'close' selector (GH-3173)
+%%%
+%%% dispatch('close', [], Handle) was never called in tests; close/1 was always
+%%% invoked directly.  This test routes through dispatch to cover line 339.
+%%% ============================================================================
+
+dispatch_close_routes_to_handle_test() ->
+    with_temp_handle(<<"data">>, fun(Handle) ->
+        ?assertEqual(nil, ok_value(beamtalk_file_handle:dispatch('close', [], Handle))),
+        ?assertNot(beamtalk_file_handle:isOpen(Handle))
+    end).
+
+%%% ============================================================================
+%%% Internal helper edge cases (GH-3173)
+%%% ============================================================================
+
+is_open_false_on_non_map_test() ->
+    %% is_open/1 catch-all returns false for any non-FileHandle value, including
+    %% plain atoms, integers, and tuples.
+    ?assertNot(beamtalk_file_handle:is_open(not_a_handle)),
+    ?assertNot(beamtalk_file_handle:is_open(42)),
+    ?assertNot(beamtalk_file_handle:is_open({some, tuple})).
+
+close_handle_on_stateless_map_test() ->
+    %% close_handle/1 falls back to a best-effort file:close when the map
+    %% has an `fd` key but no `state` cell (malformed handle).  We build one
+    %% directly, close it, and assert the returned ok means it succeeded.
+    TmpPath = temp_path("bt_fh_stateless"),
+    ok = file:write_file(TmpPath, <<>>),
+    {ok, Fd} = file:open(TmpPath, [read, binary]),
+    BadHandle = #{fd => Fd},
+    try
+        ?assertEqual(ok, beamtalk_file_handle:close_handle(BadHandle))
+    after
+        file:delete(TmpPath)
+    end.
+
+descriptor_alive_for_raw_fd_returns_true_test() ->
+    %% A raw descriptor (#file_descriptor{}) is not a pid, so descriptor_alive/1
+    %% takes the `_Fd -> true` branch (line 142) that trusts the state cell alone.
+    TmpPath = temp_path("bt_fh_raw_fd"),
+    ok = file:write_file(TmpPath, <<"raw">>),
+    {ok, RawFd} = file:open(TmpPath, [read, binary, raw]),
+    Handle = beamtalk_file_handle:new(RawFd, read, list_to_binary(TmpPath)),
+    try
+        ?assert(beamtalk_file_handle:isOpen(Handle)),
+        ?assert(not is_pid(RawFd))
+    after
+        beamtalk_file_handle:close_handle(Handle),
+        file:delete(TmpPath)
+    end.
