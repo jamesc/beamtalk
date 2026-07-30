@@ -1,0 +1,140 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for the non-empty List lookup failures (BT-3025).
+//
+// `detect:` with no match, and `from:to:` with a malformed start index, both
+// used to raise `does_not_understand` — a dispatch failure. The List
+// understands both selectors perfectly well; one search came up empty and the
+// other was handed a bad index. Reporting a dispatch failure sent readers
+// hunting for a typo and left `on:do:` unable to tell either case apart from a
+// genuinely misspelled selector.
+//
+// These are the sibling conditions to the empty-collection ones covered in
+// `empty_collection_access_test.bt` (BT-3021) — neither of these receivers is
+// empty.
+
+TestCase subclass: ListLookupErrorKindsTest
+
+  // ==========================================================================
+  // detect: — a search that ran to completion without matching
+  // ==========================================================================
+  // The List is full — of non-matches. That is why `not_found` rather than
+  // `empty_collection`: nothing here is empty.
+  testDetectWithNoMatchRaisesNotFound =>
+    self should: [#(1, 2, 3) detect: [:x | x > 10]] raise: #not_found
+
+  // `detect:` is a search, not an element accessor, so an empty receiver is
+  // just the degenerate no-match case and reports the same kind.
+  testDetectOnEmptyListAlsoRaisesNotFound =>
+    self should: [#() detect: [:x | x > 10]] raise: #not_found
+
+  testDetectMessageNamesTheCondition =>
+    message := [#(1, 2, 3) detect: [:x | x > 10]] on: Error do: [:e | e message]
+    self assert: (message includesSubstring: "not found")
+    self deny: (message includesSubstring: "does not understand")
+
+  // not_found classifies as RuntimeError, so `on:do:` can discriminate it
+  // from an unrelated failure raised by the same block.
+  testNotFoundIsCatchableAsRuntimeError =>
+    caught := [
+      #(1, 2, 3) detect: [:x | x > 10]
+    ] on: RuntimeError do: [:e | "caught"]
+    self assert: caught equals: "caught"
+
+  // The point of the fix: `e kind` now tells a no-match apart from a genuine
+  // misspelled selector, which both reported as #does_not_understand before.
+  // The typo goes via `perform:`, since a literal `detekt:` on a typed List is
+  // rejected at compile time and never reaches the runtime.
+  testDetectKindDiscriminatesFromATypo =>
+    noMatch := [
+      #(1, 2, 3) detect: [:x | x > 10]
+    ] on: RuntimeError do: [:e | e kind]
+    typo := [
+      #(1, 2, 3) perform: #detekt: withArguments: #(1)
+    ] on: RuntimeError do: [:e | e kind]
+    self assert: noMatch equals: #not_found
+    self assert: typo equals: #does_not_understand
+    self deny: noMatch == typo
+
+  testFromToKindIsIndexOutOfBounds =>
+    badIndex := [#(1, 2, 3) from: -1 to: 2] on: RuntimeError do: [:e | e kind]
+    self assert: badIndex equals: #index_out_of_bounds
+
+  // `beamtalk_error:format/1` runs a DNU-only enrichment pass that overwrites
+  // the hint with a "did you mean a class-side message?" suggestion. Off the
+  // does_not_understand branch, the hint we actually set survives to the user.
+  testDetectHintPointsAtDetectIfNone =>
+    hint := [
+      #(1, 2, 3) detect: [:x | x > 10]
+    ] on: RuntimeError do: [:e | e hint]
+    self assert: (hint includesSubstring: "detect:ifNone:")
+    self deny: (hint includesSubstring: "class-side message")
+
+  testDetectStillAnswersTheFirstMatch =>
+    self assert: (#(1, 2, 3) detect: [:x | x > 1]) equals: 2
+
+  // detect:ifNone: stays the non-raising alternative.
+  testDetectIfNoneDoesNotRaise =>
+    self assert: (#(1, 2, 3) detect: [:x | x > 10] ifNone: [0]) equals: 0
+
+  // ==========================================================================
+  // not_found is shared with non-collection receivers
+  // ==========================================================================
+
+  // `not_found` predates this fix on `AtomicCounter named:` / `Ets named:`,
+  // which had no generated message at all until BT-3025 added one. The wording
+  // has to stay neutral so it does not claim those have "elements" — the
+  // receiver-specific detail lives in the hint.
+  testNotFoundMessageReadsCorrectlyOnNonCollection =>
+    message := [
+      AtomicCounter named: #noSuchCounterXyz
+    ] on: Error do: [:e | e message]
+    self assert: (message includesSubstring: "not found")
+    self deny: (message includesSubstring: "element")
+
+  testNotFoundHintCarriesTheReceiverSpecifics =>
+    hint := [AtomicCounter named: #noSuchCounterXyz] on: Error do: [:e | e hint]
+    self assert: (hint includesSubstring: "counter")
+
+  // ==========================================================================
+  // from:to: — a start index below 1 is malformed, matching at:
+  // ==========================================================================
+  testFromToNegativeStartRaisesIndexOutOfBounds =>
+    self should: [#(1, 2, 3) from: -1 to: 2] raise: #index_out_of_bounds
+
+  testFromToZeroStartRaisesIndexOutOfBounds =>
+    self should: [#(1, 2, 3) from: 0 to: 2] raise: #index_out_of_bounds
+
+  // The same kind `at:` raises for a sub-1 index — the two agree.
+  testFromToAgreesWithAtOnMalformedIndex =>
+    self should: [#(1, 2, 3) at: 0] raise: #index_out_of_bounds
+    self should: [#(1, 2, 3) from: 0 to: 2] raise: #index_out_of_bounds
+
+  testFromToMessageNamesTheCondition =>
+    message := [#(1, 2, 3) from: -1 to: 2] on: Error do: [:e | e message]
+    self assert: (message includesSubstring: "index out of bounds")
+    self deny: (message includesSubstring: "does not understand")
+
+  testFromToIndexOutOfBoundsIsCatchableAsRuntimeError =>
+    caught := [#(1, 2, 3) from: -1 to: 2] on: RuntimeError do: [:e | "caught"]
+    self assert: caught equals: "caught"
+
+  // ==========================================================================
+  // The total cases stay total — only a sub-1 start raises
+  // ==========================================================================
+  testFromToInRangeAnswersSubsequence =>
+    self assert: (#(10, 20, 30, 40) from: 2 to: 3) equals: #(20, 30)
+
+  // An end below the start is an empty range, not an error.
+  testFromToEndBelowStartAnswersEmptyList =>
+    self assert: (#(1, 2, 3) from: 3 to: 1) equals: #()
+
+  // An end past the last index is clamped rather than raising.
+  testFromToEndPastSizeIsClamped =>
+    self assert: (#(1, 2, 3) from: 2 to: 99) equals: #(2, 3)
+
+  // A start past the last index answers empty — it is in range shape, just
+  // beyond the data.
+  testFromToStartPastSizeAnswersEmptyList =>
+    self assert: (#(1, 2, 3) from: 9 to: 12) equals: #()
