@@ -1261,34 +1261,8 @@ impl CoreErlangGenerator {
                         ]
                     ),
                     line(),
-                    // BT-943: Log error but don't crash — caller expects no reply
-                    // BT-1822: Destructure error triple to log stacktrace
-                    "<{'error', {CastType, CastReason, CastStacktrace}, _CastState}> when 'true' ->",
-                    nest(
-                        INDENT,
-                        docvec![
-                            line(),
-                            "let CastErrMsg = call 'beamtalk_error':'format_safe'({CastType, CastReason}, CastStacktrace) in",
-                            line(),
-                            "let _ = call 'logger':'warning'(CastErrMsg, ~{'selector' => CastSelector, 'reason' => {CastType, CastReason}, 'stacktrace' => CastStacktrace, 'domain' => ['beamtalk'|['runtime'|[]]]}~)",
-                            line(),
-                            "in {'noreply', State}",
-                        ]
-                    ),
-                    line(),
-                    // Fallback: plain {error, Error, State} from dispatch (DNU, #beamtalk_error{}, etc.)
-                    "<{'error', CastError, _CastState2}> when 'true' ->",
-                    nest(
-                        INDENT,
-                        docvec![
-                            line(),
-                            "let CastErrMsg2 = call 'beamtalk_error':'format_safe'(CastError) in",
-                            line(),
-                            "let _ = call 'logger':'warning'(CastErrMsg2, ~{'selector' => CastSelector, 'reason' => CastError, 'domain' => ['beamtalk'|['runtime'|[]]]}~)",
-                            line(),
-                            "in {'noreply', State}",
-                        ]
-                    ),
+                    // BT-943/BT-1822: log error but don't crash — shared with handle_info
+                    noreply_error_arms("Cast", leaf::var("CastSelector")),
                 ]
             ),
             line(),
@@ -1519,33 +1493,8 @@ impl CoreErlangGenerator {
                                     ]
                                 ),
                                 line(),
-                                // BT-1822: Destructure error triple to log stacktrace
-                                "<{'error', {InfoType, InfoReason, InfoStacktrace}, _ErrState}> when 'true' ->",
-                                nest(
-                                    INDENT,
-                                    docvec![
-                                        line(),
-                                        "let InfoErrMsg = call 'beamtalk_error':'format_safe'({InfoType, InfoReason}, InfoStacktrace) in",
-                                        line(),
-                                        "let _Log = call 'logger':'warning'(InfoErrMsg, ~{'selector' => 'handleInfo:', 'reason' => {InfoType, InfoReason}, 'stacktrace' => InfoStacktrace, 'domain' => ['beamtalk'|['runtime'|[]]]}~)",
-                                        line(),
-                                        "in {'noreply', State}",
-                                    ]
-                                ),
-                                line(),
-                                // Fallback: plain {error, Error, State} from dispatch
-                                "<{'error', InfoError, _ErrState2}> when 'true' ->",
-                                nest(
-                                    INDENT,
-                                    docvec![
-                                        line(),
-                                        "let InfoErrMsg2 = call 'beamtalk_error':'format_safe'(InfoError) in",
-                                        line(),
-                                        "let _Log = call 'logger':'warning'(InfoErrMsg2, ~{'selector' => 'handleInfo:', 'reason' => InfoError, 'domain' => ['beamtalk'|['runtime'|[]]]}~)",
-                                        line(),
-                                        "in {'noreply', State}",
-                                    ]
-                                ),
+                                // BT-1822/BT-943: log error but don't crash — shared with handle_cast
+                                noreply_error_arms("Info", leaf::atom("handleInfo:")),
                                 line(),
                                 "<_Other> when 'true' -> {'noreply', State}",
                             ]
@@ -1672,4 +1621,169 @@ impl CoreErlangGenerator {
         ];
         Ok(doc)
     }
+}
+
+/// Generates the two error case arms shared by `gen_server` `noreply` callbacks
+/// (`handle_cast` and `handle_info`).
+///
+/// Both callbacks dispatch into user code and must handle two error shapes with
+/// identical log-and-continue semantics:
+///
+/// 1. **Triple-format error** `{'error', {Type, Reason, Stacktrace}, _State}`:
+///    the three-tuple produced by a `catch` expression in the dispatch path.
+///    Logged with `beamtalk_error:format_safe/2` (includes stacktrace).
+/// 2. **Plain-format fallback** `{'error', Error, _State2}`:
+///    DNU, `#beamtalk_error{}`, or any non-triple error from dispatch.
+///    Logged with `beamtalk_error:format_safe/1`.
+///
+/// Both arms log an OTP logger `warning` and return `{'noreply', State}`.
+///
+/// `var_prefix` is the capitalised variable-name prefix (e.g. `"Cast"` →
+/// `CastType`, `CastReason`, …; `"Info"` → `InfoType`, …).  Variable names are
+/// produced via [`leaf::var`] to satisfy the typed-leaf rule (ADR 0089).
+///
+/// `selector` is the Core Erlang expression for the `'selector'` key in the
+/// logger metadata map — a `leaf::var` call for `handle_cast` (the dynamic
+/// selector variable) and a `leaf::atom` call for `handle_info` (`'handleInfo:'`).
+#[allow(clippy::too_many_lines)] // document tree; length is structural, not algorithmic
+fn noreply_error_arms(var_prefix: &str, selector: Document<'static>) -> Document<'static> {
+    // Compute variable name strings from the prefix, then pass to leaf::var.
+    // format! here derives the *input* to the typed-leaf API, not a raw Core
+    // Erlang fragment — this is the sanctioned pattern per ADR 0089.
+    let type_v = leaf::var(format!("{var_prefix}Type"));
+    let reason_v = leaf::var(format!("{var_prefix}Reason"));
+    let stack_v = leaf::var(format!("{var_prefix}Stacktrace"));
+    let state1_v = leaf::var(format!("_{var_prefix}State"));
+    let msg_triple_v = leaf::var(format!("{var_prefix}ErrMsg"));
+    let error_v = leaf::var(format!("{var_prefix}Error"));
+    let state2_v = leaf::var(format!("_{var_prefix}State2"));
+    let msg_plain_v = leaf::var(format!("{var_prefix}ErrMsg2"));
+
+    docvec![
+        // BT-1822: Triple-format arm — destructure error triple to log stacktrace
+        docvec![
+            "<{",
+            leaf::atom("error"),
+            ", {",
+            type_v.clone(),
+            ", ",
+            reason_v.clone(),
+            ", ",
+            stack_v.clone(),
+            "}, ",
+            state1_v,
+            "}> when ",
+            leaf::atom("true"),
+            " ->",
+        ],
+        nest(
+            INDENT,
+            docvec![
+                line(),
+                docvec![
+                    "let ",
+                    msg_triple_v.clone(),
+                    " = call ",
+                    leaf::atom("beamtalk_error"),
+                    ":",
+                    leaf::atom("format_safe"),
+                    "({",
+                    type_v.clone(),
+                    ", ",
+                    reason_v.clone(),
+                    "}, ",
+                    stack_v.clone(),
+                    ") in",
+                ],
+                line(),
+                docvec![
+                    "let _ = call ",
+                    leaf::atom("logger"),
+                    ":",
+                    leaf::atom("warning"),
+                    "(",
+                    msg_triple_v,
+                    ", ~{",
+                    leaf::atom("selector"),
+                    " => ",
+                    selector.clone(),
+                    ", ",
+                    leaf::atom("reason"),
+                    " => {",
+                    type_v.clone(),
+                    ", ",
+                    reason_v.clone(),
+                    "}, ",
+                    leaf::atom("stacktrace"),
+                    " => ",
+                    stack_v,
+                    ", ",
+                    leaf::atom("domain"),
+                    " => [",
+                    leaf::atom("beamtalk"),
+                    "|[",
+                    leaf::atom("runtime"),
+                    "|[]]]}~)",
+                ],
+                line(),
+                docvec!["in {", leaf::atom("noreply"), ", State}"],
+            ],
+        ),
+        line(),
+        // BT-943: Plain-format fallback — {error, Error, State} (DNU, #beamtalk_error{}, etc.)
+        docvec![
+            "<{",
+            leaf::atom("error"),
+            ", ",
+            error_v.clone(),
+            ", ",
+            state2_v,
+            "}> when ",
+            leaf::atom("true"),
+            " ->",
+        ],
+        nest(
+            INDENT,
+            docvec![
+                line(),
+                docvec![
+                    "let ",
+                    msg_plain_v.clone(),
+                    " = call ",
+                    leaf::atom("beamtalk_error"),
+                    ":",
+                    leaf::atom("format_safe"),
+                    "(",
+                    error_v.clone(),
+                    ") in",
+                ],
+                line(),
+                docvec![
+                    "let _ = call ",
+                    leaf::atom("logger"),
+                    ":",
+                    leaf::atom("warning"),
+                    "(",
+                    msg_plain_v,
+                    ", ~{",
+                    leaf::atom("selector"),
+                    " => ",
+                    selector,
+                    ", ",
+                    leaf::atom("reason"),
+                    " => ",
+                    error_v,
+                    ", ",
+                    leaf::atom("domain"),
+                    " => [",
+                    leaf::atom("beamtalk"),
+                    "|[",
+                    leaf::atom("runtime"),
+                    "|[]]]}~)",
+                ],
+                line(),
+                docvec!["in {", leaf::atom("noreply"), ", State}"],
+            ],
+        ),
+    ]
 }
