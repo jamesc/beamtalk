@@ -197,6 +197,32 @@ ProtoObject subclass: Object
   /// ```
   hash -> Integer => @intrinsic hash
 
+  /// Test value equality — the overridable counterpart to `=:=`.
+  ///
+  /// Defaults to `=:=` (Erlang structural term equality), so for most classes
+  /// the two agree. Unlike `=:=`, this is an ordinary message send, so a class
+  /// whose logical value is *not* its representation can override it: a
+  /// persistent structure whose shape depends on construction history, a
+  /// timestamp that should compare by instant rather than by wall-clock fields,
+  /// or a type with a normalising form. `=:=`, `=/=`, `==` and `/=` are lowered
+  /// straight to Erlang BIFs (ADR 0002) and cannot be overridden — the compiler
+  /// rejects any attempt (BT-2997).
+  ///
+  /// ## Caveat
+  ///
+  /// `Dictionary` and `Set` are backed by Erlang maps, so key identity is
+  /// decided by the VM's raw `=:=`, never by this method. A class that
+  /// overrides `equals:` still deduplicates by representation when used as a
+  /// key. Normalise the representation if that matters.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 42 equals: 42           // => true
+  /// 42 equals: 42.0         // => false (defaults to strict `=:=`)
+  /// "ab" equals: "ab"       // => true
+  /// ```
+  equals: other :: Object -> Boolean => self =:= other
+
   /// Test if the receiver responds to the given selector.
   ///
   /// ## Examples

@@ -1,0 +1,47 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2997: `=:=`, `=/=`, `==` and `/=` are lowered straight to Erlang BIFs by
+// codegen (ADR 0002) and are never message-dispatched, so a class cannot
+// override them — the compiler now rejects the attempt outright rather than
+// compiling a method nothing can call. `Object>>equals:` is the overridable
+// counterpart: an ordinary message send that defaults to `=:=`.
+//
+// The `Fraction` value-type in `fixtures/` stores its parts unnormalised, so
+// `1/2` and `2/4` are genuinely different terms. That separates the two
+// mechanisms: `=:=` answers false, the `equals:` override answers true.
+
+TestCase subclass: OverridableEqualityTest
+
+  /// A class that does not override `equals:` gets `=:=` semantics.
+  testDefaultEqualsIsStrictEquality =>
+    self assert: (42 equals: 42)
+    self deny: (42 equals: 43)
+    // Strict, like `=:=` — no numeric coercion, unlike `==`.
+    self deny: (42 equals: 42.0)
+    self assert: ("ab" equals: "ab")
+    self assert: (#(1, 2, 3) equals: #(1, 2, 3))
+
+  /// An `equals:` override actually runs — the point the dead `=:=` methods
+  /// removed in BT-2997 only appeared to demonstrate.
+  testOverrideDispatches =>
+    half := Fraction numer: 1 denom: 2
+    twoQuarters := Fraction numer: 2 denom: 4
+    self assert: (half equals: twoQuarters)
+    self assert: (twoQuarters equals: half)
+
+  /// The override is not structural equality in disguise: `=:=` still compares
+  /// representation and disagrees with `equals:` for the same pair.
+  testStrictEqualityIsUnaffectedByOverride =>
+    half := Fraction numer: 1 denom: 2
+    twoQuarters := Fraction numer: 2 denom: 4
+    self deny: (half =:= twoQuarters)
+    self assert: (half =/= twoQuarters)
+    // Identical representations remain `=:=` equal.
+    self assert: (half =:= (Fraction numer: 1 denom: 2))
+
+  /// Unequal values are still unequal under the override.
+  testOverrideRejectsUnequalValues =>
+    half := Fraction numer: 1 denom: 2
+    third := Fraction numer: 1 denom: 3
+    self deny: (half equals: third)
