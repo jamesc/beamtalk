@@ -47,12 +47,12 @@ main(_Args) ->
             io:format(standard_error, "❌ No Erlang sources found under the repository root.~n", []),
             halt(1)
         end,
-    Results = [scan_file(F) || F <- Files],
-    Offenders = lists:append([O || {ok, O} <- Results]),
-    Skipped = [{F, Why} || {skipped, F, Why} <- Results],
     io:format("🔍 Linting ~b Erlang source file(s) for non-ASCII in binary literals...~n", [
         length(Files)
     ]),
+    Results = [scan_file(F) || F <- Files],
+    Offenders = lists:append([O || {ok, O} <- Results]),
+    Skipped = [{F, Why} || {skipped, F, Why} <- Results],
     %% A file this lint could not parse is not a file this lint has checked. Say
     %% so rather than letting it pass silently, but do not fail the build: an
     %% intentionally-malformed fixture is legitimate, and a real syntax error
