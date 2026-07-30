@@ -62,6 +62,7 @@ done
 
 # --- 2. Cloud-sandbox detection + bridge -----------------------------------
 IN_CLOUD=0
+BRIDGE_UP=0          # set below; section 3 reports a different cause when down
 BRIDGE_UPSTREAM=""   # filled in below from the bridge's own /__bridge/status
 [[ "${CLAUDE_CODE_REMOTE:-}" == "true" ]] && IN_CLOUD=1
 [[ -n "${HTTP_PROXY:-}" && "${HTTP_PROXY:-}" == *"@"* ]] && IN_CLOUD=1
@@ -70,9 +71,9 @@ if (( IN_CLOUD )); then
   (( SUMMARY_ONLY )) || echo "Cloud sandbox (MITM egress proxy):"
   BRIDGE_PORT="${HEX_BRIDGE_PORT:-18081}"
   if have lsof && lsof -i:"${BRIDGE_PORT}" &>/dev/null; then
-    ok "hex-bridge proxy listening on :${BRIDGE_PORT}"
+    ok "hex-bridge proxy listening on :${BRIDGE_PORT}"; BRIDGE_UP=1
   elif (command -v curl >/dev/null && curl -s -o /dev/null --max-time 3 "http://127.0.0.1:${BRIDGE_PORT}/names"); then
-    ok "hex-bridge proxy responding on :${BRIDGE_PORT}"
+    ok "hex-bridge proxy responding on :${BRIDGE_PORT}"; BRIDGE_UP=1
   else
     bad "hex-bridge proxy NOT running on :${BRIDGE_PORT} — rebar3/mix fetches will hang/fail"
     note "start it: HEX_BRIDGE_PORT=${BRIDGE_PORT} python3 scripts/hex-bridge-proxy.py &"
@@ -80,18 +81,22 @@ if (( IN_CLOUD )); then
   # How the bridge reaches hex.pm: through a CONNECT tunnel when the env named
   # a proxy, otherwise dialling directly — which needs direct DNS the sandbox
   # may not have. Ask the running bridge rather than re-reading the env, since
-  # a bridge started before the env was fixed keeps its original wiring.
-  if have curl; then
-    _BRIDGE_STATUS=$(curl -s --max-time 3 --noproxy '*' \
-      "http://127.0.0.1:${BRIDGE_PORT}/__bridge/status" 2>/dev/null)
+  # a bridge started before the env was fixed keeps its original wiring. Only
+  # worth asking when it is up: a down bridge has no wiring to report, and
+  # saying so twice buries the one finding that matters.
+  if (( BRIDGE_UP )) && have curl; then
+    # The bridge is single-threaded, so a status probe queues behind an
+    # in-flight tarball fetch — hence a timeout generous enough to outlast one.
+    _BRIDGE_STATUS=$(curl -s --max-time 10 --noproxy '*' \
+      "http://127.0.0.1:${BRIDGE_PORT}/__bridge/status" 2>/dev/null | tr -d '\r')
     BRIDGE_UPSTREAM=$(printf '%s\n' "${_BRIDGE_STATUS}" | sed -n 's/^upstream=//p')
     _BRIDGE_UPSTREAM_FROM=$(printf '%s\n' "${_BRIDGE_STATUS}" | sed -n 's/^upstream_from=//p')
     if [[ "${BRIDGE_UPSTREAM}" == "direct" ]]; then
       ok "hex-bridge → hex.pm directly (no proxy named in its env)"
     elif [[ -n "${BRIDGE_UPSTREAM}" ]]; then
-      ok "hex-bridge → hex.pm via ${BRIDGE_UPSTREAM} (from ${_BRIDGE_UPSTREAM_FROM})"
+      ok "hex-bridge → hex.pm via ${BRIDGE_UPSTREAM} (from ${_BRIDGE_UPSTREAM_FROM:-?})"
     else
-      warn "hex-bridge did not report its upstream — predates /__bridge/status, or is wedged"
+      warn "hex-bridge reported no upstream — busy, wedged, or predates /__bridge/status"
     fi
   fi
   # Env wiring that routes BEAM package managers through the bridge.
@@ -141,26 +146,30 @@ else
         if (( IN_CLOUD )); then
           bad "BEAM package fetch FAILED via bridge: ${RES:-no response}"
           note "rebar3/mix deps.get will fail."
-          # The bridge answered its port two checks ago, so "the bridge is down"
-          # is the one cause we can already rule out. Name the leg that is
-          # actually broken instead of pointing back at a check that passed.
-          case "${BRIDGE_UPSTREAM}" in
-            direct)
-              note "the bridge is up but named no upstream proxy, so it dials hex.pm"
-              note "directly — that fails where the sandbox has no direct DNS. Restart"
-              note "it from a shell that has HTTPS_PROXY set:"
-              note "  kill \$(lsof -t -i:${BP}) && just build"
-              ;;
-            "")
-              note "the bridge is up but did not report an upstream — restart it:"
-              note "  kill \$(lsof -t -i:${BP}) && just build"
-              ;;
-            *)
-              note "the bridge is up and tunnelling via ${BRIDGE_UPSTREAM}; that upstream"
-              note "leg is the failing one. Probe it directly for the error text:"
-              note "curl -sv --noproxy '*' http://127.0.0.1:${BP}/names"
-              ;;
-          esac
+          # Name the leg that is actually broken. Pointing at the bridge check
+          # is only useful when that check FAILED — the original bug here was
+          # sending people back to a check that had just passed.
+          if (( ! BRIDGE_UP )); then
+            note "the bridge is not listening — see the hex-bridge check above."
+          else
+            case "${BRIDGE_UPSTREAM}" in
+              direct)
+                note "the bridge is up but named no upstream proxy, so it dials hex.pm"
+                note "directly — that fails where the sandbox has no direct DNS. Restart"
+                note "it from a shell that has HTTPS_PROXY set:"
+                note "  kill \$(lsof -t -i:${BP}) && just build"
+                ;;
+              "")
+                note "the bridge is up but did not report an upstream — restart it:"
+                note "  kill \$(lsof -t -i:${BP}) && just build"
+                ;;
+              *)
+                note "the bridge is up and tunnelling via ${BRIDGE_UPSTREAM}; that upstream"
+                note "leg is the failing one. Probe it directly for the error text:"
+                note "curl -sv --noproxy '*' http://127.0.0.1:${BP}/names"
+                ;;
+            esac
+          fi
         else
           warn "BEAM direct fetch returned: ${RES:-no response}"
           note "Outside cloud this may be a corporate MITM — set HEX_CACERTS_PATH or start the bridge."

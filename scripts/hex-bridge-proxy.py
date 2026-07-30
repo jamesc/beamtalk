@@ -61,10 +61,24 @@ STATUS_PATH = "/__bridge/status"
 # repo.hex.pm directly and every fetch failed for want of direct DNS.  The
 # value is only ever used to open a CONNECT tunnel — exactly what HTTPS_PROXY
 # names — so the fallback is sound.
+#
+# A variable only wins if it parses to a hostname, so falling through to
+# "direct" means the environment named nothing usable — not that the first
+# variable set happened to hold junk.  (A proxy URL with an https:// scheme
+# parses fine but is not supported: the CONNECT below is sent in the clear.)
 _PROXY_VARS = ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy")
-UPSTREAM_VAR = next((var for var in _PROXY_VARS if os.environ.get(var)), "")
-_http_proxy = os.environ.get(UPSTREAM_VAR, "") if UPSTREAM_VAR else ""
-_parsed_proxy = urlsplit(_http_proxy)
+
+
+def _discover_upstream():
+    """Return (env var name, parsed URL) for the first usable proxy setting."""
+    for var in _PROXY_VARS:
+        parsed = urlsplit(os.environ.get(var, ""))
+        if parsed.hostname:
+            return var, parsed
+    return "", urlsplit("")
+
+
+UPSTREAM_VAR, _parsed_proxy = _discover_upstream()
 UPSTREAM_HOST = _parsed_proxy.hostname or ""
 UPSTREAM_PORT = _parsed_proxy.port or (3128 if UPSTREAM_HOST else 0)
 if _parsed_proxy.username is not None:
