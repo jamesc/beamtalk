@@ -976,6 +976,106 @@ fn ffi_union_arg_singleton_symbol_members_compatible_with_symbol_param() {
     );
 }
 
+// ---- BT-3024: the same subtyping rule for a *scalar* singleton ----
+
+#[test]
+fn ffi_scalar_singleton_symbol_arg_compatible_with_symbol_param() {
+    // BT-3024 regression: the singleton rule asserted by the BT-2846 test just
+    // above applies to a *lone* singleton too. A call like
+    // `(Erlang beamtalk_collection) raiseEmpty: #Interval selector: #first`
+    // against `-spec raiseEmpty(atom(), atom())` must not warn — before this
+    // fix the `Known` arm compared by name equality, so `#first` warned where
+    // `#first | #last` did not.
+    let sig = single_param_sig(InferredType::known("Symbol"));
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.check_ffi_argument_types(
+        "mymod",
+        "fun",
+        &sig,
+        &[InferredType::known("#first")],
+        span(),
+        &hierarchy,
+    );
+    assert!(
+        checker.diagnostics().is_empty(),
+        "A lone singleton symbol should be compatible with a Symbol param. Got: {:?}",
+        checker.diagnostics()
+    );
+}
+
+#[test]
+fn ffi_scalar_symbol_arg_against_singleton_param_still_warns() {
+    // BT-3024: subtyping is one-directional. `Symbol` is *not* a subtype of the
+    // singleton `#first`, so widening the `Known` arm to `is_type_compatible`
+    // must not make this direction pass too.
+    let sig = single_param_sig(InferredType::known("#first"));
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.check_ffi_argument_types(
+        "mymod",
+        "fun",
+        &sig,
+        &[InferredType::known("Symbol")],
+        span(),
+        &hierarchy,
+    );
+    assert_eq!(
+        checker.diagnostics().len(),
+        1,
+        "Symbol is not a subtype of the singleton #first — expected a diagnostic. Got: {:?}",
+        checker.diagnostics()
+    );
+}
+
+#[test]
+fn ffi_scalar_subclass_arg_compatible_with_superclass_param() {
+    // BT-3024 (intentional widening): `is_type_compatible` also admits a
+    // subclass where an ancestor is declared. `Integer` against a `Number`
+    // param is a genuine subtype relation, so the warning name equality used
+    // to emit here was a false positive.
+    let sig = single_param_sig(InferredType::known("Number"));
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.check_ffi_argument_types(
+        "mymod",
+        "fun",
+        &sig,
+        &[InferredType::known("Integer")],
+        span(),
+        &hierarchy,
+    );
+    assert!(
+        checker.diagnostics().is_empty(),
+        "Integer is a subclass of Number — no diagnostic expected. Got: {:?}",
+        checker.diagnostics()
+    );
+}
+
+#[test]
+fn ffi_scalar_unrelated_class_arg_still_warns() {
+    // BT-3024 guard: the widened check must still catch genuinely unrelated
+    // classes — `Integer` where `String` is declared has no subtype relation.
+    let sig = single_param_sig(InferredType::known("String"));
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.check_ffi_argument_types(
+        "mymod",
+        "fun",
+        &sig,
+        &[InferredType::known("Integer")],
+        span(),
+        &hierarchy,
+    );
+    assert_eq!(
+        checker.diagnostics().len(),
+        1,
+        "Integer against a String param should still warn. Got: {:?}",
+        checker.diagnostics()
+    );
+    assert!(checker.diagnostics()[0].message.contains("expects String"));
+}
+
 #[test]
 fn ffi_dynamic_arg_unchanged_no_warning() {
     // A `Dynamic` argument continues to short-circuit — same as before this
