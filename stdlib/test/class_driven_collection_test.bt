@@ -106,19 +106,18 @@ TestCase subclass: ClassDrivenCollectionTest
     ] on: Exception do: [:e | e selector]
     self assert: selector equals: #run:over:
 
-  // --- nesting: an inner to_list running inside the outer one's block ------
+  // --- sequential and genuinely-nested to_list calls -----------------------
 
-  // The outer block runs in ClassDrivenCollection's class process, so the inner
-  // `asList` sets up its accumulator *there* and drains that process's mailbox
-  // mid-gen_server-callback. Distinct refs must keep the two from eating each
-  // other's elements, and neither may disturb the class process's own queue.
-  testNestedClassDrivenIteration =>
+  // `collect:`/`inject:into:` fold over a fully-materialised `to_list/1`, so the
+  // user block here runs in the *caller's* process after the outer iteration has
+  // finished — these are back-to-back to_list calls, not overlapping ones.
+  testSequentialClassDrivenIteration =>
     outer := ClassDrivenCollection of: #(1, 2)
     self assert: (outer collect: [:x |
       (ClassDrivenCollection of: #(x, x)) asList
     ]) equals: #(#(1, 1), #(2, 2))
 
-  testNestedClassDrivenInjectAcrossProcesses =>
+  testSequentialClassDrivenInjectAcrossProcesses =>
     outer := ClassDrivenCollection of: #(1, 2, 3)
     total := outer inject: 0 into: [:acc :x |
       acc + (ClassDrivenCollection of: #(x, x)) sum
@@ -129,3 +128,18 @@ TestCase subclass: ClassDrivenCollectionTest
   // class process and needs the same non-local-return relay (BT-3031).
   testNonLocalReturnThroughMetaclassDispatch =>
     self assert: (CollectionProbe firstViaMetaclassOver: #(1, 2, 3)) equals: 2
+
+  // Genuinely overlapping: NestedDrivenCollection>>do: posts its first elements
+  // through a class hop, then runs a *complete* inner to_list/1 in this same
+  // process while those are still queued, then posts one more. Two accumulators
+  // share the mailbox and are told apart only by their refs — if that isolation
+  // broke, the inner drain would eat the outer's queued elements.
+  testInnerToListWhileOuterInFlight =>
+    inner := ClassDrivenCollection of: #(7, 8, 9)
+    outer := NestedDrivenCollection of: #(1, 2) inner: inner
+    self assert: outer asList equals: #(1, 2, 3)
+
+  testInnerToListWhileOuterInFlightPreservesOrder =>
+    inner := ClassDrivenCollection of: #(7, 8, 9)
+    outer := NestedDrivenCollection of: #(10, 20, 30) inner: inner
+    self assert: (outer inject: 0 into: [:a :x | a + x]) equals: 63
