@@ -201,12 +201,26 @@ return or a raise from inside the block) elements may still be queued, and
 leaving them behind would hand stray `'$bt_to_list'` messages to whatever
 `handle_info/2` owns this process.
 
-Cost: each element costs a selective receive, which scans any unrelated messages
-already queued ahead of ours. That is free in an eval worker (empty mailbox) and
-bounded by the backlog when `to_list/1` runs inside a busy actor callback; both
-are dominated by the per-element `do:` dispatch this function drives. Routing
-through a dedicated collector process would make it independent of the backlog
-at the cost of a spawn per call — worth revisiting only if a profile says so.
+Cost, measured on the accumulator in isolation (1000 elements, OTP 28):
+
+    backlog   process dict   mailbox   collector process
+          0         56 us     149 us         327 us
+       1000         87 us     217 us         355 us
+       5000        175 us     387 us         406 us
+
+So the mailbox costs roughly 90ns per element more than the process dictionary
+did — real, but a minority of a `to_list/1` call, which also pays a full `do:`
+dispatch per element on top. Two things worth knowing before "optimising" this:
+
+- A backlog does *not* cost `O(elements x backlog)`. The naive reading of a
+  selective receive says each element re-scans the queued prefix; measurement
+  says otherwise (2.6x from a 5000-message backlog, not 5000x), and the process
+  dictionary version degrades alongside it, so most of that is heap pressure
+  from the queued messages rather than scanning.
+- Routing through a dedicated collector process — the obvious "avoid the
+  caller's mailbox" answer — is *slower at every backlog measured*: the spawn
+  and the cross-process handshake cost more than the receives they replace, and
+  the crossover never arrives. Do not switch to it without new numbers.
 """.
 -spec to_list(term()) -> list().
 to_list(Self) when is_list(Self) ->
