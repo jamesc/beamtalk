@@ -27,6 +27,15 @@ Environment variables:
   HEX_BRIDGE_PORT      - listen port (default: 18081)
   HEX_BRIDGE_TARGET    - target host (default: repo.hex.pm)
   HTTP_PROXY           - upstream proxy URL with credentials
+  http_proxy           - fallback for HTTP_PROXY
+  HTTPS_PROXY          - fallback for HTTP_PROXY
+  https_proxy          - fallback for HTTPS_PROXY
+
+Diagnostics:
+  GET /__bridge/status - plain-text key=value report of how the bridge is
+                         wired (target, upstream, which env var named it).
+                         scripts/cloud-doctor.sh reads this so it can tell a
+                         dead bridge apart from a failing upstream leg.
 """
 
 import base64
@@ -40,10 +49,21 @@ from urllib.parse import urlsplit, unquote
 LISTEN_PORT = int(os.environ.get("HEX_BRIDGE_PORT", "18081"))
 TARGET_HOST = os.environ.get("HEX_BRIDGE_TARGET", "repo.hex.pm")
 MAX_CONNECT_HEADER_BYTES = 64 * 1024
+STATUS_PATH = "/__bridge/status"
 
-# Parse upstream proxy from HTTP_PROXY env var using a proper URL parser
-# to handle percent-encoded credentials and IPv6 addresses correctly.
-_http_proxy = os.environ.get("HTTP_PROXY", os.environ.get("http_proxy", ""))
+# Discover the upstream proxy from the environment, parsed with a proper URL
+# parser to handle percent-encoded credentials and IPv6 addresses correctly.
+#
+# HTTPS_PROXY is a fallback for HTTP_PROXY, not just an afterthought: the
+# Claude Code cloud sandbox sets only HTTPS_PROXY and deliberately leaves
+# HTTP_PROXY unset (plain HTTP to its egress proxy earns a 405).  Reading
+# HTTP_PROXY alone left UPSTREAM_HOST empty there, so the bridge tried to dial
+# repo.hex.pm directly and every fetch failed for want of direct DNS.  The
+# value is only ever used to open a CONNECT tunnel — exactly what HTTPS_PROXY
+# names — so the fallback is sound.
+_PROXY_VARS = ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy")
+UPSTREAM_VAR = next((var for var in _PROXY_VARS if os.environ.get(var)), "")
+_http_proxy = os.environ.get(UPSTREAM_VAR, "") if UPSTREAM_VAR else ""
 _parsed_proxy = urlsplit(_http_proxy)
 UPSTREAM_HOST = _parsed_proxy.hostname or ""
 UPSTREAM_PORT = _parsed_proxy.port or (3128 if UPSTREAM_HOST else 0)
@@ -169,6 +189,25 @@ def _dechunk(data):
 class HexBridgeHandler(http.server.BaseHTTPRequestHandler):
     """Handle incoming HTTP requests and proxy them to hex.pm over HTTPS."""
 
+    def _send_status(self):
+        """Report how the bridge is wired upstream.
+
+        A bridge that is listening but dialling the wrong upstream fails
+        exactly like a healthy one until a fetch is attempted, so `just doctor`
+        asks the running process rather than re-reading the environment — a
+        bridge started before the env was fixed keeps its original wiring.
+        """
+        body = (
+            f"target={TARGET_HOST}\n"
+            f"upstream={f'{UPSTREAM_HOST}:{UPSTREAM_PORT}' if UPSTREAM_HOST else 'direct'}\n"
+            f"upstream_from={UPSTREAM_VAR or 'none'}\n"
+        ).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self):
         path = self.path
         # Handle absolute URLs (http://host/path?q=1) from HTTP proxy clients
@@ -177,6 +216,10 @@ class HexBridgeHandler(http.server.BaseHTTPRequestHandler):
             path = parsed.path or "/"
             if parsed.query:
                 path = f"{path}?{parsed.query}"
+
+        if path.split("?", 1)[0] == STATUS_PATH:
+            self._send_status()
+            return
 
         try:
             raw = https_get(path)
@@ -232,9 +275,9 @@ class HexBridgeHandler(http.server.BaseHTTPRequestHandler):
 def main():
     server = http.server.HTTPServer(("127.0.0.1", LISTEN_PORT), HexBridgeHandler)
     if UPSTREAM_HOST:
-        via = f"via {UPSTREAM_HOST}:{UPSTREAM_PORT}"
+        via = f"via {UPSTREAM_HOST}:{UPSTREAM_PORT} (from {UPSTREAM_VAR})"
     else:
-        via = "direct"
+        via = "direct — no HTTP_PROXY/HTTPS_PROXY in env"
     print(
         f"hex-bridge listening on 127.0.0.1:{LISTEN_PORT} -> {TARGET_HOST} ({via})",
         flush=True,
