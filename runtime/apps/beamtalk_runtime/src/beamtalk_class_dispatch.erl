@@ -498,13 +498,11 @@ metaclass_send_dispatch(Pid, Selector, Args, Self) ->
             %% `unwrap_class_call/1` reraises it as an ordinary error and the raw
             %% `{'$bt_nlr', ...}` tuple reaches user code.
             %%
-            %% Carried by parity with the `beamtalk_script_exit` clause directly
-            %% above, which faces the identical problem at this identical site.
-            %% Not covered by a test: no Beamtalk source shape tried so far
-            %% (`SomeClass`, `SomeClass class`, `anInstance class`) routes a
-            %% block-taking class method through here rather than through
-            %% `class_send/3` — see BT-3031. Harmless if the path is in fact
-            %% dead: it only intercepts a shape that would otherwise leak.
+            %% Reached via a metaclass receiver — `SomeClass class class`, which
+            %% `beamtalk_behaviour_intrinsics:classClass/1` tags `'Metaclass'` so
+            %% `beamtalk_primitive:send/3` routes it here. A plain class literal or
+            %% a single `class` send goes through `class_send/3` instead, which is
+            %% why this needs its own clause rather than sharing that one.
             throw(Nlr);
         Other ->
             unwrap_class_call(Other)

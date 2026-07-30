@@ -124,3 +124,8 @@ TestCase subclass: ClassDrivenCollectionTest
       acc + (ClassDrivenCollection of: #(x, x)) sum
     ]
     self assert: total equals: 12
+
+  // A metaclass receiver (`SomeClass class class`) is a second door into the
+  // class process and needs the same non-local-return relay (BT-3031).
+  testNonLocalReturnThroughMetaclassDispatch =>
+    self assert: (CollectionProbe firstViaMetaclassOver: #(1, 2, 3)) equals: 2

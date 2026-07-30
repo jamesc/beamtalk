@@ -24,3 +24,12 @@ Value subclass: CollectionProbe
     k := CollectionDriver
     k run: [:x | x > 1 ifTrue: [^x]] over: aList
     0
+
+  // BT-3031: `CollectionDriver class class` is a true metaclass receiver
+  // (beamtalk_behaviour_intrinsics:classClass/1 tags it 'Metaclass'), so this
+  // routes through metaclass_send/4 instead of class_send/3. The `^` belongs to
+  // this method's frame and must cross back along that path too.
+  class firstViaMetaclassOver: aList :: List -> Integer =>
+    k := CollectionDriver class class
+    k run: [:x | x > 1 ifTrue: [^x]] over: aList
+    0
