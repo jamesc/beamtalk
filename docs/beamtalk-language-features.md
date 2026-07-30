@@ -4705,9 +4705,10 @@ element matching. `detect:ifNone:` is the non-raising alternative:
 ```
 
 Every receiver agrees ([BT-3028](https://linear.app/beamtalk/issue/BT-3028)) —
-`List`, `Set`, `Bag`, `Dictionary`, `Interval`, `String`, and `Stream`. `detect:` answers
-`E`, and `E` has no in-band way to say "nothing matched", so the raise is the
-honest encoding; reach for `detect:ifNone:` whenever a miss is expected:
+`List`, `Set`, `Bag`, `Dictionary`, `Interval`, `String`, and `Stream`.
+`detect:` answers `E`, and `E` has no in-band way to say "nothing matched", so
+the raise is the honest encoding; reach for `detect:ifNone:` whenever a miss is
+expected:
 
 ```beamtalk
 #(1, 2, 3) asSet detect: [:x | x > 10]      // raises not_found

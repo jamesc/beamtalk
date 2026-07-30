@@ -6,10 +6,10 @@
 // `detect:` used to mean two different things depending on the receiver's
 // class. `List` overrode it with a primitive that raises `not_found`, while
 // every collection that did *not* override it — Set, Bag, Dictionary,
-// Interval — inherited a `Collection>>detect:` that answered nil, and
-// `Stream>>detect:` was a third variant that also answered nil. Swapping a Set
-// for a List at a call site silently turned a raise into a nil that flowed on
-// and failed somewhere unrelated.
+// Interval, Binary/String — inherited a `Collection>>detect:` that answered
+// nil, and `Stream>>detect:` was a third variant that also answered nil.
+// Swapping a Set for a List at a call site silently turned a raise into a nil
+// that flowed on and failed somewhere unrelated.
 //
 // They all raise now: the declared return type is `E`, which has no in-band
 // way to say "nothing matched". `detect:ifNone:` is the non-raising
