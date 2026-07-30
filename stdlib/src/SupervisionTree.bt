@@ -90,8 +90,8 @@ typed Value subclass: SupervisionTree
   select: aBlock :: Block(SupervisionNode, Boolean) -> List(SupervisionNode) =>
     self nodes select: aBlock
 
-  /// The first node for which `aBlock` answers `true`. Raises if none match —
-  /// use `detect:ifNone:` for a default.
+  /// The first node for which `aBlock` answers `true`. Raises `not_found` if
+  /// none match — use `detect:ifNone:` for a default.
   ///
   /// ## Examples
   /// ```beamtalk

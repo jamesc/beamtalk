@@ -151,13 +151,15 @@ detect_first_match_test() ->
         )
     ).
 
+%% BT-3025: no element matched is `not_found`, not `does_not_understand` —
+%% the List understands `detect:`, the search just came up empty.
 detect_not_found_test() ->
     ?assertException(
         error,
         #{
             '$beamtalk_class' := 'RuntimeError',
             error := #beamtalk_error{
-                kind = does_not_understand,
+                kind = not_found,
                 class = 'List',
                 selector = 'detect:'
             }
@@ -167,6 +169,17 @@ detect_not_found_test() ->
             fun(X) -> X > 10 end
         )
     ).
+
+%% The message names the condition rather than a missing selector.
+detect_not_found_message_test() ->
+    Message =
+        try
+            beamtalk_list:detect([1, 2, 3], fun(X) -> X > 10 end)
+        catch
+            error:#{error := #beamtalk_error{message = M}} -> M
+        end,
+    ?assertNotEqual(nomatch, binary:match(Message, <<"no matching element">>)),
+    ?assertEqual(nomatch, binary:match(Message, <<"does not understand">>)).
 
 detect_invalid_block_test() ->
     ?assertException(
@@ -622,16 +635,32 @@ from_to_non_integer_end_test() ->
         beamtalk_list:from_to([1, 2, 3], 1, foo)
     ).
 
+%% BT-3025: a sub-1 start index is `index_out_of_bounds`, matching `at:` —
+%% the index is malformed, the selector is not.
 from_to_negative_start_test() ->
     ?assertException(
         error,
         #{
             '$beamtalk_class' := 'RuntimeError',
             error := #beamtalk_error{
-                kind = does_not_understand,
+                kind = index_out_of_bounds,
                 class = 'List',
                 selector = 'from:to:'
             }
         },
         beamtalk_list:from_to([1, 2, 3], -1, 2)
+    ).
+
+from_to_zero_start_test() ->
+    ?assertException(
+        error,
+        #{
+            '$beamtalk_class' := 'RuntimeError',
+            error := #beamtalk_error{
+                kind = index_out_of_bounds,
+                class = 'List',
+                selector = 'from:to:'
+            }
+        },
+        beamtalk_list:from_to([1, 2, 3], 0, 2)
     ).

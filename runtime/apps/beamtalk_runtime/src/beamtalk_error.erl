@@ -341,6 +341,15 @@ generate_message(index_out_of_bounds, Class, undefined) ->
     iolist_to_binary(io_lib:format("Index out of bounds for ~s", [Class]));
 generate_message(index_out_of_bounds, Class, Selector) ->
     iolist_to_binary(io_lib:format("'~s': index out of bounds for ~s", [Selector, Class]));
+%% BT-3025: a search that ran to completion without matching. `key_error` was
+%% the closest existing kind but names a key the receiver was asked for, which
+%% a predicate search has none of; `empty_collection` says the wrong thing when
+%% the collection is full of non-matches.
+generate_message(not_found, Class, undefined) ->
+    iolist_to_binary(io_lib:format("No matching element in ~s", [Class]));
+generate_message(not_found, Class, Selector) ->
+    %% Selector is quoted because keyword selectors already end in `:`.
+    iolist_to_binary(io_lib:format("'~s': no matching element in ~s", [Selector, Class]));
 generate_message(actor_dead, Class, undefined) ->
     iolist_to_binary(io_lib:format("~s actor process has terminated", [Class]));
 generate_message(actor_dead, Class, Selector) ->

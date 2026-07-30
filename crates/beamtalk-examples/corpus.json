@@ -1377,7 +1377,17 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-191",
+      "id": "docs-beamtalk-language-features-block-192",
+      "title": "Lookups That Find Nothing (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "#(1, 2, 3) from: 0 to: 2   // raises index_out_of_bounds\n#(1, 2, 3) from: 3 to: 1   // => #()  (empty range, not an error)\n#(1, 2, 3) from: 2 to: 99  // => #(2, 3)  (clamped)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-193",
       "title": "Interval — Arithmetic Sequences (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1393,7 +1403,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-192",
+      "id": "docs-beamtalk-language-features-block-194",
       "title": "Bag(E) — Multisets (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1417,7 +1427,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-193",
+      "id": "docs-beamtalk-language-features-block-195",
       "title": "Constructors (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1436,7 +1446,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-194",
+      "id": "docs-beamtalk-language-features-block-196",
       "title": "Lazy Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1457,7 +1467,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-195",
+      "id": "docs-beamtalk-language-features-block-197",
       "title": "Terminal Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1470,7 +1480,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-196",
+      "id": "docs-beamtalk-language-features-block-198",
       "title": "printString — Pipeline Inspection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1486,7 +1496,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-197",
+      "id": "docs-beamtalk-language-features-block-199",
       "title": "Eager vs Lazy — The Boundary (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1496,35 +1506,6 @@
         "where"
       ],
       "source": "// Eager — List methods return a List immediately\n#(1, 2, 3, 4, 5) select: [:n | n > 2]\n// => [3,4,5]  (a List)\n\n// Lazy — stream methods return a Stream (unevaluated)\n(#(1, 2, 3, 4, 5) stream) select: [:n | n > 2]\n// => Stream  (unevaluated — call asList or take: to materialize)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-198",
-      "title": "File Streaming (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features",
-        "filter",
-        "filtering",
-        "for each",
-        "for-each",
-        "forEach",
-        "iterate",
-        "iteration",
-        "loop",
-        "where"
-      ],
-      "source": "// Read lines lazily\n(File lines: \"data.csv\") do: [:line | Transcript show: line]\n\n// Pipeline composition\n(File lines: \"app.log\") select: [:l | l includes: \"ERROR\"]\n\n// Block-scoped handle for explicit lifecycle control\nFile open: \"data.csv\" do: [:handle |\n  handle lines take: 10\n]\n// handle closed automatically when block exits",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-199",
-      "title": "File I/O and Directory Operations (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features"
-      ],
-      "source": "File writeAll: \"output.txt\" contents: \"hello\"\nFile readAll: \"output.txt\"              // => \"hello\"\nFile mkdirAll: \"target/data/logs\"\nFile listDirectory: \"target/data\"       // => [\"logs\"]\nFile rename: \"output.txt\" to: \"target/data/output.txt\"\nFile delete: \"target/data/output.txt\"\nFile deleteAll: \"target/data\"",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -1554,6 +1535,35 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-200",
+      "title": "File Streaming (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features",
+        "filter",
+        "filtering",
+        "for each",
+        "for-each",
+        "forEach",
+        "iterate",
+        "iteration",
+        "loop",
+        "where"
+      ],
+      "source": "// Read lines lazily\n(File lines: \"data.csv\") do: [:line | Transcript show: line]\n\n// Pipeline composition\n(File lines: \"app.log\") select: [:l | l includes: \"ERROR\"]\n\n// Block-scoped handle for explicit lifecycle control\nFile open: \"data.csv\" do: [:handle |\n  handle lines take: 10\n]\n// handle closed automatically when block exits",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-201",
+      "title": "File I/O and Directory Operations (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "File writeAll: \"output.txt\" contents: \"hello\"\nFile readAll: \"output.txt\"              // => \"hello\"\nFile mkdirAll: \"target/data/logs\"\nFile listDirectory: \"target/data\"       // => [\"logs\"]\nFile rename: \"output.txt\" to: \"target/data/output.txt\"\nFile delete: \"target/data/output.txt\"\nFile deleteAll: \"target/data\"",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-202",
       "title": "Incremental File I/O — FileHandle (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1574,7 +1584,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-201",
+      "id": "docs-beamtalk-language-features-block-203",
       "title": "Incremental File I/O — FileHandle (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1593,7 +1603,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-203",
+      "id": "docs-beamtalk-language-features-block-205",
       "title": "Side-Effect Timing ⚠️ (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1611,7 +1621,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-204",
+      "id": "docs-beamtalk-language-features-block-206",
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1626,7 +1636,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-205",
+      "id": "docs-beamtalk-language-features-block-207",
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1636,7 +1646,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-206",
+      "id": "docs-beamtalk-language-features-block-208",
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1651,29 +1661,6 @@
         "subclassing"
       ],
       "source": "typed Object subclass: Collection(E)\n  @expect type\n  first => (Erlang erlang) hd: self asErlangList   // polymorphic return — suppress missing-annotation warning",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-209",
-      "title": "Creating a Table (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "async",
-        "beamtalk-language-features",
-        "concurrent",
-        "constructor",
-        "create",
-        "gen_server",
-        "genserver",
-        "instantiate",
-        "mutate",
-        "mutation",
-        "process",
-        "set"
-      ],
-      "source": "// Create a named public table\ncache := Ets new: #myCache type: #set\n\n// Table types\nEts new: #t1 type: #set          // one entry per key (unordered)\nEts new: #t2 type: #orderedSet   // one entry per key (sorted keys)\nEts new: #t3 type: #bag          // multiple entries per key, values differ\nEts new: #t4 type: #duplicateBag // multiple identical entries per key\n\n// Look up an existing named table from another actor\ncache := Ets named: #myCache",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -1702,7 +1689,30 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-210",
+      "id": "docs-beamtalk-language-features-block-211",
+      "title": "Creating a Table (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "async",
+        "beamtalk-language-features",
+        "concurrent",
+        "constructor",
+        "create",
+        "gen_server",
+        "genserver",
+        "instantiate",
+        "mutate",
+        "mutation",
+        "process",
+        "set"
+      ],
+      "source": "// Create a named public table\ncache := Ets new: #myCache type: #set\n\n// Table types\nEts new: #t1 type: #set          // one entry per key (unordered)\nEts new: #t2 type: #orderedSet   // one entry per key (sorted keys)\nEts new: #t3 type: #bag          // multiple entries per key, values differ\nEts new: #t4 type: #duplicateBag // multiple identical entries per key\n\n// Look up an existing named table from another actor\ncache := Ets named: #myCache",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-212",
       "title": "Reading and Writing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1712,7 +1722,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-211",
+      "id": "docs-beamtalk-language-features-block-213",
       "title": "Other Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1722,7 +1732,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-212",
+      "id": "docs-beamtalk-language-features-block-214",
       "title": "Cross-Actor Sharing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1745,7 +1755,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-214",
+      "id": "docs-beamtalk-language-features-block-216",
       "title": "Enqueueing and Dequeueing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1760,7 +1770,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-215",
+      "id": "docs-beamtalk-language-features-block-217",
       "title": "Other Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1770,7 +1780,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-217",
+      "id": "docs-beamtalk-language-features-block-219",
       "title": "Atomic Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1783,7 +1793,22 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-218",
+      "id": "docs-beamtalk-language-features-block-22",
+      "title": "Blocks (Closures) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "// Block with no arguments\n[self doSomething]\n\n// Block with arguments\n[:x :y | x + y]\n\n// Block with local variables\n[:x | temp := x * 2. temp + 1]",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-220",
       "title": "Cross-Actor Sharing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1806,7 +1831,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-219",
+      "id": "docs-beamtalk-language-features-block-221",
       "title": "TestCase — BUnit Testing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1829,22 +1854,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-22",
-      "title": "Blocks (Closures) (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "// Block with no arguments\n[self doSomething]\n\n// Block with arguments\n[:x :y | x + y]\n\n// Block with local variables\n[:x | temp := x * 2. temp + 1]",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-220",
+      "id": "docs-beamtalk-language-features-block-222",
       "title": "TestCase — BUnit Testing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1867,7 +1877,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-221",
+      "id": "docs-beamtalk-language-features-block-223",
       "title": "Suite-Level Setup — setUpOnce / tearDownOnce (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1898,7 +1908,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-222",
+      "id": "docs-beamtalk-language-features-block-224",
       "title": "Parallel Test Execution (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -24302,6 +24312,52 @@
       ],
       "source": "// E2E tests for list literal syntax #(1, 2, 3) (ADR 0012, BT-402)\n\nTestCase subclass: ListLiteralsTest\n\n  testEmptyList =>\n    self assert: #() equals: #()\n    self assert: #() size equals: 0\n    self assert: #() isEmpty\n\n  testSingleElementList =>\n    self assert: #(256) equals: #(256)\n    self assert: #(256) size equals: 1\n    self deny: #(256) isEmpty\n\n  testMultipleElementList =>\n    self assert: #(1, 2, 3) equals: #(1, 2, 3)\n    self assert: #(1, 2, 3) size equals: 3\n\n  testNestedLists =>\n    self assert: #(#(1, 2), #(3, 4)) equals: #(#(1, 2), #(3, 4))\n\n  testListMethods =>\n    self assert: #(1, 2, 3) first equals: 1\n    self assert: #(1, 2, 3) rest equals: #(2, 3)\n\n  // Trailing commas are accepted by the parser and normalized away (formatter removes them)\n  testTrailingComma => self assert: #(10, 20, 30) equals: #(10, 20, 30)\n\n  testListWithExpressionsParenthesizedForBinaryOps =>\n    self assert: #((1 + 2), (3 * 4)) equals: #(3, 12)\n\n  testNewFromList =>\n    self assert: (List new: #(1, 2, 3)) equals: #(1, 2, 3)\n    self assert: (List new: #()) equals: #()\n\n  testSetNewFromList => self assert: (Set new: #(1, 2, 2, 3)) size equals: 3\n\n  testTupleNewFromList => self assert: (Tuple new: #(1, 2, 3)) size equals: 3",
       "explanation": "E2E tests for list literal syntax #(1, 2, 3) (ADR 0012, BT-402)"
+    },
+    {
+      "id": "stdlib-test-list-lookup-error-kinds-test",
+      "title": "ListLookupErrorKindsTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "ListLookupErrorKindsTest",
+        "TestCase",
+        "assign",
+        "assignment",
+        "extends",
+        "find",
+        "first match",
+        "for each",
+        "for-each",
+        "forEach",
+        "inherit",
+        "inheritance",
+        "iterate",
+        "iteration",
+        "list_lookup_error_kinds_test",
+        "loop",
+        "mutate",
+        "mutation",
+        "object",
+        "search",
+        "set",
+        "subclassing",
+        "testDetectIfNoneDoesNotRaise",
+        "testDetectMessageNamesTheCondition",
+        "testDetectOnEmptyListAlsoRaisesNotFound",
+        "testDetectStillAnswersTheFirstMatch",
+        "testDetectWithNoMatchRaisesNotFound",
+        "testFromToAgreesWithAtOnMalformedIndex",
+        "testFromToEndBelowStartAnswersEmptyList",
+        "testFromToEndPastSizeIsClamped",
+        "testFromToInRangeAnswersSubsequence",
+        "testFromToIndexOutOfBoundsIsCatchableAsRuntimeError",
+        "testFromToMessageNamesTheCondition",
+        "testFromToNegativeStartRaisesIndexOutOfBounds",
+        "testFromToStartPastSizeAnswersEmptyList",
+        "testFromToZeroStartRaisesIndexOutOfBounds",
+        "testNotFoundIsCatchableAsRuntimeError"
+      ],
+      "source": "// BUnit tests for the non-empty List lookup failures (BT-3025).\n//\n// `detect:` with no match, and `from:to:` with a malformed start index, both\n// used to raise `does_not_understand` — a dispatch failure. The List\n// understands both selectors perfectly well; one search came up empty and the\n// other was handed a bad index. Reporting a dispatch failure sent readers\n// hunting for a typo and left `on:do:` unable to tell either case apart from a\n// genuinely misspelled selector.\n//\n// These are the sibling conditions to the empty-collection ones covered in\n// `empty_collection_access_test.bt` (BT-3021) — neither of these receivers is\n// empty.\n\nTestCase subclass: ListLookupErrorKindsTest\n\n  // ==========================================================================\n  // detect: — a search that ran to completion without matching\n  // ==========================================================================\n  // The List is full — of non-matches. That is why `not_found` rather than\n  // `empty_collection`: nothing here is empty.\n  testDetectWithNoMatchRaisesNotFound =>\n    self should: [#(1, 2, 3) detect: [:x | x > 10]] raise: #not_found\n\n  // `detect:` is a search, not an element accessor, so an empty receiver is\n  // just the degenerate no-match case and reports the same kind.\n  testDetectOnEmptyListAlsoRaisesNotFound =>\n    self should: [#() detect: [:x | x > 10]] raise: #not_found\n\n  testDetectMessageNamesTheCondition =>\n    message := [#(1, 2, 3) detect: [:x | x > 10]] on: Error do: [:e | e message]\n    self assert: (message includesSubstring: \"no matching element\")\n    self deny: (message includesSubstring: \"does not understand\")\n\n  // not_found classifies as RuntimeError, so `on:do:` can discriminate it\n  // from an unrelated failure raised by the same block.\n  testNotFoundIsCatchableAsRuntimeError =>\n    caught := [\n      #(1, 2, 3) detect: [:x | x > 10]\n    ] on: RuntimeError do: [:e | \"caught\"]\n    self assert: caught equals: \"caught\"\n\n  testDetectStillAnswersTheFirstMatch =>\n    self assert: (#(1, 2, 3) detect: [:x | x > 1]) equals: 2\n\n  // detect:ifNone: stays the non-raising alternative.\n  testDetectIfNoneDoesNotRaise =>\n    self assert: (#(1, 2, 3) detect: [:x | x > 10] ifNone: [0]) equals: 0\n\n  // ==========================================================================\n  // from:to: — a start index below 1 is malformed, matching at:\n  // ==========================================================================\n  testFromToNegativeStartRaisesIndexOutOfBounds =>\n    self should: [#(1, 2, 3) from: -1 to: 2] raise: #index_out_of_bounds\n\n  testFromToZeroStartRaisesIndexOutOfBounds =>\n    self should: [#(1, 2, 3) from: 0 to: 2] raise: #index_out_of_bounds\n\n  // The same kind `at:` raises for a sub-1 index — the two agree.\n  testFromToAgreesWithAtOnMalformedIndex =>\n    self should: [#(1, 2, 3) at: 0] raise: #index_out_of_bounds\n    self should: [#(1, 2, 3) from: 0 to: 2] raise: #index_out_of_bounds\n\n  testFromToMessageNamesTheCondition =>\n    message := [#(1, 2, 3) from: -1 to: 2] on: Error do: [:e | e message]\n    self assert: (message includesSubstring: \"index out of bounds\")\n    self deny: (message includesSubstring: \"does not understand\")\n\n  testFromToIndexOutOfBoundsIsCatchableAsRuntimeError =>\n    caught := [#(1, 2, 3) from: -1 to: 2] on: RuntimeError do: [:e | \"caught\"]\n    self assert: caught equals: \"caught\"\n\n  // ==========================================================================\n  // The total cases stay total — only a sub-1 start raises\n  // ==========================================================================\n  testFromToInRangeAnswersSubsequence =>\n    self assert: (#(10, 20, 30, 40) from: 2 to: 3) equals: #(20, 30)\n\n  // An end below the start is an empty range, not an error.\n  testFromToEndBelowStartAnswersEmptyList =>\n    self assert: (#(1, 2, 3) from: 3 to: 1) equals: #()\n\n  // An end past the last index is clamped rather than raising.\n  testFromToEndPastSizeIsClamped =>\n    self assert: (#(1, 2, 3) from: 2 to: 99) equals: #(2, 3)\n\n  // A start past the last index answers empty — it is in range shape, just\n  // beyond the data.\n  testFromToStartPastSizeAnswersEmptyList =>\n    self assert: (#(1, 2, 3) from: 9 to: 12) equals: #()",
+      "explanation": "BUnit tests for the non-empty List lookup failures (BT-3025).  `detect:` with no match, and `from:to:` with a malformed start index, both used to raise `does_not_understand` — a dispatch failure. The List understands both selectors perfectly well; one search came up empty and the other was handed a bad index. Reporting a dispatch failure sent readers hunting for a typo and left `on:do:` unable to tell either case apart from a genuinely misspelled selector.  These are the sibling conditions to the empty-collection ones covered in `empty_collection_access_test.bt` (BT-3021) — neither of these receivers is empty."
     },
     {
       "id": "stdlib-test-local-type-annotation-test",
