@@ -23,7 +23,8 @@ See also: docs/internal/design-self-as-object.md Section 3.3
     print_string/1,
     display_string/1,
     process_label/1,
-    is_object/1
+    is_object/1,
+    is_utf8/1
 ]).
 
 -include("beamtalk.hrl").
@@ -75,11 +76,23 @@ is_object(_) ->
     %% cross-module call to is_beamtalk_actor/1 (which only guards `is_pid`).
     false.
 
--doc "Determine the Beamtalk class of any value.".
+-doc """
+Determine the Beamtalk class of any value.
+
+Bare binaries (BT-2999): `String` is a subclass of `Binary` and both share the
+single BEAM `binary()` representation, so a raw binary carries no runtime tag
+saying which one it is. Valid UTF-8 answers `String` (the ambiguous but
+overwhelmingly common case); a binary that is *not* valid UTF-8 cannot be a
+`String` at all, so it answers `Binary`.
+""".
 -spec class_of(term()) -> atom().
 class_of(X) when is_integer(X) -> 'Integer';
 class_of(X) when is_float(X) -> 'Float';
-class_of(X) when is_binary(X) -> 'String';
+class_of(X) when is_binary(X) ->
+    case is_utf8(X) of
+        true -> 'String';
+        false -> 'Binary'
+    end;
 class_of(true) ->
     'True';
 class_of(false) ->
@@ -161,8 +174,17 @@ Strings are quoted (developer representation), symbols use the `#` prefix.
 print_string(X) when is_integer(X) -> erlang:integer_to_binary(X);
 print_string(X) when is_float(X) -> erlang:float_to_binary(X, [short]);
 print_string(X) when is_binary(X) ->
-    Escaped = binary:replace(X, <<"\"">>, <<"\"\"">>, [global]),
-    iolist_to_binary([$", Escaped, $"]);
+    case is_utf8(X) of
+        true ->
+            Escaped = binary:replace(X, <<"\"">>, <<"\"\"">>, [global]),
+            iolist_to_binary([$", Escaped, $"]);
+        false ->
+            %% BT-2999: bytes that aren't valid UTF-8 can't be a String, and
+            %% embedding them raw produces an invalid-UTF-8 result that later
+            %% blows up anything expecting text (json:encode/1, logger, …).
+            %% Render them the way `Binary printString` does instead.
+            binary_hex_print_string(X)
+    end;
 print_string(true) ->
     <<"true">>;
 print_string(false) ->
@@ -513,7 +535,14 @@ responds_via_module(X, Selector) ->
 -doc "Map a runtime value to its stdlib dispatch module.".
 -spec module_for_value(term()) -> atom() | undefined.
 module_for_value(X) when is_integer(X) -> 'bt@stdlib@integer';
-module_for_value(X) when is_binary(X) -> 'bt@stdlib@string';
+module_for_value(X) when is_binary(X) ->
+    %% BT-2999: keep dynamic dispatch consistent with class_of/1 — a binary
+    %% that isn't valid UTF-8 is a Binary, so grapheme-aware String methods
+    %% (`size`, `at:`, `do:`, …) would only fail on it.
+    case is_utf8(X) of
+        true -> 'bt@stdlib@string';
+        false -> 'bt@stdlib@binary'
+    end;
 module_for_value(true) ->
     'bt@stdlib@true';
 module_for_value(false) ->
@@ -798,6 +827,34 @@ camel_to_snake([H | T], PrevWasLower, Acc) when H >= $A, H =< $Z ->
     end;
 camel_to_snake([H | T], _PrevWasLower, Acc) ->
     camel_to_snake(T, (H >= $a andalso H =< $z), [H | Acc]).
+
+-doc """
+Whether a binary holds valid UTF-8 text (BT-2999).
+
+`String` and `Binary` share the single BEAM `binary()` representation, so this
+is the only signal available at runtime: invalid UTF-8 definitively rules out
+`String`, while valid UTF-8 leaves the two indistinguishable and is treated as
+`String`.
+
+Cost is a single O(byte_size) validating scan with no copy — `characters_to_binary/3`
+hands back the *same* binary when it is already valid UTF-8. It runs only on
+the dynamic-dispatch path (statically typed sends compile straight to BIFs).
+""".
+-spec is_utf8(binary()) -> boolean().
+is_utf8(Bin) when is_binary(Bin) ->
+    is_binary(unicode:characters_to_binary(Bin, utf8, utf8)).
+
+-doc """
+Render a non-UTF-8 binary the way `Binary printString` does — `<<AB CD>>`.
+
+Kept here rather than delegating to `beamtalk_binary:print_string/1` because
+beamtalk_runtime must not depend on beamtalk_stdlib.
+""".
+-spec binary_hex_print_string(binary()) -> binary().
+binary_hex_print_string(Bin) ->
+    Hex = binary:encode_hex(Bin, uppercase),
+    Spaced = lists:join(<<" ">>, [Pair || <<Pair:2/binary>> <= Hex]),
+    iolist_to_binary([<<"<<">>, Spaced, <<">>">>]).
 
 -doc """
 Extract the class name atom from a class tag or class object tag.

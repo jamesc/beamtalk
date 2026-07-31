@@ -4659,15 +4659,43 @@ bin isEmpty                   // => false
 
 | Method | On Binary | On String |
 |--------|-----------|-----------|
-| `at: index` | grapheme (1-based, via String at runtime) | grapheme (1-based) |
-| `size` | element count (via String at runtime) | grapheme count |
+| `at: index` | grapheme (1-based, via String at runtime¹) | grapheme (1-based) |
+| `size` | element count (via String at runtime¹) | grapheme count |
 | `byteAt: offset` | byte value (0-based) | inherited — byte value (0-based) |
 | `byteSize` | byte count | inherited — byte count |
-| `do: block` | iterate elements (via String at runtime) | iterate graphemes |
+| `do: block` | iterate elements (via String at runtime¹) | iterate graphemes |
 | `part: offset size: n` | byte-level slice, returns Binary | inherited — byte-level slice, returns Binary |
 | `concat:` | byte concatenation, returns Binary | inherited — byte concatenation, returns Binary |
 | `asString` | UTF-8 validation, returns String | no-op, returns self |
 | `asStringUnchecked` | unchecked cast to String | no-op, returns self |
+
+¹ Only when the bytes are valid UTF-8 — see below.
+
+#### Binary vs String at Runtime
+
+Binary and String are one and the same BEAM `binary()` — a raw binary carries
+no tag saying which class produced it. The runtime therefore uses the only
+signal it has, UTF-8 validity ([BT-2999](https://linear.app/beamtalk/issue/BT-2999)):
+
+| Bytes | `class` | Dynamic dispatch of `size`, `at:`, `do:`, … |
+|-------|---------|---------------------------------------------|
+| valid UTF-8 (`"hello"`, `Binary fromBytes: #(104, 105)`) | `String` | String — grapheme-aware |
+| not valid UTF-8 (crypto output, hashes, compressed data, `Binary fromBytes: #(255, 254)`) | `Binary` | Binary — byte-level |
+
+```beamtalk
+bytes := Binary fromBytes: #(255, 254, 253)
+bytes class name    // => #Binary
+bytes size          // => 3 (bytes, not graphemes)
+bytes printString   // => "<<FF FE FD>>" (hex — never raw invalid UTF-8)
+
+(Binary fromBytes: #(104, 105)) class name   // => #String  (indistinguishable)
+```
+
+Valid UTF-8 stays genuinely ambiguous: a `Binary` holding text answers `String`
+and gets grapheme semantics. **Do not rely on `class` to tell text from bytes.**
+When the distinction matters, annotate the type (`data :: Binary`) so the
+compiler dispatches statically, or use the unambiguous byte-level selectors
+(`byteSize`, `byteAt:`, `part:size:`) which mean the same thing on both.
 
 ### Accessing an Empty Collection
 

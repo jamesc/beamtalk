@@ -1391,12 +1391,20 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-189",
-      "title": "Accessing an Empty Collection (beamtalk-language-features)",
+      "title": "Binary vs String at Runtime (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
-        "beamtalk-language-features"
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set",
+        "string conversion",
+        "toString",
+        "to_string"
       ],
-      "source": "#() first                  // raises empty_collection\n#() last                   // raises empty_collection\n#() at: 1                  // raises empty_collection\n\"\" first                   // raises empty_collection\n\"\" at: 1                   // raises empty_collection\n(Array withAll: #()) at: 1 // raises empty_collection\n(Binary fromBytes: #()) at: 1   // raises empty_collection\n(1 to: 0) first            // raises empty_collection\n#() max                    // raises empty_collection (also min, average)",
+      "source": "bytes := Binary fromBytes: #(255, 254, 253)\nbytes class name    // => #Binary\nbytes size          // => 3 (bytes, not graphemes)\nbytes printString   // => \"<<FF FE FD>>\" (hex — never raw invalid UTF-8)\n\n(Binary fromBytes: #(104, 105)) class name   // => #String  (indistinguishable)",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -1420,7 +1428,17 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-191",
+      "id": "docs-beamtalk-language-features-block-190",
+      "title": "Accessing an Empty Collection (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "#() first                  // raises empty_collection\n#() last                   // raises empty_collection\n#() at: 1                  // raises empty_collection\n\"\" first                   // raises empty_collection\n\"\" at: 1                   // raises empty_collection\n(Array withAll: #()) at: 1 // raises empty_collection\n(Binary fromBytes: #()) at: 1   // raises empty_collection\n(1 to: 0) first            // raises empty_collection\n#() max                    // raises empty_collection (also min, average)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-192",
       "title": "Accessing an Empty Collection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1430,7 +1448,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-194",
+      "id": "docs-beamtalk-language-features-block-195",
       "title": "Lookups That Find Nothing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1443,7 +1461,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-195",
+      "id": "docs-beamtalk-language-features-block-196",
       "title": "Lookups That Find Nothing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1453,7 +1471,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-196",
+      "id": "docs-beamtalk-language-features-block-197",
       "title": "Interval — Arithmetic Sequences (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1469,7 +1487,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-197",
+      "id": "docs-beamtalk-language-features-block-198",
       "title": "Bag(E) — Multisets (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1493,7 +1511,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-198",
+      "id": "docs-beamtalk-language-features-block-199",
       "title": "Constructors (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1509,27 +1527,6 @@
         "loop"
       ],
       "source": "// Infinite stream starting from a value, incrementing by 1\nStream from: 1                     // 1, 2, 3, 4, ...\n\n// Infinite stream with custom step function\nStream from: 1 by: [:n | n * 2]   // 1, 2, 4, 8, ...\n\n// Stream from a collection (List, String, Set)\nStream on: #(1, 2, 3)             // wraps collection lazily\n\n// Collection shorthand — List, String, and Set respond to `stream`\n#(1, 2, 3) stream                  // same as Stream on: #(1, 2, 3)\n\"hello\" stream                     // Stream over characters\n(Set new add: 1) stream            // Stream over set elements\n\n// Dictionary iteration — use doWithKey: instead of stream\n#{#a => 1} doWithKey: [:k :v | Transcript show: k]\n\n// File streaming — lazy, constant memory\nFile lines: \"data.csv\"            // Stream of lines\nFile open: \"data.csv\" do: [:handle |\n  handle lines take: 10           // block-scoped handle\n]",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-199",
-      "title": "Lazy Operations (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "filter",
-        "filtering",
-        "map",
-        "mapping",
-        "mutate",
-        "mutation",
-        "set",
-        "transform",
-        "where"
-      ],
-      "source": "// Build a pipeline — nothing computes yet\ns := Stream from: 1\ns := s select: [:n | n isEven]\ns := s collect: [:n | n * n]\n// s is still a Stream — no values computed",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -1559,6 +1556,27 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-200",
+      "title": "Lazy Operations (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "filter",
+        "filtering",
+        "map",
+        "mapping",
+        "mutate",
+        "mutation",
+        "set",
+        "transform",
+        "where"
+      ],
+      "source": "// Build a pipeline — nothing computes yet\ns := Stream from: 1\ns := s select: [:n | n isEven]\ns := s collect: [:n | n * n]\n// s is still a Stream — no values computed",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-201",
       "title": "Terminal Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1571,7 +1589,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-201",
+      "id": "docs-beamtalk-language-features-block-202",
       "title": "printString — Pipeline Inspection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1587,7 +1605,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-202",
+      "id": "docs-beamtalk-language-features-block-203",
       "title": "Eager vs Lazy — The Boundary (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1600,7 +1618,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-203",
+      "id": "docs-beamtalk-language-features-block-204",
       "title": "File Streaming (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1619,7 +1637,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-204",
+      "id": "docs-beamtalk-language-features-block-205",
       "title": "File I/O and Directory Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1629,7 +1647,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-205",
+      "id": "docs-beamtalk-language-features-block-206",
       "title": "Incremental File I/O — FileHandle (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1650,7 +1668,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-206",
+      "id": "docs-beamtalk-language-features-block-207",
       "title": "Incremental File I/O — FileHandle (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1669,7 +1687,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-208",
+      "id": "docs-beamtalk-language-features-block-209",
       "title": "Side-Effect Timing ⚠️ (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1684,21 +1702,6 @@
         "transform"
       ],
       "source": "// This prints NOTHING — the pipeline is just a recipe\ns := (Stream on: #(1, 2, 3)) collect: [:n | Transcript show: n. n * 2]\n\n// This is when printing actually happens\ns asList\n// Transcript shows: 1, 2, 3\n// => [2,4,6]",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-209",
-      "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "@expect dnu\nsomeObject unknownMessage   // DNU hint suppressed\n\n@expect type\n42 + \"hello\"                // type warning suppressed\n\n@expect type\n42 unknownMethod            // also suppresses method-not-found (DNU) hints\n\n@expect unused\nx := computeSomething       // unused-variable warning suppressed\n\n@expect all\nanything                    // any diagnostic suppressed (discouraged — use a specific category)",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -1731,13 +1734,28 @@
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "@expect dnu\nsomeObject unknownMessage   // DNU hint suppressed\n\n@expect type\n42 + \"hello\"                // type warning suppressed\n\n@expect type\n42 unknownMethod            // also suppresses method-not-found (DNU) hints\n\n@expect unused\nx := computeSomething       // unused-variable warning suppressed\n\n@expect all\nanything                    // any diagnostic suppressed (discouraged — use a specific category)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-211",
+      "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
         "beamtalk-language-features"
       ],
       "source": "// Result.unwrap returns Object — the type system cannot verify 'size' exists\n@expect type\nself assert: someResult unwrap size equals: 10",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-211",
+      "id": "docs-beamtalk-language-features-block-212",
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1755,7 +1773,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-214",
+      "id": "docs-beamtalk-language-features-block-215",
       "title": "Creating a Table (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1778,7 +1796,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-215",
+      "id": "docs-beamtalk-language-features-block-216",
       "title": "Reading and Writing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1788,7 +1806,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-216",
+      "id": "docs-beamtalk-language-features-block-217",
       "title": "Other Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1798,7 +1816,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-217",
+      "id": "docs-beamtalk-language-features-block-218",
       "title": "Cross-Actor Sharing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1821,21 +1839,6 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-219",
-      "title": "Enqueueing and Dequeueing (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "q2 := q enqueue: 1\nq3 := q2 enqueue: 2\nresult := q3 dequeue         // => {1, <Queue with [2]>}\nvalue := result at: 1       // => 1\nrest := result at: 2        // => Queue containing [2]",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
       "id": "docs-beamtalk-language-features-block-22",
       "title": "Blocks (Closures) (beamtalk-language-features)",
       "category": "language-reference",
@@ -1852,6 +1855,21 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-220",
+      "title": "Enqueueing and Dequeueing (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "q2 := q enqueue: 1\nq3 := q2 enqueue: 2\nresult := q3 dequeue         // => {1, <Queue with [2]>}\nvalue := result at: 1       // => 1\nrest := result at: 2        // => Queue containing [2]",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-221",
       "title": "Other Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1861,7 +1879,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-222",
+      "id": "docs-beamtalk-language-features-block-223",
       "title": "Atomic Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1874,7 +1892,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-223",
+      "id": "docs-beamtalk-language-features-block-224",
       "title": "Cross-Actor Sharing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1897,7 +1915,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-224",
+      "id": "docs-beamtalk-language-features-block-225",
       "title": "TestCase — BUnit Testing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1920,7 +1938,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-225",
+      "id": "docs-beamtalk-language-features-block-226",
       "title": "TestCase — BUnit Testing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1943,7 +1961,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-226",
+      "id": "docs-beamtalk-language-features-block-227",
       "title": "Suite-Level Setup — setUpOnce / tearDownOnce (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1974,7 +1992,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-227",
+      "id": "docs-beamtalk-language-features-block-228",
       "title": "Parallel Test Execution (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -12808,6 +12826,46 @@
       ],
       "source": "// Stdlib tests for Binary encoding — asBase64/asBase64Url/asHex and their\n// class-side decoders, checked against RFC 4648 §10 test vectors.\n\nTestCase subclass: BinaryEncodingTest\n\n  // ===== asBase64 (RFC 4648 §10 test vectors) =====\n  testAsBase64EmptyString =>\n    self assert: (Binary fromBytes: #()) asBase64 equals: \"\"\n\n  testAsBase64F => self assert: \"f\" asBase64 equals: \"Zg==\"\n\n  testAsBase64Fo => self assert: \"fo\" asBase64 equals: \"Zm8=\"\n\n  testAsBase64Foo => self assert: \"foo\" asBase64 equals: \"Zm9v\"\n\n  testAsBase64Foob => self assert: \"foob\" asBase64 equals: \"Zm9vYg==\"\n\n  testAsBase64Fooba => self assert: \"fooba\" asBase64 equals: \"Zm9vYmE=\"\n\n  testAsBase64Foobar => self assert: \"foobar\" asBase64 equals: \"Zm9vYmFy\"\n\n  // ===== fromBase64: (round trip + error handling) =====\n  testFromBase64RoundTrip =>\n    self assert: (Binary fromBase64: \"Zm9vYmFy\") unwrap asStringUnchecked equals: \"foobar\"\n\n  testFromBase64IsOkOnValidInput =>\n    self assert: (Binary fromBase64: \"aGVsbG8=\") isOk\n\n  testFromBase64IsErrorOnMalformedInput =>\n    self assert: (Binary fromBase64: \"not valid base64!!\") isError\n    self assert: (Binary fromBase64: \"a\") isError\n\n  testFromBase64RejectsUrlSafeAlphabet =>\n    // \"--8=\" is the url-safe encoding of #(251, 239); the standard decoder\n    // must reject its '-' characters rather than accept them.\n    self assert: (Binary fromBase64: \"--8=\") isError\n\n  // ===== asBase64Url / fromBase64Url: =====\n  testAsBase64UrlUsesUrlSafeAlphabet =>\n    // Bytes chosen so the standard alphabet needs `+`; url-safe uses `-`.\n    bin := Binary fromBytes: #(251, 239)\n    self assert: bin asBase64 equals: \"++8=\"\n    self assert: bin asBase64Url equals: \"--8=\"\n\n  testFromBase64UrlRoundTrip =>\n    encoded := (Binary fromBytes: #(251, 239)) asBase64Url\n    self assert: (Binary fromBase64Url: encoded) unwrap equals: (Binary fromBytes: #(251, 239))\n\n  testFromBase64UrlIsErrorOnMalformedInput =>\n    self assert: (Binary fromBase64Url: \"not valid!!\") isError\n\n  testFromBase64UrlAcceptsUnpaddedInput =>\n    // \"--8=\" is the padded url-safe encoding of #(251, 239); JWTs and PKCE\n    // challenges use the unpadded form (\"--8\") instead — both must decode\n    // to the same bytes.\n    self assert: (Binary fromBase64Url: \"--8\") unwrap equals: (Binary fromBytes: #(251, 239))\n\n  testFromBase64UrlRejectsStandardAlphabet =>\n    // \"++8=\" is the standard encoding of #(251, 239); the url-safe decoder\n    // must reject its '+' characters rather than accept them.\n    self assert: (Binary fromBase64Url: \"++8=\") isError\n\n  // ===== asHex / fromHex: =====\n  testAsHexLowercase => self assert: \"hello\" asHex equals: \"68656c6c6f\"\n\n  testAsHexEmptyBinary => self assert: (Binary fromBytes: #()) asHex equals: \"\"\n\n  testFromHexRoundTrip =>\n    self assert: (Binary fromHex: \"68656c6c6f\") unwrap asStringUnchecked equals: \"hello\"\n\n  testFromHexIsCaseInsensitive =>\n    self assert: (Binary fromHex: \"68656C6C6F\") unwrap asStringUnchecked equals: \"hello\"\n\n  testFromHexIsErrorOnOddLength => self assert: (Binary fromHex: \"abc\") isError\n\n  testFromHexIsErrorOnNonHexCharacters =>\n    self assert: (Binary fromHex: \"zz\") isError\n\n  // ===== String inherits Binary's encoding methods =====\n  testStringInheritsAsBase64 => self assert: \"hello\" asBase64 equals: \"aGVsbG8=\"\n\n  testStringInheritsAsHex => self assert: \"hi\" asHex equals: \"6869\"",
       "explanation": "Stdlib tests for Binary encoding — asBase64/asBase64Url/asHex and their class-side decoders, checked against RFC 4648 §10 test vectors."
+    },
+    {
+      "id": "stdlib-test-binary-non-utf8-test",
+      "title": "BinaryNonUtf8Test",
+      "category": "stdlib-tests",
+      "tags": [
+        "BinaryNonUtf8Test",
+        "TestCase",
+        "assign",
+        "assignment",
+        "binary_non_utf8_test",
+        "extends",
+        "inherit",
+        "inheritance",
+        "invalidUtf8",
+        "mutate",
+        "mutation",
+        "object",
+        "set",
+        "string conversion",
+        "subclassing",
+        "testNonUtf8BinaryAnswersBinary",
+        "testNonUtf8BinaryAsHex",
+        "testNonUtf8BinaryByteSize",
+        "testNonUtf8BinaryIsEmpty",
+        "testNonUtf8BinaryPrintStringIsHex",
+        "testNonUtf8BinaryPrintStringIsValidUtf8",
+        "testNonUtf8BinarySize",
+        "testNonUtf8BinaryToBytes",
+        "testRandomBytesAnswerBinary",
+        "testRandomBytesSize",
+        "testStringPrintStringUnchanged",
+        "testStringSizeStillGraphemeCount",
+        "testStringStillAnswersString",
+        "testValidUtf8BinaryStillAnswersString",
+        "toString",
+        "to_string"
+      ],
+      "source": "// Non-UTF-8 Binary handling (BT-2999).\n//\n// String and Binary share one BEAM representation, so a bare binary carries\n// no runtime tag saying which it is. Valid UTF-8 stays ambiguous and answers\n// String; bytes that are *not* valid UTF-8 cannot be a String, so they answer\n// Binary and dispatch to Binary's byte-level methods.\n//\n// Before BT-2999, `.size`/`.class` on such a binary went through String's\n// grapheme-aware path, and the resulting error message embedded the raw bytes.\n// That invalid-UTF-8 message then reached `json:encode/1` in the BUnit runner\n// and crashed the whole test VM — so this file passing at all is the\n// regression test for the crash.\n\nTestCase subclass: BinaryNonUtf8Test\n\n  // ═══════════════════════════════════════════════════════════════════\n  // Helpers\n  // ═══════════════════════════════════════════════════════════════════\n\n  /// Bytes that are definitely not valid UTF-8 (FF/FE are never legal).\n  invalidUtf8 -> Binary => Binary fromBytes: #(255, 254, 253, 0, 200)\n\n  // ═══════════════════════════════════════════════════════════════════\n  // class — non-UTF-8 bytes answer Binary, valid UTF-8 stays String\n  // ═══════════════════════════════════════════════════════════════════\n  testNonUtf8BinaryAnswersBinary =>\n    self assert: self invalidUtf8 class name equals: #Binary\n\n  testRandomBytesAnswerBinary =>\n    // The original repro: cryptographically random bytes are almost never\n    // valid UTF-8.\n    bytes := (Erlang crypto) strong_rand_bytes: 16\n    self assert: bytes class name equals: #Binary\n\n  testValidUtf8BinaryStillAnswersString =>\n    // A binary that *is* valid UTF-8 remains indistinguishable from a String.\n    self assert: (Binary fromBytes: #(104, 101, 108, 108, 111)) class name equals: #String\n\n  testStringStillAnswersString =>\n    self assert: \"hello\" class name equals: #String\n    self assert: \"café\" class name equals: #String\n\n  // ═══════════════════════════════════════════════════════════════════\n  // size — byte count, not a grapheme walk over invalid bytes\n  // ═══════════════════════════════════════════════════════════════════\n  testNonUtf8BinarySize => self assert: self invalidUtf8 size equals: 5\n\n  testRandomBytesSize =>\n    bytes := (Erlang crypto) strong_rand_bytes: 16\n    self assert: bytes size equals: 16\n\n  testNonUtf8BinaryByteSize => self assert: self invalidUtf8 byteSize equals: 5\n\n  testStringSizeStillGraphemeCount =>\n    // No regression: valid UTF-8 keeps grapheme semantics.\n    self assert: \"café\" size equals: 4\n    self assert: \"café\" byteSize equals: 5\n\n  // ═══════════════════════════════════════════════════════════════════\n  // printString / displayString — always valid UTF-8 output\n  // ═══════════════════════════════════════════════════════════════════\n  testNonUtf8BinaryPrintStringIsHex =>\n    self assert: self invalidUtf8 printString equals: \"<<FF FE FD 00 C8>>\"\n\n  testNonUtf8BinaryPrintStringIsValidUtf8 =>\n    // The whole point: the rendering can be re-read as text, so it can be\n    // embedded in JSON, logs, and test failure messages.\n    self assert: self invalidUtf8 printString class name equals: #String\n\n  testStringPrintStringUnchanged =>\n    self assert: \"hello\" printString equals: \"\"\"hello\"\"\"\n\n  // ═══════════════════════════════════════════════════════════════════\n  // Byte-level operations keep working\n  // ═══════════════════════════════════════════════════════════════════\n  testNonUtf8BinaryToBytes =>\n    self assert: self invalidUtf8 toBytes equals: #(255, 254, 253, 0, 200)\n\n  testNonUtf8BinaryAsHex =>\n    self assert: self invalidUtf8 asHex equals: \"fffefd00c8\"\n\n  testNonUtf8BinaryIsEmpty =>\n    self assert: self invalidUtf8 isEmpty equals: false",
+      "explanation": "Non-UTF-8 Binary handling (BT-2999).  String and Binary share one BEAM representation, so a bare binary carries no runtime tag saying which it is. Valid UTF-8 stays ambiguous and answers String; bytes that are *not* valid UTF-8 cannot be a String, so they answer Binary and dispatch to Binary's byte-level methods.  Before BT-2999, `.size`/`.class` on such a binary went through String's grapheme-aware path, and the resulting error message embedded the raw bytes. That invalid-UTF-8 message then reached `json:encode/1` in the BUnit runner and crashed the whole test VM — so this file passing at all is the regression test for the crash."
     },
     {
       "id": "stdlib-test-binary-patterns-test",
