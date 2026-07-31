@@ -44,10 +44,13 @@ TestCase subclass: ClassDrivenCollectionTest
       x > 1
     ]) equals: 2
 
+  // BT-3028: a no-match raises `not_found` rather than answering nil. The raise
+  // is issued after `do:` has returned, so — unlike the found arm — it does not
+  // cross the class-process boundary; it fires in this process.
   testClassDrivenDetectNotFound =>
-    self assert: ((ClassDrivenCollection of: #(1, 2, 3)) detect: [:x |
-      x > 9
-    ]) equals: nil
+    self should: [
+      (ClassDrivenCollection of: #(1, 2, 3)) detect: [:x | x > 9]
+    ] raise: #not_found
 
   testClassDrivenDetectIfNone =>
     c := ClassDrivenCollection of: #(1, 2, 3)

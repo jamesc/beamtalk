@@ -47,6 +47,16 @@ TestCase subclass: CustomCollectionTest
     col := NumberList new: #{#items => #(1, 2, 3)}
     self assert: (col detect: [:x | x > 10] ifNone: [0]) equals: 0
 
+  // BT-3028: the inherited `detect:` raises on a no-match, and the error names
+  // the *receiver's* class rather than the abstract `Collection` the method is
+  // defined on — so a user-defined subclass reports itself.
+  testInheritedDetectNoMatchNamesReceiverClass =>
+    col := NumberList new: #{#items => #(1, 2, 3)}
+    errorClass := [
+      col detect: [:x | x > 10]
+    ] on: RuntimeError do: [:e | e errorClass asString]
+    self assert: errorClass equals: "NumberList"
+
   testInheritedAnySatisfy =>
     col := NumberList new: #{#items => #(1, 2, 3)}
     self assert: (col anySatisfy: [:x | x > 2])
@@ -64,7 +74,9 @@ TestCase subclass: CustomCollectionTest
     self assert: (empty select: [:x | x > 0]) equals: #()
     self assert: (empty reject: [:x | x > 0]) equals: #()
     self deny: (empty includes: 1)
-    self assert: (empty detect: [:x | x > 0]) equals: nil
+    // BT-3028: `detect:` answers `E`, so a no-match raises rather than
+    // answering nil — an empty receiver is just the degenerate no-match case.
+    self should: [empty detect: [:x | x > 0]] raise: #not_found
     self assert: (empty detect: [:x | x > 0] ifNone: [42]) equals: 42
     self deny: (empty anySatisfy: [:x | x > 0])
     self assert: (empty allSatisfy: [:x | x > 0])

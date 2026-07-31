@@ -155,6 +155,9 @@ sealed typed Collection(E) subclass: List(E)
   /// there is no in-band way to say "nothing matched". Use `detect:ifNone:`
   /// when a default is wanted; it is the non-raising alternative.
   ///
+  /// Same behaviour as the inherited `Collection>>detect:` and as
+  /// `Stream>>detect:`; this override exists only to reach the primitive.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// #(1, 2, 3) detect: [:x | x > 1]   // => 2

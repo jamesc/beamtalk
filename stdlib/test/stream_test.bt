@@ -70,9 +70,19 @@ TestCase subclass: StreamTest
     self assert: ((Stream on: #()) inject: 42 into: [:acc :n |
       acc + n
     ]) equals: 42
-    // detect: — first matching element
+    // detect: — first matching element; BT-3028: a no-match raises not_found,
+    // matching List and the rest of the collections. detect:ifNone: is the
+    // non-raising form.
     self assert: ((Stream on: #(1, 2, 3, 4, 5)) detect: [:n | n > 3]) equals: 4
-    self assert: ((Stream on: #(1, 2, 3)) detect: [:n | n > 10]) equals: nil
+    self should: [
+      (Stream on: #(1, 2, 3)) detect: [:n | n > 10]
+    ] raise: #not_found
+    self assert: ((Stream on: #(1, 2, 3)) detect: [:n |
+      n > 10
+    ] ifNone: [0]) equals: 0
+    self assert: ((Stream on: #(1, 2, 3)) detect: [:n |
+      n > 1
+    ] ifNone: [0]) equals: 2
     // asList — materialize
     self assert: (Stream on: #(10, 20, 30)) asList equals: #(10, 20, 30)
     // anySatisfy: — any match?
@@ -109,7 +119,8 @@ TestCase subclass: StreamTest
     self assert: (Stream from: 1) class equals: Stream
     self assert: ((Stream on: #()) take: 5) equals: #()
     self assert: (Stream on: #()) asList equals: #()
-    self assert: ((Stream on: #()) detect: [:x | x > 0]) equals: nil
+    self should: [(Stream on: #()) detect: [:x | x > 0]] raise: #not_found
+    self assert: ((Stream on: #()) detect: [:x | x > 0] ifNone: [42]) equals: 42
     self deny: ((Stream on: #()) anySatisfy: [:x | x > 0])
     self assert: ((Stream on: #()) allSatisfy: [:x | x > 0])
     self assert: ((Stream on: #()) inject: 0 into: [:acc :x |

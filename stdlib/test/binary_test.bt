@@ -201,10 +201,17 @@ TestCase subclass: BinaryTest
     result := bin detect: [:ch | ch =:= "C"]
     self assert: result equals: "C"
 
-  testDetectReturnsNilWhenNotFound =>
+  // BT-3028: a no-match raises `not_found` rather than answering nil — the
+  // inherited `Collection>>detect:` answers `E`, on every receiver.
+  testDetectRaisesNotFoundWhenNoMatch =>
     bin := Binary fromBytes: #(65, 66, 67)
-    result := bin detect: [:ch | ch =:= "Z"]
-    self assert: result equals: nil
+    self should: [bin detect: [:ch | ch =:= "Z"]] raise: #not_found
+
+  testDetectIfNoneAnswersDefaultWhenNoMatch =>
+    bin := Binary fromBytes: #(65, 66, 67)
+    self assert: (bin detect: [:ch |
+      ch =:= "Z"
+    ] ifNone: ["none"]) equals: "none"
 
   // ═══════════════════════════════════════════════════════════════════
   // Collection protocol: anySatisfy:, allSatisfy:

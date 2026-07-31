@@ -242,11 +242,15 @@ abstract typed Value subclass: Collection(E)
 
   /// Find the first element for which `block` returns true.
   ///
-  /// This generic implementation returns nil if no element matches. `List`
-  /// overrides it with a primitive that instead raises `not_found`, because
-  /// its return type is `E` rather than `E | Nil` — so on a List, a
-  /// no-match is an error, not a nil answer. `detect:ifNone:` is the
-  /// non-raising alternative on either receiver.
+  /// Raises `not_found` if no element matches — the return type is `E`, so
+  /// there is no in-band way to say "nothing matched". Every collection
+  /// agrees on this: `Set`, `Bag`, `Dictionary`, `Interval`, and `Binary` /
+  /// `String` inherit this implementation, and the native overrides on `List`
+  /// and `Stream` raise the same kind. `detect:ifNone:` is the non-raising
+  /// alternative on all of them.
+  ///
+  /// The error names the *receiver's* class rather than `Collection`, so a
+  /// no-match on a Set reports `Set`.
   ///
   /// Uses `^` (non-local return) for early exit — this compiles to
   /// throw/catch on BEAM.
@@ -255,9 +259,9 @@ abstract typed Value subclass: Collection(E)
   /// ```beamtalk
   /// #(1, 2, 3) detect: [:x | x > 1]     // => 2
   /// ```
-  detect: block :: Block(E, Boolean) -> E | Nil =>
+  detect: block :: Block(E, Boolean) -> E =>
     self do: [:each | (block value: each) ifTrue: [^each]]
-    nil
+    (Erlang beamtalk_collection) raiseDetectNotFound: self class name
 
   /// Find the first element matching `block`, or evaluate `noneBlock` if none.
   ///
