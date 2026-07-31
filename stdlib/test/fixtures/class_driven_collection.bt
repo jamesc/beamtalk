@@ -1,0 +1,20 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3022: a Collection subclass whose `do:` delegates to a *class-side* method,
+// so the block that `Collection`'s inherited primitives pass to `do:` runs in the
+// class gen_server process rather than the caller's.
+
+Collection subclass: ClassDrivenCollection
+  field: items :: List = #()
+
+  class of: aList :: List -> ClassDrivenCollection =>
+    ClassDrivenCollection new: #{#items => aList}
+
+  size -> Integer => self.items size
+
+  do: block :: Block -> Nil =>
+    CollectionDriver run: block over: self.items
+    nil
+
+  printString -> String => "ClassDrivenCollection"

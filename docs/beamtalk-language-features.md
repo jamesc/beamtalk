@@ -2254,6 +2254,37 @@ MyClass performLocally: #add:to: withArguments: #(3, 7)
 
 **Limitations:** Local dispatch calls the method directly on the target class module — it does not walk the superclass chain. Class variable mutations are discarded (the call runs outside the class gen_server's state). Use this only for stateless or read-only class methods.
 
+### Passing Blocks Through Class Methods
+
+Because a class method runs in the class object's gen_server process, a block passed *into* one runs there too, not where it was written ([BT-3022](https://linear.app/beamtalk/issue/BT-3022)):
+
+```beamtalk
+Value subclass: Driver
+  class run: aBlock over: aList -> Nil =>
+    aList do: [:x | aBlock value: x]      // aBlock runs in Driver's class process
+    nil
+```
+
+Arguments and return values cross that boundary as copies, so blocks that compute answers work normally. Two things do *not* survive the hop:
+
+- **Process-local side effects.** A block that writes to the process dictionary (`Erlang erlang put:value:`), reads `self()`, or otherwise depends on running in a particular process affects the *class* process. The caller sees none of it.
+- **Re-entrant class sends.** If the block messages the same class whose method is driving it, the class process would have to `gen_server:call` itself. That raises a structured `dispatch_error` naming the selector rather than deadlocking. Read what you need before the call, or hold the resource yourself instead of using the block form.
+
+Non-local return (`^`) *does* cross the boundary: the signal is relayed back and unwinds the enclosing method as it would without the hop. One caveat — if the class method mutated a class variable *before* the block escaped, that mutation is currently reverted ([BT-3032](https://linear.app/beamtalk/issue/BT-3032)); the returned value is unaffected.
+
+This matters most when building a `Collection` subclass. Implementing `do:` by delegating to a class-side helper is fine — `asList`, `inject:into:`, `sum`, `includes:` and the rest of the inherited protocol all work — but a class-side helper that reaches back into its own class does not:
+
+```beamtalk
+Collection subclass: Batch
+  field: items :: List = #()
+  size -> Integer => self.items size
+
+  // Fine: the inherited Collection protocol works through this.
+  do: block :: Block -> Nil =>
+    Driver run: block over: self.items
+    nil
+```
+
 ### Actor-to-Actor Coordination
 
 Because `.` sends are synchronous, when an actor method calls another actor internally, the caller **waits** for the nested call to complete before continuing. The sync barrier pattern (explicit round-trip queries) is generally no longer needed:

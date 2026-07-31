@@ -1,0 +1,145 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3022: Collection subclass whose do: delegates to a class-side method.
+
+TestCase subclass: ClassDrivenCollectionTest
+
+  // --- controls: instance-side driver, no process hop ---------------------
+  testSelfDrivenAsList =>
+    self assert: (SelfDrivenCollection of: #(1, 2, 3)) asList equals: #(1, 2, 3)
+
+  testSelfDrivenInject =>
+    c := SelfDrivenCollection of: #(1, 2, 3)
+    self assert: (c inject: 0 into: [:a :x | a + x]) equals: 6
+
+  testSelfDrivenIncludes =>
+    self assert: ((SelfDrivenCollection of: #(1, 2, 3)) includes: 2)
+
+  // --- the class-driven path ---------------------------------------------
+  testClassDrivenAsList =>
+    self assert: (ClassDrivenCollection of: #(1, 2, 3)) asList equals: #(1, 2, 3)
+
+  testClassDrivenInject =>
+    c := ClassDrivenCollection of: #(1, 2, 3)
+    self assert: (c inject: 0 into: [:a :x | a + x]) equals: 6
+
+  testClassDrivenSum =>
+    self assert: (ClassDrivenCollection of: #(1, 2, 3)) sum equals: 6
+
+  testClassDrivenIncludes =>
+    self assert: ((ClassDrivenCollection of: #(1, 2, 3)) includes: 2)
+
+  testClassDrivenDoesNotInclude =>
+    self deny: ((ClassDrivenCollection of: #(1, 2, 3)) includes: 9)
+
+  // --- every inherited `^`-through-do: method, both arms ------------------
+
+  // `includes:` is not the only one: detect:, detect:ifNone:, anySatisfy: and
+  // allSatisfy: all escape their do: block with `^`, and allSatisfy: escapes on
+  // the *false* arm. Each relies on the non-local return crossing back out of
+  // the class process.
+  testClassDrivenDetectFound =>
+    self assert: ((ClassDrivenCollection of: #(1, 2, 3)) detect: [:x |
+      x > 1
+    ]) equals: 2
+
+  testClassDrivenDetectNotFound =>
+    self assert: ((ClassDrivenCollection of: #(1, 2, 3)) detect: [:x |
+      x > 9
+    ]) equals: nil
+
+  testClassDrivenDetectIfNone =>
+    c := ClassDrivenCollection of: #(1, 2, 3)
+    self assert: (c detect: [:x | x > 9] ifNone: [0]) equals: 0
+
+  testClassDrivenAnySatisfy =>
+    c := ClassDrivenCollection of: #(1, 2, 3)
+    self assert: (c anySatisfy: [:x | x > 2])
+    self deny: (c anySatisfy: [:x | x > 9])
+
+  testClassDrivenAllSatisfy =>
+    c := ClassDrivenCollection of: #(2, 4, 6)
+    self assert: (c allSatisfy: [:x | x isEven])
+    self deny: (c allSatisfy: [:x | x > 4])
+
+  // --- the fold-based inherited methods -----------------------------------
+  testClassDrivenCollect =>
+    c := ClassDrivenCollection of: #(1, 2, 3)
+    self assert: (c collect: [:x | x * 2]) equals: #(2, 4, 6)
+
+  testClassDrivenSelect =>
+    c := ClassDrivenCollection of: #(1, 2, 3, 4)
+    self assert: (c select: [:x | x isEven]) equals: #(2, 4)
+
+  testClassDrivenReject =>
+    c := ClassDrivenCollection of: #(1, 2, 3, 4)
+    self assert: (c reject: [:x | x isEven]) equals: #(1, 3)
+
+  // --- iteration started from inside another class process ----------------
+  testAsListFromInsideAClassMethod =>
+    self assert: (CollectionProbe asListOf: #(1, 2, 3)) equals: #(1, 2, 3)
+
+  testSumFromInsideAClassMethod =>
+    self assert: (CollectionProbe sumOf: #(1, 2, 3)) equals: 6
+
+  testIncludesFromInsideAClassMethod =>
+    self assert: (CollectionProbe includes: 2 in: #(1, 2, 3))
+
+  testNonLocalReturnThroughClassHeldInVariable =>
+    self assert: (CollectionProbe firstOver: #(1, 2, 3)) equals: 2
+
+  // --- re-entrant: the iteration sends back to the running class process ---
+
+  // Still unsupported (a class gen_server cannot call itself), but it must be a
+  // structured error rather than a bare `{calling_self, {gen_server, call, ...}}`.
+  testReentrantClassDrivenRaisesStructuredError =>
+    self should: [
+      CollectionDriver reentrantAsListOf: #(1, 2, 3)
+    ] raise: #dispatch_error
+
+  // Pins the diagnostic to the self-send that actually deadlocks, so a future
+  // regression cannot satisfy the test above with an unrelated dispatch_error.
+  testReentrantClassDrivenNamesTheSelfSend =>
+    selector := [
+      CollectionDriver reentrantAsListOf: #(1, 2, 3)
+    ] on: Exception do: [:e | e selector]
+    self assert: selector equals: #run:over:
+
+  // --- sequential and genuinely-nested to_list calls -----------------------
+
+  // `collect:`/`inject:into:` fold over a fully-materialised `to_list/1`, so the
+  // user block here runs in the *caller's* process after the outer iteration has
+  // finished — these are back-to-back to_list calls, not overlapping ones.
+  testSequentialClassDrivenIteration =>
+    outer := ClassDrivenCollection of: #(1, 2)
+    self assert: (outer collect: [:x |
+      (ClassDrivenCollection of: #(x, x)) asList
+    ]) equals: #(#(1, 1), #(2, 2))
+
+  testSequentialClassDrivenInjectAcrossProcesses =>
+    outer := ClassDrivenCollection of: #(1, 2, 3)
+    total := outer inject: 0 into: [:acc :x |
+      acc + (ClassDrivenCollection of: #(x, x)) sum
+    ]
+    self assert: total equals: 12
+
+  // A metaclass receiver (`SomeClass class class`) is a second door into the
+  // class process and needs the same non-local-return relay (BT-3031).
+  testNonLocalReturnThroughMetaclassDispatch =>
+    self assert: (CollectionProbe firstViaMetaclassOver: #(1, 2, 3)) equals: 2
+
+  // Genuinely overlapping: NestedDrivenCollection>>do: posts its first elements
+  // through a class hop, then runs a *complete* inner to_list/1 in this same
+  // process while those are still queued, then posts one more. Two accumulators
+  // share the mailbox and are told apart only by their refs — if that isolation
+  // broke, the inner drain would eat the outer's queued elements.
+  testInnerToListWhileOuterInFlight =>
+    inner := ClassDrivenCollection of: #(7, 8, 9)
+    outer := NestedDrivenCollection of: #(1, 2) inner: inner
+    self assert: outer asList equals: #(1, 2, 3)
+
+  testInnerToListWhileOuterInFlightPreservesOrder =>
+    inner := ClassDrivenCollection of: #(7, 8, 9)
+    outer := NestedDrivenCollection of: #(10, 20, 30) inner: inner
+    self assert: (outer inject: 0 into: [:a :x | a + x]) equals: 63

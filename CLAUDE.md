@@ -12,6 +12,7 @@ Beamtalk is a Smalltalk/Newspeak-inspired language compiling to BEAM via Rust. T
 - **Returns (`^`):** Use `^` only for early/non-local returns, never on the last expression. Inside a block, `^` exits the *enclosing method* immediately (standard Smalltalk semantics, via throw/catch in codegen).
 - **Structured errors:** Use `#beamtalk_error{}` for all user-facing/public API errors. Internal helpers may use `{ok, V} | {error, R}` if translated at public boundaries.
 - **DNU:** An unrecognised message raises `does_not_understand` (`#beamtalk_error{}`). Use `respondsTo:` to check before calling.
+- **Blocks into class methods:** A class method runs in its class's gen_server process, so a block passed into one runs there too. Values and `^` cross that boundary; process-local side effects (process dictionary, `self()`) do not, and messaging the same class back raises `dispatch_error`. See `docs/beamtalk-language-features.md` § Passing Blocks Through Class Methods.
 - **Erlang logging:** OTP logger macros (`?LOG_ERROR`, …), never `io:format` or `logger:error()`. Set `domain` metadata in `init/1` via `logger:set_process_metadata(#{domain => [beamtalk, runtime]})` (`[beamtalk, stdlib]` for stdlib) so all calls inherit it.
 - **License headers:** All source **code** files (`.rs`, `.erl`, `.bt`, `.hrl`) need `Copyright 2026 James Casey` / `SPDX-License-Identifier: Apache-2.0`. Not on `.md` files.
 - **Test assertions:** Every expression in test files needs a `// =>` assertion (even `// => _`) — no assertion means no execution.
