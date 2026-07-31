@@ -15,13 +15,17 @@ stdlib's *linear scans* honour it from Erlang-implemented primitives.
 
 ## Which operations honour `equals:`
 
-Linear scans do — `List>>includes:` here, plus `Collection>>includes:` and
-`List>>indexOf:` which are written in Beamtalk and simply send `equals:`.
+Linear scans do. Through this module: `List>>includes:`, `Array>>includes:`,
+and `Dictionary>>includes:` (which searches *values*, not keys). Directly, by
+sending `equals:` from Beamtalk: `Collection>>includes:`, `List>>indexOf:`,
+`TestCase>>assert:equals:`.
 
-Keyed containers do **not**, and cannot: `Dictionary` is backed by Erlang maps
-(keys compare with `=:=`) and `Set` by `ordsets` (elements compare by term
-order, i.e. `==`). Both decide identity inside the VM, below anything the
-language can dispatch.
+Keying and deduplication do **not**, and cannot: `Dictionary` *keys* are Erlang
+map keys and `Set` elements live in a term-order-sorted list, both decided
+inside the VM; `List>>unique` needs an order. All three use raw `=:=`. This is
+the same constraint Java's `equals`/`hashCode` contract expresses — membership
+in a keyed structure needs an order or a hash that a user-defined `equals:`
+cannot supply.
 
 ## The reflexivity contract
 
@@ -46,7 +50,7 @@ argument (`each equals: item`) — matching `Collection>>includes:` and the
 Smalltalk convention.
 """.
 
--export([eq/2, member/2]).
+-export([eq/2, member/2, scan/2]).
 
 %% Dispatch targets are resolved at runtime from compiled stdlib modules.
 % elp:fixme W0048 intentional suppression for dynamic dispatch
@@ -77,18 +81,20 @@ overrides falls entirely on the negative case.
 """.
 -spec member(term(), list()) -> boolean().
 member(Item, List) ->
-    lists:member(Item, List) orelse equals_scan(List, Item).
+    lists:member(Item, List) orelse scan(List, Item).
 
-%%% ============================================================================
-%%% Internal
-%%% ============================================================================
+-doc """
+Scan for an element whose `equals:` override accepts `Item`, assuming raw
+equality has already been ruled out.
 
-%% Scan for an element whose `equals:` override accepts `Item`.
-%%
-%% `lists:member/2` has already ruled out raw equality, so only object elements
-%% can still match — non-objects are skipped without a dispatch.
--spec equals_scan(list(), term()) -> boolean().
-equals_scan([Elem | Rest], Item) when
+Exported so callers that can test raw equality more cheaply than
+`lists:member/2` — `beamtalk_array`, which folds over its backing map without
+materialising a list — can run their own fast path first and fall back here
+only on a miss. Calling this *without* having ruled out raw equality first will
+miss elements that are `=:=` but not objects.
+""".
+-spec scan(list(), term()) -> boolean().
+scan([Elem | Rest], Item) when
     is_number(Elem);
     is_atom(Elem);
     is_binary(Elem);
@@ -106,14 +112,18 @@ equals_scan([Elem | Rest], Item) when
     %% Deliberately excludes `is_map` (tagged value-type maps ARE objects),
     %% `is_tuple` (`#beamtalk_object{}` is a record, hence a tuple) and
     %% `is_pid` (actor refs). Those fall through to the real check below.
-    equals_scan(Rest, Item);
-equals_scan([Elem | Rest], Item) ->
+    scan(Rest, Item);
+scan([Elem | Rest], Item) ->
     case beamtalk_primitive:is_object(Elem) andalso dispatch_equals(Elem, Item) of
         true -> true;
-        false -> equals_scan(Rest, Item)
+        false -> scan(Rest, Item)
     end;
-equals_scan([], _Item) ->
+scan([], _Item) ->
     false.
+
+%%% ============================================================================
+%%% Internal
+%%% ============================================================================
 
 %% Send `equals:` to an object element. Coerces a non-boolean answer from a
 %% misbehaving override to `false` rather than letting it leak into a guard.

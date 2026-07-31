@@ -27,7 +27,7 @@ identity, so `Set` was the outlier.
 The representation is unchanged — a term-order-sorted list, which
 `beamtalk_inspector`, `beamtalk_primitive` and `beamtalk_stream` all read
 directly, and which keeps `asList` sorted. Only identity moved to `=:=`, via
-the `beamtalk_list:unique/1` / `strict_member/2` helpers. `==` and `=:=`
+the `beamtalk_list:unique/1` / `strict_member_sorted/2` helpers. `==` and `=:=`
 disagree only for numbers, so mutually-`==` elements form a short contiguous
 run that those helpers scan strictly.
 """.
@@ -83,7 +83,7 @@ is_empty(#{'$beamtalk_class' := 'Set', elements := Elements}) ->
 -doc "Return true if the Set contains the given element.".
 -spec includes(map(), term()) -> boolean().
 includes(#{'$beamtalk_class' := 'Set', elements := Elements}, Element) ->
-    beamtalk_list:strict_member(Element, Elements).
+    beamtalk_list:strict_member_sorted(Element, Elements).
 
 %%% ============================================================================
 %%% Modification (returns new Set)
@@ -121,7 +121,10 @@ intersection(
     #{'$beamtalk_class' := 'Set', elements := E1},
     #{'$beamtalk_class' := 'Set', elements := E2}
 ) ->
-    #{'$beamtalk_class' => 'Set', elements => [X || X <- E1, beamtalk_list:strict_member(X, E2)]};
+    #{
+        '$beamtalk_class' => 'Set',
+        elements => [X || X <- E1, beamtalk_list:strict_member_sorted(X, E2)]
+    };
 intersection(#{'$beamtalk_class' := 'Set'}, _Other) ->
     set_type_error('intersection:');
 intersection(_, _) ->
@@ -135,7 +138,7 @@ difference(
 ) ->
     #{
         '$beamtalk_class' => 'Set',
-        elements => [X || X <- E1, not beamtalk_list:strict_member(X, E2)]
+        elements => [X || X <- E1, not beamtalk_list:strict_member_sorted(X, E2)]
     };
 difference(#{'$beamtalk_class' := 'Set'}, _Other) ->
     set_type_error('difference:');
@@ -152,7 +155,7 @@ is_subset_of(
     #{'$beamtalk_class' := 'Set', elements := E1},
     #{'$beamtalk_class' := 'Set', elements := E2}
 ) ->
-    lists:all(fun(X) -> beamtalk_list:strict_member(X, E2) end, E1);
+    lists:all(fun(X) -> beamtalk_list:strict_member_sorted(X, E2) end, E1);
 is_subset_of(#{'$beamtalk_class' := 'Set'}, _Other) ->
     set_type_error('isSubsetOf:');
 is_subset_of(_, _) ->
@@ -193,7 +196,7 @@ distinct element and is inserted after it, keeping the run contiguous.
 """.
 -spec strict_add(term(), list()) -> list().
 strict_add(Elem, Sorted) ->
-    case beamtalk_list:strict_member(Elem, Sorted) of
+    case beamtalk_list:strict_member_sorted(Elem, Sorted) of
         true -> Sorted;
         false -> strict_insert(Elem, Sorted)
     end.

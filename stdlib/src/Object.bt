@@ -210,8 +210,9 @@ ProtoObject subclass: Object
   ///
   /// ## What honours it
   ///
-  /// The linear scans: `Collection>>includes:`, `List>>includes:`,
-  /// `List>>indexOf:`, and `TestCase>>assert:equals:`.
+  /// The linear scans: `includes:` on `Collection`, `List`, `Array` and
+  /// `Dictionary` (which searches values), plus `List>>indexOf:` and
+  /// `TestCase>>assert:equals:`.
   ///
   /// ## Contract
   ///

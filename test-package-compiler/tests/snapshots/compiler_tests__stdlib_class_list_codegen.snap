@@ -52,7 +52,7 @@ call 'beamtalk_list':'sort_with'(Self, _comparator3)
 call 'lists':'reverse'(Self)
 
 'unique'/1 = fun (Self) ->
-call 'lists':'usort'(Self)
+call 'beamtalk_list':'unique'(Self)
 
 'detect:'/2 = fun (Self, _block4) ->
 call 'beamtalk_list':'detect'(Self, _block4)

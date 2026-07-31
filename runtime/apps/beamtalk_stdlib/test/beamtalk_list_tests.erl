@@ -688,18 +688,18 @@ unique_non_numeric_terms_test() ->
     ?assertEqual([<<"a">>, <<"b">>], beamtalk_list:unique([<<"b">>, <<"a">>, <<"b">>])).
 
 strict_member_distinguishes_int_from_float_test() ->
-    ?assert(beamtalk_list:strict_member(1, [1])),
-    ?assertNot(beamtalk_list:strict_member(1.0, [1])),
-    ?assertNot(beamtalk_list:strict_member(1, [1.0])),
+    ?assert(beamtalk_list:strict_member_sorted(1, [1])),
+    ?assertNot(beamtalk_list:strict_member_sorted(1.0, [1])),
+    ?assertNot(beamtalk_list:strict_member_sorted(1, [1.0])),
     %% Both present: each is found on its own terms.
-    ?assert(beamtalk_list:strict_member(1, [1, 1.0])),
-    ?assert(beamtalk_list:strict_member(1.0, [1, 1.0])).
+    ?assert(beamtalk_list:strict_member_sorted(1, [1, 1.0])),
+    ?assert(beamtalk_list:strict_member_sorted(1.0, [1, 1.0])).
 
 strict_member_absent_and_empty_test() ->
-    ?assertNot(beamtalk_list:strict_member(9, [1, 2, 3])),
-    ?assertNot(beamtalk_list:strict_member(1, [])),
+    ?assertNot(beamtalk_list:strict_member_sorted(9, [1, 2, 3])),
+    ?assertNot(beamtalk_list:strict_member_sorted(1, [])),
     %% Stops early once the sorted list passes the element.
-    ?assertNot(beamtalk_list:strict_member(0, [1, 2, 3])).
+    ?assertNot(beamtalk_list:strict_member_sorted(0, [1, 2, 3])).
 
 sorted_strict_unique_preserves_equal_run_test() ->
     %% A run of mutually-`==` terms keeps one of each distinct value.

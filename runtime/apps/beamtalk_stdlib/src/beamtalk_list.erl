@@ -31,7 +31,7 @@ BT-419: Created as part of Array→List rename and compiled stdlib migration.
     reverse_group_values/1,
     unique/1,
     sorted_strict_unique/1,
-    strict_member/2
+    strict_member_sorted/2
 ]).
 
 -doc """
@@ -342,34 +342,53 @@ duplicates. All `=:=`-identical terms sort contiguously, so a run scan is
 sufficient.
 """.
 -spec sorted_strict_unique(list()) -> list().
-sorted_strict_unique([]) ->
-    [];
-sorted_strict_unique([H | T]) ->
+sorted_strict_unique(Sorted) ->
+    %% Tail-recursive: a large list would otherwise recurse once per distinct
+    %% element, which `lists:usort/1` never did.
+    sorted_strict_unique(Sorted, []).
+
+-spec sorted_strict_unique(list(), list()) -> list().
+sorted_strict_unique([], Acc) ->
+    lists:reverse(Acc);
+sorted_strict_unique([H | T], Acc) ->
     {Run, Rest} = lists:splitwith(fun(X) -> X == H end, T),
-    strict_uniq_run([H | Run], []) ++ sorted_strict_unique(Rest).
+    %% Dedupe the run against a *run-local* accumulator, not the output one:
+    %% elements outside the run compare `/=` to everything in it, so they can
+    %% never be `=:=` equal, and scanning them would make this quadratic.
+    %% The result is reversed and at most two elements, so `++` is constant.
+    Distinct = strict_uniq_run([H | Run], []),
+    sorted_strict_unique(Rest, Distinct ++ Acc).
 
 -doc """
-True if `Elem` is `=:=` some member of the term-order-sorted list `Sorted`.
+True if `Elem` is `=:=` some member of `Sorted`.
 
-Stops as soon as the list passes `Elem` in term order.
+**`Sorted` must be sorted by Erlang term order.** The scan stops as soon as the
+list passes `Elem`, so an unsorted list yields a silently wrong answer rather
+than an error — hence the name. `beamtalk_set` keeps its `elements` field in
+this form, as does `unique/1`'s output.
 """.
--spec strict_member(term(), list()) -> boolean().
-strict_member(_Elem, []) ->
+-spec strict_member_sorted(term(), list()) -> boolean().
+strict_member_sorted(_Elem, []) ->
     false;
-strict_member(Elem, [H | T]) when H == Elem ->
-    H =:= Elem orelse strict_member(Elem, T);
-strict_member(Elem, [H | T]) when H < Elem ->
-    strict_member(Elem, T);
-strict_member(_Elem, _PastIt) ->
-    %% Sorted ascending, so every remaining element is greater than Elem.
+strict_member_sorted(Elem, [H | T]) when H == Elem ->
+    %% Inside a run of mutually-`==` terms: only `=:=` counts as a match.
+    H =:= Elem orelse strict_member_sorted(Elem, T);
+strict_member_sorted(Elem, [H | T]) when H < Elem ->
+    strict_member_sorted(Elem, T);
+strict_member_sorted(_Elem, _PastIt) ->
+    %% Reached an element greater than Elem; sorted ascending, so it is absent.
     false.
 
-%% Strictly deduplicate one `==`-equal run, preserving order. Runs hold at most
-%% an integer and a float of the same value, so the quadratic membership check
-%% is bounded by a constant in practice.
+%% Strictly deduplicate one `==`-equal run onto a reversed accumulator.
+%%
+%% A run may be long (`[1, 1, 1, 1.0]`), but the number of *distinct* terms it
+%% can contribute is at most two — an integer and a float of equal value are
+%% the only way Erlang terms compare `==` without comparing `=:=`. So the
+%% `lists:any/2` membership check runs against an at-most-two-element list and
+%% is constant, not quadratic.
 -spec strict_uniq_run(list(), list()) -> list().
 strict_uniq_run([], Acc) ->
-    lists:reverse(Acc);
+    Acc;
 strict_uniq_run([H | T], Acc) ->
     case lists:any(fun(Y) -> Y =:= H end, Acc) of
         true -> strict_uniq_run(T, Acc);
