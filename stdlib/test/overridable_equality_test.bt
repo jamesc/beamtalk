@@ -45,3 +45,43 @@ TestCase subclass: OverridableEqualityTest
     half := Fraction numer: 1 denom: 2
     third := Fraction numer: 1 denom: 3
     self deny: (half equals: third)
+
+  // ===== Stdlib operations that honour `equals:` (BT-2997) =====
+
+  /// `List>>includes:` finds a value-equal element the raw `=:=` primitive
+  /// would miss. This is the `beamtalk_equality:member/2` slow path: the
+  /// `lists:member/2` fast path returns false, then the scan dispatches.
+  testListIncludesHonoursOverride =>
+    halves := #((Fraction numer: 1 denom: 2))
+    self assert: (halves includes: (Fraction numer: 2 denom: 4))
+    self deny: (halves includes: (Fraction numer: 1 denom: 3))
+
+  /// The `lists:member/2` fast path still settles the structurally-identical
+  /// case without dispatching — same answer, reached the cheap way.
+  testListIncludesFastPathUnchanged =>
+    halves := #((Fraction numer: 1 denom: 2))
+    self assert: (halves includes: (Fraction numer: 1 denom: 2))
+    self assert: (#(1, 2, 3) includes: 2)
+    self deny: (#(1, 2, 3) includes: 9)
+
+  // Still strict for primitives — `includes: 2.0` on a `List(Integer)` is
+  // rejected by the type checker before it can even reach the comparison.
+
+  /// `List>>indexOf:` compares with `equals:` too.
+  testIndexOfHonoursOverride =>
+    fractions := #((Fraction numer: 1 denom: 3), (Fraction numer: 1 denom: 2))
+    self assert: (fractions indexOf: (Fraction numer: 2 denom: 4)) equals: 2
+    self assert: (fractions indexOf: (Fraction numer: 9 denom: 9)) equals: nil
+
+  /// `assert:equals:` compares with `equals:`, so an override makes the
+  /// assertion pass where raw `=:=` would fail the test.
+  testAssertEqualsHonoursOverride =>
+    self assert: (Fraction numer: 1 denom: 2) equals: (Fraction numer: 2 denom: 4)
+
+  /// `Set` does NOT honour the override — it is an ordsets lookup, deciding
+  /// identity in the VM. This is the documented boundary, pinned so a future
+  /// change to it is deliberate rather than accidental.
+  testSetDoesNotHonourOverride =>
+    s := (Set new add: (Fraction numer: 1 denom: 2)) add: (Fraction numer: 2 denom: 4)
+    self assert: s size equals: 2
+    self deny: (s includes: (Fraction numer: 4 denom: 8))

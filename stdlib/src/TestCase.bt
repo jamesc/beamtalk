@@ -132,8 +132,11 @@ Value subclass: TestCase
 
   /// Assert that `actual` equals `expected`, failing the test if they differ.
   ///
-  /// Uses strict equality (`=:=`) — `1 equals: 1.0` fails since Beamtalk's
-  /// strict comparison does not coerce across numeric types.
+  /// Compares with `equals:` (BT-2997), so a class that overrides it is
+  /// asserted by value rather than by representation. `equals:` defaults to
+  /// strict `=:=`, so a class that does not override it is unaffected — and
+  /// `self assert: 1 equals: 1.0` still fails, since strict comparison does
+  /// not coerce across numeric types.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -141,7 +144,7 @@ Value subclass: TestCase
   /// self assert: (1 + 1) equals: 3   // fails
   /// ```
   assert: actual :: Object equals: expected :: Object -> Nil =>
-    (actual =:= expected) ifFalse: [
+    (actual equals: expected) ifFalse: [
       self fail: "Expected {expected}, got {actual}"
     ]
     nil

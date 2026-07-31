@@ -208,6 +208,18 @@ ProtoObject subclass: Object
   /// straight to Erlang BIFs (ADR 0002) and cannot be overridden — the compiler
   /// rejects any attempt (BT-2997).
   ///
+  /// ## What honours it
+  ///
+  /// The linear scans: `Collection>>includes:`, `List>>includes:`,
+  /// `List>>indexOf:`, and `TestCase>>assert:equals:`.
+  ///
+  /// ## Contract
+  ///
+  /// An override must agree with `=:=` wherever `=:=` holds — `a =:= b` must
+  /// imply `a equals: b`. It may only make *more* values equal, never fewer.
+  /// The scans above rely on this: each tries raw `=:=` first and dispatches
+  /// only on a miss, so a fast-path hit is always a genuine `equals:` hit.
+  ///
   /// ## Caveat
   ///
   /// The keyed containers decide identity in the VM, never through this

@@ -81,7 +81,14 @@ fn generate_list_access_bif(selector: &str, params: &[String]) -> Option<Documen
             ])
         }
         "at:" => Some(call_self_p0("beamtalk_list", "at", param(params, 0, "_N"))),
-        "includes:" => Some(call_p0_self("lists", "member", param(params, 0, "_Item"))),
+        // BT-2997: honours an `equals:` override on the elements. Takes
+        // `lists:member/2` first and only dispatches on a raw miss, so the
+        // positive case keeps the BIF's speed.
+        "includes:" => Some(call_p0_self(
+            "beamtalk_equality",
+            "member",
+            param(params, 0, "_Item"),
+        )),
         "sort" => Some(Document::Str("call 'lists':'sort'(Self)")),
         "sort:" => Some(call_self_p0(
             "beamtalk_list",
@@ -283,10 +290,14 @@ mod tests {
 
     #[test]
     fn test_includes() {
+        // BT-2997: routes through `beamtalk_equality:member/2`, not bare
+        // `lists:member/2`, so an `equals:` override on the element class is
+        // honoured. That helper still takes `lists:member/2` first, so the
+        // positive case costs the same as before.
         let result = doc_to_string(generate_list_bif("includes:", &["Item".to_string()]));
         assert_eq!(
             result,
-            Some("call 'lists':'member'(Item, Self)".to_string())
+            Some("call 'beamtalk_equality':'member'(Item, Self)".to_string())
         );
     }
 

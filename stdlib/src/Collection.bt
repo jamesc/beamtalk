@@ -81,13 +81,18 @@ abstract typed Value subclass: Collection(E)
   /// Default implementation iterates with `do:` and returns early on match.
   /// Subclasses may override with more efficient lookup.
   ///
+  /// Compares with `equals:`, so an element class that overrides it is matched
+  /// by value rather than by representation (BT-2997). `Set` overrides this
+  /// with an `ordsets` lookup and so compares by term order instead — keyed
+  /// containers decide identity in the VM and cannot honour `equals:`.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// #(1, 2, 3) includes: 2      // => true
   /// #(1, 2, 3) includes: 9      // => false
   /// ```
   includes: element :: E -> Boolean =>
-    self do: [:each | each =:= element ifTrue: [^true]]
+    self do: [:each | (each equals: element) ifTrue: [^true]]
     false
 
   /// Reduce the collection with an accumulator.
