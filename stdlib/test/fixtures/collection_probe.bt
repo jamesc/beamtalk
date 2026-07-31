@@ -1,0 +1,35 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3022: reaches a class-driven Collection from *inside* a class method, so the
+// process that sets up the iteration accumulator is itself a class gen_server
+// rather than the eval worker.
+
+Value subclass: CollectionProbe
+
+  // The accumulating process is CollectionProbe's class process; the iteration
+  // block then hops on to CollectionDriver's.
+  class asListOf: aList :: List -> List =>
+    (ClassDrivenCollection of: aList) asList
+
+  class sumOf: aList :: List -> Number => (ClassDrivenCollection of: aList) sum
+
+  class includes: x :: Integer in: aList :: List -> Boolean =>
+    (ClassDrivenCollection of: aList) includes: x
+
+  // BT-3022: reaches the driver through a class held in a *variable*. The `^`
+  // belongs to this method's frame, so the non-local return still has to cross
+  // back out of CollectionDriver's class process.
+  class firstOver: aList :: List -> Integer =>
+    k := CollectionDriver
+    k run: [:x | x > 1 ifTrue: [^x]] over: aList
+    0
+
+  // BT-3031: `CollectionDriver class class` is a true metaclass receiver
+  // (beamtalk_behaviour_intrinsics:classClass/1 tags it 'Metaclass'), so this
+  // routes through metaclass_send/4 instead of class_send/3. The `^` belongs to
+  // this method's frame and must cross back along that path too.
+  class firstViaMetaclassOver: aList :: List -> Integer =>
+    k := CollectionDriver class class
+    k run: [:x | x > 1 ifTrue: [^x]] over: aList
+    0

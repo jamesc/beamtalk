@@ -37,6 +37,17 @@ Extracted from beamtalk_object_class.erl (BT-704).
 -type selector() :: atom().
 -type class_name() :: atom().
 
+%% BT-3022: a `^` non-local return in flight. Codegen throws the state-carrying
+%% 4-tuple `{'$bt_nlr', Token, Value, State}` (ADR 0041); the 3-tuple is the
+%% pre-BT-854 shape still recognised by `beamtalk_result:'tryDo:'/1`. Both are
+%% control-flow signals aimed at a method frame that may live in another process,
+%% so class dispatch must relay rather than report them.
+-define(IS_NLR(T),
+    (is_tuple(T) andalso
+        (tuple_size(T) =:= 4 orelse tuple_size(T) =:= 3) andalso
+        element(1, T) =:= '$bt_nlr')
+).
+
 -doc """
 Send a message to a class object synchronously (BT-246 / ADR 0013 Phase 1).
 
@@ -395,6 +406,14 @@ class_send_dispatch(ClassPid, Selector, Args) ->
             %% reports the status and ends the session — instead of
             %% unwrap_class_call/1 wrapping it as an ordinary method failure.
             throw(ScriptExit);
+        {error, Nlr} when ?IS_NLR(Nlr) ->
+            %% BT-3022: a `^` inside a block that this class method ran on our
+            %% behalf. The matching catch frame is in *our* process — the class
+            %% gen_server had no frame holding that token, so its reply is the only
+            %% way the signal can get back here. Re-throw so the enclosing method
+            %% unwinds as it would have without the process hop; without this the
+            %% raw `{'$bt_nlr', ...}` tuple surfaces to user code as an error value.
+            throw(Nlr);
         Other ->
             unwrap_class_call(Other)
     end.
@@ -471,6 +490,20 @@ metaclass_send_dispatch(Pid, Selector, Args, Self) ->
             %% metaclass-dispatched class method as the script-exit throw (parity
             %% with class_send_dispatch/3), so the worker adopts the status.
             throw(ScriptExit);
+        {error, Nlr} when ?IS_NLR(Nlr) ->
+            %% BT-3022: same relay as class_send_dispatch/3, and for the same
+            %% reason — a metaclass-dispatched class method also runs in the class
+            %% gen_server, so a `^` out of a caller-supplied block unwinds to here
+            %% with no frame holding its token. Without this clause
+            %% `unwrap_class_call/1` reraises it as an ordinary error and the raw
+            %% `{'$bt_nlr', ...}` tuple reaches user code.
+            %%
+            %% Reached via a metaclass receiver — `SomeClass class class`, which
+            %% `beamtalk_behaviour_intrinsics:classClass/1` tags `'Metaclass'` so
+            %% `beamtalk_primitive:send/3` routes it here. A plain class literal or
+            %% a single `class` send goes through `class_send/3` instead, which is
+            %% why this needs its own clause rather than sharing that one.
+            throw(Nlr);
         Other ->
             unwrap_class_call(Other)
     end.
@@ -660,6 +693,11 @@ apply_class_method_fun(Fun, ClassSelf, ClassVars, Args, ClassName, Selector) ->
         %% it to the eval/dispatch worker that reports the status.
         throw:({beamtalk_script_exit, _} = ScriptExit):ScriptST ->
             {error, {raised, throw, ScriptExit, ScriptST}};
+        %% BT-3022: a `^` non-local return that unwound through this class method
+        %% belongs to a method frame in the *calling* process. Pass it through
+        %% unlogged so class_send_dispatch/3 can re-throw it there.
+        throw:Nlr:NlrST when ?IS_NLR(Nlr) ->
+            {error, {raised, throw, Nlr, NlrST}};
         error:undef:ST ->
             ?LOG_ERROR(
                 "Runtime class method ~p:~p raised undef internally",
@@ -706,6 +744,10 @@ apply_compiled_class_method(
         %% re-raises it to the eval/dispatch worker.
         throw:({beamtalk_script_exit, _} = ScriptExit):ScriptST ->
             {error, {raised, throw, ScriptExit, ScriptST}};
+        %% BT-3022: see apply_class_method_fun/6 — a non-local return unwinding out
+        %% of a class method is control flow for a frame in the calling process.
+        throw:Nlr:NlrST when ?IS_NLR(Nlr) ->
+            {error, {raised, throw, Nlr, NlrST}};
         error:undef:ST ->
             classify_undef(ClassName, DefiningClass, DefiningModule, Selector, FunName, ST);
         ErrClass:Error:ErrST ->

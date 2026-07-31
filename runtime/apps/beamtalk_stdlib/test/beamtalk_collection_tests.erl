@@ -117,7 +117,10 @@ to_list_non_list_test_() ->
     {setup, fun stdlib_setup/0, fun stdlib_teardown/1, [
         {"to_list on Interval yields integers in range", fun to_list_interval_test/0},
         {"to_list on empty Interval yields empty list", fun to_list_empty_interval_test/0},
-        {"inject_into on Interval sums the range", fun inject_into_interval_test/0}
+        {"inject_into on Interval sums the range", fun inject_into_interval_test/0},
+        {"to_list leaves unrelated mailbox messages untouched",
+            fun to_list_preserves_mailbox_test/0},
+        {"to_list leaves no accumulator messages behind", fun to_list_drains_mailbox_test/0}
     ]}.
 
 %% Build an Interval via direct map construction (matches stdlib/src/Interval.bt).
@@ -140,6 +143,48 @@ inject_into_interval_test() ->
     %% Sum 1..10 = 55
     Sum = beamtalk_collection:inject_into(Interval, 0, fun(Acc, E) -> Acc + E end),
     ?assertEqual(55, Sum).
+
+%% BT-3022: to_list/1 accumulates through the caller's mailbox so the iteration
+%% block works across a process boundary. That makes mailbox hygiene part of its
+%% contract: unrelated messages must be left in place and in order, because
+%% to_list may run inside an actor's callback.
+to_list_preserves_mailbox_test() ->
+    self() ! {decoy, 1},
+    self() ! {decoy, 2},
+    ?assertEqual([1, 2, 3], beamtalk_collection:to_list(make_interval(1, 3))),
+    ?assertEqual(
+        {decoy, 1},
+        receive
+            M1 -> M1
+        after 0 -> timeout
+        end
+    ),
+    ?assertEqual(
+        {decoy, 2},
+        receive
+            M2 -> M2
+        after 0 -> timeout
+        end
+    ),
+    ?assertEqual(
+        empty,
+        receive
+            M3 -> M3
+        after 0 -> empty
+        end
+    ).
+
+%% The accumulator messages must all be consumed — a stray `'$bt_to_list'` tuple
+%% left behind would reach the enclosing process's handle_info/2.
+to_list_drains_mailbox_test() ->
+    ?assertEqual([1, 2, 3, 4, 5], beamtalk_collection:to_list(make_interval(1, 5))),
+    ?assertEqual(
+        empty,
+        receive
+            Any -> Any
+        after 0 -> empty
+        end
+    ).
 
 %%% ============================================================================
 %%% from_list_like/2 — result reconstruction (BT-2342)

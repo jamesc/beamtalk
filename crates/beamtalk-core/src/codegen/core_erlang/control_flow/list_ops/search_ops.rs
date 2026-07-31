@@ -11,6 +11,40 @@ use super::super::{BodyKind, ThreadingPlan};
 use crate::ast::{Block, Expression};
 use crate::docvec;
 
+/// BT-3028: binds the `detect:` answer out of a mutation-threading fold result,
+/// raising `not_found` when nothing matched.
+///
+/// The fold seeds its accumulator with `{'nil', 'false', …}` and processes every
+/// element, so slot 1 alone cannot say whether the search succeeded — `'nil'` is
+/// both the seed and a legitimate match. Slot 2 is the found flag, and it is the
+/// one consulted here, which also makes `#(nil) detect: [:x | x isNil]` answer
+/// `nil` rather than raise.
+///
+/// The class named in the error comes from the receiver, so a `Set` routed
+/// through the list-op path reports `Set` rather than `List`.
+fn bind_detect_found_or_raise_doc(
+    found_result: &str,
+    fold_result: &str,
+    recv_var: &str,
+    class_var: &str,
+) -> Document<'static> {
+    docvec![
+        "let ",
+        leaf::var(found_result.to_owned()),
+        " = case call 'erlang':'element'(2, ",
+        leaf::var(fold_result.to_owned()),
+        ") of <'true'> when 'true' -> call 'erlang':'element'(1, ",
+        leaf::var(fold_result.to_owned()),
+        ") <'false'> when 'true' -> let ",
+        leaf::var(class_var.to_owned()),
+        " = call 'beamtalk_primitive':'class_of'(",
+        leaf::var(recv_var.to_owned()),
+        ") in call 'beamtalk_collection':'raiseDetectNotFound'(",
+        leaf::var(class_var.to_owned()),
+        ") end in ",
+    ]
+}
+
 impl CoreErlangGenerator {
     /// BT-1481: Generates code for `list anySatisfy:` with mutation analysis.
     pub(in crate::codegen::core_erlang) fn generate_list_any_satisfy(
@@ -718,7 +752,7 @@ impl CoreErlangGenerator {
             let mut docs: Vec<Document<'static>> = Vec::new();
             docs.push(super::list_recv_to_safe_list_doc(
                 recv_code,
-                list_var,
+                list_var.clone(),
                 safe_list_var.clone(),
             ));
             docs.push(docvec![
@@ -754,6 +788,7 @@ impl CoreErlangGenerator {
 
             let fold_result = self.fresh_temp_var("FoldResult");
             let found_result = self.fresh_temp_var("FoundResult");
+            let class_var = self.fresh_temp_var("DetectRecvClass");
 
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 3, self);
             if self.in_direct_params_loop {
@@ -767,11 +802,13 @@ impl CoreErlangGenerator {
                     init_tuple_doc,
                     ", ",
                     leaf::var(safe_list_var),
-                    ") in let ",
-                    leaf::var(found_result.clone()),
-                    " = call 'erlang':'element'(1, ",
-                    leaf::var(fold_result),
                     ") in ",
+                    bind_detect_found_or_raise_doc(
+                        &found_result,
+                        &fold_result,
+                        &list_var,
+                        &class_var
+                    ),
                     extract_doc,
                 ]);
             } else {
@@ -785,11 +822,13 @@ impl CoreErlangGenerator {
                     init_tuple_doc,
                     ", ",
                     leaf::var(safe_list_var),
-                    ") in let ",
-                    leaf::var(found_result.clone()),
-                    " = call 'erlang':'element'(1, ",
-                    leaf::var(fold_result),
                     ") in ",
+                    bind_detect_found_or_raise_doc(
+                        &found_result,
+                        &fold_result,
+                        &list_var,
+                        &class_var
+                    ),
                     extract_doc,
                     repack_doc,
                     "{",
@@ -809,7 +848,7 @@ impl CoreErlangGenerator {
         docs.push(pack_doc);
         docs.push(super::list_recv_to_safe_list_doc(
             recv_code,
-            list_var,
+            list_var.clone(),
             safe_list_var.clone(),
         ));
         docs.push(docvec![
@@ -846,6 +885,7 @@ impl CoreErlangGenerator {
 
         let fold_result = self.fresh_temp_var("FoldResult");
         let found_result = self.fresh_temp_var("FoundResult");
+        let class_var = self.fresh_temp_var("DetectRecvClass");
         let state_out = self.fresh_temp_var("StOut");
 
         docs.push(docvec![
@@ -857,11 +897,9 @@ impl CoreErlangGenerator {
             leaf::var(init_state),
             "}, ",
             leaf::var(safe_list_var),
-            ") in let ",
-            leaf::var(found_result.clone()),
-            " = call 'erlang':'element'(1, ",
-            leaf::var(fold_result.clone()),
-            ") in let ",
+            ") in ",
+            bind_detect_found_or_raise_doc(&found_result, &fold_result, &list_var, &class_var),
+            "let ",
             leaf::var(state_out.clone()),
             " = call 'erlang':'element'(3, ",
             leaf::var(fold_result),

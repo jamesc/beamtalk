@@ -2295,6 +2295,37 @@ MyClass performLocally: #add:to: withArguments: #(3, 7)
 
 **Limitations:** Local dispatch calls the method directly on the target class module — it does not walk the superclass chain. Class variable mutations are discarded (the call runs outside the class gen_server's state). Use this only for stateless or read-only class methods.
 
+### Passing Blocks Through Class Methods
+
+Because a class method runs in the class object's gen_server process, a block passed *into* one runs there too, not where it was written ([BT-3022](https://linear.app/beamtalk/issue/BT-3022)):
+
+```beamtalk
+Value subclass: Driver
+  class run: aBlock over: aList -> Nil =>
+    aList do: [:x | aBlock value: x]      // aBlock runs in Driver's class process
+    nil
+```
+
+Arguments and return values cross that boundary as copies, so blocks that compute answers work normally. Two things do *not* survive the hop:
+
+- **Process-local side effects.** A block that writes to the process dictionary (`Erlang erlang put:value:`), reads `self()`, or otherwise depends on running in a particular process affects the *class* process. The caller sees none of it.
+- **Re-entrant class sends.** If the block messages the same class whose method is driving it, the class process would have to `gen_server:call` itself. That raises a structured `dispatch_error` naming the selector rather than deadlocking. Read what you need before the call, or hold the resource yourself instead of using the block form.
+
+Non-local return (`^`) *does* cross the boundary: the signal is relayed back and unwinds the enclosing method as it would without the hop. One caveat — if the class method mutated a class variable *before* the block escaped, that mutation is currently reverted ([BT-3032](https://linear.app/beamtalk/issue/BT-3032)); the returned value is unaffected.
+
+This matters most when building a `Collection` subclass. Implementing `do:` by delegating to a class-side helper is fine — `asList`, `inject:into:`, `sum`, `includes:` and the rest of the inherited protocol all work — but a class-side helper that reaches back into its own class does not:
+
+```beamtalk
+Collection subclass: Batch
+  field: items :: List = #()
+  size -> Integer => self.items size
+
+  // Fine: the inherited Collection protocol works through this.
+  do: block :: Block -> Nil =>
+    Driver run: block over: self.items
+    nil
+```
+
 ### Actor-to-Actor Coordination
 
 Because `.` sends are synchronous, when an actor method calls another actor internally, the caller **waits** for the nested call to complete before continuing. The sync barrier pattern (explicit round-trip queries) is generally no longer needed:
@@ -4737,13 +4768,32 @@ its own kind ([BT-3025](https://linear.app/beamtalk/issue/BT-3025)). None of
 them is `does_not_understand` — the receiver understands the selector, so
 reporting a dispatch failure would send the reader hunting for a typo.
 
-**`List detect:` raises `not_found`** when the search runs to completion with
-no element matching. `detect:ifNone:` is the non-raising alternative:
+**`detect:` raises `not_found`** when the search runs to completion with no
+element matching. `detect:ifNone:` is the non-raising alternative:
 
 ```beamtalk
 #(1, 2, 3) detect: [:x | x > 10]            // raises not_found
 #(1, 2, 3) detect: [:x | x > 10] ifNone: [0] // => 0
 ```
+
+Every receiver agrees ([BT-3028](https://linear.app/beamtalk/issue/BT-3028)) —
+`List`, `Set`, `Bag`, `Dictionary`, `Interval`, `String`, and `Stream`.
+`detect:` answers `E`, and `E` has no in-band way to say "nothing matched", so
+the raise is the honest encoding; reach for `detect:ifNone:` whenever a miss is
+expected:
+
+```beamtalk
+#(1, 2, 3) asSet detect: [:x | x > 10]      // raises not_found
+(1 to: 3) detect: [:x | x > 10]             // raises not_found
+(Stream on: #(1, 2, 3)) detect: [:n | n > 10]  // raises not_found
+
+(1 to: 3) detect: [:x | x > 10] ifNone: [0] // => 0
+```
+
+The error names the *receiver's* class, so a no-match on a Set reports `Set`
+rather than the abstract `Collection` the shared implementation lives on. An
+empty receiver is just the degenerate no-match case and raises `not_found` too,
+not `empty_collection` — `detect:` is a search, not an element accessor.
 
 **`List from:to:` raises `index_out_of_bounds`** for a start index below 1,
 matching `at:`. Its other edge cases stay total — an end below the start is an
@@ -4866,7 +4916,8 @@ Terminal operations force evaluation and return a concrete result:
 | `asList` | Materialize entire stream to List | `s asList` → `[1,2,3]` |
 | `do:` | Iterate with side effects, return nil | `s do: [:n \| Transcript show: n]` |
 | `inject:into:` | Fold/reduce with initial value | `s inject: 0 into: [:sum :n \| sum + n]` |
-| `detect:` | First matching element, or nil | `s detect: [:n \| n > 10]` |
+| `detect:` | First matching element; raises `not_found` if none | `s detect: [:n \| n > 10]` |
+| `detect:ifNone:` | First matching element, or the default if none | `s detect: [:n \| n > 10] ifNone: [0]` |
 | `anySatisfy:` | True if any element matches | `s anySatisfy: [:n \| n > 2]` |
 | `allSatisfy:` | True if all elements match | `s allSatisfy: [:n \| n > 0]` |
 

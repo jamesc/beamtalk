@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 use tracing::info;
 
 use crate::commands::manifest::{self, format_name_error, validate_package_name};
+use crate::commands::util::find_project_root;
 
 use super::git;
 use super::lockfile::{LockEntry, Lockfile};
@@ -718,31 +719,6 @@ fn update_single_registry_dep(
     }
 
     Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/// Find the project root by looking for `beamtalk.toml` in the current directory.
-fn find_project_root() -> Result<Utf8PathBuf> {
-    let cwd = std::env::current_dir()
-        .into_diagnostic()
-        .wrap_err("Failed to determine current directory")?;
-
-    let project_root = Utf8PathBuf::from_path_buf(cwd).map_err(|p| {
-        miette::miette!("Current directory path is not valid UTF-8: {}", p.display())
-    })?;
-
-    let manifest_path = project_root.join("beamtalk.toml");
-    if !manifest_path.exists() {
-        miette::bail!(
-            "No beamtalk.toml found in current directory.\n  \
-             Run this command from a Beamtalk project root, or create one with `beamtalk new`."
-        );
-    }
-
-    Ok(project_root)
 }
 
 #[cfg(test)]

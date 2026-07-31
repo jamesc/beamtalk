@@ -38,7 +38,7 @@ Collection. They fold over `to_list/1`; `max`/`min`/`average` raise
 %% dispatch, not @primitive — see docs/beamtalk-native-erlang.md "The naming
 %% rule": the function name is the first keyword with its colon removed, no
 %% case conversion, hence camelCase.
--export([raiseEmpty/2]).
+-export([raiseEmpty/2, raiseDetectNotFound/1]).
 
 %%% ============================================================================
 %%% Public API
@@ -153,6 +153,23 @@ raiseEmpty(Class, Selector) ->
     beamtalk_error:raise(beamtalk_error:new(empty_collection, Class, Selector, Hint)).
 
 -doc """
+Raise `not_found` for a `detect:` that ran to completion without matching.
+
+BT-3028: `Collection>>detect:` answers `E`, so there is no in-band way to say
+"nothing matched" — it raises, matching the `@primitive` `List>>detect:`. Pure
+Beamtalk cannot raise a *named* kind (`self error:` always yields `user_error`),
+so the generic implementation calls this. `Class` is the receiver's own class,
+so a `Set` reports `Set`, not the abstract `Collection` the method lives on.
+
+The hint deliberately matches `beamtalk_list:detect/2`'s, so a no-match reads
+the same whichever collection raised it.
+""".
+-spec raiseDetectNotFound(atom()) -> no_return().
+raiseDetectNotFound(Class) ->
+    Hint = <<"No element matched the block; use `detect:ifNone:` to supply a default">>,
+    beamtalk_error:raise(beamtalk_error:new(not_found, Class, 'detect:', Hint)).
+
+-doc """
 Reconstruct a `collect:`/`select:`/`reject:` result so its type matches the
 original receiver, mirroring the pure (non-mutating) list-op path.
 
@@ -180,19 +197,83 @@ Convert any collection to a list by iterating with do:.
 Called from compiler-generated Core Erlang for `do:`, `collect:`,
 `select:`, `reject:`, and `inject:into:` when the receiver is not
 already an Erlang list.
+
+BT-3022: the accumulator is the *caller's mailbox*, not its process dictionary.
+A `Collection` subclass may implement `do:` by delegating to a class-side method,
+and class-method dispatch runs the callee in the class gen_server process
+(`beamtalk_class_dispatch:class_send/3`). The iteration block is a plain fun, so
+it is copied across that boundary and invoked there — a `put/2` inside it would
+land in the *class* process's dictionary, and this function would read back its
+own untouched accumulator and answer `#()`. Posting each element back to the
+process that started the iteration is boundary-agnostic: it works whether the
+block runs here, in a class process, or in an actor.
+
+Ordering is preserved by BEAM's pairwise signal-ordering guarantee: the class
+process posts every element and then sends its `gen_server:call` reply over the
+same sender/receiver pair, so all the elements are already queued ahead of the
+reply that releases us.
+
+The `after` clause is load-bearing: on the exception path (a `^` non-local
+return or a raise from inside the block) elements may still be queued, and
+leaving them behind would hand stray `'$bt_to_list'` messages to whatever
+`handle_info/2` owns this process.
+
+Cost, measured on the accumulator in isolation (1000 elements, OTP 28):
+
+    backlog   process dict   mailbox   collector process
+          0         56 us     149 us         327 us
+       1000         87 us     217 us         355 us
+       5000        175 us     387 us         406 us
+
+So the mailbox costs roughly 90ns per element more than the process dictionary
+did — real, but a minority of a `to_list/1` call, which also pays a full `do:`
+dispatch per element on top. Two things worth knowing before "optimising" this:
+
+- A backlog does *not* cost `O(elements x backlog)`. The naive reading of a
+  selective receive says each element re-scans the queued prefix; measurement
+  says otherwise (2.6x from a 5000-message backlog, not 5000x), and the process
+  dictionary version degrades alongside it, so most of that is heap pressure
+  from the queued messages rather than scanning.
+- Routing through a dedicated collector process — the obvious "avoid the
+  caller's mailbox" answer — is *slower at every backlog measured*: the spawn
+  and the cross-process handshake cost more than the receives they replace, and
+  the crossover never arrives. Do not switch to it without new numbers.
 """.
 -spec to_list(term()) -> list().
 to_list(Self) when is_list(Self) ->
     Self;
 to_list(Self) ->
     Ref = make_ref(),
-    put(Ref, []),
+    Owner = self(),
     try
         Block = fun(Each) ->
-            put(Ref, [Each | get(Ref)])
+            Owner ! {'$bt_to_list', Ref, Each},
+            ok
         end,
         beamtalk_primitive:send(Self, 'do:', [Block]),
-        lists:reverse(get(Ref))
+        collect_posted(Ref, [])
     after
-        erase(Ref)
+        discard_posted(Ref)
+    end.
+
+%% Drain the elements posted by the iteration block, oldest first.
+-spec collect_posted(reference(), list()) -> list().
+collect_posted(Ref, Acc) ->
+    receive
+        {'$bt_to_list', Ref, Each} ->
+            collect_posted(Ref, [Each | Acc])
+    after 0 ->
+        lists:reverse(Acc)
+    end.
+
+%% Drop anything left over after an abnormal exit from the iteration. On the
+%% success path `collect_posted/2` has already emptied the queue, so this is a
+%% single non-matching mailbox scan.
+-spec discard_posted(reference()) -> ok.
+discard_posted(Ref) ->
+    receive
+        {'$bt_to_list', Ref, _Each} ->
+            discard_posted(Ref)
+    after 0 ->
+        ok
     end.

@@ -8,6 +8,7 @@ This file is a compact one-page index for AI coding agents. For full, detailed g
 - **Repo values (use for API calls):** Owner: `jamesc`, Repo: `beamtalk`.
 - **Syntax verification:** Always verify Beamtalk syntax in `docs/beamtalk-language-features.md`, `examples/`, or `tests/` before using it.
 - **Structured errors:** Use `#beamtalk_error{}` for all user-facing/public API errors. Internal runtime helpers (`runtime/**/*.erl`) may use `{ok, Value} | {error, Reason}` if translated at public API boundaries.
+- **Blocks into class methods:** A class method runs in its class's gen_server process, so a block passed into one runs there too. Values and `^` cross fine; process-local side effects (process dictionary, `self()`) do not, and messaging the same class back raises `dispatch_error`. See [expanded doc](docs/agents/expanded.md#blocks-passed-into-class-methods).
 - **CI checklist:** Use `just ci` for full checks; quick commands: `just build`, `just test`, `just test-stdlib`, `just test-repl-protocol`.
 - **Agent shortcuts:** You may run `just`, `cargo`, `rustc`, `rustfmt`, and `git` without asking.
 
