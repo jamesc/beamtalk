@@ -330,7 +330,10 @@ sealed typed Collection(E) subclass: List(E)
       inject: 0
       into: [:i :each |
         newI := i + 1
-        (each equals: item) ifTrue: [^newI]
+        // `beamtalk_equality:eq/2`, not a bare `equals:` send: sending to an
+        // actor element would be a blocking `gen_server:call` per element.
+        // See `Collection>>includes:`.
+        ((Erlang beamtalk_equality) eq: each with: item) ifTrue: [^newI]
         newI
       ]
     nil

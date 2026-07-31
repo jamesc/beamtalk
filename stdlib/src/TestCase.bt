@@ -144,7 +144,10 @@ Value subclass: TestCase
   /// self assert: (1 + 1) equals: 3   // fails
   /// ```
   assert: actual :: Object equals: expected :: Object -> Nil =>
-    (actual equals: expected) ifFalse: [
+    // `beamtalk_equality:eq/2`, not a bare `equals:` send: asserting on an
+    // actor would otherwise be a blocking `gen_server:call` into it. See
+    // `Collection>>includes:`.
+    ((Erlang beamtalk_equality) eq: actual with: expected) ifFalse: [
       self fail: "Expected {expected}, got {actual}"
     ]
     nil

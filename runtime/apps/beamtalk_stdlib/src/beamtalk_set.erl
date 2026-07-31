@@ -121,10 +121,7 @@ intersection(
     #{'$beamtalk_class' := 'Set', elements := E1},
     #{'$beamtalk_class' := 'Set', elements := E2}
 ) ->
-    #{
-        '$beamtalk_class' => 'Set',
-        elements => [X || X <- E1, beamtalk_list:strict_member_sorted(X, E2)]
-    };
+    #{'$beamtalk_class' => 'Set', elements => strict_intersection(E1, E2)};
 intersection(#{'$beamtalk_class' := 'Set'}, _Other) ->
     set_type_error('intersection:');
 intersection(_, _) ->
@@ -136,10 +133,7 @@ difference(
     #{'$beamtalk_class' := 'Set', elements := E1},
     #{'$beamtalk_class' := 'Set', elements := E2}
 ) ->
-    #{
-        '$beamtalk_class' => 'Set',
-        elements => [X || X <- E1, not beamtalk_list:strict_member_sorted(X, E2)]
-    };
+    #{'$beamtalk_class' => 'Set', elements => strict_difference(E1, E2)};
 difference(#{'$beamtalk_class' := 'Set'}, _Other) ->
     set_type_error('difference:');
 difference(_, _) ->
@@ -155,7 +149,7 @@ is_subset_of(
     #{'$beamtalk_class' := 'Set', elements := E1},
     #{'$beamtalk_class' := 'Set', elements := E2}
 ) ->
-    lists:all(fun(X) -> beamtalk_list:strict_member_sorted(X, E2) end, E1);
+    strict_is_subset(E1, E2);
 is_subset_of(#{'$beamtalk_class' := 'Set'}, _Other) ->
     set_type_error('isSubsetOf:');
 is_subset_of(_, _) ->
@@ -187,6 +181,72 @@ do(#{'$beamtalk_class' := 'Set'}, _Block) ->
 %%% ============================================================================
 %%% Internal Helpers
 %%% ============================================================================
+
+%% Both operands are term-order-sorted and `=:=`-unique, so these walk the two
+%% lists in step — linear, as `ordsets:intersection/2` and `ordsets:subtract/2`
+%% were. A `[X || X <- E1, strict_member_sorted(X, E2)]` comprehension would be
+%% O(|E1|*|E2|) in the worst case.
+%%
+%% `==`-equal-but-not-`=:=` terms (an integer and a float of equal value) sit in
+%% the same order position, so neither list can be advanced on an order tie
+%% alone — those cases fall back to a bounded `strict_member_sorted/2` probe of
+%% the run rather than risk skipping a strict match.
+
+-spec strict_intersection(list(), list()) -> list().
+strict_intersection([], _E2) ->
+    [];
+strict_intersection(_E1, []) ->
+    [];
+strict_intersection([H1 | T1] = E1, [H2 | T2] = E2) ->
+    if
+        H1 =:= H2 -> [H1 | strict_intersection(T1, T2)];
+        H1 == H2 -> tie_intersection(E1, E2);
+        H1 < H2 -> strict_intersection(T1, E2);
+        true -> strict_intersection(E1, T2)
+    end.
+
+%% Order tie without strict equality: probe H1 against E2's tied run, then
+%% advance E1 only. Runs are bounded (an integer and a float), so this stays
+%% linear overall.
+-spec tie_intersection(list(), list()) -> list().
+tie_intersection([H1 | T1], E2) ->
+    case beamtalk_list:strict_member_sorted(H1, E2) of
+        true -> [H1 | strict_intersection(T1, E2)];
+        false -> strict_intersection(T1, E2)
+    end.
+
+-spec strict_difference(list(), list()) -> list().
+strict_difference([], _E2) ->
+    [];
+strict_difference(E1, []) ->
+    E1;
+strict_difference([H1 | T1] = E1, [H2 | T2] = E2) ->
+    if
+        H1 =:= H2 -> strict_difference(T1, T2);
+        H1 == H2 -> tie_difference(E1, E2);
+        H1 < H2 -> [H1 | strict_difference(T1, E2)];
+        true -> strict_difference(E1, T2)
+    end.
+
+-spec tie_difference(list(), list()) -> list().
+tie_difference([H1 | T1], E2) ->
+    case beamtalk_list:strict_member_sorted(H1, E2) of
+        true -> strict_difference(T1, E2);
+        false -> [H1 | strict_difference(T1, E2)]
+    end.
+
+-spec strict_is_subset(list(), list()) -> boolean().
+strict_is_subset([], _E2) ->
+    true;
+strict_is_subset(_E1, []) ->
+    false;
+strict_is_subset([H1 | T1] = E1, [H2 | T2] = E2) ->
+    if
+        H1 =:= H2 -> strict_is_subset(T1, T2);
+        H1 == H2 -> beamtalk_list:strict_member_sorted(H1, E2) andalso strict_is_subset(T1, E2);
+        H1 < H2 -> false;
+        true -> strict_is_subset(E1, T2)
+    end.
 
 -doc """
 Insert `Elem` into a term-order-sorted list, keeping it sorted and `=:=`-unique.
