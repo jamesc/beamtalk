@@ -241,7 +241,8 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, force: bool) 
     // — they're gated on `current_package: Some(_)` and silently emit zero
     // diagnostics otherwise. `None` for single-file/manifest-less builds,
     // which have no package boundary to enforce.
-    options.current_package = env.pkg_manifest().map(|m| m.name.clone());
+    options.current_package =
+        package_identity(env.pkg_manifest(), options.stdlib_mode).map(str::to_owned);
     let options = &options;
 
     let dep_ctx = resolve_and_validate_dependencies(&env, options)?;
@@ -258,6 +259,42 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, force: bool) 
     post_process_package_artifacts(&env, &dep_ctx, &passes)?;
 
     Ok(())
+}
+
+/// The name of the package this build is compiling, or `None` when the build
+/// has no package boundary at all.
+///
+/// Normally that's just the manifest's package name — a single-file or
+/// manifest-less directory build compiles a loose pile of sources with nothing
+/// to enforce a boundary against.
+///
+/// BT-2965: `--stdlib-mode` is the exception. The stdlib carries no
+/// `beamtalk.toml`, but every file it compiles belongs to one package, so any
+/// manifest-less `--stdlib-mode` build — in practice `beamtalk build
+/// --stdlib-mode <dir>`, what `just dialyzer-specs` runs over a flat copy of
+/// `stdlib/src/*.bt` in a bare temp dir — reports the same identity
+/// `build_stdlib::stdlib_compiler_options` (BT-2964) and the LSP's
+/// [`STDLIB_PACKAGE_MARKER`](beamtalk_core::language_service::STDLIB_PACKAGE_MARKER)
+/// use. (`test_internal_alias_resolves_cross_file_within_stdlib` pins
+/// `build_stdlib`'s hardcoded literal to that constant so the two stdlib
+/// compile paths cannot drift apart.)
+///
+/// Both callers below depend on the manifest and stdlib answers being the same
+/// one: `build` stamps it onto `CompilerOptions::current_package` (the boundary
+/// `AliasRegistry::add_pre_loaded` enforces) and `build_class_index` stamps it
+/// onto each collected `AliasInfo::package` (the side that boundary is checked
+/// against). A mismatch would silently drop every `internal` stdlib alias
+/// instead of seeding it.
+///
+/// A manifest always wins: `--stdlib-mode` is about how to compile, not about
+/// renaming a package that already named itself.
+fn package_identity(
+    pkg_manifest: Option<&manifest::PackageManifest>,
+    stdlib_mode: bool,
+) -> Option<&str> {
+    pkg_manifest
+        .map(|pkg| pkg.name.as_str())
+        .or_else(|| stdlib_mode.then_some(beamtalk_core::language_service::STDLIB_PACKAGE_MARKER))
 }
 
 /// Phase 1-3: Discover source files, resolve the project root and manifest,
@@ -520,9 +557,22 @@ fn build_class_index(
 
     // BT-2928 / BT-2910: Same-package cross-file protocol and type-alias
     // resolution, merged with dependency-exported protocols/aliases. Only
-    // runs for manifest-based package builds (matching `pre_loaded_classes`'s
-    // existing scope) — a manifest-less directory/single-file build has no
-    // package boundary and keeps today's same-file-only resolution.
+    // runs for package builds (matching `pre_loaded_classes`'s existing
+    // scope) — a manifest-less directory/single-file build has no package
+    // boundary and keeps today's same-file-only resolution.
+    //
+    // BT-2965: `--stdlib-mode` is the exception (see `package_identity`).
+    // `beamtalk build --stdlib-mode <dir>` — what `just dialyzer-specs` runs,
+    // over a flat copy of `stdlib/src/*.bt` in a bare temp dir — has no
+    // manifest but *is* one coherent package. Without it, `field: restart ::
+    // RestartStrategy = #temporary` in `SupervisionSpec.bt` couldn't see
+    // `type RestartStrategy = ...` declared over in `Actor.bt`, and
+    // `check_state_defaults` reported a false "declared as RestartStrategy,
+    // default is #temporary" mismatch against the unexpanded alias name.
+    // `just build-stdlib` never hit this: `build_stdlib.rs` seeds its own
+    // `pre_loaded_aliases` from a live same-run pre-pass (BT-2935). There are
+    // no dependencies to merge in stdlib mode, so the dep-side vectors are
+    // empty and the merge helpers are pass-throughs.
     //
     // Protocols and aliases are extracted together in one uncached scan
     // (`collect_project_protocol_and_alias_infos`) rather than two separate
@@ -530,17 +580,18 @@ fn build_class_index(
     // here, on top of `build_class_module_index`'s own (incrementally
     // cached) scan for classes, was doing up to three full parses of every
     // file per build.
-    let (all_protocol_infos, all_alias_infos) = match pkg_manifest {
-        Some(pkg) => {
-            let (source_protocol_infos, source_alias_infos) =
-                collect_project_protocol_and_alias_infos(&env.source_files, &pkg.name);
-            (
-                collect_all_protocol_infos(&[&source_protocol_infos, &dep_protocol_infos]),
-                collect_all_alias_infos(&[&source_alias_infos, &dep_alias_infos]),
-            )
-        }
-        None => (Vec::new(), Vec::new()),
-    };
+    let (all_protocol_infos, all_alias_infos) =
+        match package_identity(pkg_manifest, options.stdlib_mode) {
+            Some(name) => {
+                let (source_protocol_infos, source_alias_infos) =
+                    collect_project_protocol_and_alias_infos(&env.source_files, name);
+                (
+                    collect_all_protocol_infos(&[&source_protocol_infos, &dep_protocol_infos]),
+                    collect_all_alias_infos(&[&source_alias_infos, &dep_alias_infos]),
+                )
+            }
+            None => (Vec::new(), Vec::new()),
+        };
 
     Ok(ClassIndexResult {
         class_module_index,
@@ -3539,6 +3590,190 @@ mod tests {
                 .all(|d| !d.message.contains("Duplicate type alias")),
             "Expected no false duplicate-alias diagnostic when a file's own \
              alias is also present in pre_loaded_aliases, got: {diagnostics:?}"
+        );
+    }
+
+    /// BT-2965: `package_identity` is the single source of truth for "which
+    /// package is this build compiling", consumed by `build` (for
+    /// `CompilerOptions::current_package`) and `build_class_index` (for the
+    /// `AliasInfo::package` stamp). Those two must agree or
+    /// `AliasRegistry::add_pre_loaded`'s seeding-boundary check silently drops
+    /// every `internal` alias, so pin the mapping directly.
+    #[test]
+    fn package_identity_names_stdlib_for_manifest_less_stdlib_mode() {
+        let manifest = manifest::PackageManifest {
+            name: "my_pkg".to_string(),
+            version: "0.1.0".to_string(),
+            description: None,
+            licenses: None,
+            strict_deps: false,
+        };
+
+        // A manifest always wins — `--stdlib-mode` never renames a real package.
+        assert_eq!(package_identity(Some(&manifest), false), Some("my_pkg"));
+        assert_eq!(package_identity(Some(&manifest), true), Some("my_pkg"));
+
+        // Manifest-less: only `--stdlib-mode` has a package boundary, and it is
+        // named the same way `build_stdlib::stdlib_compiler_options` (BT-2964)
+        // and the LSP's `STDLIB_PACKAGE_MARKER` name it.
+        assert_eq!(
+            package_identity(None, true),
+            Some(beamtalk_core::language_service::STDLIB_PACKAGE_MARKER)
+        );
+        assert_eq!(package_identity(None, false), None);
+    }
+
+    /// BT-2965 regression: `beamtalk build --stdlib-mode <dir>` over a bare
+    /// directory (no `beamtalk.toml`) must still collect cross-file type
+    /// aliases. This is exactly what `just dialyzer-specs` does — it copies
+    /// `stdlib/src/*.bt` flat into a temp dir and builds it — and before the
+    /// fix `build_class_index` returned an empty `all_alias_infos` for every
+    /// manifest-less build, so `SupervisionSpec.bt`'s `field: restart ::
+    /// RestartStrategy = #temporary` never saw `Actor.bt`'s `type
+    /// RestartStrategy = ...` and drew a false state-default type mismatch.
+    #[test]
+    fn stdlib_mode_manifest_less_build_collects_cross_file_aliases() {
+        let temp = TempDir::new().unwrap();
+        let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        // Flat layout with no `beamtalk.toml` and no `src/`, mirroring
+        // `dialyzer-specs`' temp dir.
+        write_test_file(
+            &project_path.join("Actor.bt"),
+            "type RestartStrategy = #permanent | #transient | #temporary\n\
+             typed Value subclass: Policy\n  \
+             default -> RestartStrategy => #temporary\n",
+        );
+        write_test_file(
+            &project_path.join("SupervisionSpec.bt"),
+            "typed Value subclass: Spec\n  \
+             field: restart :: RestartStrategy = #temporary\n",
+        );
+
+        let env = setup_build_environment(project_path.as_str()).unwrap();
+        assert!(
+            env.pkg_manifest().is_none(),
+            "test fixture must stay manifest-less to exercise the fixed path"
+        );
+        let dep_ctx = DependencyContext {
+            resolved_deps: Vec::new(),
+            has_native_deps: false,
+        };
+
+        let stdlib_options = beamtalk_core::CompilerOptions {
+            stdlib_mode: true,
+            ..default_options()
+        };
+        let index = build_class_index(&env, &dep_ctx, &stdlib_options, true).unwrap();
+        let restart_alias = index
+            .all_alias_infos
+            .iter()
+            .find(|a| a.name == "RestartStrategy")
+            .expect("stdlib-mode build should collect cross-file aliases");
+        assert_eq!(
+            restart_alias.package.as_deref(),
+            Some(beamtalk_core::language_service::STDLIB_PACKAGE_MARKER),
+            "the alias stamp must match the `current_package` `build` sets, or \
+             `add_pre_loaded`'s boundary check drops internal stdlib aliases"
+        );
+
+        // Control: the same manifest-less directory *without* `--stdlib-mode`
+        // keeps the pre-existing same-file-only behaviour — this fix widens
+        // the scope for the stdlib build only.
+        let plain_index = build_class_index(&env, &dep_ctx, &default_options(), true).unwrap();
+        assert!(
+            plain_index.all_alias_infos.is_empty(),
+            "a plain manifest-less directory build has no package boundary and \
+             must keep same-file-only alias resolution"
+        );
+    }
+
+    /// BT-2965 regression, symptom level: with cross-file aliases seeded, a
+    /// `field: x :: SomeAlias = <member>` default whose alias is declared in
+    /// *another* file draws no "Type mismatch: state ... declared as ...,
+    /// default is ..." warning. The negative control (no `pre_loaded_aliases`)
+    /// reproduces the original false positive, proving the assertion is load
+    /// bearing.
+    #[test]
+    fn state_default_with_cross_file_alias_draws_no_type_mismatch() {
+        let temp = TempDir::new().unwrap();
+        let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let src_path = project_path.join("src");
+        fs::create_dir_all(&src_path).unwrap();
+
+        write_test_file(
+            &src_path.join("a.bt"),
+            "type RestartStrategy = #permanent | #transient | #temporary\n\
+             typed Value subclass: Policy\n  \
+             default -> RestartStrategy => #temporary\n",
+        );
+        write_test_file(
+            &src_path.join("b.bt"),
+            "typed Value subclass: Spec\n  \
+             field: restart :: RestartStrategy = #temporary\n",
+        );
+
+        let build_dir = project_path.join("_build/dev/ebin");
+        fs::create_dir_all(&build_dir).unwrap();
+
+        let source_files = vec![src_path.join("a.bt"), src_path.join("b.bt")];
+        let (class_module_index, class_superclass_index, all_class_infos, _extensions, _cached) =
+            build_class_module_index(&source_files, Some(&src_path), "test_pkg").unwrap();
+        let all_alias_infos = collect_project_alias_infos(&source_files, "test_pkg");
+
+        let options = default_options();
+        let diagnostics = compile_file(
+            &src_path.join("b.bt"),
+            "bt@test_pkg@b",
+            &build_dir.join("bt@test_pkg@b.core"),
+            &options,
+            &CompileContext {
+                hierarchy: ClassHierarchyContext {
+                    class_module_index: class_module_index.clone(),
+                    class_superclass_index: class_superclass_index.clone(),
+                    pre_loaded_classes: all_class_infos.clone(),
+                    pre_loaded_aliases: all_alias_infos,
+                    ..ClassHierarchyContext::default()
+                },
+                ..CompileContext::default()
+            },
+            None,
+        )
+        .expect("state default typed with a cross-file alias should compile");
+        assert!(
+            diagnostics
+                .iter()
+                .all(|d| !d.message.contains("Type mismatch: state")),
+            "Expected no false state-default mismatch once cross-file aliases \
+             are seeded, got: {diagnostics:?}"
+        );
+
+        // Negative control: without `pre_loaded_aliases`, `RestartStrategy`
+        // stays an opaque name and the original false positive returns.
+        let diagnostics_unfixed = compile_file(
+            &src_path.join("b.bt"),
+            "bt@test_pkg@b_unfixed",
+            &build_dir.join("bt@test_pkg@b_unfixed.core"),
+            &options,
+            &CompileContext {
+                hierarchy: ClassHierarchyContext {
+                    class_module_index,
+                    class_superclass_index,
+                    pre_loaded_classes: all_class_infos,
+                    ..ClassHierarchyContext::default()
+                },
+                ..CompileContext::default()
+            },
+            None,
+        )
+        .expect("Compile should still succeed (warning, not error)");
+        assert!(
+            diagnostics_unfixed.iter().any(|d| {
+                d.message.contains("Type mismatch: state `restart`")
+                    && d.message.contains("RestartStrategy")
+            }),
+            "Expected the negative control (no pre_loaded_aliases) to reproduce \
+             the false positive, got: {diagnostics_unfixed:?}"
         );
     }
 
