@@ -1890,6 +1890,23 @@ mod tests {
         let pre_loaded_aliases = stdlib_pre_loaded_aliases(&alias_sources);
         assert_eq!(pre_loaded_aliases[0].package.as_deref(), Some("stdlib"));
 
+        // BT-2965: `build.rs`'s `package_identity` names the *other* stdlib
+        // compile path — manifest-less `beamtalk build --stdlib-mode <dir>`,
+        // what `just dialyzer-specs` runs — with `STDLIB_PACKAGE_MARKER`. The
+        // literal hardcoded here and that constant must stay the same string,
+        // or the two paths would disagree about stdlib's package identity and
+        // only one of them would seed `internal` aliases.
+        assert_eq!(
+            pre_loaded_aliases[0].package.as_deref(),
+            Some(beamtalk_core::language_service::STDLIB_PACKAGE_MARKER),
+            "stdlib_pre_loaded_aliases' stamp must match STDLIB_PACKAGE_MARKER"
+        );
+        assert_eq!(
+            stdlib_compiler_options(false).current_package.as_deref(),
+            Some(beamtalk_core::language_service::STDLIB_PACKAGE_MARKER),
+            "stdlib_compiler_options' current_package must match STDLIB_PACKAGE_MARKER"
+        );
+
         // The exact options `build_stdlib()` runs with — crucially with
         // `current_package: Some("stdlib")` matching the stamp above.
         let options = stdlib_compiler_options(false);

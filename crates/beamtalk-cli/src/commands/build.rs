@@ -269,17 +269,25 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, force: bool) 
 /// to enforce a boundary against.
 ///
 /// BT-2965: `--stdlib-mode` is the exception. The stdlib carries no
-/// `beamtalk.toml`, but every file in the build set belongs to one package, so
-/// `beamtalk build --stdlib-mode <dir>` (what `just dialyzer-specs` runs over a
-/// flat copy of `stdlib/src/*.bt` in a bare temp dir) reports the same identity
+/// `beamtalk.toml`, but every file it compiles belongs to one package, so any
+/// manifest-less `--stdlib-mode` build — in practice `beamtalk build
+/// --stdlib-mode <dir>`, what `just dialyzer-specs` runs over a flat copy of
+/// `stdlib/src/*.bt` in a bare temp dir — reports the same identity
 /// `build_stdlib::stdlib_compiler_options` (BT-2964) and the LSP's
 /// [`STDLIB_PACKAGE_MARKER`](beamtalk_core::language_service::STDLIB_PACKAGE_MARKER)
-/// use. Both callers below depend on the two agreeing: `build` stamps it onto
-/// `CompilerOptions::current_package` (the boundary
+/// use. (`test_internal_alias_resolves_cross_file_within_stdlib` pins
+/// `build_stdlib`'s hardcoded literal to that constant so the two stdlib
+/// compile paths cannot drift apart.)
+///
+/// Both callers below depend on the manifest and stdlib answers being the same
+/// one: `build` stamps it onto `CompilerOptions::current_package` (the boundary
 /// `AliasRegistry::add_pre_loaded` enforces) and `build_class_index` stamps it
 /// onto each collected `AliasInfo::package` (the side that boundary is checked
 /// against). A mismatch would silently drop every `internal` stdlib alias
 /// instead of seeding it.
+///
+/// A manifest always wins: `--stdlib-mode` is about how to compile, not about
+/// renaming a package that already named itself.
 fn package_identity(
     pkg_manifest: Option<&manifest::PackageManifest>,
     stdlib_mode: bool,
