@@ -291,11 +291,18 @@ sealed typed Value subclass: DateTime native: beamtalk_datetime
   // `=:=`, `=/=`, and `/=` are NOT overridable here: per ADR 0002, the compiler
   // hard-lowers all four equality/inequality operators straight to Erlang's raw
   // `=:=`/`=/=` term comparison at codegen time, with no method dispatch at all —
-  // any `=:=`/`=/=`/`/=` method declared on a class is dead code. For DateTime
-  // that means `=:=`/`/=` compare the underlying representation structurally
-  // (same wall-clock fields AND same offsetMinutes), NOT the represented instant:
-  // two DateTimes at different offsets for the same instant are NOT `=:=`. Use
-  // `sameInstant:` below for instant-based equality.
+  // any `=:=`/`=/=`/`/=` method declared on a class is dead code, and is now
+  // rejected at compile time (BT-2997). For DateTime that means `=:=`/`/=`
+  // compare the underlying representation structurally (same wall-clock fields
+  // AND same offsetMinutes), NOT the represented instant: two DateTimes at
+  // different offsets for the same instant are NOT `=:=`. Use `sameInstant:`
+  // below for instant-based equality.
+  //
+  // `equals:` (Object) is deliberately left at its structural default. The two
+  // questions are genuinely different — "is this the same timestamp value" vs.
+  // "is this the same moment" — and collapsing `equals:` onto `sameInstant:`
+  // would make it disagree with `=:=` and with Dictionary/Set key identity,
+  // which are decided in the VM and cannot follow a Beamtalk method.
 
   /// True if this DateTime is earlier than `other`.
   ///

@@ -81,13 +81,27 @@ abstract typed Value subclass: Collection(E)
   /// Default implementation iterates with `do:` and returns early on match.
   /// Subclasses may override with more efficient lookup.
   ///
+  /// Compares with `equals:`, so an element class that overrides it is matched
+  /// by value rather than by representation (BT-2997). `Set` overrides this
+  /// with a sorted-list lookup and so compares with raw `=:=` instead — keyed
+  /// containers decide identity in the VM and cannot honour `equals:`.
+  ///
+  /// Goes through `beamtalk_equality:eq/2` rather than sending `equals:`
+  /// directly. A bare send would reach `Object>>equals:` on an **actor**
+  /// element as a blocking `gen_server:call` — turning this scan into an RPC
+  /// per element that can raise `deadlock_detected` or time out. `eq/2` tries
+  /// raw `=:=` first and only dispatches to tagged value types, so actors
+  /// answer by identity, as they must.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// #(1, 2, 3) includes: 2      // => true
   /// #(1, 2, 3) includes: 9      // => false
   /// ```
   includes: element :: E -> Boolean =>
-    self do: [:each | each =:= element ifTrue: [^true]]
+    self do: [:each |
+      ((Erlang beamtalk_equality) eq: each with: element) ifTrue: [^true]
+    ]
     false
 
   /// Reduce the collection with an accumulator.

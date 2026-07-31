@@ -40,7 +40,7 @@ case Self of <[]> when 'true' -> let Error0 = call 'beamtalk_error':'new'('empty
 call 'beamtalk_list':'at'(Self, _index1)
 
 'includes:'/2 = fun (Self, _item2) ->
-call 'lists':'member'(_item2, Self)
+call 'beamtalk_equality':'member'(_item2, Self)
 
 'sort'/1 = fun (Self) ->
 call 'lists':'sort'(Self)
@@ -52,7 +52,7 @@ call 'beamtalk_list':'sort_with'(Self, _comparator3)
 call 'lists':'reverse'(Self)
 
 'unique'/1 = fun (Self) ->
-call 'lists':'usort'(Self)
+call 'beamtalk_list':'unique'(Self)
 
 'detect:'/2 = fun (Self, _block4) ->
 call 'beamtalk_list':'detect'(Self, _block4)

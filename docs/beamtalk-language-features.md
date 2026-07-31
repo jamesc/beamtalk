@@ -467,6 +467,8 @@ p1 == p3    // => false
 (p1 withX: 10) == (Point x: 10 y: 4)   // => true
 ```
 
+This compares the **representation**, and cannot be changed: the equality operators are not overridable (see [Equality operators cannot be overridden](#equality-operators-cannot-be-overridden)). A value type whose logical value differs from its stored form — one that is not canonicalised, or that carries a field outside its identity — should override `equals:` and say so in its class documentation.
+
 #### Value objects in collections
 
 Value objects work seamlessly with all collection methods:
@@ -551,6 +553,45 @@ Binary operators follow standard math precedence (highest to lowest):
 - `=/=` - Strict inequality (Erlang `=/=`): `5 =/= 6` → `true`
 
 Note: bare `=` is **not** a valid Beamtalk operator — it has no entry in the parser's precedence table, so `x = y` fails to parse. Use `=:=` for value equality or `==` for reference equality.
+
+##### Equality operators cannot be overridden
+
+Unlike the arithmetic (`+ - * /`) and ordering (`< > <= >=`) operators, which are dispatched as messages so a value type can overload them, all four equality operators are lowered directly to the corresponding Erlang BIF at codegen time (ADR 0002). There is no method lookup, so a class-level `=:=` / `=/=` / `==` / `/=` method could never be called. **Declaring one is a compile error** (BT-2997):
+
+```beamtalk
+Value subclass: Money
+  field: cents :: Integer = 0
+  =:= other :: Money -> Boolean => self.cents =:= other cents
+  // error: `=:=` cannot be overridden — this method can never be called
+```
+
+Use **`equals:`** instead. It is declared on `Object`, defaults to `=:=`, and is an ordinary message send, so overriding it works:
+
+```beamtalk
+// Fractions stored unnormalised: 1/2 and 2/4 are different terms…
+half := Fraction numer: 1 denom: 2
+twoQuarters := Fraction numer: 2 denom: 4
+
+half =:= twoQuarters      // => false  (structural — compares representation)
+half equals: twoQuarters  // => true   (dispatches to Fraction>>equals:)
+```
+
+This is a deliberate limit, not a gap to be closed. The keyed containers decide identity inside the VM, below anything the language can dispatch — `Dictionary` by Erlang map keys, `Set` by a term-order-sorted list — as do `lists:member/2`, `ets`, and receive-pattern matching. An override the compiler honoured would still be invisible to all of them, so `a =:= b` could report `true` while a `Set` holding both still reported size 2. A class that needs content-based membership must normalise its representation rather than redefine the operator.
+
+Both containers use `=:=` for identity, so they agree with each other and with `List>>includes:` — `Set new add: 1; add: 1.0` holds two elements, matching a `Dictionary` keyed on `1` and `1.0`. What they cannot do is consult a user-defined `equals:`.
+
+##### What honours `equals:`
+
+| | Compares with |
+|---|---|
+| `includes:` on `Collection`, `List`, `Array`, `Dictionary` (searches values); `List>>indexOf:`; `TestCase>>assert:equals:` | `equals:` |
+| `Set` elements, `Dictionary` *keys*, `List>>unique` | `=:=` |
+
+The line is searching versus keying: a linear search can afford to ask each element, while membership in a keyed container — or deduplication — needs an order or a hash that a user-defined `equals:` cannot supply. This is the same constraint Java's `equals`/`hashCode` contract expresses.
+
+An `equals:` override must agree with `=:=` wherever `=:=` holds: it may only make *more* values equal, never fewer. The searches rely on that to try raw equality first and dispatch only on a miss.
+
+Where the two notions of equality are genuinely different questions, prefer a domain-specific name to overriding `equals:` — `DateTime` keeps `equals:` structural and offers `sameInstant:` for instant-based comparison.
 
 #### Short-circuit boolean operators (`and:`/`or:`)
 

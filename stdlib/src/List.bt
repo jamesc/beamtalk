@@ -110,6 +110,11 @@ sealed typed Collection(E) subclass: List(E)
 
   /// Test if the list contains the given item.
   ///
+  /// Compares with `equals:`, so an element class that overrides it is matched
+  /// by value rather than by representation (BT-2997). Raw `=:=` is tried
+  /// first, so a list of primitives — or any list where a structurally equal
+  /// element exists — costs exactly what it did before.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// #(1, 2, 3) includes: 2   // => true
@@ -143,9 +148,15 @@ sealed typed Collection(E) subclass: List(E)
 
   /// Remove duplicate elements.
   ///
+  /// Deduplicates with `=:=` and returns the elements sorted. Unlike the
+  /// searches (`includes:`, `indexOf:`), this does not consult an `equals:`
+  /// override — deduplication needs an order that a user-defined `equals:`
+  /// cannot supply, the same reason `Set` and `Dictionary` keys cannot.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// #(1, 2, 2, 3) unique     // => #(1, 2, 3)
+  /// #(1, 1.0) unique         // => #(1, 1.0)  (strict — 1 and 1.0 differ)
   /// ```
   unique -> List(E) => @primitive
 
@@ -319,7 +330,10 @@ sealed typed Collection(E) subclass: List(E)
       inject: 0
       into: [:i :each |
         newI := i + 1
-        each =:= item ifTrue: [^newI]
+        // `beamtalk_equality:eq/2`, not a bare `equals:` send: sending to an
+        // actor element would be a blocking `gen_server:call` per element.
+        // See `Collection>>includes:`.
+        ((Erlang beamtalk_equality) eq: each with: item) ifTrue: [^newI]
         newI
       ]
     nil

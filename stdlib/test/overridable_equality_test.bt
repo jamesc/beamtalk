@@ -1,0 +1,130 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2997: `=:=`, `=/=`, `==` and `/=` are lowered straight to Erlang BIFs by
+// codegen (ADR 0002) and are never message-dispatched, so a class cannot
+// override them — the compiler now rejects the attempt outright rather than
+// compiling a method nothing can call. `Object>>equals:` is the overridable
+// counterpart: an ordinary message send that defaults to `=:=`.
+//
+// The `Fraction` value-type in `fixtures/` stores its parts unnormalised, so
+// `1/2` and `2/4` are genuinely different terms. That separates the two
+// mechanisms: `=:=` answers false, the `equals:` override answers true.
+
+TestCase subclass: OverridableEqualityTest
+
+  /// A class that does not override `equals:` gets `=:=` semantics.
+  testDefaultEqualsIsStrictEquality =>
+    self assert: (42 equals: 42)
+    self deny: (42 equals: 43)
+    // Strict, like `=:=` — no numeric coercion, unlike `==`.
+    self deny: (42 equals: 42.0)
+    self assert: ("ab" equals: "ab")
+    self assert: (#(1, 2, 3) equals: #(1, 2, 3))
+
+  /// An `equals:` override actually runs — the point the dead `=:=` methods
+  /// removed in BT-2997 only appeared to demonstrate.
+  testOverrideDispatches =>
+    half := Fraction numer: 1 denom: 2
+    twoQuarters := Fraction numer: 2 denom: 4
+    self assert: (half equals: twoQuarters)
+    self assert: (twoQuarters equals: half)
+
+  /// The override is not structural equality in disguise: `=:=` still compares
+  /// representation and disagrees with `equals:` for the same pair.
+  testStrictEqualityIsUnaffectedByOverride =>
+    half := Fraction numer: 1 denom: 2
+    twoQuarters := Fraction numer: 2 denom: 4
+    self deny: (half =:= twoQuarters)
+    self assert: (half =/= twoQuarters)
+    // Identical representations remain `=:=` equal.
+    self assert: (half =:= (Fraction numer: 1 denom: 2))
+
+  /// Unequal values are still unequal under the override.
+  testOverrideRejectsUnequalValues =>
+    half := Fraction numer: 1 denom: 2
+    third := Fraction numer: 1 denom: 3
+    self deny: (half equals: third)
+
+  // ===== Stdlib operations that honour `equals:` (BT-2997) =====
+
+  /// `List>>includes:` finds a value-equal element the raw `=:=` primitive
+  /// would miss. This is the `beamtalk_equality:member/2` slow path: the
+  /// `lists:member/2` fast path returns false, then the scan dispatches.
+  testListIncludesHonoursOverride =>
+    halves := #((Fraction numer: 1 denom: 2))
+    self assert: (halves includes: (Fraction numer: 2 denom: 4))
+    self deny: (halves includes: (Fraction numer: 1 denom: 3))
+
+  /// The `lists:member/2` fast path still settles the structurally-identical
+  /// case without dispatching — same answer, reached the cheap way.
+  testListIncludesFastPathUnchanged =>
+    halves := #((Fraction numer: 1 denom: 2))
+    self assert: (halves includes: (Fraction numer: 1 denom: 2))
+    self assert: (#(1, 2, 3) includes: 2)
+    self deny: (#(1, 2, 3) includes: 9)
+
+  // Still strict for primitives — `includes: 2.0` on a `List(Integer)` is
+  // rejected by the type checker before it can even reach the comparison.
+
+  /// `Array>>includes:` honours the override too — an Array is a linear
+  /// sequence like a List, so the two must agree about membership.
+  testArrayIncludesHonoursOverride =>
+    halves := #[(Fraction numer: 1 denom: 2)]
+    self assert: (halves includes: (Fraction numer: 2 denom: 4))
+    self deny: (halves includes: (Fraction numer: 1 denom: 3))
+    // Raw fast path unchanged.
+    self assert: (#[1, 2, 3] includes: 2)
+    self deny: (#[1, 2, 3] includes: 9)
+
+  /// `Dictionary>>includes:` searches values, which is a linear scan.
+  testDictionaryValueSearchHonoursOverride =>
+    d := Dictionary new at: #half put: (Fraction numer: 1 denom: 2)
+    self assert: (d includes: (Fraction numer: 2 denom: 4))
+    self deny: (d includes: (Fraction numer: 1 denom: 3))
+
+  /// `List>>indexOf:` compares with `equals:` too.
+  testIndexOfHonoursOverride =>
+    fractions := #((Fraction numer: 1 denom: 3), (Fraction numer: 1 denom: 2))
+    self assert: (fractions indexOf: (Fraction numer: 2 denom: 4)) equals: 2
+    self assert: (fractions indexOf: (Fraction numer: 9 denom: 9)) equals: nil
+
+  /// `assert:equals:` compares with `equals:`, so an override makes the
+  /// assertion pass where raw `=:=` would fail the test.
+  testAssertEqualsHonoursOverride =>
+    self assert: (Fraction numer: 1 denom: 2) equals: (Fraction numer: 2 denom: 4)
+
+  /// `Set` does NOT honour the override — membership is a raw `=:=` lookup in
+  /// its term-order-sorted list, because dedup needs an order a user-defined
+  /// `equals:` cannot supply. This is the documented boundary, pinned so a
+  /// future change to it is deliberate rather than accidental.
+  testSetDoesNotHonourOverride =>
+    s := (Set new add: (Fraction numer: 1 denom: 2)) add: (Fraction numer: 2 denom: 4)
+    self assert: s size equals: 2
+    self deny: (s includes: (Fraction numer: 4 denom: 8))
+
+  // ===== Actors answer by identity, never by dispatch (BT-2997) =====
+  //
+  // `beamtalk_primitive:is_object/1` accepts actor references (pids and
+  // `#beamtalk_object{}`), so an earlier cut of this change would have sent a
+  // synchronous `equals:` message to every actor element of a collection on a
+  // raw miss — turning a side-effect-free membership test into something that
+  // blocks on live processes and can raise `deadlock_detected` or time out.
+  // `beamtalk_equality:dispatchable/1` is deliberately narrower: only tagged
+  // value-type maps are asked. Actor equality is process identity.
+  testActorMembershipUsesIdentityNotDispatch =>
+    a := Counter spawn
+    b := Counter spawn
+    actors := #(a)
+    // A hit: raw identity, no message sent.
+    self assert: (actors includes: a)
+    // A miss over a live actor must answer false promptly, not dispatch.
+    self deny: (actors includes: b)
+    self assert: (actors indexOf: a) equals: 1
+    self assert: (actors indexOf: b) equals: nil
+
+  testDistinctSpawnsAreNeverEqual =>
+    a := Counter spawn
+    b := Counter spawn
+    self deny: (a equals: b)
+    self assert: (a equals: a)
