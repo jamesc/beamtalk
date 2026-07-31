@@ -429,11 +429,12 @@ Serialize a TestResult to JSON for CLI consumption.
 Returns a JSON binary that can be parsed by the CLI to reconstruct the result.
 Includes all test details (pass/fail/skip per test, durations, errors).
 
-BT-2999: encoding is guarded. `json:encode/1` throws on any value it can't
-represent (notably a binary that isn't valid UTF-8), and this runs in the
-one-shot test escript's boot process — an uncaught throw there takes down the
-whole VM and loses *every* test's result. On failure we fall back to a
-counts-only document so one test's edge case can't destroy the run.
+BT-2999: building *and* encoding the document is guarded. `json:encode/1`
+throws on any value it can't represent (notably a binary that isn't valid
+UTF-8), and this runs in the one-shot test escript's boot process — an
+uncaught throw there takes down the whole VM and loses *every* test's result.
+On any failure we fall back to a counts-only document so one test's edge case
+can't destroy the run.
 """.
 -spec result_to_json(map()) -> binary().
 result_to_json(
@@ -447,15 +448,18 @@ result_to_json(
         tests := Tests
     } = Result
 ) ->
-    JsonStruct = #{
-        <<"total">> => Total,
-        <<"passed">> => Passed,
-        <<"failed">> => Failed,
-        <<"skipped">> => Skipped,
-        <<"duration">> => Duration,
-        <<"tests">> => [serialize_test_result(T) || T <- Tests]
-    },
     try
+        %% Serialization is inside the `try` too: a malformed entry makes
+        %% serialize_test_result/1 itself raise, and that would escape the
+        %% boot process exactly like the encode failure this guards against.
+        JsonStruct = #{
+            <<"total">> => Total,
+            <<"passed">> => Passed,
+            <<"failed">> => Failed,
+            <<"skipped">> => Skipped,
+            <<"duration">> => Duration,
+            <<"tests">> => [serialize_test_result(T) || T <- Tests]
+        },
         iolist_to_binary(json:encode(JsonStruct))
     catch
         Class:Reason:Stacktrace ->

@@ -837,8 +837,20 @@ is the only signal available at runtime: invalid UTF-8 definitively rules out
 `String`.
 
 Cost is a single O(byte_size) validating scan with no copy — `characters_to_binary/3`
-hands back the *same* binary when it is already valid UTF-8. It runs only on
-the dynamic-dispatch path (statically typed sends compile straight to BIFs).
+hands back the *same* binary when it is already valid UTF-8, and bails at the
+first bad byte when it is not. Measured on OTP 28: ~32 ns for a short string,
+~415 ns for 1 KB, ~0.4 ns/byte thereafter.
+
+It runs only on the **dynamic**-dispatch path; statically typed sends compile
+straight to BIFs and never reach here. That matters for hot loops: repeatedly
+sending to the *same* multi-megabyte binary through dynamic dispatch re-scans
+it every send (~0.4 ms per send at 1 MB), so an N-iteration loop is O(N x size).
+Annotate such a receiver `:: Binary` or `:: String` to compile the sends
+statically and skip this entirely. Note the grapheme-aware String selectors
+(`size`, `at:`, `do:`) were already O(size) per call before this check existed —
+only the O(1) byte-level selectors (`byteSize`, `byteAt:`) gain a per-send scan,
+and only when dispatched dynamically. Tracked for a selector-aware fix in
+BT-3033.
 """.
 -spec is_utf8(binary()) -> boolean().
 is_utf8(Bin) when is_binary(Bin) ->

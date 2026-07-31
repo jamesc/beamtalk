@@ -4697,6 +4697,23 @@ When the distinction matters, annotate the type (`data :: Binary`) so the
 compiler dispatches statically, or use the unambiguous byte-level selectors
 (`byteSize`, `byteAt:`, `part:size:`) which mean the same thing on both.
 
+Deciding which of the two a bare binary is costs one validating scan of the
+bytes (~32 ns for a short string, ~0.4 ns/byte beyond ~1 KB). It happens only
+when the compiler could not determine the receiver's type. Annotate the type
+in hot loops over large binaries so the sends compile statically and skip the
+check entirely:
+
+```beamtalk
+// Unannotated: every send re-checks `data` — fine for small values,
+// avoidable when `data` is megabytes and the loop runs many times
+checksum: data =>
+  (0 to: data byteSize - 1) inject: 0 into: [:acc :i | acc + (data byteAt: i)]
+
+// Annotated: dispatch resolves at compile time, no per-send check
+checksum: data :: Binary =>
+  (0 to: data byteSize - 1) inject: 0 into: [:acc :i | acc + (data byteAt: i)]
+```
+
 ### Accessing an Empty Collection
 
 Element accessors and subsequence operations differ deliberately on an empty

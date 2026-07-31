@@ -381,6 +381,17 @@ result_to_json_non_utf8_error_term_test() ->
     [Test] = maps:get(<<"tests">>, Decoded),
     ?assertEqual(<<"{#badarg, <<FF FE>>}">>, maps:get(<<"error">>, Test)).
 
+result_to_json_degrades_on_malformed_test_entry_test() ->
+    %% serialize_test_result/1 itself raises on an entry missing `name`/`status`
+    %% (function_clause). That happens while *building* the document, so it only
+    %% degrades if the construction is inside the guard, not just the encode.
+    Result = make_result(2, 1, 1, 0, 0.5, [#{unexpected => shape}]),
+    Json = beamtalk_test_runner:result_to_json(Result),
+    Decoded = json:decode(Json),
+    ?assertEqual(2, maps:get(<<"total">>, Decoded)),
+    ?assertEqual([], maps:get(<<"tests">>, Decoded)),
+    ?assert(is_binary(maps:get(<<"encodingError">>, Decoded))).
+
 result_to_json_degrades_instead_of_crashing_test() ->
     %% Belt and braces: any other value json:encode/1 rejects (here a pid where
     %% a duration belongs) must still produce a parseable counts-only document
