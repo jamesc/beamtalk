@@ -484,19 +484,23 @@ should_raise_matches_exception_map_test() ->
 %% Line 652: {future_rejected, Reason} → recursive delegation → hits line 657
 should_raise_matches_future_rejected_test() ->
     Block = fun() ->
-        error({future_rejected, #beamtalk_error{
-            kind = my_kind, class = 'TestCase', message = <<"m">>
-        }})
+        error(
+            {future_rejected, #beamtalk_error{
+                kind = my_kind, class = 'TestCase', message = <<"m">>
+            }}
+        )
     end,
     ?assertEqual(nil, beamtalk_test_case:should_raise(Block, my_kind)).
 
 %% Line 655: {error, Map} when is_map(Map) → recursive → hits $beamtalk_class clause
 should_raise_matches_error_map_wrapped_test() ->
     Block = fun() ->
-        error({error, #{
-            '$beamtalk_class' => 'RuntimeError',
-            error => #beamtalk_error{kind = my_kind, class = 'TestCase', message = <<"m">>}
-        }})
+        error(
+            {error, #{
+                '$beamtalk_class' => 'RuntimeError',
+                error => #beamtalk_error{kind = my_kind, class = 'TestCase', message = <<"m">>}
+            }}
+        )
     end,
     ?assertEqual(nil, beamtalk_test_case:should_raise(Block, my_kind)).
 
