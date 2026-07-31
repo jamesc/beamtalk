@@ -94,10 +94,37 @@ TestCase subclass: OverridableEqualityTest
   testAssertEqualsHonoursOverride =>
     self assert: (Fraction numer: 1 denom: 2) equals: (Fraction numer: 2 denom: 4)
 
-  /// `Set` does NOT honour the override — it is an ordsets lookup, deciding
-  /// identity in the VM. This is the documented boundary, pinned so a future
-  /// change to it is deliberate rather than accidental.
+  /// `Set` does NOT honour the override — membership is a raw `=:=` lookup in
+  /// its term-order-sorted list, because dedup needs an order a user-defined
+  /// `equals:` cannot supply. This is the documented boundary, pinned so a
+  /// future change to it is deliberate rather than accidental.
   testSetDoesNotHonourOverride =>
     s := (Set new add: (Fraction numer: 1 denom: 2)) add: (Fraction numer: 2 denom: 4)
     self assert: s size equals: 2
     self deny: (s includes: (Fraction numer: 4 denom: 8))
+
+  // ===== Actors answer by identity, never by dispatch (BT-2997) =====
+  //
+  // `beamtalk_primitive:is_object/1` accepts actor references (pids and
+  // `#beamtalk_object{}`), so an earlier cut of this change would have sent a
+  // synchronous `equals:` message to every actor element of a collection on a
+  // raw miss — turning a side-effect-free membership test into something that
+  // blocks on live processes and can raise `deadlock_detected` or time out.
+  // `beamtalk_equality:dispatchable/1` is deliberately narrower: only tagged
+  // value-type maps are asked. Actor equality is process identity.
+  testActorMembershipUsesIdentityNotDispatch =>
+    a := Counter spawn
+    b := Counter spawn
+    actors := #(a)
+    // A hit: raw identity, no message sent.
+    self assert: (actors includes: a)
+    // A miss over a live actor must answer false promptly, not dispatch.
+    self deny: (actors includes: b)
+    self assert: (actors indexOf: a) equals: 1
+    self assert: (actors indexOf: b) equals: nil
+
+  testDistinctSpawnsAreNeverEqual =>
+    a := Counter spawn
+    b := Counter spawn
+    self deny: (a equals: b)
+    self assert: (a equals: a)

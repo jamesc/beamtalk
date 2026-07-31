@@ -59,8 +59,8 @@ member_empty_list_test() ->
     ?assertNot(beamtalk_equality:member(1, [])).
 
 member_skips_non_objects_without_dispatch_test() ->
-    %% Every element kind the local guard covers. A miss here must walk the
-    %% whole list and answer false, never attempting a dispatch.
+    %% A miss over assorted non-dispatchable element kinds must walk the whole
+    %% list and answer false, never attempting a dispatch.
     Elements = [1, 2.5, atom, <<"bin">>, [nested], fun() -> ok end, make_ref()],
     ?assertNot(beamtalk_equality:member(missing, Elements)).
 
@@ -71,7 +71,49 @@ member_untagged_map_is_not_an_object_test() ->
     ?assertNot(beamtalk_equality:member(#{a => 2}, [#{a => 1}])).
 
 member_tuple_element_is_not_dispatched_test() ->
-    %% Tuples are excluded from the local guard because #beamtalk_object{} is a
-    %% record — but a plain tuple still fails is_object/1 and must not dispatch.
+    %% A plain tuple is not a tagged map, so it is not dispatchable and must be
+    %% compared raw.
     ?assert(beamtalk_equality:member({a, 1}, [{a, 1}])),
     ?assertNot(beamtalk_equality:member({a, 2}, [{a, 1}])).
+
+%%% ============================================================================
+%%% Actor references answer by identity, never by dispatch
+%%% ============================================================================
+
+member_does_not_dispatch_to_pids_test() ->
+    %% `beamtalk_primitive:is_object/1` accepts live actor pids, so dispatching
+    %% on them would send a synchronous message per element. `dispatchable/1` is
+    %% narrower. A bare spawned pid is not a Beamtalk actor, but the point holds
+    %% for any pid: a miss must answer promptly rather than send anything.
+    Pid = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    Other = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    ?assert(beamtalk_equality:member(Pid, [Pid])),
+    ?assertNot(beamtalk_equality:member(Other, [Pid])),
+    ?assert(beamtalk_equality:eq(Pid, Pid)),
+    ?assertNot(beamtalk_equality:eq(Pid, Other)),
+    Pid ! stop,
+    Other ! stop.
+
+member_does_not_dispatch_to_beamtalk_object_records_test() ->
+    %% `#beamtalk_object{}` is an actor reference (class, class_mod, pid), so it
+    %% is excluded for the same reason as a bare pid.
+    Ref = {beamtalk_object, 'Counter', 'counter', self()},
+    ?assert(beamtalk_equality:member(Ref, [Ref])),
+    ?assertNot(
+        beamtalk_equality:member({beamtalk_object, 'Counter', 'counter', spawn(fun() -> ok end)}, [
+            Ref
+        ])
+    ).
+
+untagged_map_is_not_dispatchable_test() ->
+    %% Only maps carrying '$beamtalk_class' are asked.
+    ?assertNot(beamtalk_equality:member(#{a => 2}, [#{a => 1}])),
+    ?assert(beamtalk_equality:member(#{a => 1}, [#{a => 1}])).
