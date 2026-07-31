@@ -833,6 +833,10 @@ fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult {
     // BT-2718: Reject user names that collide with the reserved internal `__`
     // state-key namespace (`__local__…`, `__methods__`, `__class_mod__`).
     validators::check_reserved_internal_names(module, &mut result.diagnostics);
+    // BT-2997: Reject method declarations for the equality operators codegen
+    // lowers straight to Erlang BIFs (`=:=`, `=/=`, `==`, `/=`, ADR 0002) —
+    // they never dispatch, so such a method is silently dead code.
+    validators::check_non_overridable_operator_methods(module, &mut result.diagnostics);
     validators::check_class_variable_access(
         module,
         &result.class_hierarchy,

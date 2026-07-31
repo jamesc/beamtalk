@@ -12,12 +12,14 @@
 //! - `supervision_validators` — OTP supervision policy checks
 //! - `match_validators` — pattern match exhaustiveness
 //! - `native_validators` — native actor validation
+//! - `operator_validators` — non-dispatchable operator declaration checks
 //! - `reserved_name_validators` — reserved internal-namespace name checks
 
 mod class_validators;
 mod lint_validators;
 mod match_validators;
 mod native_validators;
+mod operator_validators;
 pub(crate) mod package_validators;
 mod reserved_name_validators;
 mod sendability_validators;
@@ -46,6 +48,7 @@ pub(crate) use native_validators::{
     check_native_delegate_reserved_word, check_native_delegate_return_type,
     check_native_state_fields,
 };
+pub(crate) use operator_validators::check_non_overridable_operator_methods;
 pub(crate) use package_validators::check_package_qualifiers;
 pub(crate) use reserved_name_validators::check_reserved_internal_names;
 pub(crate) use sendability_validators::{

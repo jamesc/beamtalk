@@ -29,11 +29,10 @@ abstract typed Value subclass: Number
   /// Division.
   / _other :: Number -> Number => self subclassResponsibility
 
-  /// Strict equality comparison.
-  =:= _other :: Number -> Boolean => self subclassResponsibility
-
-  /// Strict inequality comparison.
-  =/= _other :: Number -> Boolean => self subclassResponsibility
+  // No `=:=` / `=/=` protocol entry: unlike arithmetic and ordering, the
+  // equality operators are never receiver-dispatched (ADR 0002, BT-2997), so
+  // there is nothing for a subclass to be responsible for. `ProtoObject`
+  // declares them once, for every class, as `@intrinsic`.
 
   /// Less than.
   < _other :: Number -> Boolean => self subclassResponsibility

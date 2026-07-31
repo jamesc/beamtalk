@@ -1,0 +1,32 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2997 fixture: a value-type whose logical value is *not* its representation.
+// Fractions are stored unnormalised, so `1/2` and `2/4` are different terms —
+// raw `=:=` says false while the two are equal by value. That makes it a real
+// test of `Object>>equals:` being overridable, unlike a canonicalising type
+// (e.g. `Duration`) where an override and structural equality agree anyway.
+//
+// It cannot override `=:=` itself: per ADR 0002 the compiler lowers all four
+// equality operators to Erlang BIFs with no dispatch, and rejects any method
+// declared for them.
+
+Value subclass: Fraction
+  field: numer :: Integer = 0
+  field: denom :: Integer = 1
+
+  /// Construct a fraction from its parts, stored as given (never reduced).
+  class numer: n :: Integer denom: d :: Integer -> Fraction =>
+    ((Fraction new) withNumer: n) withDenom: d
+
+  /// The numerator, as stored (not normalised).
+  numer -> Integer => self.numer
+
+  /// The denominator, as stored (not normalised).
+  denom -> Integer => self.denom
+
+  /// Value equality by cross-multiplication, independent of representation.
+  ///
+  /// Overrides `Object>>equals:`, which defaults to `=:=`.
+  equals: other :: Fraction -> Boolean =>
+    (self.numer * (other denom)) =:= ((other numer) * self.denom)
