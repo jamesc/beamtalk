@@ -148,9 +148,15 @@ sealed typed Collection(E) subclass: List(E)
 
   /// Remove duplicate elements.
   ///
+  /// Deduplicates with `=:=` and returns the elements sorted. Unlike the
+  /// searches (`includes:`, `indexOf:`), this does not consult an `equals:`
+  /// override — deduplication needs an order that a user-defined `equals:`
+  /// cannot supply, the same reason `Set` and `Dictionary` keys cannot.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// #(1, 2, 2, 3) unique     // => #(1, 2, 3)
+  /// #(1, 1.0) unique         // => #(1, 1.0)  (strict — 1 and 1.0 differ)
   /// ```
   unique -> List(E) => @primitive
 

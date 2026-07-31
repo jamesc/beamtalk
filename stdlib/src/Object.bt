@@ -222,9 +222,9 @@ ProtoObject subclass: Object
   ///
   /// ## Caveat
   ///
-  /// The keyed containers decide identity in the VM, never through this
-  /// method: `Dictionary` is backed by Erlang maps (keys compare with `=:=`),
-  /// `Set` by `ordsets` (elements compare by term order, i.e. `==`). A class
+  /// `Set`, `Dictionary` keys, and `List>>unique` decide identity in the VM
+  /// with raw `=:=`, never through this method — keying and deduplication need
+  /// an order or a hash that a user-defined `equals:` cannot supply. A class
   /// that overrides `equals:` still deduplicates by representation when used
   /// as a key or element. Normalise the representation if that matters.
   ///

@@ -28,7 +28,10 @@ BT-419: Created as part of Array→List rename and compiled stdlib migration.
     drop/2,
     sort_with/2,
     from_to/3,
-    reverse_group_values/1
+    reverse_group_values/1,
+    unique/1,
+    sorted_strict_unique/1,
+    strict_member/2
 ]).
 
 -doc """
@@ -302,3 +305,73 @@ describe_value(V) when is_function(V) ->
 describe_value(V) ->
     ClassName = beamtalk_primitive:class_of(V),
     atom_to_binary(ClassName).
+
+%%% ============================================================================
+%%% Strict (`=:=`) element identity — BT-2997
+%%% ============================================================================
+%%%
+%%% `ordsets` and `lists:usort/1` decide element identity with Erlang term
+%%% *order*, which is `==` semantics: it treats the integer `1` and the float
+%%% `1.0` as the same element. Beamtalk's element identity is `=:=` — matching
+%%% `Dictionary` keys (Erlang maps), `List>>includes:`, and ADR 0002's
+%%% strict-by-default equality, which BT-1562 established for `5 =:= 5.0`.
+%%%
+%%% These helpers keep the term-order-sorted list representation (which
+%%% `beamtalk_set`, `beamtalk_inspector`, `beamtalk_primitive` and
+%%% `beamtalk_stream` all rely on) but decide identity with `=:=`.
+%%%
+%%% `==` and `=:=` disagree only for numbers — an integer and a float of equal
+%%% value — so after sorting, mutually-`==` elements form a short contiguous
+%%% run. Every operation below scans that run strictly.
+
+-doc """
+`List>>unique` — remove duplicate elements.
+
+Sorts, as `lists:usort/1` did, but deduplicates with `=:=`, so `1` and `1.0`
+are kept as distinct elements.
+""".
+-spec unique(list()) -> list().
+unique(List) when is_list(List) ->
+    sorted_strict_unique(lists:sort(List)).
+
+-doc """
+Strictly deduplicate an already term-order-sorted list.
+
+Keeps elements that merely compare `==` (`1` and `1.0`); removes only `=:=`
+duplicates. All `=:=`-identical terms sort contiguously, so a run scan is
+sufficient.
+""".
+-spec sorted_strict_unique(list()) -> list().
+sorted_strict_unique([]) ->
+    [];
+sorted_strict_unique([H | T]) ->
+    {Run, Rest} = lists:splitwith(fun(X) -> X == H end, T),
+    strict_uniq_run([H | Run], []) ++ sorted_strict_unique(Rest).
+
+-doc """
+True if `Elem` is `=:=` some member of the term-order-sorted list `Sorted`.
+
+Stops as soon as the list passes `Elem` in term order.
+""".
+-spec strict_member(term(), list()) -> boolean().
+strict_member(_Elem, []) ->
+    false;
+strict_member(Elem, [H | T]) when H == Elem ->
+    H =:= Elem orelse strict_member(Elem, T);
+strict_member(Elem, [H | T]) when H < Elem ->
+    strict_member(Elem, T);
+strict_member(_Elem, _PastIt) ->
+    %% Sorted ascending, so every remaining element is greater than Elem.
+    false.
+
+%% Strictly deduplicate one `==`-equal run, preserving order. Runs hold at most
+%% an integer and a float of the same value, so the quadratic membership check
+%% is bounded by a constant in practice.
+-spec strict_uniq_run(list(), list()) -> list().
+strict_uniq_run([], Acc) ->
+    lists:reverse(Acc);
+strict_uniq_run([H | T], Acc) ->
+    case lists:any(fun(Y) -> Y =:= H end, Acc) of
+        true -> strict_uniq_run(T, Acc);
+        false -> strict_uniq_run(T, [H | Acc])
+    end.

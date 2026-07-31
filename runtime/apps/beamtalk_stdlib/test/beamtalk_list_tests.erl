@@ -664,3 +664,43 @@ from_to_zero_start_test() ->
         },
         beamtalk_list:from_to([1, 2, 3], 0, 2)
     ).
+
+%%% ============================================================================
+%%% Strict (`=:=`) element identity — BT-2997
+%%% ============================================================================
+
+unique_strict_keeps_int_and_float_test() ->
+    %% `lists:usort/1` would collapse these to [1].
+    ?assertEqual([1, 1.0], beamtalk_list:unique([1, 1.0, 1, 1.0])).
+
+unique_removes_strict_duplicates_test() ->
+    ?assertEqual([1, 2, 3], beamtalk_list:unique([3, 1, 2, 1, 3])).
+
+unique_empty_and_singleton_test() ->
+    ?assertEqual([], beamtalk_list:unique([])),
+    ?assertEqual([a], beamtalk_list:unique([a])).
+
+unique_output_is_sorted_test() ->
+    ?assertEqual([1, 2, 3, 4], beamtalk_list:unique([4, 3, 2, 1])).
+
+unique_non_numeric_terms_test() ->
+    ?assertEqual([a, b, c], beamtalk_list:unique([c, b, a, b])),
+    ?assertEqual([<<"a">>, <<"b">>], beamtalk_list:unique([<<"b">>, <<"a">>, <<"b">>])).
+
+strict_member_distinguishes_int_from_float_test() ->
+    ?assert(beamtalk_list:strict_member(1, [1])),
+    ?assertNot(beamtalk_list:strict_member(1.0, [1])),
+    ?assertNot(beamtalk_list:strict_member(1, [1.0])),
+    %% Both present: each is found on its own terms.
+    ?assert(beamtalk_list:strict_member(1, [1, 1.0])),
+    ?assert(beamtalk_list:strict_member(1.0, [1, 1.0])).
+
+strict_member_absent_and_empty_test() ->
+    ?assertNot(beamtalk_list:strict_member(9, [1, 2, 3])),
+    ?assertNot(beamtalk_list:strict_member(1, [])),
+    %% Stops early once the sorted list passes the element.
+    ?assertNot(beamtalk_list:strict_member(0, [1, 2, 3])).
+
+sorted_strict_unique_preserves_equal_run_test() ->
+    %% A run of mutually-`==` terms keeps one of each distinct value.
+    ?assertEqual([1, 1.0], beamtalk_list:sorted_strict_unique([1, 1.0, 1.0, 1])).

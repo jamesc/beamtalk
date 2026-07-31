@@ -576,9 +576,20 @@ half =:= twoQuarters      // => false  (structural — compares representation)
 half equals: twoQuarters  // => true   (dispatches to Fraction>>equals:)
 ```
 
-This is a deliberate limit, not a gap to be closed. The keyed containers decide identity inside the VM, below anything the language can dispatch: `Dictionary` is backed by Erlang maps (keys compare with `=:=`) and `Set` by `ordsets` (elements compare by Erlang term order, i.e. `==` semantics). So do `lists:member/2`, `ets`, and receive-pattern matching. An override the compiler honoured would still be invisible to all of them, so `a =:= b` could report `true` while a `Set` holding both still reported size 2. A class that needs content-based membership must normalise its representation rather than redefine the operator.
+This is a deliberate limit, not a gap to be closed. The keyed containers decide identity inside the VM, below anything the language can dispatch — `Dictionary` by Erlang map keys, `Set` by a term-order-sorted list — as do `lists:member/2`, `ets`, and receive-pattern matching. An override the compiler honoured would still be invisible to all of them, so `a =:= b` could report `true` while a `Set` holding both still reported size 2. A class that needs content-based membership must normalise its representation rather than redefine the operator.
 
-Note that `Set` and `Dictionary` do not agree with each other either — `Set new add: 1; add: 1.0` holds one element, while a `Dictionary` keyed on `1` and `1.0` holds two. That is a consequence of their different backing stores, not of anything in this section.
+Both containers use `=:=` for identity, so they agree with each other and with `List>>includes:` — `Set new add: 1; add: 1.0` holds two elements, matching a `Dictionary` keyed on `1` and `1.0`. What they cannot do is consult a user-defined `equals:`.
+
+##### What honours `equals:`
+
+| | Compares with |
+|---|---|
+| `Collection>>includes:`, `List>>includes:`, `List>>indexOf:`, `TestCase>>assert:equals:` | `equals:` |
+| `Set`, `Dictionary` keys, `List>>unique` | `=:=` |
+
+The line is searching versus keying: a linear search can afford to ask each element, while membership in a keyed container — or deduplication — needs an order or a hash that a user-defined `equals:` cannot supply. This is the same constraint Java's `equals`/`hashCode` contract expresses.
+
+An `equals:` override must agree with `=:=` wherever `=:=` holds: it may only make *more* values equal, never fewer. The searches rely on that to try raw equality first and dispatch only on a miss.
 
 Where the two notions of equality are genuinely different questions, prefer a domain-specific name to overriding `equals:` — `DateTime` keeps `equals:` structural and offers `sameInstant:` for instant-based comparison.
 

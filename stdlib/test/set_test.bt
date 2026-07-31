@@ -95,3 +95,46 @@ TestCase subclass: SetTest
   testPrintstring =>
     self assert: (((Set new) fromList: #(1, 2, 3)) printString) equals: "Set(1, 2, 3)"
     self assert: ((Set new) printString) equals: "Set()"
+
+  // ===== Element identity is `=:=`, not term order (BT-2997) =====
+  //
+  // Set was backed by `ordsets`, which decides membership by Erlang term
+  // *order* — `==` semantics — so `1` and `1.0` collapsed into one element.
+  // That made Set the odd one out: `Dictionary` keys (Erlang maps) and
+  // `List>>includes:` both use `=:=`, which ADR 0002 and BT-1562 make the
+  // language's element identity.
+  testIntAndFloatAreDistinctElements =>
+    s := (Set new add: 1) add: 1.0
+    self assert: s size equals: 2
+    self assert: s asList equals: #(1, 1.0)
+
+  testStrictMembership =>
+    s := (Set new) add: 1
+    self assert: (s includes: 1)
+    self deny: (s includes: 1.0)
+
+  testStrictRemovalKeepsTheOtherNumber =>
+    s := (Set new add: 1) add: 1.0
+    self assert: (s remove: 1.0) asList equals: #(1)
+    self assert: (s remove: 1) asList equals: #(1.0)
+
+  testSetNowAgreesWithDictionaryOnKeyIdentity =>
+    // The divergence this fixes: both hold two entries now.
+    s := (Set new add: 1) add: 1.0
+    d := (Dictionary new at: 1 put: #a) at: 1.0 put: #b
+    self assert: s size equals: d size
+
+  testStrictSetOperations =>
+    ints := (Set new) fromList: #(1, 2)
+    floats := (Set new) fromList: #(1.0, 2.0)
+    // Disjoint under `=:=`, though every element compares `==` to one in the other.
+    self assert: (ints intersection: floats) size equals: 0
+    self assert: (ints union: floats) size equals: 4
+    self assert: (ints difference: floats) asList equals: #(1, 2)
+    self deny: (ints isSubsetOf: floats)
+    self assert: (ints isSubsetOf: (ints union: floats))
+
+  testSortedOrderPreserved =>
+    // The representation is still a term-order-sorted list, so `asList`
+    // remains sorted regardless of insertion order.
+    self assert: (((Set new) fromList: #(3, 1, 2)) asList) equals: #(1, 2, 3)

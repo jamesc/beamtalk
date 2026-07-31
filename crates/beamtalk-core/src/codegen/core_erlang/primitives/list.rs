@@ -96,7 +96,9 @@ fn generate_list_access_bif(selector: &str, params: &[String]) -> Option<Documen
             param(params, 0, "_Block"),
         )),
         "reversed" => Some(Document::Str("call 'lists':'reverse'(Self)")),
-        "unique" => Some(Document::Str("call 'lists':'usort'(Self)")),
+        // BT-2997: `lists:usort/1` deduplicates by term order (`==`), which
+        // collapses `1` and `1.0`. Beamtalk element identity is `=:=`.
+        "unique" => Some(Document::Str("call 'beamtalk_list':'unique'(Self)")),
         _ => None,
     }
 }
@@ -324,8 +326,14 @@ mod tests {
 
     #[test]
     fn test_unique() {
+        // BT-2997: `lists:usort/1` deduplicates by term order (`==`), which
+        // collapses `1` and `1.0`. `beamtalk_list:unique/1` sorts the same way
+        // but deduplicates with `=:=`.
         let result = doc_to_string(generate_list_bif("unique", &[]));
-        assert_eq!(result, Some("call 'lists':'usort'(Self)".to_string()));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_list':'unique'(Self)".to_string())
+        );
     }
 
     // Iteration ops
