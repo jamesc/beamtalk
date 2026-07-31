@@ -202,6 +202,16 @@ TestCase subclass: MutationMatrixTest
   testDetectMutationNoMatch =>
     self should: [self.a detectMutation: #(1, 2, 3)] raise: #not_found
 
+  // BT-3028: the mutation path has no `is_list` guard — a non-List receiver is
+  // folded over `beamtalk_collection:to_list/1` instead of being re-dispatched,
+  // so the raise has to name the class from the *receiver* rather than assume
+  // `List`. A Set routed through the same fixture must report `Set`.
+  testDetectMutationNoMatchOnSetNamesSet =>
+    errorClass := [
+      self.a detectMutation: #(1, 2, 3) asSet
+    ] on: RuntimeError do: [:e | e errorClass asString]
+    self assert: errorClass equals: "Set"
+
   // P3-2: detect:ifNone: with field mutation in predicate block (BT-1486)
   // Unlike P1-8 which mutates *before* detect:ifNone:, this mutates *inside* the predicate.
   // All elements are processed (no short-circuit) to ensure mutations are applied.

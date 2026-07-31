@@ -1,0 +1,20 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3022: control for `ClassDrivenCollection` — identical, except the driver is
+// instance-side, so no process hop occurs and the inherited Collection primitives
+// have always worked here.
+
+Collection subclass: SelfDrivenCollection
+  field: items :: List = #()
+
+  class of: aList :: List -> SelfDrivenCollection =>
+    SelfDrivenCollection new: #{#items => aList}
+
+  size -> Integer => self.items size
+
+  do: block :: Block -> Nil =>
+    CollectionDriver new run: block over: self.items
+    nil
+
+  printString -> String => "SelfDrivenCollection"

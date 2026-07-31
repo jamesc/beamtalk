@@ -625,6 +625,12 @@ Do **not** add license headers to `.md` files. The repo `LICENSE` file covers al
 - **No periods**: Newlines separate statements, not `.`
 - **Comments**: Use `//` and `/* */`, not Smalltalk's `"..."`
 
+### Blocks Passed Into Class Methods
+
+A class method runs in its class object's gen_server process, so a block passed into one runs there, not where it was written. Values and non-local returns (`^`) cross that boundary fine; **process-local side effects do not** — a block that writes the process dictionary or reads `self()` affects the class process, and a block that messages the same class back raises `dispatch_error` rather than deadlocking (BT-3022).
+
+Practical rule: a `Collection` subclass may implement `do:` via a class-side helper (the inherited protocol works), but that helper must not reach back into its own class. See [Passing Blocks Through Class Methods](../beamtalk-language-features.md#passing-blocks-through-class-methods).
+
 ### Code Generation — Document API Only
 
 All Core Erlang codegen MUST use `Document` / `docvec!` API. Never use `format!()` or string concatenation. If you see existing string-based patterns, convert them.
