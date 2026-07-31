@@ -19,13 +19,15 @@
 //! a single `millis` field, so raw structural equality happened to agree with
 //! the override that was never called.
 //!
-//! This is not a limitation worth lifting. `Dictionary` is backed by Erlang
-//! maps and `Set` by map keys, so key identity is decided by the VM's own
-//! `=:=` — an override the compiler honoured would still be invisible to
-//! every container, to `lists:member/2`, to `ets`, and to receive-pattern
-//! matching, producing `a =:= b` while a `Set` holding both still reports
-//! size 2. Dispatch would also make equality asymmetric (it keys on the left
-//! receiver alone) and cost a guard on the language's hottest operator.
+//! This is not a limitation worth lifting. The keyed containers decide identity
+//! inside the VM, below anything the language can dispatch: `Dictionary` is
+//! backed by Erlang maps (keys compare with `=:=`), `Set` by `ordsets`
+//! (elements compare by term order, i.e. `==`). So do `lists:member/2`, `ets`,
+//! and receive-pattern matching. An override the compiler honoured would still
+//! be invisible to all of them, producing `a =:= b` while a `Set` holding both
+//! still reports size 2. Dispatch would also make equality asymmetric (it keys
+//! on the left receiver alone) and cost a guard on the language's hottest
+//! operator.
 //!
 //! So the operators stay primitive and this validator makes the dead
 //! declaration impossible to write, pointing authors at `equals:` — the
@@ -91,10 +93,10 @@ fn check_method(method: &MethodDefinition, diagnostics: &mut Vec<Diagnostic>) {
         )
         .with_hint(
             "Rename it to `equals:` (declared on `Object`, defaulting to `=:=`), or to a \
-             domain-specific name such as `sameInstant:`. Note that Erlang maps back \
-             `Dictionary` and `Set`, so their key identity always uses raw `=:=` — a \
-             class that needs content-based membership must normalise its representation, \
-             not redefine the operator."
+             domain-specific name such as `sameInstant:`. Note that `Dictionary` and \
+             `Set` decide key identity in the VM (Erlang maps and `ordsets`), so neither \
+             an operator nor an `equals:` override can affect them — a class that needs \
+             content-based membership must normalise its representation."
                 .to_string(),
         ),
     );

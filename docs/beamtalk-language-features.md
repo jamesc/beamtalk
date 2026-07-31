@@ -576,7 +576,9 @@ half =:= twoQuarters      // => false  (structural — compares representation)
 half equals: twoQuarters  // => true   (dispatches to Fraction>>equals:)
 ```
 
-This is a deliberate limit, not a gap to be closed. `Dictionary` and `Set` are backed by Erlang maps, so key identity is decided by the VM's own `=:=` — as are `lists:member/2`, `ets`, and receive-pattern matching. An override the compiler honoured would still be invisible to all of them, so `a =:= b` could report `true` while a `Set` holding both still reported size 2. A class that needs content-based membership must normalise its representation rather than redefine the operator.
+This is a deliberate limit, not a gap to be closed. The keyed containers decide identity inside the VM, below anything the language can dispatch: `Dictionary` is backed by Erlang maps (keys compare with `=:=`) and `Set` by `ordsets` (elements compare by Erlang term order, i.e. `==` semantics). So do `lists:member/2`, `ets`, and receive-pattern matching. An override the compiler honoured would still be invisible to all of them, so `a =:= b` could report `true` while a `Set` holding both still reported size 2. A class that needs content-based membership must normalise its representation rather than redefine the operator.
+
+Note that `Set` and `Dictionary` do not agree with each other either — `Set new add: 1; add: 1.0` holds one element, while a `Dictionary` keyed on `1` and `1.0` holds two. That is a consequence of their different backing stores, not of anything in this section.
 
 Where the two notions of equality are genuinely different questions, prefer a domain-specific name to overriding `equals:` — `DateTime` keeps `equals:` structural and offers `sameInstant:` for instant-based comparison.
 

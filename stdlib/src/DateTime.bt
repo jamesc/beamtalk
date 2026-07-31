@@ -302,7 +302,7 @@ sealed typed Value subclass: DateTime native: beamtalk_datetime
   // questions are genuinely different — "is this the same timestamp value" vs.
   // "is this the same moment" — and collapsing `equals:` onto `sameInstant:`
   // would make it disagree with `=:=` and with Dictionary/Set key identity,
-  // which are raw term equality and cannot follow.
+  // which are decided in the VM and cannot follow a Beamtalk method.
 
   /// True if this DateTime is earlier than `other`.
   ///
