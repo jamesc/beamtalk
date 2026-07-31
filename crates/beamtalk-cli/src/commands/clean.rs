@@ -23,6 +23,7 @@ use miette::{Context, IntoDiagnostic, Result};
 use tracing::{debug, info};
 
 use super::build_layout::BuildLayout;
+use super::util::find_project_root;
 
 /// What `clean` is allowed to remove.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -186,28 +187,6 @@ fn remove_path(path: &Utf8Path) -> Result<()> {
             .into_diagnostic()
             .wrap_err_with(|| format!("Failed to remove file '{path}'"))
     }
-}
-
-/// Find the project root by requiring a `beamtalk.toml` in the current
-/// directory.
-fn find_project_root() -> Result<Utf8PathBuf> {
-    let cwd = std::env::current_dir()
-        .into_diagnostic()
-        .wrap_err("Failed to determine current directory")?;
-
-    let project_root = Utf8PathBuf::from_path_buf(cwd).map_err(|p| {
-        miette::miette!("Current directory path is not valid UTF-8: {}", p.display())
-    })?;
-
-    let manifest_path = project_root.join("beamtalk.toml");
-    if !manifest_path.exists() {
-        miette::bail!(
-            "No beamtalk.toml found in current directory.\n  \
-             Run this command from a Beamtalk project root, or create one with `beamtalk new`."
-        );
-    }
-
-    Ok(project_root)
 }
 
 #[cfg(test)]
