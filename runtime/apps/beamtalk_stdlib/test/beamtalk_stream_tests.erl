@@ -64,6 +64,24 @@ detect_calls_finalizer_test() ->
     after 100 -> ?assert(false)
     end.
 
+%% BT-3028: the finalizer must still run when detect: exhausts the stream and
+%% raises — the raise happens after the `try ... after`, not inside it. Without
+%% this the no-match path would leak whatever resource the finalizer releases
+%% (e.g. the file handle behind `File open:do:`).
+detect_calls_finalizer_on_not_found_test() ->
+    Self = self(),
+    Gen = make_list_gen([1, 2, 3]),
+    Finalizer = fun() -> Self ! finalizer_called end,
+    Stream = beamtalk_stream:make_stream(Gen, <<"test">>, Finalizer),
+    ?assertError(
+        #{'$beamtalk_class' := 'RuntimeError'},
+        beamtalk_stream:detect(Stream, fun(X) -> X > 10 end)
+    ),
+    receive
+        finalizer_called -> ok
+    after 100 -> ?assert(false)
+    end.
+
 %% Test that anySatisfy: calls the finalizer
 any_satisfy_calls_finalizer_test() ->
     Self = self(),

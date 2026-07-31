@@ -80,6 +80,9 @@ Find first element matching block, error if not found.
 BT-3025: raises `not_found` when no element matches. It used to raise
 `does_not_understand`, which claimed the List had no `detect:` at all and sent
 readers hunting for a typo. Use `detect:ifNone:` for the non-raising form.
+
+BT-3028: every other collection raises the same kind, so the error is built by
+the shared `beamtalk_collection:raiseDetectNotFound/1` rather than inline here.
 """.
 -spec detect(list(), function()) -> term().
 detect(List, Block) when is_list(List), is_function(Block, 1) ->
@@ -87,10 +90,10 @@ detect(List, Block) when is_list(List), is_function(Block, 1) ->
         {ok, Found} ->
             Found;
         not_found ->
-            Hint = <<"No element matched the block; use `detect:ifNone:` to supply a default">>,
-            beamtalk_error:raise(
-                beamtalk_error:new(not_found, 'List', 'detect:', Hint)
-            )
+            %% BT-3028: shared with the inherited `Collection>>detect:` and with
+            %% `beamtalk_stream:detect/2` so all three raise byte-identical
+            %% errors — a caller that swaps receiver types sees no difference.
+            beamtalk_collection:raiseDetectNotFound('List')
     end;
 detect(List, Block) when is_list(List) ->
     Hint = iolist_to_binary(
