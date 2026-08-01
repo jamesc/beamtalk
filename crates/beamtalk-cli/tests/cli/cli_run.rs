@@ -171,6 +171,13 @@ fn run_connected_status_lines_go_to_stderr_not_stdout() {
         .stdout(predicate::function(|out: &str| {
             out.find("connected-output-42") < out.find("connected-nested-99")
         }))
+        // Exactly once: `do_dispatch` also returns the captured output in the
+        // terminal reply, so a client that both streams and prints that fallback
+        // would emit every line twice.
+        .stdout(predicate::function(|out: &str| {
+            out.matches("connected-output-42").count() == 1
+                && out.matches("connected-nested-99").count() == 1
+        }))
         // The program's output must not be duplicated onto stderr.
         .stderr(contains("connected-output-42").not());
 }

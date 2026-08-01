@@ -1259,6 +1259,12 @@ this gen_server, where those keys are absent. We read them from the caller via
 `process_info/2` (no message-shape change) and `put/2` them locally, restoring
 the previous values (or erasing) on the way out so concurrent calls from other
 sessions never see a stale context.
+
+Deliberately leaves `beamtalk_entry_group_leader` (BT-2963) alone: only a
+pre-BT-2963 caller sends the 3-arity message this seeds from, and such a caller
+never set that key. It cannot read a stale one either — `gen_server` serialises
+calls and `seed_session_context_from/1` always restores the key before its call
+returns, so the key is only ever set *during* a 4-tuple call.
 """.
 -spec seed_caller_session_context({pid(), term()} | term()) -> fun(() -> ok).
 seed_caller_session_context({CallerPid, _Tag}) when is_pid(CallerPid) ->
