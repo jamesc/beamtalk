@@ -227,7 +227,7 @@ TestCase subclass: BinaryTest
 
   testAllSatisfyTrue =>
     bin := Binary fromBytes: #(65, 66, 67)
-    self assert: (bin allSatisfy: [:ch | ch size > 0])
+    self assert: (bin allSatisfy: [:ch | ch size == 1])
 
   testAllSatisfyFalse =>
     bin := Binary fromBytes: #(65, 66, 67)
@@ -431,7 +431,7 @@ TestCase subclass: BinaryTest
     @expect type
     self assert: (result at: 1) equals: 42
     @expect type
-    self assert: (result at: 2) > 0
+    self assert: (result at: 2) equals: bin byteSize
 
   testDeserializeWithUsedString =>
     bin := Binary serialize: "hello"
