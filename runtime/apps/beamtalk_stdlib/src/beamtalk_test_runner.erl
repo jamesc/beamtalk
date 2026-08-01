@@ -397,8 +397,8 @@ format_single_failure(#{name := Name, error := Error} = Entry) ->
     ClassStr = atom_to_list(ClassName),
     ErrorBin =
         case is_binary(Error) of
-            true -> Error;
-            false -> beamtalk_primitive:print_string(Error)
+            true -> ensure_utf8(Error);
+            false -> ensure_utf8(beamtalk_primitive:print_string(Error))
         end,
     [
         "  \xe2\x9c\x97 ",
@@ -428,26 +428,81 @@ Serialize a TestResult to JSON for CLI consumption.
 
 Returns a JSON binary that can be parsed by the CLI to reconstruct the result.
 Includes all test details (pass/fail/skip per test, durations, errors).
+
+BT-2999: building *and* encoding the document is guarded. `json:encode/1`
+throws on any value it can't represent (notably a binary that isn't valid
+UTF-8), and this runs in the one-shot test escript's boot process — an
+uncaught throw there takes down the whole VM and loses *every* test's result.
+On any failure we fall back to a counts-only document so one test's edge case
+can't destroy the run.
 """.
 -spec result_to_json(map()) -> binary().
-result_to_json(#{
-    '$beamtalk_class' := 'TestResult',
-    total := Total,
-    passed := Passed,
-    failed := Failed,
-    skipped := Skipped,
-    duration := Duration,
-    tests := Tests
-}) ->
-    JsonStruct = #{
-        <<"total">> => Total,
-        <<"passed">> => Passed,
-        <<"failed">> => Failed,
-        <<"skipped">> => Skipped,
-        <<"duration">> => Duration,
-        <<"tests">> => [serialize_test_result(T) || T <- Tests]
-    },
-    iolist_to_binary(json:encode(JsonStruct)).
+result_to_json(
+    #{
+        '$beamtalk_class' := 'TestResult',
+        total := Total,
+        passed := Passed,
+        failed := Failed,
+        skipped := Skipped,
+        duration := Duration,
+        tests := Tests
+    } = Result
+) ->
+    try
+        %% Serialization is inside the `try` too: a malformed entry makes
+        %% serialize_test_result/1 itself raise, and that would escape the
+        %% boot process exactly like the encode failure this guards against.
+        JsonStruct = #{
+            <<"total">> => Total,
+            <<"passed">> => Passed,
+            <<"failed">> => Failed,
+            <<"skipped">> => Skipped,
+            <<"duration">> => Duration,
+            <<"tests">> => [serialize_test_result(T) || T <- Tests]
+        },
+        iolist_to_binary(json:encode(JsonStruct))
+    catch
+        Class:Reason:Stacktrace ->
+            ?LOG_ERROR(
+                "BUnit result JSON encoding failed (~p:~p); "
+                "falling back to counts-only output: ~p",
+                [Class, Reason, Stacktrace]
+            ),
+            degraded_result_json(Result, Reason)
+    end.
+
+-doc """
+Counts-only JSON used when the full result document can't be encoded.
+
+Every field is coerced to a number or a valid-UTF-8 binary first, so this
+document cannot itself fail to encode — it is the last line of defence before
+the escript would die with no results at all.
+""".
+-spec degraded_result_json(map(), term()) -> binary().
+degraded_result_json(Result, Reason) ->
+    Note = iolist_to_binary(
+        io_lib:format(
+            "Per-test details omitted: the BUnit runner could not encode them as JSON (~p)",
+            [Reason]
+        )
+    ),
+    Count = fun(Key) -> safe_number(maps:get(Key, Result, 0)) end,
+    iolist_to_binary(
+        json:encode(#{
+            <<"total">> => Count(total),
+            <<"passed">> => Count(passed),
+            <<"failed">> => Count(failed),
+            <<"skipped">> => Count(skipped),
+            <<"duration">> => Count(duration),
+            <<"tests">> => [],
+            <<"encodingError">> => ensure_utf8(Note)
+        })
+    ).
+
+-doc "Pass numbers through, replace anything else with 0.".
+-spec safe_number(term()) -> number().
+safe_number(N) when is_number(N) -> N;
+safe_number(_) -> 0.
 
 -doc "Serialize a single test result.".
 -spec serialize_test_result(map()) -> map().
@@ -465,11 +520,25 @@ serialize_test_result(#{name := Name, status := Status} = Test) ->
         end,
     case Test of
         #{error := Error} when is_binary(Error) ->
-            Base#{<<"error">> => Error};
+            Base#{<<"error">> => ensure_utf8(Error)};
         #{error := Error} ->
-            Base#{<<"error">> => beamtalk_primitive:print_string(Error)};
+            Base#{<<"error">> => ensure_utf8(beamtalk_primitive:print_string(Error))};
         _ ->
             Base
+    end.
+
+-doc """
+Coerce a message binary to valid UTF-8 so `json:encode/1` can never reject it.
+
+BT-2999: error messages are assembled from arbitrary runtime values, some of
+which are raw non-UTF-8 binaries (crypto output, file reads, hashes). Such a
+message is rendered as `Binary printString` hex instead of being embedded raw.
+""".
+-spec ensure_utf8(binary()) -> binary().
+ensure_utf8(Bin) when is_binary(Bin) ->
+    case beamtalk_primitive:is_utf8(Bin) of
+        true -> Bin;
+        false -> beamtalk_binary:print_string(Bin)
     end.
 
 %%====================================================================

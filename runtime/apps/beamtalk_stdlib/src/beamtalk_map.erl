@@ -41,7 +41,10 @@ do_with_key(Map, Block) when is_function(Block, 2) ->
 -doc "Test if the dictionary contains the given value.".
 -spec includes(map(), term()) -> boolean().
 includes(Map, Value) ->
-    lists:member(Value, maps:values(Map)).
+    %% BT-2997: this searches *values*, which is a linear scan, so it honours an
+    %% `equals:` override. Dictionary *keys* are Erlang map keys and cannot —
+    %% their identity is decided in the VM.
+    beamtalk_equality:member(Value, maps:values(Map)).
 
 -doc """
 Format a dictionary as Beamtalk syntax: #{key => value, ...}

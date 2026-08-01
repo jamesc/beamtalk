@@ -165,3 +165,6 @@ runtime/traces-*.json
 # Python bytecode cache (scripts/*.py are run directly, never packaged)
 __pycache__/
 *.pyc
+
+# insta pending-snapshot artifacts — review with `cargo insta review`, never commit
+*.snap.new

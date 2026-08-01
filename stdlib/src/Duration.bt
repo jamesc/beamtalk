@@ -172,7 +172,8 @@ sealed typed Value subclass: Duration native: beamtalk_duration
   //
   // Operator selectors (`+`, `<`, …) are not valid Erlang function names, so
   // these stay inline FFI (ADR 0101 / BT-2731) dispatching through the named
-  // shims `add`/`subtract`/`multiply`/`lt`/`gt`/`lte`/`gte`/`eql`/`sneq`/`neq`.
+  // shims `add`/`subtract`/`multiply`/`lt`/`gt`/`lte`/`gte`. The equality
+  // operators have no shim — see the note below the comparison methods.
 
   /// Sum of two Durations.
   ///
@@ -203,6 +204,17 @@ sealed typed Value subclass: Duration native: beamtalk_duration
     (Erlang beamtalk_duration) multiply: self with: scalar
 
   // ===== Instance Methods — Comparison =====
+  //
+  // Ordering (`< > <= >=`) is message-dispatched (BT-2709/2710), so these
+  // overrides are real. Equality is not, and deliberately has no declaration
+  // here: per ADR 0002 the compiler lowers `=:=`, `=/=`, `==` and `/=` straight
+  // to the Erlang BIFs with no method dispatch, so a method for any of them
+  // would be dead code — and is now rejected at compile time (BT-2997).
+  //
+  // Raw structural equality is already the right answer for Duration: every
+  // constructor canonicalises to the single `millis` field, so equal lengths
+  // are identical terms and `(Duration seconds: 60) =:= (Duration minutes: 1)`
+  // is true without any override. `Object equals:` inherits that behaviour.
 
   /// True if this Duration is shorter than `other`.
   ///
@@ -239,30 +251,3 @@ sealed typed Value subclass: Duration native: beamtalk_duration
   /// ```
   >= other :: Duration -> Boolean =>
     (Erlang beamtalk_duration) gte: self with: other
-
-  /// True if this Duration is exactly the same length as `other`.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// (Duration seconds: 60) =:= (Duration minutes: 1)  // => true
-  /// ```
-  =:= other :: Duration -> Boolean =>
-    (Erlang beamtalk_duration) eql: self with: other
-
-  /// True if this Duration is not strictly equal to `other`.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// (Duration seconds: 1) =/= (Duration seconds: 2)  // => true
-  /// ```
-  =/= other :: Duration -> Boolean =>
-    (Erlang beamtalk_duration) sneq: self with: other
-
-  /// True if this Duration differs in length from `other`.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// (Duration seconds: 1) /= (Duration seconds: 2)  // => true
-  /// ```
-  /= other :: Duration -> Boolean =>
-    (Erlang beamtalk_duration) neq: self with: other

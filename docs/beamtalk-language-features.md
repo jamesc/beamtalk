@@ -467,6 +467,8 @@ p1 == p3    // => false
 (p1 withX: 10) == (Point x: 10 y: 4)   // => true
 ```
 
+This compares the **representation**, and cannot be changed: the equality operators are not overridable (see [Equality operators cannot be overridden](#equality-operators-cannot-be-overridden)). A value type whose logical value differs from its stored form — one that is not canonicalised, or that carries a field outside its identity — should override `equals:` and say so in its class documentation.
+
 #### Value objects in collections
 
 Value objects work seamlessly with all collection methods:
@@ -551,6 +553,45 @@ Binary operators follow standard math precedence (highest to lowest):
 - `=/=` - Strict inequality (Erlang `=/=`): `5 =/= 6` → `true`
 
 Note: bare `=` is **not** a valid Beamtalk operator — it has no entry in the parser's precedence table, so `x = y` fails to parse. Use `=:=` for value equality or `==` for reference equality.
+
+##### Equality operators cannot be overridden
+
+Unlike the arithmetic (`+ - * /`) and ordering (`< > <= >=`) operators, which are dispatched as messages so a value type can overload them, all four equality operators are lowered directly to the corresponding Erlang BIF at codegen time (ADR 0002). There is no method lookup, so a class-level `=:=` / `=/=` / `==` / `/=` method could never be called. **Declaring one is a compile error** (BT-2997):
+
+```beamtalk
+Value subclass: Money
+  field: cents :: Integer = 0
+  =:= other :: Money -> Boolean => self.cents =:= other cents
+  // error: `=:=` cannot be overridden — this method can never be called
+```
+
+Use **`equals:`** instead. It is declared on `Object`, defaults to `=:=`, and is an ordinary message send, so overriding it works:
+
+```beamtalk
+// Fractions stored unnormalised: 1/2 and 2/4 are different terms…
+half := Fraction numer: 1 denom: 2
+twoQuarters := Fraction numer: 2 denom: 4
+
+half =:= twoQuarters      // => false  (structural — compares representation)
+half equals: twoQuarters  // => true   (dispatches to Fraction>>equals:)
+```
+
+This is a deliberate limit, not a gap to be closed. The keyed containers decide identity inside the VM, below anything the language can dispatch — `Dictionary` by Erlang map keys, `Set` by a term-order-sorted list — as do `lists:member/2`, `ets`, and receive-pattern matching. An override the compiler honoured would still be invisible to all of them, so `a =:= b` could report `true` while a `Set` holding both still reported size 2. A class that needs content-based membership must normalise its representation rather than redefine the operator.
+
+Both containers use `=:=` for identity, so they agree with each other and with `List>>includes:` — `Set new add: 1; add: 1.0` holds two elements, matching a `Dictionary` keyed on `1` and `1.0`. What they cannot do is consult a user-defined `equals:`.
+
+##### What honours `equals:`
+
+| | Compares with |
+|---|---|
+| `includes:` on `Collection`, `List`, `Array`, `Dictionary` (searches values); `List>>indexOf:`; `TestCase>>assert:equals:` | `equals:` |
+| `Set` elements, `Dictionary` *keys*, `List>>unique` | `=:=` |
+
+The line is searching versus keying: a linear search can afford to ask each element, while membership in a keyed container — or deduplication — needs an order or a hash that a user-defined `equals:` cannot supply. This is the same constraint Java's `equals`/`hashCode` contract expresses.
+
+An `equals:` override must agree with `=:=` wherever `=:=` holds: it may only make *more* values equal, never fewer. The searches rely on that to try raw equality first and dispatch only on a miss.
+
+Where the two notions of equality are genuinely different questions, prefer a domain-specific name to overriding `equals:` — `DateTime` keeps `equals:` structural and offers `sameInstant:` for instant-based comparison.
 
 #### Short-circuit boolean operators (`and:`/`or:`)
 
@@ -4659,15 +4700,60 @@ bin isEmpty                   // => false
 
 | Method | On Binary | On String |
 |--------|-----------|-----------|
-| `at: index` | grapheme (1-based, via String at runtime) | grapheme (1-based) |
-| `size` | element count (via String at runtime) | grapheme count |
+| `at: index` | grapheme (1-based, via String at runtime¹) | grapheme (1-based) |
+| `size` | element count (via String at runtime¹) | grapheme count |
 | `byteAt: offset` | byte value (0-based) | inherited — byte value (0-based) |
 | `byteSize` | byte count | inherited — byte count |
-| `do: block` | iterate elements (via String at runtime) | iterate graphemes |
+| `do: block` | iterate elements (via String at runtime¹) | iterate graphemes |
 | `part: offset size: n` | byte-level slice, returns Binary | inherited — byte-level slice, returns Binary |
 | `concat:` | byte concatenation, returns Binary | inherited — byte concatenation, returns Binary |
 | `asString` | UTF-8 validation, returns String | no-op, returns self |
 | `asStringUnchecked` | unchecked cast to String | no-op, returns self |
+
+¹ Only when the bytes are valid UTF-8 — see below.
+
+#### Binary vs String at Runtime
+
+Binary and String are one and the same BEAM `binary()` — a raw binary carries
+no tag saying which class produced it. The runtime therefore uses the only
+signal it has, UTF-8 validity ([BT-2999](https://linear.app/beamtalk/issue/BT-2999)):
+
+| Bytes | `class` | Dynamic dispatch of `size`, `at:`, `do:`, … |
+|-------|---------|---------------------------------------------|
+| valid UTF-8 (`"hello"`, `Binary fromBytes: #(104, 105)`) | `String` | String — grapheme-aware |
+| not valid UTF-8 (crypto output, hashes, compressed data, `Binary fromBytes: #(255, 254)`) | `Binary` | Binary — byte-level |
+
+```beamtalk
+bytes := Binary fromBytes: #(255, 254, 253)
+bytes class name    // => #Binary
+bytes size          // => 3 (bytes, not graphemes)
+bytes printString   // => "<<FF FE FD>>" (hex — never raw invalid UTF-8)
+
+(Binary fromBytes: #(104, 105)) class name   // => #String  (indistinguishable)
+```
+
+Valid UTF-8 stays genuinely ambiguous: a `Binary` holding text answers `String`
+and gets grapheme semantics. **Do not rely on `class` to tell text from bytes.**
+When the distinction matters, annotate the type (`data :: Binary`) so the
+compiler dispatches statically, or use the unambiguous byte-level selectors
+(`byteSize`, `byteAt:`, `part:size:`) which mean the same thing on both.
+
+Deciding which of the two a bare binary is costs one validating scan of the
+bytes (~32 ns for a short string, ~0.4 ns/byte beyond ~1 KB). It happens only
+when the compiler could not determine the receiver's type. Annotate the type
+in hot loops over large binaries so the sends compile statically and skip the
+check entirely:
+
+```beamtalk
+// Unannotated: every send re-checks `data` — fine for small values,
+// avoidable when `data` is megabytes and the loop runs many times
+checksum: data =>
+  (0 to: data byteSize - 1) inject: 0 into: [:acc :i | acc + (data byteAt: i)]
+
+// Annotated: dispatch resolves at compile time, no per-send check
+checksum: data :: Binary =>
+  (0 to: data byteSize - 1) inject: 0 into: [:acc :i | acc + (data byteAt: i)]
+```
 
 ### Accessing an Empty Collection
 

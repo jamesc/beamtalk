@@ -80,11 +80,25 @@ TestCase subclass: DurationTest
     self deny: (b <= a)
     self assert: (a >= a)
     self deny: (a >= b)
+
+  // Equality is raw Erlang term comparison, not a Duration method — `=:=`,
+  // `=/=` and `/=` never dispatch (ADR 0002, BT-2997). It answers correctly
+  // only because every constructor canonicalises to the single `millis` field,
+  // so equal lengths built by different routes are identical terms. That
+  // cross-constructor case is what the first assertion pins down.
+  testEquality =>
+    a := Duration seconds: 1
+    b := Duration seconds: 2
     self assert: (a =:= (Duration milliseconds: 1000))
+    self assert: ((Duration minutes: 1) =:= (Duration seconds: 60))
     self deny: (a =:= b)
     self assert: (a /= b)
     self deny: (a /= a)
     self assert: (a =/= b)
+    // `equals:` is the overridable counterpart (Object). Duration does not
+    // override it, so it tracks `=:=` exactly.
+    self assert: (a equals: (Duration milliseconds: 1000))
+    self deny: (a equals: b)
 
   // ===== Formatting =====
   testPrintString =>

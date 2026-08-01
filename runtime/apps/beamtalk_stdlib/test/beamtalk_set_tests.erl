@@ -366,3 +366,60 @@ do_type_error_test() ->
         },
         beamtalk_set:do(Set, not_a_function)
     ).
+
+%%% ============================================================================
+%%% Merge-based set operations, mixed `==` runs — BT-2997
+%%% ============================================================================
+%%%
+%%% `intersection/2`, `difference/2` and `is_subset_of/2` walk two term-order
+%%% sorted lists in step. An integer and a float of equal value share an order
+%%% position, so neither list can be advanced on an order tie alone — those
+%%% cases fall back to a bounded probe of the tied run. `set_test.bt` covers
+%%% fully-disjoint int-vs-float sets; these pin the harder shape, where one set
+%%% holds *both* members of a tied run.
+
+s(L) -> beamtalk_set:from_list(L).
+al(S) -> beamtalk_set:as_list(S).
+
+intersection_plain_test() ->
+    ?assertEqual([2, 3], al(beamtalk_set:intersection(s([1, 2, 3]), s([2, 3, 4])))),
+    ?assertEqual([], al(beamtalk_set:intersection(s([1, 2]), s([3, 4])))).
+
+intersection_int_float_disjoint_test() ->
+    %% Every element ties on order, none is `=:=`, so the result is empty.
+    ?assertEqual([], al(beamtalk_set:intersection(s([1, 2]), s([1.0, 2.0])))).
+
+intersection_mixed_run_test() ->
+    %% Left holds both members of the tied run; only the float is shared.
+    ?assertEqual([1.0], al(beamtalk_set:intersection(s([1, 1.0]), s([1.0])))),
+    ?assertEqual([1], al(beamtalk_set:intersection(s([1, 1.0]), s([1])))),
+    ?assertEqual([1, 1.0], al(beamtalk_set:intersection(s([1, 1.0]), s([1, 1.0])))).
+
+difference_plain_test() ->
+    ?assertEqual([1, 3], al(beamtalk_set:difference(s([1, 2, 3]), s([2])))),
+    ?assertEqual([1, 2], al(beamtalk_set:difference(s([1, 2]), s([])))),
+    ?assertEqual([], al(beamtalk_set:difference(s([]), s([1])))).
+
+difference_mixed_run_test() ->
+    %% Removing the integer must leave the float, and vice versa.
+    ?assertEqual([1.0], al(beamtalk_set:difference(s([1, 1.0]), s([1])))),
+    ?assertEqual([1], al(beamtalk_set:difference(s([1, 1.0]), s([1.0])))),
+    ?assertEqual([1, 1.0], al(beamtalk_set:difference(s([1, 1.0]), s([2])))).
+
+is_subset_of_plain_test() ->
+    ?assert(beamtalk_set:is_subset_of(s([1, 2]), s([1, 2, 3]))),
+    ?assert(beamtalk_set:is_subset_of(s([]), s([1]))),
+    ?assertNot(beamtalk_set:is_subset_of(s([3]), s([1, 2]))),
+    ?assertNot(beamtalk_set:is_subset_of(s([1]), s([]))).
+
+is_subset_of_mixed_run_test() ->
+    %% An order tie is not membership — 1 is not in {1.0}.
+    ?assertNot(beamtalk_set:is_subset_of(s([1]), s([1.0]))),
+    ?assertNot(beamtalk_set:is_subset_of(s([1.0]), s([1]))),
+    ?assert(beamtalk_set:is_subset_of(s([1.0]), s([1, 1.0]))),
+    ?assert(beamtalk_set:is_subset_of(s([1]), s([1, 1.0]))),
+    ?assertNot(beamtalk_set:is_subset_of(s([1, 1.0]), s([1]))).
+
+set_operations_stay_sorted_and_unique_test() ->
+    ?assertEqual([1, 2, 3, 4], al(beamtalk_set:union(s([3, 1]), s([4, 2, 1])))),
+    ?assertEqual([1, 1.0], al(beamtalk_set:union(s([1]), s([1.0])))).
