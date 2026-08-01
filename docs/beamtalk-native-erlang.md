@@ -187,6 +187,24 @@ This is the same first-keyword convention as inline FFI (`(Erlang mod) do: x wit
 
 If a method's first keyword is an Erlang reserved word (`after and andalso band begin bnot bor bsl bsr bxor case catch cond div end fun if let not of or orelse receive rem try when xor`), codegen emits a compile error rather than producing invalid output like `mod:receive(Self, X)`. Use inline FFI with an explicitly-named function for those (rare) cases.
 
+## Instantiating a `native:` Class (BT-2998)
+
+A `native:` class keeps its instances in whatever shape its backing module defines — `beamtalk_datetime`'s calendar tuple, `beamtalk_uuid`'s 16 raw bytes, `beamtalk_stream`'s generator closure — and normally declares no fields of its own. The inherited `Value class>>new` builds an instance out of `$beamtalk_class` plus the declared field defaults, so on such a class it can only produce a correctly-tagged but *empty* map: dispatch accepts it, and the first real message then fails deep inside the Erlang module.
+
+So `new`/`new:` on a `native:` class with no declared fields is a **compile error**, and the compiled `new/0` raises `instantiation_error` for the dynamic paths (REPL, `perform:`) where no static receiver class is known. Both messages name the class's actual constructors:
+
+```beamtalk
+DateTime new
+// error: `native:` class `DateTime` cannot be instantiated with `new` — its
+//        instances live in its backing Erlang module, not in declared fields
+// help:  Use one of: DateTime now, DateTime year:month:day:, DateTime fromString:
+```
+
+Two escapes, both of which say "this class really can build an instance":
+
+- **Declare your own class-side `new`.** `Random` and `Queue` do — `class sealed new -> Random => self delegate` — and it is a real constructor, so nothing is refused.
+- **Declare fields.** A `native:` class carrying `field:` declarations (`Package`, `SupervisionNode`) has a genuine default instance, so `new` keeps building it.
+
 ## Native Actors — `native:` and `self delegate`
 
 When an Actor needs a hand-written gen_server (for port management, deferred replies, `handle_info/2`, or complex OTP patterns), declare it with `native:`:
