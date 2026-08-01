@@ -1626,6 +1626,13 @@ impl CoreErlangGenerator {
     /// Mirrors the `has_explicit_new` / `has_explicit_class_new` test in
     /// `generate_value_type_module`, which is what decides whether the
     /// auto-generated — and now possibly raising — `new/0` is emitted at all.
+    ///
+    /// One case it deliberately does not mirror: a declared `new` whose body is
+    /// `@intrinsic basicNew` routes back to the auto-generated constructor, so
+    /// on a `native:` class it would raise despite being "declared". Only
+    /// `Value.bt`/`Object.bt` write that body and neither is `native:`; if one
+    /// ever were, the only cost is an omitted `isConstructible` key, which the
+    /// runtime recomputes lazily from `new/0` anyway.
     fn declares_own_new(class: &ClassDefinition) -> bool {
         class
             .methods

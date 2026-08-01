@@ -3854,6 +3854,24 @@ Value subclass: Caller
     );
 }
 
+#[test]
+fn test_bt_2998_new_with_args_hint_points_at_the_classs_own_new() {
+    // `Queue` declares a working `new` but no `new:`, so its `new:` refusal
+    // must point back at `Q new` rather than claim there is no constructor.
+    let errors = uninstantiable_new_errors(
+        "
+Value subclass: Q native: beamtalk_q
+  class sealed new -> Q => self delegate
+
+Value subclass: Caller
+  test => Q new: #{}
+",
+    );
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    let hint = errors[0].hint.as_ref().expect("should carry a hint");
+    assert!(hint.contains("Q new"), "got: {hint}");
+}
+
 // ── ADR 0050 Phase 4: analyse_with_known_vars_and_classes ──
 
 #[test]

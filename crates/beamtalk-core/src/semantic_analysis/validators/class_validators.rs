@@ -160,7 +160,7 @@ fn opaque_native_new_error(
     hierarchy: &ClassHierarchy,
     span: Span,
 ) -> Diagnostic {
-    let constructors = native_constructor_selectors(class_name, hierarchy);
+    let constructors = native_constructor_selectors(class_name, selector, hierarchy);
     let hint = if constructors.is_empty() {
         format!("`{class_name}` declares no class-side constructor to use instead")
     } else {
@@ -185,20 +185,26 @@ fn opaque_native_new_error(
 }
 
 /// BT-2998: the class-side selectors that produce an instance of `class_name`,
-/// for the diagnostic hint.
+/// for the hint on the refusal of `rejected`.
 ///
 /// A class method counts when its declared return type mentions the class,
 /// either directly (`now -> DateTime`) or nested in a generic
 /// (`from: -> Result(Regex, Error)`), which skips the class-side utilities these
-/// classes also carry (`DateTime monotonicNow -> Integer`). Mirrors the
-/// codegen-side list baked into the runtime error, capped for the same reason.
-fn native_constructor_selectors(class_name: &str, hierarchy: &ClassHierarchy) -> Vec<EcoString> {
+/// classes also carry (`DateTime monotonicNow -> Integer`). Only `rejected`
+/// itself is filtered out, so `Queue new: …` can point back at `Queue new`.
+/// Mirrors the codegen-side list baked into the runtime error, capped for the
+/// same reason.
+fn native_constructor_selectors(
+    class_name: &str,
+    rejected: &str,
+    hierarchy: &ClassHierarchy,
+) -> Vec<EcoString> {
     let Some(info) = hierarchy.get_class(class_name) else {
         return Vec::new();
     };
     info.class_methods
         .iter()
-        .filter(|m| !matches!(m.selector.as_str(), "new" | "new:"))
+        .filter(|m| m.selector != rejected)
         .filter(|m| {
             m.return_type
                 .as_ref()
@@ -217,12 +223,15 @@ const MAX_HINTED_CONSTRUCTORS: usize = 6;
 /// identifier — so `Result(DateTime, Error)` matches `DateTime`, while
 /// `DateTimeRange` does not match `DateTime`.
 ///
+/// `Self` counts as well: in return position on a class method it resolves to
+/// the receiver class (`Collection class>>withAll: -> Self`).
+///
 /// Return types reach the hierarchy as display strings (they cross the BEAM
 /// metadata boundary), so this is a token scan rather than an AST walk.
 fn type_names_class(type_display: &str, class_name: &str) -> bool {
     type_display
         .split(|c: char| !c.is_alphanumeric() && c != '_')
-        .any(|token| token == class_name)
+        .any(|token| token == class_name || token == "Self")
 }
 
 fn visit_actor_new(

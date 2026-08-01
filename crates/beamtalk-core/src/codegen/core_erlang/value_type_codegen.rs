@@ -175,22 +175,27 @@ pub(in crate::codegen::core_erlang) fn has_opaque_native_representation(
 }
 
 /// BT-2998: the class-side selectors that actually produce an instance of
-/// `class`, for the `instantiation_error` hint.
+/// `class`, for the `instantiation_error` hint raised by `rejected` .
 ///
 /// A class method counts when its declared return type mentions the class
 /// anywhere — directly (`now -> DateTime`) or nested in a generic
 /// (`from: -> Result(Regex, Error)`). That deliberately skips the class-side
 /// utilities these classes also carry (`DateTime monotonicNow -> Integer`,
-/// `Uuid isValid: -> Boolean`) and the `new`/`new:` refusals themselves.
+/// `Uuid isValid: -> Boolean`).
+///
+/// Only the `rejected` selector itself is filtered out, not both `new` and
+/// `new:`: `Queue` declares a working `class sealed new -> Queue` but no
+/// `new:`, so its `new:` refusal should — and does — point back at `Queue new`.
+///
 /// Declaration order is preserved so the hint is deterministic, and the list is
 /// capped at [`MAX_HINTED_CONSTRUCTORS`] so a wide class-side API cannot turn
 /// one error message into a wall of text.
-fn native_constructor_selectors(class: &ClassDefinition) -> Vec<String> {
+fn native_constructor_selectors(class: &ClassDefinition, rejected: &str) -> Vec<String> {
     class
         .class_methods
         .iter()
         .filter(|m| m.kind == MethodKind::Primary)
-        .filter(|m| !matches!(m.selector.name().as_str(), "new" | "new:"))
+        .filter(|m| m.selector.name() != rejected)
         .filter(|m| {
             m.return_type
                 .as_ref()
@@ -885,7 +890,7 @@ impl CoreErlangGenerator {
             "{class_name} instances are built by the {backing} module, not from field \
              defaults — `{selector}` cannot produce a usable one."
         );
-        let constructors = native_constructor_selectors(class);
+        let constructors = native_constructor_selectors(class, selector);
         if constructors.is_empty() {
             hint.push_str(" It has no class-side constructor.");
             return hint;
@@ -4209,16 +4214,34 @@ mod tests {
             "  year -> Integer => self delegate\n",
         ));
         assert_eq!(
-            native_constructor_selectors(&class),
+            native_constructor_selectors(&class, "new"),
             vec![
                 "now".to_string(),
                 "year:month:".to_string(),
                 "parse:".to_string(),
             ],
             "only class methods returning the class (directly or nested in a \
-             generic) count; `monotonicNow`, the `new:` refusal and the \
-             instance-side `year` do not"
+             generic) count; `monotonicNow`, the `-> Nil` `new:` refusal and \
+             the instance-side `year` do not"
         );
+    }
+
+    #[test]
+    fn test_bt_2998_constructor_selectors_keep_the_other_new() {
+        use super::native_constructor_selectors;
+
+        // `Queue` declares a working `new` but no `new:`, so its `new:`
+        // refusal must point back at `Queue new` rather than claim it has no
+        // constructor at all.
+        let class = parse_one_class(concat!(
+            "Value subclass: Queue native: beamtalk_queue\n",
+            "  class sealed new -> Queue => self delegate\n",
+        ));
+        assert_eq!(
+            native_constructor_selectors(&class, "new:"),
+            vec!["new".to_string()]
+        );
+        assert!(native_constructor_selectors(&class, "new").is_empty());
     }
 
     #[test]
@@ -4231,7 +4254,7 @@ mod tests {
             "Object subclass: Console native: beamtalk_console\n",
             "  class sealed log: msg :: String -> Nil => self delegate\n",
         ));
-        assert!(native_constructor_selectors(&class).is_empty());
+        assert!(native_constructor_selectors(&class, "new").is_empty());
     }
 
     #[test]
