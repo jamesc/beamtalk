@@ -3804,6 +3804,38 @@ Value subclass: Caller
 }
 
 #[test]
+fn test_bt_2998_actor_native_class_without_fields_reports_only_spawn_error() {
+    // `Subprocess`/`ReactiveSubprocess`/`TranscriptStream` are actor natives
+    // with no declared fields, so they match the opaque-native shape exactly.
+    // `check_actor_new_usage` already tells the user to `spawn`, which is the
+    // actionable fix; a second "use a different constructor" diagnostic would
+    // both double-report and point somewhere that doesn't help.
+    let source = "
+Actor subclass: Proc native: beamtalk_proc
+  class sealed open: path :: String -> Proc => self delegate
+  pid -> Integer => self delegate
+
+Value subclass: Caller
+  test => Proc new
+";
+    assert!(
+        uninstantiable_new_errors(source).is_empty(),
+        "actor natives must not draw an opaque-native diagnostic: {:?}",
+        uninstantiable_new_errors(source)
+    );
+
+    // The pre-existing spawn diagnostic is still the one the user sees.
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let spawn_errors: Vec<_> = analyse(&module)
+        .diagnostics
+        .into_iter()
+        .filter(|d| d.message.contains("spawn"))
+        .collect();
+    assert_eq!(spawn_errors.len(), 1, "{spawn_errors:?}");
+}
+
+#[test]
 fn test_bt_2998_native_class_with_declared_fields_is_exempt() {
     // `Package`/`SupervisionNode`: fields of their own, so `basicNew` builds a
     // genuine default instance.

@@ -324,8 +324,15 @@ fn uninstantiable_new(
     {
         return None;
     }
-    if hierarchy.resolve_class_kind(class_name) == ClassKind::Object {
-        return Some(UninstantiableNew::ObjectKind);
+    match hierarchy.resolve_class_kind(class_name) {
+        ClassKind::Object => return Some(UninstantiableNew::ObjectKind),
+        // Actor `new`/`new:` is `check_actor_new_usage`'s territory: it already
+        // says "must use `spawn`", which is the fix. Falling through would
+        // double-report on the actor natives that declare no fields
+        // (`Subprocess`, `ReactiveSubprocess`, `TranscriptStream`) and point at
+        // `open:args:`-style constructors that don't address the real problem.
+        ClassKind::Actor => return None,
+        ClassKind::Value => {}
     }
     // BT-2998: `native:` with no fields of its own. A native class that *does*
     // declare fields (`Package`, `SupervisionNode`) has a real default instance.
