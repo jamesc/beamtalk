@@ -149,6 +149,17 @@ TestCase subclass: DurationTest
     @expect type
     self should: [(Duration seconds: 1) < 5] raise: #type_error
 
+  // BT-2998: bare `new` used to build a tagged-but-empty map — a Duration
+  // holds beamtalk_duration's millis, not a BT field, so there is nothing for
+  // the inherited `basicNew` to fill in. It refuses instead of failing later.
+  testBareNewIsDisabled =>
+    // Rejected at compile time; @expect keeps that diagnostic from failing the
+    // build so the runtime guard (for dynamic sends) can be exercised too.
+    @expect type
+    self should: [Duration new] raise: #instantiation_error
+    // The keyword form has refused all along; both now agree.
+    self should: [Duration new: 5] raise: #user_error
+
   // ===== Integration — Timer =====
   testTimerSleepAcceptsDuration =>
     self assert: (Timer sleep: (Duration milliseconds: 1)) equals: nil

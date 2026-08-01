@@ -20,6 +20,15 @@ TestCase subclass: UuidTest
 
   testNewIsDisabled => self should: [Uuid new: 5] raise: #user_error
 
+  // BT-2998: a Uuid lives in beamtalk_uuid's 16 raw bytes, not in BT fields,
+  // so the inherited `basicNew` used to hand back a tagged-but-empty map that
+  // only failed later, inside an unrelated method.
+  // Rejected at compile time; @expect keeps that diagnostic from failing the
+  // build so the runtime guard (for dynamic sends) can be exercised too.
+  testBareNewIsDisabled =>
+    @expect type
+    self should: [Uuid new] raise: #instantiation_error
+
   // ===== Format validity =====
   testAsStringFormat =>
     // Canonical 8-4-4-4-12 lowercase hex form

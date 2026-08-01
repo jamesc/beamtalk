@@ -6126,3 +6126,114 @@ fn test_method_table_with_script_methods_includes_arity() {
         "method_table should list 'binary' with arity 2. Got:\n{table_body}"
     );
 }
+
+// ─── BT-2998: bare `new` on an opaque `native:` class ────────────────────────
+
+#[test]
+fn test_bt_2998_native_class_without_fields_raises_on_new() {
+    // A `native:` class keeps its state in the shape its backing module
+    // defines, so `basicNew`'s `~{'$beamtalk_class' => 'X'}~` is a hollow
+    // instance every later method call trips over. Refuse it up front.
+    let src = concat!(
+        "Value subclass: DateTime native: beamtalk_datetime\n",
+        "  class sealed now -> DateTime => self delegate\n",
+        "  class sealed monotonicNow -> Integer => self delegate\n",
+        "  class sealed fromString: str :: String -> DateTime => self delegate\n",
+        "  year -> Integer => self delegate\n",
+    );
+    let code = super::codegen(src);
+
+    assert!(
+        code.contains("call 'beamtalk_error':'new'('instantiation_error', 'DateTime')"),
+        "bare new on an opaque native class must raise instantiation_error. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("~{'$beamtalk_class' => 'DateTime'}~"),
+        "must not still build the hollow tagged map. Got:\n{code}"
+    );
+    // (The hint text itself is a Core Erlang binary literal, so it is asserted
+    // on in `value_type_codegen`'s unit tests rather than the emitted code.)
+    // `new:` merges over `new`, so it is just as hollow and refuses too.
+    assert!(
+        code.contains("'new'/1 = fun (_InitArgs) ->"),
+        "new/1 must also refuse rather than merge over a hollow default. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'beamtalk_error':'with_selector'(Error0, 'new:')"),
+        "the new/1 refusal must name selector 'new:'. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_bt_2998_native_class_with_declared_fields_still_builds_default_instance() {
+    // A `native:` class that *does* declare fields has a real default
+    // instance (`Package`, `SupervisionNode`), so `basicNew` stays correct.
+    let src = concat!(
+        "Value subclass: Package native: beamtalk_package\n",
+        "  field: name = nil\n",
+        "  class sealed named: n :: String -> Package => self delegate\n",
+    );
+    let code = super::codegen(src);
+    assert!(
+        code.contains("'$beamtalk_class' => 'Package'"),
+        "field-carrying native class must still build its default map. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'instantiation_error', 'Package'"),
+        "field-carrying native class must not refuse new. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_bt_2998_native_class_with_own_class_new_keeps_it() {
+    // `Random`/`Queue` declare a working zero-arg `new`; `new/0` must keep
+    // delegating to it rather than being replaced by the refusal.
+    let src = concat!(
+        "Value subclass: Random native: beamtalk_random\n",
+        "  class sealed new -> Random => self delegate\n",
+    );
+    let code = super::codegen(src);
+    let new_body = extract_core_fn(&code, "'new'/0 = fun").expect("should have new/0");
+    assert!(
+        new_body.contains("'class_new'('undefined', 'undefined')"),
+        "new/0 must delegate to the declared class method. Got:\n{new_body}"
+    );
+    assert!(
+        !new_body.contains("instantiation_error"),
+        "a class with its own `new` must not get the refusal. Got:\n{new_body}"
+    );
+}
+
+#[test]
+fn test_bt_2998_non_native_value_class_unaffected() {
+    // Plain value types build their instance from field defaults as before.
+    let src = concat!(
+        "Value subclass: Point\n",
+        "  field: x = 0\n",
+        "  field: y = 0\n",
+    );
+    let code = super::codegen(src);
+    assert!(
+        !code.contains("'instantiation_error', 'Point'"),
+        "non-native value class must still be constructible. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'$beamtalk_class' => 'Point'"),
+        "non-native value class must build its default map. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_bt_2998_opaque_native_class_registers_as_non_constructible() {
+    // BT-877's compile-time `isConstructible` flag must agree with the
+    // now-raising `new/0`, instead of leaving the runtime to discover it.
+    let src = concat!(
+        "Value subclass: Uuid native: beamtalk_uuid\n",
+        "  class sealed v4 -> Uuid => self delegate\n",
+    );
+    let code = super::codegen(src);
+    assert!(
+        code.contains("'isConstructible' => 'false'"),
+        "opaque native class must register isConstructible => false. Got:\n{code}"
+    );
+}
