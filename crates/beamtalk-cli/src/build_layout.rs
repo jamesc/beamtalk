@@ -114,6 +114,19 @@ impl BuildLayout {
         self.build_root().join("deps")
     }
 
+    /// `_build/deps/.dep-graph.json` — snapshot of the effective dependency
+    /// graph recorded after the last successful resolve (BT-3009).
+    ///
+    /// Compared against the currently declared graph so a *structural* change
+    /// — most importantly a dependency's source type swapping between git and
+    /// path in an intermediate manifest — is detected as stale, which no
+    /// mtime, lockfile, or ebin-presence check catches. The leading dot keeps
+    /// it out of the way of the per-dependency directories that share
+    /// `_build/deps/` (and that `clean_stale_deps` scans).
+    pub fn dep_graph_path(&self) -> Utf8PathBuf {
+        self.deps_dir().join(".dep-graph.json")
+    }
+
     /// `_build/deps/<name>/` — checkout directory for a single dependency.
     pub fn dep_checkout_dir(&self, name: &str) -> Utf8PathBuf {
         self.deps_dir().join(name)
