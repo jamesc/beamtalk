@@ -510,8 +510,8 @@ metaclass_send_dispatch(Pid, Selector, Args, Self) ->
 
 -doc """
 Read this process's session context (`beamtalk_session_pid` /
-`beamtalk_session_id` / `beamtalk_session_meta`) for explicit propagation into a
-class-method call.
+`beamtalk_session_id` / `beamtalk_session_meta` / `beamtalk_entry_group_leader`)
+for explicit propagation into a class-method call.
 
 ADR 0081 / BT-2379: the eval worker seeds these keys
 (`beamtalk_repl_shell:seed_session_context/3`). Class-method dispatch hops to
@@ -520,13 +520,29 @@ caller's context there — including the origin metadata so `Session current kin
 reports the real client surface rather than `unknown`. We read our own keys
 cheaply with `get/1` and pass them in the message tuple, avoiding a
 `process_info(CallerPid, dictionary)` full-dictionary copy on the receiving
-side. Returns `{undefined, undefined, undefined}` when this process has no
+side.
+
+BT-2963: the fourth element is the *entry group leader* — the IO sink a
+connected `beamtalk run … --connect` dispatch wants its `Console` output to
+reach. It is seeded only by `beamtalk_repl_eval:do_dispatch/5` (the `run-entry`
+op) and is `undefined` everywhere else, including ordinary REPL `eval`, so no
+other dispatch path changes where its output goes. Carrying it alongside the
+session context makes it propagate transitively: a class method that calls
+*another* class method re-emits the key it was seeded with, so nested output
+keeps streaming to the same client.
+
+Returns `{undefined, undefined, undefined, undefined}` when this process has no
 seeded context (the common non-REPL case).
 """.
 -spec local_session_context() ->
-    {pid() | undefined, binary() | undefined, map() | undefined}.
+    {pid() | undefined, binary() | undefined, map() | undefined, pid() | undefined}.
 local_session_context() ->
-    {get(beamtalk_session_pid), get(beamtalk_session_id), get(beamtalk_session_meta)}.
+    {
+        get(beamtalk_session_pid),
+        get(beamtalk_session_id),
+        get(beamtalk_session_meta),
+        get(beamtalk_entry_group_leader)
+    }.
 
 -doc """
 Unwrap a class gen_server call result for use in class_send.

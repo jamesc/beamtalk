@@ -487,7 +487,15 @@ class_send_test_() ->
             {"class_send unknown selector raises does_not_understand", fun test_class_send_dnu/0},
             {"class_send successful user-defined class method", fun test_class_send_user_method/0},
             {"class_send re-raises a connected Program exit: as a throw",
-                fun test_class_send_script_exit_propagates/0}
+                fun test_class_send_script_exit_propagates/0},
+            {"class_send leaves the class group leader alone without an entry sink",
+                fun test_class_send_keeps_group_leader_by_default/0},
+            {"class_send adopts the caller's entry group leader for the call",
+                fun test_class_send_adopts_entry_group_leader/0},
+            {"class_send restores the class group leader after the call",
+                fun test_class_send_restores_group_leader/0},
+            {"class_send ignores a dead entry group leader",
+                fun test_class_send_ignores_dead_entry_group_leader/0}
         ]
     end}.
 
@@ -580,6 +588,129 @@ test_class_send_script_exit_propagates() ->
         catch
             _:_ -> ok
         end)
+    end.
+
+%%% ----------------------------------------------------------------------------
+%%% BT-2963: entry group-leader propagation across the class gen_server hop.
+%%%
+%%% A class gen_server is long-lived, so it keeps the group leader it inherited
+%%% at spawn and a class method's `Console` output misses the calling session's
+%%% IO capture entirely — which is how `beamtalk run … --connect` used to drop
+%%% the entry's output. `beamtalk_repl_eval:do_dispatch/5` publishes its capture
+%%% process as `beamtalk_entry_group_leader`; these tests pin the contract that
+%%% key relies on, from the caller's side.
+%%% ----------------------------------------------------------------------------
+
+%% Start a class whose only method reports the group leader it ran under.
+start_group_leader_probe_class(ClassName) ->
+    beamtalk_object_class:start_link(ClassName, #{
+        superclass => none,
+        module => beamtalk_class_dispatch_test_helper,
+        class_methods => #{testGroupLeader => <<>>},
+        class_state => #{}
+    }).
+
+%% Run `Body(ClassPid)` against a freshly started probe class, always stopping it.
+with_group_leader_probe_class(ClassName, Body) ->
+    {ok, Pid} = start_group_leader_probe_class(ClassName),
+    try
+        Body(Pid)
+    after
+        (try
+            gen_server:stop(Pid, normal, 5000)
+        catch
+            _:_ -> ok
+        end)
+    end.
+
+%% A live process to stand in for the IO-capture sink. Idles until told to stop
+%% so it stays a valid group-leader target for the whole test.
+spawn_sink() ->
+    spawn(fun Loop() ->
+        receive
+            stop -> ok;
+            _ -> Loop()
+        end
+    end).
+
+%% No `beamtalk_entry_group_leader` seeded (every path except the `run-entry`
+%% op): the class gen_server keeps its own group leader, so nothing about where
+%% existing callers' output goes changes.
+test_class_send_keeps_group_leader_by_default() ->
+    erase(beamtalk_entry_group_leader),
+    with_group_leader_probe_class('BT2963DefaultGlTest', fun(Pid) ->
+        {group_leader, ClassGl} = erlang:process_info(Pid, group_leader),
+        ?assertEqual(
+            {ClassGl, undefined},
+            beamtalk_class_dispatch:class_send(Pid, testGroupLeader, [])
+        )
+    end).
+
+%% With the key seeded, the method body runs under the caller's sink — the whole
+%% point, since `Console` resolves `standard_io` to the group leader — and still
+%% sees the key, so a nested class-method call re-propagates it.
+test_class_send_adopts_entry_group_leader() ->
+    Sink = spawn_sink(),
+    try
+        put(beamtalk_entry_group_leader, Sink),
+        with_group_leader_probe_class('BT2963AdoptGlTest', fun(Pid) ->
+            ?assertEqual(
+                {Sink, Sink},
+                beamtalk_class_dispatch:class_send(Pid, testGroupLeader, [])
+            )
+        end)
+    after
+        erase(beamtalk_entry_group_leader),
+        Sink ! stop
+    end.
+
+%% The adoption lasts exactly one call: afterwards the class gen_server is back
+%% on its original group leader, so a later call from a *different* session (or
+%% after the sink dies) is unaffected.
+test_class_send_restores_group_leader() ->
+    Sink = spawn_sink(),
+    try
+        with_group_leader_probe_class('BT2963RestoreGlTest', fun(Pid) ->
+            {group_leader, Before} = erlang:process_info(Pid, group_leader),
+            put(beamtalk_entry_group_leader, Sink),
+            ?assertEqual(
+                {Sink, Sink},
+                beamtalk_class_dispatch:class_send(Pid, testGroupLeader, [])
+            ),
+            erase(beamtalk_entry_group_leader),
+            ?assertEqual({group_leader, Before}, erlang:process_info(Pid, group_leader)),
+            ?assertEqual(
+                {Before, undefined},
+                beamtalk_class_dispatch:class_send(Pid, testGroupLeader, [])
+            )
+        end)
+    after
+        erase(beamtalk_entry_group_leader),
+        Sink ! stop
+    end.
+
+%% A sink that died before the call (client disconnected mid-dispatch) must not
+%% take the class gen_server down with it: `group_leader/2` raises badarg on a
+%% dead pid, so the swap is skipped and the method runs under the original.
+test_class_send_ignores_dead_entry_group_leader() ->
+    Dead = spawn_sink(),
+    Ref = monitor(process, Dead),
+    Dead ! stop,
+    receive
+        {'DOWN', Ref, process, Dead, _} -> ok
+    after 5000 -> error(sink_did_not_exit)
+    end,
+    try
+        put(beamtalk_entry_group_leader, Dead),
+        with_group_leader_probe_class('BT2963DeadGlTest', fun(Pid) ->
+            {group_leader, ClassGl} = erlang:process_info(Pid, group_leader),
+            ?assertEqual(
+                {ClassGl, Dead},
+                beamtalk_class_dispatch:class_send(Pid, testGroupLeader, [])
+            )
+        end)
+    after
+        erase(beamtalk_entry_group_leader)
     end.
 
 %%% ============================================================================

@@ -28,6 +28,7 @@ Function naming convention follows Beamtalk's `class_` prefix scheme:
     class_testSupervisorNew/2,
     class_testAlreadyStarted/2,
     class_testSupError/2,
+    class_testGroupLeader/2,
     'class_initialize:'/3
 ]).
 
@@ -158,6 +159,19 @@ class_testSupError(_ClassSelf, _ClassVars) ->
         <<"test error">>
     ),
     beamtalk_result:from_tagged_tuple({error, BtError}).
+
+-doc """
+Zero-argument class method that reports where its output would go.
+
+BT-2963: returns the class gen_server's group leader *as seen from inside the
+method body* together with the `beamtalk_entry_group_leader` key it was seeded
+with. `Console` writes resolve `standard_io` to the group leader, so the first
+element is exactly the sink a `Console printLine:` in this method would reach;
+the second is what a nested class-method call would re-propagate.
+""".
+-spec class_testGroupLeader(term(), map()) -> {pid(), pid() | undefined}.
+class_testGroupLeader(_ClassSelf, _ClassVars) ->
+    {group_leader(), get(beamtalk_entry_group_leader)}.
 
 -doc """
 Synchronous `class_initialize:` target for the supervisor-new rewrap test.

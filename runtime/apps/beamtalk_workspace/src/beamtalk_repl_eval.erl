@@ -289,7 +289,9 @@ which case `Argv` (the program arguments as a `List(String)`, i.e. a list of
 UTF-8 binaries) is passed as the single method argument; a unary entry (`run`)
 receives no arguments. `Subscriber` is the streaming output sink (the connecting
 client) — `Console` writes reach it via the captured group leader, mirroring the
-streaming `eval` path.
+streaming `eval` path. Because the entry itself runs one process hop away in its
+class's gen_server, the capture process is also published as the *entry group
+leader* so that hop adopts it (BT-2963); see the inline note below.
 
 Returns the shared `eval_result()` shape (`{ok, …}` / `{error, …}` /
 `{script_exit, …}`) so the shell's existing `eval_result` handling applies
@@ -311,7 +313,19 @@ do_dispatch(ClassNameBin, SelectorBin, Argv, Subscriber, State) ->
                     true -> [Argv];
                     false -> []
                 end,
-            CaptureRef = beamtalk_io_capture:start(Subscriber),
+            {CapturePid, _PrevGroupLeader} = CaptureRef = beamtalk_io_capture:start(Subscriber),
+            %% BT-2963: `beamtalk_io_capture:start/1` only redirects *this*
+            %% worker's IO, but the entry runs one hop away in its class's
+            %% gen_server, which kept the node's group leader from spawn — so its
+            %% `Console` output went to the detached node's stdout and the client
+            %% saw nothing. Publishing the capture process as the entry group
+            %% leader makes the class gen_server adopt it for the duration of the
+            %% call (`beamtalk_object_class:adopt_entry_group_leader/1`), giving
+            %% `--connect` the same "the program's output is my output" contract
+            %% run mode gets for free from the node's own stdout. Scoped to this
+            %% `run-entry` path: `do_eval` never seeds the key, so REPL `eval`
+            %% keeps routing output exactly as before.
+            PrevEntryGl = put(beamtalk_entry_group_leader, CapturePid),
             EvalResult =
                 try beamtalk_class_dispatch:class_send(ClassPid, Selector, DispatchArgs) of
                     RawResult ->
@@ -334,8 +348,14 @@ do_dispatch(ClassNameBin, SelectorBin, Argv, Subscriber, State) ->
                         {error, {eval_error, Class, CaughtExObj}, State}
                 after
                     %% Unlike the eval path there is no transient eval module to
-                    %% purge — the entry runs in already-loaded class code.
-                    ok
+                    %% purge — the entry runs in already-loaded class code. The
+                    %% capture process outlives this call only as a proxy to the
+                    %% original group leader, so drop the key before it can name a
+                    %% sink that is no longer streaming (BT-2963).
+                    case PrevEntryGl of
+                        undefined -> erase(beamtalk_entry_group_leader);
+                        _ -> put(beamtalk_entry_group_leader, PrevEntryGl)
+                    end
                 end,
             Output = beamtalk_io_capture:stop(CaptureRef),
             inject_output(EvalResult, Output, []);

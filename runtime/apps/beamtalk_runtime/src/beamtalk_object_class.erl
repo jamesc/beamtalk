@@ -1148,43 +1148,105 @@ keys in the message tuple (`beamtalk_class_dispatch:local_session_context/0`)
 rather than having us copy its entire dictionary via `process_info/2`. We
 `put/2` them locally and restore the previous values (or erase) on the way out.
 
+The 4-tuple shape adds the *entry group leader* (BT-2963) — the IO sink a
+connected `beamtalk run … --connect` dispatch streams its `Console` output to.
+This gen_server is long-lived, so it inherited the node's group leader at spawn
+and a class method's `Console` writes miss the dispatching session's IO capture
+entirely. Adopting the caller's sink for the duration of the call fixes that;
+`gen_server` serialises calls, so a concurrent call from another session queues
+behind this one and adopts *its own* caller's sink rather than seeing ours. The
+key is only ever set by the `run-entry` op, so every other dispatch path keeps
+the group leader it has today.
+
 The 3-tuple shape carries the origin metadata (`Meta`) so `Session current kind`
-reports the real client surface. The 2-tuple clause remains for in-flight
+reports the real client surface. The 3- and 2-tuple clauses remain for in-flight
 messages sent by a pre-upgrade caller across a hot-code reload (no metadata →
-`Session current` falls back to `kind => unknown`).
+`Session current` falls back to `kind => unknown`); both delegate to the 4-tuple
+clause with the missing fields as `undefined`, so every clause manages the same
+key set as a unit and no stale value from a previous call can leak into this one.
 """.
 -spec seed_session_context_from(
-    {pid() | undefined, binary() | undefined, map() | undefined}
+    {pid() | undefined, binary() | undefined, map() | undefined, pid() | undefined}
+    | {pid() | undefined, binary() | undefined, map() | undefined}
     | {pid() | undefined, binary() | undefined}
     | term()
 ) -> fun(() -> ok).
-seed_session_context_from({SessionPid, SessionId, SessionMeta}) ->
+seed_session_context_from({SessionPid, SessionId, SessionMeta, EntryGroupLeader}) ->
     PrevPid = put(beamtalk_session_pid, SessionPid),
     PrevId = put(beamtalk_session_id, SessionId),
     PrevMeta = put(beamtalk_session_meta, SessionMeta),
+    %% BT-2963: keep the key in the dictionary as well as adopting the sink, so
+    %% a nested class-method call made from inside this one re-emits it via
+    %% `beamtalk_class_dispatch:local_session_context/0` and keeps streaming.
+    PrevEntryGl = put(beamtalk_entry_group_leader, EntryGroupLeader),
+    RestoreGroupLeader = adopt_entry_group_leader(EntryGroupLeader),
     fun() ->
+        RestoreGroupLeader(),
         restore_dict_key(beamtalk_session_pid, PrevPid),
         restore_dict_key(beamtalk_session_id, PrevId),
         restore_dict_key(beamtalk_session_meta, PrevMeta),
+        restore_dict_key(beamtalk_entry_group_leader, PrevEntryGl),
         ok
     end;
+seed_session_context_from({SessionPid, SessionId, SessionMeta}) ->
+    seed_session_context_from({SessionPid, SessionId, SessionMeta, undefined});
 seed_session_context_from({SessionPid, SessionId}) ->
-    PrevPid = put(beamtalk_session_pid, SessionPid),
-    PrevId = put(beamtalk_session_id, SessionId),
     %% A 2-tuple context carries no metadata, so clear any leftover `meta` for
-    %% the duration of this call (and restore it after). Managing all three keys
+    %% the duration of this call (and restore it after). Managing all the keys
     %% as a unit means `Session current kind` inside this call can never read a
     %% stale other-session's metadata, regardless of what ran before.
-    PrevMeta = put(beamtalk_session_meta, undefined),
-    fun() ->
-        restore_dict_key(beamtalk_session_pid, PrevPid),
-        restore_dict_key(beamtalk_session_id, PrevId),
-        restore_dict_key(beamtalk_session_meta, PrevMeta),
-        ok
-    end;
+    seed_session_context_from({SessionPid, SessionId, undefined, undefined});
 seed_session_context_from(_Other) ->
     %% Unrecognised context shape: seed nothing rather than crash the call.
     fun() -> ok end.
+
+-doc """
+Adopt `EntryGroupLeader` as this process's group leader for the duration of one
+class-method call (BT-2963), returning a zero-arity closure that restores the
+previous one.
+
+A no-op — returning a no-op closure — unless the caller passed a live local pid
+that differs from the group leader we already have. The liveness check matters:
+`group_leader/2` happily accepts a dead pid, and a method that then writes to
+`standard_io` blocks until the io call gives up, so a client that disconnected
+mid-dispatch would turn every `Console` write in the entry into an error. Falling
+back to the group leader we already have loses the (undeliverable) output
+instead. `group_leader/2` still raises `badarg` for a non-local pid and the sink
+can exit between the check and the swap, so both the swap and the restore are
+wrapped: losing the output sink must never crash the class gen_server.
+""".
+-spec adopt_entry_group_leader(pid() | undefined | term()) -> fun(() -> ok).
+adopt_entry_group_leader(EntryGroupLeader) when
+    is_pid(EntryGroupLeader), node(EntryGroupLeader) =:= node()
+->
+    Previous = group_leader(),
+    Adopt =
+        EntryGroupLeader =/= Previous andalso
+            is_process_alive(EntryGroupLeader) andalso
+            set_group_leader(EntryGroupLeader),
+    case Adopt of
+        true ->
+            fun() ->
+                _ = set_group_leader(Previous),
+                ok
+            end;
+        false ->
+            fun() -> ok end
+    end;
+adopt_entry_group_leader(_Other) ->
+    fun() -> ok end.
+
+%% Point this process's group leader at `Pid`, reporting whether it took effect.
+%% `false` (rather than a crash) when `group_leader/2` rejects `Pid` — the same
+%% defensive shape `beamtalk_io_capture:stop/1` uses when resetting inherited
+%% group leaders.
+-spec set_group_leader(pid()) -> boolean().
+set_group_leader(Pid) ->
+    try
+        group_leader(Pid, self())
+    catch
+        error:badarg -> false
+    end.
 
 -doc """
 Mirror the calling process's session context into this class gen_server for the
