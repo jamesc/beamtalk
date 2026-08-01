@@ -3080,6 +3080,28 @@ impl CoreErlangGenerator {
         STDLIB_CLASS_NAMES.contains(&class_name)
     }
 
+    /// Returns true if `class` defines `doesNotUnderstand:args:` with a
+    /// structural (unquoted) intrinsic body (BT-1763).
+    ///
+    /// Such a definition acts as a catch-all DNU handler (e.g. `ErlangModule`,
+    /// `Erlang`) rather than the error-raising default in `ProtoObject`
+    /// (`@primitive "doesNotUnderstand:args:"`).  Both the dispatch function
+    /// and the `has_method` function need this same predicate, so it lives
+    /// here to avoid drift between the two sites.
+    fn class_has_catch_all_dnu(class: &ClassDefinition) -> bool {
+        class.methods.iter().any(|m| {
+            m.selector.name() == "doesNotUnderstand:args:"
+                && m.body.len() == 1
+                && matches!(
+                    &m.body[0].expression,
+                    Expression::Primitive {
+                        is_quoted: false,
+                        ..
+                    }
+                )
+        })
+    }
+
     /// Computes the compiled module name for a class (ADR 0016 / ADR 0026 / BT-794).
     ///
     /// Resolution order:
@@ -3194,21 +3216,8 @@ impl CoreErlangGenerator {
         // Route each class-defined method to its individual function
         let method_branches = self.generate_dispatch_method_branches(class, &mod_name);
 
-        // BT-1763: Check if this class defines doesNotUnderstand:args: with a
-        // structural intrinsic body (@intrinsic, unquoted). This indicates a
-        // catch-all DNU handler (like ErlangModule/Erlang) rather than the
-        // error-raising default in ProtoObject (@primitive "doesNotUnderstand:args:").
-        let has_catch_all_dnu = class.methods.iter().any(|m| {
-            m.selector.name() == "doesNotUnderstand:args:"
-                && m.body.len() == 1
-                && matches!(
-                    &m.body[0].expression,
-                    crate::ast::Expression::Primitive {
-                        is_quoted: false,
-                        ..
-                    }
-                )
-        });
+        // BT-1763: Check whether this class has a catch-all DNU handler.
+        let has_catch_all_dnu = Self::class_has_catch_all_dnu(class);
 
         // Default case: extension fallback, then superclass delegation (or DNU)
         let not_found_branch: Document<'static> = if has_catch_all_dnu {
@@ -3685,20 +3694,9 @@ impl CoreErlangGenerator {
         let class_name = self.class_name().clone();
         let superclass_mod = self.superclass_module_name(class.superclass_name());
 
-        // BT-1763: If the class defines doesNotUnderstand:args: with a structural
-        // intrinsic body, it accepts any selector — return true unconditionally.
-        // Excludes ProtoObject's error-raising DNU (@primitive "doesNotUnderstand:args:").
-        let has_catch_all_dnu = class.methods.iter().any(|m| {
-            m.selector.name() == "doesNotUnderstand:args:"
-                && m.body.len() == 1
-                && matches!(
-                    &m.body[0].expression,
-                    crate::ast::Expression::Primitive {
-                        is_quoted: false,
-                        ..
-                    }
-                )
-        });
+        // BT-1763: If the class has a catch-all DNU handler, it accepts any
+        // selector — return true unconditionally.
+        let has_catch_all_dnu = Self::class_has_catch_all_dnu(class);
         if has_catch_all_dnu {
             return Ok(docvec![
                 "'has_method'/1 = fun (_Selector) ->\n",
