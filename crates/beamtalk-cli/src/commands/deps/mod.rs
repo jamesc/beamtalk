@@ -2046,4 +2046,45 @@ mod tests {
             "A corrupt graph snapshot must force re-resolution"
         );
     }
+
+    #[test]
+    fn test_ensure_deps_resolved_records_a_snapshot_that_reads_back_fresh() {
+        // The round trip that matters for build times: the snapshot a real
+        // resolve records must satisfy the *next* freshness check. If the
+        // graph recorded after resolution ever disagreed with the graph
+        // discovered before it, every build would re-resolve from scratch.
+        let temp = TempDir::new().unwrap();
+        let root = camino::Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let dep_dir = temp.path().join("utils");
+        fs::create_dir_all(&dep_dir).unwrap();
+        write_manifest(&dep_dir, "utils", "0.1.0", "");
+        write_source(
+            &dep_dir,
+            "helper.bt",
+            "Object subclass: Helper\n  greet => \"hi\"\n",
+        );
+        write_manifest(
+            temp.path(),
+            "my_app",
+            "0.1.0",
+            "[dependencies]\nutils = { path = \"utils\" }",
+        );
+
+        let options = beamtalk_core::CompilerOptions::default();
+        let resolved = ensure_deps_resolved(&root, &options).unwrap();
+        assert_eq!(resolved.len(), 1, "utils should have resolved");
+
+        assert!(
+            BuildLayout::new(&root).dep_graph_path().exists(),
+            "a successful resolve must record the dependency-graph snapshot"
+        );
+
+        let parsed = manifest::parse_manifest_full(&root.join("beamtalk.toml")).unwrap();
+        assert!(
+            deps_are_fresh(&root, &parsed),
+            "the recorded snapshot must read back as fresh — otherwise every \
+             build re-resolves"
+        );
+    }
 }
