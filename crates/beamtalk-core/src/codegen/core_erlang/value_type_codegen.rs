@@ -845,37 +845,7 @@ impl CoreErlangGenerator {
         arity: usize,
     ) -> Document<'static> {
         let class_name = class.name.name.as_str();
-        let backing = class
-            .backing_module
-            .as_ref()
-            .map_or("its backing", |m| m.name.as_str());
-
-        let mut hint = format!(
-            "{class_name} instances are built by the {backing} module, not from field \
-             defaults — `{selector}` cannot produce a usable one."
-        );
-        let constructors = native_constructor_selectors(class);
-        if constructors.is_empty() {
-            hint.push_str(" It has no class-side constructor.");
-        } else {
-            let _ = write!(
-                hint,
-                " Use one of: {}",
-                constructors
-                    .iter()
-                    .take(MAX_HINTED_CONSTRUCTORS)
-                    .map(|sel| format!("{class_name} {sel}"))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            );
-            if constructors.len() > MAX_HINTED_CONSTRUCTORS {
-                let _ = write!(
-                    hint,
-                    ", and {} more",
-                    constructors.len() - MAX_HINTED_CONSTRUCTORS
-                );
-            }
-        }
+        let hint = Self::native_new_error_hint(class, selector);
 
         let function_head = if arity == 0 {
             "'new'/0 = fun () ->"
@@ -898,6 +868,46 @@ impl CoreErlangGenerator {
             "    call 'beamtalk_error':'raise'(Error2)\n",
             "\n",
         ]
+    }
+
+    /// BT-2998: the hint text baked into [`Self::generate_native_new_error`].
+    ///
+    /// Split out so it can be asserted on directly — in the emitted Core Erlang
+    /// it is a binary literal, i.e. a per-byte segment list.
+    fn native_new_error_hint(class: &ClassDefinition, selector: &str) -> String {
+        let class_name = class.name.name.as_str();
+        let backing = class
+            .backing_module
+            .as_ref()
+            .map_or("its backing", |m| m.name.as_str());
+
+        let mut hint = format!(
+            "{class_name} instances are built by the {backing} module, not from field \
+             defaults — `{selector}` cannot produce a usable one."
+        );
+        let constructors = native_constructor_selectors(class);
+        if constructors.is_empty() {
+            hint.push_str(" It has no class-side constructor.");
+            return hint;
+        }
+        let _ = write!(
+            hint,
+            " Use one of: {}",
+            constructors
+                .iter()
+                .take(MAX_HINTED_CONSTRUCTORS)
+                .map(|sel| format!("{class_name} {sel}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        if constructors.len() > MAX_HINTED_CONSTRUCTORS {
+            let _ = write!(
+                hint,
+                ", and {} more",
+                constructors.len() - MAX_HINTED_CONSTRUCTORS
+            );
+        }
+        hint
     }
 
     /// Generates `new/0` for a collection type that returns an empty native value.
@@ -4150,6 +4160,126 @@ mod tests {
         assert!(auto.getters.is_empty());
         assert!(auto.setters.is_empty());
         assert!(auto.keyword_constructor.is_none());
+    }
+
+    // ─── BT-2998: opaque `native:` representations ──────────────────────────
+
+    fn parse_one_class(source: &str) -> ClassDefinition {
+        crate::test_helpers::test_support::parse_bt(source)
+            .classes
+            .into_iter()
+            .next()
+            .expect("source should declare a class")
+    }
+
+    #[test]
+    fn test_bt_2998_has_opaque_native_representation() {
+        use super::has_opaque_native_representation;
+
+        // `native:` + no declared fields — nothing for `basicNew` to build.
+        assert!(has_opaque_native_representation(&parse_one_class(
+            "Value subclass: Uuid native: beamtalk_uuid\n  version -> Integer => self delegate\n"
+        )));
+        // `native:` but carrying its own fields (`Package`, `SupervisionNode`).
+        assert!(!has_opaque_native_representation(&parse_one_class(
+            "Value subclass: Package native: beamtalk_package\n  field: name = nil\n"
+        )));
+        // Plain value type — the ordinary `basicNew` case.
+        assert!(!has_opaque_native_representation(&parse_one_class(
+            "Value subclass: Point\n  field: x = 0\n"
+        )));
+        // Fieldless *non*-native class: `~{'$beamtalk_class' => 'X'}~` is its
+        // complete and correct instance, so it stays constructible.
+        assert!(!has_opaque_native_representation(&parse_one_class(
+            "Value subclass: Marker\n  isMarker -> Boolean => true\n"
+        )));
+    }
+
+    #[test]
+    fn test_bt_2998_constructor_selectors_filter_by_return_type() {
+        use super::native_constructor_selectors;
+
+        let class = parse_one_class(concat!(
+            "Value subclass: DateTime native: beamtalk_datetime\n",
+            "  class new: _ :: Object -> Nil => self error: \"nope\"\n",
+            "  class sealed now -> DateTime => self delegate\n",
+            "  class sealed monotonicNow -> Integer => self delegate\n",
+            "  class sealed year: y :: Integer month: m :: Integer -> DateTime => self delegate\n",
+            "  class sealed parse: s :: String -> Result(DateTime, Error) => self delegate\n",
+            "  year -> Integer => self delegate\n",
+        ));
+        assert_eq!(
+            native_constructor_selectors(&class),
+            vec![
+                "now".to_string(),
+                "year:month:".to_string(),
+                "parse:".to_string(),
+            ],
+            "only class methods returning the class (directly or nested in a \
+             generic) count; `monotonicNow`, the `new:` refusal and the \
+             instance-side `year` do not"
+        );
+    }
+
+    #[test]
+    fn test_bt_2998_constructor_selectors_empty_for_namespace_class() {
+        use super::native_constructor_selectors;
+
+        // Namespace-style native classes (`Console`, `System`, …) have no
+        // constructor to point at.
+        let class = parse_one_class(concat!(
+            "Object subclass: Console native: beamtalk_console\n",
+            "  class sealed log: msg :: String -> Nil => self delegate\n",
+        ));
+        assert!(native_constructor_selectors(&class).is_empty());
+    }
+
+    #[test]
+    fn test_bt_2998_native_new_error_hint_names_constructors() {
+        let class = parse_one_class(concat!(
+            "Value subclass: Uuid native: beamtalk_uuid\n",
+            "  class sealed v4 -> Uuid => self delegate\n",
+            "  class sealed fromString: s :: String -> Uuid => self delegate\n",
+        ));
+        let hint = CoreErlangGenerator::native_new_error_hint(&class, "new");
+        assert_eq!(
+            hint,
+            "Uuid instances are built by the beamtalk_uuid module, not from field \
+             defaults — `new` cannot produce a usable one. Use one of: Uuid v4, \
+             Uuid fromString:"
+        );
+    }
+
+    #[test]
+    fn test_bt_2998_native_new_error_hint_without_constructors() {
+        let class = parse_one_class(concat!(
+            "Object subclass: Console native: beamtalk_console\n",
+            "  class sealed log: msg :: String -> Nil => self delegate\n",
+        ));
+        let hint = CoreErlangGenerator::native_new_error_hint(&class, "new:");
+        assert!(
+            hint.ends_with("`new:` cannot produce a usable one. It has no class-side constructor."),
+            "hint should say there is no constructor. Got: {hint}"
+        );
+    }
+
+    #[test]
+    fn test_bt_2998_native_new_error_hint_caps_long_constructor_lists() {
+        use std::fmt::Write as _;
+
+        let mut source = String::from("Value subclass: Wide native: beamtalk_wide\n");
+        for i in 0..(super::MAX_HINTED_CONSTRUCTORS + 3) {
+            let _ = writeln!(source, "  class sealed make{i} -> Wide => self delegate");
+        }
+        let hint = CoreErlangGenerator::native_new_error_hint(&parse_one_class(&source), "new");
+        assert!(
+            hint.contains("Wide make0, ") && hint.ends_with(", and 3 more"),
+            "hint should cap the list and count the remainder. Got: {hint}"
+        );
+        assert!(
+            !hint.contains("Wide make6"),
+            "hint should not list beyond the cap. Got: {hint}"
+        );
     }
 
     #[test]

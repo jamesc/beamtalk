@@ -16,6 +16,7 @@
 //! - Value type `-> Nil` return annotations (BT-1052)
 //! - Data keyword / class-kind mismatch errors (BT-1529, BT-1535)
 //! - Object-kind `new`/`new:` usage errors (BT-1540)
+//! - Opaque `native:` `new`/`new:` usage errors (BT-2998)
 
 use crate::ast::{
     ClassKind, DeclaredKeyword, Expression, Identifier, MessageSelector, MethodDefinition, Module,
@@ -152,6 +153,78 @@ fn object_kind_new_error(class_name: &str, selector: &str, span: Span) -> Diagno
     .with_category(DiagnosticCategory::Type)
 }
 
+/// Creates a diagnostic for using `new`/`new:` on an opaque `native:` class (BT-2998).
+fn opaque_native_new_error(
+    class_name: &str,
+    selector: &str,
+    hierarchy: &ClassHierarchy,
+    span: Span,
+) -> Diagnostic {
+    let constructors = native_constructor_selectors(class_name, hierarchy);
+    let hint = if constructors.is_empty() {
+        format!("`{class_name}` declares no class-side constructor to use instead")
+    } else {
+        format!(
+            "Use one of: {}",
+            constructors
+                .iter()
+                .map(|sel| format!("{class_name} {sel}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    Diagnostic::error(
+        format!(
+            "`native:` class `{class_name}` cannot be instantiated with `{selector}` — its \
+             instances live in its backing Erlang module, not in declared fields"
+        ),
+        span,
+    )
+    .with_hint(hint)
+    .with_category(DiagnosticCategory::Type)
+}
+
+/// BT-2998: the class-side selectors that produce an instance of `class_name`,
+/// for the diagnostic hint.
+///
+/// A class method counts when its declared return type mentions the class,
+/// either directly (`now -> DateTime`) or nested in a generic
+/// (`from: -> Result(Regex, Error)`), which skips the class-side utilities these
+/// classes also carry (`DateTime monotonicNow -> Integer`). Mirrors the
+/// codegen-side list baked into the runtime error, capped for the same reason.
+fn native_constructor_selectors(class_name: &str, hierarchy: &ClassHierarchy) -> Vec<EcoString> {
+    let Some(info) = hierarchy.get_class(class_name) else {
+        return Vec::new();
+    };
+    info.class_methods
+        .iter()
+        .filter(|m| !matches!(m.selector.as_str(), "new" | "new:"))
+        .filter(|m| {
+            m.return_type
+                .as_ref()
+                .is_some_and(|t| type_names_class(t, class_name))
+        })
+        .map(|m| m.selector.clone())
+        .take(MAX_HINTED_CONSTRUCTORS)
+        .collect()
+}
+
+/// How many constructors [`opaque_native_new_error`]'s hint names before it
+/// stops. Matches the codegen-side cap so both messages read the same.
+const MAX_HINTED_CONSTRUCTORS: usize = 6;
+
+/// Whether the rendered return type `type_display` names `class_name` as a whole
+/// identifier — so `Result(DateTime, Error)` matches `DateTime`, while
+/// `DateTimeRange` does not match `DateTime`.
+///
+/// Return types reach the hierarchy as display strings (they cross the BEAM
+/// metadata boundary), so this is a token scan rather than an AST walk.
+fn type_names_class(type_display: &str, class_name: &str) -> bool {
+    type_display
+        .split(|c: char| !c.is_alphanumeric() && c != '_')
+        .any(|token| token == class_name)
+}
+
 fn visit_actor_new(
     expr: &Expression,
     hierarchy: &ClassHierarchy,
@@ -193,31 +266,79 @@ fn visit_actor_new(
     }
 }
 
-/// BT-1540: Error when Object-kind classes use `new` or `new:`.
+/// BT-1540 / BT-2998: Error when a class that cannot build an instance from
+/// field defaults is nonetheless sent `new` or `new:`.
 ///
-/// Object-kind classes are class-method namespaces and should not be instantiated.
-/// `new`/`new:` are only available on Value subclasses. Classes that define their
-/// own class-side `new`/`new:` factory methods (e.g. `AtomicCounter`, `Ets`) are exempt.
+/// Object-kind classes are class-method namespaces and should not be
+/// instantiated at all; `native:` classes with no declared fields keep their
+/// representation inside their backing Erlang module, so the inherited
+/// `basicNew` would hand back a correctly-tagged but empty map that only fails
+/// later, inside an unrelated method. Classes that define their own class-side
+/// `new`/`new:` factory (e.g. `AtomicCounter`, `Ets`, `Random`, `Queue`) are
+/// exempt in both cases — those are real constructors.
 pub(crate) fn check_object_new_usage(
     module: &Module,
     hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    walk_module_with_hierarchy(module, hierarchy, diagnostics, visit_object_new);
+    walk_module_with_hierarchy(module, hierarchy, diagnostics, visit_uninstantiable_new);
 }
 
-/// Returns true if `class_name` with `selector` should trigger an Object-kind new error.
+/// Why `ClassName new`/`new:` cannot work for a given receiver.
+#[derive(Clone, Copy)]
+enum UninstantiableNew {
+    /// BT-1540: an Object-kind class — a class-method namespace.
+    ObjectKind,
+    /// BT-2998: a `native:` class whose instances only its backing module builds.
+    OpaqueNative,
+}
+
+/// Classifies `class_name new`/`new:`, or `None` when the send is fine.
 ///
 /// Only fires for classes known in the hierarchy (unknown classes get DNU instead).
-fn is_object_new_error(class_name: &str, selector: &str, hierarchy: &ClassHierarchy) -> bool {
-    (selector == "new" || selector == "new:")
-        && !matches!(class_name, "self" | "super")
-        && hierarchy.has_class(class_name)
-        && hierarchy.resolve_class_kind(class_name) == ClassKind::Object
-        && !hierarchy.has_own_class_method(class_name, selector)
+fn uninstantiable_new(
+    class_name: &str,
+    selector: &str,
+    hierarchy: &ClassHierarchy,
+) -> Option<UninstantiableNew> {
+    if !matches!(selector, "new" | "new:")
+        || matches!(class_name, "self" | "super")
+        || !hierarchy.has_class(class_name)
+        || hierarchy.has_own_class_method(class_name, selector)
+    {
+        return None;
+    }
+    if hierarchy.resolve_class_kind(class_name) == ClassKind::Object {
+        return Some(UninstantiableNew::ObjectKind);
+    }
+    // BT-2998: `native:` with no fields of its own. A native class that *does*
+    // declare fields (`Package`, `SupervisionNode`) has a real default instance.
+    let has_own_fields = hierarchy
+        .get_class(class_name)
+        .is_some_and(|info| !info.state.is_empty());
+    if hierarchy.is_native(class_name) && !has_own_fields {
+        return Some(UninstantiableNew::OpaqueNative);
+    }
+    None
 }
 
-fn visit_object_new(
+/// Builds the diagnostic for a classified bad `new`/`new:` send.
+fn uninstantiable_new_error(
+    kind: UninstantiableNew,
+    class_name: &str,
+    selector: &str,
+    hierarchy: &ClassHierarchy,
+    span: Span,
+) -> Diagnostic {
+    match kind {
+        UninstantiableNew::ObjectKind => object_kind_new_error(class_name, selector, span),
+        UninstantiableNew::OpaqueNative => {
+            opaque_native_new_error(class_name, selector, hierarchy, span)
+        }
+    }
+}
+
+fn visit_uninstantiable_new(
     expr: &Expression,
     hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
@@ -231,8 +352,10 @@ fn visit_object_new(
     {
         if let Some(class_name) = receiver_class_name(receiver) {
             let sel = selector.name();
-            if is_object_new_error(class_name, &sel, hierarchy) {
-                diagnostics.push(object_kind_new_error(class_name, &sel, *span));
+            if let Some(kind) = uninstantiable_new(class_name, &sel, hierarchy) {
+                diagnostics.push(uninstantiable_new_error(
+                    kind, class_name, &sel, hierarchy, *span,
+                ));
             }
         }
     }
@@ -244,8 +367,10 @@ fn visit_object_new(
         if let Some(class_name) = receiver_class_name(receiver) {
             for msg in messages {
                 let sel = msg.selector.name();
-                if is_object_new_error(class_name, &sel, hierarchy) {
-                    diagnostics.push(object_kind_new_error(class_name, &sel, msg.span));
+                if let Some(kind) = uninstantiable_new(class_name, &sel, hierarchy) {
+                    diagnostics.push(uninstantiable_new_error(
+                        kind, class_name, &sel, hierarchy, msg.span,
+                    ));
                 }
             }
         }

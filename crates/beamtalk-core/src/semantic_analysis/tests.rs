@@ -3740,6 +3740,120 @@ Value subclass: Caller
     );
 }
 
+// ── BT-2998: `new` on an opaque `native:` class ──
+
+/// Collects the "cannot be instantiated" errors `analyse` reports for `source`.
+fn uninstantiable_new_errors(source: &str) -> Vec<crate::source_analysis::Diagnostic> {
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    analyse(&module)
+        .diagnostics
+        .into_iter()
+        .filter(|d| {
+            d.message.contains("cannot be instantiated")
+                && d.severity == crate::source_analysis::Severity::Error
+        })
+        .collect()
+}
+
+#[test]
+fn test_bt_2998_native_value_class_without_fields_rejects_new() {
+    // The instance lives in beamtalk_stopwatch, so `basicNew` would produce a
+    // tagged-but-empty map that only fails later, inside an unrelated method.
+    let errors = uninstantiable_new_errors(
+        "
+Value subclass: Stopwatch native: beamtalk_stopwatch
+  class sealed started -> Stopwatch => self delegate
+  class sealed tickRate -> Integer => self delegate
+  elapsed -> Integer => self delegate
+
+Value subclass: Caller
+  test => Stopwatch new
+",
+    );
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert!(
+        errors[0].message.contains("`native:` class `Stopwatch`"),
+        "{}",
+        errors[0].message
+    );
+    let hint = errors[0].hint.as_ref().expect("should carry a hint");
+    assert!(
+        hint.contains("Stopwatch started"),
+        "hint should name the real constructor, got: {hint}"
+    );
+    assert!(
+        !hint.contains("tickRate"),
+        "hint should skip class methods that do not return an instance, got: {hint}"
+    );
+}
+
+#[test]
+fn test_bt_2998_native_class_with_own_new_is_exempt() {
+    // `Random`/`Queue` declare a working zero-arg `new` — a real constructor.
+    let errors = uninstantiable_new_errors(
+        "
+Value subclass: Rng native: beamtalk_rng
+  class sealed new -> Rng => self delegate
+
+Value subclass: Caller
+  test => Rng new
+",
+    );
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn test_bt_2998_native_class_with_declared_fields_is_exempt() {
+    // `Package`/`SupervisionNode`: fields of their own, so `basicNew` builds a
+    // genuine default instance.
+    let errors = uninstantiable_new_errors(
+        "
+Value subclass: Pkg native: beamtalk_pkg
+  field: name = nil
+
+Value subclass: Caller
+  test => Pkg new
+",
+    );
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn test_bt_2998_plain_value_class_without_fields_is_exempt() {
+    // Not native: `~{'$beamtalk_class' => 'Marker'}~` is its complete instance.
+    let errors = uninstantiable_new_errors(
+        "
+Value subclass: Marker
+  isMarker -> Boolean => true
+
+Value subclass: Caller
+  test => Marker new
+",
+    );
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn test_bt_2998_native_new_with_args_also_rejected() {
+    // `new:` merges over what `new` builds, so it is just as hollow.
+    let errors = uninstantiable_new_errors(
+        "
+Value subclass: Stopwatch native: beamtalk_stopwatch
+  class sealed started -> Stopwatch => self delegate
+
+Value subclass: Caller
+  test => Stopwatch new: #{}
+",
+    );
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert!(
+        errors[0].message.contains("`new:`"),
+        "{}",
+        errors[0].message
+    );
+}
+
 // ── ADR 0050 Phase 4: analyse_with_known_vars_and_classes ──
 
 #[test]

@@ -137,3 +137,13 @@ TestCase subclass: StreamTest
     // BT-765: take: with non-integer argument raises type_error
     @expect all
     self should: [(Stream from: 1) take: "five"] raise: #type_error
+
+  // BT-2998: a Stream is beamtalk_stream's generator closure, so the inherited
+  // `basicNew` had nothing to build it from and produced a hollow instance.
+  // (`Stream` is Object-kind, so BT-1540 already rejected this at compile time
+  // — what is new is that the dynamic path no longer returns a broken value.)
+  testBareNewIsDisabled =>
+    @expect type
+    self should: [Stream new] raise: #instantiation_error
+    // The keyword form has refused all along; both now agree.
+    self should: [Stream new: 5] raise: #user_error
