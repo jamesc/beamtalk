@@ -305,6 +305,13 @@ enum UninstantiableNew {
 /// Classifies `class_name new`/`new:`, or `None` when the send is fine.
 ///
 /// Only fires for classes known in the hierarchy (unknown classes get DNU instead).
+///
+/// The `native:` arm needs `ClassInfo::is_native`, which is set when the class
+/// is built from an AST (this compilation unit) or from the generated stdlib
+/// table, but *not* from `__beamtalk_meta` — the compiled metadata carries no
+/// native flag. A `native:` class reached across a package boundary therefore
+/// degrades to `None` here and is caught by the raising `new/0` codegen emits
+/// instead (BT-2998), which is the same guard the REPL and `perform:` rely on.
 fn uninstantiable_new(
     class_name: &str,
     selector: &str,
