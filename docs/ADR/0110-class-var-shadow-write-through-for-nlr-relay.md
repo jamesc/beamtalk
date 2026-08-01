@@ -57,7 +57,7 @@ Wrapping each block-invocation site in the class method's own generated code (to
 
 ### Existing precedent for a write-through shadow
 
-`beamtalk_actor.erl` already solves a shaped-alike problem for actor state. `self_dispatch/2`'s `unwrap_dispatch_result/1` writes the actor's current state into the process dictionary (`put('$bt_actor_state', NewState)`) after every nested self-dispatch call, specifically so state mutated by a self-send doesn't need to be threaded functionally through every intermediate call frame; `restore_dispatch_pdict/1` cleans it up in an `after` block. This is the same shape of problem — state that a purely functional threading model cannot recover across a call boundary it doesn't control — solved with the same tool.
+`beamtalk_actor.erl` already solves a shaped-alike problem for actor state. `self_dispatch/2`'s `unwrap_dispatch_result/1` writes the actor's current state into the process dictionary (`put('$bt_actor_state', NewState)`) after every nested self-dispatch call, so other code running later in the same handler sees a live, current state without it being threaded functionally through every intermediate call frame. `restore_dispatch_pdict/1` runs once, in the `after` block of the *outermost* `handle_call`/`handle_cast` — it restores whatever value (or absence) preceded that call, so the shadow never leaks into the *next*, unrelated invocation of the same gen_server. This ADR follows the same two-part discipline — write-through during the call, single cleanup at the outer boundary — not a per-nesting-level save/restore; see the Runtime change below for why that distinction matters here.
 
 ### Constraints
 
@@ -72,7 +72,7 @@ Add a **process-dictionary shadow write-through**, scoped narrowly to the one ca
 
 ### Codegen change
 
-Class-var assignment (`self.foo := value`) already funnels through one function, `CoreErlangGenerator::generate_field_assignment` (`crates/beamtalk-core/src/codegen/core_erlang/expressions.rs`), which emits `let ClassVarsN = call 'maps':'put'(field, Val, ClassVars{N-1}) in` and flips a sticky per-method `class_var_mutated` flag via `next_class_var()` (`core_erlang/mod.rs`) — the same flag that already gates `NlrBoundary::ClassMethod { has_class_vars }`. Add one more line at that single emission site, writing the just-updated map into a fixed process-dictionary key:
+Class-var assignment (`self.foo := value`) already funnels through one function, `CoreErlangGenerator::generate_field_assignment` (`crates/beamtalk-core/src/codegen/core_erlang/expressions.rs`), which emits `let ClassVarsN = call 'maps':'put'(field, Val, ClassVars{N-1}) in` and flips a sticky per-method `class_var_mutated` flag via `next_class_var()` (`core_erlang/mod.rs`) — the same flag that already gates `NlrBoundary::ClassMethod { has_class_vars }`. Add one more line at that emission site, writing the just-updated map into a fixed process-dictionary key:
 
 ```erlang
 let Val = <value> in
@@ -80,7 +80,13 @@ let ClassVars1 = call 'maps':'put'('runs', Val, ClassVars0) in
 let _ = call 'erlang':'put'('$bt_class_vars_shadow', ClassVars1) in
 ```
 
-This only fires for class methods that already have `class_var_mutated = true` — i.e., exactly the methods that already pay the `ClassVars` threading cost today. Methods with no class-var mutations emit nothing new; no new analysis pass is needed.
+**This must be gated on `self.block_depth == 0`, not just `self.in_class_method()`.** `in_class_method()` is a lexical flag that stays `true` for the entire method body, including inside nested block literals — but a block literal written inside class P's method can be invoked *from a different class's process* (per ADR 0109 / the block-runs-where-invoked semantics documented in `beamtalk-language-features.md`). Writing the shadow unconditionally would let a block invoked while executing inside class C's gen_server write class P's `ClassVars` into the pdict key that C's own `invoke_class_method/7` reads back — corrupting an unrelated class's persisted state on a foreign-NLR relay. `block_depth` (already tracked in `CoreErlangGenerator`, incremented in `generate_block`) distinguishes "top-level statement in the method body" from "inside a nested block," so the gate becomes `self.in_class_method() && self.block_depth == 0 && self.class_var_names().contains(field_name)`.
+
+This scoping is not a new limitation — it matches existing behavior. `generate_block` already saves and restores `class_var_version` around a block's body (BT-1550, "so self-calls inside a conditional branch don't leak `ClassVars{N}` bindings into the outer scope"), meaning a class-var mutation made *inside* a block is already discarded on the method's normal-return path today. Scoping the shadow to `block_depth == 0` keeps the shadow's contents consistent with what already survives normal return — it does not shadow anything that wasn't already going to be lost.
+
+This only fires for top-level mutations in class methods that already have `class_var_mutated = true` — i.e., exactly the methods that already pay the `ClassVars` threading cost today. Methods with no class-var mutations, and blocks nested inside any method, emit nothing new; no new analysis pass is needed.
+
+**Scope boundary:** this covers compiled Beamtalk class methods only. Class methods installed as runtime `ClassBuilder` funs (ADR 0084) and class methods implemented directly in hand-written Erlang do not go through `generate_field_assignment`, so a class-var mutation in either of those, followed by a foreign-NLR relay, keeps today's lossy behavior. Extending coverage to those paths is out of scope for this ADR.
 
 ### Runtime change
 
@@ -88,7 +94,7 @@ This only fires for class methods that already have `class_var_mutated = true` �
 
 ```erlang
 invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningModule, ClassVars) ->
-    Reply =
+    try
         case apply_class_method_in_context(Selector, Args, ClassName, DefiningClass, DefiningModule, ClassVars) of
             test_spawn ->
                 test_spawn;
@@ -114,12 +120,15 @@ invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningM
             {error, {raised, _ErrClass, Error, _ST}} ->
                 %% Genuine error: revert, exactly as today.
                 {reply, {error, Error}, ClassVars}
-        end,
-    erlang:erase('$bt_class_vars_shadow'),
-    Reply.
+        end
+    after
+        erlang:erase('$bt_class_vars_shadow')
+    end.
 ```
 
-The unconditional `erase/1` after the `case` — on every outcome, including `test_spawn` and the ordinary success path — guarantees the shadow never survives past a single `class_method_call`/`metaclass_method_call`, so a later, unrelated call on the same class gen_server can never read a stale value. `invoke_class_method/7` is always the outermost frame for a given external call: `class_self_dispatch/4` and `class_self_dispatch_local/4` (the self-send path) call `apply_class_method_in_context/6` directly and run in the same process without a new gen_server hop, so a foreign NLR relayed through a self-send still unwinds to this same `case` before the call returns — no separate handling needed there. Cross-class self-dispatch is impossible by construction (`class_self_dispatch` only walks one class's own superclass chain), and different classes are different gen_server processes with independent process dictionaries, so there is no cross-class shadow collision to guard against.
+The `after` clause — not a bare trailing statement — is required here: `apply_class_method_in_context/6` has an un-`try`'d prelude (`beamtalk_class_registry:class_object_tag/1`, `lookup_class_method_fun/2`, `is_test_execution_selector/1`) that could in principle raise before the `case` ever completes, and the class gen_server is long-lived, so any path that skipped the erase would leave a stale shadow for the *next unrelated call* to read. `try ... after ... end` guarantees the erase runs regardless.
+
+This guarantees the shadow never survives past a single `class_method_call`/`metaclass_method_call`, so a later, unrelated call on the same class gen_server can never read a stale value. `invoke_class_method/7` is always the outermost frame for a given external call: `class_self_dispatch/4` and `class_self_dispatch_local/4` (the self-send path) call `apply_class_method_in_context/6` directly and run in the same process without a new gen_server hop, so a chain of self-dispatched calls within one external call writes the shadow sequentially (each mutation overwrites the previous value) and a foreign NLR relayed through any depth of that chain still unwinds to this same `try` before the call returns. No per-nesting-level save/restore is needed — unlike `beamtalk_actor.erl`'s `'$bt_actor_state'`, which restores the pre-call value in its `after` because instance self-dispatch exposes "the currently live state" *during* the chain for other code to read; here nothing reads the shadow until after the whole chain has finished, so straight overwrite-and-erase-once-at-the-end is sufficient. Cross-class self-dispatch is impossible by construction (`class_self_dispatch` only walks one class's own superclass chain), and different classes are different gen_server processes with independent process dictionaries, so there is no cross-class shadow collision through self-dispatch — the collision risk was in codegen (see above), not here.
 
 ### REPL example
 
@@ -233,32 +242,56 @@ Warn when a class method both mutates a class variable and takes a `Block` param
 
 **Rejected** (already investigated in the BT-3032 issue itself): that shape is common and legitimate (most block-taking class methods with class-var mutations never have the block's `^` escape); the warning would be wrong almost every time it fired.
 
+### Alternative F: Wrap the continuation at each mutation site (pure codegen, no pdict)
+
+Instead of a process-dictionary shadow, wrap the *continuation* after each top-level class-var mutation in a `try`/`catch` that intercepts any escaping exception, and — if it's a non-matching (`foreign`) NLR — re-throws it carrying the in-scope `ClassVarsN` as an auxiliary payload rather than the original tuple's own (unrelated) state field:
+
+```erlang
+let ClassVars1 = call 'maps':'put'('runs', Val, ClassVars0) in
+try
+    <rest of method body, using ClassVars1>
+catch <Cls, Err, Stk> ->
+    case {Cls, Err} of
+      <{'throw', {'$bt_nlr', _T, _V, _S} = Nlr}> when 'true' ->
+          primop 'raw_raise'('throw', {'$bt_nlr_with_cv', Nlr, ClassVars1}, Stk)
+      <_> when 'true' ->
+          primop 'raw_raise'(Cls, Err, Stk)
+    end
+end
+```
+
+This is a genuinely strong alternative: it never touches the process dictionary, so it has none of Option C's cross-process contamination risk (this ADR's own codegen fix above exists only because the pdict approach needed one) and composes with nesting for free (each mutation's `try` wraps a strictly smaller continuation than the last, so the innermost one to fire carries the most current `ClassVarsN`). The outermost `wrap_class_method_body_with_nlr_catch` would need to recognize the new `{'$bt_nlr_with_cv', Nlr, CV}` wrapper and use `CV` instead of `ClassVars` when relaying `Nlr` onward.
+
+**Rejected in favor of Option C, but noted as the strongest alternative found during review:** it requires new `try`/`catch` scaffolding at *every* class-var mutation site (not just a one-line `put/2`), plus a second wrapper shape the relay path and every consumer of the NLR tuple must now recognize alongside the plain 4-tuple — more codegen surface than Option C for the same observable fix. If Option C's process-dictionary side channel proves troublesome in practice (e.g. the coupling noted in Consequences below), this is the fallback to revisit.
+
 ## Consequences
 
 ### Positive
 - Class-var mutations made before a `^` escapes a class method survive the unwind, matching the existing correct behavior for value types and actor fields (ADR 0041) and for a class method's own `^` (BT-3022).
 - Genuine errors continue to revert class-var mutations, unchanged.
-- No hot-path cost for the majority of class methods (no class vars).
+- No hot-path cost for the majority of class methods (no class vars), and none for mutations made inside blocks (already excluded, matching their existing normal-return behavior).
 - Reuses an existing, narrow, well-understood pattern already in the codebase (`'$bt_actor_state'`) rather than introducing a new state-management concept.
-- The trap documented in `beamtalk-language-features.md` § Passing Blocks Through Class Methods is closed rather than merely better-documented.
+- The trap documented in `beamtalk-language-features.md` § Passing Blocks Through Class Methods is closed rather than merely better-documented, for the compiled-class-method case.
+- The process dictionary dies with its process: a class gen_server crash and supervisor restart cannot carry a stale shadow into the fresh process, since `erlang:get/1` on a freshly-started process is always `undefined`.
 
 ### Negative
-- Introduces a process-dictionary side channel, which is easy to misuse if a future change adds another write site without also erasing it on every exit path. Mitigated by scoping the write to a single codegen emission point (`generate_field_assignment`) and the erase to a single unconditional statement at the end of `invoke_class_method/7`, analogous to `restore_dispatch_pdict/1`'s discipline.
-- Two representations of "the current class-var mutation" exist simultaneously for the duration of a call that has one (the functional `ClassVarsN` binding and the shadow) — a future maintainer touching class-var codegen must know both need updating together. A code comment at both emission sites should cross-reference this ADR.
-- `invoke_class_method/7` gains a guard (`?IS_NLR(Error)`) whose correctness depends on `apply_class_method_fun/6` and `apply_compiled_class_method/7` continuing to route genuine errors and NLR passthroughs to separate `catch` clauses before either reaches this point — true today, but a future change to either function's exception handling could silently break the discrimination. Worth a code comment cross-referencing this ADR at both sites, not just a new one.
+- Introduces a process-dictionary side channel, which is easy to misuse if a future change adds another write site without also erasing it on every exit path. Mitigated by scoping the write to a single codegen emission point (`generate_field_assignment`, gated on `block_depth == 0`) and the erase to a single `try ... after ... end` at the end of `invoke_class_method/7`.
+- Two representations of "the current class-var mutation" exist simultaneously for the duration of a call that has one (the functional `ClassVarsN` binding and the shadow) — a future maintainer touching class-var codegen must know both need updating together, and that the shadow write must stay excluded inside blocks. A code comment at both emission sites should cross-reference this ADR.
+- `invoke_class_method/7` gains a guard (`?IS_NLR(Error)`) whose correctness depends on `apply_class_method_fun/6` and `apply_compiled_class_method/7` continuing to route genuine errors and NLR passthroughs to separate `catch` clauses before either reaches this point — true today, but a future change to either function's exception handling could silently break the discrimination. Worth a code comment cross-referencing this ADR at both sites, not just the new one.
+- Coverage is partial: only class methods compiled through `generate_field_assignment` are fixed. Class methods installed as runtime `ClassBuilder` funs (ADR 0084) or implemented directly in hand-written Erlang keep today's lossy behavior, since they never emit the shadow write. Not addressed by this ADR.
 
 ### Neutral
 - No change to the NLR token/relay mechanism itself (`class_send_dispatch/3`, `metaclass_send_dispatch/4`, `class_self_dispatch/4`'s existing BT-3022 relays), only to which `ClassVars` value `invoke_class_method/7` hands back to the gen_server callback afterward.
 - No change to the actor or value-type NLR paths — this is scoped to class methods only, since they are the only context with a separate `ClassVars` bucket distinct from the block's own `State`.
-- No change to `class_method_outcome/0` or any of its other consumers — the fix is a single new guarded clause plus an unconditional trailing erase, both inside `invoke_class_method/7`.
+- No change to `class_method_outcome/0` or any of its other consumers — the fix is a single new guarded clause plus a `try ... after` erase, both inside `invoke_class_method/7`.
 
 ## Implementation
 
 Affected components: codegen (`crates/beamtalk-core/src/codegen/core_erlang/expressions.rs` — `generate_field_assignment`, the class-var mutation emission site) and runtime (`runtime/apps/beamtalk_runtime/src/beamtalk_class_dispatch.erl` — `invoke_class_method/7` only).
 
-1. Add the `'$bt_class_vars_shadow'` `put/2` emission immediately after the existing `let ClassVarsN = call 'maps':'put'(...) in` in `generate_field_assignment`'s class-var branch (gated by the same `self.in_class_method() && self.class_var_names().contains(field_name)` condition already there — no new analysis pass needed).
-2. Restructure `invoke_class_method/7` to bind its `case` result to `Reply`, add the new `{error, {raised, throw, Error, _ST}} when ?IS_NLR(Error)` clause ordered before the existing generic `{error, {raised, _ErrClass, Error, _ST}}` clause, and append the unconditional `erlang:erase('$bt_class_vars_shadow')` before returning `Reply`.
-3. Regression test in `stdlib/test/` using the repro from this ADR's Context section, plus a companion test asserting a genuine error after a mutation still reverts, and a third asserting a self-dispatched (`self otherClassMethod:`) inherited method's mutation also survives a foreign-NLR relay.
+1. Add the `'$bt_class_vars_shadow'` `put/2` emission immediately after the existing `let ClassVarsN = call 'maps':'put'(...) in` in `generate_field_assignment`'s class-var branch, gated on `self.in_class_method() && self.block_depth == 0 && self.class_var_names().contains(field_name)` — the `block_depth == 0` clause is new; the rest is the existing condition. No new analysis pass needed.
+2. Restructure `invoke_class_method/7` to wrap its existing `case` in `try ... after erlang:erase('$bt_class_vars_shadow') end`, and add the new `{error, {raised, throw, Error, _ST}} when ?IS_NLR(Error)` clause ordered before the existing generic `{error, {raised, _ErrClass, Error, _ST}}` clause.
+3. Regression tests in `stdlib/test/`: the repro from this ADR's Context section; a companion test asserting a genuine error after a mutation still reverts; a third asserting a self-dispatched (`self otherClassMethod:`) inherited method's mutation also survives a foreign-NLR relay; and a fourth asserting a mutation made *inside a block* passed to another class's method still behaves as it does today (discarded on normal return, not newly preserved) — to lock in the `block_depth == 0` scoping decision as intentional, not an oversight.
 
 ## References
 - Related issues: BT-3032 (the issue this ADR resolves), BT-3022 (parent — fixed the value-return path, left class vars unfixed)
