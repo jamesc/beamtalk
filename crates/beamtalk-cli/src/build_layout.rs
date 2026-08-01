@@ -120,9 +120,13 @@ impl BuildLayout {
     /// Compared against the currently declared graph so a *structural* change
     /// — most importantly a dependency's source type swapping between git and
     /// path in an intermediate manifest — is detected as stale, which no
-    /// mtime, lockfile, or ebin-presence check catches. The leading dot keeps
-    /// it out of the way of the per-dependency directories that share
-    /// `_build/deps/` (and that `clean_stale_deps` scans).
+    /// mtime, lockfile, or ebin-presence check catches.
+    ///
+    /// Sharing `_build/deps/` with the per-dependency directories is safe
+    /// because every consumer filters to directories: `clean_stale_deps`
+    /// skips non-directory entries outright, and `collect_dep_ebin_paths`
+    /// only accepts `<entry>/ebin`. The leading dot is convention, not what
+    /// makes it safe — a dotless name would be equally well protected.
     pub fn dep_graph_path(&self) -> Utf8PathBuf {
         self.deps_dir().join(".dep-graph.json")
     }
