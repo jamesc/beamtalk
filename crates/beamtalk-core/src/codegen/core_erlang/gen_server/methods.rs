@@ -12,6 +12,7 @@ use super::super::document::leaf::fname;
 use super::super::document::{Document, INDENT, join, leaf, line, nest};
 use super::super::selector_mangler::safe_class_method_fn_name;
 use super::super::spec_codegen;
+use super::super::value_type_codegen::has_opaque_native_representation;
 use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{
     Block, CascadeMessage, ClassDefinition, ClassKind, Expression, Identifier, Literal, MapPair,
@@ -1619,6 +1620,21 @@ impl CoreErlangGenerator {
             .any(|m| Self::is_self_error_body(&m.body))
     }
 
+    /// BT-2998: whether the class declares a unary `new` of its own, on either
+    /// side, and so keeps control of `new/0` (`Random`, `Queue`, `Announcer`).
+    ///
+    /// Mirrors the `has_explicit_new` / `has_explicit_class_new` test in
+    /// `generate_value_type_module`, which is what decides whether the
+    /// auto-generated — and now possibly raising — `new/0` is emitted at all.
+    fn declares_own_new(class: &ClassDefinition) -> bool {
+        class
+            .methods
+            .iter()
+            .chain(class.class_methods.iter())
+            .filter(|m| m.kind == MethodKind::Primary)
+            .any(|m| m.selector == MessageSelector::Unary("new".into()))
+    }
+
     /// Check if a method body is a single `self error: <StringLiteral>` expression.
     fn is_self_error_body(body: &[crate::ast::ExpressionStatement]) -> bool {
         if body.len() != 1 {
@@ -1839,9 +1855,16 @@ impl CoreErlangGenerator {
             // so the runtime can fall back to lazy computation — this is needed
             // because primitive classes (String, Integer, etc.) have raising new/0
             // in Erlang, not in Beamtalk AST.
+            //
+            // BT-2998: a `native:` class with no declared fields and no `new` of
+            // its own now compiles a raising `new/0` too (see
+            // `has_opaque_native_representation`). The runtime would reach the
+            // same answer lazily by calling that `new/0` and catching, but
+            // stating it up front keeps the registered metadata honest.
             let is_non_constructible = class.is_abstract
                 || self.context == CodeGenContext::Actor
-                || Self::has_raising_new(class);
+                || Self::has_raising_new(class)
+                || (has_opaque_native_representation(class) && !Self::declares_own_new(class));
 
             // ADR 0050 Phase 5: BuilderState carries only module/source/signature/doc metadata.
             // Static fields (flags, fields, method signatures) are read from __beamtalk_meta/0

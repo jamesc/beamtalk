@@ -20,7 +20,7 @@ use super::util::ClassIdentity;
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::{
     Block, ClassDefinition, ClassKind, Expression, MessageSelector, MethodDefinition, MethodKind,
-    Module, WellKnownSelector,
+    Module, TypeAnnotation, WellKnownSelector,
 };
 use crate::docvec;
 
@@ -148,6 +148,93 @@ pub(super) fn compute_auto_slot_methods(class: &ClassDefinition) -> Option<AutoS
     })
 }
 
+/// BT-2998: whether this class's instances are opaque terms owned entirely by
+/// a paired Erlang module, so the inherited `basicNew` cannot build one.
+///
+/// `Value class>>new` is `@intrinsic basicNew`, which compiles to a map of
+/// `$beamtalk_class` plus every declared field's default. That is a complete
+/// instance for an ordinary value type — but a `native:` class keeps its state
+/// in the shape its backing module defines (`beamtalk_datetime`'s calendar
+/// tuple, `beamtalk_uuid`'s 16 raw bytes, …) and declares no BT fields to
+/// stand in for it. `basicNew` therefore yields `~{'$beamtalk_class' => 'X'}~`:
+/// correctly tagged, so dispatch accepts it, and empty, so the very first
+/// method call dies inside the Erlang module on an unrelated-looking
+/// `function_clause`. Codegen raises a clear `instantiation_error` instead.
+///
+/// Deliberately narrow on both counts:
+///
+/// * A `native:` class that *does* declare fields (`Package`,
+///   `SupervisionNode`) has a real default instance, so `basicNew` is right.
+/// * A class that declares its own `new` (`Random`, `Queue`) already routes
+///   `new/0` through `generate_delegating_new` to that method; this predicate
+///   is only consulted on the auto-generated path.
+pub(in crate::codegen::core_erlang) fn has_opaque_native_representation(
+    class: &ClassDefinition,
+) -> bool {
+    class.backing_module.is_some() && class.state.is_empty()
+}
+
+/// BT-2998: the class-side selectors that actually produce an instance of
+/// `class`, for the `instantiation_error` hint.
+///
+/// A class method counts when its declared return type mentions the class
+/// anywhere — directly (`now -> DateTime`) or nested in a generic
+/// (`from: -> Result(Regex, Error)`). That deliberately skips the class-side
+/// utilities these classes also carry (`DateTime monotonicNow -> Integer`,
+/// `Uuid isValid: -> Boolean`) and the `new`/`new:` refusals themselves.
+/// Declaration order is preserved so the hint is deterministic, and the list is
+/// capped at [`MAX_HINTED_CONSTRUCTORS`] so a wide class-side API cannot turn
+/// one error message into a wall of text.
+fn native_constructor_selectors(class: &ClassDefinition) -> Vec<String> {
+    class
+        .class_methods
+        .iter()
+        .filter(|m| m.kind == MethodKind::Primary)
+        .filter(|m| !matches!(m.selector.name().as_str(), "new" | "new:"))
+        .filter(|m| {
+            m.return_type
+                .as_ref()
+                .is_some_and(|t| type_mentions_class(t, class.name.name.as_str()))
+        })
+        .map(|m| m.selector.name().to_string())
+        .collect()
+}
+
+/// How many constructors the BT-2998 `instantiation_error` hint names before
+/// it stops. `DateTime` — the widest in the stdlib — declares seven.
+const MAX_HINTED_CONSTRUCTORS: usize = 6;
+
+/// Whether `annotation` names `class_name` at any depth (BT-2998).
+///
+/// `Self` counts too: in return position it resolves to the receiver class.
+fn type_mentions_class(annotation: &TypeAnnotation, class_name: &str) -> bool {
+    match annotation {
+        TypeAnnotation::Simple(id) => id.name == class_name,
+        TypeAnnotation::SelfType { .. } => true,
+        TypeAnnotation::Generic {
+            base, parameters, ..
+        } => {
+            base.name == class_name
+                || parameters
+                    .iter()
+                    .any(|p| type_mentions_class(p, class_name))
+        }
+        TypeAnnotation::Union { types, .. } => {
+            types.iter().any(|t| type_mentions_class(t, class_name))
+        }
+        TypeAnnotation::FalseOr { inner, .. } => type_mentions_class(inner, class_name),
+        TypeAnnotation::Difference { base, .. } => type_mentions_class(base, class_name),
+        TypeAnnotation::Intersection { left, right, .. } => {
+            type_mentions_class(left, class_name) || type_mentions_class(right, class_name)
+        }
+        // A metaclass return (`Self class`, `Foo class`) is not an instance,
+        // and a singleton type never names a class.
+        TypeAnnotation::SelfClass { .. }
+        | TypeAnnotation::ClassOf { .. }
+        | TypeAnnotation::Singleton { .. } => false,
+    }
+}
+
 // Auto-generated from lib/*.bt by build.rs — do not edit manually.
 include!(concat!(env!("OUT_DIR"), "/stdlib_types.rs"));
 
@@ -258,7 +345,7 @@ impl CoreErlangGenerator {
         // because that method compiles to 'new'/1 (Self parameter), which would clash
         // with the auto-generated 'new'/1 (InitArgs parameter).
         if !has_explicit_new_with && !has_explicit_new {
-            docs.push(self.generate_value_type_new_with_args()?);
+            docs.push(self.generate_value_type_new_with_args(class)?);
             docs.push(Document::Str("\n"));
         }
 
@@ -504,6 +591,7 @@ impl CoreErlangGenerator {
     ///
     /// - Non-instantiable primitives (Integer, String, etc.): raises `instantiation_error`
     /// - Collection primitives (Dictionary, List, Tuple): returns empty native value
+    /// - `native:` classes carrying no declared fields (BT-2998): raises `instantiation_error`
     /// - Other value types: creates an instance map with `$beamtalk_class` and defaults
     fn generate_value_type_new(&mut self, class: &ClassDefinition) -> Result<Document<'static>> {
         let class_name = self.class_name().clone();
@@ -512,6 +600,10 @@ impl CoreErlangGenerator {
         }
         if let Some(empty_val) = Self::collection_empty_value(class_name.as_str()) {
             return Ok(Self::generate_collection_new(empty_val));
+        }
+        // BT-2998: a hollow-instance `new` is worse than no `new` at all.
+        if has_opaque_native_representation(class) {
+            return Ok(Self::generate_native_new_error(class, "new", 0));
         }
 
         // BT-1559: For Value sub-subclasses (superclass is not "Value" itself),
@@ -665,8 +757,12 @@ impl CoreErlangGenerator {
     /// - Non-instantiable primitives: raises `instantiation_error`
     /// - Dictionary: returns `InitArgs` directly (dictionary IS a map)
     /// - List, Tuple: raises `instantiation_error` (no meaningful init-from-map)
+    /// - `native:` classes carrying no declared fields (BT-2998): raises `instantiation_error`
     /// - Other value types: merges initialization arguments with defaults
-    fn generate_value_type_new_with_args(&mut self) -> Result<Document<'static>> {
+    fn generate_value_type_new_with_args(
+        &mut self,
+        class: &ClassDefinition,
+    ) -> Result<Document<'static>> {
         let class_name = self.class_name().clone();
         if Self::is_non_instantiable_primitive(class_name.as_str()) {
             return self.generate_primitive_new_error(class_name.as_str(), "new:", 1);
@@ -678,6 +774,11 @@ impl CoreErlangGenerator {
         // List and Tuple have no meaningful init-from-map pattern
         if Self::collection_empty_value(class_name.as_str()).is_some() {
             return self.generate_primitive_new_error(class_name.as_str(), "new:", 1);
+        }
+        // BT-2998: `new:` merges over what `new` builds, so an opaque native
+        // representation leaves it just as hollow — same error, same guidance.
+        if has_opaque_native_representation(class) {
+            return Ok(Self::generate_native_new_error(class, "new:", 1));
         }
 
         let module_name = self.module_name.clone();
@@ -724,6 +825,79 @@ impl CoreErlangGenerator {
             "    call 'beamtalk_error':'raise'(Error2)\n",
             "\n",
         ])
+    }
+
+    /// BT-2998: generates a `new`/`new:` function that raises `instantiation_error`
+    /// for a `native:` class whose instances only the backing module can build.
+    ///
+    /// The hint names the class's own class-side constructors (see
+    /// [`native_constructor_selectors`]) so the message points at the way out
+    /// rather than just refusing, e.g.
+    ///
+    /// ```text
+    /// DateTime instances are built by the beamtalk_datetime module, not from
+    /// field defaults — `new` cannot produce a usable one. Use one of:
+    /// DateTime now, DateTime year:month:day:, DateTime fromTimestamp:
+    /// ```
+    fn generate_native_new_error(
+        class: &ClassDefinition,
+        selector: &str,
+        arity: usize,
+    ) -> Document<'static> {
+        let class_name = class.name.name.as_str();
+        let backing = class
+            .backing_module
+            .as_ref()
+            .map_or("its backing", |m| m.name.as_str());
+
+        let mut hint = format!(
+            "{class_name} instances are built by the {backing} module, not from field \
+             defaults — `{selector}` cannot produce a usable one."
+        );
+        let constructors = native_constructor_selectors(class);
+        if constructors.is_empty() {
+            hint.push_str(" It has no class-side constructor.");
+        } else {
+            let _ = write!(
+                hint,
+                " Use one of: {}",
+                constructors
+                    .iter()
+                    .take(MAX_HINTED_CONSTRUCTORS)
+                    .map(|sel| format!("{class_name} {sel}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            if constructors.len() > MAX_HINTED_CONSTRUCTORS {
+                let _ = write!(
+                    hint,
+                    ", and {} more",
+                    constructors.len() - MAX_HINTED_CONSTRUCTORS
+                );
+            }
+        }
+
+        let function_head = if arity == 0 {
+            "'new'/0 = fun () ->"
+        } else {
+            "'new'/1 = fun (_InitArgs) ->"
+        };
+
+        docvec![
+            function_head,
+            "\n",
+            "    let Error0 = call 'beamtalk_error':'new'('instantiation_error', ",
+            leaf::atom(class_name.to_string()),
+            ") in\n",
+            "    let Error1 = call 'beamtalk_error':'with_selector'(Error0, ",
+            leaf::atom(selector.to_string()),
+            ") in\n",
+            "    let Error2 = call 'beamtalk_error':'with_hint'(Error1, ",
+            leaf::binary_lit(&hint),
+            ") in\n",
+            "    call 'beamtalk_error':'raise'(Error2)\n",
+            "\n",
+        ]
     }
 
     /// Generates `new/0` for a collection type that returns an empty native value.
