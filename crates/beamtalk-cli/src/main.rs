@@ -350,6 +350,16 @@ enum Command {
         dry_run: bool,
     },
 
+    /// Render the package registry index as a static site (BT-2990)
+    ///
+    /// A read-only view of the registry index — no server, mirroring
+    /// `beamtalk doc --site`. Distinct from `beamtalk deps`, which consumes
+    /// registry dependencies rather than rendering the index itself.
+    Registry {
+        #[command(subcommand)]
+        action: commands::registry::cli::RegistryCommand,
+    },
+
     /// Generate code from Beamtalk sources (native Erlang stubs, FFI stubs)
     Generate {
         #[command(subcommand)]
@@ -636,6 +646,7 @@ fn run() -> Result<()> {
         Command::Deps { action } => commands::deps::cli::run(action),
         Command::Version { args } => commands::version::run(&args),
         Command::Publish { dry_run } => commands::publish::run(dry_run),
+        Command::Registry { action } => commands::registry::cli::run(action),
         Command::Doctor { dev } => commands::doctor::run(dev),
         Command::Doc {
             path,
