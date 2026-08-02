@@ -24,8 +24,7 @@ TestCase subclass: ClassVarNlrShadowTest
     ClassMethodConditionalSelfCall resetCounter
     self
 
-  tearDown =>
-    self.cls isNil ifFalse: [self.cls removeFromSystem]
+  tearDown => self.cls isNil ifFalse: [self.cls removeFromSystem]
 
   // --- (a) the BT-3032 repro -----------------------------------------------
 
@@ -49,7 +48,6 @@ TestCase subclass: ClassVarNlrShadowTest
     self assert: CollectionDriver runCount equals: 2
 
   // --- (b) a genuine error still reverts -----------------------------------
-
   testGenuineErrorStillRevertsMutation =>
     // The raw badarith from `1 / 0` is classified to #type_error at the
     // class-dispatch boundary (as elsewhere off the caller's process).
@@ -91,24 +89,21 @@ TestCase subclass: ClassVarNlrShadowTest
     Object classBuilder name: #BT3037ShadowBuilt;
       superclass: Object;
       classVars: #{#runs => 0};
-      classMethods: #{
-        #countedRun:over: => [:self :aBlock :aList |
+      classMethods: #{#countedRun:over: => [:self :aBlock :aList |
           self.runs := self.runs + 1
           aList do: [:x | aBlock value: x]
           nil
-        ],
-        #runCount => [:self | self.runs]
-      };
+        ], #runCount => [:self | self.runs]};
       register
     self.cls := (Erlang beamtalk_interface) findClass: #BT3037ShadowBuilt
     self assert: (ShadowRelayProbe escapeThrough: self.cls over: #(1, 2, 3)) equals: 2
     self assert: self.cls runCount equals: 1
 
-  // A builder cascade with a *mutating* classMethods: block written inside a
-  // block literal is rejected at compile time today (BT-2792 stored-closure
-  // field-write validation sees the classMethods: mutation), so the
-  // "cascade lexically inside a block" arm of ADR 0110 — the
-  // generate_class_method_fun_from_block block_depth reset — is pinned at the
-  // Rust level instead:
-  // crates/beamtalk-core/src/codegen/core_erlang/tests/dispatch.rs,
-  // test_builder_cascade_at_block_depth_still_emits_shadow_write.
+// A builder cascade with a *mutating* classMethods: block written inside a
+// block literal is rejected at compile time today (BT-2792 stored-closure
+// field-write validation sees the classMethods: mutation), so the
+// "cascade lexically inside a block" arm of ADR 0110 — the
+// generate_class_method_fun_from_block block_depth reset — is pinned at the
+// Rust level instead:
+// crates/beamtalk-core/src/codegen/core_erlang/tests/dispatch.rs,
+// test_builder_cascade_at_block_depth_still_emits_shadow_write.
