@@ -73,7 +73,7 @@ This is by design — types are documentation-first in Beamtalk.
 
 ## Standard Library Gaps
 
-Most common utilities are now in the stdlib: `Regex`, `DateTime`, `JSON`, `Integer`/`Float` math (sqrt, trig, log), `System` (environment variables), `HTTPClient`, `Supervisor`, `DynamicSupervisor`.
+Most common utilities are now in the stdlib: `Regex`, `DateTime`, `Duration`, `JSON`, `Integer`/`Float` math (sqrt, trig, log), `Digest` (hashing/HMAC), `System` (environment variables), `Supervisor`, `DynamicSupervisor`, `RetryPolicy`, `Parallel`. HTTP is **not** in stdlib — `HTTPClient`/`HTTPServer` live in the separate [`beamtalk-http`](https://github.com/jamesc/beamtalk-http) package (add it as a dependency; see the [Package Management guide](beamtalk-packages.md)).
 
 ## Pattern Matching
 
