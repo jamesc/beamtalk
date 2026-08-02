@@ -550,6 +550,28 @@ impl CoreErlangGenerator {
                 let current_cv = self.current_class_var();
                 let val_doc = self.expression_doc(value)?;
                 let new_cv = self.next_class_var();
+                // ADR 0110 (BT-3032/BT-3037): shadow write-through so a foreign
+                // NLR (`^` belonging to another method's frame) relayed out of
+                // this class method does not lose the mutation —
+                // `invoke_class_method/7` reads '$bt_class_vars_shadow' back on
+                // the `{nlr_relay, ...}` path and erases it in `after` on every
+                // path. Gated on `block_depth == 0`: a block literal written in
+                // this method can execute in a *different* class's gen_server
+                // process (ADR 0109), where an unconditional write would corrupt
+                // that class's vars with this class's map. Top-frame-only also
+                // matches existing semantics — block-interior class-var
+                // mutations are already discarded on normal return (BT-1550).
+                let shadow_doc = if self.block_depth == 0 {
+                    docvec![
+                        "let _ = call 'erlang':'put'(",
+                        leaf::atom("$bt_class_vars_shadow"),
+                        ", ",
+                        leaf::var(new_cv.clone()),
+                        ") in ",
+                    ]
+                } else {
+                    Document::Str("")
+                };
                 let doc = docvec![
                     "let ",
                     leaf::var(val_var.clone()),
@@ -564,6 +586,7 @@ impl CoreErlangGenerator {
                     ", ",
                     leaf::var(current_cv),
                     ") in ",
+                    shadow_doc,
                 ];
                 // Store result var name for callers that need to reference it
                 self.last_open_scope_result = Some(val_var);

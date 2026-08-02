@@ -3245,6 +3245,15 @@ impl CoreErlangGenerator {
         self.reset_state_version();
         self.set_class_var_version(0);
         self.set_class_var_mutated(false);
+        // ADR 0110 (BT-3037): the fun body executes at runtime as a class
+        // method's own top frame, even when the builder cascade lexically sits
+        // inside a block (`block_depth > 0` at the cascade's position). Reset
+        // `block_depth` so `generate_field_assignment`'s shadow-write gate
+        // (`block_depth == 0`) uniformly means "the method's own top frame"
+        // across compiled methods and ClassBuilder funs alike; restored on
+        // every exit path below.
+        let saved_block_depth = self.block_depth;
+        self.block_depth = 0;
 
         // The class is reachable via the conventional literal `self` (so
         // `self.cvar` access and self-sends lower correctly — both key on the
@@ -3293,6 +3302,7 @@ impl CoreErlangGenerator {
                 Ok(doc) => doc,
                 Err(e) => {
                     self.set_current_nlr_token(None);
+                    self.block_depth = saved_block_depth;
                     self.pop_scope();
                     return Err(e);
                 }
@@ -3317,6 +3327,7 @@ impl CoreErlangGenerator {
             nest(INDENT, docvec![line(), body_doc]),
         ];
 
+        self.block_depth = saved_block_depth;
         self.pop_scope();
         Ok(doc)
     }

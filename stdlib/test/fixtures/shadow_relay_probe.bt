@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3032 / ADR 0110: owns the `^` that escapes through another class's
+// process for the class-var shadow write-through tests
+// (stdlib/test/class_var_nlr_shadow_test.bt).
+
+Value subclass: ShadowRelayProbe
+
+  // The `^` belongs to this method's frame; it escapes through
+  // ShadowRelayChild's class process (and the self-dispatched inherited
+  // method inside it).
+  class escapeThroughChild: aList :: List -> Integer =>
+    ShadowRelayChild driveWith: [:x | x > 1 ifTrue: [^x]] over: aList
+    0
+
+  // Generic variant: the driver class arrives as an argument, so the same
+  // escape works against a ClassBuilder-defined class. The target must
+  // understand #countedRun:over:.
+  class escapeThrough: k over: aList :: List -> Integer =>
+    k countedRun: [:x | x > 1 ifTrue: [^x]] over: aList
+    0
