@@ -177,46 +177,22 @@ fn validate_erlang_module_name(name: &str) -> Result<(), rmcp::ErrorData> {
 /// Validate that a string is a valid Beamtalk selector.
 ///
 /// Accepts keyword/unary selectors (`increment`, `at:put:`) and binary operator
-/// selectors (`+`, `>=`, `**`) matching the lexer's `is_binary_selector_char`.
+/// selectors (`+`, `>=`, `**`). The canonical shape check is
+/// `beamtalk_core::source_analysis::is_valid_selector`.
 fn validate_selector(sel: &str) -> Result<(), rmcp::ErrorData> {
-    fn is_binary_selector_char(c: char) -> bool {
-        matches!(
-            c,
-            '+' | '-' | '*' | '/' | '<' | '>' | '=' | '~' | '%' | '&' | '?' | ',' | '\\'
-        )
-    }
-
     if sel.is_empty() {
         return Err(rmcp::ErrorData::invalid_params(
             "Selector must not be empty.",
             None,
         ));
     }
-
-    // Binary operator selectors: all chars are operator chars
-    let first = sel.chars().next().unwrap();
-    if is_binary_selector_char(first) {
-        if sel.chars().all(is_binary_selector_char) {
-            return Ok(());
-        }
+    if !beamtalk_core::source_analysis::is_valid_selector(sel) {
         return Err(rmcp::ErrorData::invalid_params(
-            format!("Invalid binary selector: '{sel}'."),
+            format!("Invalid selector: '{sel}'."),
             None,
         ));
     }
-
-    // Keyword/unary selectors: alphanumeric, underscores, and colons
-    if sel
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == ':')
-    {
-        return Ok(());
-    }
-
-    Err(rmcp::ErrorData::invalid_params(
-        format!("Invalid selector: '{sel}'."),
-        None,
-    ))
+    Ok(())
 }
 
 /// Pretty-print a JSON value, falling back to `Display` on serialization error.

@@ -80,6 +80,38 @@ pub fn is_valid_class_name(name: &str) -> bool {
         && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
+/// Returns `true` if `sel` is a valid Beamtalk selector.
+///
+/// Three shapes are accepted:
+/// - **Unary / keyword**: non-empty, all characters are ASCII alphanumeric,
+///   underscore, or `:` (e.g. `increment`, `at:put:`).
+/// - **Binary operator**: non-empty, all characters are operator characters
+///   from the set `+ - * / < > = ~ % & ? , \` (e.g. `+`, `>=`, `**`).
+///
+/// Mixed shapes (e.g. a string that starts with an operator char but also
+/// contains alphanumerics) are rejected.
+///
+/// This is the canonical definition; tools that validate user-supplied
+/// selectors (LSP, MCP) must delegate their boolean check here so the rule
+/// stays in one place.
+pub fn is_valid_selector(sel: &str) -> bool {
+    fn is_binary_selector_char(c: char) -> bool {
+        matches!(
+            c,
+            '+' | '-' | '*' | '/' | '<' | '>' | '=' | '~' | '%' | '&' | '?' | ',' | '\\'
+        )
+    }
+
+    let mut chars = sel.chars();
+    match chars.next() {
+        None => false,
+        Some(first) if is_binary_selector_char(first) => chars.all(is_binary_selector_char),
+        Some(_) => sel
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == ':'),
+    }
+}
+
 #[cfg(test)]
 mod naming_tests {
     use super::*;
@@ -115,5 +147,40 @@ mod naming_tests {
     #[test]
     fn invalid_digit_start() {
         assert!(!is_valid_class_name("123Foo"));
+    }
+
+    #[test]
+    fn selector_unary() {
+        assert!(is_valid_selector("increment"));
+        assert!(is_valid_selector("size"));
+        assert!(is_valid_selector("printString"));
+    }
+
+    #[test]
+    fn selector_keyword() {
+        assert!(is_valid_selector("at:"));
+        assert!(is_valid_selector("at:put:"));
+        assert!(is_valid_selector("do:separatedBy:"));
+    }
+
+    #[test]
+    fn selector_binary() {
+        assert!(is_valid_selector("+"));
+        assert!(is_valid_selector(">="));
+        assert!(is_valid_selector("**"));
+        assert!(is_valid_selector("~="));
+    }
+
+    #[test]
+    fn selector_empty_is_invalid() {
+        assert!(!is_valid_selector(""));
+    }
+
+    #[test]
+    fn selector_mixed_shapes_invalid() {
+        assert!(!is_valid_selector("+foo"));
+        assert!(!is_valid_selector("foo+"));
+        assert!(!is_valid_selector("has space"));
+        assert!(!is_valid_selector("bad!char"));
     }
 }
