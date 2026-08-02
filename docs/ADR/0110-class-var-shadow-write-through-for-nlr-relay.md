@@ -149,7 +149,7 @@ invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningM
     end.
 ```
 
-The other consumer of `class_method_outcome()`, `unwrap_self_dispatch_outcome/3`, gains a clause with behavior identical to the path it takes today (`{error, {raised, throw, Nlr, ST}}` → `erlang:raise/3`):
+The other consumer of `class_method_outcome()`, `unwrap_self_dispatch_outcome/3`, gains a clause with behavior identical to how those throws unwind today — currently there is no throw-specific clause; the generic `{error, {raised, ErrClass, Error, ST}} -> erlang:raise(ErrClass, Error, ST)` catch-all handles them, binding `ErrClass = throw` for a relayed NLR:
 
 ```erlang
 {nlr_relay, Nlr, ST} ->
