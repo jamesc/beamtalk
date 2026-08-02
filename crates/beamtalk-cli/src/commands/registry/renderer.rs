@@ -153,10 +153,20 @@ pub(super) fn write_detail_page(output_dir: &Utf8Path, entry: &RegistryEntry) ->
             let git = html_escape(&release.git);
             let tag = html_escape(&release.tag);
             let snippet = dependency_snippet(&entry.name, &release.version);
+            // release.git is untrusted third-party data (parsed from a TOML index
+            // entry, not necessarily written by `beamtalk publish`). html_escape
+            // neutralizes markup but not a `javascript:`/`data:` URI scheme, so
+            // only linkify known-safe schemes; otherwise render as plain text.
+            let git_href =
+                if release.git.starts_with("https://") || release.git.starts_with("http://") {
+                    format!("<a href=\"{git}\">{git}</a>")
+                } else {
+                    git.clone()
+                };
             let _ = writeln!(
                 html,
                 "<tr><td class=\"version-cell\">{version}</td>\
-                 <td><a href=\"{git}\">{git}</a></td>\
+                 <td>{git_href}</td>\
                  <td>{tag}</td>\
                  <td class=\"snippet-cell\"><code>{snippet}</code></td></tr>"
             );
@@ -274,5 +284,31 @@ tag = "release-0.2.1"
         let html = fs::read_to_string(out.join("xss.html")).unwrap();
         assert!(!html.contains("<script>"));
         assert!(html.contains("&lt;script&gt;"));
+    }
+
+    #[test]
+    fn test_unsafe_git_scheme_is_not_linkified() {
+        let e = entry(
+            "name = \"evil\"\n\n[[versions]]\nversion = \"1.0.0\"\ngit = \"javascript:alert(1)\"\n",
+            "evil",
+        );
+        let dir = TempDir::new().unwrap();
+        let out = camino::Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap();
+
+        write_detail_page(&out, &e).unwrap();
+        let html = fs::read_to_string(out.join("evil.html")).unwrap();
+        assert!(!html.contains("href=\"javascript:"));
+        assert!(html.contains("javascript:alert(1)")); // still shown as plain text
+    }
+
+    #[test]
+    fn test_https_git_scheme_is_still_linkified() {
+        let e = entry(YAML_TOML, "yaml");
+        let dir = TempDir::new().unwrap();
+        let out = camino::Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap();
+
+        write_detail_page(&out, &e).unwrap();
+        let html = fs::read_to_string(out.join("yaml.html")).unwrap();
+        assert!(html.contains("href=\"https://example.test/yaml\""));
     }
 }
