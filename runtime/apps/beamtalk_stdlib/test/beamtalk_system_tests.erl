@@ -241,3 +241,62 @@ unique_id_monotonic_test() ->
     C = beamtalk_system:uniqueId(),
     ?assert(B > A),
     ?assert(C > B).
+
+%%% ============================================================================
+%%% halt/0, halt:/1, halt/1 — error paths (non-node-owning context)
+%%%
+%%% In the test environment node_owning defaults to false, so all halt calls
+%%% safely raise #beamtalk_error{kind=unsupported} instead of halting the VM.
+%%% ============================================================================
+
+halt_zero_raises_unsupported_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = unsupported}},
+        beamtalk_system:halt()
+    ).
+
+halt_colon_valid_code_raises_unsupported_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = unsupported}},
+        beamtalk_system:'halt:'(0)
+    ).
+
+halt_colon_out_of_range_negative_raises_invalid_argument_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = invalid_argument}},
+        beamtalk_system:'halt:'(-1)
+    ).
+
+halt_colon_out_of_range_too_large_raises_invalid_argument_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = invalid_argument}},
+        beamtalk_system:'halt:'(256)
+    ).
+
+halt_colon_non_integer_raises_type_error_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_system:'halt:'(not_an_integer)
+    ).
+
+halt_shim_delegates_to_halt_colon_test() ->
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = unsupported}},
+        beamtalk_system:halt(0)
+    ).
+
+%%% ============================================================================
+%%% platform_name/1 (exported under TEST)
+%%% ============================================================================
+
+platform_name_darwin_test() ->
+    ?assertEqual(<<"darwin">>, beamtalk_system:platform_name(darwin)).
+
+platform_name_linux_test() ->
+    ?assertEqual(<<"linux">>, beamtalk_system:platform_name(linux)).
+
+platform_name_nt_test() ->
+    ?assertEqual(<<"win32">>, beamtalk_system:platform_name(nt)).
+
+platform_name_other_atom_test() ->
+    ?assertEqual(<<"freebsd">>, beamtalk_system:platform_name(freebsd)).
