@@ -1,7 +1,13 @@
 # ADR 0110: Class-Variable Shadow Write-Through for Foreign NLR Relay
 
 ## Status
-Proposed (2026-08-01)
+Accepted (2026-08-02)
+
+## Implementation Tracking
+
+**Epic:** BT-3035
+**Issues:** BT-3036 (runtime outcome variant + shadow read/erase) → BT-3037 (codegen emission + BUnit regression suite) → BT-3038 (docs + e2e close-out)
+**Status:** Planned
 
 ## Context
 
