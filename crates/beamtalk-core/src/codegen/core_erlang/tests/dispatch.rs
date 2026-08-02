@@ -3286,6 +3286,61 @@ fn test_bt2276_class_methods_correct_block_unaffected() {
 }
 
 #[test]
+fn test_builder_class_var_mutation_emits_shadow_write() {
+    // ADR 0110 (BT-3037): ClassBuilder classMethods: funs lower through the
+    // shared class-method body path, so a top-frame class-var mutation inside
+    // one must emit the '$bt_class_vars_shadow' write exactly like a compiled
+    // class method.
+    let src = "Object classBuilder name: #ShadowB; superclass: Object; \
+               classVars: #{ #runs => 0 }; \
+               classMethods: #{ #bump => [:self | self.runs := self.runs + 1] }; register";
+    let code = try_codegen(src).expect("mutating classMethods block must compile");
+    assert!(
+        code.contains("call 'erlang':'put'('$bt_class_vars_shadow', ClassVars1)"),
+        "builder class-method mutation should emit the ADR 0110 shadow write. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_builder_cascade_at_block_depth_still_emits_shadow_write() {
+    // ADR 0110 (BT-3037): the builder cascade may lexically sit inside a block
+    // (block_depth > 0 at the cascade's position), but the fun body executes
+    // at runtime as a class method's own top frame.
+    // generate_class_method_fun_from_block saves/resets/restores block_depth so
+    // the shadow-write gate (`block_depth == 0`) still fires — forgetting that
+    // reset would silently disable the fix for builder classes defined inside
+    // blocks. A source-level `[… classBuilder …]` wrapper is currently rejected
+    // earlier (BT-2792 stored-closure field-write validation sees the
+    // classMethods: mutation), so simulate the lexical position directly, as
+    // test_generate_cast_send_actor_self_in_block_uses_mailbox does.
+    let src = "Object classBuilder name: #ShadowBlk; superclass: Object; \
+               classVars: #{ #runs => 0 }; \
+               classMethods: #{ #bump => [:self | self.runs := self.runs + 1] }; register";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let expr = module
+        .expressions
+        .into_iter()
+        .next()
+        .expect("expected one top-level expression")
+        .expression;
+    let mut generator = CoreErlangGenerator::new("test");
+    generator.block_depth = 1; // Simulate the cascade sitting inside a block
+    let code = generator
+        .expression_doc(&expr)
+        .expect("mutating classMethods block must compile")
+        .to_pretty_string();
+    assert!(
+        code.contains("call 'erlang':'put'('$bt_class_vars_shadow', ClassVars1)"),
+        "builder fun lowered from inside a block should still emit the shadow write. Got:\n{code}"
+    );
+    assert_eq!(
+        generator.block_depth, 1,
+        "block_depth must be restored after lowering the builder fun"
+    );
+}
+
+#[test]
 fn test_bt2276_class_methods_computed_fun_passes_compile() {
     // A computed (non-block) value cannot have its arity checked at compile
     // time, so it must NOT be rejected by the compiler — its arity is validated
