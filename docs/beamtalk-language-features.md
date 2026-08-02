@@ -4561,7 +4561,7 @@ See [ADR 0071](ADR/0071-class-visibility-internal-modifier.md) for the full desi
 
 ## Standard Library
 
-76 classes implemented and tested. For detailed API documentation, see [API Reference](https://www.beamtalk.dev/apidocs/).
+109 classes implemented and tested (`stdlib/src/*.bt`; see [Stdlib Implementation Status](stdlib-implementation-status.md) for the current per-class method audit). For detailed API documentation, see [API Reference](https://www.beamtalk.dev/apidocs/).
 
 **Core types:**
 
@@ -4617,10 +4617,11 @@ See [ADR 0071](ADR/0071-class-visibility-internal-modifier.md) for the full desi
 | **File**, **FileHandle** | File system operations |
 | **Subprocess**, **ReactiveSubprocess** | OS process execution ([ADR 0051](ADR/0051-subprocess-execution.md)) |
 | **OS**, **System** | Platform info and system operations |
-| **Json**, **Yaml** | Data serialisation |
+| **Json** | Data serialisation (JSON) |
 | **Regex** | Regular expression matching |
-| **DateTime**, **Time** | Date/time operations |
+| **DateTime**, **Time**, **Duration** | Date/time operations |
 | **Random** | Random number generation |
+| **Digest** | Cryptographic hash functions and HMAC |
 
 **Networking** (in [`beamtalk-http`](https://github.com/jamesc/beamtalk-http)):
 
@@ -4629,6 +4630,12 @@ See [ADR 0071](ADR/0071-class-visibility-internal-modifier.md) for the full desi
 | **HTTPServer**, **HTTPClient** | HTTP server and client |
 | **HTTPRouter**, **HTTPRoute**, **HTTPRouteBuilder** | Declarative HTTP routing |
 | **HTTPRequest**, **HTTPResponse** | Request/response objects |
+
+**Data formats** (in [`beamtalk-yaml`](https://github.com/jamesc/beamtalk-yaml)):
+
+| Class | Description |
+|-------|-------------|
+| **Yaml** | YAML parsing and serialisation — not part of stdlib; add it as a package dependency ([Package Management guide](beamtalk-packages.md)) |
 
 **Observability:**
 
