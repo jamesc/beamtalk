@@ -258,6 +258,12 @@ unwrap_self_dispatch_outcome(ClassName, Selector, Outcome) ->
             erlang:error(undef);
         {error, {raised, ErrClass, Error, ST}} ->
             erlang:raise(ErrClass, Error, ST);
+        {nlr_relay, Nlr, ST} ->
+            %% ADR 0110 / BT-3032: self-dispatch runs in the caller's own
+            %% process, so resume the non-local return unwind directly —
+            %% identical behavior to when these throws were tagged
+            %% {error, {raised, throw, ...}}.
+            erlang:raise(throw, Nlr, ST);
         test_spawn ->
             %% `TestCase>>runAll` / `run:` self-sent from inside another
             %% class method would run the test suite inline in the class
@@ -612,28 +618,60 @@ invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningM
     %% so both dispatch paths see identical error classification, class-var
     %% threading, and the BT-440 test_spawn escape hatch. This function
     %% adapts the shared outcome to the gen_server `{reply, _, State}` shape.
-    case
-        apply_class_method_in_context(
-            Selector, Args, ClassName, DefiningClass, DefiningModule, ClassVars
-        )
-    of
-        test_spawn ->
-            test_spawn;
-        {ok, {class_var_result, Result, NewClassVars}} ->
-            {reply, {ok, Result}, NewClassVars};
-        {ok, Result} ->
-            {reply, {ok, Result}, ClassVars};
-        {error, #beamtalk_error{} = Error} ->
-            {reply, {error, Error}, ClassVars};
-        {error, undef_in_body} ->
-            {reply, {error, undef}, ClassVars};
-        {error, {raised, _ErrClass, Error, _ST}} ->
-            {reply, {error, Error}, ClassVars}
+    %%
+    %% ADR 0110 / BT-3032: the whole body runs inside try ... after so the
+    %% '$bt_class_vars_shadow' process-dictionary key (written by codegen at
+    %% top-level class-var mutations) never outlives a dispatch, whatever the
+    %% outcome.
+    try
+        case
+            apply_class_method_in_context(
+                Selector, Args, ClassName, DefiningClass, DefiningModule, ClassVars
+            )
+        of
+            test_spawn ->
+                test_spawn;
+            {ok, {class_var_result, Result, NewClassVars}} ->
+                {reply, {ok, Result}, NewClassVars};
+            {ok, Result} ->
+                {reply, {ok, Result}, ClassVars};
+            {nlr_relay, Nlr, _ST} ->
+                %% ADR 0110 / BT-3032: a foreign `^` relaying out of the class
+                %% method is control flow, not a failure — class-var writes made
+                %% before the unwind must survive. The codegen write-through
+                %% (BT-3037) records them under '$bt_class_vars_shadow'; until
+                %% that lands the shadow is never set and this falls back to the
+                %% pre-call ClassVars, exactly today's behavior. The reply shape
+                %% is byte-identical to the historical {error, Nlr}, so the
+                %% ?IS_NLR re-throw clauses in class_send_dispatch/3 and
+                %% metaclass_send_dispatch/4 need no change.
+                ShadowClassVars =
+                    case erlang:get('$bt_class_vars_shadow') of
+                        undefined -> ClassVars;
+                        Shadow -> Shadow
+                    end,
+                {reply, {error, Nlr}, ShadowClassVars};
+            {error, #beamtalk_error{} = Error} ->
+                {reply, {error, Error}, ClassVars};
+            {error, undef_in_body} ->
+                {reply, {error, undef}, ClassVars};
+            {error, {raised, _ErrClass, Error, _ST}} ->
+                {reply, {error, Error}, ClassVars}
+        end
+    after
+        erlang:erase('$bt_class_vars_shadow')
     end.
 
+%% ADR 0110 / BT-3032: `{nlr_relay, Nlr, ST}` is a foreign `^` (non-local
+%% return) relaying out of the class method — the relayed NLR tuple plus its
+%% stacktrace. It is kept distinct from `{error, {raised, ...}}` so
+%% `invoke_class_method/7` can preserve class-var writes recorded under the
+%% `'$bt_class_vars_shadow'` process-dictionary key instead of reverting them
+%% the way it does for genuine errors.
 -type class_method_outcome() ::
     test_spawn
     | {ok, term()}
+    | {nlr_relay, term(), list()}
     | {error, #beamtalk_error{}}
     | {error, undef_in_body}
     | {error, {raised, atom(), term(), list()}}.
@@ -712,8 +750,11 @@ apply_class_method_fun(Fun, ClassSelf, ClassVars, Args, ClassName, Selector) ->
         %% BT-3022: a `^` non-local return that unwound through this class method
         %% belongs to a method frame in the *calling* process. Pass it through
         %% unlogged so class_send_dispatch/3 can re-throw it there.
+        %% ADR 0110 / BT-3032: tagged as its own outcome variant (not
+        %% {error, {raised, ...}}) so invoke_class_method/7 can keep class-var
+        %% writes made before the unwind instead of reverting them.
         throw:Nlr:NlrST when ?IS_NLR(Nlr) ->
-            {error, {raised, throw, Nlr, NlrST}};
+            {nlr_relay, Nlr, NlrST};
         error:undef:ST ->
             ?LOG_ERROR(
                 "Runtime class method ~p:~p raised undef internally",
@@ -762,8 +803,10 @@ apply_compiled_class_method(
             {error, {raised, throw, ScriptExit, ScriptST}};
         %% BT-3022: see apply_class_method_fun/6 — a non-local return unwinding out
         %% of a class method is control flow for a frame in the calling process.
+        %% ADR 0110 / BT-3032: tagged {nlr_relay, ...} so class-var writes made
+        %% before the unwind can be recovered rather than reverted.
         throw:Nlr:NlrST when ?IS_NLR(Nlr) ->
-            {error, {raised, throw, Nlr, NlrST}};
+            {nlr_relay, Nlr, NlrST};
         error:undef:ST ->
             classify_undef(ClassName, DefiningClass, DefiningModule, Selector, FunName, ST);
         ErrClass:Error:ErrST ->
