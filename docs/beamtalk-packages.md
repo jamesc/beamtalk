@@ -238,6 +238,18 @@ tag = "v0.2.1"
 
 Unknown top-level or per-version keys are accepted (not rejected) — the index is a separately versioned artifact served to clients this binary doesn't control, so a future index format can add fields like `yanked` or `checksum` without breaking older `beamtalk` binaries reading it.
 
+### Browsing the Registry
+
+The default registry is browsable at **[www.beamtalk.dev/registry/](https://www.beamtalk.dev/registry/)** — published alongside the main docs site, on every push that touches the generator and on a daily schedule (to pick up packages published to the registry index between deploys of this repo). It's an index page of every published package with its latest version, and a per-package page listing every published version with its git repo link, tag, and a copy-paste `name = "x.y.z"` dependency snippet.
+
+The site is generated from any registry index — the default or a self-hosted one — with:
+
+```bash
+beamtalk registry site --index <path-or-git-url> --output <dir>
+```
+
+Like `beamtalk doc --site`, this is a purely static, read-only renderer (hand-rolled HTML/CSS, no server) — `--index` accepts the same kind of value `BEAMTALK_REGISTRY`/`[registry] url` do: an existing local directory is read in place, anything else is treated as a git URL and cloned. Useful for previewing a self-hosted registry's site before publishing it, or for regenerating `www.beamtalk.dev/registry/` locally.
+
 ### Hosting Your Own Registry
 
 A registry index is nothing more than a git repository with a `packages/` directory — there is no server, database, or publishing service to run. To host one:

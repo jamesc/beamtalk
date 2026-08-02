@@ -281,7 +281,12 @@ pub fn registry_identity(registry: Option<&RegistryConfig>) -> String {
 /// A relative path is resolved against `project_root`, not the process working
 /// directory: the CLI, LSP and MCP servers all run with different cwds, and the
 /// same `beamtalk.toml` must name the same registry from each of them.
-fn classify_location(project_root: &Utf8Path, raw: &str) -> RegistryLocation {
+///
+/// `pub(crate)` rather than private: `beamtalk registry site` (BT-2990,
+/// `commands::registry`) takes the same kind of raw `--index` value (a local
+/// directory or a git URL) outside of any project, and reuses this instead of
+/// re-implementing the classification.
+pub(crate) fn classify_location(project_root: &Utf8Path, raw: &str) -> RegistryLocation {
     let candidate = Utf8Path::new(raw);
     if candidate.is_absolute() {
         if candidate.is_dir() {
@@ -757,6 +762,52 @@ pub fn resolve_latest_release(
     entry.latest_version().cloned().ok_or_else(|| {
         miette::miette!("Package '{name}' has no published versions in the registry ({location}).")
     })
+}
+
+/// List every package entry in the index, sorted by name.
+///
+/// Unlike [`describe_available_packages`] (which stops early — it only ever
+/// needs enough names for a "not found, try one of these" message), this
+/// reads and fully parses every entry. Used by `beamtalk registry site`
+/// (BT-2990) to render the whole index as a static site; reuses
+/// [`read_entry`]/[`parse_index_entry`] rather than re-walking `packages/`
+/// with a second parser.
+///
+/// # Errors
+///
+/// Returns an error if the `packages/` directory cannot be read, or any
+/// entry fails to parse — the same errors [`read_entry`] would report for
+/// that file.
+pub fn list_all_entries(index_root: &Utf8Path) -> Result<Vec<RegistryEntry>> {
+    let packages_dir = index_root.join("packages");
+    let dir = std::fs::read_dir(&packages_dir)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to read registry packages directory '{packages_dir}'"))?;
+
+    let mut names = Vec::new();
+    for entry in dir {
+        let entry = entry.into_diagnostic().wrap_err_with(|| {
+            format!("Failed to read an entry in registry packages directory '{packages_dir}'")
+        })?;
+        let path = entry.path();
+        if path.extension().is_some_and(|e| e == "toml") {
+            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                names.push(stem.to_string());
+            }
+        }
+    }
+    names.sort();
+
+    let mut entries = Vec::with_capacity(names.len());
+    for name in &names {
+        // `read_entry` returns `Ok(None)` only on a missing file, which
+        // cannot happen here — `name` was just listed from this same
+        // directory.
+        if let Some(entry) = read_entry(index_root, name)? {
+            entries.push(entry);
+        }
+    }
+    Ok(entries)
 }
 
 /// Describe which packages the index does contain, for a not-found error.
@@ -1650,6 +1701,41 @@ git = "g"
         assert!(
             msg.contains("The latest version is 0.2.1"),
             "should suggest the latest: {msg}"
+        );
+    }
+
+    // ── list_all_entries (BT-2990) ─────────────────────────────────────
+
+    #[test]
+    fn test_list_all_entries_sorted_by_name() {
+        let (_dir, root) = make_index(&[
+            ("yaml", YAML_ENTRY),
+            (
+                "json",
+                "name = \"json\"\n[[versions]]\nversion = \"1.0.0\"\ngit = \"g\"\n",
+            ),
+        ]);
+        let entries = list_all_entries(&root).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].name, "json");
+        assert_eq!(entries[1].name, "yaml");
+    }
+
+    #[test]
+    fn test_list_all_entries_empty_registry() {
+        let (_dir, root) = make_index(&[]);
+        let entries = list_all_entries(&root).unwrap();
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn test_list_all_entries_missing_packages_dir_errors() {
+        let dir = TempDir::new().unwrap();
+        let root = utf8(&dir);
+        let err = list_all_entries(&root).unwrap_err();
+        assert!(
+            flat_err(&err).contains("Failed to read registry packages directory"),
+            "{err:?}"
         );
     }
 
