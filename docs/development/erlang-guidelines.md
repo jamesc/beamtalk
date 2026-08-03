@@ -139,6 +139,25 @@ init([]) ->
 
 ---
 
+## FFI Class Methods That Mutate Class Variables (ADR 0110)
+
+A class method implemented directly in hand-written Erlang (rather than compiled from `.bt` source) that mutates class variables — i.e. returns `{class_var_result, NewValue, NewClassVars}` — and can have a foreign non-local return (`^`) pass through it (for example, because it invokes a caller-supplied `fun()`/`Block`) **must** also write the process-dictionary shadow at each mutation point:
+
+```erlang
+NewClassVars = maps:put(runs, Val, ClassVars),
+_ = erlang:put('$bt_class_vars_shadow', NewClassVars),
+{class_var_result, Val, NewClassVars}
+```
+
+**Why:** compiled class methods get this write-through for free — `generate_field_assignment` emits it at every top-frame class-var assignment (`crates/beamtalk-core/src/codegen/core_erlang/expressions.rs`). Without it, `beamtalk_class_dispatch:invoke_class_method/7` has no way to recover the mutation when a block passed into the method escapes with a foreign `^`: it falls back to the pre-call `ClassVars`, silently reverting the mutation (BT-3032).
+
+**Rules:**
+- Write the shadow only at the method's own top frame — never from a callback/continuation running after control has already returned to different Beamtalk code, and never on behalf of a different class's `ClassVars`.
+- Do not `erlang:erase('$bt_class_vars_shadow')` yourself — `invoke_class_method/7` erases it in a `try ... after ... end` once per external call, regardless of which path (`ok`, `nlr_relay`, or error) was taken.
+- No module under `beamtalk_stdlib/src` or `beamtalk_runtime/src` mutates class vars today, so this is a forward-looking authoring rule, not a live gap. See ADR 0110 for the full mechanism.
+
+---
+
 ## Error Handling - CRITICAL
 
 **NO bare tuple errors EVER!** All errors MUST use the structured `#beamtalk_error{}` system.
