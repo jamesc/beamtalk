@@ -191,11 +191,17 @@ TestCase subclass: EmptyCollectionAccessTest
 
   // Set/Bag/Dictionary have no `first`/`last` at all — the design
   // deliberately does not give them those selectors (they'd misleadingly
-  // imply an ordering guarantee). This is caught at *compile time*: `Set`,
-  // `Bag`, and `Dictionary` are typed classes, so `Set new first` is a
-  // static type error, not a runtime does_not_understand — there is no
-  // executable test for it here, only the class docs (see Set.bt, Bag.bt,
-  // Dictionary.bt) pointing readers at `anyOne` / `asList first` instead.
+  // imply an ordering guarantee). The type checker emits a compile-time
+  // hint for the unresolved selector, but this does not block compilation
+  // (see `@expect dnu` convention) — it still dispatches at runtime and
+  // raises `does_not_understand`, exactly like any other typo.
+  @expect dnu
+  testSetFirstRaisesDoesNotUnderstand =>
+    self should: [Set new first] raise: #does_not_understand
+
+  @expect dnu
+  testBagLastRaisesDoesNotUnderstand =>
+    self should: [(Bag withAll: #(1, 2)) last] raise: #does_not_understand
 
   // ==========================================================================
   // Collection aggregates — max/min/average over nothing
