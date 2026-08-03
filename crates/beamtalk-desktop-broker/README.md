@@ -2,9 +2,12 @@
 
 Desktop attach connection-broker core (ADR 0097, BT-2985): discovery of live
 workspaces under `~/.beamtalk/workspaces/`, per-instance spawn of the
-LiveView front (`bin/server <id>`) with the loopback/no-OIDC/entropy-seeded-
-sname posture, two-stage readiness probing (`GET /readiness`, BT-2983),
-post-attach connection monitoring, and orphan reaping.
+LiveView front — `bin/server <id>` on Unix, or on Windows (BT-2988, no
+POSIX-shell counterpart) `bin\bt_attach.bat start` with every env var
+`bin/server` would have resolved and set by this crate directly — with the
+loopback/no-OIDC/entropy-seeded-sname posture, two-stage readiness probing
+(`GET /readiness`, BT-2983), post-attach connection monitoring, and orphan
+reaping.
 
 This is a plain Rust library — no GUI dependency. It implements the
 process-supervision logic a desktop shell (picker UI: BT-2986; packaging:

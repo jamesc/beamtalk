@@ -19,8 +19,9 @@ pub struct AppState {
     /// kept separately from `AttachManager` so that crate stays free of
     /// `std::process` (see its module docs on why it's pure).
     pub children: Mutex<HashMap<String, Child>>,
-    /// Path to the `bin/server` launcher for the bundled `bt_attach`
-    /// release. Resolved once at startup (see `crate::launcher`).
+    /// Path to the launcher for the bundled `bt_attach` release —
+    /// `bin/server` on Unix, `bin\bt_attach.bat` on Windows (BT-2988).
+    /// Resolved once at startup (see `crate::launcher`).
     pub launcher: PathBuf,
 }
 

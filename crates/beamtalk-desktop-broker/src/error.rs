@@ -27,6 +27,15 @@ pub enum BrokerError {
     #[error("no workspace '{0}' under ~/.beamtalk/workspaces/")]
     UnknownWorkspace(String),
 
+    /// A workspace directory exists but has no `cookie` file (or it's empty)
+    /// — the Windows spawn path (BT-2988) needs to read `BT_WORKSPACE_COOKIE`
+    /// itself before invoking `bin\bt_attach.bat` directly, since there is no
+    /// `bin/server` shell script there to resolve it. On Unix this can't
+    /// happen in practice (`bin/server` re-resolves the cookie itself and
+    /// would fail the same way), but it's a real, reachable state here.
+    #[error("workspace '{0}' has no cookie file under ~/.beamtalk/workspaces/{0}/cookie")]
+    MissingCookie(String),
+
     /// Ran out of port-allocation attempts (see [`crate::port::allocate_port_with_retry`]).
     #[error("failed to allocate a free port after {0} attempt(s)")]
     PortsExhausted(u32),

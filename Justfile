@@ -323,6 +323,42 @@ dist-liveview:
     echo "   Run: dist-liveview/bin/server <workspace-id>   (resolves node+cookie like 'just web')"
     echo "   Or:  PHX_SERVER=true SECRET_KEY_BASE=... dist-liveview/bin/bt_attach start"
 
+# Windows counterpart of dist-liveview above (BT-2988) — same build, via
+# PowerShell (a shebang recipe, like the bash version above, so each step
+# shares one process/cwd — `just`'s non-shebang Windows recipes start a fresh
+# shell per line, which would silently drop MIX_ENV between steps here).
+#
+# No `ELIXIR_ERL_OPTIONS=+fnu`: that flag tells Erlang to interpret filenames
+# as UTF-8 on filesystems that don't tag an encoding (Linux); Windows
+# filenames are always native UTF-16, so the flag is a Unix-only concern —
+# not verified against a real Windows `mix release` boot (no Windows sandbox
+# was available to develop this against), flagged per BT-2988's "document
+# Windows-specific gaps" acceptance criterion rather than guessed at silently.
+[windows]
+[working-directory: 'editors/liveview']
+dist-liveview:
+    #!powershell.exe
+    $ErrorActionPreference = "Stop"
+    $env:MIX_ENV = "prod"
+    Write-Output "📦 Building LiveView IDE release (bt_attach)..."
+    mix deps.get --only prod
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    mix assets.setup
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    mix assets.deploy
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    if (Test-Path ../../dist-liveview) { Remove-Item -Recurse -Force ../../dist-liveview }
+    mix release --overwrite --path ../../dist-liveview
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    # phx.digest (part of assets.deploy) writes digested copies and
+    # cache_manifest.json into priv/static/ alongside the tracked originals.
+    # The release embeds its own copies, so restore the source tree.
+    mix phx.digest.clean --all
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    Write-Output "✅ LiveView IDE release ready in dist-liveview/"
+    Write-Output "   Run: PORT=... BT_ATTACH_BIND_IP=... BT_ATTACH_NODE_SUFFIX=... BT_WORKSPACE_NODE=... BT_WORKSPACE_COOKIE=... SECRET_KEY_BASE=... PHX_SERVER=true dist-liveview\bin\bt_attach.bat start"
+    Write-Output "   (no bin\server equivalent — beamtalk-desktop-broker's Windows spawn path sets these directly, BT-2988)"
+
 # Usage: just dist-desktop-platform appimage,deb
 # Build the desktop app (Tauri shell, ADR 0097) bundle(s) for specific Tauri
 # bundle targets (BT-2987). Needs the Tauri toolchain — `cargo install
@@ -354,6 +390,31 @@ dist-desktop-platform bundles:
     cargo tauri build --bundles "{{bundles}}" --config "{\"version\":\"${VERSION}\"}"
     echo "✅ Desktop app bundle(s) in desktop/src-tauri/target/release/bundle/"
 
+# Usage: just dist-desktop-platform msi,nsis
+# Windows counterpart of dist-desktop-platform above (BT-2988) — same recipe,
+# via PowerShell. Tauri's Windows bundle targets are `msi` (WiX) and `nsis`
+# (NSIS installer .exe); see desktop-release.yml's Windows leg for which of
+# these actually ship. Checks for `dist-liveview\bin\bt_attach.bat` (the
+# Windows entry point — no `bin\server`, BT-2988) rather than `bin/server`.
+[windows]
+dist-desktop-platform bundles:
+    #!powershell.exe
+    $ErrorActionPreference = "Stop"
+    if (!(Test-Path dist-liveview/bin/bt_attach.bat)) {
+        Write-Output "❌ dist-liveview/bin/bt_attach.bat not found. Run 'just dist-liveview' first."
+        exit 1
+    }
+    if (!(Get-Command cargo-tauri -ErrorAction SilentlyContinue)) {
+        Write-Output '❌ cargo-tauri not found. Install: cargo install tauri-cli --version "^2.0.0"'
+        exit 1
+    }
+    $version = (Get-Content VERSION -Raw).Trim()
+    Write-Output "📦 Building desktop app v$version ({{bundles}})..."
+    Set-Location desktop
+    cargo tauri build --bundles "{{bundles}}" --config "{`"version`":`"$version`"}"
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    Write-Output "✅ Desktop app bundle(s) in desktop/src-tauri/target/release/bundle/"
+
 # Build the desktop app bundle for the host platform (BT-2987), auto-picking
 # the bundle targets Tauri supports there (.AppImage/.deb on Linux, .app/.dmg
 # on macOS — Windows is BT-2988).
@@ -366,6 +427,12 @@ dist-desktop:
         Darwin) just dist-desktop-platform app,dmg ;;
         *)      echo "❌ Unsupported platform: $(uname -s)"; exit 1 ;;
     esac
+
+# Build the desktop app bundle for Windows (BT-2988), auto-picking Tauri's
+# Windows bundle targets (msi + nsis — see dist-desktop-platform above).
+[windows]
+dist-desktop:
+    just dist-desktop-platform msi,nsis
 
 # Ensure the loopback hex-bridge proxy is up before any rebar3/mix dep fetch.
 # Cloud containers only (gated on CLAUDE_CODE_REMOTE): a session can outlive the

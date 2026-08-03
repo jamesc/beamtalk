@@ -5,9 +5,25 @@
 # ============================
 # Builds the Beamtalk desktop picker (Tauri shell, ADR 0097, BT-2986) bundled
 # with a self-contained bt_attach ERTS release, producing installable
-# artifacts for Linux x86_64 (.AppImage / .deb) and macOS arm64 + x86_64
-# (.dmg / .app). Windows is BT-2988 — `bin/server` is a POSIX `sh` script
-# with no Windows counterpart, so the broker's launch path differs there.
+# artifacts for Linux x86_64 (.AppImage / .deb), macOS arm64 + x86_64
+# (.dmg / .app), and Windows x86_64 (.msi / NSIS .exe, BT-2988).
+#
+# Windows has no `bin/server` — it's a POSIX `sh` script with no Windows
+# counterpart in a `mix release` bundle — so the Windows leg bundles
+# `bin\bt_attach.bat` (the release's own generated entry point) instead;
+# `beamtalk-desktop-broker`'s Windows spawn path
+# (`crates/beamtalk-desktop-broker/src/spawn.rs`) sets every env var
+# `bin/server` would have (`BT_WORKSPACE_NODE`, `BT_WORKSPACE_COOKIE`,
+# `SECRET_KEY_BASE`, `PHX_SERVER`) itself before invoking it directly. This
+# job runs every step under `shell: bash` (Git Bash, preinstalled on
+# GitHub-hosted Windows runners) rather than the platform default (`pwsh` on
+# Windows) — see the job-level `defaults:` below — so the Linux/macOS/
+# Windows legs share one script per step instead of forking bash/PowerShell
+# variants of every `run:` block; only `just dist-liveview`/
+# `just dist-desktop-platform` branch on OS internally (via the Justfile's
+# own `[unix]`/`[windows]` recipe attributes), because those two steps need
+# native PowerShell (`mix`/`cargo tauri` invoked with Windows env semantics)
+# rather than Git Bash shelling out to them.
 #
 # Ships on its OWN release lane, mirroring liveview-release.yml, because:
 #   1. It needs the Tauri/webview toolchain (webkit2gtk on Linux), which
@@ -39,17 +55,32 @@
 # https://v2.tauri.app/distribute/sign/macos/.)
 #
 # Verification status (read before relying on this lane): the app itself
-# has not been compiled end-to-end in any sandbox available to this project
-# — see desktop/README.md's "What was and wasn't verified". This workflow's
-# job logic (matrix, caching, artifact/version plumbing, signing
-# conditionals) follows the same structure already proven by
-# liveview-release.yml, but the `cargo tauri build` step is expected to
-# need fixes on its first real run. For that reason this lane is NOT yet
-# wired into release.yml's `on: release` path (unlike liveview-release.yml/
-# release-vscode.yml) — run it via workflow_dispatch until a real run
-# confirms the build succeeds, then add a `desktop-app: uses: ./.github/
-# workflows/desktop-release.yml` job to release.yml the same way those two
-# are wired in.
+# has not been compiled end-to-end in any sandbox available to this project,
+# on ANY platform including Windows — see desktop/README.md's "What was and
+# wasn't verified". This workflow's job logic (matrix, caching, artifact/
+# version plumbing, signing conditionals) follows the same structure already
+# proven by liveview-release.yml, but the `cargo tauri build` step is
+# expected to need fixes on its first real run on every platform. The
+# Windows leg carries extra unverified surface on top of that shared risk —
+# flagged rather than silently assumed away (BT-2988 acceptance criteria):
+#   - Tauri's WiX (`.msi`)/NSIS (`.exe`) bundlers are expected to
+#     self-download on first use (no explicit choco/winget prerequisite step
+#     here, unlike Linux's apt-get step below) — not confirmed against a
+#     real `cargo tauri build` on Windows.
+#   - WebView2 Runtime is assumed preinstalled on GitHub's windows-2022
+#     image (Microsoft ships it by default there) — not independently
+#     verified by this workflow.
+#   - `scripts/ci/package-desktop-release.sh`'s `windows-x86_64` case
+#     (Tauri bundle subpaths, `sha256sum` via Git Bash) is unverified against
+#     a real bundle output.
+#   - epmd/dist and orphan-process behavior differences are documented in
+#     `beamtalk-desktop-broker/src/spawn.rs`'s module doc comment, not here —
+#     that's a runtime concern, not a build-lane one.
+# For that reason this lane is NOT yet wired into release.yml's `on: release`
+# path (unlike liveview-release.yml/release-vscode.yml) — run it via
+# workflow_dispatch until a real run confirms every leg's build succeeds,
+# then add a `desktop-app: uses: ./.github/workflows/desktop-release.yml` job
+# to release.yml the same way those two are wired in.
 #
 # Trigger modes (mirrors liveview-release.yml):
 #   - workflow_dispatch: manual build (artifacts only unless `publish` is set).
@@ -58,7 +89,7 @@
 #
 # Related: liveview-release.yml (the bt_attach release this lane bundles),
 #          desktop/README.md, docs/ADR/0097-desktop-attach-client-node-per-workspace.md
-# Issue: BT-2987 (epic BT-2982)
+# Issues: BT-2987 (Linux/macOS), BT-2988 (Windows) — epic BT-2982
 
 name: Desktop App Release
 
@@ -117,6 +148,14 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: write # gh release upload on a full release
+    # Every step below runs under Git Bash, including on Windows — see the
+    # header comment's rationale. GitHub-hosted Windows runners ship Git Bash
+    # at a fixed location `shell: bash` resolves automatically; no PATH setup
+    # needed here (same mechanism ci.yml doesn't need either, since none of
+    # its steps use bash on the windows-2022 leg).
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
@@ -130,6 +169,11 @@ jobs:
           - runner: macos-15-intel
             platform: macos-x86_64
             bundles: app,dmg
+          # Pin to windows-2022, matching ci.yml's own matrix note:
+          # erlef/setup-beam@v1 doesn't support win25 (windows-2025) yet.
+          - runner: windows-2022
+            platform: windows-x86_64
+            bundles: msi,nsis
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -175,12 +219,26 @@ jobs:
       - name: Build bt_attach release
         run: just dist-liveview
 
-      - name: Smoke test bt_attach release boots
+      - name: Smoke test bt_attach release boots (Unix)
+        if: runner.os != 'Windows'
         env:
           SECRET_KEY_BASE: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
         run: |
           test -x dist-liveview/bin/server
           dist-liveview/bin/bt_attach version
+
+      # Windows counterpart (BT-2988): no `bin/server`, so this checks the
+      # release's own `bin\bt_attach.bat` directly — the same entry point
+      # `beamtalk-desktop-broker`'s Windows spawn path invokes at runtime.
+      # Git Bash (this job's default shell — see the job-level `defaults:`
+      # above) can invoke a `.bat` file directly by path.
+      - name: Smoke test bt_attach release boots (Windows)
+        if: runner.os == 'Windows'
+        env:
+          SECRET_KEY_BASE: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+        run: |
+          test -f dist-liveview/bin/bt_attach.bat
+          dist-liveview/bin/bt_attach.bat version
 
       # ─── Build the Tauri shell ────────────────────────────────────────────
       - name: Install Rust toolchain
@@ -213,6 +271,13 @@ jobs:
             librsvg2-dev \
             patchelf
 
+      # No equivalent "Install Windows Tauri prerequisites" step: GitHub's
+      # windows-2022 image ships the WebView2 Runtime and MSVC Build Tools
+      # Tauri needs by default, and Tauri v2's bundler self-downloads its
+      # WiX (`.msi`)/NSIS (`.exe`) tooling on first use — see this file's
+      # header comment for why that's flagged as unverified rather than
+      # assumed (BT-2988).
+      #
       # No `--locked`: we don't control tauri-cli's own published lockfile,
       # and pinning purely by `^2.0.0` here is deliberate (matches the `"2"`
       # tauri-cli/tauri version req in desktop/src-tauri/Cargo.toml).
