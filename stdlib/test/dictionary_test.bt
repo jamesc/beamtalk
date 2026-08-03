@@ -162,3 +162,16 @@ TestCase subclass: DictionaryTest
     d := #{#a => Dictionary new: #{#n => 0}, #b => 42}
     self assert: (d at: #a) equals: #{#n => 0}
     self assert: (d at: #b) equals: 42
+
+  // BT-3027 — Dictionary has no first/last; anyOne is the deliberately
+  // non-deterministic single-element accessor. It answers a *value*
+  // (consistent with do:), not a key-value pair.
+  testAnyOne =>
+    d := #{#a => 1, #b => 2, #c => 3}
+    self assert: (d includes: d anyOne)
+
+  testAnyOneOnSingletonDictionary =>
+    self assert: (#{#only => 99} anyOne) equals: 99
+
+  testAnyOneOnEmptyDictionaryRaisesEmptyCollection =>
+    self should: [#{} anyOne] raise: #empty_collection

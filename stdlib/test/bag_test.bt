@@ -114,3 +114,14 @@ TestCase subclass: BagTest
 
   testAddWithCountNegativeRaisesError =>
     self should: [(Bag new) add: 1 withCount: -1] raise: #user_error
+
+  // BT-3027 — Bag has no first/last; anyOne is the deliberately
+  // non-deterministic single-element accessor.
+  testAnyOne =>
+    b := Bag withAll: #(1, 1, 2)
+    self assert: (b includes: b anyOne)
+
+  testAnyOneOnSingletonBag => self assert: ((Bag new add: 7) anyOne) equals: 7
+
+  testAnyOneOnEmptyBagRaisesEmptyCollection =>
+    self should: [Bag new anyOne] raise: #empty_collection

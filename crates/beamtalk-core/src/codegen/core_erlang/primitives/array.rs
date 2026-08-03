@@ -31,6 +31,10 @@ pub(crate) fn generate_array_bif(selector: &str, params: &[String]) -> Option<Do
             leaf::var(p0.to_string()),
             ")"
         ]),
+        // BT-3027: mirrors String's "first"/"last" (BT-3021) — both raise
+        // `empty_collection` on an empty Array.
+        "first" => Some(Document::Str("call 'beamtalk_array':'first'(Self)")),
+        "last" => Some(Document::Str("call 'beamtalk_array':'last'(Self)")),
         "at:put:" => {
             let p1 = param(params, 1, "_Arg1");
             Some(docvec![

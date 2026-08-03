@@ -29,6 +29,17 @@ TestCase subclass: ArrayTest
     // Original is unchanged (immutable)
     self assert: (a at: 2) equals: 2
 
+  // BT-3027
+  testFirstAndLast =>
+    self assert: #[10, 20, 30] first equals: 10
+    self assert: #[10, 20, 30] last equals: 30
+    self assert: #[42] first equals: 42
+    self assert: #[42] last equals: 42
+
+  testFirstAndLastOnEmptyRaiseEmptyCollection =>
+    self should: [#[] first] raise: #empty_collection
+    self should: [#[] last] raise: #empty_collection
+
   testIncludes =>
     a := #[1, 2, 3]
     self assert: (a includes: 2)

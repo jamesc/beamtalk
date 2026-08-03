@@ -69,6 +69,27 @@ sealed typed Collection(E) subclass: Array(E)
   /// ```
   at: index :: Integer -> E => @primitive
 
+  /// Return the first element of the array.
+  ///
+  /// Raises `empty_collection` if the array is empty — there is no element
+  /// to answer. Guard with `isEmpty` before calling.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #[10, 20, 30] first          // => 10
+  /// ```
+  first -> E => @primitive
+
+  /// Return the last element of the array.
+  ///
+  /// Raises `empty_collection` if the array is empty (see `first`).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #[10, 20, 30] last           // => 30
+  /// ```
+  last -> E => @primitive
+
   /// Return a new array with the element at `index` replaced by `value`.
   ///
   /// Raises `index_out_of_bounds` if the index is out of range.

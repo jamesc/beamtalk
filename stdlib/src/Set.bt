@@ -6,6 +6,12 @@
 /// Sets are immutable collections backed by Erlang's ordsets module.
 /// Operations that "modify" a set return a new set.
 ///
+/// Deliberately has no `first`/`last` — a Set promises no ordering, so
+/// either name would misleadingly suggest one. Use `anyOne` to grab a
+/// single element (no ordering guarantee, may differ between calls), or
+/// `asList first` / `asList last` if you specifically want the order
+/// `asList` currently answers in.
+///
 /// ## Examples
 /// ```beamtalk
 /// Set new class                    // => Set
