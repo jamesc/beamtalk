@@ -28,10 +28,21 @@ BT-419: Created as part of Array→List rename and compiled stdlib migration.
     drop/2,
     sort_with/2,
     from_to/3,
-    reverse_group_values/1
+    reverse_group_values/1,
+    unique/1,
+    sorted_strict_unique/1,
+    strict_member_sorted/2
 ]).
 
--doc "Access element at 1-based index with bounds checking.".
+-doc """
+Access element at 1-based index with bounds checking.
+
+BT-3021: three distinct failures, three distinct kinds — a non-integer index is
+a `type_error`, indexing an empty List is `empty_collection`, and any other
+out-of-range index is `index_out_of_bounds` (matching `Array`/`String` `at:`).
+None of them is `does_not_understand`: the List understands `at:` perfectly
+well, so reporting a dispatch failure would send the reader hunting for a typo.
+""".
 -spec at(list(), term()) -> term().
 at(List, N) when is_list(List), not is_integer(N) ->
     Hint = iolist_to_binary(
@@ -39,38 +50,53 @@ at(List, N) when is_list(List), not is_integer(N) ->
     ),
     beamtalk_error:raise_type_error('List', 'at:', Hint);
 at(List, N) when is_list(List), is_integer(N), N =< 0 ->
-    Hint = iolist_to_binary(
-        io_lib:format("Index ~p is out of bounds (must be >= 1)", [N])
-    ),
-    beamtalk_error:raise(beamtalk_error:new(does_not_understand, 'List', 'at:', Hint));
+    %% An index below 1 is malformed whether or not the List is empty, so this
+    %% is checked before the emptiness clause.
+    raise_out_of_bounds(N, <<" (must be >= 1)">>);
+at([], _N) ->
+    raise_empty('at:');
 at(List, N) when is_list(List), is_integer(N), N >= 1 ->
     try
         lists:nth(N, List)
     catch
-        error:badarg ->
-            Hint = iolist_to_binary(
-                io_lib:format("Index ~p is out of bounds", [N])
-            ),
-            beamtalk_error:raise(beamtalk_error:new(does_not_understand, 'List', 'at:', Hint));
-        error:function_clause ->
-            Hint = iolist_to_binary(
-                io_lib:format("Index ~p is out of bounds", [N])
-            ),
-            beamtalk_error:raise(beamtalk_error:new(does_not_understand, 'List', 'at:', Hint))
+        error:badarg -> raise_out_of_bounds(N, <<>>);
+        error:function_clause -> raise_out_of_bounds(N, <<>>)
     end.
 
--doc "Find first element matching block, error if not found.".
+-doc "Raise `empty_collection` for an accessor called on an empty List.".
+-spec raise_empty(atom()) -> no_return().
+raise_empty(Selector) ->
+    Hint = <<"List is empty; guard with `isEmpty` before indexing">>,
+    beamtalk_error:raise(beamtalk_error:new(empty_collection, 'List', Selector, Hint)).
+
+-doc "Raise `index_out_of_bounds` for an in-range-shaped but out-of-range index.".
+-spec raise_out_of_bounds(integer(), binary()) -> no_return().
+raise_out_of_bounds(N, Suffix) ->
+    Hint = iolist_to_binary(
+        io_lib:format("Index ~p is out of bounds~s", [N, Suffix])
+    ),
+    beamtalk_error:raise(beamtalk_error:new(index_out_of_bounds, 'List', 'at:', Hint)).
+
+-doc """
+Find first element matching block, error if not found.
+
+BT-3025: raises `not_found` when no element matches. It used to raise
+`does_not_understand`, which claimed the List had no `detect:` at all and sent
+readers hunting for a typo. Use `detect:ifNone:` for the non-raising form.
+
+BT-3028: every other collection raises the same kind, so the error is built by
+the shared `beamtalk_collection:raiseDetectNotFound/1` rather than inline here.
+""".
 -spec detect(list(), function()) -> term().
 detect(List, Block) when is_list(List), is_function(Block, 1) ->
     case detect_helper(Block, List) of
         {ok, Found} ->
             Found;
         not_found ->
-            beamtalk_error:raise(
-                beamtalk_error:new(
-                    does_not_understand, 'List', 'detect:', <<"No element matched the block">>
-                )
-            )
+            %% BT-3028: shared with the inherited `Collection>>detect:` and with
+            %% `beamtalk_stream:detect/2` so all three raise byte-identical
+            %% errors — a caller that swaps receiver types sees no difference.
+            beamtalk_collection:raiseDetectNotFound('List')
     end;
 detect(List, Block) when is_list(List) ->
     Hint = iolist_to_binary(
@@ -199,7 +225,13 @@ intersperse([], _Sep) -> [];
 intersperse([X], _Sep) -> [X];
 intersperse([H | T], Sep) -> [H, Sep | intersperse(T, Sep)].
 
--doc "Extract subsequence from Start to End (1-based, inclusive).".
+-doc """
+Extract subsequence from Start to End (1-based, inclusive).
+
+BT-3025: a start index below 1 raises `index_out_of_bounds`, matching `at/2`.
+It used to raise `does_not_understand`, which reported a malformed index as a
+dispatch failure. An `End` below `Start` is an empty range, not an error.
+""".
 -spec from_to(list(), term(), term()) -> list().
 from_to(List, Start, End) when
     is_list(List),
@@ -232,7 +264,7 @@ from_to(List, Start, _End) when is_list(List), is_integer(Start), Start < 1 ->
     Hint = iolist_to_binary(
         io_lib:format("Start index ~p is out of bounds (must be >= 1)", [Start])
     ),
-    beamtalk_error:raise(beamtalk_error:new(does_not_understand, 'List', 'from:to:', Hint)).
+    beamtalk_error:raise(beamtalk_error:new(index_out_of_bounds, 'List', 'from:to:', Hint)).
 
 %% Internal helpers
 
@@ -276,3 +308,92 @@ describe_value(V) when is_function(V) ->
 describe_value(V) ->
     ClassName = beamtalk_primitive:class_of(V),
     atom_to_binary(ClassName).
+
+%%% ============================================================================
+%%% Strict (`=:=`) element identity — BT-2997
+%%% ============================================================================
+%%%
+%%% `ordsets` and `lists:usort/1` decide element identity with Erlang term
+%%% *order*, which is `==` semantics: it treats the integer `1` and the float
+%%% `1.0` as the same element. Beamtalk's element identity is `=:=` — matching
+%%% `Dictionary` keys (Erlang maps), `List>>includes:`, and ADR 0002's
+%%% strict-by-default equality, which BT-1562 established for `5 =:= 5.0`.
+%%%
+%%% These helpers keep the term-order-sorted list representation (which
+%%% `beamtalk_set`, `beamtalk_inspector`, `beamtalk_primitive` and
+%%% `beamtalk_stream` all rely on) but decide identity with `=:=`.
+%%%
+%%% `==` and `=:=` disagree only for numbers — an integer and a float of equal
+%%% value — so after sorting, mutually-`==` elements form a short contiguous
+%%% run. Every operation below scans that run strictly.
+
+-doc """
+`List>>unique` — remove duplicate elements.
+
+Sorts, as `lists:usort/1` did, but deduplicates with `=:=`, so `1` and `1.0`
+are kept as distinct elements.
+""".
+-spec unique(list()) -> list().
+unique(List) when is_list(List) ->
+    sorted_strict_unique(lists:sort(List)).
+
+-doc """
+Strictly deduplicate an already term-order-sorted list.
+
+Keeps elements that merely compare `==` (`1` and `1.0`); removes only `=:=`
+duplicates. All `=:=`-identical terms sort contiguously, so a run scan is
+sufficient.
+""".
+-spec sorted_strict_unique(list()) -> list().
+sorted_strict_unique(Sorted) ->
+    %% Tail-recursive: a large list would otherwise recurse once per distinct
+    %% element, which `lists:usort/1` never did.
+    sorted_strict_unique(Sorted, []).
+
+-spec sorted_strict_unique(list(), list()) -> list().
+sorted_strict_unique([], Acc) ->
+    lists:reverse(Acc);
+sorted_strict_unique([H | T], Acc) ->
+    {Run, Rest} = lists:splitwith(fun(X) -> X == H end, T),
+    %% Dedupe the run against a *run-local* accumulator, not the output one:
+    %% elements outside the run compare `/=` to everything in it, so they can
+    %% never be `=:=` equal, and scanning them would make this quadratic.
+    %% The result is reversed and at most two elements, so `++` is constant.
+    Distinct = strict_uniq_run([H | Run], []),
+    sorted_strict_unique(Rest, Distinct ++ Acc).
+
+-doc """
+True if `Elem` is `=:=` some member of `Sorted`.
+
+**`Sorted` must be sorted by Erlang term order.** The scan stops as soon as the
+list passes `Elem`, so an unsorted list yields a silently wrong answer rather
+than an error — hence the name. `beamtalk_set` keeps its `elements` field in
+this form, as does `unique/1`'s output.
+""".
+-spec strict_member_sorted(term(), list()) -> boolean().
+strict_member_sorted(_Elem, []) ->
+    false;
+strict_member_sorted(Elem, [H | T]) when H == Elem ->
+    %% Inside a run of mutually-`==` terms: only `=:=` counts as a match.
+    H =:= Elem orelse strict_member_sorted(Elem, T);
+strict_member_sorted(Elem, [H | T]) when H < Elem ->
+    strict_member_sorted(Elem, T);
+strict_member_sorted(_Elem, _PastIt) ->
+    %% Reached an element greater than Elem; sorted ascending, so it is absent.
+    false.
+
+%% Strictly deduplicate one `==`-equal run onto a reversed accumulator.
+%%
+%% A run may be long (`[1, 1, 1, 1.0]`), but the number of *distinct* terms it
+%% can contribute is at most two — an integer and a float of equal value are
+%% the only way Erlang terms compare `==` without comparing `=:=`. So the
+%% `lists:any/2` membership check runs against an at-most-two-element list and
+%% is constant, not quadratic.
+-spec strict_uniq_run(list(), list()) -> list().
+strict_uniq_run([], Acc) ->
+    Acc;
+strict_uniq_run([H | T], Acc) ->
+    case lists:any(fun(Y) -> Y =:= H end, Acc) of
+        true -> strict_uniq_run(T, Acc);
+        false -> strict_uniq_run(T, [H | Acc])
+    end.

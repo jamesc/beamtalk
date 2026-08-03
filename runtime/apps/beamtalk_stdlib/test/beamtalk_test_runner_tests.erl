@@ -358,6 +358,56 @@ result_to_json_skip_has_no_error_key_test() ->
     %% skip entries have no error key
     ?assertNot(maps:is_key(<<"error">>, Test)).
 
+result_to_json_non_utf8_error_binary_test() ->
+    %% BT-2999: a raw non-UTF-8 error message used to throw {invalid_byte, N}
+    %% out of json:encode/1 and take the whole test VM down with it.
+    Result = make_result(1, 0, 1, 0, 0.5, [
+        #{name => testBad, class => 'T', status => fail, error => <<"boom ", 255, 254, 253>>}
+    ]),
+    Json = beamtalk_test_runner:result_to_json(Result),
+    Decoded = json:decode(Json),
+    [Test] = maps:get(<<"tests">>, Decoded),
+    ?assertEqual(<<"<<62 6F 6F 6D 20 FF FE FD>>">>, maps:get(<<"error">>, Test)),
+    %% Full per-test detail survives — no degraded fallback needed.
+    ?assertNot(maps:is_key(<<"encodingError">>, Decoded)).
+
+result_to_json_non_utf8_error_term_test() ->
+    %% Non-binary error terms go through print_string/1 first.
+    Result = make_result(1, 0, 1, 0, 0.5, [
+        #{name => testBad, class => 'T', status => fail, error => {badarg, <<255, 254>>}}
+    ]),
+    Json = beamtalk_test_runner:result_to_json(Result),
+    Decoded = json:decode(Json),
+    [Test] = maps:get(<<"tests">>, Decoded),
+    ?assertEqual(<<"{#badarg, <<FF FE>>}">>, maps:get(<<"error">>, Test)).
+
+result_to_json_degrades_on_malformed_test_entry_test() ->
+    %% serialize_test_result/1 itself raises on an entry missing `name`/`status`
+    %% (function_clause). That happens while *building* the document, so it only
+    %% degrades if the construction is inside the guard, not just the encode.
+    Result = make_result(2, 1, 1, 0, 0.5, [#{unexpected => shape}]),
+    Json = beamtalk_test_runner:result_to_json(Result),
+    Decoded = json:decode(Json),
+    ?assertEqual(2, maps:get(<<"total">>, Decoded)),
+    ?assertEqual([], maps:get(<<"tests">>, Decoded)),
+    ?assert(is_binary(maps:get(<<"encodingError">>, Decoded))).
+
+result_to_json_degrades_instead_of_crashing_test() ->
+    %% Belt and braces: any other value json:encode/1 rejects (here a pid where
+    %% a duration belongs) must still produce a parseable counts-only document
+    %% rather than throwing out of the escript's boot process.
+    Result = make_result(3, 2, 1, 0, self(), [
+        #{name => testBad, class => 'T', status => fail, error => <<"boom">>}
+    ]),
+    Json = beamtalk_test_runner:result_to_json(Result),
+    Decoded = json:decode(Json),
+    ?assertEqual(3, maps:get(<<"total">>, Decoded)),
+    ?assertEqual(2, maps:get(<<"passed">>, Decoded)),
+    ?assertEqual(1, maps:get(<<"failed">>, Decoded)),
+    ?assertEqual(0, maps:get(<<"duration">>, Decoded)),
+    ?assertEqual([], maps:get(<<"tests">>, Decoded)),
+    ?assert(is_binary(maps:get(<<"encodingError">>, Decoded))).
+
 %%% ============================================================================
 %%% run_all/1 invalid-argument error path
 %%% ============================================================================

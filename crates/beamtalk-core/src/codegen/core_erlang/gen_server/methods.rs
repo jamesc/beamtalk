@@ -12,6 +12,7 @@ use super::super::document::leaf::fname;
 use super::super::document::{Document, INDENT, join, leaf, line, nest};
 use super::super::selector_mangler::safe_class_method_fn_name;
 use super::super::spec_codegen;
+use super::super::value_type_codegen::has_opaque_native_representation;
 use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{
     Block, CascadeMessage, ClassDefinition, ClassKind, Expression, Identifier, Literal, MapPair,
@@ -1619,6 +1620,28 @@ impl CoreErlangGenerator {
             .any(|m| Self::is_self_error_body(&m.body))
     }
 
+    /// BT-2998: whether the class declares a unary `new` of its own, on either
+    /// side, and so keeps control of `new/0` (`Random`, `Queue`, `Announcer`).
+    ///
+    /// Mirrors the `has_explicit_new` / `has_explicit_class_new` test in
+    /// `generate_value_type_module`, which is what decides whether the
+    /// auto-generated — and now possibly raising — `new/0` is emitted at all.
+    ///
+    /// One case it deliberately does not mirror: a declared `new` whose body is
+    /// `@intrinsic basicNew` routes back to the auto-generated constructor, so
+    /// on a `native:` class it would raise despite being "declared". Only
+    /// `Value.bt`/`Object.bt` write that body and neither is `native:`; if one
+    /// ever were, the only cost is an omitted `isConstructible` key, which the
+    /// runtime recomputes lazily from `new/0` anyway.
+    fn declares_own_new(class: &ClassDefinition) -> bool {
+        class
+            .methods
+            .iter()
+            .chain(class.class_methods.iter())
+            .filter(|m| m.kind == MethodKind::Primary)
+            .any(|m| m.selector == MessageSelector::Unary("new".into()))
+    }
+
     /// Check if a method body is a single `self error: <StringLiteral>` expression.
     fn is_self_error_body(body: &[crate::ast::ExpressionStatement]) -> bool {
         if body.len() != 1 {
@@ -1839,9 +1862,16 @@ impl CoreErlangGenerator {
             // so the runtime can fall back to lazy computation — this is needed
             // because primitive classes (String, Integer, etc.) have raising new/0
             // in Erlang, not in Beamtalk AST.
+            //
+            // BT-2998: a `native:` class with no declared fields and no `new` of
+            // its own now compiles a raising `new/0` too (see
+            // `has_opaque_native_representation`). The runtime would reach the
+            // same answer lazily by calling that `new/0` and catching, but
+            // stating it up front keeps the registered metadata honest.
             let is_non_constructible = class.is_abstract
                 || self.context == CodeGenContext::Actor
-                || Self::has_raising_new(class);
+                || Self::has_raising_new(class)
+                || (has_opaque_native_representation(class) && !Self::declares_own_new(class));
 
             // ADR 0050 Phase 5: BuilderState carries only module/source/signature/doc metadata.
             // Static fields (flags, fields, method signatures) are read from __beamtalk_meta/0
@@ -3215,6 +3245,15 @@ impl CoreErlangGenerator {
         self.reset_state_version();
         self.set_class_var_version(0);
         self.set_class_var_mutated(false);
+        // ADR 0110 (BT-3037): the fun body executes at runtime as a class
+        // method's own top frame, even when the builder cascade lexically sits
+        // inside a block (`block_depth > 0` at the cascade's position). Reset
+        // `block_depth` so `generate_field_assignment`'s shadow-write gate
+        // (`block_depth == 0`) uniformly means "the method's own top frame"
+        // across compiled methods and ClassBuilder funs alike; restored on
+        // every exit path below.
+        let saved_block_depth = self.block_depth;
+        self.block_depth = 0;
 
         // The class is reachable via the conventional literal `self` (so
         // `self.cvar` access and self-sends lower correctly — both key on the
@@ -3263,6 +3302,7 @@ impl CoreErlangGenerator {
                 Ok(doc) => doc,
                 Err(e) => {
                     self.set_current_nlr_token(None);
+                    self.block_depth = saved_block_depth;
                     self.pop_scope();
                     return Err(e);
                 }
@@ -3287,6 +3327,7 @@ impl CoreErlangGenerator {
             nest(INDENT, docvec![line(), body_doc]),
         ];
 
+        self.block_depth = saved_block_depth;
         self.pop_scope();
         Ok(doc)
     }

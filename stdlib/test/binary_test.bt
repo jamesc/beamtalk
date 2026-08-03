@@ -201,10 +201,17 @@ TestCase subclass: BinaryTest
     result := bin detect: [:ch | ch =:= "C"]
     self assert: result equals: "C"
 
-  testDetectReturnsNilWhenNotFound =>
+  // BT-3028: a no-match raises `not_found` rather than answering nil — the
+  // inherited `Collection>>detect:` answers `E`, on every receiver.
+  testDetectRaisesNotFoundWhenNoMatch =>
     bin := Binary fromBytes: #(65, 66, 67)
-    result := bin detect: [:ch | ch =:= "Z"]
-    self assert: result equals: nil
+    self should: [bin detect: [:ch | ch =:= "Z"]] raise: #not_found
+
+  testDetectIfNoneAnswersDefaultWhenNoMatch =>
+    bin := Binary fromBytes: #(65, 66, 67)
+    self assert: (bin detect: [:ch |
+      ch =:= "Z"
+    ] ifNone: ["none"]) equals: "none"
 
   // ═══════════════════════════════════════════════════════════════════
   // Collection protocol: anySatisfy:, allSatisfy:
@@ -220,7 +227,7 @@ TestCase subclass: BinaryTest
 
   testAllSatisfyTrue =>
     bin := Binary fromBytes: #(65, 66, 67)
-    self assert: (bin allSatisfy: [:ch | ch size > 0])
+    self assert: (bin allSatisfy: [:ch | ch size == 1])
 
   testAllSatisfyFalse =>
     bin := Binary fromBytes: #(65, 66, 67)
@@ -247,9 +254,19 @@ TestCase subclass: BinaryTest
     bin := Binary fromBytes: #(1, 2, 3)
     self should: [bin at: 0] raise: #index_out_of_bounds
 
+  // BT-3021: indexing an empty collection is `empty_collection`, not
+  // `index_out_of_bounds` — the latter is reserved for an index that misses a
+  // populated receiver. Note an empty Binary and an empty String are the same
+  // term (`<<>>`), which classifies as String, so this actually dispatches to
+  // String's `at:`; `beamtalk_binary:at/2` raises the same kind so the result
+  // does not depend on that.
   testAtOnEmptyBinary =>
     bin := Binary fromBytes: #()
-    self should: [bin at: 1] raise: #index_out_of_bounds
+    self should: [bin at: 1] raise: #empty_collection
+
+  testAtBeyondSizeOnBinaryIsOutOfBounds =>
+    bin := Binary fromBytes: #(104, 105)
+    self should: [bin at: 9] raise: #index_out_of_bounds
 
   // ═══════════════════════════════════════════════════════════════════
   // Byte access: byteAt: (0-based) — Binary-only, not overridden
@@ -414,7 +431,7 @@ TestCase subclass: BinaryTest
     @expect type
     self assert: (result at: 1) equals: 42
     @expect type
-    self assert: (result at: 2) > 0
+    self assert: (result at: 2) equals: bin byteSize
 
   testDeserializeWithUsedString =>
     bin := Binary serialize: "hello"

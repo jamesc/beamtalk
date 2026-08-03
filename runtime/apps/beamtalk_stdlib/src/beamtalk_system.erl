@@ -40,6 +40,10 @@ detecting the operating system and architecture, and querying process info.
 -export([getEnv/1, getEnv/2]).
 -export([setEnv/2, unsetEnv/1]).
 
+-ifdef(TEST).
+-export([platform_name/1]).
+-endif.
+
 -include_lib("kernel/include/logger.hrl").
 
 %%% ============================================================================

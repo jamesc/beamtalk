@@ -328,6 +328,35 @@ generate_message(type_error, Class, undefined) ->
     iolist_to_binary(io_lib:format("Type error in ~s", [Class]));
 generate_message(type_error, Class, Selector) ->
     iolist_to_binary(io_lib:format("Type error in '~s' on ~s", [Selector, Class]));
+%% BT-3021: empty-collection access is a distinct condition from a dispatch
+%% failure — the receiver understands the selector, it just has no element to
+%% answer. Naming it lets `on:do:` discriminate it from a genuine typo.
+generate_message(empty_collection, Class, undefined) ->
+    iolist_to_binary(io_lib:format("~s is empty", [Class]));
+generate_message(empty_collection, Class, Selector) ->
+    %% Selector is quoted because keyword selectors already end in `:` —
+    %% an unquoted `at:` would render as `at:: List is empty`.
+    iolist_to_binary(io_lib:format("'~s': ~s is empty", [Selector, Class]));
+generate_message(index_out_of_bounds, Class, undefined) ->
+    iolist_to_binary(io_lib:format("Index out of bounds for ~s", [Class]));
+generate_message(index_out_of_bounds, Class, Selector) ->
+    iolist_to_binary(io_lib:format("'~s': index out of bounds for ~s", [Selector, Class]));
+%% BT-3025: a lookup that ran to completion without finding anything.
+%% `key_error` was the closest existing kind for `List detect:` but names a key
+%% the receiver was asked for, which a predicate search has none of; and
+%% `empty_collection` says the wrong thing when the collection is full of
+%% non-matches.
+%%
+%% Deliberately generic wording: `not_found` predates BT-3025 on non-collection
+%% receivers (`AtomicCounter named:`, `Ets named:`, `BeamtalkInterface`), which
+%% until now fell through to the `~s error in ...` fallback. A collection-
+%% flavoured "no matching element" would read as nonsense on those. The
+%% specifics belong in the hint, which every call site already sets.
+generate_message(not_found, Class, undefined) ->
+    iolist_to_binary(io_lib:format("Not found in ~s", [Class]));
+generate_message(not_found, Class, Selector) ->
+    %% Selector is quoted because keyword selectors already end in `:`.
+    iolist_to_binary(io_lib:format("'~s': not found in ~s", [Selector, Class]));
 generate_message(actor_dead, Class, undefined) ->
     iolist_to_binary(io_lib:format("~s actor process has terminated", [Class]));
 generate_message(actor_dead, Class, Selector) ->
@@ -416,7 +445,7 @@ maybe_enrich_dnu_hint(#beamtalk_error{class = Class, selector = Selector} = Erro
             Hint = iolist_to_binary([
                 <<"'">>,
                 SelBin,
-                <<"' is a class-side message — use 'class ">>,
+                <<"' is a class-side message; use 'class ">>,
                 SelBin,
                 <<"' to send it to an instance's class">>
             ]),

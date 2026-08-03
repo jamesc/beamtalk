@@ -30,6 +30,9 @@ Start trace store if not running.
 Returns `{started, Pid}` when we started it, `{existing, Pid}` if already running.
 """.
 setup_trace_store() ->
+    %% telemetry must be running before start_link because init/1 calls
+    %% attach_telemetry_handlers which calls gen_server:call(telemetry_handler_table, ...).
+    _ = application:ensure_all_started(telemetry),
     case whereis(beamtalk_trace_store) of
         undefined ->
             {ok, Pid} = beamtalk_trace_store:start_link(),
@@ -225,6 +228,176 @@ tmp_export_path(Tag) ->
         integer_to_list(erlang:unique_integer([positive])),
         ".json"
     ]).
+
+%%====================================================================
+%% disable-tracing tests (lines 63-64 in source)
+%%====================================================================
+
+disable_tracing_test_() ->
+    {setup, fun setup_trace_store/0, fun cleanup_trace_store/1, fun(_Setup) ->
+        [
+            {"disable-tracing returns success response", fun() ->
+                Result = beamtalk_repl_ops_perf:handle(
+                    <<"disable-tracing">>, #{}, make_msg(<<"disable-tracing">>), self()
+                ),
+                Decoded = decode_response(Result),
+                ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)),
+                ?assertEqual(<<"Tracing disabled">>, maps:get(<<"value">>, Decoded))
+            end},
+            {"disable-tracing actually disables the trace store", fun() ->
+                beamtalk_tracing:enable(),
+                ?assert(beamtalk_trace_store:is_enabled()),
+                _ = beamtalk_repl_ops_perf:handle(
+                    <<"disable-tracing">>, #{}, make_msg(<<"disable-tracing">>), self()
+                ),
+                ?assertNot(beamtalk_trace_store:is_enabled())
+            end}
+        ]
+    end}.
+
+%%====================================================================
+%% get-traces filter parameter tests
+%%====================================================================
+
+get_traces_outcome_filter_test_() ->
+    {setup, fun setup_trace_store/0, fun cleanup_trace_store/1, fun(_Setup) ->
+        [
+            %% parse_outcome <<"ok">> arm (line 250)
+            {"get-traces with outcome=ok returns success", fun() ->
+                Result = beamtalk_repl_ops_perf:handle(
+                    <<"get-traces">>,
+                    #{<<"outcome">> => <<"ok">>},
+                    make_msg(<<"get-traces">>),
+                    self()
+                ),
+                ?assertMatch(#{<<"status">> := [<<"done">>]}, decode_response(Result))
+            end},
+            %% parse_outcome <<"error">> arm (line 252)
+            {"get-traces with outcome=error returns success", fun() ->
+                Result = beamtalk_repl_ops_perf:handle(
+                    <<"get-traces">>,
+                    #{<<"outcome">> => <<"error">>},
+                    make_msg(<<"get-traces">>),
+                    self()
+                ),
+                ?assertMatch(#{<<"status">> := [<<"done">>]}, decode_response(Result))
+            end},
+            %% parse_outcome <<"timeout">> arm (line 254)
+            {"get-traces with outcome=timeout returns success", fun() ->
+                Result = beamtalk_repl_ops_perf:handle(
+                    <<"get-traces">>,
+                    #{<<"outcome">> => <<"timeout">>},
+                    make_msg(<<"get-traces">>),
+                    self()
+                ),
+                ?assertMatch(#{<<"status">> := [<<"done">>]}, decode_response(Result))
+            end},
+            %% parse_outcome invalid value error (line 256)
+            {"invalid outcome returns structured error", fun() ->
+                ?assertMatch(
+                    {error, #beamtalk_error{kind = invalid_argument, class = 'Tracing'}},
+                    beamtalk_repl_ops_perf:handle_term(
+                        <<"get-traces">>,
+                        #{<<"outcome">> => <<"flying">>},
+                        make_msg(<<"get-traces">>),
+                        self()
+                    )
+                )
+            end}
+        ]
+    end}.
+
+get_traces_class_filter_test_() ->
+    {setup, fun setup_trace_store/0, fun cleanup_trace_store/1, fun(_Setup) ->
+        [
+            %% parse_class with a guaranteed-existing atom (line 138, 229)
+            {"get-traces with known class atom returns success", fun() ->
+                %% 'ok' is always an existing atom in the BEAM atom table
+                Result = beamtalk_repl_ops_perf:handle(
+                    <<"get-traces">>,
+                    #{<<"class">> => <<"ok">>},
+                    make_msg(<<"get-traces">>),
+                    self()
+                ),
+                ?assertMatch(#{<<"status">> := [<<"done">>]}, decode_response(Result))
+            end},
+            %% parse_class with unknown atom: badarg error path (lines 228-232)
+            {"get-traces with unknown class returns structured error", fun() ->
+                ?assertMatch(
+                    {error, #beamtalk_error{kind = invalid_argument, class = 'Tracing'}},
+                    beamtalk_repl_ops_perf:handle_term(
+                        <<"get-traces">>,
+                        #{<<"class">> => <<"NonExistentClassXYZ99999NightlyTest">>},
+                        make_msg(<<"get-traces">>),
+                        self()
+                    )
+                )
+            end}
+        ]
+    end}.
+
+get_traces_min_duration_ns_filter_test_() ->
+    {setup, fun setup_trace_store/0, fun cleanup_trace_store/1, fun(_Setup) ->
+        [
+            %% valid min_duration_ns (line 148)
+            {"get-traces with min_duration_ns=1000 returns success", fun() ->
+                Result = beamtalk_repl_ops_perf:handle(
+                    <<"get-traces">>,
+                    #{<<"min_duration_ns">> => 1000},
+                    make_msg(<<"get-traces">>),
+                    self()
+                ),
+                ?assertMatch(#{<<"status">> := [<<"done">>]}, decode_response(Result))
+            end},
+            %% invalid min_duration_ns: structured error (lines 150-158)
+            {"get-traces with non-integer min_duration_ns returns structured error", fun() ->
+                ?assertMatch(
+                    {error, #beamtalk_error{kind = invalid_argument, class = 'Tracing'}},
+                    beamtalk_repl_ops_perf:handle_term(
+                        <<"get-traces">>,
+                        #{<<"min_duration_ns">> => <<"not-a-number">>},
+                        make_msg(<<"get-traces">>),
+                        self()
+                    )
+                )
+            end}
+        ]
+    end}.
+
+get_traces_limit_fallthrough_test_() ->
+    {setup, fun setup_trace_store/0, fun cleanup_trace_store/1, fun(_Setup) ->
+        [
+            %% apply_limit catch-all: zero is not a positive integer (line 176)
+            {"get-traces with limit=0 returns all traces without crashing", fun() ->
+                Result = beamtalk_repl_ops_perf:handle(
+                    <<"get-traces">>,
+                    #{<<"limit">> => 0},
+                    make_msg(<<"get-traces">>),
+                    self()
+                ),
+                ?assertMatch(#{<<"status">> := [<<"done">>]}, decode_response(Result))
+            end}
+        ]
+    end}.
+
+export_traces_noninteger_limit_test_() ->
+    {setup, fun setup_trace_store/0, fun cleanup_trace_store/1, fun(_Setup) ->
+        [
+            %% build_export_opts: non-integer limit falls through guard (line 115)
+            {"export-traces with non-integer limit ignores it and succeeds", fun() ->
+                TmpFile = tmp_export_path("nonint_limit"),
+                Result = beamtalk_repl_ops_perf:handle(
+                    <<"export-traces">>,
+                    #{<<"path">> => TmpFile, <<"limit">> => <<"not-a-number">>},
+                    make_msg(<<"export-traces">>),
+                    self()
+                ),
+                Decoded = decode_response(Result),
+                ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)),
+                file:delete(TmpFile)
+            end}
+        ]
+    end}.
 
 %%====================================================================
 %% Error handling tests

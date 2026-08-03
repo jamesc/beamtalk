@@ -201,21 +201,34 @@ do_loop(Bin, Pos, Size, Fun) ->
     Fun(Byte),
     do_loop(Bin, Pos + 1, Size, Fun).
 
--doc "1-based byte access. Returns Integer 0-255.".
+-doc """
+1-based byte access. Returns Integer 0-255.
+
+BT-3021: indexing an empty Binary raises `empty_collection`, matching
+`beamtalk_list:at/2`, `beamtalk_string:at/2` and `beamtalk_array:at/2`. An
+index below 1 is malformed whether or not the Binary is empty, so it stays
+`index_out_of_bounds`.
+
+Note this function is rarely the one that runs for an *empty* receiver: `<<>>`
+classifies as `'String'`, so `(Binary fromBytes: #()) at: 1` dispatches to
+`beamtalk_string:at/2`. Both raise `empty_collection`, so the kind no longer
+depends on which side of that ambiguity a caller lands on.
+""".
 -spec at(binary(), pos_integer()) -> non_neg_integer().
 at(Bin, Index) when is_binary(Bin), is_integer(Index) ->
     Size = erlang:byte_size(Bin),
     if
+        Size =:= 0 andalso Index >= 1 ->
+            Error0 = beamtalk_error:new(empty_collection, 'Binary'),
+            Error1 = beamtalk_error:with_selector(Error0, at),
+            Error2 = beamtalk_error:with_hint(
+                Error1, <<"Binary is empty; guard with `isEmpty` before indexing">>
+            ),
+            beamtalk_error:raise(Error2);
         Index < 1 orelse Index > Size ->
             Error0 = beamtalk_error:new(index_out_of_bounds, 'Binary'),
             Error1 = beamtalk_error:with_selector(Error0, at),
-            Msg =
-                case Size of
-                    0 ->
-                        io_lib:format("Index ~B is out of bounds (empty binary)", [Index]);
-                    _ ->
-                        io_lib:format("Index ~B is out of bounds (1..~B)", [Index, Size])
-                end,
+            Msg = io_lib:format("Index ~B is out of bounds (1..~B)", [Index, Size]),
             Error2 = beamtalk_error:with_hint(Error1, iolist_to_binary(Msg)),
             beamtalk_error:raise(Error2);
         true ->

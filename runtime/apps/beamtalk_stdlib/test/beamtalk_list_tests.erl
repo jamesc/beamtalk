@@ -36,7 +36,7 @@ at_out_of_bounds_test() ->
         #{
             '$beamtalk_class' := 'RuntimeError',
             error := #beamtalk_error{
-                kind = does_not_understand,
+                kind = index_out_of_bounds,
                 class = 'List',
                 selector = 'at:'
             }
@@ -50,7 +50,7 @@ at_zero_index_test() ->
         #{
             '$beamtalk_class' := 'RuntimeError',
             error := #beamtalk_error{
-                kind = does_not_understand,
+                kind = index_out_of_bounds,
                 class = 'List',
                 selector = 'at:'
             }
@@ -64,12 +64,55 @@ at_negative_index_test() ->
         #{
             '$beamtalk_class' := 'RuntimeError',
             error := #beamtalk_error{
-                kind = does_not_understand,
+                kind = index_out_of_bounds,
                 class = 'List',
                 selector = 'at:'
             }
         },
         beamtalk_list:at([1, 2, 3], -1)
+    ).
+
+%% BT-3021: indexing an *empty* List is `empty_collection`, a distinct
+%% condition from an out-of-range index into a populated one.
+at_empty_list_test() ->
+    ?assertException(
+        error,
+        #{
+            '$beamtalk_class' := 'RuntimeError',
+            error := #beamtalk_error{
+                kind = empty_collection,
+                class = 'List',
+                selector = 'at:'
+            }
+        },
+        beamtalk_list:at([], 1)
+    ).
+
+%% An index below 1 is malformed regardless of emptiness, so the out-of-bounds
+%% clause is checked before the emptiness clause.
+at_empty_list_zero_index_test() ->
+    ?assertException(
+        error,
+        #{
+            '$beamtalk_class' := 'RuntimeError',
+            error := #beamtalk_error{
+                kind = index_out_of_bounds,
+                class = 'List',
+                selector = 'at:'
+            }
+        },
+        beamtalk_list:at([], 0)
+    ).
+
+%% A non-integer index stays a type_error even on an empty List.
+at_empty_list_non_integer_test() ->
+    ?assertException(
+        error,
+        #{
+            '$beamtalk_class' := 'TypeError',
+            error := #beamtalk_error{kind = type_error, class = 'List', selector = 'at:'}
+        },
+        beamtalk_list:at([], foo)
     ).
 
 at_non_integer_test() ->
@@ -108,13 +151,15 @@ detect_first_match_test() ->
         )
     ).
 
+%% BT-3025: no element matched is `not_found`, not `does_not_understand` —
+%% the List understands `detect:`, the search just came up empty.
 detect_not_found_test() ->
     ?assertException(
         error,
         #{
             '$beamtalk_class' := 'RuntimeError',
             error := #beamtalk_error{
-                kind = does_not_understand,
+                kind = not_found,
                 class = 'List',
                 selector = 'detect:'
             }
@@ -124,6 +169,17 @@ detect_not_found_test() ->
             fun(X) -> X > 10 end
         )
     ).
+
+%% The message names the condition rather than a missing selector.
+detect_not_found_message_test() ->
+    Message =
+        try
+            beamtalk_list:detect([1, 2, 3], fun(X) -> X > 10 end)
+        catch
+            error:#{error := #beamtalk_error{message = M}} -> M
+        end,
+    ?assertNotEqual(nomatch, binary:match(Message, <<"not found">>)),
+    ?assertEqual(nomatch, binary:match(Message, <<"does not understand">>)).
 
 detect_invalid_block_test() ->
     ?assertException(
@@ -579,16 +635,72 @@ from_to_non_integer_end_test() ->
         beamtalk_list:from_to([1, 2, 3], 1, foo)
     ).
 
+%% BT-3025: a sub-1 start index is `index_out_of_bounds`, matching `at:` —
+%% the index is malformed, the selector is not.
 from_to_negative_start_test() ->
     ?assertException(
         error,
         #{
             '$beamtalk_class' := 'RuntimeError',
             error := #beamtalk_error{
-                kind = does_not_understand,
+                kind = index_out_of_bounds,
                 class = 'List',
                 selector = 'from:to:'
             }
         },
         beamtalk_list:from_to([1, 2, 3], -1, 2)
     ).
+
+from_to_zero_start_test() ->
+    ?assertException(
+        error,
+        #{
+            '$beamtalk_class' := 'RuntimeError',
+            error := #beamtalk_error{
+                kind = index_out_of_bounds,
+                class = 'List',
+                selector = 'from:to:'
+            }
+        },
+        beamtalk_list:from_to([1, 2, 3], 0, 2)
+    ).
+
+%%% ============================================================================
+%%% Strict (`=:=`) element identity — BT-2997
+%%% ============================================================================
+
+unique_strict_keeps_int_and_float_test() ->
+    %% `lists:usort/1` would collapse these to [1].
+    ?assertEqual([1, 1.0], beamtalk_list:unique([1, 1.0, 1, 1.0])).
+
+unique_removes_strict_duplicates_test() ->
+    ?assertEqual([1, 2, 3], beamtalk_list:unique([3, 1, 2, 1, 3])).
+
+unique_empty_and_singleton_test() ->
+    ?assertEqual([], beamtalk_list:unique([])),
+    ?assertEqual([a], beamtalk_list:unique([a])).
+
+unique_output_is_sorted_test() ->
+    ?assertEqual([1, 2, 3, 4], beamtalk_list:unique([4, 3, 2, 1])).
+
+unique_non_numeric_terms_test() ->
+    ?assertEqual([a, b, c], beamtalk_list:unique([c, b, a, b])),
+    ?assertEqual([<<"a">>, <<"b">>], beamtalk_list:unique([<<"b">>, <<"a">>, <<"b">>])).
+
+strict_member_distinguishes_int_from_float_test() ->
+    ?assert(beamtalk_list:strict_member_sorted(1, [1])),
+    ?assertNot(beamtalk_list:strict_member_sorted(1.0, [1])),
+    ?assertNot(beamtalk_list:strict_member_sorted(1, [1.0])),
+    %% Both present: each is found on its own terms.
+    ?assert(beamtalk_list:strict_member_sorted(1, [1, 1.0])),
+    ?assert(beamtalk_list:strict_member_sorted(1.0, [1, 1.0])).
+
+strict_member_absent_and_empty_test() ->
+    ?assertNot(beamtalk_list:strict_member_sorted(9, [1, 2, 3])),
+    ?assertNot(beamtalk_list:strict_member_sorted(1, [])),
+    %% Stops early once the sorted list passes the element.
+    ?assertNot(beamtalk_list:strict_member_sorted(0, [1, 2, 3])).
+
+sorted_strict_unique_preserves_equal_run_test() ->
+    %% A run of mutually-`==` terms keeps one of each distinct value.
+    ?assertEqual([1, 1.0], beamtalk_list:sorted_strict_unique([1, 1.0, 1.0, 1])).

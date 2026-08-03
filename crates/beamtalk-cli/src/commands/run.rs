@@ -349,8 +349,16 @@ fn run_script(
 /// run-mode node, discover the project's running workspace (registry under
 /// `~/.beamtalk/workspaces/`), connect over the REPL TCP/JSON protocol, and
 /// dispatch `ClassName selector [args]` into that node via the `run-entry` op.
-/// `Console` output streams back to this CLI; on completion the connecting
-/// process adopts the entry's status:
+///
+/// The entry's `Console` output streams back over that connection and is
+/// written to **stdout** as it arrives, while the two status lines this
+/// function prints go to stderr (BT-2702) — so `beamtalk run … --connect | …`
+/// pipes the program's output and nothing else, exactly as script mode does.
+/// Making that true required the workspace side to route a class method's
+/// output back to the dispatching session (BT-2963); before that fix the output
+/// was silently dropped despite the entry running successfully.
+///
+/// On completion the connecting process adopts the entry's status:
 ///
 /// * `Program exit: N` ends only that session (the node and other sessions stay
 ///   up) and this process exits `N`;

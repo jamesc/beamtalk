@@ -1,0 +1,109 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3032 / BT-3037 / ADR 0110: class-var mutations made before a foreign `^`
+// escapes a class method must survive the non-local-return relay.
+//
+// Codegen writes the just-updated ClassVars map into the
+// '$bt_class_vars_shadow' process-dictionary key at every *top-frame*
+// class-var mutation in a class method; the runtime's `{nlr_relay, ...}`
+// path (BT-3036) reads it back instead of reverting to the pre-call map.
+//
+// Fixtures: fixtures/collection_driver.bt, fixtures/collection_probe.bt,
+// fixtures/shadow_relay_parent.bt, fixtures/shadow_relay_child.bt,
+// fixtures/shadow_relay_probe.bt,
+// fixtures/class_method_conditional_self_call.bt.
+
+TestCase subclass: ClassVarNlrShadowTest
+  field: cls = nil
+
+  setUp =>
+    CollectionDriver resetRunCount
+    ShadowRelayParent resetHits
+    ShadowRelayChild resetHits
+    ClassMethodConditionalSelfCall resetCounter
+    self
+
+  tearDown => self.cls isNil ifFalse: [self.cls removeFromSystem]
+
+  // --- (a) the BT-3032 repro -----------------------------------------------
+
+  // Control: a normally-returning block keeps the increment (worked before
+  // ADR 0110 too — pins that the shadow write changes nothing here).
+  testMutationPersistsOnNormalReturn =>
+    CollectionDriver countedRun: [:x | x] over: #(1, 2, 3)
+    self assert: CollectionDriver runCount equals: 1
+
+  // The repro: the `^` in the probe's block is foreign to countedRun:over:'s
+  // frame. The returned value was already correct (BT-3022); the class-var
+  // increment must now survive too.
+  testMutationSurvivesForeignNlrEscape =>
+    self assert: (CollectionProbe escapeAfterCountedRun: #(1, 2, 3)) equals: 2
+    self assert: CollectionDriver runCount equals: 1
+
+  // Escaping twice accumulates — each relay persists its own increment.
+  testRepeatedEscapesAccumulate =>
+    self assert: (CollectionProbe escapeAfterCountedRun: #(1, 2, 3)) equals: 2
+    self assert: (CollectionProbe escapeAfterCountedRun: #(1, 2, 3)) equals: 2
+    self assert: CollectionDriver runCount equals: 2
+
+  // --- (b) a genuine error still reverts -----------------------------------
+  testGenuineErrorStillRevertsMutation =>
+    // The raw badarith from `1 / 0` is classified to #type_error at the
+    // class-dispatch boundary (as elsewhere off the caller's process).
+    self should: [CollectionDriver failAfterCount] raise: #type_error
+    self assert: CollectionDriver runCount equals: 0
+
+  // --- (c) self-dispatched inherited class method --------------------------
+
+  // The mutation happens in ShadowRelayParent's hitRun:over: running via
+  // `self hitRun:over:` inside ShadowRelayChild's class process; the foreign
+  // `^` relays through the self-dispatch chain and the increment lands in the
+  // child's ClassVars.
+  testInheritedSelfDispatchMutationSurvivesRelay =>
+    self assert: (ShadowRelayProbe escapeThroughChild: #(1, 2, 3)) equals: 2
+    self assert: ShadowRelayChild hitCount equals: 1
+    // Per-class ClassVars: the parent's own counter is untouched.
+    self assert: ShadowRelayParent hitCount equals: 0
+
+  // --- (d) block-interior mutations stay discarded -------------------------
+
+  // A *direct* class-var assignment inside a block in a class method is a
+  // compile-time error (BT-2792 FieldAssignmentInUnsupportedBlock), so the
+  // runtime-expressible block-interior mutation is the BT-1550 shape: a
+  // conditional self-call whose callee mutates. That mutation is discarded on
+  // the normal-return path today, and the ADR 0110 shadow write — gated on
+  // the method's own top frame, block_depth == 0 — deliberately does not
+  // change this. (The gate itself is pinned by Rust codegen tests in
+  // crates/beamtalk-core/src/codegen/core_erlang/tests/.)
+  testBlockInteriorMutationStillDiscardedOnNormalReturn =>
+    self assert: (ClassMethodConditionalSelfCall triggerWithMutation: 5) equals: 5
+    self assert: ClassMethodConditionalSelfCall counterValue equals: 0
+
+  // --- (e) ClassBuilder-defined classes ------------------------------------
+
+  // Same repro against a runtime-built class: the classMethods: fun lowers
+  // through the shared class-method body path, so the shadow write fires
+  // there too.
+  testClassBuilderMutationSurvivesForeignNlrEscape =>
+    Object classBuilder name: #BT3037ShadowBuilt;
+      superclass: Object;
+      classVars: #{#runs => 0};
+      classMethods: #{#countedRun:over: => [:self :aBlock :aList |
+          self.runs := self.runs + 1
+          aList do: [:x | aBlock value: x]
+          nil
+        ], #runCount => [:self | self.runs]};
+      register
+    self.cls := (Erlang beamtalk_interface) findClass: #BT3037ShadowBuilt
+    self assert: (ShadowRelayProbe escapeThrough: self.cls over: #(1, 2, 3)) equals: 2
+    self assert: self.cls runCount equals: 1
+
+// A builder cascade with a *mutating* classMethods: block written inside a
+// block literal is rejected at compile time today (BT-2792 stored-closure
+// field-write validation sees the classMethods: mutation), so the
+// "cascade lexically inside a block" arm of ADR 0110 — the
+// generate_class_method_fun_from_block block_depth reset — is pinned at the
+// Rust level instead:
+// crates/beamtalk-core/src/codegen/core_erlang/tests/dispatch.rs,
+// test_builder_cascade_at_block_depth_still_emits_shadow_write.

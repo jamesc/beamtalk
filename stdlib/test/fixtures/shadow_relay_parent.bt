@@ -1,0 +1,26 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3032 / ADR 0110: parent fixture for the class-var shadow write-through
+// tests (stdlib/test/class_var_nlr_shadow_test.bt). The mutating driver is
+// defined here and reached from ShadowRelayChild via self-dispatch
+// (`self hitRun:over:`), so the foreign NLR relays through the
+// class_self_dispatch chain before it leaves the child's class process.
+//
+// `classState: hits` is declared on both parent and child — ClassVars storage
+// is per-class (BT-2007), and self-dispatch passes the *caller's* ClassVars
+// into the inherited method body.
+
+Value subclass: ShadowRelayParent
+  classState: hits = 0
+
+  // Inherited by ShadowRelayChild; when invoked via self-dispatch from the
+  // child, this mutates the *child's* ClassVars.
+  class hitRun: aBlock :: Block over: aList :: List -> Nil =>
+    self.hits := self.hits + 1
+    aList do: [:x | aBlock value: x]
+    nil
+
+  class hitCount -> Integer => self.hits
+
+  class resetHits => self.hits := 0

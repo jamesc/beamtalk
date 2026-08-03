@@ -452,3 +452,119 @@ run_single_structured_fail_test() ->
     ?assertEqual(1, maps:get(total, Result)),
     ?assertEqual(0, maps:get(passed, Result)),
     ?assertEqual(1, maps:get(failed, Result)).
+
+%%% ============================================================================
+%%% extract_error_kind/1 clauses via should_raise/2
+%%%
+%%% extract_error_kind/1 is private but reachable via the public should_raise/2
+%%% API: Block raises an exception; should_raise calls extract_error_kind on the
+%%% exception value to get the kind to compare against ExpectedKind.
+%%%
+%%% Covers lines 652, 655, 657, 660, 669 of beamtalk_test_case.erl.
+%%% ============================================================================
+
+%% Line 657: #beamtalk_error{kind = Kind} direct record match
+should_raise_matches_beamtalk_error_record_test() ->
+    Block = fun() ->
+        error(#beamtalk_error{kind = my_kind, class = 'TestCase', message = <<"m">>})
+    end,
+    ?assertEqual(nil, beamtalk_test_case:should_raise(Block, my_kind)).
+
+%% Line 660: #{class := 'Exception', error := #beamtalk_error{}} map match
+should_raise_matches_exception_map_test() ->
+    Block = fun() ->
+        error(#{
+            class => 'Exception',
+            '$beamtalk_class' => 'Exception',
+            error => #beamtalk_error{kind = my_kind, class = 'TestCase', message = <<"m">>}
+        })
+    end,
+    ?assertEqual(nil, beamtalk_test_case:should_raise(Block, my_kind)).
+
+%% Line 652: {future_rejected, Reason} → recursive delegation → hits line 657
+should_raise_matches_future_rejected_test() ->
+    Block = fun() ->
+        error(
+            {future_rejected, #beamtalk_error{
+                kind = my_kind, class = 'TestCase', message = <<"m">>
+            }}
+        )
+    end,
+    ?assertEqual(nil, beamtalk_test_case:should_raise(Block, my_kind)).
+
+%% Line 655: {error, Map} when is_map(Map) → recursive → hits $beamtalk_class clause
+should_raise_matches_error_map_wrapped_test() ->
+    Block = fun() ->
+        error(
+            {error, #{
+                '$beamtalk_class' => 'RuntimeError',
+                error => #beamtalk_error{kind = my_kind, class = 'TestCase', message = <<"m">>}
+            }}
+        )
+    end,
+    ?assertEqual(nil, beamtalk_test_case:should_raise(Block, my_kind)).
+
+%% Line 669: unknown error shape → catch-all returns atom 'error'
+should_raise_unknown_error_shape_test() ->
+    Block = fun() -> error({some_weird_tuple, not_recognized}) end,
+    ?assertEqual(nil, beamtalk_test_case:should_raise(Block, error)).
+
+%%% ============================================================================
+%%% format_stacktrace/1 edge cases (BT-1743)
+%%%
+%%% format_stacktrace/1 is exported under -ifdef(TEST).
+%%% Covers lines 440, 537–538, 556, 573 of beamtalk_test_case.erl.
+%%% ============================================================================
+
+%% Line 440: empty list → <<>>
+format_stacktrace_empty_test() ->
+    ?assertEqual(<<>>, beamtalk_test_case:format_stacktrace([])).
+
+%% Lines 537–538: anonymous fun name stripping ('-fun_name/N-fun-M-' → 'fun_name')
+format_stacktrace_anon_fun_name_test() ->
+    Frame = {'bt@my_class', '-my_fun/0-fun-0-', 0, [{file, "my_class.erl"}, {line, 42}]},
+    Result = beamtalk_test_case:format_stacktrace([Frame]),
+    ?assertNotEqual(nomatch, binary:match(Result, <<"my_fun">>)).
+
+%% Line 556: malformed frame (not a 4-tuple) filtered out → <<>>
+format_stacktrace_malformed_frame_test() ->
+    Result = beamtalk_test_case:format_stacktrace([bad_frame]),
+    ?assertEqual(<<>>, Result).
+
+%% Line 573: >3 bt@ frames → select_frames returns [first, second, last]
+format_stacktrace_more_than_3_frames_test() ->
+    Frames = [
+        {'bt@a', f, 0, [{file, "a.erl"}, {line, 1}]},
+        {'bt@b', f, 0, [{file, "b.erl"}, {line, 2}]},
+        {'bt@c', f, 0, [{file, "c.erl"}, {line, 3}]},
+        {'bt@d', f, 0, [{file, "d.erl"}, {line, 4}]}
+    ],
+    Result = beamtalk_test_case:format_stacktrace(Frames),
+    ?assert(is_binary(Result)),
+    ?assertNotEqual(<<>>, Result).
+
+%%% ============================================================================
+%%% setUp failure paths in run_test_method/5 outer catch block
+%%%
+%%% The outer try in run_test_method/5 wraps Module:new() and the setUp
+%%% dispatch. Exceptions from setUp bypass the inner catch and land in the
+%%% outer catch clauses at lines 850–871 of beamtalk_test_case.erl.
+%%% ============================================================================
+
+%% Line 853: setUp throws {bunit_skip, Reason} → {skip, MethodName, Reason}
+setup_throws_bunit_skip_test() ->
+    FlatMethods = #{setUp => {'FakeTest', {}}, testPass => {'FakeTest', {}}},
+    Result = beamtalk_test_case:run_test_method(
+        'FakeTest', tc_setup_skip_helper, testPass, FlatMethods, nil
+    ),
+    ?assertEqual({skip, testPass, <<"skipping in setUp">>}, Result).
+
+%% Lines 868–871: setUp raises generic Erlang error → {fail, MethodName, "setUp failed: ..."}
+setup_raises_generic_error_test() ->
+    FlatMethods = #{setUp => {'FakeTest', {}}, testPass => {'FakeTest', {}}},
+    Result = beamtalk_test_case:run_test_method(
+        'FakeTest', tc_setup_fail_helper, testPass, FlatMethods, nil
+    ),
+    ?assertMatch({fail, testPass, Msg} when is_binary(Msg), Result),
+    {fail, _, Msg} = Result,
+    ?assertNotEqual(nomatch, binary:match(Msg, <<"setUp failed">>)).

@@ -1130,6 +1130,71 @@ impl CoreErlangGenerator {
         }
     }
 
+    /// BT-3018 / ADR 0109: lower `File open:do:` / `File open:mode:do:` to a
+    /// direct call rather than a class send, so the block runs in the caller.
+    ///
+    /// A class send is a `gen_server:call` into the singleton class process, so
+    /// the method body — *including the user's block* — executes there. For a
+    /// block-scoped resource method that is three separate problems: the block
+    /// cannot message `File` again (deadlock), it holds the class process for
+    /// its whole duration (every `File` call in the node queues behind it), and
+    /// it must finish inside the 60-second class-call timeout.
+    ///
+    /// Emitting the same `native_call` the class-method body would have emitted
+    /// — just here, in the caller — removes all three. The Erlang side is
+    /// unchanged: `beamtalk_file:open/2,3` still performs the open, the
+    /// `try`/`after` and the close, so the intercepted path and the
+    /// `perform:`-style dynamic path stay semantically identical.
+    ///
+    /// Deliberately a hard-coded selector list, per ADR 0109's "Not in scope":
+    /// the general mechanism (a continuation protocol for any Block-taking class
+    /// method) would change the hottest dispatch path in the language to benefit
+    /// the ~1% of class methods that take a Block. A fourth block-scoped method
+    /// is the trigger to revisit that.
+    ///
+    /// Scoped to the unqualified stdlib `File`: a package-qualified receiver
+    /// (`mylib@File open: p do: blk`) is some other class that happens to share
+    /// the name, and must keep its own implementation. Same reasoning as the
+    /// `pkg.is_none()` guard on BT-773's self-send case below.
+    fn try_generate_block_scoped_open(
+        &mut self,
+        class_name: &str,
+        package: Option<&str>,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> Result<Option<Document<'static>>> {
+        if class_name != "File" || package.is_some() {
+            return Ok(None);
+        }
+        let selector_atom = selector.to_erlang_atom();
+        if !matches!(selector_atom.as_str(), "open:do:" | "open:mode:do:") {
+            return Ok(None);
+        }
+
+        let mut arg_docs = Vec::with_capacity(arguments.len());
+        for argument in arguments {
+            arg_docs.push(self.expression_doc(argument)?);
+        }
+        let args = Self::join_docs_with_commas(arg_docs);
+
+        // Mirrors `native_delegate_body_doc`: the Erlang shim name is the first
+        // keyword without its colon, and the `{Class, Selector}` context makes a
+        // wrapped error read `File>>open:mode:do:` rather than a bare MFA.
+        Ok(Some(docvec![
+            "call 'beamtalk_erlang_proxy':'native_call'(",
+            leaf::atom("beamtalk_file"),
+            ", ",
+            leaf::atom("open"),
+            ", [",
+            args,
+            "], {",
+            leaf::atom("File"),
+            ", ",
+            leaf::atom(selector_atom),
+            "})"
+        ]))
+    }
+
     /// Handles `ClassReference` receivers as class method calls.
     ///
     /// ADR 0019 Phase 3: In REPL context, checks REPL bindings first for
@@ -1149,6 +1214,15 @@ impl CoreErlangGenerator {
     ) -> Result<Option<Document<'static>>> {
         if let Expression::ClassReference { name, package, .. } = receiver {
             let pkg = package.as_ref().map(|p| p.name.as_str());
+            // BT-3018 / ADR 0109: block-scoped `File open:…do:` must not reach
+            // the File class gen_server, or the user's block runs there. Checked
+            // ahead of every class-send path below, because the deadlock, the
+            // serialization and the 60s class-call ceiling apply to all of them.
+            if let Some(doc) =
+                self.try_generate_block_scoped_open(&name.name, pkg, selector, arguments)?
+            {
+                return Ok(Some(doc));
+            }
             // BT-773: When inside a class method and the explicit class name matches
             // the current class, use direct dispatch (same as `self` sends) to avoid
             // deadlock. The class actor is already processing the outer call, so
@@ -3347,6 +3421,69 @@ mod tests {
         // Arbitrary user selectors must fall through to inherited dispatch.
         assert!(!is_class_auto_export_selector("increment", 0));
         assert!(!is_class_auto_export_selector("at:put:", 2));
+    }
+
+    /// BT-3018 / ADR 0109: `File open:…do:` is lowered at the call site so the
+    /// user's block runs in the caller rather than the File class `gen_server`.
+    /// The interception is keyed on the *unqualified* stdlib `File` — a
+    /// package-qualified `mylib@File` is an unrelated class that happens to
+    /// share the name, and must keep reaching its own implementation.
+    #[test]
+    fn block_scoped_file_open_is_lowered_only_for_unqualified_file() {
+        /// Lowers `[package@]File <keywords>` with one argument per keyword.
+        fn lower(package: Option<&str>, keywords: &[&str]) -> String {
+            let mut generator = CoreErlangGenerator::new("test");
+            let receiver = Expression::ClassReference {
+                name: Identifier::new("File", s()),
+                package: package.map(|p| Identifier::new(p, s())),
+                span: s(),
+            };
+            let selector = MessageSelector::Keyword(
+                keywords.iter().map(|k| KeywordPart::new(*k, s())).collect(),
+            );
+            let arguments: Vec<_> = keywords
+                .iter()
+                .map(|k| Expression::Identifier(Identifier::new(k.trim_end_matches(':'), s())))
+                .collect();
+            generator
+                .generate_message_send(&receiver, &selector, &arguments)
+                .unwrap()
+                .to_pretty_string()
+        }
+
+        // Both intercepted selectors, so dropping either from the `matches!`
+        // list fails here rather than silently reintroducing the deadlock.
+        for keywords in [&["open:", "do:"][..], &["open:", "mode:", "do:"][..]] {
+            let selector_atom = keywords.concat();
+
+            let unqualified = lower(None, keywords);
+            assert!(
+                unqualified.contains("'native_call'(")
+                    && unqualified.contains("'beamtalk_file'")
+                    && unqualified.contains(&format!("'{selector_atom}'")),
+                "unqualified File {selector_atom} should lower to a native_call in the \
+                 caller. Got: {unqualified}"
+            );
+            assert!(
+                !unqualified.contains("class_send"),
+                "the block must not reach the class gen_server. Got: {unqualified}"
+            );
+
+            // A package-qualified receiver keeps the ordinary class-send path:
+            // asserted positively, so an empty or otherwise-shaped lowering
+            // cannot pass by merely lacking the stdlib module name.
+            let qualified = lower(Some("mylib"), keywords);
+            assert!(
+                !qualified.contains("'beamtalk_file'"),
+                "mylib@File {selector_atom} is a different class and must not be \
+                 redirected to the stdlib File shim. Got: {qualified}"
+            );
+            assert!(
+                qualified.contains("class_send"),
+                "mylib@File {selector_atom} should fall through to a normal class \
+                 send. Got: {qualified}"
+            );
+        }
     }
 
     #[test]

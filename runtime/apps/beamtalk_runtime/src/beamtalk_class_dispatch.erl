@@ -37,6 +37,17 @@ Extracted from beamtalk_object_class.erl (BT-704).
 -type selector() :: atom().
 -type class_name() :: atom().
 
+%% BT-3022: a `^` non-local return in flight. Codegen throws the state-carrying
+%% 4-tuple `{'$bt_nlr', Token, Value, State}` (ADR 0041); the 3-tuple is the
+%% pre-BT-854 shape still recognised by `beamtalk_result:'tryDo:'/1`. Both are
+%% control-flow signals aimed at a method frame that may live in another process,
+%% so class dispatch must relay rather than report them.
+-define(IS_NLR(T),
+    (is_tuple(T) andalso
+        (tuple_size(T) =:= 4 orelse tuple_size(T) =:= 3) andalso
+        element(1, T) =:= '$bt_nlr')
+).
+
 -doc """
 Send a message to a class object synchronously (BT-246 / ADR 0013 Phase 1).
 
@@ -85,10 +96,62 @@ class_send(ClassPid, 'spawnWith:', [Map]) ->
 %% explicit clauses because they must route to the gen_server's {new, _} / {spawn, _}
 %% handlers, not to class_method_call. Moving them to the Behaviour/Class chain
 %% is future work (ADR 0032 Phase 4+).
+%% BT-3018: every other selector aimed at the class's own gen_server from
+%% inside that gen_server. `gen_server:call(self(), ...)` does not hang — it
+%% exits with `{calling_self, {gen_server, call, [...]}}`, a raw tuple that
+%% says nothing about what the caller did wrong. The commonest way to get here
+%% is a block running inside a class method that messages its own class:
+%%
+%%     File open: p mode: #read do: [:h | File exists: q]
+%%
+%% Report it the way BT-2005's `handle_metaclass_self_call/2` already reports
+%% the metaclass equivalent. No working path changes: the alternative was an
+%% exit, not a successful call.
+class_send(ClassPid, Selector, _Args) when ClassPid =:= self() ->
+    handle_class_self_call(Selector);
 class_send(ClassPid, Selector, Args) ->
     class_send_with_recovery(ClassPid, Selector, fun(P) ->
         class_send_dispatch(P, Selector, Args)
     end).
+
+-doc """
+Report a class-method self-send that would deadlock (BT-3018).
+
+The four instantiation selectors are short-circuited above; anything else
+sent to a class from inside that class's own process has no safe route, so
+raise a structured `dispatch_error` naming the deadlock instead of letting
+`gen_server:call/2` exit with an opaque `calling_self` tuple.
+""".
+-spec handle_class_self_call(selector()) -> no_return().
+handle_class_self_call(Selector) ->
+    ClassName =
+        case get(beamtalk_class_name) of
+            undefined -> 'the class';
+            CN -> CN
+        end,
+    Error0 = beamtalk_error:new(dispatch_error, ClassName, Selector),
+    %% Built with atom_to_binary rather than io_lib:format on purpose. A badarg
+    %% escaping from *inside* error construction is especially nasty here: the
+    %% FFI boundary treats it as a genuine badarg, retries the whole call with
+    %% charlist-coerced arguments, and the caller ends up seeing an unrelated
+    %% type_error from whichever guard the coerced arguments happen to miss.
+    Error1 = beamtalk_error:with_hint(
+        Error0,
+        iolist_to_binary([
+            <<"Sending '">>,
+            atom_to_binary(Selector, utf8),
+            <<"' to '">>,
+            atom_to_binary(ClassName, utf8),
+            <<
+                "' from inside one of its own class methods would deadlock "
+                "(gen_server:call to self). This usually means a block passed to a "
+                "class method is messaging that same class again; read what you "
+                "need before the call, or hold the resource yourself instead of "
+                "using the block form."
+            >>
+        ])
+    ),
+    beamtalk_error:raise(Error1).
 
 -doc """
 BT-2007: Dispatch an inherited class method from inside a class method body.
@@ -195,6 +258,12 @@ unwrap_self_dispatch_outcome(ClassName, Selector, Outcome) ->
             erlang:error(undef);
         {error, {raised, ErrClass, Error, ST}} ->
             erlang:raise(ErrClass, Error, ST);
+        {nlr_relay, Nlr, ST} ->
+            %% ADR 0110 / BT-3032: self-dispatch runs in the caller's own
+            %% process, so resume the non-local return unwind directly —
+            %% identical behavior to when these throws were tagged
+            %% {error, {raised, throw, ...}}.
+            erlang:raise(throw, Nlr, ST);
         test_spawn ->
             %% `TestCase>>runAll` / `run:` self-sent from inside another
             %% class method would run the test suite inline in the class
@@ -343,6 +412,14 @@ class_send_dispatch(ClassPid, Selector, Args) ->
             %% reports the status and ends the session — instead of
             %% unwrap_class_call/1 wrapping it as an ordinary method failure.
             throw(ScriptExit);
+        {error, Nlr} when ?IS_NLR(Nlr) ->
+            %% BT-3022: a `^` inside a block that this class method ran on our
+            %% behalf. The matching catch frame is in *our* process — the class
+            %% gen_server had no frame holding that token, so its reply is the only
+            %% way the signal can get back here. Re-throw so the enclosing method
+            %% unwinds as it would have without the process hop; without this the
+            %% raw `{'$bt_nlr', ...}` tuple surfaces to user code as an error value.
+            throw(Nlr);
         Other ->
             unwrap_class_call(Other)
     end.
@@ -419,14 +496,28 @@ metaclass_send_dispatch(Pid, Selector, Args, Self) ->
             %% metaclass-dispatched class method as the script-exit throw (parity
             %% with class_send_dispatch/3), so the worker adopts the status.
             throw(ScriptExit);
+        {error, Nlr} when ?IS_NLR(Nlr) ->
+            %% BT-3022: same relay as class_send_dispatch/3, and for the same
+            %% reason — a metaclass-dispatched class method also runs in the class
+            %% gen_server, so a `^` out of a caller-supplied block unwinds to here
+            %% with no frame holding its token. Without this clause
+            %% `unwrap_class_call/1` reraises it as an ordinary error and the raw
+            %% `{'$bt_nlr', ...}` tuple reaches user code.
+            %%
+            %% Reached via a metaclass receiver — `SomeClass class class`, which
+            %% `beamtalk_behaviour_intrinsics:classClass/1` tags `'Metaclass'` so
+            %% `beamtalk_primitive:send/3` routes it here. A plain class literal or
+            %% a single `class` send goes through `class_send/3` instead, which is
+            %% why this needs its own clause rather than sharing that one.
+            throw(Nlr);
         Other ->
             unwrap_class_call(Other)
     end.
 
 -doc """
 Read this process's session context (`beamtalk_session_pid` /
-`beamtalk_session_id` / `beamtalk_session_meta`) for explicit propagation into a
-class-method call.
+`beamtalk_session_id` / `beamtalk_session_meta` / `beamtalk_entry_group_leader`)
+for explicit propagation into a class-method call.
 
 ADR 0081 / BT-2379: the eval worker seeds these keys
 (`beamtalk_repl_shell:seed_session_context/3`). Class-method dispatch hops to
@@ -435,13 +526,29 @@ caller's context there — including the origin metadata so `Session current kin
 reports the real client surface rather than `unknown`. We read our own keys
 cheaply with `get/1` and pass them in the message tuple, avoiding a
 `process_info(CallerPid, dictionary)` full-dictionary copy on the receiving
-side. Returns `{undefined, undefined, undefined}` when this process has no
+side.
+
+BT-2963: the fourth element is the *entry group leader* — the IO sink a
+connected `beamtalk run … --connect` dispatch wants its `Console` output to
+reach. It is seeded only by `beamtalk_repl_eval:do_dispatch/5` (the `run-entry`
+op) and is `undefined` everywhere else, including ordinary REPL `eval`, so no
+other dispatch path changes where its output goes. Carrying it alongside the
+session context makes it propagate transitively: a class method that calls
+*another* class method re-emits the key it was seeded with, so nested output
+keeps streaming to the same client.
+
+Returns `{undefined, undefined, undefined, undefined}` when this process has no
 seeded context (the common non-REPL case).
 """.
 -spec local_session_context() ->
-    {pid() | undefined, binary() | undefined, map() | undefined}.
+    {pid() | undefined, binary() | undefined, map() | undefined, pid() | undefined}.
 local_session_context() ->
-    {get(beamtalk_session_pid), get(beamtalk_session_id), get(beamtalk_session_meta)}.
+    {
+        get(beamtalk_session_pid),
+        get(beamtalk_session_id),
+        get(beamtalk_session_meta),
+        get(beamtalk_entry_group_leader)
+    }.
 
 -doc """
 Unwrap a class gen_server call result for use in class_send.
@@ -511,28 +618,60 @@ invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningM
     %% so both dispatch paths see identical error classification, class-var
     %% threading, and the BT-440 test_spawn escape hatch. This function
     %% adapts the shared outcome to the gen_server `{reply, _, State}` shape.
-    case
-        apply_class_method_in_context(
-            Selector, Args, ClassName, DefiningClass, DefiningModule, ClassVars
-        )
-    of
-        test_spawn ->
-            test_spawn;
-        {ok, {class_var_result, Result, NewClassVars}} ->
-            {reply, {ok, Result}, NewClassVars};
-        {ok, Result} ->
-            {reply, {ok, Result}, ClassVars};
-        {error, #beamtalk_error{} = Error} ->
-            {reply, {error, Error}, ClassVars};
-        {error, undef_in_body} ->
-            {reply, {error, undef}, ClassVars};
-        {error, {raised, _ErrClass, Error, _ST}} ->
-            {reply, {error, Error}, ClassVars}
+    %%
+    %% ADR 0110 / BT-3032: the whole body runs inside try ... after so the
+    %% '$bt_class_vars_shadow' process-dictionary key (written by codegen at
+    %% top-level class-var mutations) never outlives a dispatch, whatever the
+    %% outcome.
+    try
+        case
+            apply_class_method_in_context(
+                Selector, Args, ClassName, DefiningClass, DefiningModule, ClassVars
+            )
+        of
+            test_spawn ->
+                test_spawn;
+            {ok, {class_var_result, Result, NewClassVars}} ->
+                {reply, {ok, Result}, NewClassVars};
+            {ok, Result} ->
+                {reply, {ok, Result}, ClassVars};
+            {nlr_relay, Nlr, _ST} ->
+                %% ADR 0110 / BT-3032: a foreign `^` relaying out of the class
+                %% method is control flow, not a failure — class-var writes made
+                %% before the unwind must survive. The codegen write-through
+                %% (BT-3037) records them under '$bt_class_vars_shadow'; until
+                %% that lands the shadow is never set and this falls back to the
+                %% pre-call ClassVars, exactly today's behavior. The reply shape
+                %% is byte-identical to the historical {error, Nlr}, so the
+                %% ?IS_NLR re-throw clauses in class_send_dispatch/3 and
+                %% metaclass_send_dispatch/4 need no change.
+                ShadowClassVars =
+                    case erlang:get('$bt_class_vars_shadow') of
+                        undefined -> ClassVars;
+                        Shadow -> Shadow
+                    end,
+                {reply, {error, Nlr}, ShadowClassVars};
+            {error, #beamtalk_error{} = Error} ->
+                {reply, {error, Error}, ClassVars};
+            {error, undef_in_body} ->
+                {reply, {error, undef}, ClassVars};
+            {error, {raised, _ErrClass, Error, _ST}} ->
+                {reply, {error, Error}, ClassVars}
+        end
+    after
+        erlang:erase('$bt_class_vars_shadow')
     end.
 
+%% ADR 0110 / BT-3032: `{nlr_relay, Nlr, ST}` is a foreign `^` (non-local
+%% return) relaying out of the class method — the relayed NLR tuple plus its
+%% stacktrace. It is kept distinct from `{error, {raised, ...}}` so
+%% `invoke_class_method/7` can preserve class-var writes recorded under the
+%% `'$bt_class_vars_shadow'` process-dictionary key instead of reverting them
+%% the way it does for genuine errors.
 -type class_method_outcome() ::
     test_spawn
     | {ok, term()}
+    | {nlr_relay, term(), list()}
     | {error, #beamtalk_error{}}
     | {error, undef_in_body}
     | {error, {raised, atom(), term(), list()}}.
@@ -608,6 +747,14 @@ apply_class_method_fun(Fun, ClassSelf, ClassVars, Args, ClassName, Selector) ->
         %% it to the eval/dispatch worker that reports the status.
         throw:({beamtalk_script_exit, _} = ScriptExit):ScriptST ->
             {error, {raised, throw, ScriptExit, ScriptST}};
+        %% BT-3022: a `^` non-local return that unwound through this class method
+        %% belongs to a method frame in the *calling* process. Pass it through
+        %% unlogged so class_send_dispatch/3 can re-throw it there.
+        %% ADR 0110 / BT-3032: tagged as its own outcome variant (not
+        %% {error, {raised, ...}}) so invoke_class_method/7 can keep class-var
+        %% writes made before the unwind instead of reverting them.
+        throw:Nlr:NlrST when ?IS_NLR(Nlr) ->
+            {nlr_relay, Nlr, NlrST};
         error:undef:ST ->
             ?LOG_ERROR(
                 "Runtime class method ~p:~p raised undef internally",
@@ -654,6 +801,12 @@ apply_compiled_class_method(
         %% re-raises it to the eval/dispatch worker.
         throw:({beamtalk_script_exit, _} = ScriptExit):ScriptST ->
             {error, {raised, throw, ScriptExit, ScriptST}};
+        %% BT-3022: see apply_class_method_fun/6 — a non-local return unwinding out
+        %% of a class method is control flow for a frame in the calling process.
+        %% ADR 0110 / BT-3032: tagged {nlr_relay, ...} so class-var writes made
+        %% before the unwind can be recovered rather than reverted.
+        throw:Nlr:NlrST when ?IS_NLR(Nlr) ->
+            {nlr_relay, Nlr, NlrST};
         error:undef:ST ->
             classify_undef(ClassName, DefiningClass, DefiningModule, Selector, FunName, ST);
         ErrClass:Error:ErrST ->

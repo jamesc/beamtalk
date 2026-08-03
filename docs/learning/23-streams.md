@@ -120,8 +120,12 @@ sum  // => 15
 (Stream from: 1) detect: [:n | n > 10]  // => 11
 ```
 
+If the stream runs to exhaustion without a match, `detect:` raises
+`not_found` — same as on a List, a Set, or an Interval. Use `detect:ifNone:`
+when a miss is expected:
+
 ```beamtalk
-(Stream on: #(1, 2, 3)) detect: [:n | n > 100]  // => nil
+(Stream on: #(1, 2, 3)) detect: [:n | n > 100] ifNone: [0]  // => 0
 ```
 
 ### anySatisfy: and allSatisfy:
@@ -175,10 +179,14 @@ empty := Stream on: #()                     // => _
 empty asList                                 // => []
 (empty select: [:n | true]) asList           // => []
 (empty collect: [:n | n * 2]) asList         // => []
-empty detect: [:n | true]                    // => nil
+empty detect: [:n | true] ifNone: [nil]      // => nil
 empty anySatisfy: [:n | true]                // => false
 empty allSatisfy: [:n | true]                // => true
 ```
+
+The one that does not answer is `detect:` on its own: an empty stream is just
+the degenerate no-match case, so `empty detect: [:n | true]` raises
+`not_found`.
 
 ## Summary
 
@@ -206,7 +214,8 @@ stream drop: n               → skip first n elements
 stream take: n                          → List of first n elements
 stream asList                           → List of all elements
 stream inject: init into: [:acc :n | …] → folded value
-stream detect: [:n | ...]               → first match or nil
+stream detect: [:n | ...]               → first match (raises not_found if none)
+stream detect: [:n | ...] ifNone: [d]   → first match, or d if none
 stream anySatisfy: [:n | ...]           → Boolean
 stream allSatisfy: [:n | ...]           → Boolean
 stream do: [:n | ...]                   → nil (side effects)

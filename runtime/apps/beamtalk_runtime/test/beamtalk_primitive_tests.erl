@@ -37,6 +37,20 @@ class_of_string_test() ->
     ?assertEqual('String', beamtalk_primitive:class_of(<<"with spaces">>)),
     ?assertEqual('String', beamtalk_primitive:class_of(<<"Unicode: 你好"/utf8>>)).
 
+class_of_non_utf8_binary_is_binary_test() ->
+    %% BT-2999: bytes that can't be valid UTF-8 can't be a String either.
+    ?assertEqual('Binary', beamtalk_primitive:class_of(<<255, 254, 253>>)),
+    ?assertEqual('Binary', beamtalk_primitive:class_of(<<"prefix", 16#C3>>)),
+    ?assertEqual('Binary', beamtalk_primitive:class_of(crypto:strong_rand_bytes(64))).
+
+is_utf8_test() ->
+    ?assert(beamtalk_primitive:is_utf8(<<>>)),
+    ?assert(beamtalk_primitive:is_utf8(<<"hello">>)),
+    ?assert(beamtalk_primitive:is_utf8(<<"Unicode: 你好"/utf8>>)),
+    ?assertNot(beamtalk_primitive:is_utf8(<<255, 254>>)),
+    %% Truncated multi-byte sequence — incomplete, not valid.
+    ?assertNot(beamtalk_primitive:is_utf8(<<16#E4, 16#BD>>)).
+
 class_of_boolean_test() ->
     ?assertEqual('True', beamtalk_primitive:class_of(true)),
     ?assertEqual('False', beamtalk_primitive:class_of(false)).
@@ -657,6 +671,35 @@ print_string_float_test() ->
 
 print_string_string_test() ->
     ?assertEqual(<<"\"hello\"">>, beamtalk_primitive:print_string(<<"hello">>)).
+
+print_string_non_utf8_binary_is_hex_test() ->
+    %% BT-2999: raw bytes render as `Binary printString` hex, never inline.
+    ?assertEqual(<<"<<FF FE FD>>">>, beamtalk_primitive:print_string(<<255, 254, 253>>)),
+    ?assertEqual(<<"<<00 C8>>">>, beamtalk_primitive:print_string(<<0, 200>>)).
+
+print_string_non_utf8_binary_output_is_valid_utf8_test() ->
+    %% The invariant that keeps json:encode/1 and the logger from blowing up.
+    Cases = [
+        <<255>>,
+        <<255, 254, 253, 0, 200>>,
+        <<"partially valid ", 16#C3>>,
+        crypto:strong_rand_bytes(128)
+    ],
+    lists:foreach(
+        fun(Bin) ->
+            Printed = beamtalk_primitive:print_string(Bin),
+            ?assert(beamtalk_primitive:is_utf8(Printed))
+        end,
+        Cases
+    ).
+
+print_string_non_utf8_nested_in_tuple_test() ->
+    %% The real crash path: `string:length/1` raises `{badarg, RawBinary}`, and
+    %% that reason is rendered for the failure message.
+    ?assertEqual(
+        <<"{#badarg, <<FF FE>>}">>,
+        beamtalk_primitive:print_string({badarg, <<255, 254>>})
+    ).
 
 print_string_boolean_test() ->
     ?assertEqual(<<"true">>, beamtalk_primitive:print_string(true)),

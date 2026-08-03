@@ -1,0 +1,50 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3022: a driver that runs a block over a list, offered both class-side and
+// instance-side with identical bodies.
+//
+// The class-side form hops into the class gen_server process, so a block passed
+// through it runs in a *different* process from its caller. Used by
+// `ClassDrivenCollection` (class-side) and `SelfDrivenCollection` (instance-side)
+// to compare the two paths.
+
+Value subclass: CollectionDriver
+  // BT-3032 / ADR 0110: class-side run counter, mutated before the driver
+  // invokes the caller's block — the mutation must survive a foreign `^`
+  // escaping through the block (shadow write-through).
+  classState: runs = 0
+
+  // CLASS-side driver — running this hops into the class process.
+  class run: aBlock :: Block over: aList :: List -> Nil =>
+    aList do: [:x | aBlock value: x]
+    nil
+
+  // BT-3032 / ADR 0110: mutates a class var *before* driving the caller's
+  // block. If the block escapes with a foreign `^`, the increment must not
+  // be reverted.
+  class countedRun: aBlock :: Block over: aList :: List -> Nil =>
+    self.runs := self.runs + 1
+    aList do: [:x | aBlock value: x]
+    nil
+
+  // BT-3032 / ADR 0110: a genuine error after the mutation must still revert
+  // it (the existing, documented behavior).
+  class failAfterCount =>
+    self.runs := self.runs + 1
+    1 / 0
+
+  class runCount -> Integer => self.runs
+
+  class resetRunCount => self.runs := 0
+
+  // BT-3022: re-entrant. This class method iterates a collection whose `do:`
+  // delegates back to *this same class*, so the inner class send targets the
+  // process already executing this method.
+  class reentrantAsListOf: aList :: List -> List =>
+    (ClassDrivenCollection of: aList) asList
+
+  // Instance-side control, identical body — stays in the caller's process.
+  run: aBlock :: Block over: aList :: List -> Nil =>
+    aList do: [:x | aBlock value: x]
+    nil

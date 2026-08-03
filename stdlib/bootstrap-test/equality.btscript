@@ -67,6 +67,35 @@ true /= false
 // => true
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Overridable Equality: `equals:` — BT-2997
+// ═══════════════════════════════════════════════════════════════════════════
+
+// `=:=`, `=/=`, `==` and `/=` lower straight to Erlang BIFs and never
+// dispatch, so a class cannot override them (the compiler rejects the
+// attempt). `Object equals:` is the overridable counterpart; it defaults to
+// `=:=`, so on classes that do not override it the two agree exactly.
+42 equals: 42
+// => true
+42 equals: 43
+// => false
+
+// Strict by default: no numeric coercion, same as `=:=`
+42 equals: 42.0
+// => false
+
+// Reaches Object's default through primitive dispatch, for every receiver kind
+"ab" equals: "ab"
+// => true
+#foo equals: #foo
+// => true
+#(1, 2) equals: #(1, 2)
+// => true
+true equals: true
+// => true
+nil equals: nil
+// => true
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Value Type Equality (Map Contents) - NOT YET IMPLEMENTED
 // ═══════════════════════════════════════════════════════════════════════════
 

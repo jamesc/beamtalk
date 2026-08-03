@@ -10,7 +10,7 @@
 
 use super::super::document::Document;
 use super::super::document::leaf;
-use super::{build_dnu_error_doc, call_p0_self, call_self_p0, param};
+use super::{build_error_doc, call_p0_self, call_self_p0, param};
 use crate::docvec;
 
 /// List primitive implementations (BT-419).
@@ -32,9 +32,17 @@ fn generate_list_access_bif(selector: &str, params: &[String]) -> Option<Documen
     match selector {
         "size" => Some(Document::Str("call 'erlang':'length'(Self)")),
         "isEmpty" => Some(Document::Str("call 'erlang':'=:='(Self, [])")),
+        // BT-3021: `first`/`last` raise `empty_collection`, not
+        // `does_not_understand` — the receiver *does* understand the selector,
+        // it just has no element to answer. `rest` is deliberately total (see
+        // below), so only the element accessors raise here.
         "first" => {
-            let error =
-                build_dnu_error_doc("List", "first", "Cannot get first element of empty list");
+            let error = build_error_doc(
+                "empty_collection",
+                "List",
+                "first",
+                "List is empty; guard with `isEmpty` or use `detect:ifNone:`",
+            );
             Some(docvec![
                 "case Self of \
                  <[H|_T]> when 'true' -> H \
@@ -45,6 +53,9 @@ fn generate_list_access_bif(selector: &str, params: &[String]) -> Option<Documen
                  end",
             ])
         }
+        // BT-3021: `rest` is a *subsequence* op, not an element accessor — it
+        // has a well-defined total answer on empty (the empty list), matching
+        // `drop:`/`take:`. Only `first`/`last`/`at:` raise on empty.
         "rest" => Some(Document::Str(
             "case Self of \
              <[_H|T]> when 'true' -> T \
@@ -52,8 +63,12 @@ fn generate_list_access_bif(selector: &str, params: &[String]) -> Option<Documen
              end",
         )),
         "last" => {
-            let error =
-                build_dnu_error_doc("List", "last", "Cannot get last element of empty list");
+            let error = build_error_doc(
+                "empty_collection",
+                "List",
+                "last",
+                "List is empty; guard with `isEmpty` or use `detect:ifNone:`",
+            );
             Some(docvec![
                 "case Self of \
                  <[]> when 'true' -> \
@@ -66,7 +81,14 @@ fn generate_list_access_bif(selector: &str, params: &[String]) -> Option<Documen
             ])
         }
         "at:" => Some(call_self_p0("beamtalk_list", "at", param(params, 0, "_N"))),
-        "includes:" => Some(call_p0_self("lists", "member", param(params, 0, "_Item"))),
+        // BT-2997: honours an `equals:` override on the elements. Takes
+        // `lists:member/2` first and only dispatches on a raw miss, so the
+        // positive case keeps the BIF's speed.
+        "includes:" => Some(call_p0_self(
+            "beamtalk_equality",
+            "member",
+            param(params, 0, "_Item"),
+        )),
         "sort" => Some(Document::Str("call 'lists':'sort'(Self)")),
         "sort:" => Some(call_self_p0(
             "beamtalk_list",
@@ -74,7 +96,9 @@ fn generate_list_access_bif(selector: &str, params: &[String]) -> Option<Documen
             param(params, 0, "_Block"),
         )),
         "reversed" => Some(Document::Str("call 'lists':'reverse'(Self)")),
-        "unique" => Some(Document::Str("call 'lists':'usort'(Self)")),
+        // BT-2997: `lists:usort/1` deduplicates by term order (`==`), which
+        // collapses `1` and `1.0`. Beamtalk element identity is `=:=`.
+        "unique" => Some(Document::Str("call 'beamtalk_list':'unique'(Self)")),
         _ => None,
     }
 }
@@ -224,7 +248,9 @@ mod tests {
         let output = result.expect("first should produce code");
         assert!(output.contains("case Self of"));
         assert!(output.contains("<[H|_T]> when 'true' -> H"));
-        assert!(output.contains("'does_not_understand'"));
+        // BT-3021: empty-collection access is not a dispatch failure.
+        assert!(output.contains("'empty_collection'"));
+        assert!(!output.contains("'does_not_understand'"));
         assert!(output.contains("'first'"));
     }
 
@@ -249,7 +275,9 @@ mod tests {
         let output = result.expect("last should produce code");
         assert!(output.contains("case Self of"));
         assert!(output.contains("call 'lists':'last'(Self)"));
-        assert!(output.contains("'does_not_understand'"));
+        // BT-3021: empty-collection access is not a dispatch failure.
+        assert!(output.contains("'empty_collection'"));
+        assert!(!output.contains("'does_not_understand'"));
         assert!(output.contains("'last'"));
     }
 
@@ -264,10 +292,14 @@ mod tests {
 
     #[test]
     fn test_includes() {
+        // BT-2997: routes through `beamtalk_equality:member/2`, not bare
+        // `lists:member/2`, so an `equals:` override on the element class is
+        // honoured. That helper still takes `lists:member/2` first, so the
+        // positive case costs the same as before.
         let result = doc_to_string(generate_list_bif("includes:", &["Item".to_string()]));
         assert_eq!(
             result,
-            Some("call 'lists':'member'(Item, Self)".to_string())
+            Some("call 'beamtalk_equality':'member'(Item, Self)".to_string())
         );
     }
 
@@ -294,8 +326,14 @@ mod tests {
 
     #[test]
     fn test_unique() {
+        // BT-2997: `lists:usort/1` deduplicates by term order (`==`), which
+        // collapses `1` and `1.0`. `beamtalk_list:unique/1` sorts the same way
+        // but deduplicates with `=:=`.
         let result = doc_to_string(generate_list_bif("unique", &[]));
-        assert_eq!(result, Some("call 'lists':'usort'(Self)".to_string()));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_list':'unique'(Self)".to_string())
+        );
     }
 
     // Iteration ops

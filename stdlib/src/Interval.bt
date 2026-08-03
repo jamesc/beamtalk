@@ -50,14 +50,21 @@ typed Collection subclass: Interval
 
   /// First element of the interval.
   ///
+  /// Raises `empty_collection` if the interval is empty, matching
+  /// `List first` / `String first`.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// (1 to: 10) first     // => 1
   /// ```
   first -> Integer =>
-    self isEmpty ifTrue: [self error: "Interval is empty"] ifFalse: [self.from]
+    self isEmpty ifTrue: [
+      (Erlang beamtalk_collection) raiseEmpty: #Interval selector: #first
+    ] ifFalse: [self.from]
 
   /// Last element of the interval.
+  ///
+  /// Raises `empty_collection` if the interval is empty (see `first`).
   ///
   /// ## Examples
   /// ```beamtalk
@@ -66,7 +73,7 @@ typed Collection subclass: Interval
   /// ```
   last -> Integer =>
     self isEmpty ifTrue: [
-      self error: "Interval is empty"
+      (Erlang beamtalk_collection) raiseEmpty: #Interval selector: #last
     ] ifFalse: [self.from + ((self size - 1) * self.step)]
 
   /// Materialise the interval into a `List` of its elements (ADR 0095 §6 — the

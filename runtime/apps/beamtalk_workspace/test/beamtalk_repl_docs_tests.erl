@@ -247,8 +247,8 @@ format_see_also_single_no_desc_test() ->
 format_see_also_with_desc_test() ->
     Result = beamtalk_repl_docs:format_see_also([{'Value', <<"immutable data">>}]),
     ?assert(binary:match(Result, <<"See also:">>) =/= nomatch),
-    %% Should contain the em dash separator
-    ?assert(binary:match(Result, <<" — ">>) =/= nomatch),
+    %% Should contain the ASCII separator (BT-3026: no non-ASCII in binary literals)
+    ?assert(binary:match(Result, <<" - ">>) =/= nomatch),
     ?assert(binary:match(Result, <<"immutable data">>) =/= nomatch).
 
 %%====================================================================

@@ -58,6 +58,74 @@ at_negative_index_test() ->
         beamtalk_string:at(<<"hi">>, -1)
     ).
 
+%% BT-3021: indexing an *empty* String is `empty_collection`, matching
+%% `List at:`; an index below 1 stays `index_out_of_bounds` even when empty,
+%% since it is malformed either way.
+at_empty_string_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := 'RuntimeError',
+            error := #beamtalk_error{kind = empty_collection, class = 'String', selector = 'at:'}
+        },
+        beamtalk_string:at(<<>>, 1)
+    ).
+
+at_empty_string_zero_index_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := 'RuntimeError',
+            error := #beamtalk_error{kind = index_out_of_bounds, class = 'String', selector = 'at:'}
+        },
+        beamtalk_string:at(<<>>, 0)
+    ).
+
+%%% ============================================================================
+%%% first/1, last/1 (BT-3021)
+%%%
+%%% Grapheme-aware element accessors. On `<<>>` they raise `empty_collection` —
+%%% the same kind `List first` raises — so a single `on:do:` clause handles both.
+%%% ============================================================================
+
+first_returns_first_grapheme_test() ->
+    ?assertEqual(<<"h">>, beamtalk_string:first(<<"hello">>)).
+
+last_returns_last_grapheme_test() ->
+    ?assertEqual(<<"o">>, beamtalk_string:last(<<"hello">>)).
+
+first_single_character_test() ->
+    ?assertEqual(<<"x">>, beamtalk_string:first(<<"x">>)),
+    ?assertEqual(<<"x">>, beamtalk_string:last(<<"x">>)).
+
+%% Grapheme-aware, not byte-aware: these are multi-byte in UTF-8.
+first_utf8_grapheme_test() ->
+    ?assertEqual(<<"\x{FC}"/utf8>>, beamtalk_string:first(<<"\x{FC}ber"/utf8>>)).
+
+last_utf8_grapheme_test() ->
+    ?assertEqual(<<"\x{E9}"/utf8>>, beamtalk_string:last(<<"caf\x{E9}"/utf8>>)).
+
+last_emoji_test() ->
+    ?assertEqual(<<"\x{1F44B}"/utf8>>, beamtalk_string:last(<<"hi\x{1F44B}"/utf8>>)).
+
+first_empty_string_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := 'RuntimeError',
+            error := #beamtalk_error{
+                kind = empty_collection, class = 'String', selector = 'first'
+            }
+        },
+        beamtalk_string:first(<<>>)
+    ).
+
+last_empty_string_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := 'RuntimeError',
+            error := #beamtalk_error{kind = empty_collection, class = 'String', selector = 'last'}
+        },
+        beamtalk_string:last(<<>>)
+    ).
+
 %%% ============================================================================
 %%% capitalize/1
 %%% ============================================================================

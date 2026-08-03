@@ -2443,7 +2443,11 @@ impl TypeChecker {
                 InferredType::Known {
                     class_name: actual, ..
                 } => {
-                    if actual == expected || expected_is_object {
+                    // BT-3024: use the same subtyping predicate the `Union` arm
+                    // below already uses, rather than bare name equality — a
+                    // lone singleton `#first` is a subtype of a `Symbol` param
+                    // (Erlang spec `atom()`) exactly as `#first | #last` is.
+                    if expected_is_object || Self::is_type_compatible(actual, expected, hierarchy) {
                         continue;
                     }
                     let actual_display = InferredType::class_name_for_diagnostic(actual.as_str());

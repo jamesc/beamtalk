@@ -16,6 +16,8 @@ All operations are grapheme-aware and handle UTF-8 correctly.
 """.
 -export([
     at/2,
+    first/1,
+    last/1,
     capitalize/1,
     reverse/1,
     includes/2,
@@ -48,8 +50,17 @@ All operations are grapheme-aware and handle UTF-8 correctly.
 %% removed, no case conversion, so these are camelCase not snake_case).
 -export([urlEncoded/1, urlDecoded/1]).
 
--doc "1-based grapheme access. Returns the grapheme at the given index.".
+-doc """
+1-based grapheme access. Returns the grapheme at the given index.
+
+BT-3021: mirrors `beamtalk_list:at/2` — indexing an empty String is
+`empty_collection`, any other out-of-range index is `index_out_of_bounds`. An
+index below 1 is malformed whether or not the String is empty, so that clause
+is reached first (it is listed last, but `Idx >= 1` excludes it above).
+""".
 -spec at(binary(), integer()) -> binary().
+at(<<>>, Idx) when is_integer(Idx), Idx >= 1 ->
+    raise_empty('at:');
 at(Str, Idx) when is_binary(Str), is_integer(Idx), Idx >= 1 ->
     case get_nth_grapheme(Str, Idx) of
         {ok, Grapheme} ->
@@ -67,6 +78,45 @@ at(Str, Idx) when is_binary(Str), is_integer(Idx) ->
             index_out_of_bounds, 'String', 'at:', <<"Index must be >= 1 (1-based indexing)">>
         )
     ).
+
+-doc """
+First grapheme cluster, as a String.
+
+BT-3021: raises `empty_collection` on `""` — the same kind `List first` raises,
+so `on:do:` can handle both with one clause.
+""".
+-spec first(binary()) -> binary().
+first(<<>>) ->
+    raise_empty('first');
+first(Str) when is_binary(Str) ->
+    case string:next_grapheme(Str) of
+        [Grapheme | _Rest] -> unicode:characters_to_binary([Grapheme]);
+        [] -> raise_empty('first')
+    end.
+
+-doc """
+Last grapheme cluster, as a String.
+
+BT-3021: raises `empty_collection` on `""` (see `first/1`).
+""".
+-spec last(binary()) -> binary().
+last(<<>>) ->
+    raise_empty('last');
+last(Str) when is_binary(Str) ->
+    %% `string:slice/3` is grapheme-aware, so this is the final grapheme cluster
+    %% — not the final byte or code point. Preferred over reversing the string:
+    %% both are O(n) to traverse, but `string:reverse/1` also allocates a full
+    %% reversed copy just to read one grapheme off the front.
+    case string:slice(Str, string:length(Str) - 1, 1) of
+        <<>> -> raise_empty('last');
+        Grapheme -> unicode:characters_to_binary(Grapheme)
+    end.
+
+-doc "Raise `empty_collection` for an accessor called on an empty String.".
+-spec raise_empty(atom()) -> no_return().
+raise_empty(Selector) ->
+    Hint = <<"String is empty; guard with `isEmpty` before indexing">>,
+    beamtalk_error:raise(beamtalk_error:new(empty_collection, 'String', Selector, Hint)).
 
 -doc "Capitalize the first grapheme, keep rest unchanged.".
 -spec capitalize(binary()) -> binary().
@@ -405,7 +455,7 @@ raise_url_decode_error() ->
     Error1 = beamtalk_error:with_selector(Error0, 'urlDecoded'),
     Error2 = beamtalk_error:with_hint(
         Error1,
-        <<"Malformed percent-encoding — a '%' must be followed by two hex digits">>
+        <<"Malformed percent-encoding; a '%' must be followed by two hex digits">>
     ),
     beamtalk_error:raise(Error2).
 

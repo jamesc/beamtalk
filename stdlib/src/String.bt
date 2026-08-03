@@ -159,12 +159,38 @@ sealed typed Binary subclass: String
 
   /// Return the grapheme cluster at the given 1-based index.
   ///
+  /// Raises `index_out_of_bounds` if `index` is outside `1..self length`, and
+  /// `empty_collection` if the String is empty.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// "hello" at: 1        // => "h"
   /// "hello" at: 5        // => "o"
   /// ```
   at: index :: Integer -> String => @primitive
+
+  /// Return the first grapheme cluster.
+  ///
+  /// Raises `empty_collection` if the String is empty — there is no character
+  /// to answer. Guard with `isEmpty`, or use `take: 1`, which answers `""`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// "hello" first        // => "h"
+  /// "über" first         // => "ü"
+  /// ```
+  first -> String => @primitive
+
+  /// Return the last grapheme cluster.
+  ///
+  /// Raises `empty_collection` if the String is empty — there is no character
+  /// to answer. Guard with `isEmpty` before calling.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// "hello" last         // => "o"
+  /// ```
+  last -> String => @primitive
 
   /// Convert all characters to uppercase.
   ///

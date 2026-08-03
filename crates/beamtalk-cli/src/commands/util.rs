@@ -7,7 +7,7 @@
 
 use beamtalk_core::file_walker::FileWalker;
 use camino::{Utf8Path, Utf8PathBuf};
-use miette::Result;
+use miette::{Context, IntoDiagnostic, Result};
 use std::fs;
 use std::time::SystemTime;
 
@@ -37,6 +37,30 @@ pub(crate) enum Expected {
 /// Read the modification time of a file, returning `None` on any error.
 pub(super) fn mtime_of(path: &Utf8Path) -> Option<SystemTime> {
     fs::metadata(path).ok()?.modified().ok()
+}
+
+/// Find the project root by requiring a `beamtalk.toml` in the current directory.
+///
+/// Returns the current working directory as a [`Utf8PathBuf`] if a manifest is
+/// present, or an error telling the user to run from a Beamtalk project root.
+pub(crate) fn find_project_root() -> Result<Utf8PathBuf> {
+    let cwd = std::env::current_dir()
+        .into_diagnostic()
+        .wrap_err("Failed to determine current directory")?;
+
+    let project_root = Utf8PathBuf::from_path_buf(cwd).map_err(|p| {
+        miette::miette!("Current directory path is not valid UTF-8: {}", p.display())
+    })?;
+
+    let manifest_path = project_root.join("beamtalk.toml");
+    if !manifest_path.exists() {
+        miette::bail!(
+            "No beamtalk.toml found in current directory.\n  \
+             Run this command from a Beamtalk project root, or create one with `beamtalk new`."
+        );
+    }
+
+    Ok(project_root)
 }
 
 /// Find files matching the given extensions in a path.

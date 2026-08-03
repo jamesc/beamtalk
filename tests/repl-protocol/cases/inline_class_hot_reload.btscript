@@ -25,7 +25,7 @@
 Actor subclass: InlineRedefActor
   state: count = 0
   bump => self.count := self.count + 1
-// => _
+// => InlineRedefActor
 
 ir := InlineRedefActor spawn
 // => Actor(InlineRedefActor, _)
@@ -44,7 +44,7 @@ ir bump
 Actor subclass: InlineRedefActor
   state: count = 0
   bump => self.count := self.count + 10
-// => _
+// => InlineRedefActor
 
 // Existing actor picks up new bump (adds 10). Count preserved at 2.
 ir bump
@@ -73,10 +73,10 @@ ir2 bump
 Actor subclass: MethodDropActor
   state: x = 0
   setX => self.x := self.x + 1
-// => _
+// => MethodDropActor
 
 MethodDropActor >> secret => "visible"
-// => _
+// => MethodDropActor>>secret
 
 md := MethodDropActor spawn
 // => Actor(MethodDropActor, _)
@@ -91,7 +91,7 @@ md secret
 Actor subclass: MethodDropActor
   state: x = 0
   setX => self.x := self.x + 1
-// => _
+// => MethodDropActor
 
 // setX still works on existing actor after hot reload
 md setX

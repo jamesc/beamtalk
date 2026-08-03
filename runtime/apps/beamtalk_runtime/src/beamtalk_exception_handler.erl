@@ -79,6 +79,20 @@ kind_to_class(arity_mismatch) -> 'RuntimeError';
 kind_to_class(immutable_value) -> 'RuntimeError';
 kind_to_class(runtime_error) -> 'RuntimeError';
 kind_to_class(index_out_of_bounds) -> 'RuntimeError';
+%% BT-3021: accessing an element of an empty collection (List/String/Array
+%% first/last/at:, Interval first/last, Collection max/min/average).
+kind_to_class(empty_collection) -> 'RuntimeError';
+%% `empty_queue` is the same condition on Queue, and predates `empty_collection`
+%% (BT-1250). It kept its own kind for compatibility — callers catch
+%% `#empty_queue` — but it classified as bare 'Error' while every other
+%% empty-collection access is a 'RuntimeError'. RuntimeError is a subclass of
+%% Error, so `on: Error do:` still catches it; `on: RuntimeError do:` now does
+%% too, making the family uniform.
+kind_to_class(empty_queue) -> 'RuntimeError';
+%% BT-3025: a search that completed but matched nothing (`detect:`). Distinct
+%% from `empty_collection` — the collection may be full, just of non-matches —
+%% and from `key_error`, which names a *key* the receiver was asked for.
+kind_to_class(not_found) -> 'RuntimeError';
 kind_to_class(class_not_found) -> 'RuntimeError';
 kind_to_class(no_superclass) -> 'RuntimeError';
 kind_to_class(class_already_exists) -> 'RuntimeError';

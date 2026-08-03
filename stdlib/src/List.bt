@@ -58,6 +58,10 @@ sealed typed Collection(E) subclass: List(E)
 
   /// Return the first element.
   ///
+  /// Raises `empty_collection` if the list is empty — there is no element to
+  /// answer, and `nil` would be indistinguishable from a stored `nil`. Guard
+  /// with `isEmpty`, or use `detect:ifNone:` when a default is wanted.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// #(1, 2, 3) first         // => 1
@@ -66,13 +70,22 @@ sealed typed Collection(E) subclass: List(E)
 
   /// Return all elements except the first (the tail).
   ///
+  /// Answers `#()` on an empty list rather than raising. `rest` is a
+  /// *subsequence* operation, not an element accessor: unlike `first`/`last`,
+  /// it has a well-defined total answer on empty, and staying total keeps the
+  /// `[:l | l isEmpty ifFalse: [... l rest ...]]` recursion idiom working. This
+  /// matches its neighbours `take:` and `drop:`, which are also total.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// #(1, 2, 3) rest          // => #(2, 3)
+  /// #() rest                 // => #()
   /// ```
   rest -> List(E) => @primitive
 
   /// Return the last element.
+  ///
+  /// Raises `empty_collection` if the list is empty (see `first`).
   ///
   /// ## Examples
   /// ```beamtalk
@@ -85,6 +98,10 @@ sealed typed Collection(E) subclass: List(E)
   /// **O(n)** — `List` is a cons list. For frequent random access by position,
   /// use `Array` (`aList asArray`), whose `at:` is O(log n).
   ///
+  /// Raises `empty_collection` if the list is empty, `index_out_of_bounds` if
+  /// `index` is outside `1..self size`, and `type_error` if `index` is not an
+  /// Integer.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// #(10, 20, 30) at: 2      // => 20
@@ -92,6 +109,11 @@ sealed typed Collection(E) subclass: List(E)
   at: index :: Integer -> E => @primitive
 
   /// Test if the list contains the given item.
+  ///
+  /// Compares with `equals:`, so an element class that overrides it is matched
+  /// by value rather than by representation (BT-2997). Raw `=:=` is tried
+  /// first, so a list of primitives — or any list where a structurally equal
+  /// element exists — costs exactly what it did before.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -126,13 +148,26 @@ sealed typed Collection(E) subclass: List(E)
 
   /// Remove duplicate elements.
   ///
+  /// Deduplicates with `=:=` and returns the elements sorted. Unlike the
+  /// searches (`includes:`, `indexOf:`), this does not consult an `equals:`
+  /// override — deduplication needs an order that a user-defined `equals:`
+  /// cannot supply, the same reason `Set` and `Dictionary` keys cannot.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// #(1, 2, 2, 3) unique     // => #(1, 2, 3)
+  /// #(1, 1.0) unique         // => #(1, 1.0)  (strict — 1 and 1.0 differ)
   /// ```
   unique -> List(E) => @primitive
 
   /// Find the first element for which `block` returns true.
+  ///
+  /// Raises `not_found` if no element matches — the return type is `E`, so
+  /// there is no in-band way to say "nothing matched". Use `detect:ifNone:`
+  /// when a default is wanted; it is the non-raising alternative.
+  ///
+  /// Same behaviour as the inherited `Collection>>detect:` and as
+  /// `Stream>>detect:`; this override exists only to reach the primitive.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -273,6 +308,10 @@ sealed typed Collection(E) subclass: List(E)
 
   /// Return a subsequence from `start` to `end` (1-based, inclusive).
   ///
+  /// Raises `index_out_of_bounds` if `start` is below 1, matching `at:`. An
+  /// `end` below `start` is an empty range rather than an error, and an `end`
+  /// past the last index is clamped.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// #(10, 20, 30, 40) from: 2 to: 3 // => #(20, 30)
@@ -291,7 +330,10 @@ sealed typed Collection(E) subclass: List(E)
       inject: 0
       into: [:i :each |
         newI := i + 1
-        each =:= item ifTrue: [^newI]
+        // `beamtalk_equality:eq/2`, not a bare `equals:` send: sending to an
+        // actor element would be a blocking `gen_server:call` per element.
+        // See `Collection>>includes:`.
+        ((Erlang beamtalk_equality) eq: each with: item) ifTrue: [^newI]
         newI
       ]
     nil

@@ -197,6 +197,46 @@ ProtoObject subclass: Object
   /// ```
   hash -> Integer => @intrinsic hash
 
+  /// Test value equality — the overridable counterpart to `=:=`.
+  ///
+  /// Defaults to `=:=` (Erlang structural term equality), so for most classes
+  /// the two agree. Unlike `=:=`, this is an ordinary message send, so a class
+  /// whose logical value is *not* its representation can override it: a
+  /// persistent structure whose shape depends on construction history, a
+  /// timestamp that should compare by instant rather than by wall-clock fields,
+  /// or a type with a normalising form. `=:=`, `=/=`, `==` and `/=` are lowered
+  /// straight to Erlang BIFs (ADR 0002) and cannot be overridden — the compiler
+  /// rejects any attempt (BT-2997).
+  ///
+  /// ## What honours it
+  ///
+  /// The linear scans: `includes:` on `Collection`, `List`, `Array` and
+  /// `Dictionary` (which searches values), plus `List>>indexOf:` and
+  /// `TestCase>>assert:equals:`.
+  ///
+  /// ## Contract
+  ///
+  /// An override must agree with `=:=` wherever `=:=` holds — `a =:= b` must
+  /// imply `a equals: b`. It may only make *more* values equal, never fewer.
+  /// The scans above rely on this: each tries raw `=:=` first and dispatches
+  /// only on a miss, so a fast-path hit is always a genuine `equals:` hit.
+  ///
+  /// ## Caveat
+  ///
+  /// `Set`, `Dictionary` keys, and `List>>unique` decide identity in the VM
+  /// with raw `=:=`, never through this method — keying and deduplication need
+  /// an order or a hash that a user-defined `equals:` cannot supply. A class
+  /// that overrides `equals:` still deduplicates by representation when used
+  /// as a key or element. Normalise the representation if that matters.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 42 equals: 42           // => true
+  /// 42 equals: 42.0         // => false (defaults to strict `=:=`)
+  /// "ab" equals: "ab"       // => true
+  /// ```
+  equals: other :: Object -> Boolean => self =:= other
+
   /// Test if the receiver responds to the given selector.
   ///
   /// ## Examples

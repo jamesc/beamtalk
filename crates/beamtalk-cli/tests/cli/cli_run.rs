@@ -6,7 +6,7 @@
 //! Covers the script-mode entry-point invocation. Service mode (`run .`)
 //! requires a running BEAM workspace and is exercised by the e2e tests.
 //! Connected mode (`run ... --connect`) is covered by an `#[ignore]`d
-//! end-to-end test below that boots a real workspace (BT-2890).
+//! end-to-end test below that boots a real workspace (BT-2890, BT-2963).
 
 use crate::cli_common;
 
@@ -78,7 +78,8 @@ fn run_dot_without_application_section_errors() {
 }
 
 // ---------------------------------------------------------------------------
-// BT-2890: connected mode (`--connect`) status lines must go to stderr
+// BT-2890 / BT-2963: connected mode (`--connect`) stream split — the program's
+// output on stdout, status lines on stderr
 // ---------------------------------------------------------------------------
 
 /// Stops the fixture project's workspace on drop, so a failed assertion in
@@ -105,7 +106,24 @@ fn run_connected_status_lines_go_to_stderr_not_stdout() {
     // land on stderr, keeping stdout clean for the program's own output.
     // `cli_run.rs`'s script-mode test covers the `run_script` path; this
     // covers the `--connect` path against a real shared workspace.
+    //
+    // BT-2963: the other half of that split — the entry's own `Console` output
+    // must actually *reach* stdout. It used to vanish: the entry runs in its
+    // class's gen_server, which kept the node's group leader, so the writes
+    // never reached the dispatching session's IO capture. `Helper shout` guards
+    // the nested hop as well, since a class method calling another class method
+    // has to re-propagate the sink to keep streaming.
     let project = cli_common::fixture_project();
+    std::fs::write(
+        project.path().join("src/Helper.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Object subclass: Helper\n\
+         \n\
+         \x20\x20class shout => Console printLine: \"connected-nested-99\"\n",
+    )
+    .unwrap();
     std::fs::write(
         project.path().join("src/Smoke.bt"),
         "// Copyright 2026 James Casey\n\
@@ -113,7 +131,9 @@ fn run_connected_status_lines_go_to_stderr_not_stdout() {
          \n\
          Object subclass: Smoke\n\
          \n\
-         \x20\x20class run => 21 + 21\n",
+         \x20\x20class run =>\n\
+         \x20\x20\x20\x20Console printLine: \"connected-output-42\".\n\
+         \x20\x20\x20\x20Helper shout\n",
     )
     .unwrap();
 
@@ -141,10 +161,23 @@ fn run_connected_status_lines_go_to_stderr_not_stdout() {
         // Status lines must NOT leak onto stdout ...
         .stdout(contains("Connecting to workspace").not())
         .stdout(contains("Running Smoke>>run (connected)").not())
-        // ... and must appear on stderr. (Asserting the program's own
-        // Console output reaches stdout is blocked on connected mode
-        // currently dropping Console output entirely — script mode streams
-        // it, `--connect` loses it. Add that assertion once fixed.)
+        // ... they belong on stderr ...
         .stderr(contains("Connecting to workspace"))
-        .stderr(contains("Running Smoke>>run (connected)"));
+        .stderr(contains("Running Smoke>>run (connected)"))
+        // ... and stdout carries the program's own output, in order, from both
+        // the entry and the class method it calls (BT-2963).
+        .stdout(contains("connected-output-42"))
+        .stdout(contains("connected-nested-99"))
+        .stdout(predicate::function(|out: &str| {
+            out.find("connected-output-42") < out.find("connected-nested-99")
+        }))
+        // Exactly once: `do_dispatch` also returns the captured output in the
+        // terminal reply, so a client that both streams and prints that fallback
+        // would emit every line twice.
+        .stdout(predicate::function(|out: &str| {
+            out.matches("connected-output-42").count() == 1
+                && out.matches("connected-nested-99").count() == 1
+        }))
+        // The program's output must not be duplicated onto stderr.
+        .stderr(contains("connected-output-42").not());
 }

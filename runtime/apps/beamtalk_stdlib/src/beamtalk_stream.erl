@@ -39,6 +39,7 @@ where generator is a zero-arity function that returns either
     do/2,
     inject_into/3,
     detect/2,
+    detect_if_none/3,
     as_list/1,
     any_satisfy/2,
     all_satisfy/2,
@@ -47,6 +48,7 @@ where generator is a zero-arity function that returns either
     %% FFI shims for (Erlang beamtalk_stream) dispatch
     from/2,
     inject/3,
+    detect/3,
     asList/1,
     anySatisfy/2,
     allSatisfy/2,
@@ -233,18 +235,56 @@ inject_into(#{'$beamtalk_class' := 'Stream', generator := Gen} = Stream, Initial
 inject_into(_, _, _) ->
     raise_type_error('inject:into:', <<"Expected a Block with 2 arguments">>).
 
--doc "Return first element matching predicate, or nil if none.".
+-doc """
+Return first element matching predicate, raising `not_found` if none does.
+
+BT-3028: used to answer `nil`, which made `detect:` mean different things on a
+Stream and on a List. An exhausted stream is the degenerate no-match case and
+reports the same kind. `detect_if_none/3` is the non-raising form.
+""".
 -spec detect(t(), fun((term()) -> boolean())) -> term().
 detect(#{'$beamtalk_class' := 'Stream', generator := Gen} = Stream, Pred) when
     is_function(Pred, 1)
 ->
-    try
-        detect_loop(Gen, Pred)
-    after
-        call_finalizer(Stream)
+    Result =
+        try
+            detect_loop(Gen, Pred)
+        after
+            call_finalizer(Stream)
+        end,
+    case Result of
+        not_found ->
+            beamtalk_collection:raiseDetectNotFound('Stream');
+        {ok, Elem} ->
+            Elem
     end;
 detect(_, _) ->
     raise_type_error('detect:', <<"Expected a Block with 1 argument">>).
+
+-doc """
+Return first element matching predicate, or the `Default` value if none does.
+
+Mirrors `detect:ifNone:` on the other collections: `Default` is evaluated only
+when the stream runs to exhaustion without a match, and a zero-arity function
+is called rather than answered, so `ifNone: [0]` yields `0`.
+""".
+-spec detect_if_none(t(), fun((term()) -> boolean()), term()) -> term().
+detect_if_none(#{'$beamtalk_class' := 'Stream', generator := Gen} = Stream, Pred, Default) when
+    is_function(Pred, 1)
+->
+    Result =
+        try
+            detect_loop(Gen, Pred)
+        after
+            call_finalizer(Stream)
+        end,
+    case Result of
+        not_found when is_function(Default, 0) -> Default();
+        not_found -> Default;
+        {ok, Elem} -> Elem
+    end;
+detect_if_none(_, _, _) ->
+    raise_type_error('detect:ifNone:', <<"Expected a Block with 1 argument">>).
 
 -doc "Materialize entire stream to a List.".
 -spec as_list(t()) -> list().
@@ -304,6 +344,10 @@ from(Start, StepFun) -> from_by(Start, StepFun).
 %% `inject:init:into:` → selector strips to `inject`, arity 3
 -spec inject(t(), Init :: term(), Into :: fun((term(), term()) -> term())) -> term().
 inject(Self, Init, Block) -> inject_into(Self, Init, Block).
+
+%% `detect:ifNone:` → selector strips to `detect`, arity 3
+-spec detect(t(), fun((term()) -> boolean()), term()) -> term().
+detect(Self, Pred, Default) -> detect_if_none(Self, Pred, Default).
 
 %% `asList:` → selector strips to `asList`, arity 1
 -spec asList(t()) -> list().
@@ -401,13 +445,15 @@ inject_loop(Gen, Acc, Block) ->
         {Elem, NextGen} -> inject_loop(NextGen, Block(Acc, Elem), Block)
     end.
 
+%% Answers `{ok, Elem}` / `not_found` rather than the element itself, so a
+%% stream that legitimately contains `nil` is not mistaken for a no-match.
 detect_loop(Gen, Pred) ->
     case Gen() of
         done ->
-            nil;
+            not_found;
         {Elem, NextGen} ->
             case Pred(Elem) of
-                true -> Elem;
+                true -> {ok, Elem};
                 false -> detect_loop(NextGen, Pred)
             end
     end.

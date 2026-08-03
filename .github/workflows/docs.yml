@@ -12,9 +12,19 @@ on:
       - 'docs/known-limitations.md'
       - 'docs/images/**'
       - 'crates/beamtalk-cli/src/commands/doc/**'
+      - 'crates/beamtalk-cli/src/commands/registry/**'
+      - 'crates/beamtalk-cli/src/commands/deps/registry.rs'
       - 'crates/beamtalk-cli/src/main.rs'
       - 'crates/beamtalk-core/src/codegen/core_erlang/doc_chunks.rs'
       - 'scripts/install.sh'
+      - '.github/workflows/docs.yml'
+  schedule:
+    # BT-2990: 8am UTC daily — picks up packages published to the separate
+    # jamesc/beamtalk-registry repo since the last run (that repo's own
+    # pushes don't trigger this workflow). Offset from nightly.yml (6am) and
+    # cross-repo.yml (7am) to avoid resource contention, same reasoning as
+    # cross-repo.yml's own offset from nightly.yml.
+    - cron: '0 8 * * *'
   workflow_dispatch:
 
 concurrency:
@@ -79,6 +89,27 @@ jobs:
 
       - name: Generate documentation site
         run: cargo run --bin beamtalk -- doc stdlib/src/ --output _site/ --site --docs-path docs/
+
+      # BT-2990: render the registry index (jamesc/beamtalk-registry, a
+      # separate repo published to independently of this one) into
+      # _site/registry/, alongside the docs site above. Both the checkout and
+      # the render are best-effort — continue-on-error, like the review step
+      # in claude-review.yml — so a registry-repo outage degrades to "docs
+      # site deploys without the registry pages" instead of failing the
+      # whole Pages deployment.
+      - name: Checkout registry index
+        id: checkout_registry
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: jamesc/beamtalk-registry
+          path: _registry-index
+          persist-credentials: false
+
+      - name: Generate registry site
+        if: steps.checkout_registry.outcome == 'success'
+        continue-on-error: true
+        run: cargo run --bin beamtalk -- registry site --index _registry-index --output _site/registry/
 
       - name: Copy install script to site root
         run: cp scripts/install.sh _site/install.sh

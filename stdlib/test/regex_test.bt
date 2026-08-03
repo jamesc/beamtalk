@@ -12,6 +12,16 @@ TestCase subclass: RegexTest
     // Compile with options
     self assert: (Regex from: "[a-z]+" options: #(#caseless)) unwrap class equals: Regex
 
+  // BT-2998: a Regex wraps a compiled `re` MP term, so the inherited
+  // `basicNew` had nothing to build it from and produced a hollow instance.
+  testBareNewIsDisabled =>
+    // Rejected at compile time; @expect keeps that diagnostic from failing the
+    // build so the runtime guard (for dynamic sends) can be exercised too.
+    @expect type
+    self should: [Regex new] raise: #instantiation_error
+    // The keyword form has refused all along; both now agree.
+    self should: [Regex new: 5] raise: #user_error
+
   testStringMatchesregexWithStringPatterns =>
     // Simple digit match
     self assert: ("hello123" matchesRegex: "[0-9]+")

@@ -606,7 +606,23 @@ bench:
 lint-elixir: fmt-check-elixir
 
 # Run all linting and formatting checks
-lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-workaround-comments
+lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-workaround-comments lint-binary-literal-encoding
+
+# Lint: reject non-ASCII inside Erlang binary literals that lack /utf8 (BT-3026).
+# Binary literals are bytes, so `<<"—">>` truncates U+2014 to 0x14 (a DC4 control
+# character) with no compiler warning, and the mangled text reaches the user.
+#
+# To clear a failure: rewrite the literal in ASCII (use `;` where an em-dash
+# joined two clauses), or append `/utf8` when the character is genuinely needed.
+# Unix-only (the escript shells out to `git ls-files`); Linux CI covers it, so
+# the Windows variant is a no-op, consistent with the other lint splits.
+[unix]
+lint-binary-literal-encoding:
+    @escript scripts/ci/lint-binary-literal-encoding.escript
+
+[windows]
+lint-binary-literal-encoding:
+    @echo "lint-binary-literal-encoding: skipped on Windows (covered by Linux CI)"
 
 # Ratchet lint: flag workaround/limitation comments lacking a BT-NNNN tracking
 # reference (BT-2347). Ships with an allowlist snapshot of pre-existing offenders

@@ -77,7 +77,10 @@ jobs:
           # Config-only PRs get the cheaper Haiku model; anything touching code OR docs
           # (incl. ADRs under docs/, whose review is valuable) stays on Sonnet. Unknown
           # extensions default to Sonnet — never silently downgrade a substantive change.
-          model='claude-sonnet-4-6'
+          # Sonnet 5 uses a new tokenizer (~30% more tokens for the same text than
+          # Sonnet 4.6) — the pre-computed diffs and -U20 context above are what keep
+          # that in check, so don't widen them without re-checking review cost.
+          model='claude-sonnet-5'
           files="$(git diff --name-only "${FULL_RANGE}")"
           # A file is "config" if it matches this pattern. If grep finds any changed file
           # that does NOT match (and is non-empty), the PR touches code/docs → Sonnet.
@@ -119,7 +122,7 @@ jobs:
       - name: Run Claude review
         id: review
         continue-on-error: true
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # The reviewer never mutates the repo directly: it reads code, runs
@@ -152,7 +155,7 @@ jobs:
         id: review_retry
         if: always() && hashFiles('.claude-verdict') == ''
         continue-on-error: true
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           claude_args: '--max-turns 50 --model ${{ steps.model.outputs.model }} --allowedTools "Read,Grep,Glob,Write,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(cat:*),Bash(ls:*),Bash(find:*)"'
@@ -182,7 +185,7 @@ jobs:
       # automatically.
       - name: Post PR review
         if: always() && (hashFiles('.claude-verdict') != '' || hashFiles('.claude-findings.json') != '')
-        uses: actions/github-script@v9
+        uses: actions/github-script@373c709c69115d41ff229c7e5df9f8788daa9553 # v9
         with:
           script: |
             const fs = require('fs');
@@ -314,7 +317,7 @@ jobs:
 
       - name: Post review summary
         if: always()
-        uses: actions/github-script@v9
+        uses: actions/github-script@373c709c69115d41ff229c7e5df9f8788daa9553 # v9
         with:
           script: |
             const fs = require('fs');

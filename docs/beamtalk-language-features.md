@@ -106,6 +106,11 @@ String operations respect Unicode grapheme clusters (user-perceived characters):
 "Hello" at: 1         // => "H"
 "世界" at: 1           // => "世"
 
+// First / last grapheme
+"Hello" first         // => "H"
+"Hello" last          // => "o"
+"über" first          // => "ü" (one grapheme, two UTF-8 bytes)
+
 // Iteration over graphemes
 "Hello" each: [:char | Transcript show: char]
 
@@ -462,6 +467,8 @@ p1 == p3    // => false
 (p1 withX: 10) == (Point x: 10 y: 4)   // => true
 ```
 
+This compares the **representation**, and cannot be changed: the equality operators are not overridable (see [Equality operators cannot be overridden](#equality-operators-cannot-be-overridden)). A value type whose logical value differs from its stored form — one that is not canonicalised, or that carries a field outside its identity — should override `equals:` and say so in its class documentation.
+
 #### Value objects in collections
 
 Value objects work seamlessly with all collection methods:
@@ -546,6 +553,45 @@ Binary operators follow standard math precedence (highest to lowest):
 - `=/=` - Strict inequality (Erlang `=/=`): `5 =/= 6` → `true`
 
 Note: bare `=` is **not** a valid Beamtalk operator — it has no entry in the parser's precedence table, so `x = y` fails to parse. Use `=:=` for value equality or `==` for reference equality.
+
+##### Equality operators cannot be overridden
+
+Unlike the arithmetic (`+ - * /`) and ordering (`< > <= >=`) operators, which are dispatched as messages so a value type can overload them, all four equality operators are lowered directly to the corresponding Erlang BIF at codegen time (ADR 0002). There is no method lookup, so a class-level `=:=` / `=/=` / `==` / `/=` method could never be called. **Declaring one is a compile error** (BT-2997):
+
+```beamtalk
+Value subclass: Money
+  field: cents :: Integer = 0
+  =:= other :: Money -> Boolean => self.cents =:= other cents
+  // error: `=:=` cannot be overridden — this method can never be called
+```
+
+Use **`equals:`** instead. It is declared on `Object`, defaults to `=:=`, and is an ordinary message send, so overriding it works:
+
+```beamtalk
+// Fractions stored unnormalised: 1/2 and 2/4 are different terms…
+half := Fraction numer: 1 denom: 2
+twoQuarters := Fraction numer: 2 denom: 4
+
+half =:= twoQuarters      // => false  (structural — compares representation)
+half equals: twoQuarters  // => true   (dispatches to Fraction>>equals:)
+```
+
+This is a deliberate limit, not a gap to be closed. The keyed containers decide identity inside the VM, below anything the language can dispatch — `Dictionary` by Erlang map keys, `Set` by a term-order-sorted list — as do `lists:member/2`, `ets`, and receive-pattern matching. An override the compiler honoured would still be invisible to all of them, so `a =:= b` could report `true` while a `Set` holding both still reported size 2. A class that needs content-based membership must normalise its representation rather than redefine the operator.
+
+Both containers use `=:=` for identity, so they agree with each other and with `List>>includes:` — `Set new add: 1; add: 1.0` holds two elements, matching a `Dictionary` keyed on `1` and `1.0`. What they cannot do is consult a user-defined `equals:`.
+
+##### What honours `equals:`
+
+| | Compares with |
+|---|---|
+| `includes:` on `Collection`, `List`, `Array`, `Dictionary` (searches values); `List>>indexOf:`; `TestCase>>assert:equals:` | `equals:` |
+| `Set` elements, `Dictionary` *keys*, `List>>unique` | `=:=` |
+
+The line is searching versus keying: a linear search can afford to ask each element, while membership in a keyed container — or deduplication — needs an order or a hash that a user-defined `equals:` cannot supply. This is the same constraint Java's `equals`/`hashCode` contract expresses.
+
+An `equals:` override must agree with `=:=` wherever `=:=` holds: it may only make *more* values equal, never fewer. The searches rely on that to try raw equality first and dispatch only on a miss.
+
+Where the two notions of equality are genuinely different questions, prefer a domain-specific name to overriding `equals:` — `DateTime` keeps `equals:` structural and offers `sameInstant:` for instant-based comparison.
 
 #### Short-circuit boolean operators (`and:`/`or:`)
 
@@ -2248,6 +2294,37 @@ MyClass performLocally: #add:to: withArguments: #(3, 7)
 ```
 
 **Limitations:** Local dispatch calls the method directly on the target class module — it does not walk the superclass chain. Class variable mutations are discarded (the call runs outside the class gen_server's state). Use this only for stateless or read-only class methods.
+
+### Passing Blocks Through Class Methods
+
+Because a class method runs in the class object's gen_server process, a block passed *into* one runs there too, not where it was written ([BT-3022](https://linear.app/beamtalk/issue/BT-3022)):
+
+```beamtalk
+Value subclass: Driver
+  class run: aBlock over: aList -> Nil =>
+    aList do: [:x | aBlock value: x]      // aBlock runs in Driver's class process
+    nil
+```
+
+Arguments and return values cross that boundary as copies, so blocks that compute answers work normally. Two things do *not* survive the hop:
+
+- **Process-local side effects.** A block that writes to the process dictionary (`Erlang erlang put:value:`), reads `self()`, or otherwise depends on running in a particular process affects the *class* process. The caller sees none of it.
+- **Re-entrant class sends.** If the block messages the same class whose method is driving it, the class process would have to `gen_server:call` itself. That raises a structured `dispatch_error` naming the selector rather than deadlocking. Read what you need before the call, or hold the resource yourself instead of using the block form.
+
+Non-local return (`^`) *does* cross the boundary: the signal is relayed back and unwinds the enclosing method as it would without the hop, and a class variable mutated *before* the block escaped survives the unwind along with it (ADR 0110). A genuine error after the mutation still reverts it, exactly as before.
+
+This matters most when building a `Collection` subclass. Implementing `do:` by delegating to a class-side helper is fine — `asList`, `inject:into:`, `sum`, `includes:` and the rest of the inherited protocol all work — but a class-side helper that reaches back into its own class does not:
+
+```beamtalk
+Collection subclass: Batch
+  field: items :: List = #()
+  size -> Integer => self.items size
+
+  // Fine: the inherited Collection protocol works through this.
+  do: block :: Block -> Nil =>
+    Driver run: block over: self.items
+    nil
+```
 
 ### Actor-to-Actor Coordination
 
@@ -4484,7 +4561,7 @@ See [ADR 0071](ADR/0071-class-visibility-internal-modifier.md) for the full desi
 
 ## Standard Library
 
-76 classes implemented and tested. For detailed API documentation, see [API Reference](https://www.beamtalk.dev/apidocs/).
+109 classes implemented and tested (`stdlib/src/*.bt`; see [Stdlib Implementation Status](stdlib-implementation-status.md) for the current per-class method audit). For detailed API documentation, see [API Reference](https://www.beamtalk.dev/apidocs/).
 
 **Core types:**
 
@@ -4540,10 +4617,11 @@ See [ADR 0071](ADR/0071-class-visibility-internal-modifier.md) for the full desi
 | **File**, **FileHandle** | File system operations |
 | **Subprocess**, **ReactiveSubprocess** | OS process execution ([ADR 0051](ADR/0051-subprocess-execution.md)) |
 | **OS**, **System** | Platform info and system operations |
-| **Json**, **Yaml** | Data serialisation |
+| **Json** | Data serialisation (JSON) |
 | **Regex** | Regular expression matching |
-| **DateTime**, **Time** | Date/time operations |
+| **DateTime**, **Time**, **Duration** | Date/time operations |
 | **Random** | Random number generation |
+| **Digest** | Cryptographic hash functions and HMAC |
 
 **Networking** (in [`beamtalk-http`](https://github.com/jamesc/beamtalk-http)):
 
@@ -4552,6 +4630,12 @@ See [ADR 0071](ADR/0071-class-visibility-internal-modifier.md) for the full desi
 | **HTTPServer**, **HTTPClient** | HTTP server and client |
 | **HTTPRouter**, **HTTPRoute**, **HTTPRouteBuilder** | Declarative HTTP routing |
 | **HTTPRequest**, **HTTPResponse** | Request/response objects |
+
+**Data formats** (in [`beamtalk-yaml`](https://github.com/jamesc/beamtalk-yaml)):
+
+| Class | Description |
+|-------|-------------|
+| **Yaml** | YAML parsing and serialisation — not part of stdlib; add it as a package dependency ([Package Management guide](beamtalk-packages.md)) |
 
 **Observability:**
 
@@ -4623,15 +4707,159 @@ bin isEmpty                   // => false
 
 | Method | On Binary | On String |
 |--------|-----------|-----------|
-| `at: index` | grapheme (1-based, via String at runtime) | grapheme (1-based) |
-| `size` | element count (via String at runtime) | grapheme count |
+| `at: index` | grapheme (1-based, via String at runtime¹) | grapheme (1-based) |
+| `size` | element count (via String at runtime¹) | grapheme count |
 | `byteAt: offset` | byte value (0-based) | inherited — byte value (0-based) |
 | `byteSize` | byte count | inherited — byte count |
-| `do: block` | iterate elements (via String at runtime) | iterate graphemes |
+| `do: block` | iterate elements (via String at runtime¹) | iterate graphemes |
 | `part: offset size: n` | byte-level slice, returns Binary | inherited — byte-level slice, returns Binary |
 | `concat:` | byte concatenation, returns Binary | inherited — byte concatenation, returns Binary |
 | `asString` | UTF-8 validation, returns String | no-op, returns self |
 | `asStringUnchecked` | unchecked cast to String | no-op, returns self |
+
+¹ Only when the bytes are valid UTF-8 — see below.
+
+#### Binary vs String at Runtime
+
+Binary and String are one and the same BEAM `binary()` — a raw binary carries
+no tag saying which class produced it. The runtime therefore uses the only
+signal it has, UTF-8 validity ([BT-2999](https://linear.app/beamtalk/issue/BT-2999)):
+
+| Bytes | `class` | Dynamic dispatch of `size`, `at:`, `do:`, … |
+|-------|---------|---------------------------------------------|
+| valid UTF-8 (`"hello"`, `Binary fromBytes: #(104, 105)`) | `String` | String — grapheme-aware |
+| not valid UTF-8 (crypto output, hashes, compressed data, `Binary fromBytes: #(255, 254)`) | `Binary` | Binary — byte-level |
+
+```beamtalk
+bytes := Binary fromBytes: #(255, 254, 253)
+bytes class name    // => #Binary
+bytes size          // => 3 (bytes, not graphemes)
+bytes printString   // => "<<FF FE FD>>" (hex — never raw invalid UTF-8)
+
+(Binary fromBytes: #(104, 105)) class name   // => #String  (indistinguishable)
+```
+
+Valid UTF-8 stays genuinely ambiguous: a `Binary` holding text answers `String`
+and gets grapheme semantics. **Do not rely on `class` to tell text from bytes.**
+When the distinction matters, annotate the type (`data :: Binary`) so the
+compiler dispatches statically, or use the unambiguous byte-level selectors
+(`byteSize`, `byteAt:`, `part:size:`) which mean the same thing on both.
+
+Deciding which of the two a bare binary is costs one validating scan of the
+bytes (~32 ns for a short string, ~0.4 ns/byte beyond ~1 KB). It happens only
+when the compiler could not determine the receiver's type. Annotate the type
+in hot loops over large binaries so the sends compile statically and skip the
+check entirely:
+
+```beamtalk
+// Unannotated: every send re-checks `data` — fine for small values,
+// avoidable when `data` is megabytes and the loop runs many times
+checksum: data =>
+  (0 to: data byteSize - 1) inject: 0 into: [:acc :i | acc + (data byteAt: i)]
+
+// Annotated: dispatch resolves at compile time, no per-send check
+checksum: data :: Binary =>
+  (0 to: data byteSize - 1) inject: 0 into: [:acc :i | acc + (data byteAt: i)]
+```
+
+### Accessing an Empty Collection
+
+Element accessors and subsequence operations differ deliberately on an empty
+collection ([BT-3021](https://linear.app/beamtalk/issue/BT-3021)):
+
+**Element accessors raise `empty_collection`.** `first`, `last`, and `at:` have
+no element to answer, and `nil` would be indistinguishable from a stored `nil`:
+
+```beamtalk
+#() first                  // raises empty_collection
+#() last                   // raises empty_collection
+#() at: 1                  // raises empty_collection
+"" first                   // raises empty_collection
+"" at: 1                   // raises empty_collection
+(Array withAll: #()) at: 1 // raises empty_collection
+(Binary fromBytes: #()) at: 1   // raises empty_collection
+(1 to: 0) first            // raises empty_collection
+#() max                    // raises empty_collection (also min, average)
+```
+
+`Queue` predates this kind and keeps its own `empty_queue` for compatibility,
+but classifies as a `RuntimeError` like the rest of the family, so a single
+`on: RuntimeError do:` covers both.
+
+`empty_collection` is a `RuntimeError`, so it can be caught on its own —
+crucially, *separately* from a genuine typo, which raises
+`does_not_understand`:
+
+```beamtalk
+[orders first] on: RuntimeError do: [:e | e kind =:= #empty_collection]
+```
+
+**Subsequence operations stay total** and answer the empty collection. `rest`,
+`take:`, and `drop:` all have a well-defined answer on empty, so they never
+raise — which keeps recursive idioms working without a guard at every step:
+
+```beamtalk
+#() rest                   // => #()
+#() take: 3                // => #()
+#() drop: 3                // => #()
+#() sum                    // => 0 (identity element, unlike max/min)
+```
+
+An out-of-range index into a *non-empty* collection is a different condition
+again, and raises `index_out_of_bounds`:
+
+```beamtalk
+#(1, 2, 3) at: 9           // raises index_out_of_bounds
+#(1, 2, 3) at: 0           // raises index_out_of_bounds (index < 1 is malformed)
+```
+
+### Lookups That Find Nothing
+
+A lookup on a *non-empty* collection can still fail, and each way it fails gets
+its own kind ([BT-3025](https://linear.app/beamtalk/issue/BT-3025)). None of
+them is `does_not_understand` — the receiver understands the selector, so
+reporting a dispatch failure would send the reader hunting for a typo.
+
+**`detect:` raises `not_found`** when the search runs to completion with no
+element matching. `detect:ifNone:` is the non-raising alternative:
+
+```beamtalk
+#(1, 2, 3) detect: [:x | x > 10]            // raises not_found
+#(1, 2, 3) detect: [:x | x > 10] ifNone: [0] // => 0
+```
+
+Every receiver agrees ([BT-3028](https://linear.app/beamtalk/issue/BT-3028)) —
+`List`, `Set`, `Bag`, `Dictionary`, `Interval`, `String`, and `Stream`.
+`detect:` answers `E`, and `E` has no in-band way to say "nothing matched", so
+the raise is the honest encoding; reach for `detect:ifNone:` whenever a miss is
+expected:
+
+```beamtalk
+#(1, 2, 3) asSet detect: [:x | x > 10]      // raises not_found
+(1 to: 3) detect: [:x | x > 10]             // raises not_found
+(Stream on: #(1, 2, 3)) detect: [:n | n > 10]  // raises not_found
+
+(1 to: 3) detect: [:x | x > 10] ifNone: [0] // => 0
+```
+
+The error names the *receiver's* class, so a no-match on a Set reports `Set`
+rather than the abstract `Collection` the shared implementation lives on. An
+empty receiver is just the degenerate no-match case and raises `not_found` too,
+not `empty_collection` — `detect:` is a search, not an element accessor.
+
+**`List from:to:` raises `index_out_of_bounds`** for a start index below 1,
+matching `at:`. Its other edge cases stay total — an end below the start is an
+empty range, and an end past the last index is clamped:
+
+```beamtalk
+#(1, 2, 3) from: 0 to: 2   // raises index_out_of_bounds
+#(1, 2, 3) from: 3 to: 1   // => #()  (empty range, not an error)
+#(1, 2, 3) from: 2 to: 99  // => #(2, 3)  (clamped)
+```
+
+`not_found` is a `RuntimeError`, like `empty_collection` and
+`index_out_of_bounds`, so `on: RuntimeError do:` catches the whole family and
+`e kind` discriminates within it.
 
 ### Interval — Arithmetic Sequences
 
@@ -4740,7 +4968,8 @@ Terminal operations force evaluation and return a concrete result:
 | `asList` | Materialize entire stream to List | `s asList` → `[1,2,3]` |
 | `do:` | Iterate with side effects, return nil | `s do: [:n \| Transcript show: n]` |
 | `inject:into:` | Fold/reduce with initial value | `s inject: 0 into: [:sum :n \| sum + n]` |
-| `detect:` | First matching element, or nil | `s detect: [:n \| n > 10]` |
+| `detect:` | First matching element; raises `not_found` if none | `s detect: [:n \| n > 10]` |
+| `detect:ifNone:` | First matching element, or the default if none | `s detect: [:n \| n > 10] ifNone: [0]` |
 | `anySatisfy:` | True if any element matches | `s anySatisfy: [:n \| n > 2]` |
 | `allSatisfy:` | True if all elements match | `s allSatisfy: [:n \| n > 0]` |
 
@@ -4823,6 +5052,8 @@ File open: "data.csv" do: [:handle |
 | `File rename: from to: to` | `nil` | Rename/move a file or directory |
 | `File absolutePath: path` | `String` | Resolve path to absolute |
 | `File tempDirectory` | `String` | OS temporary directory path |
+| `File open: path mode: mode` | `FileHandle` | Open a handle the caller must close |
+| `File open: path mode: mode do: block` | block value | Block-scoped handle, closed on exit |
 
 ```beamtalk
 File writeAll: "output.txt" contents: "hello"
@@ -4832,6 +5063,88 @@ File listDirectory: "target/data"       // => ["logs"]
 File rename: "output.txt" to: "target/data/output.txt"
 File delete: "target/data/output.txt"
 File deleteAll: "target/data"
+```
+
+#### Incremental File I/O — FileHandle
+
+`File open:mode:` and `File open:mode:do:` give you a `FileHandle` for reading
+and writing against the file's *current position*, instead of whole-file
+class methods. This is what an append-only log wants: one open handle, an
+explicit `sync` per record.
+
+| Mode | Behaviour |
+|------|-----------|
+| `#read` | Read only; the file must exist |
+| `#write` | Truncate or create, write only |
+| `#append` | Create if absent; every write lands at end-of-file |
+| `#readWrite` | Create if absent; existing contents kept |
+
+Write-capable modes create missing parent directories.
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `handle read: n` | `Binary` | Up to `n` bytes from the current position |
+| `handle readAll` | `Binary` | From the current position to end-of-file |
+| `handle write: data` | `nil` | Write a String or Binary |
+| `handle writeLine: data` | `nil` | Write followed by a newline |
+| `handle position` | `Integer` | Current byte offset |
+| `handle seek: offset` | `Integer` | Move to an absolute offset, returns it |
+| `handle flush` | `nil` | Push buffered writes to the OS |
+| `handle sync` | `nil` | fsync — force data to physical storage |
+| `handle close` | `nil` | Close the handle (idempotent) |
+| `handle isOpen` | `Boolean` | Whether the handle is still open |
+| `handle lines` | `Stream(String)` | Lazy lines from the current position |
+
+Every method returns a `Result` except `isOpen`, which answers a Boolean, and
+`lines`, which answers a Stream — with no Result to carry an error, `lines`
+raises on a closed or write-only handle instead.
+
+```beamtalk
+// Block scope — the handle is closed however the block exits
+(File open: "events.log" mode: #append do: [:handle |
+  handle writeLine: "an event".
+  handle sync
+]) unwrap
+
+// Caller-owned handle — you close it
+handle := (File open: "data.bin" mode: #read) unwrap
+(handle seek: 16) unwrap
+header := (handle read: 4) unwrap
+handle close
+```
+
+Reading past end-of-file is not an error: `read:` returns a binary shorter than
+requested, and an empty binary once the handle is at end-of-file.
+
+**Closed handles error, they don't crash.** Every operation on a closed handle
+returns a structured `Result error:`, as does a read on a `#write` handle or a
+write on a `#read` handle:
+
+```beamtalk
+(File open: "notes.txt" mode: #read do: [:handle |
+  handle close.
+  handle read: 1        // => Result error: FileHandle 'read:' is closed
+]) unwrap
+```
+
+Handles are process-scoped values (`HandleScoped(#process)`): they can be held
+across calls but not sent to another actor. The descriptor underneath is a BEAM
+process, so it keeps working wherever the handle is held on this node — but it
+does not survive crossing a node boundary.
+
+A handle from `open:mode:` is yours to close. Its descriptor is not tied to the
+calling process, so an unclosed handle stays open for the lifetime of the node
+— reach for `open:mode:do:` whenever a block scope will do.
+
+**Open blocks run in your own process.** `open:do:` and `open:mode:do:` are
+lowered at the call site (ADR 0109), so only the open itself touches the `File`
+class — the block, and the close that follows it, run where you called from.
+A block may therefore message `File` again, holds no shared resource, and is
+under no time limit:
+
+```beamtalk
+// Fine — the block is running in your process, not inside File
+File open: "a.txt" mode: #read do: [:h | File exists: "b.txt"]
 ```
 
 #### Side-Effect Timing ⚠️

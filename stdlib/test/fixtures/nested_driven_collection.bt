@@ -1,0 +1,32 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3022: a Collection whose `do:` runs a *complete* inner iteration partway
+// through its own, so an inner `to_list/1` accumulates while the outer one is
+// still in flight and has already posted elements.
+//
+// The two accumulators share one process mailbox and are told apart only by
+// their refs. If that isolation broke, the inner drain would swallow the outer's
+// queued elements (or vice versa) and the outer answer would come back short,
+// reordered, or contaminated with the inner collection's elements.
+
+Collection subclass: NestedDrivenCollection
+  field: items :: List = #()
+  field: inner :: Collection | Nil = nil
+
+  class of: aList :: List inner: anInner :: Collection -> NestedDrivenCollection =>
+    NestedDrivenCollection new: #{#items => aList, #inner => anInner}
+
+  // One element per item, plus the one yielded after the inner iteration.
+  size -> Integer => self.items size + 1
+
+  do: block :: Block -> Nil =>
+    // Posts the outer elements first — via a class hop, so they arrive from the
+    // class process — leaving them queued in the caller's mailbox.
+    CollectionDriver run: block over: self.items
+    // Now run an entire inner to_list/1 in this same process while those outer
+    // elements are still queued, then post one more outer element after it.
+    block value: self.inner asList size
+    nil
+
+  printString -> String => "NestedDrivenCollection"

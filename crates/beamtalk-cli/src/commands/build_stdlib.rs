@@ -105,9 +105,13 @@ pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
 
     // BT-2935: live same-run alias pre-pass — see its doc for why.
     let alias_sources = collect_stdlib_alias_sources(&source_files)?;
+    // BT-3034: live same-run protocol pre-pass, mirroring the alias pre-pass
+    // immediately above — see `collect_stdlib_protocol_infos`'s doc for why.
+    let protocol_infos = collect_stdlib_protocol_infos(&source_files);
     let compile_ctx = CompileContext {
         native_type_registry: native_type_registry.map(std::sync::Arc::new),
         hierarchy: ClassHierarchyContext {
+            pre_loaded_protocols: protocol_infos,
             pre_loaded_aliases: stdlib_pre_loaded_aliases(&alias_sources),
             ..ClassHierarchyContext::default()
         },
@@ -927,6 +931,74 @@ fn collect_stdlib_alias_sources(source_files: &[Utf8PathBuf]) -> Result<Vec<Alia
         }
     }
     Ok(all)
+}
+
+/// Scans every stdlib source file for `Protocol define: ...` declarations,
+/// extracting each into a `ProtocolInfo` immediately (BT-3034).
+///
+/// **Why a live, same-run pre-pass — mirroring [`collect_stdlib_alias_sources`]
+/// (BT-2935) exactly:** before this fix, `build_stdlib()`'s `CompileContext`
+/// seeded `pre_loaded_aliases` from a live scan but left `pre_loaded_protocols`
+/// at its `Vec::default()`, so a stdlib file compiled with a `:: SomeProtocol`
+/// type annotation referencing a protocol declared in *another* stdlib file
+/// (e.g. `Console.bt`/`Json.bt`'s `:: Printable` parameters, with `Printable`
+/// declared in `Printable.bt`) could never see that protocol as resolved —
+/// each file is compiled independently, with only this pre-pass's output as
+/// its window into the rest of stdlib.
+///
+/// That degrades *silently*, with no diagnostic at all — not even a
+/// warning: `build_stdlib()` never sets `pre_loaded_classes` either, so
+/// `has_cross_file_classes` is always `false` for every stdlib compile,
+/// which gates off `check_unresolved_classes` entirely (see its call site's
+/// doc in `semantic_analysis/mod.rs` — "only check ... when cross-file
+/// metadata has been loaded"). So a missing `Printable` registration was
+/// never going to surface as an `UnresolvedClass` diagnostic in this
+/// pipeline in the first place. The actual damage is one level deeper: the
+/// type checker's `check_protocol_argument_conformance` (BT-1928,
+/// `type_checker/validation.rs`) short-circuits with
+/// `let Some(_protocol) = protocol_registry.get(base_protocol) else { return; }`
+/// whenever the named protocol isn't registered — so with `Printable`
+/// unregistered, structural protocol-conformance checking on every
+/// `Printable`-typed argument anywhere in stdlib was silently skipped
+/// (never verifying, never warning), which is exactly the "silently
+/// degrade to unresolved" failure mode this issue describes. Nothing short
+/// of an explicit `pre_loaded_protocols`/`ProtocolRegistry` inspection
+/// (see this function's regression test) makes the gap visible; no build
+/// flag, including `--warnings-as-errors`, could ever have caught it.
+///
+/// Unlike [`collect_stdlib_alias_sources`], this needs no source-text
+/// slicing/re-parse round trip and no `package` stamp: `ProtocolInfo` carries
+/// no `package` field (protocols have no `internal` modifier at the AST
+/// level — see `collect_project_protocol_and_alias_infos`'s doc in
+/// `build.rs`, which this mirrors), and nothing downstream persists stdlib's
+/// protocols into `generated_builtins.rs` the way aliases are for
+/// REPL/workspace consumption. `ProtocolRegistry::extract_protocol_infos`
+/// already returns owned, directly-usable `ProtocolInfo` values, so a single
+/// per-file lex/parse/extract pass is enough.
+///
+/// Parse errors on an individual file are non-fatal here — consistent with
+/// `build.rs`'s `collect_project_protocol_and_alias_infos`, which the
+/// ordinary `beamtalk build` pipeline already uses for this exact purpose:
+/// that file simply contributes no protocols to the merged set, and the same
+/// parse error is already reported through the normal per-file diagnostics
+/// path when that file is compiled on its own.
+fn collect_stdlib_protocol_infos(
+    source_files: &[Utf8PathBuf],
+) -> Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo> {
+    let mut all = Vec::new();
+    for file in source_files {
+        let Ok(source) = fs::read_to_string(file) else {
+            continue;
+        };
+        let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
+        let (module, _diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+        all.extend(
+            beamtalk_core::semantic_analysis::protocol_registry::ProtocolRegistry::extract_protocol_infos(
+                &module,
+            ),
+        );
+    }
+    all
 }
 
 /// The `CompilerOptions` every stdlib compile in [`build_stdlib`] runs with.
@@ -1890,6 +1962,23 @@ mod tests {
         let pre_loaded_aliases = stdlib_pre_loaded_aliases(&alias_sources);
         assert_eq!(pre_loaded_aliases[0].package.as_deref(), Some("stdlib"));
 
+        // BT-2965: `build.rs`'s `package_identity` names the *other* stdlib
+        // compile path — manifest-less `beamtalk build --stdlib-mode <dir>`,
+        // what `just dialyzer-specs` runs — with `STDLIB_PACKAGE_MARKER`. The
+        // literal hardcoded here and that constant must stay the same string,
+        // or the two paths would disagree about stdlib's package identity and
+        // only one of them would seed `internal` aliases.
+        assert_eq!(
+            pre_loaded_aliases[0].package.as_deref(),
+            Some(beamtalk_core::language_service::STDLIB_PACKAGE_MARKER),
+            "stdlib_pre_loaded_aliases' stamp must match STDLIB_PACKAGE_MARKER"
+        );
+        assert_eq!(
+            stdlib_compiler_options(false).current_package.as_deref(),
+            Some(beamtalk_core::language_service::STDLIB_PACKAGE_MARKER),
+            "stdlib_compiler_options' current_package must match STDLIB_PACKAGE_MARKER"
+        );
+
         // The exact options `build_stdlib()` runs with — crucially with
         // `current_package: Some("stdlib")` matching the stamp above.
         let options = stdlib_compiler_options(false);
@@ -1960,6 +2049,141 @@ mod tests {
         assert!(
             result.alias_registry.has_alias("Direction"),
             "the matching \"stdlib\" current_package must seed the internal alias"
+        );
+    }
+
+    /// BT-3034: End-to-end regression fixture for stdlib's own cross-file
+    /// protocol resolution, mirroring
+    /// `test_internal_alias_resolves_cross_file_within_stdlib`/
+    /// `test_cross_file_alias_resolution_seeds_pre_loaded_aliases` above but
+    /// for `pre_loaded_protocols` instead of `pre_loaded_aliases`. Proves the
+    /// full round trip `build_stdlib()` relies on:
+    /// `collect_stdlib_protocol_infos` (a live, same-run pre-pass — same
+    /// rationale as `collect_stdlib_alias_sources`) →
+    /// `ClassHierarchyContext::pre_loaded_protocols` → the protocol getting
+    /// registered into file B's own `ProtocolRegistry` during semantic
+    /// analysis, in the very same run the protocol was first declared in.
+    ///
+    /// This is the exact shape of the real stdlib bug: `Console.bt`/`Json.bt`
+    /// reference `Printable` (declared in `Printable.bt`) in a `::
+    /// Printable` parameter annotation — a different file entirely, compiled
+    /// independently. Before this fix, `ProtocolRegistry::has_protocol` for a
+    /// cross-file protocol name was always `false` while compiling any other
+    /// stdlib file, which — per `check_protocol_argument_conformance`'s early
+    /// return when `protocol_registry.get(name)` is `None` — makes structural
+    /// protocol-conformance checking on `Printable`-typed arguments silently
+    /// a no-op *everywhere* in stdlib, with no diagnostic at all (not even a
+    /// warning): the exact "silently degrade to unresolved" failure mode
+    /// BT-3034 describes. That's why this test asserts on
+    /// `protocol_registry.has_protocol` directly instead of scanning for a
+    /// diagnostic message — there is no diagnostic to find; the whole point
+    /// of the bug is that the check never ran.
+    #[test]
+    fn test_cross_file_protocol_resolution_seeds_pre_loaded_protocols() {
+        let (_temp, lib_dir) = temp_utf8_dir();
+
+        // File A: declares the protocol, mirroring `Printable.bt`.
+        let file_a = lib_dir.join("ProtocolFixtureA.bt");
+        fs::write(
+            &file_a,
+            "Protocol define: ProtocolFixtureA\n  asString -> String\n",
+        )
+        .unwrap();
+
+        // File B: references it in a parameter type annotation — the exact
+        // shape of `Console.bt`'s `printLine: aValue :: Printable -> Nil`.
+        let file_b = lib_dir.join("ProtocolFixtureB.bt");
+        fs::write(
+            &file_b,
+            "Object subclass: ProtocolFixtureB\n  \
+             show: aValue :: ProtocolFixtureA -> Nil => nil\n",
+        )
+        .unwrap();
+
+        // The real function under test, called the way `build_stdlib()`
+        // actually calls it — over *all* source files in one pass, before
+        // any compile happens (a live scan, not a seed from any prior
+        // "generated" snapshot).
+        let protocol_infos = collect_stdlib_protocol_infos(&[file_a.clone(), file_b.clone()]);
+        assert_eq!(
+            protocol_infos.len(),
+            1,
+            "expected exactly one protocol declaration, from file A"
+        );
+        assert_eq!(protocol_infos[0].name.as_str(), "ProtocolFixtureA");
+
+        let options = stdlib_compiler_options(false);
+        let bindings = beamtalk_core::erlang::primitive_bindings::PrimitiveBindingTable::new();
+
+        // Compile B the way `build_stdlib()` actually does — through
+        // `compile_source_with_bindings` with `pre_loaded_protocols` seeded
+        // via `CompileContext`/`ClassHierarchyContext` — and confirm the
+        // cross-file `:: ProtocolFixtureA` parameter annotation compiles
+        // cleanly end to end.
+        let core_file = lib_dir.join("b.core");
+        compile_source_with_bindings(
+            &file_b,
+            "bt@stdlib@protocol_fixture_b",
+            &core_file,
+            &options,
+            &bindings,
+            &CompileContext {
+                hierarchy: ClassHierarchyContext {
+                    pre_loaded_protocols: protocol_infos.clone(),
+                    ..ClassHierarchyContext::default()
+                },
+                ..CompileContext::default()
+            },
+            None,
+        )
+        .expect("cross-file protocol-typed parameter should compile without errors");
+
+        // The real mechanism under test: does file B's own semantic analysis
+        // actually *know about* the cross-file protocol afterwards?
+        // `compile_source_with_bindings` doesn't expose the `ProtocolRegistry`
+        // it built, so re-run semantic analysis directly (same
+        // `pre_loaded_protocols` input `compile_ctx.hierarchy` carries) to
+        // inspect it.
+        let source_b = fs::read_to_string(&file_b).unwrap();
+        let tokens_b = beamtalk_core::source_analysis::lex_with_eof(&source_b);
+        let (module_b, _diags) = beamtalk_core::source_analysis::parse(tokens_b);
+        let extensions = beamtalk_core::compilation::extension_index::ExtensionIndex::default();
+
+        let result =
+            beamtalk_core::semantic_analysis::analyse_with_natives_and_protocols_and_aliases(
+                &module_b,
+                &options,
+                vec![],
+                protocol_infos,
+                vec![],
+                None,
+                &extensions,
+            );
+        assert!(
+            result.protocol_registry.has_protocol("ProtocolFixtureA"),
+            "expected pre_loaded_protocols to seed the cross-file protocol into \
+             file B's own protocol registry"
+        );
+
+        // Negative control: WITHOUT pre_loaded_protocols (the pre-BT-3034
+        // gap), the cross-file protocol never gets registered — proving the
+        // assertion above exercises the fix rather than a tautology.
+        let result_unfixed =
+            beamtalk_core::semantic_analysis::analyse_with_natives_and_protocols_and_aliases(
+                &module_b,
+                &options,
+                vec![],
+                vec![],
+                vec![],
+                None,
+                &extensions,
+            );
+        assert!(
+            !result_unfixed
+                .protocol_registry
+                .has_protocol("ProtocolFixtureA"),
+            "expected the negative control (no pre_loaded_protocols) to reproduce \
+             the pre-BT-3034 gap: the cross-file protocol should NOT be registered"
         );
     }
 

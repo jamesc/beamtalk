@@ -108,7 +108,14 @@ instantiation_test_() ->
             {"self new + instance-method dispatch resolves inside the class process",
                 fun test_self_new_instance_method_dispatch/0},
             {"self new + inherited instance-method dispatch resolves inside the class process",
-                fun test_self_new_inherited_instance_method_dispatch/0}
+                fun test_self_new_inherited_instance_method_dispatch/0},
+            %% Edge paths: uncovered branches (coverage improvement)
+            {"is_module_loaded_with_new returns false for non-atom arg",
+                fun test_module_loaded_with_new_non_atom/0},
+            {"handle_new_generic selects new: selector for abstract class with args",
+                fun test_generic_new_abstract_with_args/0},
+            {"handle_new_compiled falls back to new/0 when new/1 not exported",
+                fun test_new_compiled_map_without_new1/0}
         ]
     end}.
 
@@ -687,6 +694,59 @@ test_self_new_inherited_instance_method_dispatch() ->
         gen_server:stop(ChildPid, normal, 5000),
         gen_server:stop(ParentPid, normal, 5000)
     end.
+
+%%====================================================================
+%% Edge-path tests (coverage improvement)
+%%====================================================================
+
+%% Line 149: is_module_loaded_with_new/1 catch-all clause for non-atom.
+%% The function is internal; we reach it via handle_new/4 which calls it.
+%% When Module is not an atom (e.g. 42), the `when is_atom(Module)` guard
+%% fails → catch-all returns false → handle_new routes to generic path.
+test_module_loaded_with_new_non_atom() ->
+    %% 42 is an integer, so is_module_loaded_with_new(42) hits the catch-all.
+    %% Generic path for an unregistered class name yields a tagged map with
+    %% no fields (superclass chain empty → no inherited defaults).
+    Result = beamtalk_class_instantiation:handle_new([], 'BtciNonAtomMod', 42, undefined),
+    ?assertMatch({ok, #{'$beamtalk_class' := 'BtciNonAtomMod'}, _IsConstructible}, Result).
+
+%% Line 179: handle_new_generic chooses 'new:' selector when the abstract
+%% class is called with a non-empty args list (as opposed to [] → 'new').
+%% The beamtalk_class_is_abstract process-dict flag is set by the class
+%% gen_server's init/1; we replicate it here for a direct unit test.
+test_generic_new_abstract_with_args() ->
+    put(beamtalk_class_is_abstract, true),
+    try
+        %% nonexistent_module_xyz has no BEAM file → is_module_loaded_with_new → false
+        %% → handle_new_generic is called with Args = [#{}] (non-empty)
+        Result = beamtalk_class_instantiation:handle_new(
+            [#{}], 'AbstractShape', nonexistent_module_xyz, undefined
+        ),
+        ?assertMatch(
+            {error,
+                #beamtalk_error{
+                    kind = instantiation_error,
+                    class = 'AbstractShape',
+                    selector = 'new:'
+                },
+                false},
+            Result
+        )
+    after
+        erase(beamtalk_class_is_abstract)
+    end.
+
+%% Line 363: handle_new_compiled falls back to new/0 when the caller
+%% passes a Map arg but the module exports only new/0 (no new/1).
+%% Uses test_new_no_init, a minimal fixture that exports new/0 only.
+test_new_compiled_map_without_new1() ->
+    %% Ensure the fixture module is loaded (it lives in the test code path).
+    {module, test_new_no_init} = code:ensure_loaded(test_new_no_init),
+    Result = beamtalk_class_instantiation:handle_new(
+        [#{x => 1}], 'TestNewNoInit', test_new_no_init, undefined
+    ),
+    %% Falls back to new/0 → returns the default instance.
+    ?assertMatch({ok, #{'$beamtalk_class' := 'TestNewNoInit'}, _IsConstructible}, Result).
 
 %%====================================================================
 %% Helpers

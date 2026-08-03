@@ -87,6 +87,26 @@ at_zero_index_test() ->
         beamtalk_array:at(A, 0)
     ).
 
+%% BT-3021: indexing an empty Array is `empty_collection`, matching
+%% `beamtalk_list:at/2` and `beamtalk_string:at/2`.
+at_empty_array_test() ->
+    A = make_array([]),
+    ?assertError(
+        #{
+            '$beamtalk_class' := 'RuntimeError',
+            error := #beamtalk_error{kind = empty_collection, class = 'Array', selector = 'at:'}
+        },
+        beamtalk_array:at(A, 1)
+    ).
+
+%% An index below 1 is malformed either way, so it stays index_out_of_bounds.
+at_empty_array_zero_index_test() ->
+    A = make_array([]),
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = index_out_of_bounds}},
+        beamtalk_array:at(A, 0)
+    ).
+
 at_non_integer_index_test() ->
     A = make_array([1, 2, 3]),
     ?assertError(

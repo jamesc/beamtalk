@@ -100,11 +100,24 @@ is_empty(#{'$beamtalk_class' := 'Array', 'data' := Data}) ->
 Return the element at the given 1-based index.
 
 Raises index_out_of_bounds if the index is out of range.
+
+BT-3021: indexing an *empty* Array raises `empty_collection` instead, matching
+`beamtalk_list:at/2` and `beamtalk_string:at/2`. An index below 1 is malformed
+whether or not the Array is empty, so it stays `index_out_of_bounds`.
 """.
 -spec at(map(), integer()) -> term().
 at(#{'$beamtalk_class' := 'Array', 'data' := Data}, Index) when is_integer(Index), Index >= 1 ->
     N = maps:size(Data),
     if
+        N =:= 0 ->
+            beamtalk_error:raise(
+                beamtalk_error:new(
+                    empty_collection,
+                    'Array',
+                    'at:',
+                    <<"Array is empty; guard with `isEmpty` before indexing">>
+                )
+            );
         Index > N ->
             beamtalk_error:raise(
                 beamtalk_error:new(
@@ -169,9 +182,17 @@ do(#{'$beamtalk_class' := 'Array'}, _Block) ->
 -doc "Return true if the Array contains the given element.".
 -spec includes(map(), term()) -> boolean().
 includes(#{'$beamtalk_class' := 'Array', 'data' := Data}, Element) ->
-    %% Fold directly over the map (no intermediate maps:values/1 list); =:=
-    %% matches the strict-equality membership the old array:foldl scan used.
-    maps:fold(fun(_Index, Value, Found) -> Found orelse Value =:= Element end, false, Data).
+    %% Fold directly over the map (no intermediate maps:values/1 list) for the
+    %% raw pass, matching the strict-equality membership the old array:foldl
+    %% scan used.
+    RawHit = maps:fold(
+        fun(_Index, Value, Found) -> Found orelse Value =:= Element end, false, Data
+    ),
+    %% BT-2997: a raw miss may still be an `equals:` hit on an element class
+    %% that overrides it, so fall back to the dispatching scan — and only then
+    %% pay for materialising the values. `Array` is a linear sequence like
+    %% `List`, so the two must agree about membership.
+    RawHit orelse beamtalk_equality:scan(maps:values(Data), Element).
 
 %%% ============================================================================
 %%% Functional

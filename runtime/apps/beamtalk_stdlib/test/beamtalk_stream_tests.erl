@@ -64,6 +64,24 @@ detect_calls_finalizer_test() ->
     after 100 -> ?assert(false)
     end.
 
+%% BT-3028: the finalizer must still run when detect: exhausts the stream and
+%% raises — the raise happens after the `try ... after`, not inside it. Without
+%% this the no-match path would leak whatever resource the finalizer releases
+%% (e.g. the file handle behind `File open:do:`).
+detect_calls_finalizer_on_not_found_test() ->
+    Self = self(),
+    Gen = make_list_gen([1, 2, 3]),
+    Finalizer = fun() -> Self ! finalizer_called end,
+    Stream = beamtalk_stream:make_stream(Gen, <<"test">>, Finalizer),
+    ?assertError(
+        #{'$beamtalk_class' := 'RuntimeError'},
+        beamtalk_stream:detect(Stream, fun(X) -> X > 10 end)
+    ),
+    receive
+        finalizer_called -> ok
+    after 100 -> ?assert(false)
+    end.
+
 %% Test that anySatisfy: calls the finalizer
 any_satisfy_calls_finalizer_test() ->
     Self = self(),
@@ -332,10 +350,19 @@ inject_into_empty_test() ->
     Stream = beamtalk_stream:on([]),
     ?assertEqual(42, beamtalk_stream:inject_into(Stream, 42, fun(Acc, _X) -> Acc end)).
 
-%% detect on empty stream returns nil
+%% BT-3028: an empty stream is the degenerate no-match case, so detect raises
+%% `not_found` like every other collection rather than answering nil.
 detect_empty_test() ->
     Stream = beamtalk_stream:on([]),
-    ?assertEqual(nil, beamtalk_stream:detect(Stream, fun(_) -> true end)).
+    ?assertError(
+        #{'$beamtalk_class' := 'RuntimeError'},
+        beamtalk_stream:detect(Stream, fun(_) -> true end)
+    ).
+
+%% detect_if_none on an empty stream answers the default
+detect_if_none_empty_test() ->
+    Stream = beamtalk_stream:on([]),
+    ?assertEqual(42, beamtalk_stream:detect_if_none(Stream, fun(_) -> true end, 42)).
 
 %% any_satisfy on empty stream returns false
 any_satisfy_empty_test() ->
@@ -468,10 +495,35 @@ inject_into_sum_test() ->
     Sum = beamtalk_stream:inject_into(Stream, 0, fun(Acc, X) -> Acc + X end),
     ?assertEqual(10, Sum).
 
-%% detect returns nil if no element matches (finite)
+%% BT-3028: detect raises `not_found` if no element matches (finite)
 detect_not_found_test() ->
     Stream = beamtalk_stream:on([1, 2, 3]),
-    ?assertEqual(nil, beamtalk_stream:detect(Stream, fun(X) -> X > 10 end)).
+    ?assertError(
+        #{'$beamtalk_class' := 'RuntimeError'},
+        beamtalk_stream:detect(Stream, fun(X) -> X > 10 end)
+    ).
+
+%% detect_if_none is the non-raising form — a zero-arity default is called,
+%% so `ifNone: [0]` yields 0 rather than the block itself.
+detect_if_none_not_found_test() ->
+    Stream = beamtalk_stream:on([1, 2, 3]),
+    ?assertEqual(0, beamtalk_stream:detect_if_none(Stream, fun(X) -> X > 10 end, fun() -> 0 end)),
+    ?assertEqual(0, beamtalk_stream:detect_if_none(Stream, fun(X) -> X > 10 end, 0)).
+
+detect_if_none_found_test() ->
+    Stream = beamtalk_stream:on([1, 2, 3]),
+    ?assertEqual(2, beamtalk_stream:detect_if_none(Stream, fun(X) -> X > 1 end, fun() -> 0 end)).
+
+%% A stream element that *is* nil is an ordinary answer, not a no-match —
+%% detect_loop reports {ok, Elem} / not_found rather than the element itself.
+detect_finds_nil_element_test() ->
+    Stream = beamtalk_stream:on([1, nil, 3]),
+    ?assertEqual(nil, beamtalk_stream:detect(Stream, fun(X) -> X =:= nil end)).
+
+%% `detect:ifNone:` strips to `detect`/3 at the FFI boundary.
+detect_arity_3_ffi_shim_test() ->
+    Stream = beamtalk_stream:on([1, 2, 3]),
+    ?assertEqual(42, beamtalk_stream:detect(Stream, fun(X) -> X > 10 end, 42)).
 
 %% all_satisfy true case
 all_satisfy_true_test() ->

@@ -3616,38 +3616,16 @@ fn validate_class_name(name: &str) -> std::result::Result<(), String> {
 
 /// Validate a Beamtalk selector (unary, keyword, or binary) before splicing
 /// it unescaped into a `#selector` literal in a built expression (ADR 0105
-/// Phase 3, BT-2782's `CMD_PRECHECK_METHOD`) — mirrors `beamtalk-mcp`'s
-/// `validate_selector` (there is no shared crate for this; both surfaces
-/// need the same shape check before string-building an expression).
+/// Phase 3, BT-2782's `CMD_PRECHECK_METHOD`). The canonical shape check is
+/// `beamtalk_core::source_analysis::is_valid_selector`.
 fn validate_selector(sel: &str) -> std::result::Result<(), String> {
-    fn is_binary_selector_char(c: char) -> bool {
-        matches!(
-            c,
-            '+' | '-' | '*' | '/' | '<' | '>' | '=' | '~' | '%' | '&' | '?' | ',' | '\\'
-        )
-    }
-
     if sel.is_empty() {
         return Err("selector must not be empty".to_string());
     }
-
-    let first = sel.chars().next().expect("checked non-empty above");
-    if is_binary_selector_char(first) {
-        return if sel.chars().all(is_binary_selector_char) {
-            Ok(())
-        } else {
-            Err(format!("invalid binary selector: '{sel}'"))
-        };
+    if !beamtalk_core::source_analysis::is_valid_selector(sel) {
+        return Err(format!("invalid selector: '{sel}'"));
     }
-
-    if sel
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == ':')
-    {
-        return Ok(());
-    }
-
-    Err(format!("invalid selector: '{sel}'"))
+    Ok(())
 }
 
 fn workspace_roots(params: &InitializeParams) -> Vec<PathBuf> {

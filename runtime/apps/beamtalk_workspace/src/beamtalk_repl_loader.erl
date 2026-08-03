@@ -1515,7 +1515,7 @@ validate_target_path(TargetPath) ->
                             iolist_to_binary([
                                 <<"newClass:at: target is outside the project source tree: ">>,
                                 list_to_binary(TargetPath),
-                                <<" — new classes must be created inside the current project">>
+                                <<"; new classes must be created inside the current project">>
                             ]),
                             TargetPath
                         )}
@@ -1530,7 +1530,7 @@ validate_target_path(TargetPath) ->
                     iolist_to_binary([
                         <<"newClass:at: target already exists on disk: ">>,
                         list_to_binary(TargetPath),
-                        <<" — use compile:source: against the existing class, or choose a new path">>
+                        <<"; use compile:source: against the existing class, or choose a new path">>
                     ]),
                     TargetPath
                 )}
@@ -1561,7 +1561,7 @@ declared_class_name(ClassNames) when length(ClassNames) > 1 ->
             iolist_to_binary([
                 <<"newClass:at: source declares multiple classes (">>,
                 lists:join(<<", ">>, Names),
-                <<") — one class per file (ADR 0040)">>
+                <<"); one class per file (ADR 0040)">>
             ]),
             undefined
         )}.
@@ -1602,7 +1602,7 @@ validate_new_class(DeclaredName, TargetPath, Loaded) ->
                         Expected,
                         <<"' of ">>,
                         list_to_binary(TargetPath),
-                        <<" — either rename the class to match the basename, or use a path with basename ">>,
+                        <<"; either rename the class to match the basename, or use a path with basename ">>,
                         DeclaredName,
                         <<".bt or ">>,
                         list_to_binary(DeclaredSnake),
@@ -1617,7 +1617,7 @@ validate_new_class(DeclaredName, TargetPath, Loaded) ->
                     iolist_to_binary([
                         <<"newClass:at: class ">>,
                         DeclaredName,
-                        <<" is already loaded — use compile:source: against it, or remove it first">>
+                        <<" is already loaded; use compile:source: against it, or remove it first">>
                     ]),
                     TargetPath
                 )};
@@ -2160,10 +2160,10 @@ mark_stale_finding(ClassNameBin, Finding) ->
 %% stale" is accurate and reason-agnostic for all three causes.
 -spec stale_note(binary(), binary() | undefined) -> binary().
 stale_note(ClassNameBin, undefined) ->
-    <<"not re-checked against the latest reload of ", ClassNameBin/binary, " — may be stale">>;
+    <<"not re-checked against the latest reload of ", ClassNameBin/binary, "; may be stale">>;
 stale_note(ClassNameBin, PrevNote) ->
-    <<PrevNote/binary, " — not re-checked against the latest reload of ", ClassNameBin/binary,
-        " — may be stale">>.
+    <<PrevNote/binary, "; not re-checked against the latest reload of ", ClassNameBin/binary,
+        "; may be stale">>.
 
 %% Log + broadcast the outcome of one `maybe_trigger_recheck/4` call — but
 %% only when a live surface has something to act on: either a dependent

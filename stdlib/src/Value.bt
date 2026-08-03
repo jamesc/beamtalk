@@ -11,7 +11,18 @@
 ///
 /// - **Immutable:** slot assignments (e.g., `self.x := 5`) are compile errors.
 ///   Use methods that return new instances (e.g., `self withX: 5`).
-/// - **Value Semantics:** Compared by value, not identity.
+/// - **Compared by term, not identity:** `=:=`/`==` are never dispatched —
+///   they compile to Erlang's `=:=`/`==` on the receiver's term at every call
+///   site (ADR 0002), so `Value` cannot override them. This *reads* as value
+///   semantics exactly when a subclass's representation is a pure function of
+///   its contents, so that structurally-equal instances are also
+///   term-identical (as core `Array` guarantees via its canonical
+///   representation, ADR 0090). A subclass whose representation is
+///   history-dependent (e.g. amortized structures that keep internal state
+///   not determined solely by their logical contents) cannot rely on `=:=`
+///   for value comparison and should document its own comparison contract —
+///   typically an explicit message like `equals:` — rather than promise
+///   `=:=` correctness.
 /// - **Lightweight:** No actor processes; methods are pure functions.
 ///
 /// ## Subclassing

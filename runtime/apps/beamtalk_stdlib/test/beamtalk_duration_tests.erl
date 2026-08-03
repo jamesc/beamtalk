@@ -275,10 +275,10 @@ shims_test() ->
     ?assertEqual(true, beamtalk_duration:gt(ms(2), ms(1))),
     ?assertEqual(true, beamtalk_duration:lte(ms(1), ms(1))),
     ?assertEqual(true, beamtalk_duration:gte(ms(1), ms(1))),
-    ?assertEqual(true, beamtalk_duration:eql(ms(1), ms(1))),
-    ?assertEqual(true, beamtalk_duration:neq(ms(1), ms(2))),
-    ?assertEqual(true, beamtalk_duration:sneq(ms(1), ms(2))),
-    ?assertEqual(false, beamtalk_duration:sneq(ms(1), ms(1))).
+    %% No eql/neq/sneq shims — equality never dispatches (ADR 0002, BT-2997);
+    %% canonical `millis` makes raw term equality correct on its own.
+    ?assertEqual(true, ms(1) =:= ms(1)),
+    ?assertEqual(true, ms(1) =/= ms(2)).
 
 %%% ============================================================================
 %%% Cross-module helpers

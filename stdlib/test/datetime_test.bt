@@ -51,6 +51,18 @@ TestCase subclass: DateTimeTest
     // monotonicNow returns an Integer
     self assert: ((DateTime monotonicNow) class =:= Integer)
 
+  // BT-2998: `DateTime new` used to return `#{'$beamtalk_class' => 'DateTime'}`
+  // — tagged, so dispatch accepted it, but empty, so the first message
+  // (`asString`, `year`, …) died inside beamtalk_datetime on something that
+  // read like an arity bug. It now refuses at the point of the mistake.
+  testBareNewIsDisabled =>
+    // Rejected at compile time; @expect keeps that diagnostic from failing the
+    // build so the runtime guard (for dynamic sends) can be exercised too.
+    @expect type
+    self should: [DateTime new] raise: #instantiation_error
+    // The keyword form has refused all along; both now agree.
+    self should: [DateTime new: 5] raise: #user_error
+
   testAccessors =>
     a := DateTime
       year: 2026

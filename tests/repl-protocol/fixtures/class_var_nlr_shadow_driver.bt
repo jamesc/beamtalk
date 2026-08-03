@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0110 / BT-3038: class-side driver whose countedRun:over: mutates a
+// class variable before invoking a caller-supplied block. Used to verify
+// from a live REPL session that the mutation survives a foreign `^`
+// escaping through the block (paired fixture: class_var_nlr_shadow_probe.bt).
+
+Value subclass: CollectionDriver
+  classState: runs = 0
+
+  class countedRun: aBlock :: Block over: aList :: List -> Nil =>
+    self.runs := self.runs + 1
+    aList do: [:x | aBlock value: x]
+    nil
+
+  class runCount -> Integer => self.runs

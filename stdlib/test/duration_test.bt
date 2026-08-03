@@ -80,11 +80,25 @@ TestCase subclass: DurationTest
     self deny: (b <= a)
     self assert: (a >= a)
     self deny: (a >= b)
+
+  // Equality is raw Erlang term comparison, not a Duration method — `=:=`,
+  // `=/=` and `/=` never dispatch (ADR 0002, BT-2997). It answers correctly
+  // only because every constructor canonicalises to the single `millis` field,
+  // so equal lengths built by different routes are identical terms. That
+  // cross-constructor case is what the first assertion pins down.
+  testEquality =>
+    a := Duration seconds: 1
+    b := Duration seconds: 2
     self assert: (a =:= (Duration milliseconds: 1000))
+    self assert: ((Duration minutes: 1) =:= (Duration seconds: 60))
     self deny: (a =:= b)
     self assert: (a /= b)
     self deny: (a /= a)
     self assert: (a =/= b)
+    // `equals:` is the overridable counterpart (Object). Duration does not
+    // override it, so it tracks `=:=` exactly.
+    self assert: (a equals: (Duration milliseconds: 1000))
+    self deny: (a equals: b)
 
   // ===== Formatting =====
   testPrintString =>
@@ -134,6 +148,17 @@ TestCase subclass: DurationTest
     // Comparison with non-Duration raises error
     @expect type
     self should: [(Duration seconds: 1) < 5] raise: #type_error
+
+  // BT-2998: bare `new` used to build a tagged-but-empty map — a Duration
+  // holds beamtalk_duration's millis, not a BT field, so there is nothing for
+  // the inherited `basicNew` to fill in. It refuses instead of failing later.
+  testBareNewIsDisabled =>
+    // Rejected at compile time; @expect keeps that diagnostic from failing the
+    // build so the runtime guard (for dynamic sends) can be exercised too.
+    @expect type
+    self should: [Duration new] raise: #instantiation_error
+    // The keyword form has refused all along; both now agree.
+    self should: [Duration new: 5] raise: #user_error
 
   // ===== Integration — Timer =====
   testTimerSleepAcceptsDuration =>

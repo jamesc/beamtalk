@@ -24,7 +24,9 @@ beamtalk_error records.
 | `writeBinary:contents:`      | Write binary data to file              |
 | `appendBinary:contents:`     | Append binary data to file             |
 | `lines:`                     | Lazy Stream of lines (constant memory) |
-| `open:do:`                   | Block-scoped handle with auto-close    |
+| `open:do:`                   | Block-scoped read handle, auto-closed  |
+| `open:mode:`                 | Open a FileHandle the caller closes    |
+| `open:mode:do:`              | Block-scoped handle, auto-closed       |
 
 ## Usage
 
@@ -34,6 +36,7 @@ File readAll: 'test.txt'
 File writeAll: 'output.txt' contents: 'hello world'
 (File lines: 'data.csv') do: [:line | Transcript show: line]
 File open: 'data.csv' do: [:handle | handle lines take: 10]
+File open: 'log.etf' mode: #append do: [:h | h write: record. h sync]
 ```
 
 ## Security
@@ -51,6 +54,8 @@ enforced — Beamtalk is a trusted developer tool (ADR 0058, 0063).
     'appendBinary:contents:'/2,
     'lines:'/1,
     'open:do:'/2,
+    'open:mode:'/2,
+    'open:mode:do:'/3,
     'isDirectory:'/1,
     'isFile:'/1,
     'mkdir:'/1,
@@ -66,7 +71,7 @@ enforced — Beamtalk is a trusted developer tool (ADR 0058, 0063).
 ]).
 -export([handle_lines/1, handle_has_method/1]).
 
--type file_handle() :: #{'$beamtalk_class' := 'FileHandle', fd := file:io_device()}.
+-type file_handle() :: beamtalk_file_handle:t().
 -export_type([file_handle/0]).
 
 %% FFI shims for (Erlang beamtalk_file) dispatch
@@ -79,6 +84,7 @@ enforced — Beamtalk is a trusted developer tool (ADR 0058, 0063).
     appendBinary/2,
     lines/1,
     open/2,
+    open/3,
     isDirectory/1,
     isFile/1,
     mkdir/1,
@@ -312,6 +318,16 @@ Returns a Result ok map on success, Result error map on failure.
 -doc "Check if FileHandle responds to the given selector.".
 -spec handle_has_method(atom()) -> boolean().
 handle_has_method('lines') -> true;
+handle_has_method('read:') -> true;
+handle_has_method('readAll') -> true;
+handle_has_method('write:') -> true;
+handle_has_method('writeLine:') -> true;
+handle_has_method('position') -> true;
+handle_has_method('seek:') -> true;
+handle_has_method('flush') -> true;
+handle_has_method('sync') -> true;
+handle_has_method('close') -> true;
+handle_has_method('isOpen') -> true;
 handle_has_method(_) -> false.
 
 %%% ============================================================================
@@ -366,12 +382,12 @@ Returns a Result ok map with the result of the block.
 'open:do:'(Path, Block) when is_binary(Path), is_function(Block, 1) ->
     case file:open(unicode:characters_to_list(Path), [read, binary]) of
         {ok, Fd} ->
-            Handle = #{'$beamtalk_class' => 'FileHandle', fd => Fd},
+            Handle = beamtalk_file_handle:new(Fd, read, Path),
             try
                 BlockResult = Block(Handle),
                 beamtalk_result:from_tagged_tuple({ok, BlockResult})
             after
-                file:close(Fd)
+                beamtalk_file_handle:close_handle(Handle)
             end;
         {error, enoent} ->
             Error0 = beamtalk_error:new(file_not_found, 'File'),
@@ -395,6 +411,209 @@ Returns a Result ok map with the result of the block.
     beamtalk_error:raise_type_error('File', 'open:do:', <<"Expected a Block with 1 argument">>);
 'open:do:'(_, _) ->
     beamtalk_error:raise_type_error('File', 'open:do:', <<"Path must be a String">>).
+
+%%% ============================================================================
+%%% Incremental handle I/O (BT-2975)
+%%% ============================================================================
+
+-doc """
+Open a file in the given mode and return a FileHandle the caller owns.
+
+Modes map onto binary `file:open/2` option sets:
+
+| Mode         | Options                 | Behaviour                       |
+|--------------|-------------------------|---------------------------------|
+| `#read`      | `[read, binary]`        | Read only; file must exist      |
+| `#write`     | `[write, binary]`       | Truncate or create, write only  |
+| `#append`    | `[append, binary]`      | Create if absent, writes append |
+| `#readWrite` | `[read, write, binary]` | Create if absent, keeps content |
+
+Write-capable modes auto-create parent directories, matching
+`writeBinary:contents:`.
+
+The caller is responsible for `close`. The descriptor is owned by the File
+class process rather than the caller, so an unclosed handle survives the
+caller's death and stays open for the lifetime of the node — use
+`open:mode:do:` whenever a block scope will do.
+
+Returns a Result ok map holding the handle, or a Result error map.
+""".
+-spec 'open:mode:'(binary(), atom()) -> beamtalk_result:t().
+'open:mode:'(Path, Mode) when is_binary(Path), is_atom(Mode) ->
+    case do_open(Path, Mode, 'open:mode:') of
+        {ok, Handle} -> beamtalk_result:from_tagged_tuple({ok, Handle});
+        {error, Error} -> beamtalk_result:from_tagged_tuple({error, Error})
+    end;
+'open:mode:'(Path, _) when is_binary(Path) ->
+    beamtalk_error:raise_type_error('File', 'open:mode:', <<"Mode must be a Symbol">>);
+'open:mode:'(_, _) ->
+    beamtalk_error:raise_type_error('File', 'open:mode:', <<"Path must be a String">>).
+
+-doc """
+Block-scoped handle in the given mode, closed however the block exits.
+
+Opens the file, passes the FileHandle to the block, and closes the handle on
+the way out — normal return, raised error, or non-local return alike (the same
+guarantee `ensure:` gives at the Beamtalk level). A block that closes the
+handle itself is fine: closing is idempotent.
+
+The block normally runs in the *caller's* process: BT-3018 / ADR 0109 lowers
+`File open:…do:` at the call site to a direct call on the `open/3` shim below,
+so it never reaches the File class process. Nothing here bounds what the block
+may do — it can message `File` again, it holds nothing else up, and there is
+no time limit.
+
+The exception is reaching this function through dynamic dispatch (`perform:`),
+which still goes via the class gen_server and so runs the block there. In that
+case the pre-ADR-0109 constraints apply: the block cannot message `File` (that
+deadlocks), it serialises every other `File` call in the node behind it, and it
+must finish inside `beamtalk_class_dispatch`'s 60-second class-call timeout —
+past that the caller gets a timeout while the block keeps running.
+
+Returns a Result ok map holding the block's value, or a Result error map if the
+file could not be opened.
+""".
+-spec 'open:mode:do:'(binary(), atom(), Do :: fun((map()) -> term())) -> beamtalk_result:t().
+'open:mode:do:'(Path, Mode, Block) when
+    is_binary(Path), is_atom(Mode), is_function(Block, 1)
+->
+    case do_open(Path, Mode, 'open:mode:do:') of
+        {ok, Handle} ->
+            try
+                beamtalk_result:from_tagged_tuple({ok, Block(Handle)})
+            after
+                beamtalk_file_handle:close_handle(Handle)
+            end;
+        {error, Error} ->
+            beamtalk_result:from_tagged_tuple({error, Error})
+    end;
+'open:mode:do:'(Path, Mode, _) when is_binary(Path), is_atom(Mode) ->
+    beamtalk_error:raise_type_error(
+        'File', 'open:mode:do:', <<"Expected a Block with 1 argument">>
+    );
+'open:mode:do:'(Path, _, _) when is_binary(Path) ->
+    beamtalk_error:raise_type_error('File', 'open:mode:do:', <<"Mode must be a Symbol">>);
+'open:mode:do:'(_, _, _) ->
+    beamtalk_error:raise_type_error('File', 'open:mode:do:', <<"Path must be a String">>).
+
+-doc "Shared open path for open:mode: and open:mode:do:.".
+-spec do_open(binary(), atom(), atom()) ->
+    {ok, beamtalk_file_handle:t()} | {error, beamtalk_error:error()}.
+do_open(Path, Mode, Selector) ->
+    case mode_options(Mode) of
+        {ok, Options} ->
+            PathStr = unicode:characters_to_list(Path),
+            case ensure_parent_dir(Mode, PathStr) of
+                ok ->
+                    case check_regular(PathStr, Selector, Path) of
+                        ok ->
+                            %% Do NOT add `raw` to Options. A raw descriptor may
+                            %% only be used by the process that opened it, and
+                            %% `open:mode:` still opens in the File class
+                            %% process — every handle it hands back would fail
+                            %% with not_on_controlling_process. (ADR 0109 moved
+                            %% only the block-scoped selectors to the caller.)
+                            %% See mode_options/1.
+                            case file:open(PathStr, Options) of
+                                {ok, Fd} -> {ok, beamtalk_file_handle:new(Fd, Mode, Path)};
+                                {error, Reason} -> {error, open_error(Selector, Path, Reason)}
+                            end;
+                        {error, _} = NotRegular ->
+                            NotRegular
+                    end;
+                {error, Reason} ->
+                    Error0 = beamtalk_error:new(io_error, 'File'),
+                    Error1 = beamtalk_error:with_selector(Error0, Selector),
+                    Error2 = beamtalk_error:with_details(Error1, #{
+                        path => Path, reason => Reason
+                    }),
+                    {error, beamtalk_error:with_hint(Error2, <<"Could not create directory">>)}
+            end;
+        error ->
+            Error0 = beamtalk_error:new(type_error, 'File'),
+            Error1 = beamtalk_error:with_selector(Error0, Selector),
+            Error2 = beamtalk_error:with_details(Error1, #{path => Path, mode => Mode}),
+            {error,
+                beamtalk_error:with_hint(
+                    Error2, <<"Mode must be #read, #write, #append, or #readWrite">>
+                )}
+    end.
+
+-doc """
+Binary `file:open/2` options for each Beamtalk mode Symbol.
+
+Deliberately **not** `raw`: a raw descriptor may only be used by the process
+that opened it, and `open:mode:` is a class method, so it opens in the File
+class process rather than the caller's. The handle it returns would be dead on
+arrival. (ADR 0109 moved `open:…do:` to the caller, but not `open:mode:`.)
+Non-raw descriptors are BEAM processes, so a handle stays usable wherever it is
+held — the same property that lets `File lines:` streams outlive the open call.
+""".
+-spec mode_options(atom()) -> {ok, [file:mode()]} | error.
+mode_options(read) -> {ok, [read, binary]};
+mode_options(write) -> {ok, [write, binary]};
+mode_options(append) -> {ok, [append, binary]};
+mode_options(readWrite) -> {ok, [read, write, binary]};
+mode_options(_) -> error.
+
+-doc """
+Refuse to open something that exists but is not a regular file.
+
+A FIFO or character device never reports end-of-file, so `readAll` on one loops
+forever — and via `open:mode:`, which still opens in the File class process, a
+wedged read takes every other `File` operation in the node with it. A directory
+is rejected here too, turning a bare `eisdir` into a message that says what was
+wrong.
+
+A path that does not exist yet is fine: the write-capable modes create it.
+""".
+-spec check_regular(string(), atom(), binary()) -> ok | {error, beamtalk_error:error()}.
+check_regular(PathStr, Selector, Path) ->
+    case filelib:is_file(PathStr) andalso not filelib:is_regular(PathStr) of
+        false ->
+            ok;
+        true ->
+            Error0 = beamtalk_error:new(io_error, 'File'),
+            Error1 = beamtalk_error:with_selector(Error0, Selector),
+            Error2 = beamtalk_error:with_message(
+                Error1, <<"FileHandle path is not a regular file">>
+            ),
+            Error3 = beamtalk_error:with_details(Error2, #{path => Path}),
+            {error,
+                beamtalk_error:with_hint(
+                    Error3,
+                    <<
+                        "File handles are for regular files; a directory, FIFO or device "
+                        "cannot be read to end-of-file"
+                    >>
+                )}
+    end.
+
+-doc "Create missing parent directories for write-capable modes only.".
+-spec ensure_parent_dir(atom(), string()) -> ok | {error, term()}.
+ensure_parent_dir(read, _PathStr) ->
+    ok;
+ensure_parent_dir(_Mode, PathStr) ->
+    %% ensure_dir/1 creates the directories the *named file* sits in, and does
+    %% not create the file itself — no need to join a placeholder onto dirname.
+    filelib:ensure_dir(PathStr).
+
+-doc "Map a file:open/2 failure onto the structured error kinds File uses.".
+-spec open_error(atom(), binary(), term()) -> beamtalk_error:error().
+open_error(Selector, Path, enoent) ->
+    Error0 = beamtalk_error:new(file_not_found, 'File'),
+    Error1 = beamtalk_error:with_selector(Error0, Selector),
+    Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
+    beamtalk_error:with_hint(Error2, <<"Check that the file exists">>);
+open_error(Selector, Path, eacces) ->
+    Error0 = beamtalk_error:new(permission_denied, 'File'),
+    Error1 = beamtalk_error:with_selector(Error0, Selector),
+    Error2 = beamtalk_error:with_details(Error1, #{path => Path}),
+    beamtalk_error:with_hint(Error2, <<"Check file permissions">>);
+open_error(Selector, Path, Reason) ->
+    Error0 = beamtalk_error:new(io_error, 'File'),
+    Error1 = beamtalk_error:with_selector(Error0, Selector),
+    beamtalk_error:with_details(Error1, #{path => Path, reason => Reason}).
 
 %%% ============================================================================
 %%% Directory Operations (BT-1120)
@@ -805,6 +1024,8 @@ Returns the system temp directory as a String.
 %%%   (Erlang beamtalk_file) appendBinary: p contents: b → appendBinary/2
 %%%   (Erlang beamtalk_file) lines: path           → lines/1
 %%%   (Erlang beamtalk_file) open: path do: block  → open/2
+%%%   (Erlang beamtalk_file) open: path mode: m    → open/2
+%%%   (Erlang beamtalk_file) open: p mode: m do: b → open/3
 %%%   (Erlang beamtalk_file) isDirectory: path     → isDirectory/1
 %%%   (Erlang beamtalk_file) isFile: path          → isFile/1
 %%%   (Erlang beamtalk_file) mkdir: path           → mkdir/1
@@ -830,8 +1051,47 @@ writeBinary(Path, Contents) -> 'writeBinary:contents:'(Path, Contents).
 -spec appendBinary(binary(), Contents :: binary()) -> beamtalk_result:t().
 appendBinary(Path, Contents) -> 'appendBinary:contents:'(Path, Contents).
 lines(Path) -> 'lines:'(Path).
--spec open(binary(), Do :: fun((map()) -> term())) -> beamtalk_result:t().
-open(Path, Block) -> 'open:do:'(Path, Block).
+%% `open:do:` and `open:mode:` both lower to the arity-2 shim (the shim name is
+%% the first keyword), so they are told apart by their second argument: a Block
+%% is a fun, a mode is a Symbol.
+%%
+%% These two shims have a second caller beyond the inline FFI: BT-3018 / ADR
+%% 0109 compiles `File open:…do:` straight to `native_call(beamtalk_file, open,
+%% …)` so the user's block runs in the caller rather than the File class
+%% process. Removing the fun clause below would send those call sites to
+%% `open:mode:` with a fun as the mode.
+%%
+%% Every atom goes to `open:mode:`, not just the four valid modes. A misspelled
+%% mode is the common mistake, and `open:mode:` answers it with a `Result
+%% error:` naming all four — far better than a raise claiming the Symbol you
+%% passed is not a Symbol. The cost is that `File open: p do: nil` (nil and the
+%% booleans are atoms too) is reported against `open:mode:`, but passing a
+%% non-Block as a block is the rarer and more obviously broken call, and the
+%% message still names what a valid mode looks like.
+-spec open(binary(), Do :: fun((map()) -> term()) | atom()) -> beamtalk_result:t().
+open(Path, Block) when is_function(Block, 1) ->
+    'open:do:'(Path, Block);
+open(Path, Mode) when is_atom(Mode) ->
+    'open:mode:'(Path, Mode);
+open(_Path, _Other) ->
+    %% Deliberately no selector on the error: we cannot tell which of
+    %% `open:do:` / `open:mode:` was meant, and a made-up `open:` would mislead
+    %% anyone reading the record's selector field. The message names both.
+    Error0 = beamtalk_error:new(type_error, 'File'),
+    Error1 = beamtalk_error:with_message(
+        Error0, <<"File 'open:': second argument is neither a Block nor a mode Symbol">>
+    ),
+    beamtalk_error:raise(
+        beamtalk_error:with_hint(
+            Error1,
+            <<
+                "Pass a 1-argument Block for 'open:do:', or one of #read, #write, "
+                "#append, #readWrite for 'open:mode:'"
+            >>
+        )
+    ).
+-spec open(binary(), atom(), Do :: fun((map()) -> term())) -> beamtalk_result:t().
+open(Path, Mode, Block) -> 'open:mode:do:'(Path, Mode, Block).
 isDirectory(Path) -> 'isDirectory:'(Path).
 isFile(Path) -> 'isFile:'(Path).
 mkdir(Path) -> 'mkdir:'(Path).
@@ -853,11 +1113,17 @@ handleLines(Handle) -> handle_lines(Handle).
 -doc """
 Return a lazy Stream of lines from a FileHandle.
 
-Used within File open:do: blocks. The Stream reads lines from the
-already-open file handle. The handle's lifetime is managed by open:do:.
+The Stream reads lines from the already-open file handle, so it is bounded by
+that handle's lifetime — the enclosing block for `open:do:` / `open:mode:do:`,
+or the caller's `close` for a handle from `open:mode:`.
 """.
 -spec handle_lines(file_handle()) -> beamtalk_stream:t().
-handle_lines(#{'$beamtalk_class' := 'FileHandle', fd := Fd}) ->
+handle_lines(#{'$beamtalk_class' := 'FileHandle', fd := Fd} = Handle) ->
+    %% BT-2975: `lines` returns a Stream, not a Result, so a closed or
+    %% write-only handle has to raise. Reading a write-only descriptor crashes
+    %% the file_io_server, silently breaking every later write on the handle —
+    %% and a closed one would surface only as a mysteriously empty stream.
+    ok = beamtalk_file_handle:ensure_readable(Handle, 'lines'),
     make_line_stream_from_fd(Fd);
 handle_lines(_) ->
     beamtalk_error:raise_type_error('FileHandle', 'lines', <<"Expected a FileHandle">>).

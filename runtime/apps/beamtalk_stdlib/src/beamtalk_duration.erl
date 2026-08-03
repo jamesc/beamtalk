@@ -35,7 +35,8 @@ Float alternative was rejected so deadline arithmetic stays exact.
 the first keyword of the Beamtalk selector. Operator selectors (`+`, `<`, …)
 are not valid Erlang function names, so the Beamtalk operators dispatch
 through named shims (`add`, `subtract`, `multiply`, `lt`, `gt`, `lte`,
-`gte`, `eql`, `neq`, `sneq`).
+`gte`). The equality operators have no shim — codegen lowers them to the
+Erlang BIFs without dispatching (ADR 0002, BT-2997).
 """.
 
 %% Class methods (canonical colon forms)
@@ -52,7 +53,7 @@ through named shims (`add`, `subtract`, `multiply`, `lt`, `gt`, `lte`,
 %% FFI shims for (Erlang beamtalk_duration) dispatch
 -export([milliseconds/1, seconds/1, minutes/1, hours/1, days/1, fromString/1]).
 -export([add/2, subtract/2, multiply/2]).
--export([lt/2, gt/2, lte/2, gte/2, eql/2, neq/2, sneq/2]).
+-export([lt/2, gt/2, lte/2, gte/2]).
 
 %% Cross-module helper (beamtalk_timer, beamtalk_datetime)
 -export([is_duration/1]).
@@ -325,23 +326,10 @@ lte(Self, Other) -> '=<'(Self, Other).
 -spec gte(t(), t()) -> boolean().
 gte(Self, Other) -> '>='(Self, Other).
 
-%% `eql:with:` → strips to `eql`, arity 2
--spec eql(t(), t()) -> boolean().
-eql(Self, Other) -> '=:='(Self, Other).
-
-%% `neq:with:` → strips to `neq`, arity 2
--spec neq(t(), t()) -> boolean().
-neq(Self, Other) -> '/='(Self, Other).
-
-%% `sneq:with:` → strips to `sneq`, arity 2 — maps to the `=/=` operator
-%% (Beamtalk's strict inequality; `neq` above is `/=`)
--spec sneq(t(), t()) -> boolean().
-sneq(#{'$beamtalk_class' := 'Duration', millis := A}, #{
-    '$beamtalk_class' := 'Duration', millis := B
-}) ->
-    A =/= B;
-sneq(_, _) ->
-    raise_type_error(sneq, <<"Argument must be a Duration">>).
+%% No `eql`/`neq`/`sneq` shims: the `=:=`, `/=` and `=/=` operators are lowered
+%% directly to the Erlang BIFs by codegen and never dispatch to a method (ADR
+%% 0002, BT-2997), so nothing could reach them. Duration canonicalises to a
+%% single `millis` field, which makes raw term equality already correct.
 
 %%% ============================================================================
 %%% Cross-module Helpers

@@ -212,7 +212,7 @@ flush_kinds(_Other) ->
 classify_kinds([]) ->
     {error,
         filter_error(<<
-            "flushKinds: requires at least one kind Symbol — use Workspace flush to flush "
+            "flushKinds: requires at least one kind Symbol; use Workspace flush to flush "
             "every pending durable change"
         >>)};
 classify_kinds(Kinds) ->
@@ -277,7 +277,7 @@ normalise_filter(#beamtalk_object{class = ClassNameAtom}) when is_atom(ClassName
         false ->
             {error,
                 filter_error(
-                    <<"flush: argument is an Object but not a Class — pass a class, a Symbol, or a Dictionary">>
+                    <<"flush: argument is an Object but not a Class; pass a class, a Symbol, or a Dictionary">>
                 )}
     end;
 normalise_filter(ClassName) when is_atom(ClassName) ->
@@ -524,7 +524,7 @@ prepare_file(File, Entries) ->
                     Entries,
                     <<
                         "Cannot flush a new-class entry alongside other patches in the "
-                        "same operation — flush the new-class entry first, then re-flush "
+                        "same operation; flush the new-class entry first, then re-flush "
                         "to apply method patches against the newly created file"
                     >>
                 )};
@@ -573,7 +573,7 @@ prepare_new_class(File, Entries, Entry) ->
             %% other than enoent (e.g. eacces, eloop).
             {conflict,
                 conflict_map(File, <<"target_exists">>, Entries, <<
-                    "newClass:at: target already exists on disk — choose a different path "
+                    "newClass:at: target already exists on disk; choose a different path "
                     "or clear the pending entry"
                 >>)}
     end.
@@ -688,7 +688,7 @@ splice_with_prev(Body, Entry, Start, End, PrevBody) ->
                             (integer_to_binary(End))/binary,
                             " is outside the current ",
                             (integer_to_binary(byte_size(Body)))/binary,
-                            "-byte file — the file changed externally"
+                            "-byte file; the file changed externally"
                         >>
                     ])
                 )};
@@ -874,7 +874,7 @@ complete_flush(Files, Renamed, Failed, Seqs) ->
                 detail => iolist_to_binary([
                     <<
                         "Files were written to disk but the ChangeLog could not "
-                        "mark the entries as flushed — they still appear in "
+                        "mark the entries as flushed; they still appear in "
                         "`Workspace changes` and will conflict on re-flush. "
                         "Detail: "
                     >>,

@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3032 / ADR 0110: child fixture for the class-var shadow write-through
+// tests. See fixtures/shadow_relay_parent.bt for the inherited mutating
+// driver and stdlib/test/class_var_nlr_shadow_test.bt for the tests.
+
+ShadowRelayParent subclass: ShadowRelayChild
+  classState: hits = 0
+
+  // Self-dispatch to the inherited mutating driver — the foreign `^` must
+  // relay through this extra hop and the increment must still persist in
+  // the child's ClassVars.
+  class driveWith: aBlock :: Block over: aList :: List -> Nil =>
+    self hitRun: aBlock over: aList
+    nil
