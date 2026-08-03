@@ -1070,7 +1070,13 @@ invoke_class_method_errors_test_() ->
             {"method that raises error returns {error, Reason}", fun test_invoke_raises_error/0},
             {"connected Program exit: passes through the apply catch",
                 fun test_invoke_script_exit_passthrough/0},
-            {"multi-arg keyword selector dispatches correctly", fun test_invoke_two_arg_keyword/0}
+            {"multi-arg keyword selector dispatches correctly", fun test_invoke_two_arg_keyword/0},
+            {"NLR relay without shadow falls back to pre-call class vars",
+                fun test_invoke_nlr_relay_no_shadow/0},
+            {"NLR relay with shadow set replies with shadow class vars and erases it",
+                fun test_invoke_nlr_relay_reads_shadow/0},
+            {"genuine error ignores the shadow, reverts to pre-call class vars",
+                fun test_invoke_error_ignores_shadow/0}
         ]
     end}.
 
@@ -1128,6 +1134,72 @@ test_invoke_two_arg_keyword() ->
         #{}
     ),
     ?assertMatch({reply, {ok, {two_args, alpha, beta}}, _}, Result).
+
+%% ADR 0110 / BT-3036: a foreign `^` (NLR throw) relaying out of a class method
+%% replies {error, Nlr} with the *pre-call* ClassVars when nothing has written
+%% the '$bt_class_vars_shadow' key — exactly today's revert behavior.
+test_invoke_nlr_relay_no_shadow() ->
+    LocalMethods = #{testNlrThrow => <<>>},
+    ClassVars = #{count => 1},
+    Result = beamtalk_class_dispatch:handle_class_method_call(
+        testNlrThrow,
+        [],
+        'BT3036NlrNoShadowClass',
+        beamtalk_class_dispatch_test_helper,
+        LocalMethods,
+        ClassVars
+    ),
+    ?assertMatch(
+        {reply, {error, {'$bt_nlr', bt3036_token, nlr_value, nlr_state}}, #{count := 1}}, Result
+    ),
+    %% The shadow key never outlives a dispatch.
+    ?assertEqual(undefined, erlang:get('$bt_class_vars_shadow')).
+
+%% ADR 0110 / BT-3036: when the shadow key IS set (as the BT-3037 codegen
+%% write-through will do at top-level class-var mutations), the NLR relay path
+%% replies with the shadow class vars — preserving writes made before the
+%% unwind — and the after clause erases the key.
+test_invoke_nlr_relay_reads_shadow() ->
+    LocalMethods = #{testNlrThrow => <<>>},
+    erlang:put('$bt_class_vars_shadow', #{count => 99}),
+    try
+        Result = beamtalk_class_dispatch:handle_class_method_call(
+            testNlrThrow,
+            [],
+            'BT3036NlrShadowClass',
+            beamtalk_class_dispatch_test_helper,
+            LocalMethods,
+            #{count => 1}
+        ),
+        ?assertMatch(
+            {reply, {error, {'$bt_nlr', bt3036_token, nlr_value, nlr_state}}, #{count := 99}},
+            Result
+        ),
+        ?assertEqual(undefined, erlang:get('$bt_class_vars_shadow'))
+    after
+        erlang:erase('$bt_class_vars_shadow')
+    end.
+
+%% ADR 0110 / BT-3036: a genuine error still reverts to the pre-call ClassVars
+%% even when the shadow key is set — only the NLR relay path reads it. The
+%% after clause still erases the key.
+test_invoke_error_ignores_shadow() ->
+    LocalMethods = #{testRaise => <<>>},
+    erlang:put('$bt_class_vars_shadow', #{count => 99}),
+    try
+        Result = beamtalk_class_dispatch:handle_class_method_call(
+            testRaise,
+            [],
+            'BT3036ErrorShadowClass',
+            beamtalk_class_dispatch_test_helper,
+            LocalMethods,
+            #{count => 1}
+        ),
+        ?assertMatch({reply, {error, test_deliberate_error}, #{count := 1}}, Result),
+        ?assertEqual(undefined, erlang:get('$bt_class_vars_shadow'))
+    after
+        erlang:erase('$bt_class_vars_shadow')
+    end.
 
 %%% ============================================================================
 %%% 12. class_send instantiation variants (BT-1963)

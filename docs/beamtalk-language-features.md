@@ -2311,7 +2311,7 @@ Arguments and return values cross that boundary as copies, so blocks that comput
 - **Process-local side effects.** A block that writes to the process dictionary (`Erlang erlang put:value:`), reads `self()`, or otherwise depends on running in a particular process affects the *class* process. The caller sees none of it.
 - **Re-entrant class sends.** If the block messages the same class whose method is driving it, the class process would have to `gen_server:call` itself. That raises a structured `dispatch_error` naming the selector rather than deadlocking. Read what you need before the call, or hold the resource yourself instead of using the block form.
 
-Non-local return (`^`) *does* cross the boundary: the signal is relayed back and unwinds the enclosing method as it would without the hop. One caveat — if the class method mutated a class variable *before* the block escaped, that mutation is currently reverted ([BT-3032](https://linear.app/beamtalk/issue/BT-3032)); the returned value is unaffected.
+Non-local return (`^`) *does* cross the boundary: the signal is relayed back and unwinds the enclosing method as it would without the hop, and a class variable mutated *before* the block escaped survives the unwind along with it (ADR 0110). A genuine error after the mutation still reverts it, exactly as before.
 
 This matters most when building a `Collection` subclass. Implementing `do:` by delegating to a class-side helper is fine — `asList`, `inject:into:`, `sum`, `includes:` and the rest of the inherited protocol all work — but a class-side helper that reaches back into its own class does not:
 
@@ -4561,7 +4561,7 @@ See [ADR 0071](ADR/0071-class-visibility-internal-modifier.md) for the full desi
 
 ## Standard Library
 
-76 classes implemented and tested. For detailed API documentation, see [API Reference](https://www.beamtalk.dev/apidocs/).
+109 classes implemented and tested (`stdlib/src/*.bt`; see [Stdlib Implementation Status](stdlib-implementation-status.md) for the current per-class method audit). For detailed API documentation, see [API Reference](https://www.beamtalk.dev/apidocs/).
 
 **Core types:**
 
@@ -4617,10 +4617,11 @@ See [ADR 0071](ADR/0071-class-visibility-internal-modifier.md) for the full desi
 | **File**, **FileHandle** | File system operations |
 | **Subprocess**, **ReactiveSubprocess** | OS process execution ([ADR 0051](ADR/0051-subprocess-execution.md)) |
 | **OS**, **System** | Platform info and system operations |
-| **Json**, **Yaml** | Data serialisation |
+| **Json** | Data serialisation (JSON) |
 | **Regex** | Regular expression matching |
-| **DateTime**, **Time** | Date/time operations |
+| **DateTime**, **Time**, **Duration** | Date/time operations |
 | **Random** | Random number generation |
+| **Digest** | Cryptographic hash functions and HMAC |
 
 **Networking** (in [`beamtalk-http`](https://github.com/jamesc/beamtalk-http)):
 
@@ -4629,6 +4630,12 @@ See [ADR 0071](ADR/0071-class-visibility-internal-modifier.md) for the full desi
 | **HTTPServer**, **HTTPClient** | HTTP server and client |
 | **HTTPRouter**, **HTTPRoute**, **HTTPRouteBuilder** | Declarative HTTP routing |
 | **HTTPRequest**, **HTTPResponse** | Request/response objects |
+
+**Data formats** (in [`beamtalk-yaml`](https://github.com/jamesc/beamtalk-yaml)):
+
+| Class | Description |
+|-------|-------------|
+| **Yaml** | YAML parsing and serialisation — not part of stdlib; add it as a package dependency ([Package Management guide](beamtalk-packages.md)) |
 
 **Observability:**
 

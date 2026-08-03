@@ -3567,6 +3567,45 @@ fn test_class_method_local_var_after_class_var_mutation() {
 }
 
 #[test]
+fn test_class_var_mutation_emits_shadow_write() {
+    // ADR 0110 (BT-3032/BT-3037): a top-frame class-var mutation in a class
+    // method must write the just-updated ClassVars map into the
+    // '$bt_class_vars_shadow' process-dictionary key, immediately after the
+    // maps:put threading, so a foreign NLR relayed out of the method can
+    // recover the mutation (read + erased by invoke_class_method/7, BT-3036).
+    let src = "Object subclass: ShadowCounter\n  classState: runs = 0\n\n  class bump =>\n    self.runs := self.runs + 1\n    self.runs";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@shadowcounter").with_workspace_mode(true),
+    )
+    .expect("codegen should succeed");
+    assert!(
+        code.contains("call 'erlang':'put'('$bt_class_vars_shadow', ClassVars1)"),
+        "class-var mutation should emit the ADR 0110 shadow write. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_instance_field_mutation_does_not_emit_shadow_write() {
+    // ADR 0110: the shadow write is scoped to class-var mutations in class
+    // methods — ordinary actor state threading must not gain a pdict write.
+    let src = "Actor subclass: PlainCounter\n  state: count = 0\n\n  bump => self.count := self.count + 1";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@plaincounter").with_workspace_mode(true),
+    )
+    .expect("codegen should succeed");
+    assert!(
+        !code.contains("$bt_class_vars_shadow"),
+        "instance field mutation must not emit the class-var shadow write. Got:\n{code}"
+    );
+}
+
+#[test]
 #[allow(clippy::too_many_lines)]
 fn test_repl_destructure_mutation_threaded_rhs_unwraps_element() {
     // BT-1283: When the RHS of a REPL destructuring assignment is a mutation-threaded

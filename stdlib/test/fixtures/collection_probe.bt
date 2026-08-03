@@ -25,6 +25,14 @@ Value subclass: CollectionProbe
     k run: [:x | x > 1 ifTrue: [^x]] over: aList
     0
 
+  // BT-3032 / ADR 0110: the repro from the ADR — the `^` here is foreign to
+  // CollectionDriver's `countedRun:over:` frame, so the driver's class-var
+  // increment travels via the '$bt_class_vars_shadow' write-through when the
+  // NLR relays back out of the driver's class process.
+  class escapeAfterCountedRun: aList :: List -> Integer =>
+    CollectionDriver countedRun: [:x | x > 1 ifTrue: [^x]] over: aList
+    0
+
   // BT-3031: `CollectionDriver class class` is a true metaclass receiver
   // (beamtalk_behaviour_intrinsics:classClass/1 tags it 'Metaclass'), so this
   // routes through metaclass_send/4 instead of class_send/3. The `^` belongs to
