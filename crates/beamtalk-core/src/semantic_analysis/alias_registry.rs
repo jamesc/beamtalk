@@ -596,6 +596,15 @@ impl AliasRegistry {
                 // whole `AliasInfo` (not just `name`) is deliberate: two
                 // genuinely different aliases that happen to share a name
                 // are extremely unlikely to also share every other field.
+                // (`span` is a byte offset local to whichever file produced
+                // it, not a globally unique id, so in principle two distinct
+                // same-package files could coincidentally declare `Foo` with
+                // identical RHS text at the same offset and be silently
+                // coalesced here instead of flagged — `AliasInfo` has no
+                // file-path field to rule this out precisely. Accepted as a
+                // vanishingly unlikely trade-off against the alternative:
+                // every project with a singly-declared dependency alias
+                // failing lint/build outright.)
                 if existing == &info {
                     continue;
                 }

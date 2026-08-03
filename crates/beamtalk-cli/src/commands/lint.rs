@@ -1268,6 +1268,66 @@ mod tests {
         );
     }
 
+    /// BT-3043: `collect_lint_files`'s directory walk must never treat a
+    /// dependency's own vendored checkout under `_build/deps/` as first-party
+    /// project source. Unlike a path dependency (whose source lives wherever
+    /// the path points, outside `_build`), a git/registry dependency is
+    /// cloned straight into `_build/deps/<name>/` — the actual reproduction
+    /// shape of the original bug report (an `http` dependency, not a path
+    /// dep): without this exclusion, `beamtalk lint .` would (a) lint the
+    /// vendored dependency's own source as if it were the user's code, and
+    /// (b) extract its declarations a second time stamped with the
+    /// *consuming* project's package name, producing a genuine mismatch
+    /// against the same declaration merged in correctly (stamped with the
+    /// dependency's own package name) via `merge_dependency_infos` — a
+    /// collision `AliasRegistry::add_pre_loaded`'s identity check cannot
+    /// recognise as a duplicate, since the two entries' `package` differs.
+    #[test]
+    fn collect_lint_files_excludes_vendored_dependency_checkout_under_build_dir() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = temp.path();
+        std::fs::write(
+            root.join("beamtalk.toml"),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(
+            root.join("src").join("Main.bt"),
+            "Object subclass: Main\n  foo => 1\n",
+        )
+        .unwrap();
+
+        // Simulate a git/registry dependency's checkout (`clone_repo` clones
+        // straight into `_build/deps/<name>/` — see `BuildLayout::dep_checkout_dir`).
+        std::fs::create_dir_all(
+            root.join("_build")
+                .join("deps")
+                .join("producer")
+                .join("src"),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("_build")
+                .join("deps")
+                .join("producer")
+                .join("src")
+                .join("types.bt"),
+            "type Handler = Block | Integer\n",
+        )
+        .unwrap();
+
+        let source_path = camino::Utf8PathBuf::from_path_buf(root.to_path_buf()).unwrap();
+        let (source_files, _erl_files) =
+            collect_lint_files(&source_path, source_path.as_str()).unwrap();
+
+        assert!(
+            source_files.iter().all(|f| !f.as_str().contains("_build")),
+            "vendored dependency source under _build/ must never be treated as project \
+             source: {source_files:?}"
+        );
+    }
+
     /// BT-3043 (acceptance criterion): a project depending on a package that
     /// declares a type alias exactly once must lint clean across every file
     /// in the project — no false "Pre-loaded type alias ... collides with
@@ -1384,6 +1444,126 @@ mod tests {
                 "a once-declared dependency alias must never be flagged as colliding: {diags:?}"
             );
         }
+    }
+
+    /// BT-3043 (acceptance criterion): a *genuine* cross-package alias
+    /// collision — two different dependencies each exporting a same-named
+    /// alias with a different RHS — must be reported exactly once across a
+    /// multi-file consumer project, not once per file. Exercises the real
+    /// pipeline end to end (`parse_and_extract_class_infos` +
+    /// `merge_dependency_infos` + the same Pass-2 loop shape `run_lint` uses,
+    /// dedup included) rather than synthetic diagnostics, so it would have
+    /// caught a regression in either the `AliasRegistry::add_pre_loaded`
+    /// identity check or `run_lint`'s cross-file dedup.
+    #[test]
+    fn lint_across_many_files_reports_a_genuine_cross_package_alias_collision_exactly_once() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = temp.path();
+
+        for (pkg, rhs) in [("producer_a", "String"), ("producer_b", "Integer")] {
+            let dir = root.join(pkg);
+            std::fs::create_dir_all(dir.join("src")).unwrap();
+            std::fs::write(
+                dir.join("beamtalk.toml"),
+                format!("[package]\nname = \"{pkg}\"\nversion = \"0.1.0\"\n"),
+            )
+            .unwrap();
+            std::fs::write(
+                dir.join("src").join("types.bt"),
+                format!("type Shared = {rhs}\n"),
+            )
+            .unwrap();
+        }
+
+        let consumer_dir = root.join("consumer");
+        std::fs::create_dir_all(consumer_dir.join("src")).unwrap();
+        std::fs::write(
+            consumer_dir.join("beamtalk.toml"),
+            "[package]\nname = \"consumer\"\nversion = \"0.1.0\"\n\n\
+             [dependencies]\nproducer_a = { path = \"../producer_a\" }\n\
+             producer_b = { path = \"../producer_b\" }\n",
+        )
+        .unwrap();
+        let mut source_files = Vec::new();
+        for i in 0..8 {
+            let file = consumer_dir.join("src").join(format!("File{i}.bt"));
+            std::fs::write(&file, format!("Object subclass: File{i}\n  foo => 1\n")).unwrap();
+            source_files.push(camino::Utf8PathBuf::from_path_buf(file).unwrap());
+        }
+
+        let consumer_root = camino::Utf8PathBuf::from_path_buf(consumer_dir.clone()).unwrap();
+
+        // Fake both producers' compiled state so dependency resolution takes
+        // the fresh/no-recompile fast path (mirrors the sibling tests above).
+        let layout = crate::commands::build_layout::BuildLayout::new(&consumer_root);
+        for pkg in ["producer_a", "producer_b"] {
+            let ebin_dir = layout.dep_ebin_dir(pkg);
+            std::fs::create_dir_all(&ebin_dir).unwrap();
+            std::fs::write(ebin_dir.join(format!("bt@{pkg}@types.beam")), b"BEAM").unwrap();
+            crate::commands::build_stamp::write_stamp(
+                &layout.dep_stamp_path(pkg),
+                crate::commands::build_stamp::current_otp_version(),
+            );
+        }
+
+        let (
+            mut all_class_infos,
+            extension_index,
+            mut all_protocol_infos,
+            mut all_alias_infos,
+            parsed_files,
+        ) = parse_and_extract_class_infos(&source_files, Some(&consumer_root), Some("consumer"))
+            .unwrap();
+        merge_dependency_infos(
+            &consumer_root,
+            &mut all_class_infos,
+            &mut all_protocol_infos,
+            &mut all_alias_infos,
+        );
+        assert_eq!(
+            all_alias_infos
+                .iter()
+                .filter(|a| a.name == "Shared")
+                .count(),
+            2,
+            "the fixture declares Shared twice, with different RHS: {all_alias_infos:?}"
+        );
+
+        let mut seen_pre_loaded_alias_collisions = std::collections::HashSet::new();
+        let mut collision_count = 0usize;
+        for (_file, _source, module, parse_diags) in parsed_files {
+            let cross_file_classes =
+                beamtalk_core::semantic_analysis::ClassHierarchy::cross_file_class_infos(
+                    &all_class_infos,
+                    &module,
+                );
+            let diags = collect_diagnostics(
+                &module,
+                parse_diags,
+                cross_file_classes,
+                all_protocol_infos.clone(),
+                all_alias_infos.clone(),
+                None,
+                beamtalk_core::semantic_analysis::KnowledgeScope::ProjectComplete,
+                &extension_index,
+                true,
+                Some("consumer"),
+            )
+            .into_iter()
+            .filter(|d| dedup_pre_loaded_alias_collision(d, &mut seen_pre_loaded_alias_collisions))
+            .collect::<Vec<_>>();
+
+            collision_count += diags
+                .iter()
+                .filter(|d| d.message.contains("collides with another type alias"))
+                .count();
+        }
+
+        assert_eq!(
+            collision_count, 1,
+            "a genuine cross-package collision must be reported exactly once for the whole \
+             lint run, not once per file"
+        );
     }
 
     /// BT-3043 (acceptance criterion): when two pre-loaded aliases *do*
