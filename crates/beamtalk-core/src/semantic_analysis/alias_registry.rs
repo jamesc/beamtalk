@@ -581,7 +581,25 @@ impl AliasRegistry {
                 continue;
             }
 
-            if self.aliases.contains_key(&info.name) {
+            if let Some(existing) = self.aliases.get(&info.name) {
+                // BT-3043: A pre-loaded batch can legitimately contain the
+                // *same* declaration more than once — e.g. a dependency
+                // reachable via more than one path through the project's
+                // merged class/protocol/alias info lists (callers like
+                // `beamtalk lint`/`beamtalk build` simply concatenate
+                // same-package and dependency-exported sources with no
+                // dedup — see `collect_all_alias_infos`'s doc). Re-seeding
+                // the identical declaration (same name, RHS, internal flag,
+                // package, and source span) is idempotent, not a namespace
+                // collision — only a *different* declaration of the same
+                // name is a real collision worth diagnosing. Comparing the
+                // whole `AliasInfo` (not just `name`) is deliberate: two
+                // genuinely different aliases that happen to share a name
+                // are extremely unlikely to also share every other field.
+                if existing == &info {
+                    continue;
+                }
+
                 diagnostics.push(
                     Diagnostic::error(
                         format!(
@@ -2355,6 +2373,42 @@ mod tests {
             registry.get("Id").unwrap().annotation,
             TypeAnnotation::Simple(ident("String"))
         );
+    }
+
+    #[test]
+    fn add_pre_loaded_does_not_flag_a_duplicate_seed_of_the_same_declaration_as_a_collision() {
+        // BT-3043: `beamtalk lint`/`beamtalk build` merge same-package and
+        // dependency-exported alias infos via plain concatenation (see
+        // `collect_all_alias_infos`'s doc in `build.rs`) with no dedup —
+        // callers rely on `add_pre_loaded` itself to tell a namespace
+        // collision (two *different* declarations of the same name) apart
+        // from the *same* declaration reaching the seed list more than once
+        // (e.g. a dependency reachable through more than one path). Only the
+        // former is a real collision; re-seeding an identical `AliasInfo`
+        // (same name, RHS, internal flag, package, and span) must be a
+        // silent no-op.
+        let hierarchy = ClassHierarchy::with_builtins();
+        let protocol_registry = ProtocolRegistry::new();
+        let mut registry = AliasRegistry::new();
+
+        let declared_once = alias_info_with_package(
+            "HTTPHandlerLike",
+            TypeAnnotation::Simple(ident("Block")),
+            false,
+            Some("http"),
+        );
+        let diags = registry.add_pre_loaded(
+            vec![declared_once.clone(), declared_once],
+            &hierarchy,
+            &protocol_registry,
+            Some("consumer"),
+        );
+
+        assert!(
+            diags.is_empty(),
+            "re-seeding the identical declaration must not be reported as a collision: {diags:?}"
+        );
+        assert!(registry.has_alias("HTTPHandlerLike"));
     }
 
     #[test]
