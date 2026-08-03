@@ -7,6 +7,12 @@
 /// It is backed by a Dictionary mapping elements to occurrence counts.
 /// Operations that "modify" a bag return a new bag — the original is unchanged.
 ///
+/// Deliberately has no `first`/`last` — a Bag promises no ordering, so
+/// either name would misleadingly suggest one. Use `anyOne` to grab a
+/// single element (no ordering guarantee, may differ between calls), or
+/// `asList first` / `asList last` if you specifically want the order
+/// `asList` currently answers in.
+///
 /// ## Examples
 /// ```beamtalk
 /// Bag new class                           // => Bag

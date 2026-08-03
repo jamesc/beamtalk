@@ -48,6 +48,29 @@ typed Collection subclass: Interval
       by: self.step
       do: block
 
+  /// Return the element at the given 1-based index.
+  ///
+  /// Raises `index_out_of_bounds` for any index outside `1..self size` —
+  /// including on an empty interval. Unlike `first`/`last`, `at:` never
+  /// raises `empty_collection`: there is no dedicated "no valid index"
+  /// case for a keyed accessor, matching `Array>>at:`'s rule that only a
+  /// no-argument accessor treats emptiness as its own condition.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (1 to: 10) at: 1            // => 1
+  /// (1 to: 10) at: 10           // => 10
+  /// (1 to: 10 by: 2) at: 3      // => 5
+  /// ```
+  at: index :: Integer -> Integer =>
+    (index >= 1 and: [
+      index <= self size
+    ]) ifTrue: [
+      self.from + ((index - 1) * self.step)
+    ] ifFalse: [
+      (Erlang beamtalk_collection) raiseIndexOutOfBounds: #Interval selector: #at:
+    ]
+
   /// First element of the interval.
   ///
   /// Raises `empty_collection` if the interval is empty, matching

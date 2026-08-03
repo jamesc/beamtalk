@@ -113,6 +113,19 @@ TestCase subclass: EmptyCollectionAccessTest
     self should: [(Array withAll: #()) at: 0] raise: #index_out_of_bounds
 
   // ==========================================================================
+  // Array — first/last (BT-3027), same shape as List/String
+  // ==========================================================================
+  testArrayFirstOnEmptyRaisesEmptyCollection =>
+    self should: [#[] first] raise: #empty_collection
+
+  testArrayLastOnEmptyRaisesEmptyCollection =>
+    self should: [#[] last] raise: #empty_collection
+
+  testArrayFirstAndLastReturnElements =>
+    self assert: #[10, 20, 30] first equals: 10
+    self assert: #[10, 20, 30] last equals: 30
+
+  // ==========================================================================
   // Queue — predates empty_collection and keeps its own kind, but classifies
   // as RuntimeError like the rest of the family
   // ==========================================================================
@@ -135,6 +148,60 @@ TestCase subclass: EmptyCollectionAccessTest
   testNonEmptyIntervalFirstAndLastStillWork =>
     self assert: (1 to: 10) first equals: 1
     self assert: (1 to: 10) last equals: 10
+
+  // `Interval>>at:` (BT-3027) is bounds-checked like `Array`/`List` at:, but
+  // *always* reports out-of-range as index_out_of_bounds — including on an
+  // empty interval — never empty_collection. Only the no-arg accessors
+  // (first/last/anyOne) treat emptiness as its own condition.
+  testIntervalAtOutOfRangeRaisesIndexOutOfBounds =>
+    self should: [(1 to: 10) at: 11] raise: #index_out_of_bounds
+    self should: [(1 to: 10) at: 0] raise: #index_out_of_bounds
+
+  testEmptyIntervalAtRaisesIndexOutOfBoundsNotEmptyCollection =>
+    self should: [(1 to: 0) at: 1] raise: #index_out_of_bounds
+
+  testIntervalAtReturnsElement =>
+    self assert: ((1 to: 10) at: 1) equals: 1
+    self assert: ((1 to: 10) at: 10) equals: 10
+    self assert: ((1 to: 10 by: 2) at: 3) equals: 5
+
+  // ==========================================================================
+  // Set/Bag/Dictionary — deliberately no first/last; anyOne instead (BT-3027)
+  // ==========================================================================
+  testSetAnyOneOnEmptyRaisesEmptyCollection =>
+    self should: [Set new anyOne] raise: #empty_collection
+
+  testBagAnyOneOnEmptyRaisesEmptyCollection =>
+    self should: [Bag new anyOne] raise: #empty_collection
+
+  testDictionaryAnyOneOnEmptyRaisesEmptyCollection =>
+    self should: [#{} anyOne] raise: #empty_collection
+
+  testSetAnyOneOnNonEmptyReturnsAMember =>
+    s := Set new fromList: #(1, 2, 3)
+    self assert: (s includes: s anyOne)
+
+  testBagAnyOneOnNonEmptyReturnsAMember =>
+    b := Bag withAll: #(1, 2, 3)
+    self assert: (b includes: b anyOne)
+
+  testDictionaryAnyOneOnNonEmptyReturnsAValue =>
+    d := #{#a => 1, #b => 2}
+    self assert: (d includes: d anyOne)
+
+  // Set/Bag/Dictionary have no `first`/`last` at all — the design
+  // deliberately does not give them those selectors (they'd misleadingly
+  // imply an ordering guarantee). The type checker emits a compile-time
+  // hint for the unresolved selector, but this does not block compilation
+  // (see `@expect dnu` convention) — it still dispatches at runtime and
+  // raises `does_not_understand`, exactly like any other typo.
+  @expect dnu
+  testSetFirstRaisesDoesNotUnderstand =>
+    self should: [Set new first] raise: #does_not_understand
+
+  @expect dnu
+  testBagLastRaisesDoesNotUnderstand =>
+    self should: [(Bag withAll: #(1, 2)) last] raise: #does_not_understand
 
   // ==========================================================================
   // Collection aggregates — max/min/average over nothing

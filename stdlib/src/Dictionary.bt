@@ -9,6 +9,12 @@
 /// ## BEAM Mapping
 /// Beamtalk dictionaries map directly to Erlang maps.
 ///
+/// Deliberately has no `first`/`last` — a Dictionary promises no ordering
+/// over its entries, so either name would misleadingly suggest one. Use
+/// `anyOne` to grab a single value (no ordering guarantee, may differ
+/// between calls), or `asList first` / `asList last` if you specifically
+/// want the order `asList` currently answers in.
+///
 /// ## Examples
 /// ```beamtalk
 /// #{#name => "Alice"} class                   // => Dictionary

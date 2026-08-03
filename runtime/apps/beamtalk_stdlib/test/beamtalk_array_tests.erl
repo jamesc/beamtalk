@@ -8,7 +8,7 @@
 -moduledoc """
 EUnit tests for beamtalk_array module (BT-1088).
 
-Tests from_list, size, is_empty, at, at_put, do, includes,
+Tests from_list, size, is_empty, at, first, last, at_put, do, includes,
 collect, select, inject_into, print_string, and error paths.
 """.
 
@@ -112,6 +112,42 @@ at_non_integer_index_test() ->
     ?assertError(
         #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
         beamtalk_array:at(A, <<"1">>)
+    ).
+
+%%% ============================================================================
+%%% first/1, last/1 (BT-3027)
+%%%
+%%% Mirrors `beamtalk_string:first/1`/`last/1` (BT-3021) — both raise
+%%% `empty_collection` on an empty Array.
+%%% ============================================================================
+
+first_returns_first_element_test() ->
+    ?assertEqual(a, beamtalk_array:first(make_array([a, b, c]))).
+
+last_returns_last_element_test() ->
+    ?assertEqual(c, beamtalk_array:last(make_array([a, b, c]))).
+
+first_single_element_test() ->
+    A = make_array([42]),
+    ?assertEqual(42, beamtalk_array:first(A)),
+    ?assertEqual(42, beamtalk_array:last(A)).
+
+first_empty_array_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := 'RuntimeError',
+            error := #beamtalk_error{kind = empty_collection, class = 'Array', selector = 'first'}
+        },
+        beamtalk_array:first(make_array([]))
+    ).
+
+last_empty_array_test() ->
+    ?assertError(
+        #{
+            '$beamtalk_class' := 'RuntimeError',
+            error := #beamtalk_error{kind = empty_collection, class = 'Array', selector = 'last'}
+        },
+        beamtalk_array:last(make_array([]))
     ).
 
 %%% ============================================================================
