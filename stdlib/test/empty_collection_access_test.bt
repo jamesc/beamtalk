@@ -248,13 +248,15 @@ TestCase subclass: EmptyCollectionAccessTest
   // raiseEmpty: above: any kind, with a hint specific to the call site.
   // ==========================================================================
   testRaiseKindRoundTripsIndexOutOfBounds =>
-    self should: [
-      (Erlang beamtalk_collection)
-        raiseKind: #index_out_of_bounds
-        class: #ListZipper
-        selector: #left
-        hint: "already at the start of the sequence"
-    ] raise: #index_out_of_bounds
+    self
+      should: [
+        (Erlang beamtalk_collection)
+          raiseKind: #index_out_of_bounds
+          class: #ListZipper
+          selector: #left
+          hint: "already at the start of the sequence"
+      ]
+      raise: #index_out_of_bounds
 
   testRaiseKindUsesTheSuppliedHint =>
     message := [
