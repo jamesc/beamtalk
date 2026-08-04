@@ -28,10 +28,10 @@ Shape subclass: Triangle
 // => Triangle
 
 Triangle >> base => self.base
-// => _
+// => Triangle>>base
 
 Triangle >> area => self.base * self.base / 2.0
-// => _
+// => Triangle>>area
 
 // ===========================================================================
 // VERIFY VALUE-OBJECT BEHAVIOUR
