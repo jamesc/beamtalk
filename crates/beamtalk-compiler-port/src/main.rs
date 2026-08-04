@@ -2092,12 +2092,7 @@ fn handle_diagnostics(request: &Map) -> Term {
 fn diag_info(d: &beamtalk_core::source_analysis::Diagnostic) -> DiagInfo {
     DiagInfo {
         message: d.message.to_string(),
-        severity: match d.severity {
-            beamtalk_core::source_analysis::Severity::Error => "error".to_string(),
-            beamtalk_core::source_analysis::Severity::Warning => "warning".to_string(),
-            beamtalk_core::source_analysis::Severity::Lint => "lint".to_string(),
-            beamtalk_core::source_analysis::Severity::Hint => "hint".to_string(),
-        },
+        severity: d.severity.as_str().to_string(),
         category: diag_category(d),
         start: d.span.start(),
         end: d.span.end(),
