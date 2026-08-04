@@ -707,6 +707,19 @@ pub enum Severity {
     Hint,
 }
 
+impl Severity {
+    /// Canonical lowercase string for this severity level.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Severity::Error => "error",
+            Severity::Warning => "warning",
+            Severity::Lint => "lint",
+            Severity::Hint => "hint",
+        }
+    }
+}
+
 /// Maximum nesting depth for expressions before the parser bails out.
 ///
 /// Prevents stack overflow on deeply nested input (e.g., `(((((...)))))`).
