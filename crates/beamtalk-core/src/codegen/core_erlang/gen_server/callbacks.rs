@@ -1787,3 +1787,345 @@ fn noreply_error_arms(var_prefix: &str, selector: Document<'static>) -> Document
         ),
     ]
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::ast::{
+        ClassDefinition, Expression, Identifier, Literal, MessageSelector, MethodDefinition,
+        Module, StateDeclaration, TypeAnnotation,
+    };
+    use crate::codegen::core_erlang::CoreErlangGenerator;
+    use crate::source_analysis::Span;
+
+    fn s() -> Span {
+        Span::new(0, 0)
+    }
+
+    fn id(name: &str) -> Identifier {
+        Identifier::new(name, s())
+    }
+
+    fn simple_ta(name: &str) -> TypeAnnotation {
+        TypeAnnotation::Simple(id(name))
+    }
+
+    fn union_ta(types: Vec<TypeAnnotation>) -> TypeAnnotation {
+        TypeAnnotation::Union { types, span: s() }
+    }
+
+    fn empty_module() -> Module {
+        Module {
+            classes: Vec::new(),
+            method_definitions: Vec::new(),
+            protocols: Vec::new(),
+            type_aliases: Vec::new(),
+            expressions: Vec::new(),
+            span: s(),
+            file_leading_comments: Vec::new(),
+            file_trailing_comments: Vec::new(),
+        }
+    }
+
+    fn module_with_class(class: ClassDefinition) -> Module {
+        Module {
+            classes: vec![class],
+            ..empty_module()
+        }
+    }
+
+    // --- is_nilable_type ---
+
+    #[test]
+    fn is_nilable_type_none_returns_false() {
+        assert!(!CoreErlangGenerator::is_nilable_type(None));
+    }
+
+    #[test]
+    fn is_nilable_type_simple_nil_returns_true() {
+        let ta = simple_ta("Nil");
+        assert!(CoreErlangGenerator::is_nilable_type(Some(&ta)));
+    }
+
+    #[test]
+    fn is_nilable_type_simple_non_nil_returns_false() {
+        let ta = simple_ta("Integer");
+        assert!(!CoreErlangGenerator::is_nilable_type(Some(&ta)));
+    }
+
+    #[test]
+    fn is_nilable_type_union_containing_nil_returns_true() {
+        let ta = union_ta(vec![simple_ta("Integer"), simple_ta("Nil")]);
+        assert!(CoreErlangGenerator::is_nilable_type(Some(&ta)));
+    }
+
+    #[test]
+    fn is_nilable_type_union_without_nil_returns_false() {
+        let ta = union_ta(vec![simple_ta("Integer"), simple_ta("String")]);
+        assert!(!CoreErlangGenerator::is_nilable_type(Some(&ta)));
+    }
+
+    #[test]
+    fn is_nilable_type_falseor_returns_false() {
+        let ta = TypeAnnotation::FalseOr {
+            inner: Box::new(simple_ta("Integer")),
+            span: s(),
+        };
+        assert!(!CoreErlangGenerator::is_nilable_type(Some(&ta)));
+    }
+
+    // --- type_annotation_display ---
+
+    #[test]
+    fn type_annotation_display_simple() {
+        let ta = simple_ta("Integer");
+        assert_eq!(CoreErlangGenerator::type_annotation_display(&ta), "Integer");
+    }
+
+    #[test]
+    fn type_annotation_display_union() {
+        let ta = union_ta(vec![simple_ta("Integer"), simple_ta("String")]);
+        assert_eq!(
+            CoreErlangGenerator::type_annotation_display(&ta),
+            "Integer | String"
+        );
+    }
+
+    #[test]
+    fn type_annotation_display_singleton() {
+        let ta = TypeAnnotation::Singleton {
+            name: "north".into(),
+            span: s(),
+        };
+        assert_eq!(CoreErlangGenerator::type_annotation_display(&ta), "#north");
+    }
+
+    #[test]
+    fn type_annotation_display_generic_single_param() {
+        let ta = TypeAnnotation::Generic {
+            base: id("Collection"),
+            parameters: vec![simple_ta("Integer")],
+            span: s(),
+        };
+        assert_eq!(
+            CoreErlangGenerator::type_annotation_display(&ta),
+            "Collection(Integer)"
+        );
+    }
+
+    #[test]
+    fn type_annotation_display_generic_two_params() {
+        let ta = TypeAnnotation::Generic {
+            base: id("Result"),
+            parameters: vec![simple_ta("T"), simple_ta("E")],
+            span: s(),
+        };
+        assert_eq!(
+            CoreErlangGenerator::type_annotation_display(&ta),
+            "Result(T, E)"
+        );
+    }
+
+    #[test]
+    fn type_annotation_display_falseor() {
+        let ta = TypeAnnotation::FalseOr {
+            inner: Box::new(simple_ta("Integer")),
+            span: s(),
+        };
+        assert_eq!(
+            CoreErlangGenerator::type_annotation_display(&ta),
+            "Integer | False"
+        );
+    }
+
+    #[test]
+    fn type_annotation_display_difference() {
+        let ta = TypeAnnotation::Difference {
+            base: Box::new(simple_ta("Symbol")),
+            excluded: Box::new(TypeAnnotation::Singleton {
+                name: "foo".into(),
+                span: s(),
+            }),
+            span: s(),
+        };
+        assert_eq!(
+            CoreErlangGenerator::type_annotation_display(&ta),
+            "Symbol \\ #foo"
+        );
+    }
+
+    #[test]
+    fn type_annotation_display_intersection() {
+        let ta = TypeAnnotation::Intersection {
+            left: Box::new(simple_ta("Collection")),
+            right: Box::new(simple_ta("Comparable")),
+            span: s(),
+        };
+        assert_eq!(
+            CoreErlangGenerator::type_annotation_display(&ta),
+            "Collection & Comparable"
+        );
+    }
+
+    #[test]
+    fn type_annotation_display_self_type() {
+        let ta = TypeAnnotation::SelfType { span: s() };
+        assert_eq!(CoreErlangGenerator::type_annotation_display(&ta), "Self");
+    }
+
+    #[test]
+    fn type_annotation_display_self_class() {
+        let ta = TypeAnnotation::SelfClass { span: s() };
+        assert_eq!(
+            CoreErlangGenerator::type_annotation_display(&ta),
+            "Self class"
+        );
+    }
+
+    #[test]
+    fn type_annotation_display_class_of() {
+        let ta = TypeAnnotation::ClassOf {
+            class_name: id("Actor"),
+            span: s(),
+        };
+        assert_eq!(
+            CoreErlangGenerator::type_annotation_display(&ta),
+            "Actor class"
+        );
+    }
+
+    // --- is_nilable_type_name ---
+
+    #[test]
+    fn is_nilable_type_name_nil_returns_true() {
+        assert!(CoreErlangGenerator::is_nilable_type_name("Nil"));
+    }
+
+    #[test]
+    fn is_nilable_type_name_non_nil_returns_false() {
+        assert!(!CoreErlangGenerator::is_nilable_type_name("Integer"));
+    }
+
+    #[test]
+    fn is_nilable_type_name_union_containing_nil_returns_true() {
+        assert!(CoreErlangGenerator::is_nilable_type_name("Integer | Nil"));
+    }
+
+    #[test]
+    fn is_nilable_type_name_union_without_nil_returns_false() {
+        assert!(!CoreErlangGenerator::is_nilable_type_name("Integer | String"));
+    }
+
+    #[test]
+    fn is_nilable_type_name_multi_segment_union_with_nil() {
+        assert!(CoreErlangGenerator::is_nilable_type_name(
+            "Integer | String | Nil"
+        ));
+    }
+
+    #[test]
+    fn is_nilable_type_name_near_miss_nilable_returns_false() {
+        assert!(!CoreErlangGenerator::is_nilable_type_name("Nilable"));
+    }
+
+    // --- user_defined_initialize_chain (no-hierarchy fallback) ---
+
+    fn class_with_initialize(name: &str) -> ClassDefinition {
+        let init_method = MethodDefinition::new(
+            MessageSelector::Unary("initialize".into()),
+            Vec::new(),
+            Vec::new(),
+            s(),
+        );
+        ClassDefinition::new(id(name), id("Actor"), Vec::new(), vec![init_method], s())
+    }
+
+    fn class_without_initialize(name: &str) -> ClassDefinition {
+        ClassDefinition::new(id(name), id("Actor"), Vec::new(), Vec::new(), s())
+    }
+
+    #[test]
+    fn user_defined_initialize_chain_no_hierarchy_with_initialize() {
+        let generator = CoreErlangGenerator::new("my_actor");
+        let module = module_with_class(class_with_initialize("MyActor"));
+        let chain = generator.user_defined_initialize_chain(&module, "MyActor");
+        assert_eq!(chain.len(), 1);
+        assert_eq!(chain[0].class_name, "MyActor");
+    }
+
+    #[test]
+    fn user_defined_initialize_chain_no_hierarchy_without_initialize() {
+        let generator = CoreErlangGenerator::new("my_actor");
+        let module = module_with_class(class_without_initialize("MyActor"));
+        let chain = generator.user_defined_initialize_chain(&module, "MyActor");
+        assert!(chain.is_empty());
+    }
+
+    #[test]
+    fn user_defined_initialize_chain_no_hierarchy_unknown_leaf_class() {
+        let generator = CoreErlangGenerator::new("my_actor");
+        let module = module_with_class(class_with_initialize("MyActor"));
+        let chain = generator.user_defined_initialize_chain(&module, "UnknownClass");
+        assert!(chain.is_empty());
+    }
+
+    // --- inherited_typed_no_default_fields (no-hierarchy fallback) ---
+
+    #[test]
+    fn inherited_typed_no_default_fields_typed_no_default_returned() {
+        let field = StateDeclaration::with_type(id("count"), simple_ta("Integer"), s());
+        let class = ClassDefinition::new(id("MyActor"), id("Actor"), vec![field], Vec::new(), s());
+        let generator = CoreErlangGenerator::new("my_actor");
+        let module = module_with_class(class);
+        let fields = generator.inherited_typed_no_default_fields(&module, "MyActor");
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].field_name, "count");
+        assert_eq!(fields[0].type_name, "Integer");
+        assert_eq!(fields[0].owning_class, "MyActor");
+    }
+
+    #[test]
+    fn inherited_typed_no_default_fields_typed_with_default_skipped() {
+        let default_val = Expression::Literal(Literal::Integer(0), s());
+        let field = StateDeclaration::with_type_and_default(
+            id("count"),
+            simple_ta("Integer"),
+            default_val,
+            s(),
+        );
+        let class = ClassDefinition::new(id("MyActor"), id("Actor"), vec![field], Vec::new(), s());
+        let generator = CoreErlangGenerator::new("my_actor");
+        let module = module_with_class(class);
+        let fields = generator.inherited_typed_no_default_fields(&module, "MyActor");
+        assert!(fields.is_empty());
+    }
+
+    #[test]
+    fn inherited_typed_no_default_fields_nilable_type_skipped() {
+        let field = StateDeclaration::with_type(id("opt_val"), simple_ta("Nil"), s());
+        let class = ClassDefinition::new(id("MyActor"), id("Actor"), vec![field], Vec::new(), s());
+        let generator = CoreErlangGenerator::new("my_actor");
+        let module = module_with_class(class);
+        let fields = generator.inherited_typed_no_default_fields(&module, "MyActor");
+        assert!(fields.is_empty());
+    }
+
+    #[test]
+    fn inherited_typed_no_default_fields_untyped_skipped() {
+        let field = StateDeclaration::new(id("raw"), s());
+        let class = ClassDefinition::new(id("MyActor"), id("Actor"), vec![field], Vec::new(), s());
+        let generator = CoreErlangGenerator::new("my_actor");
+        let module = module_with_class(class);
+        let fields = generator.inherited_typed_no_default_fields(&module, "MyActor");
+        assert!(fields.is_empty());
+    }
+
+    #[test]
+    fn inherited_typed_no_default_fields_unknown_class_returns_empty() {
+        let field = StateDeclaration::with_type(id("count"), simple_ta("Integer"), s());
+        let class = ClassDefinition::new(id("MyActor"), id("Actor"), vec![field], Vec::new(), s());
+        let generator = CoreErlangGenerator::new("my_actor");
+        let module = module_with_class(class);
+        let fields = generator.inherited_typed_no_default_fields(&module, "UnknownClass");
+        assert!(fields.is_empty());
+    }
+}
