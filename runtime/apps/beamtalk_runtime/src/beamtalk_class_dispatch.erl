@@ -623,6 +623,14 @@ invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningM
     %% '$bt_class_vars_shadow' process-dictionary key (written by codegen at
     %% top-level class-var mutations) never outlives a dispatch, whatever the
     %% outcome.
+    %%
+    %% ADR 0110 amendment (BT-3039): the key is tagged with this call's own
+    %% class identity (`class_object_tag(ClassName)`, matching codegen's
+    %% `element(2, ClassSelf)` write) so a mutating self-send inside a block
+    %% invoked from a *different* class's process — which runs physically in
+    %% *this* process but writes under its own foreign class's tag — can never
+    %% be read back here. See the ADR's Codegen/Runtime change amendments.
+    ShadowKey = {'$bt_class_vars_shadow', beamtalk_class_registry:class_object_tag(ClassName)},
     try
         case
             apply_class_method_in_context(
@@ -639,14 +647,14 @@ invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningM
                 %% ADR 0110 / BT-3032: a foreign `^` relaying out of the class
                 %% method is control flow, not a failure — class-var writes made
                 %% before the unwind must survive. The codegen write-through
-                %% (BT-3037) records them under '$bt_class_vars_shadow'; until
+                %% (BT-3037) records them under this class's shadow key; until
                 %% that lands the shadow is never set and this falls back to the
                 %% pre-call ClassVars, exactly today's behavior. The reply shape
                 %% is byte-identical to the historical {error, Nlr}, so the
                 %% ?IS_NLR re-throw clauses in class_send_dispatch/3 and
                 %% metaclass_send_dispatch/4 need no change.
                 ShadowClassVars =
-                    case erlang:get('$bt_class_vars_shadow') of
+                    case erlang:get(ShadowKey) of
                         undefined -> ClassVars;
                         Shadow -> Shadow
                     end,
@@ -659,7 +667,7 @@ invoke_class_method(Selector, Args, ClassName, _Module, DefiningClass, DefiningM
                 {reply, {error, Error}, ClassVars}
         end
     after
-        erlang:erase('$bt_class_vars_shadow')
+        erlang:erase(ShadowKey)
     end.
 
 %% ADR 0110 / BT-3032: `{nlr_relay, Nlr, ST}` is a foreign `^` (non-local

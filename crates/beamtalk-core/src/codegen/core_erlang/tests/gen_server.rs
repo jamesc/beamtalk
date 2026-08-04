@@ -3582,8 +3582,10 @@ fn test_class_var_mutation_emits_shadow_write() {
     )
     .expect("codegen should succeed");
     assert!(
-        code.contains("call 'erlang':'put'('$bt_class_vars_shadow', ClassVars1)"),
-        "class-var mutation should emit the ADR 0110 shadow write. Got:\n{code}"
+        code.contains(
+            "call 'erlang':'put'({'$bt_class_vars_shadow', call 'erlang':'element'(2, ClassSelf)}, ClassVars1)"
+        ),
+        "class-var mutation should emit the ADR 0110 (BT-3039) class-keyed shadow write. Got:\n{code}"
     );
 }
 
