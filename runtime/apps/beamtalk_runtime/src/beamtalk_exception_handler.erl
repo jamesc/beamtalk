@@ -57,6 +57,7 @@ helpers called by that generated code: `wrap/1` and `matches_class/2`.
     signal_from_class/1,
     class_signal/1,
     class_signal_message/2,
+    class_raise_kind/4,
     kind_to_class/1,
     class_to_kind/1,
     classify_kind/1,
@@ -755,3 +756,20 @@ class_signal(#beamtalk_object{class = ClassTag}) ->
     signal_from_class(ClassName);
 class_signal(_ClassSelf) ->
     signal_from_class('Exception').
+
+-doc """
+Raise a named error kind with a caller-supplied hint, from pure Beamtalk.
+
+BT-3042: backs `Exception class >> raiseKind:class:selector:hint:` — the
+sanctioned, first-class way for pure-Beamtalk code (core or third-party
+package) to signal any named kind (`index_out_of_bounds`, `empty_collection`,
+or a future kind) with a hint specific to the call site, instead of the
+generic `user_error` kind `self error:` always raises. Unlike
+`class_signal_message/2`/`class_signal/1`, `Kind`/`Class`/`Selector`/`Hint`
+are all caller-supplied, so the receiver's own class plays no role here —
+this is exported by selector name only, not by which `Exception` subclass it
+was sent to.
+""".
+-spec class_raise_kind(atom(), atom(), atom(), binary()) -> no_return().
+class_raise_kind(Kind, Class, Selector, Hint) ->
+    beamtalk_error:raise(beamtalk_error:new(Kind, Class, Selector, Hint)).

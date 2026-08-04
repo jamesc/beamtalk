@@ -38,7 +38,7 @@ Collection. They fold over `to_list/1`; `max`/`min`/`average` raise
 %% dispatch, not @primitive — see docs/beamtalk-native-erlang.md "The naming
 %% rule": the function name is the first keyword with its colon removed, no
 %% case conversion, hence camelCase.
--export([raiseEmpty/2, raiseDetectNotFound/1, raiseIndexOutOfBounds/2, raiseKind/4]).
+-export([raiseEmpty/2, raiseDetectNotFound/1, raiseIndexOutOfBounds/2]).
 
 %%% ============================================================================
 %%% Public API
@@ -142,7 +142,8 @@ always yields `user_error` — so collection classes written in Beamtalk (e.g.
 `Interval`) call this to report empty-collection access with the same kind the
 `@primitive` accessors on `List`/`String` raise. This is `empty_collection`-specific
 sugar with an auto-generated hint; for any other kind, or a hint specific to
-the call site, use `raiseKind/4`.
+the call site, use `Exception class >> raiseKind:class:selector:hint:` (BT-3042)
+directly from Beamtalk.
 """.
 -spec raiseEmpty(atom(), atom()) -> no_return().
 raiseEmpty(Class, Selector) ->
@@ -171,21 +172,6 @@ raiseIndexOutOfBounds(Class, Selector) ->
         atom_to_binary(Class, utf8)
     ]),
     beamtalk_error:raise(beamtalk_error:new(index_out_of_bounds, Class, Selector, Hint)).
-
--doc """
-Raise a named error `Kind` naming `Class` and `Selector`, with a
-caller-supplied `Hint`.
-
-BT-3042: the general counterpart to `raiseEmpty/2` — that one is
-`empty_collection`-specific sugar with an auto-generated hint; this is the
-sanctioned way for pure-Beamtalk collection code (core or third-party
-package) to raise *any* named kind (`index_out_of_bounds`, `empty_collection`,
-or a future kind) with a message specific to the call site, without reaching
-into `beamtalk_error` directly.
-""".
--spec raiseKind(atom(), atom(), atom(), binary()) -> no_return().
-raiseKind(Kind, Class, Selector, Hint) ->
-    beamtalk_error:raise(beamtalk_error:new(Kind, Class, Selector, Hint)).
 
 -doc """
 Raise `not_found` for a `detect:` that ran to completion without matching.

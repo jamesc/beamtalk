@@ -243,14 +243,15 @@ TestCase subclass: EmptyCollectionAccessTest
     self assert: #() rest equals: #()
 
   // ==========================================================================
-  // beamtalk_collection raiseKind:class:selector:hint: — general named-kind
-  // raise helper for pure-Beamtalk code (BT-3042). The counterpart to
-  // raiseEmpty: above: any kind, with a hint specific to the call site.
+  // Exception class >> raiseKind:class:selector:hint: — general named-kind
+  // raise primitive for pure-Beamtalk code (BT-3042). Ordinary Beamtalk
+  // syntax, no Erlang FFI at the call site: any kind, with a hint specific
+  // to the call site.
   // ==========================================================================
   testRaiseKindRoundTripsIndexOutOfBounds =>
     self
       should: [
-        (Erlang beamtalk_collection)
+        Exception
           raiseKind: #index_out_of_bounds
           class: #ListZipper
           selector: #left
@@ -260,7 +261,7 @@ TestCase subclass: EmptyCollectionAccessTest
 
   testRaiseKindUsesTheSuppliedHint =>
     hint := [
-      (Erlang beamtalk_collection)
+      Exception
         raiseKind: #index_out_of_bounds
         class: #ListZipper
         selector: #left

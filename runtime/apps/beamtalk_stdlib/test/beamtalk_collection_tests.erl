@@ -12,7 +12,6 @@ Tests inject_into/3 and to_list/1 for list inputs.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
--include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
 %%% Test Fixtures (BT-1983)
@@ -212,42 +211,3 @@ from_list_like_other_receiver_test() ->
     %% Non-Array, non-binary, non-list receiver (e.g. a Set map) → list unchanged.
     Set = #{'$beamtalk_class' => 'Set', data => #{}},
     ?assertEqual([1, 2], beamtalk_collection:from_list_like(Set, [1, 2])).
-
-%%% ============================================================================
-%%% raiseKind/4 (BT-3042)
-%%% ============================================================================
-%%%
-%%% The general counterpart to raiseEmpty/2 — raises any named kind with a
-%%% caller-supplied hint, rather than an auto-generated empty_collection one.
-
-raiseKind_index_out_of_bounds_test() ->
-    ?assertException(
-        error,
-        #{
-            '$beamtalk_class' := 'RuntimeError',
-            error := #beamtalk_error{
-                kind = index_out_of_bounds,
-                class = 'ListZipper',
-                selector = 'left',
-                hint = <<"already at the start of the sequence">>
-            }
-        },
-        beamtalk_collection:raiseKind(
-            index_out_of_bounds, 'ListZipper', 'left', <<"already at the start of the sequence">>
-        )
-    ).
-
-raiseKind_empty_collection_test() ->
-    ?assertException(
-        error,
-        #{
-            '$beamtalk_class' := 'RuntimeError',
-            error := #beamtalk_error{
-                kind = empty_collection,
-                class = 'Deque',
-                selector = 'peek',
-                hint = <<"custom hint">>
-            }
-        },
-        beamtalk_collection:raiseKind(empty_collection, 'Deque', 'peek', <<"custom hint">>)
-    ).

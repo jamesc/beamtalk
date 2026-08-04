@@ -36,6 +36,27 @@ Object subclass: Exception
   /// ```
   class signal -> Never => @primitive "classSignal"
 
+  /// Raise a named error kind with a caller-supplied hint.
+  ///
+  /// The general, pure-Beamtalk way to signal an error with a specific kind
+  /// (`#index_out_of_bounds`, `#empty_collection`, or any future kind)
+  /// instead of the generic `#user_error` kind `self error:` always raises.
+  /// Class-side, so no instance allocation is needed — collection classes
+  /// (core or third-party package) call this to report a condition with the
+  /// same kind the `@primitive`-backed core collections (`Array`, `List`,
+  /// `String`) raise, and a hint specific to the call site.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Exception
+  ///   raiseKind: #index_out_of_bounds
+  ///   class: #ListZipper
+  ///   selector: #left
+  ///   hint: "already at the start of the sequence"
+  /// ```
+  class raiseKind: kind :: Symbol class: cls :: Symbol selector: sel :: Symbol hint: hint :: String -> Never =>
+    @primitive "classRaiseKind:class:selector:hint:"
+
   /// Return the error message string.
   ///
   /// ## Examples
