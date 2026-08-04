@@ -12,7 +12,8 @@
 // Fixtures: fixtures/collection_driver.bt, fixtures/collection_probe.bt,
 // fixtures/shadow_relay_parent.bt, fixtures/shadow_relay_child.bt,
 // fixtures/shadow_relay_probe.bt,
-// fixtures/class_method_conditional_self_call.bt.
+// fixtures/class_method_conditional_self_call.bt,
+// fixtures/shadow_cross_class_owner.bt.
 
 TestCase subclass: ClassVarNlrShadowTest
   field: cls = nil
@@ -22,6 +23,7 @@ TestCase subclass: ClassVarNlrShadowTest
     ShadowRelayParent resetHits
     ShadowRelayChild resetHits
     ClassMethodConditionalSelfCall resetCounter
+    ShadowCrossClassOwner resetBumps
     self
 
   tearDown => self.cls isNil ifFalse: [self.cls removeFromSystem]
@@ -98,6 +100,26 @@ TestCase subclass: ClassVarNlrShadowTest
     self.cls := (Erlang beamtalk_interface) findClass: #BT3037ShadowBuilt
     self assert: (ShadowRelayProbe escapeThrough: self.cls over: #(1, 2, 3)) equals: 2
     self assert: self.cls runCount equals: 1
+
+  // --- (f) cross-class contamination (BT-3039) ------------------------------
+
+  // The repro from BT-3039: ShadowCrossClassOwner hands CollectionDriver a
+  // block containing a mutating self-send (`self bump`) plus the `^` that
+  // escapes CollectionDriver's frame. `self bump` runs physically inside
+  // CollectionDriver's class process (ADR 0109), so before the class-keyed
+  // fix its shadow write clobbered CollectionDriver's own — corrupting
+  // CollectionDriver's persisted class vars with ShadowCrossClassOwner's map
+  // (a later `CollectionDriver runCount` would raise on the missing `runs`
+  // key). CollectionDriver's own mutation must survive uncorrupted.
+  testCrossClassMutationDoesNotCorruptForeignProcessShadow =>
+    self assert: (ShadowCrossClassOwner bumpThenEscapeThrough: CollectionDriver over: #(1, 2, 3)) equals: 1
+    self assert: CollectionDriver runCount equals: 1
+    // The `^` belongs to ShadowCrossClassOwner's own frame (it lexically
+    // contains the block), so its own mutation is carried out via the
+    // ordinary matching-token NLR catch (BT-3022/ADR 0041) — not the shadow
+    // at all. Both classes' own state end up correct simultaneously: P's via
+    // the normal NLR value, C's via the class-keyed shadow read.
+    self assert: ShadowCrossClassOwner bumpCount equals: 1
 
 // A builder cascade with a *mutating* classMethods: block written inside a
 // block literal is rejected at compile time today (BT-2792 stored-closure

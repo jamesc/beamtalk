@@ -1,0 +1,32 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3039 / ADR 0110 amendment: owns the mutating self-send that gets handed,
+// inside a block, into a *different* class's mutating method
+// (fixtures/collection_driver.bt's CollectionDriver). The block executes in
+// the other class's gen_server process (ADR 0109), so `self bump`'s own
+// top-frame shadow write happens physically there, under this class's own
+// key — it must never be mistaken for that other class's shadow entry.
+
+Value subclass: ShadowCrossClassOwner
+  classState: bumps = 0
+
+  class bump => self.bumps := self.bumps + 1
+
+  class bumpCount -> Integer => self.bumps
+
+  class resetBumps => self.bumps := 0
+
+  // BT-3039: `k`'s own mutating method (`countedRun:over:`) hands this
+  // method's block to `k`'s class process. `self bump` inside the block is
+  // this class's own top-frame mutation, running physically inside `k`'s
+  // process; `^x` is foreign to `k countedRun:over:`'s frame and relays back
+  // out through it.
+  class bumpThenEscapeThrough: k over: aList :: List -> Integer =>
+    k
+      countedRun: [:x |
+        self bump
+        ^x
+      ]
+      over: aList
+    0

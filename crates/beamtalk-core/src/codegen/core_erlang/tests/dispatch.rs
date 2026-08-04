@@ -3296,8 +3296,10 @@ fn test_builder_class_var_mutation_emits_shadow_write() {
                classMethods: #{ #bump => [:self | self.runs := self.runs + 1] }; register";
     let code = try_codegen(src).expect("mutating classMethods block must compile");
     assert!(
-        code.contains("call 'erlang':'put'('$bt_class_vars_shadow', ClassVars1)"),
-        "builder class-method mutation should emit the ADR 0110 shadow write. Got:\n{code}"
+        code.contains(
+            "call 'erlang':'put'({'$bt_class_vars_shadow', call 'erlang':'element'(2, ClassSelf)}, ClassVars1)"
+        ),
+        "builder class-method mutation should emit the ADR 0110 (BT-3039) class-keyed shadow write. Got:\n{code}"
     );
 }
 
@@ -3331,8 +3333,10 @@ fn test_builder_cascade_at_block_depth_still_emits_shadow_write() {
         .expect("mutating classMethods block must compile")
         .to_pretty_string();
     assert!(
-        code.contains("call 'erlang':'put'('$bt_class_vars_shadow', ClassVars1)"),
-        "builder fun lowered from inside a block should still emit the shadow write. Got:\n{code}"
+        code.contains(
+            "call 'erlang':'put'({'$bt_class_vars_shadow', call 'erlang':'element'(2, ClassSelf)}, ClassVars1)"
+        ),
+        "builder fun lowered from inside a block should still emit the class-keyed shadow write. Got:\n{code}"
     );
     assert_eq!(
         generator.block_depth, 1,

@@ -969,7 +969,7 @@ undef_classification_extended_test_() ->
                 fun test_undef_local_method_not_found/0},
             {"inherited method, module not loaded → class_not_found with inheritance hint",
                 fun test_undef_inherited_module_not_loaded/0},
-            {"inherited method, module loaded but absent → does_not_understand with inheritance hint",
+            {"inherited method, module loaded, absent → does_not_understand, inheritance hint",
                 fun test_undef_inherited_method_not_found/0}
         ]
     end}.
@@ -1076,7 +1076,9 @@ invoke_class_method_errors_test_() ->
             {"NLR relay with shadow set replies with shadow class vars and erases it",
                 fun test_invoke_nlr_relay_reads_shadow/0},
             {"genuine error ignores the shadow, reverts to pre-call class vars",
-                fun test_invoke_error_ignores_shadow/0}
+                fun test_invoke_error_ignores_shadow/0},
+            {"BT-3039: a foreign class's shadow entry in the same process is never read back",
+                fun test_invoke_nlr_relay_ignores_foreign_class_shadow/0}
         ]
     end}.
 
@@ -1137,7 +1139,7 @@ test_invoke_two_arg_keyword() ->
 
 %% ADR 0110 / BT-3036: a foreign `^` (NLR throw) relaying out of a class method
 %% replies {error, Nlr} with the *pre-call* ClassVars when nothing has written
-%% the '$bt_class_vars_shadow' key — exactly today's revert behavior.
+%% the class's shadow key — exactly today's revert behavior.
 test_invoke_nlr_relay_no_shadow() ->
     LocalMethods = #{testNlrThrow => <<>>},
     ClassVars = #{count => 1},
@@ -1153,15 +1155,24 @@ test_invoke_nlr_relay_no_shadow() ->
         {reply, {error, {'$bt_nlr', bt3036_token, nlr_value, nlr_state}}, #{count := 1}}, Result
     ),
     %% The shadow key never outlives a dispatch.
-    ?assertEqual(undefined, erlang:get('$bt_class_vars_shadow')).
+    ?assertEqual(
+        undefined,
+        erlang:get(
+            {'$bt_class_vars_shadow',
+                beamtalk_class_registry:class_object_tag('BT3036NlrNoShadowClass')}
+        )
+    ).
 
-%% ADR 0110 / BT-3036: when the shadow key IS set (as the BT-3037 codegen
-%% write-through will do at top-level class-var mutations), the NLR relay path
-%% replies with the shadow class vars — preserving writes made before the
-%% unwind — and the after clause erases the key.
+%% ADR 0110 / BT-3036, class-keyed per BT-3039: when this class's shadow key IS
+%% set (as the BT-3037 codegen write-through will do at top-level class-var
+%% mutations), the NLR relay path replies with the shadow class vars —
+%% preserving writes made before the unwind — and the after clause erases the
+%% key.
 test_invoke_nlr_relay_reads_shadow() ->
     LocalMethods = #{testNlrThrow => <<>>},
-    erlang:put('$bt_class_vars_shadow', #{count => 99}),
+    ShadowKey =
+        {'$bt_class_vars_shadow', beamtalk_class_registry:class_object_tag('BT3036NlrShadowClass')},
+    erlang:put(ShadowKey, #{count => 99}),
     try
         Result = beamtalk_class_dispatch:handle_class_method_call(
             testNlrThrow,
@@ -1175,9 +1186,9 @@ test_invoke_nlr_relay_reads_shadow() ->
             {reply, {error, {'$bt_nlr', bt3036_token, nlr_value, nlr_state}}, #{count := 99}},
             Result
         ),
-        ?assertEqual(undefined, erlang:get('$bt_class_vars_shadow'))
+        ?assertEqual(undefined, erlang:get(ShadowKey))
     after
-        erlang:erase('$bt_class_vars_shadow')
+        erlang:erase(ShadowKey)
     end.
 
 %% ADR 0110 / BT-3036: a genuine error still reverts to the pre-call ClassVars
@@ -1185,7 +1196,10 @@ test_invoke_nlr_relay_reads_shadow() ->
 %% after clause still erases the key.
 test_invoke_error_ignores_shadow() ->
     LocalMethods = #{testRaise => <<>>},
-    erlang:put('$bt_class_vars_shadow', #{count => 99}),
+    ShadowKey =
+        {'$bt_class_vars_shadow',
+            beamtalk_class_registry:class_object_tag('BT3036ErrorShadowClass')},
+    erlang:put(ShadowKey, #{count => 99}),
     try
         Result = beamtalk_class_dispatch:handle_class_method_call(
             testRaise,
@@ -1196,9 +1210,50 @@ test_invoke_error_ignores_shadow() ->
             #{count => 1}
         ),
         ?assertMatch({reply, {error, test_deliberate_error}, #{count := 1}}, Result),
-        ?assertEqual(undefined, erlang:get('$bt_class_vars_shadow'))
+        ?assertEqual(undefined, erlang:get(ShadowKey))
     after
-        erlang:erase('$bt_class_vars_shadow')
+        erlang:erase(ShadowKey)
+    end.
+
+%% ADR 0110 amendment (BT-3039): reproduces the class-var shadow's original
+%% cross-class contamination hole directly — a mutating self-send inside a
+%% block invoked from a foreign class's process writes the shadow physically
+%% in *this* process, under *its own* class's key. Simulate that here by
+%% seeding a shadow entry for an unrelated class before dispatching, and
+%% assert `invoke_class_method/7` neither reads it back as this call's
+%% result nor erases it (it isn't this call's key to touch).
+test_invoke_nlr_relay_ignores_foreign_class_shadow() ->
+    LocalMethods = #{testNlrThrow => <<>>},
+    OwnShadowKey =
+        {'$bt_class_vars_shadow', beamtalk_class_registry:class_object_tag('BT3039OwnClass')},
+    ForeignShadowKey =
+        {'$bt_class_vars_shadow', beamtalk_class_registry:class_object_tag('BT3039ForeignClass')},
+    ForeignClassVars = #{count => 12345},
+    erlang:put(ForeignShadowKey, ForeignClassVars),
+    try
+        %% No entry under OwnShadowKey — this call never mutated a class var
+        %% of its own before the block's foreign self-send ran.
+        Result = beamtalk_class_dispatch:handle_class_method_call(
+            testNlrThrow,
+            [],
+            'BT3039OwnClass',
+            beamtalk_class_dispatch_test_helper,
+            LocalMethods,
+            #{count => 1}
+        ),
+        %% Falls back to the pre-call ClassVars — the foreign entry must never
+        %% be mistaken for this call's own shadow.
+        ?assertMatch(
+            {reply, {error, {'$bt_nlr', bt3036_token, nlr_value, nlr_state}}, #{count := 1}},
+            Result
+        ),
+        ?assertEqual(undefined, erlang:get(OwnShadowKey)),
+        %% The foreign entry is untouched — invoke_class_method/7 only erases
+        %% its own class's key, not a different class's.
+        ?assertEqual(ForeignClassVars, erlang:get(ForeignShadowKey))
+    after
+        erlang:erase(OwnShadowKey),
+        erlang:erase(ForeignShadowKey)
     end.
 
 %%% ============================================================================
