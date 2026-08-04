@@ -74,15 +74,26 @@ impl CompileDiagnostic {
             msg
         };
 
+        // BT-3043: A diagnostic's span is not always guaranteed to describe
+        // an offset within *this* file's buffer — e.g. a cross-package alias
+        // collision diagnostic carries the span of the pre-loaded alias's
+        // declaration site, which belongs to whichever file originally
+        // declared it, not the file currently being rendered. Rendering such
+        // a span unclamped crashes miette's snippet extraction with an
+        // `OutOfBounds` read (or worse, silently renders a garbled snippet
+        // from unrelated bytes that happen to fall in range). Clamp to the
+        // buffer length, mirroring the `.min(source.len())` guard already
+        // used for note spans above.
+        let start = (diagnostic.span.start() as usize).min(source.len());
+        let end = (diagnostic.span.end() as usize)
+            .min(source.len())
+            .max(start);
+
         Self {
             severity: diagnostic.severity,
             message,
             src: miette::NamedSource::new(source_path, source.to_string()),
-            span: (
-                diagnostic.span.start() as usize,
-                diagnostic.span.len() as usize,
-            )
-                .into(),
+            span: (start, end - start).into(),
             label: label.to_string(),
             help: diagnostic.hint.as_ref().map(ToString::to_string),
         }
@@ -138,6 +149,37 @@ mod tests {
 
         assert_eq!(diag.span.offset(), 10);
         assert_eq!(diag.span.len(), 0);
+    }
+
+    #[test]
+    fn test_from_core_diagnostic_clamps_span_beyond_source_length() {
+        // BT-3043: a diagnostic whose span was computed against a *different*
+        // file's (longer) source buffer — e.g. a cross-package alias
+        // collision, whose span points into the declaring dependency's file
+        // — must not crash miette's snippet extraction with an `OutOfBounds`
+        // read when rendered against the much shorter buffer of whichever
+        // file is currently being reported on.
+        let core_diag =
+            CoreDiagnostic::error("Pre-loaded type alias collision", Span::new(1556, 1638));
+        let source = "short";
+        let diag = CompileDiagnostic::from_core_diagnostic(&core_diag, "test.bt", source);
+
+        assert!(diag.span.offset() <= source.len());
+        assert!(diag.span.offset() + diag.span.len() <= source.len());
+    }
+
+    #[test]
+    fn test_from_core_diagnostic_clamps_span_partially_beyond_source_length() {
+        // A span that starts in-bounds but ends beyond the buffer (e.g. the
+        // current file happens to be long enough to contain the start
+        // offset but not the whole foreign span) must also clamp cleanly
+        // rather than reporting a length that runs past the buffer.
+        let core_diag = CoreDiagnostic::error("Some diagnostic", Span::new(2, 100));
+        let source = "short";
+        let diag = CompileDiagnostic::from_core_diagnostic(&core_diag, "test.bt", source);
+
+        assert_eq!(diag.span.offset(), 2);
+        assert_eq!(diag.span.len(), source.len() - 2);
     }
 
     #[test]

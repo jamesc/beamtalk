@@ -121,16 +121,41 @@ impl FileWalker {
 
     /// Preset for collecting `.bt` source files.
     ///
-    /// Recursive, symlink-skipping, sorted, strict errors.
+    /// Recursive, symlink-skipping, sorted, strict errors. Excludes
+    /// `.git`/`target`/`node_modules`/`_build` (BT-3043) — `_build/deps/`
+    /// holds full source checkouts for git/registry dependencies (a path
+    /// dependency's source stays wherever the path points, outside
+    /// `_build`, but a git/registry dependency is cloned straight into
+    /// `_build/deps/<name>/`, `.bt` sources included), so any caller that
+    /// walks a project root or bare directory — `beamtalk lint`,
+    /// `beamtalk build` on a manifest-less directory, dependency-source
+    /// collection when a dependency has no `src/` — would otherwise treat a
+    /// dependency's own vendored sources as first-party project files: lint
+    /// diagnostics against code the user doesn't own, and (for a name that
+    /// also appears in the project's own dependency-exported alias/protocol
+    /// info, seeded independently via the proper dependency-resolution
+    /// path) a spurious duplicate declaration under a different `package`
+    /// stamp, which `AliasRegistry::add_pre_loaded`'s identity check cannot
+    /// recognise as the same physical declaration.
     pub fn source_files() -> Self {
-        Self::new().extensions(&["bt"])
+        Self::new()
+            .extensions(&["bt"])
+            .exclude_dirs(&[".git", "target", "node_modules", "_build"])
     }
 
     /// Preset for collecting `.bt` test files.
     ///
-    /// Same as `source_files()` but excludes `fixtures/`.
+    /// Same as `source_files()` but also excludes `fixtures/`. `exclude_dirs`
+    /// replaces rather than extends the excluded-dir set, so this repeats
+    /// `source_files()`'s list explicitly rather than building on top of it.
     pub fn test_files() -> Self {
-        Self::new().extensions(&["bt"]).exclude_dirs(&["fixtures"])
+        Self::new().extensions(&["bt"]).exclude_dirs(&[
+            ".git",
+            "target",
+            "node_modules",
+            "_build",
+            "fixtures",
+        ])
     }
 
     /// Preset for collecting formattable files (`.bt` and `.btscript`).
@@ -165,9 +190,10 @@ impl FileWalker {
 
     /// Preset for linting `.bt` files.
     ///
-    /// Same as `source_files()` — recursive, sorted, strict errors.
+    /// Same as `source_files()` — recursive, sorted, strict errors,
+    /// excluding `.git`/`target`/`node_modules`/`_build`.
     pub fn lint_files() -> Self {
-        Self::new().extensions(&["bt"])
+        Self::source_files()
     }
 
     // ── Walking ─────────────────────────────────────────────────────────
@@ -336,8 +362,36 @@ mod tests {
         assert!(walker.strict_errors);
         assert!(walker.sort);
         assert!(walker.recursive);
-        assert!(walker.excluded_dirs.is_empty());
+        assert!(walker.excluded_dirs.contains(".git"));
+        assert!(walker.excluded_dirs.contains("target"));
+        assert!(walker.excluded_dirs.contains("node_modules"));
+        assert!(walker.excluded_dirs.contains("_build"));
         assert!(walker.max_files.is_none());
+    }
+
+    /// BT-3043: a directory walk over a project root must never treat a
+    /// git/registry dependency's vendored checkout under `_build/deps/` as
+    /// first-party source — see `source_files()`'s doc for the false
+    /// alias-collision/spurious-lint-diagnostic consequences when it does.
+    #[test]
+    fn test_source_files_excludes_build_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir_path = Utf8Path::from_path(dir.path()).unwrap();
+        fs::create_dir_all(dir_path.join("_build").join("deps").join("somedep")).unwrap();
+        fs::write(dir_path.join("a.bt"), "").unwrap();
+        fs::write(
+            dir_path
+                .join("_build")
+                .join("deps")
+                .join("somedep")
+                .join("vendored.bt"),
+            "",
+        )
+        .unwrap();
+
+        let files = FileWalker::source_files().walk(dir_path).unwrap();
+        assert_eq!(files.len(), 1);
+        assert!(files[0].as_str().ends_with("a.bt"));
     }
 
     #[test]
