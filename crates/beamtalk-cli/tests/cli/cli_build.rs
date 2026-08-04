@@ -151,6 +151,73 @@ fn build_fails_with_e0402_for_internal_type_alias_leak() {
 }
 
 // ---------------------------------------------------------------------------
+// BT-3044: genuine cross-package alias collision must be reported once
+// ---------------------------------------------------------------------------
+
+#[test]
+fn build_reports_genuine_cross_package_alias_collision_exactly_once() {
+    // BT-3044 (follow-up from BT-3043): `beamtalk lint` was fixed to dedupe
+    // repeat sightings of a genuine cross-package alias collision across its
+    // whole per-file loop. This test proves `beamtalk build` never needed the
+    // equivalent fix: `execute_build_passes`'s Pass 2 loop (`build.rs`)
+    // propagates each file's compile error with `?`, so it stops at the
+    // *first* file whose `AliasRegistry::add_pre_loaded` seeding rediscovers
+    // the collision — the diagnostic is inherently printed once, then the
+    // whole build aborts, rather than surviving to re-diagnose it on every
+    // subsequent file the way an error-tolerant pass (like lint) would.
+    //
+    // `--force` bypasses incremental change detection so every file is a
+    // "changed" file, matching the acceptance criterion's "full/clean build,
+    // no incremental skip".
+    let root = tempfile::tempdir().expect("create tempdir");
+
+    for (pkg, rhs) in [("producer_a", "String"), ("producer_b", "Integer")] {
+        let dir = root.path().join(pkg);
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(
+            dir.join("beamtalk.toml"),
+            format!("[package]\nname = \"{pkg}\"\nversion = \"0.1.0\"\n"),
+        )
+        .unwrap();
+        std::fs::write(dir.join("src/types.bt"), format!("type Shared = {rhs}\n")).unwrap();
+    }
+
+    let consumer_dir = root.path().join("consumer");
+    std::fs::create_dir_all(consumer_dir.join("src")).unwrap();
+    std::fs::write(
+        consumer_dir.join("beamtalk.toml"),
+        "[package]\nname = \"consumer\"\nversion = \"0.1.0\"\n\n\
+         [dependencies]\n\
+         producer_a = { path = \"../producer_a\" }\n\
+         producer_b = { path = \"../producer_b\" }\n",
+    )
+    .unwrap();
+    for i in 1..=5 {
+        std::fs::write(
+            consumer_dir.join(format!("src/File{i}.bt")),
+            format!("Object subclass: File{i}\n  foo => 1\n"),
+        )
+        .unwrap();
+    }
+
+    cli_common::beamtalk()
+        .current_dir(&consumer_dir)
+        .args(["build", "--force"])
+        .assert()
+        .failure()
+        .stderr(contains("Pre-loaded type alias `Shared` collides"))
+        // Count on a short, unwrapped prefix rather than the full sentence —
+        // miette word-wraps the message to terminal width, so "collides
+        // with another type alias" and "of the same name" can land on
+        // separate lines and defeat a substring match spanning the wrap.
+        .stderr(predicate::function(|out: &str| {
+            out.matches("Pre-loaded type alias `Shared` collides")
+                .count()
+                == 1
+        }));
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
