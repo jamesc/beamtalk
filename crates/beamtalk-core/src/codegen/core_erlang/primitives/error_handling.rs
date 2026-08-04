@@ -48,19 +48,20 @@ pub(crate) fn generate_exception_bif(
         "classSignal" => Some(Document::Str(
             "call 'beamtalk_exception_handler':'class_signal'(ClassSelf)",
         )),
-        // BT-3042: the general, pure-Beamtalk way to raise a named error kind
-        // (index_out_of_bounds, empty_collection, or a future kind) with a
-        // hint specific to the call site, instead of the generic user_error
-        // kind `self error:` always raises. Kind/Class/Selector/Hint are
-        // caller-supplied, so — unlike classSignal:/classSignal — ClassSelf
-        // plays no role and is not threaded through.
-        "classRaiseKind:class:selector:hint:" => {
+        // BT-3042: the general, pure-Beamtalk way to signal a named error
+        // kind (index_out_of_bounds, empty_collection, or another kind in
+        // ExceptionKind) with a hint specific to the call site, instead of
+        // the generic user_error kind `self error:` always raises.
+        // Kind/Class/Selector/Hint are caller-supplied, so — unlike
+        // classSignal:/classSignal — ClassSelf plays no role and is not
+        // threaded through.
+        "classSignalKind:class:selector:hint:" => {
             let p0 = param(params, 0, "_Kind");
             let p1 = param(params, 1, "_Class");
             let p2 = param(params, 2, "_Selector");
             let p3 = param(params, 3, "_Hint");
             Some(docvec![
-                "call 'beamtalk_exception_handler':'class_raise_kind'(",
+                "call 'beamtalk_exception_handler':'class_signal_kind'(",
                 leaf::var(p0.to_string()),
                 ", ",
                 leaf::var(p1.to_string()),
@@ -211,9 +212,9 @@ mod tests {
     }
 
     #[test]
-    fn test_exception_class_raise_kind() {
+    fn test_exception_class_signal_kind() {
         let result = doc_to_string(generate_exception_bif(
-            "classRaiseKind:class:selector:hint:",
+            "classSignalKind:class:selector:hint:",
             &[
                 "Kind".to_string(),
                 "Class".to_string(),
@@ -224,7 +225,7 @@ mod tests {
         assert_eq!(
             result,
             Some(
-                "call 'beamtalk_exception_handler':'class_raise_kind'(Kind, Class, Selector, Hint)"
+                "call 'beamtalk_exception_handler':'class_signal_kind'(Kind, Class, Selector, Hint)"
                     .to_string()
             )
         );

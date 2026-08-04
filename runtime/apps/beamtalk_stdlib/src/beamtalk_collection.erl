@@ -142,7 +142,7 @@ always yields `user_error` — so collection classes written in Beamtalk (e.g.
 `Interval`) call this to report empty-collection access with the same kind the
 `@primitive` accessors on `List`/`String` raise. This is `empty_collection`-specific
 sugar with an auto-generated hint; for any other kind, or a hint specific to
-the call site, use `Exception class >> raiseKind:class:selector:hint:` (BT-3042)
+the call site, use `Exception class >> signalKind:class:selector:hint:` (BT-3042)
 directly from Beamtalk.
 """.
 -spec raiseEmpty(atom(), atom()) -> no_return().

@@ -965,12 +965,12 @@ class_signal_fallback_test() ->
     end.
 
 %%% ===================================================================
-%%% class_raise_kind/4 tests (BT-3042)
+%%% class_signal_kind/4 tests (BT-3042)
 %%% ===================================================================
 
-class_raise_kind_sets_kind_class_selector_hint_test() ->
+class_signal_kind_sets_kind_class_selector_hint_test() ->
     try
-        beamtalk_exception_handler:class_raise_kind(
+        beamtalk_exception_handler:class_signal_kind(
             index_out_of_bounds,
             'ListZipper',
             'left',
@@ -985,9 +985,9 @@ class_raise_kind_sets_kind_class_selector_hint_test() ->
             ?assertEqual(<<"already at the start of the sequence">>, Inner#beamtalk_error.hint)
     end.
 
-class_raise_kind_supports_any_named_kind_test() ->
+class_signal_kind_supports_any_named_kind_test() ->
     try
-        beamtalk_exception_handler:class_raise_kind(
+        beamtalk_exception_handler:class_signal_kind(
             empty_collection, 'Deque', 'peek', <<"custom hint">>
         ),
         ?assert(false)

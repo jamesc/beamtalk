@@ -243,26 +243,26 @@ TestCase subclass: EmptyCollectionAccessTest
     self assert: #() rest equals: #()
 
   // ==========================================================================
-  // Exception class >> raiseKind:class:selector:hint: — general named-kind
-  // raise primitive for pure-Beamtalk code (BT-3042). Ordinary Beamtalk
+  // Exception class >> signalKind:class:selector:hint: — general named-kind
+  // signal primitive for pure-Beamtalk code (BT-3042). Ordinary Beamtalk
   // syntax, no Erlang FFI at the call site: any kind, with a hint specific
   // to the call site.
   // ==========================================================================
-  testRaiseKindRoundTripsIndexOutOfBounds =>
+  testSignalKindRoundTripsIndexOutOfBounds =>
     self
       should: [
         Exception
-          raiseKind: #index_out_of_bounds
+          signalKind: #index_out_of_bounds
           class: #ListZipper
           selector: #left
           hint: "already at the start of the sequence"
       ]
       raise: #index_out_of_bounds
 
-  testRaiseKindUsesTheSuppliedHint =>
+  testSignalKindUsesTheSuppliedHint =>
     hint := [
       Exception
-        raiseKind: #index_out_of_bounds
+        signalKind: #index_out_of_bounds
         class: #ListZipper
         selector: #left
         hint: "already at the start of the sequence"
