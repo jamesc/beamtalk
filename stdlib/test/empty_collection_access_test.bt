@@ -259,11 +259,11 @@ TestCase subclass: EmptyCollectionAccessTest
       raise: #index_out_of_bounds
 
   testRaiseKindUsesTheSuppliedHint =>
-    message := [
+    hint := [
       (Erlang beamtalk_collection)
         raiseKind: #index_out_of_bounds
         class: #ListZipper
         selector: #left
         hint: "already at the start of the sequence"
-    ] on: Error do: [:e | e message]
-    self assert: (message includesSubstring: "already at the start of the sequence")
+    ] on: Error do: [:e | e hint]
+    self assert: (hint includesSubstring: "already at the start of the sequence")
