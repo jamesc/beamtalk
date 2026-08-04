@@ -2020,7 +2020,9 @@ mod tests {
 
     #[test]
     fn is_nilable_type_name_union_without_nil_returns_false() {
-        assert!(!CoreErlangGenerator::is_nilable_type_name("Integer | String"));
+        assert!(!CoreErlangGenerator::is_nilable_type_name(
+            "Integer | String"
+        ));
     }
 
     #[test]
