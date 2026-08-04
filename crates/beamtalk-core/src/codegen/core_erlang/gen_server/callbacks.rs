@@ -1865,6 +1865,14 @@ mod tests {
     }
 
     #[test]
+    fn is_nilable_type_union_with_nested_union_containing_nil_returns_true() {
+        // Nil inside a nested Union member — is_nilable_type recurses into union members
+        let inner_union = union_ta(vec![simple_ta("String"), simple_ta("Nil")]);
+        let ta = union_ta(vec![simple_ta("Integer"), inner_union]);
+        assert!(CoreErlangGenerator::is_nilable_type(Some(&ta)));
+    }
+
+    #[test]
     fn is_nilable_type_falseor_returns_false() {
         let ta = TypeAnnotation::FalseOr {
             inner: Box::new(simple_ta("Integer")),
