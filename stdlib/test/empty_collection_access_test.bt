@@ -241,3 +241,27 @@ TestCase subclass: EmptyCollectionAccessTest
   testElementAccessorsRaiseWhereSubsequenceOpsAnswer =>
     self should: [#() first] raise: #empty_collection
     self assert: #() rest equals: #()
+
+  // ==========================================================================
+  // beamtalk_collection raiseKind:class:selector:hint: — general named-kind
+  // raise helper for pure-Beamtalk code (BT-3042). The counterpart to
+  // raiseEmpty: above: any kind, with a hint specific to the call site.
+  // ==========================================================================
+  testRaiseKindRoundTripsIndexOutOfBounds =>
+    self should: [
+      (Erlang beamtalk_collection)
+        raiseKind: #index_out_of_bounds
+        class: #ListZipper
+        selector: #left
+        hint: "already at the start of the sequence"
+    ] raise: #index_out_of_bounds
+
+  testRaiseKindUsesTheSuppliedHint =>
+    message := [
+      (Erlang beamtalk_collection)
+        raiseKind: #index_out_of_bounds
+        class: #ListZipper
+        selector: #left
+        hint: "already at the start of the sequence"
+    ] on: Error do: [:e | e message]
+    self assert: (message includesSubstring: "already at the start of the sequence")
