@@ -1,6 +1,14 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
+/// The closed set of error kinds the runtime knows how to classify into the
+/// `Exception` hierarchy (`beamtalk_exception_handler:kind_to_class/1`).
+/// Anything outside this set falls back to classifying as plain `Error`, so
+/// `signalKind:class:selector:hint:` restricts its `kind` argument to this
+/// type to catch a typo (e.g. `#idx_out_of_bounds`) at compile time instead
+/// of silently landing in the wrong catch hierarchy at runtime.
+type ExceptionKind = #does_not_understand | #arity_mismatch | #immutable_value | #runtime_error | #index_out_of_bounds | #empty_collection | #empty_queue | #not_found | #class_not_found | #no_superclass | #class_already_exists | #dispatch_error | #callback_failed | #actor_dead | #future_not_awaited | #internal_error | #key_error | #argument_error | #resource_error | #process_not_found | #timeout_error | #type_error | #instantiation_error | #erlang_exit | #erlang_throw | #signal
+
 /// Exception — Base class for all exceptions.
 ///
 /// Wraps `#beamtalk_error{}` records as first-class Beamtalk objects.
@@ -35,6 +43,31 @@ Object subclass: Exception
   /// Exception signal
   /// ```
   class signal -> Never => @primitive "classSignal"
+
+  /// Signal a named error kind with a caller-supplied hint.
+  ///
+  /// The general, pure-Beamtalk way to signal an error with a specific kind
+  /// (`#index_out_of_bounds`, `#empty_collection`, or any other kind in
+  /// `ExceptionKind`) instead of the generic `#user_error` kind `self error:`
+  /// always raises. Class-side, so no instance allocation is needed —
+  /// collection classes (core or third-party package) call this to report a
+  /// condition with the same kind the `@primitive`-backed core collections
+  /// (`Array`, `List`, `String`) raise, and a hint specific to the call site.
+  /// Sealed: the receiving class plays no role in the result (unlike
+  /// `signal:`/`signal`, which take their class from the receiver), so
+  /// sending this to a subclass instead of `Exception` itself would be
+  /// misleading.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Exception
+  ///   signalKind: #index_out_of_bounds
+  ///   class: #ListZipper
+  ///   selector: #left
+  ///   hint: "already at the start of the sequence"
+  /// ```
+  class sealed signalKind: kind :: ExceptionKind class: cls :: Symbol selector: sel :: Symbol hint: hint :: String -> Never =>
+    @primitive "classSignalKind:class:selector:hint:"
 
   /// Return the error message string.
   ///

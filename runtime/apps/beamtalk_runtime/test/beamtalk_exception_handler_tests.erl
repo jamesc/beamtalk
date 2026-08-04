@@ -964,6 +964,41 @@ class_signal_fallback_test() ->
             ?assertEqual(<<"Exception">>, Inner#beamtalk_error.message)
     end.
 
+%%% ===================================================================
+%%% class_signal_kind/4 tests (BT-3042)
+%%% ===================================================================
+
+class_signal_kind_sets_kind_class_selector_hint_test() ->
+    try
+        beamtalk_exception_handler:class_signal_kind(
+            index_out_of_bounds,
+            'ListZipper',
+            'left',
+            <<"already at the start of the sequence">>
+        ),
+        ?assert(false)
+    catch
+        error:#{'$beamtalk_class' := 'RuntimeError', error := Inner} ->
+            ?assertEqual(index_out_of_bounds, Inner#beamtalk_error.kind),
+            ?assertEqual('ListZipper', Inner#beamtalk_error.class),
+            ?assertEqual('left', Inner#beamtalk_error.selector),
+            ?assertEqual(<<"already at the start of the sequence">>, Inner#beamtalk_error.hint)
+    end.
+
+class_signal_kind_supports_any_named_kind_test() ->
+    try
+        beamtalk_exception_handler:class_signal_kind(
+            empty_collection, 'Deque', 'peek', <<"custom hint">>
+        ),
+        ?assert(false)
+    catch
+        error:#{'$beamtalk_class' := 'RuntimeError', error := Inner} ->
+            ?assertEqual(empty_collection, Inner#beamtalk_error.kind),
+            ?assertEqual('Deque', Inner#beamtalk_error.class),
+            ?assertEqual('peek', Inner#beamtalk_error.selector),
+            ?assertEqual(<<"custom hint">>, Inner#beamtalk_error.hint)
+    end.
+
 -doc "Setup class system for hierarchy tests".
 setup_class_system() ->
     case whereis(pg) of

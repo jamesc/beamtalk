@@ -241,3 +241,30 @@ TestCase subclass: EmptyCollectionAccessTest
   testElementAccessorsRaiseWhereSubsequenceOpsAnswer =>
     self should: [#() first] raise: #empty_collection
     self assert: #() rest equals: #()
+
+  // ==========================================================================
+  // Exception class >> signalKind:class:selector:hint: — general named-kind
+  // signal primitive for pure-Beamtalk code (BT-3042). Ordinary Beamtalk
+  // syntax, no Erlang FFI at the call site: any kind, with a hint specific
+  // to the call site.
+  // ==========================================================================
+  testSignalKindRoundTripsIndexOutOfBounds =>
+    self
+      should: [
+        Exception
+          signalKind: #index_out_of_bounds
+          class: #ListZipper
+          selector: #left
+          hint: "already at the start of the sequence"
+      ]
+      raise: #index_out_of_bounds
+
+  testSignalKindUsesTheSuppliedHint =>
+    hint := [
+      Exception
+        signalKind: #index_out_of_bounds
+        class: #ListZipper
+        selector: #left
+        hint: "already at the start of the sequence"
+    ] on: Error do: [:e | e hint]
+    self assert: (hint includesSubstring: "already at the start of the sequence")
