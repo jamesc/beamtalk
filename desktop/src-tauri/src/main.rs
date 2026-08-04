@@ -1,6 +1,15 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
+// Windows-only, no-op elsewhere: without this, a release build links as a
+// console-subsystem binary, so every launch of the installed app pops a
+// black console window behind the picker's GUI (BT-2988, adversarial-review
+// follow-up — missing from the standard Tauri v2 scaffold's own
+// `main.rs.hbs` template was the actual bug; this restores it). Kept as
+// console-subsystem in debug builds so `println!`/panics stay visible during
+// `cargo tauri dev`.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 //! Beamtalk desktop picker (ADR 0097, BT-2986): a Tauri shell over
 //! `beamtalk-desktop-broker`'s connection-broker core and
 //! `beamtalk-desktop-shell`'s attach/empty-state decision logic.

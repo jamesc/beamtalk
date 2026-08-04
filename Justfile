@@ -396,6 +396,19 @@ dist-desktop-platform bundles:
 # (NSIS installer .exe); see desktop-release.yml's Windows leg for which of
 # these actually ship. Checks for `dist-liveview\bin\bt_attach.bat` (the
 # Windows entry point — no `bin\server`, BT-2988) rather than `bin/server`.
+#
+# Passes `--config` a temp *file path*, not an inline JSON string
+# (adversarial-review follow-up): Windows PowerShell 5.1 (what
+# `powershell.exe` is — not PowerShell 7's `pwsh`) does not re-escape
+# embedded double quotes when building a native command's argv
+# (`PSNativeCommandArgumentPassing` didn't exist before 7.2), so the
+# bash sibling recipe's inline-JSON trick
+# (`--config "{\"version\":\"$VERSION\"}"`) reaches `cargo-tauri.exe` here
+# as literal `{version:0.4.0}` — invalid JSON, breaking the whole Windows
+# build with a confusing serde error. Writing the JSON to a file with a
+# PowerShell cmdlet (`Set-Content`, not a native exe) sidesteps that argv
+# escaping entirely; `--config <path>` is Tauri CLI's documented alternate
+# form for exactly this.
 [windows]
 dist-desktop-platform bundles:
     #!powershell.exe
@@ -411,8 +424,14 @@ dist-desktop-platform bundles:
     $version = (Get-Content VERSION -Raw).Trim()
     Write-Output "📦 Building desktop app v$version ({{bundles}})..."
     Set-Location desktop
-    cargo tauri build --bundles "{{bundles}}" --config "{`"version`":`"$version`"}"
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $configPath = Join-Path $env:TEMP "beamtalk-tauri-config-$PID.json"
+    Set-Content -Path $configPath -Value "{`"version`":`"$version`"}" -NoNewline
+    try {
+        cargo tauri build --bundles "{{bundles}}" --config $configPath
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    } finally {
+        Remove-Item -Path $configPath -ErrorAction SilentlyContinue
+    }
     Write-Output "✅ Desktop app bundle(s) in desktop/src-tauri/target/release/bundle/"
 
 # Build the desktop app bundle for the host platform (BT-2987), auto-picking

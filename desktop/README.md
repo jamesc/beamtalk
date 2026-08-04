@@ -93,12 +93,21 @@ on every platform.
   `config/runtime.exs`'s env-var contract, and has unit test coverage, but
   has not been exercised against a real built `dist-liveview` release on
   Windows.
-- **Orphan/process-tree behavior is unconfirmed.** Whether
-  `bin\bt_attach.bat` runs `erl.exe` as a direct child (so
-  `std::process::Child::kill`, i.e. `TerminateProcess`, reaches it) or as an
-  untracked grandchild is not verified — see `spawn.rs`'s module doc comment
-  for the full reasoning and the fallback (`beamtalk_desktop_broker::reap`'s
-  PID-file sweep on the next broker start).
+- **Orphan/process-tree cleanup is closed by construction, not just hoped
+  for.** `bin\bt_attach.bat` can only run via `cmd.exe` (Windows cannot
+  `CreateProcessW` a `.bat` directly), so `std::process::Child::kill` alone
+  would always terminate `cmd.exe` and orphan `erl.exe` underneath it — not
+  an unverified maybe, a certainty given how Windows executes batch files.
+  `beamtalk_desktop_broker::winjob::JobHandle` (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`)
+  closes that: the spawned process tree is assigned to a job object that
+  kills every process in it — including everything spawned after
+  assignment — the moment the job handle closes, whether that's an explicit
+  detach or this broker process itself dying uncleanly. What remains
+  unverified is only the *mechanism's* real-world behavior (a small
+  assign-after-spawn race — see `spawn.rs`'s and `winjob.rs`'s module doc
+  comments) and whether `AssignProcessToJobObject`/`SetInformationJobObject`
+  behave as documented against a real `mix release` boot; `reap`'s PID-file
+  sweep remains the fallback net for whatever this mechanism still misses.
 - **No code signing.** See the Packaging section above — the `.msi`/NSIS
   `.exe` this lane produces are unsigned.
 - **CI build lane is unverified.** `desktop-release.yml`'s Windows leg (WiX/
@@ -106,6 +115,20 @@ on every platform.
   `windows-x86_64` case) has not been exercised against a real
   `windows-2022` run — see that workflow's header comment for the specific
   list of unverified assumptions.
+- **Console-window suppression and the CI build-lane's `--config` quoting
+  were both real bugs, now fixed rather than open gaps.** Without
+  `windows_subsystem = "windows"` (`desktop/src-tauri/src/main.rs`) a
+  release build links console-subsystem, popping a visible window behind
+  the picker's GUI on every launch; `crate::spawn::detach` additionally
+  sets `CREATE_NO_WINDOW` so the console-subsystem `cmd.exe` wrapper (see
+  the process-tree point above) doesn't pop one *per front* either. The
+  `Justfile`'s `dist-desktop-platform` Windows recipe now writes its
+  `--config` JSON to a temp file instead of inlining it, because Windows
+  PowerShell 5.1 does not re-escape embedded quotes when building a native
+  command's argv — the inline form silently reached `cargo-tauri.exe` as
+  invalid JSON. None of this has been exercised on a real Windows build
+  either (same caveat as everything else here), but these are code fixes,
+  not open questions.
 - **epmd/dist behavior differences were not independently investigated**
   beyond the process-tree point above — Windows epmd is the same `erl`-
   distributed epmd binary as Unix (no protocol difference expected), but this

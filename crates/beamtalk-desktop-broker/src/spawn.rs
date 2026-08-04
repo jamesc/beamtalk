@@ -57,19 +57,31 @@
 //! acceptance criteria):** the epmd/OS-process story is not fully verified on
 //! Windows. `detach` (below) uses `CREATE_NEW_PROCESS_GROUP` as the Windows
 //! analogue of Unix's `process_group(0)` — the standard way to stop a Ctrl-C
-//! sent to the broker's own console from also reaching the front. But unlike
-//! Unix (where `bin/bt_attach → erlexec → beam.smp` is confirmed-by-
-//! convention an unbroken `exec` chain, per [`crate::sname`]'s doc comment),
-//! whether a Windows `mix release`'s generated `bin\bt_attach.bat` runs
-//! `erl.exe` as a direct child (so `Child::kill`, i.e. `TerminateProcess`,
-//! reaches it) or spawns it as a *grandchild* it doesn't track (so killing
-//! the `.bat`'s own process leaves `erl.exe` running orphaned) was not
-//! verified against a real Windows release build — no Windows sandbox was
-//! available to develop or test this against. If it's the latter, this
-//! crate's [`crate::reap`] PID-file sweep is the fallback net on the *next*
-//! broker start, not a same-session fix. Confirm this against a real CI
-//! build (see the release workflow's own verification-status note) before
-//! relying on `detach`/`quit` to be immediate on Windows.
+//! sent to the broker's own console from also reaching the front.
+//!
+//! **The process-tree question this paragraph used to leave open is now
+//! closed by construction, not by observation** (adversarial-review
+//! follow-up): `bin\bt_attach.bat` cannot be a direct `CreateProcessW` child
+//! at all — Windows can only run a `.bat` via `cmd.exe`, so whatever
+//! `Child::id()`/`Child::kill()` refer to here is `cmd.exe` (or an
+//! equivalent wrapper), never `erl.exe` itself, no matter what a real build
+//! turns out to do. Relying on `Child::kill()` alone would therefore
+//! *always* orphan `erl.exe`, not just in some unverified branch — so
+//! [`spawn_front`] additionally assigns the spawned process to a
+//! [`crate::winjob::JobHandle`] (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`),
+//! which kills the *entire* process tree — `cmd.exe`, `erl.exe`, everything
+//! spawned after assignment — together, the moment the job handle closes
+//! (explicitly, or automatically when this broker process itself dies, no
+//! cooperation required). See [`crate::winjob`]'s module doc for the
+//! mechanism, its one residual (assign-after-spawn) race, and why that
+//! race can't be fully closed without bypassing `std::process::Command`.
+//! This has not been exercised against a real Windows boot — no Windows
+//! sandbox was available to develop or test it against — but unlike the
+//! rest of this paragraph's original framing, it is not a *guess* at what
+//! Windows does; the job-object mechanism works the same way regardless of
+//! how many hops sit between `cmd.exe` and `erl.exe`. [`crate::reap`]'s
+//! PID-file sweep remains the fallback net for any process this mechanism
+//! still misses (e.g. a crash in the narrow assign-after-spawn window).
 
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -126,9 +138,12 @@ impl SpawnConfig {
     }
 }
 
-/// The env vars this broker sets on the spawned front, in a stable order
+/// The env vars this broker sets on **every** platform, in a stable order
 /// (for deterministic logging/tests — `Command::envs` doesn't care about
-/// order).
+/// order). On Windows, [`build_launch_command`] sets four more
+/// (`BT_WORKSPACE_NODE`, `BT_WORKSPACE_COOKIE`, `SECRET_KEY_BASE`,
+/// `PHX_SERVER`) that don't go through this function — it does not
+/// report the full env set there, only the cross-platform baseline.
 #[must_use]
 pub fn build_env(config: &SpawnConfig) -> Vec<(String, String)> {
     vec![
@@ -142,6 +157,34 @@ pub fn build_env(config: &SpawnConfig) -> Vec<(String, String)> {
     ]
 }
 
+/// A spawned front process. On Unix this is exactly [`Child`]; on Windows it
+/// additionally carries the [`crate::winjob::JobHandle`] tying the front's
+/// entire process tree (not just the immediate `cmd.exe`/wrapper child) to
+/// this value's lifetime — see [`crate::winjob`]'s module doc and this
+/// module's own doc comment for why that's necessary there. `Deref`/
+/// `DerefMut` to [`Child`] so callers use it exactly like a `Child`
+/// (`.id()`, `.kill()`, `.wait()`, `.try_wait()`) on every platform.
+#[derive(Debug)]
+pub struct SpawnedFront {
+    child: Child,
+    #[cfg(windows)]
+    #[allow(dead_code)] // held for its Drop side effect only, never read
+    job: crate::winjob::JobHandle,
+}
+
+impl std::ops::Deref for SpawnedFront {
+    type Target = Child;
+    fn deref(&self) -> &Child {
+        &self.child
+    }
+}
+
+impl std::ops::DerefMut for SpawnedFront {
+    fn deref_mut(&mut self) -> &mut Child {
+        &mut self.child
+    }
+}
+
 /// Spawn the front described by `config`.
 ///
 /// Refuses with [`BrokerError::OidcConfigured`] if OIDC config is present
@@ -152,18 +195,25 @@ pub fn build_env(config: &SpawnConfig) -> Vec<(String, String)> {
 /// `~/.beamtalk/workspaces/<id>/metadata.json` doesn't exist.
 ///
 /// The child is spawned detached from this process's process group (Unix:
-/// `process_group(0)`; Windows: `CREATE_NEW_PROCESS_GROUP`) so a signal sent
-/// to the broker's own foreground group (e.g. Ctrl-C) does not also kill the
-/// front — orphan-reaping ([`crate::reap`]) is the intended mechanism for
-/// cleaning up fronts left behind by a dead broker, not accidental group
-/// signal propagation.
+/// `process_group(0)`; Windows: `CREATE_NEW_PROCESS_GROUP` + `CREATE_NO_WINDOW`)
+/// so a signal sent to the broker's own foreground group (e.g. Ctrl-C) does
+/// not also kill the front, and (Windows only) so the front's console-
+/// subsystem wrapper process doesn't pop a visible window of its own —
+/// orphan-reaping ([`crate::reap`]) is the intended mechanism for cleaning up
+/// fronts left behind by a dead broker, not accidental group signal
+/// propagation or a user closing a stray console window.
+///
+/// On Windows, additionally assigns the spawned process to a fresh
+/// [`crate::winjob::JobHandle`] before returning — see this module's doc
+/// comment for why plain `Child::kill()` cannot reach `erl.exe` there.
 ///
 /// # Errors
 ///
 /// Returns [`BrokerError::OidcConfigured`] or [`BrokerError::UnknownWorkspace`]
 /// per the refusal conditions above, or [`BrokerError::Io`] if the launcher
-/// process fails to spawn.
-pub fn spawn_front(config: &SpawnConfig) -> Result<Child> {
+/// process fails to spawn (Unix), or additionally if creating/assigning the
+/// job object fails (Windows).
+pub fn spawn_front(config: &SpawnConfig) -> Result<SpawnedFront> {
     if let Some(source) = oidc_configured(&config.ide_toml_path) {
         return Err(BrokerError::OidcConfigured(source.to_string()));
     }
@@ -177,7 +227,22 @@ pub fn spawn_front(config: &SpawnConfig) -> Result<Child> {
 
     let mut cmd = build_launch_command(config)?;
     detach(&mut cmd);
-    Ok(cmd.spawn()?)
+    let child = cmd.spawn()?;
+
+    #[cfg(windows)]
+    {
+        let job = crate::winjob::JobHandle::new()?;
+        // Best-effort-but-checked: assign right away (minimizes, per
+        // `crate::winjob`'s doc, the residual pre-assignment race) and
+        // surface a failure rather than silently returning a front this
+        // job object does not actually protect.
+        job.assign(&child)?;
+        Ok(SpawnedFront { child, job })
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(SpawnedFront { child })
+    }
 }
 
 /// Build the OS process invocation for `config`, platform-specific per this
@@ -325,8 +390,8 @@ pub const DEFAULT_BIND_FAILURE_GRACE: Duration = Duration::from_millis(1500);
 /// after the closure below returned [`SpawnAttempt::Bound`], which always
 /// stores a child into `spawned` first — the `expect` documents that
 /// invariant rather than guarding against a real failure mode.
-pub fn spawn_front_with_port_retry(config: &SpawnAttemptConfig) -> Result<(Child, u16)> {
-    let spawned: RefCell<Option<Child>> = RefCell::new(None);
+pub fn spawn_front_with_port_retry(config: &SpawnAttemptConfig) -> Result<(SpawnedFront, u16)> {
+    let spawned: RefCell<Option<SpawnedFront>> = RefCell::new(None);
     let port = port::allocate_port_with_retry(config.max_port_attempts, |candidate| {
         let spawn_config = SpawnConfig {
             launcher: config.launcher.clone(),
@@ -362,7 +427,16 @@ fn detach(cmd: &mut Command) {
 fn detach(cmd: &mut Command) {
     use std::os::windows::process::CommandExt;
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-    cmd.creation_flags(CREATE_NEW_PROCESS_GROUP);
+    // Adversarial-review follow-up (BT-2988): `bin\bt_attach.bat` can only
+    // run via a console-subsystem wrapper (`cmd.exe` — see this module's
+    // doc comment), which without this flag pops a visible console window
+    // per front, behind the desktop app's GUI, that a user could close and
+    // kill their workspace out from under them. `CREATE_NO_WINDOW`
+    // suppresses that; it does not affect `erl.exe`'s own I/O (the front
+    // doesn't attach a console either way — `PHX_SERVER=true` boot has
+    // nothing to print to one).
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    cmd.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
 }
 
 #[cfg(not(any(unix, windows)))]
