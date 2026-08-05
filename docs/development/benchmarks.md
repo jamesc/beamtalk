@@ -611,6 +611,14 @@ own measurements used, plus the >=1 MB acceptance-criteria size.
 | 64 KB | 28.878 us/op | 0.192 us/op | ~150x | 148.439 us/op |
 | 1 MB | 368.910 us/op | 0.224 us/op | **~1650x** | 2389.153 us/op |
 
+**Note:** these numbers were captured before a follow-up fix added a
+`beamtalk_extensions:has('String', Selector)` guard to the fast path (a
+review-caught correctness gap: an ADR 0066 `String` extension on one of the
+9 shared selectors must not fire for a genuinely non-UTF-8 receiver). That
+guard is a single `ets:member` check, negligible next to the numbers above —
+re-measure if the table is ever regenerated, but no material change is
+expected.
+
 ### Interpretation
 
 - **`byteAt:`'s cost is now flat (~0.2 us/op) regardless of receiver size** —
