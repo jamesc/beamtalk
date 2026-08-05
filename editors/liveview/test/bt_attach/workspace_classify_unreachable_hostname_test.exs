@@ -36,6 +36,12 @@ defmodule BtAttach.WorkspaceClassifyUnreachableHostnameTest do
   setup do
     :meck.new(:net_adm, [:unstick, :passthrough])
 
+    # Common to every test below: the bare zero-arg query fails (as it does
+    # when the machine's own hostname doesn't self-resolve) — reproducing the
+    # WSL2 bug precisely. Each test overrides only the `:localhost` arity-1
+    # response, which is what actually varies per scenario.
+    :meck.expect(:net_adm, :names, fn -> {:error, :address} end)
+
     # `:meck.unload/0` (no args), not `:meck.unload(:net_adm)`: meck ties a
     # mock's lifecycle to its owning process and auto-unloads when that
     # process exits, which — for `on_exit` callbacks — has already happened
@@ -49,23 +55,19 @@ defmodule BtAttach.WorkspaceClassifyUnreachableHostnameTest do
 
   describe "classify_unreachable/1 default arg — hostname self-resolution failure (BT-3003)" do
     test "bad_cookie: epmd knows the target node, reachable only via the explicit :localhost host" do
-      # Simulate the WSL2 bug precisely: the bare zero-arg query fails (as it
-      # does when the machine's own hostname doesn't self-resolve), while the
-      # explicit-host query the fixed default now uses succeeds against the
-      # same epmd, with the target node's short name present.
-      :meck.expect(:net_adm, :names, fn -> {:error, :address} end)
-
+      # The explicit-host query the fixed default now uses succeeds against
+      # the same epmd, with the target node's short name present.
       :meck.expect(:net_adm, :names, fn :localhost ->
         {:ok, [{~c"beamtalk_workspace_spike", 45678}]}
       end)
 
       # The regression: with the old `:net_adm.names()` default, this would
-      # hit the stubbed zero-arg failure above and misreport `:epmd_absent`.
+      # hit the stubbed zero-arg failure from setup/0 and misreport
+      # `:epmd_absent`.
       assert Workspace.classify_unreachable(:beamtalk_workspace_spike@localhost) == :bad_cookie
     end
 
     test "dead_workspace: epmd is reachable via :localhost but has no record of the target node" do
-      :meck.expect(:net_adm, :names, fn -> {:error, :address} end)
       :meck.expect(:net_adm, :names, fn :localhost -> {:ok, []} end)
 
       assert Workspace.classify_unreachable(:beamtalk_workspace_spike@localhost) ==
@@ -76,7 +78,6 @@ defmodule BtAttach.WorkspaceClassifyUnreachableHostnameTest do
       # Belt-and-braces: assert on the call itself, not just the classification
       # outcome, so a regression to the bare form fails here even if some
       # future classification change happened to produce the same atom either way.
-      :meck.expect(:net_adm, :names, fn -> {:error, :address} end)
       :meck.expect(:net_adm, :names, fn :localhost -> {:ok, []} end)
 
       Workspace.classify_unreachable(:beamtalk_workspace_spike@localhost)
