@@ -194,3 +194,20 @@ no_server_calls_are_safe_test() ->
     ?assertEqual(ok, beamtalk_file_handle_registry:unregister(Handle)),
     beamtalk_file_handle:close_handle(Handle),
     delete_temp(TmpPath).
+
+malformed_handle_calls_are_safe_test_() ->
+    %% A handle missing the `state` cell (beamtalk_file_handle:new/3 is the
+    %% only real constructor, so this cannot happen via the public FileHandle
+    %% API) must never crash the registry — register/2 and unregister/1 guard
+    %% on `is_map_key(state, Handle)` and no-op otherwise.
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        ?_test(begin
+            Malformed = #{'$beamtalk_class' => 'FileHandle', fd => not_a_real_fd},
+            ?assertEqual(ok, beamtalk_file_handle_registry:register(Malformed, undefined)),
+            ?assertEqual(ok, beamtalk_file_handle_registry:register(Malformed, self())),
+            ?assertEqual(ok, beamtalk_file_handle_registry:unregister(Malformed)),
+            %% The registry is still alive and answering normal calls.
+            ?assertEqual(ok, sync(ok)),
+            ?assertNot(has_entry(<<"anything">>, beamtalk_file_handle_registry:open_handles()))
+        end)
+    end}.

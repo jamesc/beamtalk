@@ -122,8 +122,17 @@ init([]) ->
         },
         %% `File open:mode:` handle-registry (BT-3020): tracks outstanding
         %% caller-owned FileHandles and closes an owner's handles on its
-        %% 'DOWN'. Module lives in beamtalk_stdlib (with the rest of File),
-        %% same cross-app placement as the beamtalk_stdlib worker above.
+        %% 'DOWN'. Same monitor-owner/react-to-'DOWN' shape as
+        %% beamtalk_object_watch above; unlike it, this module's source lives
+        %% in the beamtalk_stdlib app (alongside the rest of File), not here.
+        %% That is safe only because this is a monorepo with a single release
+        %% — every app's .beam files share one code path regardless of which
+        %% OTP application "owns" a given module or has formally started, so
+        %% beamtalk_runtime_sup can start a beamtalk_stdlib-sourced worker
+        %% with no special wiring. It is NOT safe to assume for a build that
+        %% ships beamtalk_runtime without beamtalk_stdlib, if one is ever
+        %% introduced — that would need this moved into beamtalk_runtime, or
+        %% supervised from a beamtalk_stdlib-owned supervisor instead.
         #{
             id => beamtalk_file_handle_registry,
             start => {beamtalk_file_handle_registry, start_link, []},

@@ -143,10 +143,12 @@ typed Object subclass: File native: beamtalk_file
   /// Write-capable modes create missing parent directories. Returns
   /// `Result ok: handle`, or `Result error: err`.
   ///
-  /// The caller owns the handle and must `close` it. The descriptor is not
-  /// tied to the calling process, so an unclosed handle stays open for the
-  /// lifetime of the node — prefer `open:mode:do:` whenever a block scope
-  /// will do.
+  /// The caller owns the handle and must `close` it, but is not the only
+  /// backstop: it is registered against the REPL session if there is one,
+  /// else the calling actor, else left unowned, and closed automatically
+  /// when that owner dies. `File openHandles` lists every outstanding
+  /// handle for diagnostics. Prefer `open:mode:do:` whenever a block scope
+  /// will do — it needs no owner at all.
   ///
   /// ## Examples
   /// ```beamtalk

@@ -54,7 +54,8 @@ and join the `beamtalk_classes` pg group for enumeration.
     update_class/2,
     local_class_methods/1,
     local_class_methods_map/1,
-    local_instance_methods/1
+    local_instance_methods/1,
+    dispatch_caller_pid/0
 ]).
 
 %% gen_server callbacks
@@ -1147,6 +1148,24 @@ dispatch_class_method(Selector, Args, From, State, Restore) ->
 -spec caller_pid({pid(), term()} | term()) -> pid() | undefined.
 caller_pid({CallerPid, _Tag}) when is_pid(CallerPid) -> CallerPid;
 caller_pid(_) -> undefined.
+
+-doc """
+Read the immediate caller's pid mirrored by `dispatch_class_method/5` for the
+duration of the current class-method call, or `undefined` outside one (or on a
+dispatch path — self-send, `perform:`, test-execution spawn — that reaches a
+class method without going through `dispatch_class_method/5` at all).
+
+BT-3020: this is the accessor consumers should use rather than reading the
+`beamtalk_dispatch_caller_pid` process-dictionary key directly, so the
+coupling between writer and reader is greppable/xref-visible instead of a bare
+atom shared by convention between two apps.
+""".
+-spec dispatch_caller_pid() -> pid() | undefined.
+dispatch_caller_pid() ->
+    case get(beamtalk_dispatch_caller_pid) of
+        Pid when is_pid(Pid) -> Pid;
+        _ -> undefined
+    end.
 
 -doc """
 Seed this class gen_server with a session context passed explicitly in the

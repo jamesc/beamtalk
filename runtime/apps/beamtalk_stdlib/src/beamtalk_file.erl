@@ -469,14 +469,24 @@ the duration of the call stand in for "who is calling":
    outlives the short-lived eval worker that made this particular call, so it
    survives across REPL turns — the property the rejected call-site-lowering
    plan (see `mode_options/1`) could not deliver.
-2. `beamtalk_dispatch_caller_pid` — the immediate caller's pid, mirrored by
-   `beamtalk_object_class:dispatch_class_method/5` from the `From` every
-   `handle_call` already carries (no wire-protocol change). Used only when
-   there is no session: if that pid is itself a Beamtalk actor
+2. The immediate caller's pid, via `beamtalk_object_class:dispatch_caller_pid/0`
+   — mirrored by `beamtalk_object_class:dispatch_class_method/5` from the
+   `From` every `handle_call` already carries (no wire-protocol change). Used
+   only when there is no session: if that pid is itself a Beamtalk actor
    (`beamtalk_actor:is_beamtalk_actor/1`), the actor owns the handle.
 
 Otherwise the handle is unowned (tier 3): registered for `openHandles`
 diagnostics, reclaimed only by an explicit `close` or node shutdown.
+
+Tier 2 is *not* transitive the way tier 1 is: the session pid is re-emitted by
+`local_session_context/0` on every nested class-method call, so an actor
+calling `Logger openFor: path` (say) which itself calls `File open:mode:`
+still resolves the session correctly if one exists. But
+`beamtalk_dispatch_caller_pid` is only ever the *immediate* caller — in that
+same nested-call shape with no session, `open:mode:` sees `Logger`'s class
+gen_server pid (not a Beamtalk actor), not the originating actor, and the
+handle falls through to unowned. A future reader tempted to make tier 2
+transitive too should know this is a known, accepted gap, not an oversight.
 """.
 -spec resolve_owner() -> pid() | undefined.
 resolve_owner() ->
@@ -484,13 +494,13 @@ resolve_owner() ->
         SessionPid when is_pid(SessionPid) ->
             SessionPid;
         _ ->
-            case get(beamtalk_dispatch_caller_pid) of
+            case beamtalk_object_class:dispatch_caller_pid() of
                 CallerPid when is_pid(CallerPid) ->
                     case beamtalk_actor:is_beamtalk_actor(CallerPid) of
                         true -> CallerPid;
                         false -> undefined
                     end;
-                _ ->
+                undefined ->
                     undefined
             end
     end.

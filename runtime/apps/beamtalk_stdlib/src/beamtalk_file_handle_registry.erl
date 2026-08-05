@@ -34,17 +34,25 @@ Registering a handle against a pid owner arms a monitor on that owner the
 first time it appears; further handles from the same owner share it. When
 the owner dies, every handle still registered under it is closed (via
 `beamtalk_file_handle:close_handle/1`, already idempotent) and dropped from
-the registry. `unregister/1` (called from `beamtalk_file_handle:close_handle/1`
-on every close, whatever opened the handle) removes a handle immediately, so
-a closed handle never lingers and a later owner death can never double-close
-it.
+the registry. `unregister/1` (called from `beamtalk_file_handle:close/1` on
+every close, whatever opened the handle) removes a handle immediately, so a
+closed handle never lingers and a later owner death can never double-close it.
 
 This is a supervised `one_for_one` worker (`beamtalk_runtime_sup`, alongside
 `beamtalk_object_watch` — the same monitor-owner/react-to-'DOWN' shape); if it
 crashes and restarts, all bookkeeping is lost and every previously-registered
 handle becomes untracked (still open, no longer reclaimed on owner death, no
 longer listed). Handles opened after the restart are tracked normally.
+`terminate/2` logs a warning on an abnormal exit so this loss is at least
+observable, rather than a silent regression back to BT-3020's original leak.
+
+`register/2` and `unregister/1` never let a registry failure (crashed
+mid-call, or too slow to reply) propagate out of `open:mode:` / `close` — a
+handle that was actually opened or closed must never be lost or turned into a
+raised error just because bookkeeping failed; see the `catch exit:_` in each.
 """.
+
+-include_lib("kernel/include/logger.hrl").
 
 -export([start_link/0, register/2, unregister/1, open_handles/0]).
 
@@ -92,43 +100,73 @@ Register an outstanding `FileHandle` against its resolved `Owner`.
 tier 3). Synchronous: the registration is committed before this returns, so a
 handle is never briefly "open but unlisted" between `open:mode:` returning and
 a subsequent `File openHandles` call. A no-op returning `ok` when the registry
-is not running — a missing registry must never fail the open itself.
+is not running, malformed (missing the `state` cell `beamtalk_file_handle:new/3`
+always sets — never true for a real handle, only a defensive guard), or the
+call itself fails (registry crashed or was too slow to reply within the
+default timeout) — a bookkeeping failure must never fail the open itself, nor
+leak the descriptor the caller was just handed by silently discarding it.
 """.
 -spec register(beamtalk_file_handle:t(), owner()) -> ok.
-register(Handle, Owner) when is_map(Handle), Owner =:= undefined orelse is_pid(Owner) ->
+register(Handle, Owner) when
+    is_map(Handle), is_map_key(state, Handle), Owner =:= undefined orelse is_pid(Owner)
+->
     case erlang:whereis(?SERVER) of
-        undefined -> ok;
-        Server -> gen_server:call(Server, {register, Handle, Owner})
-    end.
+        undefined ->
+            ok;
+        Server ->
+            try
+                gen_server:call(Server, {register, Handle, Owner})
+            catch
+                exit:_ -> ok
+            end
+    end;
+register(_Handle, _Owner) ->
+    ok.
 
 -doc """
 Unregister a `FileHandle`, whatever opened it.
 
-Called from `beamtalk_file_handle:close_handle/1` on every close, so handles
-never registered here (from `open:do:` / `open:mode:do:`) simply miss — a
-harmless no-op — while a registered handle is dropped immediately, closing the
-window where a closed handle could still appear in `open_handles/0` or be
-double-closed by a later owner `'DOWN'`.
+Called from `beamtalk_file_handle:close/1` on every close, so handles never
+registered here (from `open:do:` / `open:mode:do:`) simply miss — a harmless
+no-op — while a registered handle is dropped immediately, closing the window
+where a closed handle could still appear in `open_handles/0` or be
+double-closed by a later owner `'DOWN'`. Like `register/2`, never lets a
+missing/crashed/slow registry turn a handle that really did close into a
+raised error from `close`.
 """.
 -spec unregister(beamtalk_file_handle:t()) -> ok.
-unregister(Handle) when is_map(Handle) ->
+unregister(Handle) when is_map(Handle), is_map_key(state, Handle) ->
     case erlang:whereis(?SERVER) of
-        undefined -> ok;
-        Server -> gen_server:call(Server, {unregister, Handle})
-    end.
+        undefined ->
+            ok;
+        Server ->
+            try
+                gen_server:call(Server, {unregister, Handle})
+            catch
+                exit:_ -> ok
+            end
+    end;
+unregister(_Handle) ->
+    ok.
 
 -doc """
 List every outstanding registered handle as `{Path, Mode, Owner}`.
 
 `Owner` is the session/actor pid for tiers 1-2, `undefined` for an unowned
 (tier 3) handle. Backs `File openHandles`. Returns `[]` when the registry is
-not running.
+not running or fails to reply — a diagnostic read must never raise.
 """.
 -spec open_handles() -> [{binary(), beamtalk_file_handle:mode(), owner()}].
 open_handles() ->
     case erlang:whereis(?SERVER) of
-        undefined -> [];
-        Server -> gen_server:call(Server, open_handles)
+        undefined ->
+            [];
+        Server ->
+            try
+                gen_server:call(Server, open_handles)
+            catch
+                exit:_ -> []
+            end
     end.
 
 %%% ============================================================================
@@ -155,7 +193,21 @@ handle_info({'DOWN', MonRef, process, Owner, _Reason}, State) ->
 handle_info(_Info, State) ->
     {noreply, State}.
 
-terminate(_Reason, _State) ->
+terminate(Reason, _State) when Reason =:= normal; Reason =:= shutdown ->
+    ok;
+terminate({shutdown, _}, _State) ->
+    ok;
+terminate(Reason, #state{handles = Handles}) ->
+    %% One_for_one/permanent: the supervisor restarts this process empty.
+    %% Every handle tracked here becomes untracked — reachable via `close`,
+    %% but no longer reclaimed on its owner's death or listed in
+    %% `File openHandles`. Log it: a safety net that fails silently is worse
+    %% than one that fails loudly.
+    ?LOG_WARNING(
+        "beamtalk_file_handle_registry terminating abnormally — losing "
+        "ownership/reclamation tracking for outstanding FileHandles",
+        #{reason => Reason, tracked_handles => map_size(Handles), domain => [beamtalk, stdlib]}
+    ),
     ok.
 
 code_change(_OldVsn, State, _Extra) ->
@@ -170,10 +222,22 @@ handle_key(Handle) ->
     maps:get(state, Handle).
 
 -spec do_register(beamtalk_file_handle:t(), owner(), #state{}) -> #state{}.
-do_register(Handle, undefined, State) ->
+do_register(Handle, Owner, State0) ->
+    %% Defensive: register/2 has a single production caller (`open:mode:`,
+    %% once per freshly-opened handle) and duplicate registration of the same
+    %% handle should not happen — but if it ever did with a *different* Owner,
+    %% not clearing the old entry first would leave a stale key in the old
+    %% owner's by_owner set, which a later unrelated death would incorrectly
+    %% walk. Unregistering first keeps the invariant "each handle key is
+    %% indexed under at most one owner" true unconditionally.
+    State = do_unregister(Handle, State0),
+    do_register_new(Handle, Owner, State).
+
+-spec do_register_new(beamtalk_file_handle:t(), owner(), #state{}) -> #state{}.
+do_register_new(Handle, undefined, State) ->
     Key = handle_key(Handle),
     State#state{handles = maps:put(Key, {Handle, undefined}, State#state.handles)};
-do_register(Handle, Owner, State) when is_pid(Owner) ->
+do_register_new(Handle, Owner, State) when is_pid(Owner) ->
     #state{handles = Handles, by_owner = ByOwner, monitors = Monitors} = State,
     Key = handle_key(Handle),
     Handles1 = maps:put(Key, {Handle, Owner}, Handles),
