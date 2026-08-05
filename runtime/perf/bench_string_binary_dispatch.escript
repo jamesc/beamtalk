@@ -29,6 +29,10 @@ main(_) ->
     lists:foreach(fun(B) -> code:ensure_loaded(list_to_atom(filename:basename(B, ".beam"))) end,
                   filelib:wildcard("apps/beamtalk_stdlib/ebin/bt@stdlib@*.beam")),
     timer:sleep(800),
+    %% Defensive/idempotent: beamtalk_runtime_app's start/2 already calls this,
+    %% but bench_hop/0 calls dispatch/3 directly rather than through send/3,
+    %% so this makes the escript's dependency on the extensions table explicit
+    %% rather than relying on app-startup ordering.
     beamtalk_extensions:init(),
     Sizes = [1024, 65536, 1048576],
     lists:foreach(fun bench/1, Sizes),
