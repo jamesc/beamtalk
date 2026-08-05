@@ -54,7 +54,8 @@ and join the `beamtalk_classes` pg group for enumeration.
     update_class/2,
     local_class_methods/1,
     local_class_methods_map/1,
-    local_instance_methods/1
+    local_instance_methods/1,
+    dispatch_caller_pid/0
 ]).
 
 %% gen_server callbacks
@@ -1106,6 +1107,12 @@ state, restoring the previously-seeded session context afterwards.
 (explicit-context path, BT-2379) or `seed_caller_session_context/1` (legacy
 3-tuple fallback). It is always run, even on a method-body crash, so a
 concurrent call from another session never observes a stale mirrored context.
+
+BT-3020: also mirrors the caller's pid into `beamtalk_dispatch_caller_pid` for
+the duration of the call. `From` is already supplied here for free by every
+`handle_call` — no wire-protocol change, unlike the session context above.
+`File open:mode:` reads this key to resolve tier-2 (calling-actor) FileHandle
+ownership when there is no session context to fall back to (tier 1).
 """.
 -spec dispatch_class_method(
     atom(), list(), {pid(), term()} | term(), #class_state{}, fun(() -> ok)
@@ -1118,6 +1125,7 @@ dispatch_class_method(Selector, Args, From, State, Restore) ->
         module = Module,
         class_state = ClassVars
     } = State,
+    PrevCaller = put(beamtalk_dispatch_caller_pid, caller_pid(From)),
     try
         beamtalk_class_dispatch:handle_class_method_call(
             Selector, Args, ClassName, Module, ClassMethods, ClassVars
@@ -1133,7 +1141,30 @@ dispatch_class_method(Selector, Args, From, State, Restore) ->
         {error, not_found} ->
             {reply, {error, not_found}, State}
     after
+        restore_dict_key(beamtalk_dispatch_caller_pid, PrevCaller),
         Restore()
+    end.
+
+-spec caller_pid({pid(), term()} | term()) -> pid() | undefined.
+caller_pid({CallerPid, _Tag}) when is_pid(CallerPid) -> CallerPid;
+caller_pid(_) -> undefined.
+
+-doc """
+Read the immediate caller's pid mirrored by `dispatch_class_method/5` for the
+duration of the current class-method call, or `undefined` outside one (or on a
+dispatch path — self-send, `perform:`, test-execution spawn — that reaches a
+class method without going through `dispatch_class_method/5` at all).
+
+BT-3020: this is the accessor consumers should use rather than reading the
+`beamtalk_dispatch_caller_pid` process-dictionary key directly, so the
+coupling between writer and reader is greppable/xref-visible instead of a bare
+atom shared by convention between two apps.
+""".
+-spec dispatch_caller_pid() -> pid() | undefined.
+dispatch_caller_pid() ->
+    case get(beamtalk_dispatch_caller_pid) of
+        Pid when is_pid(Pid) -> Pid;
+        _ -> undefined
     end.
 
 -doc """

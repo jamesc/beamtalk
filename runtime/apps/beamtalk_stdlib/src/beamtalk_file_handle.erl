@@ -264,13 +264,22 @@ sync(_) ->
 -doc """
 Close the handle. Idempotent — closing an already-closed handle returns
 `Result ok: nil` rather than an error.
+
+Unregisters the handle from `beamtalk_file_handle_registry` (BT-3020) so a
+closed handle never lingers in `File openHandles`, and a later death of the
+handle's owner can never double-close it. A no-op for a handle the registry
+never tracked (from `open:do:` / `open:mode:do:`, or opened before the
+registry was running).
 """.
 -spec close(t()) -> beamtalk_result:t().
 close(#{'$beamtalk_class' := 'FileHandle'} = Handle) ->
-    case close_handle(Handle) of
-        ok -> beamtalk_result:from_tagged_tuple({ok, nil});
-        {error, Reason} -> io_error(Handle, 'close', Reason)
-    end;
+    Result =
+        case close_handle(Handle) of
+            ok -> beamtalk_result:from_tagged_tuple({ok, nil});
+            {error, Reason} -> io_error(Handle, 'close', Reason)
+        end,
+    beamtalk_file_handle_registry:unregister(Handle),
+    Result;
 close(_) ->
     beamtalk_error:raise_type_error('FileHandle', 'close', <<"Expected a FileHandle">>).
 

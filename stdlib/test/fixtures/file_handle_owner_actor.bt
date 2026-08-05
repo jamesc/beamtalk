@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for file_handle_io_test.bt — an actor that opens a `File
+// open:mode:` handle and never closes it, so the handle's registered owner
+// (BT-3020 tier 2) is this actor's own pid, and killing the actor is the
+// only thing that reclaims it.
+
+Actor subclass: FileHandleOwnerActor
+
+  openUnclosed: path =>
+    File open: path mode: #write
+    true

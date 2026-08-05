@@ -5113,6 +5113,7 @@ File open: "data.csv" do: [:handle |
 | `File tempDirectory` | `String` | OS temporary directory path |
 | `File open: path mode: mode` | `FileHandle` | Open a handle the caller must close |
 | `File open: path mode: mode do: block` | block value | Block-scoped handle, closed on exit |
+| `File openHandles` | `Array` | Outstanding `open:mode:` handles: `#(path mode owner)` |
 
 ```beamtalk
 File writeAll: "output.txt" contents: "hello"
@@ -5191,9 +5192,15 @@ across calls but not sent to another actor. The descriptor underneath is a BEAM
 process, so it keeps working wherever the handle is held on this node — but it
 does not survive crossing a node boundary.
 
-A handle from `open:mode:` is yours to close. Its descriptor is not tied to the
-calling process, so an unclosed handle stays open for the lifetime of the node
-— reach for `open:mode:do:` whenever a block scope will do.
+A handle from `open:mode:` is yours to close, but you are not the only backstop.
+Beamtalk registers it against an *owner* — the REPL session if you're at the
+REPL, else the actor you're calling from, else unowned — and closes an
+owner's outstanding handles when the owner dies. `File openHandles` lists
+every outstanding handle as `#(path mode owner)` for diagnostics, `owner`
+being `nil` for an unowned handle (opened from compiled code with neither a
+session nor a calling actor — nothing reclaims those but an explicit `close`
+or node shutdown). Still, reach for `open:mode:do:` whenever a block scope
+will do — it needs no owner at all.
 
 **Open blocks run in your own process.** `open:do:` and `open:mode:do:` are
 lowered at the call site (ADR 0109), so only the open itself touches the `File`

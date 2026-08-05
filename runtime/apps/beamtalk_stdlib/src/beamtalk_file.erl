@@ -67,7 +67,8 @@ enforced — Beamtalk is a trusted developer tool (ADR 0058, 0063).
     'absolutePath:'/1,
     'lastModified:'/1,
     'cwd'/0,
-    'tempDirectory'/0
+    'tempDirectory'/0,
+    'openHandles'/0
 ]).
 -export([handle_lines/1, handle_has_method/1]).
 
@@ -431,23 +432,98 @@ Modes map onto binary `file:open/2` option sets:
 Write-capable modes auto-create parent directories, matching
 `writeBinary:contents:`.
 
-The caller is responsible for `close`. The descriptor is owned by the File
-class process rather than the caller, so an unclosed handle survives the
-caller's death and stays open for the lifetime of the node — use
-`open:mode:do:` whenever a block scope will do.
+The caller is responsible for `close`, but is not the sole backstop (BT-3020):
+the handle is registered against a resolved *owner* — the REPL/workspace
+session if there is one, else the calling Beamtalk actor, else unowned — and
+`beamtalk_file_handle_registry` closes an owned handle when its owner dies.
+`File openHandles` lists every outstanding handle for diagnostics regardless
+of tier. Prefer `open:mode:do:` whenever a block scope will do.
 
 Returns a Result ok map holding the handle, or a Result error map.
 """.
 -spec 'open:mode:'(binary(), atom()) -> beamtalk_result:t().
 'open:mode:'(Path, Mode) when is_binary(Path), is_atom(Mode) ->
     case do_open(Path, Mode, 'open:mode:') of
-        {ok, Handle} -> beamtalk_result:from_tagged_tuple({ok, Handle});
-        {error, Error} -> beamtalk_result:from_tagged_tuple({error, Error})
+        {ok, Handle} ->
+            beamtalk_file_handle_registry:register(Handle, resolve_owner()),
+            beamtalk_result:from_tagged_tuple({ok, Handle});
+        {error, Error} ->
+            beamtalk_result:from_tagged_tuple({error, Error})
     end;
 'open:mode:'(Path, _) when is_binary(Path) ->
     beamtalk_error:raise_type_error('File', 'open:mode:', <<"Mode must be a Symbol">>);
 'open:mode:'(_, _) ->
     beamtalk_error:raise_type_error('File', 'open:mode:', <<"Path must be a String">>).
+
+-doc """
+Resolve the owner `open:mode:` registers its handle against (BT-3020, decision (a)).
+
+`open:mode:` is not call-site lowered (see `mode_options/1`), so this runs
+inside the File class gen_server, where `self()` is the class process rather
+than the caller. Two process-dictionary keys mirrored into *this* process for
+the duration of the call stand in for "who is calling":
+
+1. `beamtalk_session_pid` — the long-lived REPL/workspace session shell pid,
+   explicitly carried by `class_send_dispatch/3` (ADR 0081 / BT-2379) so
+   `Session current` works the same way from inside a class method. A pid here
+   outlives the short-lived eval worker that made this particular call, so it
+   survives across REPL turns — the property the rejected call-site-lowering
+   plan (see `mode_options/1`) could not deliver.
+2. The immediate caller's pid, via `beamtalk_object_class:dispatch_caller_pid/0`
+   — mirrored by `beamtalk_object_class:dispatch_class_method/5` from the
+   `From` every `handle_call` already carries (no wire-protocol change). Used
+   only when there is no session: if that pid is itself a Beamtalk actor
+   (`beamtalk_actor:is_beamtalk_actor/1`), the actor owns the handle.
+
+Otherwise the handle is unowned (tier 3): registered for `openHandles`
+diagnostics, reclaimed only by an explicit `close` or node shutdown.
+
+Tier 2 is *not* transitive the way tier 1 is: the session pid is re-emitted by
+`local_session_context/0` on every nested class-method call, so an actor
+calling `Logger openFor: path` (say) which itself calls `File open:mode:`
+still resolves the session correctly if one exists. But
+`beamtalk_dispatch_caller_pid` is only ever the *immediate* caller — in that
+same nested-call shape with no session, `open:mode:` sees `Logger`'s class
+gen_server pid (not a Beamtalk actor), not the originating actor, and the
+handle falls through to unowned. A future reader tempted to make tier 2
+transitive too should know this is a known, accepted gap, not an oversight.
+""".
+-spec resolve_owner() -> pid() | undefined.
+resolve_owner() ->
+    case get(beamtalk_session_pid) of
+        SessionPid when is_pid(SessionPid) ->
+            SessionPid;
+        _ ->
+            case beamtalk_object_class:dispatch_caller_pid() of
+                CallerPid when is_pid(CallerPid) ->
+                    case beamtalk_actor:is_beamtalk_actor(CallerPid) of
+                        true -> CallerPid;
+                        false -> undefined
+                    end;
+                undefined ->
+                    undefined
+            end
+    end.
+
+-doc """
+List every outstanding `open:mode:` handle for diagnostics (BT-3020).
+
+Returns an Array of 3-element Arrays `#(path mode owner)`. `owner` is the
+session/actor pid for tiers 1-2, `nil` for an unowned (tier 3) handle. Handles
+from `open:do:` / `open:mode:do:` never appear — they are block-scoped and
+always closed before the call returns, so there is nothing to enumerate.
+""".
+-spec 'openHandles'() -> map().
+'openHandles'() ->
+    Entries = [
+        beamtalk_array:from_list([Path, Mode, owner_to_beamtalk(Owner)])
+     || {Path, Mode, Owner} <- beamtalk_file_handle_registry:open_handles()
+    ],
+    beamtalk_array:from_list(Entries).
+
+-spec owner_to_beamtalk(pid() | undefined) -> pid() | nil.
+owner_to_beamtalk(undefined) -> nil;
+owner_to_beamtalk(Pid) when is_pid(Pid) -> Pid.
 
 -doc """
 Block-scoped handle in the given mode, closed however the block exits.
@@ -496,7 +572,22 @@ file could not be opened.
 'open:mode:do:'(_, _, _) ->
     beamtalk_error:raise_type_error('File', 'open:mode:do:', <<"Path must be a String">>).
 
--doc "Shared open path for open:mode: and open:mode:do:.".
+-doc """
+Shared open path for open:mode: and open:mode:do:.
+
+`open:mode:` (unlike the `do:` variants) is deliberately **not** call-site
+lowered to the caller's process, and must stay that way — BT-3020 measured why:
+OTP already auto-closes a handle when the process that opened it dies (a
+non-`raw` descriptor is a `file_io_server` process that monitors its opener),
+so lowering `open:mode:` would seem to make that auto-close "free". But the
+REPL spawns a fresh worker per evaluated statement (`spawn_monitor` in
+`beamtalk_repl_shell:handle_call({eval, ...})`), so a handle opened on one
+turn would die the instant that turn's statement finished — breaking the
+documented multi-turn `File.bt` workflow (`handle := (File open: … mode: …)
+unwrap` on one line, `handle writeLine: …` on the next). Handles survive turns
+today only because they're opened in the long-lived File class process
+instead. See `resolve_owner/0` for how ownership is resolved without lowering.
+""".
 -spec do_open(binary(), atom(), atom()) ->
     {ok, beamtalk_file_handle:t()} | {error, beamtalk_error:error()}.
 do_open(Path, Mode, Selector) ->
@@ -1039,6 +1130,7 @@ Returns the system temp directory as a String.
 %%%   (Erlang beamtalk_file) handleLines: handle   → handleLines/1
 %%%   (Erlang beamtalk_file) cwd                   → 'cwd'/0 (direct)
 %%%   (Erlang beamtalk_file) tempDirectory         → 'tempDirectory'/0 (direct)
+%%%   (Erlang beamtalk_file) openHandles           → 'openHandles'/0 (direct)
 %%% ============================================================================
 
 exists(Path) -> 'exists:'(Path).
