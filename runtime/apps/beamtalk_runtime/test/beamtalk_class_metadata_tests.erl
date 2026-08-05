@@ -58,7 +58,9 @@ new_is_idempotent_test() ->
 
 insert_and_lookup_all_fields_test() ->
     with_clean_table(fun() ->
-        ok = beamtalk_class_metadata:insert('Counter', counter_mod, [increment, reset], 'Actor'),
+        ok = beamtalk_class_metadata:insert(
+            'Counter', counter_mod, [increment, reset], 'Actor', undefined
+        ),
         ?assertEqual({ok, counter_mod}, beamtalk_class_metadata:lookup_module('Counter')),
         ?assertEqual(
             {ok, counter_mod, [increment, reset]},
@@ -76,8 +78,8 @@ lookup_missing_class_test() ->
 
 insert_overwrites_test() ->
     with_clean_table(fun() ->
-        ok = beamtalk_class_metadata:insert('Hot', old_mod, [a], 'Object'),
-        ok = beamtalk_class_metadata:insert('Hot', new_mod, [a, b], 'Value'),
+        ok = beamtalk_class_metadata:insert('Hot', old_mod, [a], 'Object', undefined),
+        ok = beamtalk_class_metadata:insert('Hot', new_mod, [a, b], 'Value', undefined),
         ?assertEqual({ok, new_mod}, beamtalk_class_metadata:lookup_module('Hot')),
         ?assertEqual({ok, new_mod, [a, b]}, beamtalk_class_metadata:lookup_methods('Hot')),
         ?assertEqual({ok, 'Value'}, beamtalk_class_metadata:lookup_superclass('Hot'))
@@ -90,7 +92,7 @@ insert_overwrites_test() ->
 
 partial_superclass_only_test() ->
     with_clean_table(fun() ->
-        ok = beamtalk_class_metadata:insert('Leaf', undefined, undefined, 'Object'),
+        ok = beamtalk_class_metadata:insert('Leaf', undefined, undefined, 'Object', undefined),
         ?assertEqual(not_found, beamtalk_class_metadata:lookup_module('Leaf')),
         ?assertEqual(not_found, beamtalk_class_metadata:lookup_methods('Leaf')),
         ?assertEqual({ok, 'Object'}, beamtalk_class_metadata:lookup_superclass('Leaf'))
@@ -98,7 +100,7 @@ partial_superclass_only_test() ->
 
 partial_module_only_test() ->
     with_clean_table(fun() ->
-        ok = beamtalk_class_metadata:insert('Reg', some_mod, undefined, undefined),
+        ok = beamtalk_class_metadata:insert('Reg', some_mod, undefined, undefined, undefined),
         ?assertEqual({ok, some_mod}, beamtalk_class_metadata:lookup_module('Reg')),
         ?assertEqual(not_found, beamtalk_class_metadata:lookup_methods('Reg')),
         ?assertEqual(not_found, beamtalk_class_metadata:lookup_superclass('Reg'))
@@ -107,14 +109,14 @@ partial_module_only_test() ->
 %% `none` is a real root-class superclass, distinct from the `undefined` sentinel.
 superclass_none_is_not_unset_test() ->
     with_clean_table(fun() ->
-        ok = beamtalk_class_metadata:insert('Root', root_mod, [], none),
+        ok = beamtalk_class_metadata:insert('Root', root_mod, [], none, undefined),
         ?assertEqual({ok, none}, beamtalk_class_metadata:lookup_superclass('Root'))
     end).
 
 %% An empty selector list is a real value, distinct from `undefined`.
 empty_selectors_is_not_unset_test() ->
     with_clean_table(fun() ->
-        ok = beamtalk_class_metadata:insert('NoClassMethods', m, [], 'Object'),
+        ok = beamtalk_class_metadata:insert('NoClassMethods', m, [], 'Object', undefined),
         ?assertEqual({ok, m, []}, beamtalk_class_metadata:lookup_methods('NoClassMethods'))
     end).
 
@@ -122,8 +124,41 @@ empty_selectors_is_not_unset_test() ->
 %% module is an incomplete row, so it reads as not_found (keeps the spec honest).
 lookup_methods_requires_module_test() ->
     with_clean_table(fun() ->
-        ok = beamtalk_class_metadata:insert('SelectorsOnly', undefined, [foo], 'Object'),
+        ok = beamtalk_class_metadata:insert('SelectorsOnly', undefined, [foo], 'Object', undefined),
         ?assertEqual(not_found, beamtalk_class_metadata:lookup_methods('SelectorsOnly'))
+    end).
+
+%%====================================================================
+%% is_abstract (BT-3047 / ADR 0109 amendment)
+%%====================================================================
+
+%% Round-trips both booleans — not_found is a distinct case (tested below),
+%% not a defaulted `false`.
+lookup_is_abstract_round_trips_test() ->
+    with_clean_table(fun() ->
+        ok = beamtalk_class_metadata:insert('Abstract1', m, [], 'Object', true),
+        ok = beamtalk_class_metadata:insert('Concrete1', m, [], 'Object', false),
+        ?assertEqual({ok, true}, beamtalk_class_metadata:lookup_is_abstract('Abstract1')),
+        ?assertEqual({ok, false}, beamtalk_class_metadata:lookup_is_abstract('Concrete1'))
+    end).
+
+%% An absent row, and a row whose is_abstract field was never written, both
+%% read as not_found — never a silently defaulted boolean in either direction
+%% (see the function's own doc for why: a `false` default could let a
+%% genuinely abstract class construct successfully).
+lookup_is_abstract_not_found_test() ->
+    with_clean_table(fun() ->
+        ?assertEqual(not_found, beamtalk_class_metadata:lookup_is_abstract('NoSuchClass')),
+        ok = beamtalk_class_metadata:insert('NoAbstractField', m, [], 'Object', undefined),
+        ?assertEqual(not_found, beamtalk_class_metadata:lookup_is_abstract('NoAbstractField'))
+    end).
+
+insert_overwrites_is_abstract_test() ->
+    with_clean_table(fun() ->
+        ok = beamtalk_class_metadata:insert('Flippy', m, [], 'Object', true),
+        ?assertEqual({ok, true}, beamtalk_class_metadata:lookup_is_abstract('Flippy')),
+        ok = beamtalk_class_metadata:insert('Flippy', m, [], 'Object', false),
+        ?assertEqual({ok, false}, beamtalk_class_metadata:lookup_is_abstract('Flippy'))
     end).
 
 %%====================================================================
@@ -132,7 +167,7 @@ lookup_methods_requires_module_test() ->
 
 delete_removes_whole_row_test() ->
     with_clean_table(fun() ->
-        ok = beamtalk_class_metadata:insert('Gone', m, [], 'Object'),
+        ok = beamtalk_class_metadata:insert('Gone', m, [], 'Object', undefined),
         ok = beamtalk_class_metadata:delete('Gone'),
         ?assertEqual(not_found, beamtalk_class_metadata:lookup_module('Gone')),
         ?assertEqual(not_found, beamtalk_class_metadata:lookup_methods('Gone')),
@@ -150,10 +185,10 @@ delete_missing_is_ok_test() ->
 
 match_subclasses_test() ->
     with_clean_table(fun() ->
-        ok = beamtalk_class_metadata:insert('Object', undefined, undefined, none),
-        ok = beamtalk_class_metadata:insert('Actor', undefined, undefined, 'Object'),
-        ok = beamtalk_class_metadata:insert('Counter', undefined, undefined, 'Actor'),
-        ok = beamtalk_class_metadata:insert('Timer', undefined, undefined, 'Actor'),
+        ok = beamtalk_class_metadata:insert('Object', undefined, undefined, none, undefined),
+        ok = beamtalk_class_metadata:insert('Actor', undefined, undefined, 'Object', undefined),
+        ok = beamtalk_class_metadata:insert('Counter', undefined, undefined, 'Actor', undefined),
+        ok = beamtalk_class_metadata:insert('Timer', undefined, undefined, 'Actor', undefined),
         ?assertEqual(['Actor'], beamtalk_class_metadata:match_subclasses('Object')),
         ?assertEqual([], beamtalk_class_metadata:match_subclasses('Counter')),
         ?assertEqual(
@@ -163,8 +198,8 @@ match_subclasses_test() ->
 
 foldl_collects_entries_with_superclass_test() ->
     with_clean_table(fun() ->
-        ok = beamtalk_class_metadata:insert('Object', undefined, undefined, none),
-        ok = beamtalk_class_metadata:insert('Actor', undefined, undefined, 'Object'),
+        ok = beamtalk_class_metadata:insert('Object', undefined, undefined, none, undefined),
+        ok = beamtalk_class_metadata:insert('Actor', undefined, undefined, 'Object', undefined),
         Result = beamtalk_class_metadata:foldl(fun({C, S}, Acc) -> Acc#{C => S} end, #{}),
         ?assertEqual(#{'Object' => none, 'Actor' => 'Object'}, Result)
     end).
@@ -173,8 +208,10 @@ foldl_collects_entries_with_superclass_test() ->
 %% table which only ever held rows that had a superclass written.
 foldl_skips_rows_without_superclass_test() ->
     with_clean_table(fun() ->
-        ok = beamtalk_class_metadata:insert('Actor', undefined, undefined, 'Object'),
-        ok = beamtalk_class_metadata:insert('ModuleOnly', some_mod, undefined, undefined),
+        ok = beamtalk_class_metadata:insert('Actor', undefined, undefined, 'Object', undefined),
+        ok = beamtalk_class_metadata:insert(
+            'ModuleOnly', some_mod, undefined, undefined, undefined
+        ),
         Result = beamtalk_class_metadata:foldl(fun({C, S}, Acc) -> Acc#{C => S} end, #{}),
         ?assertEqual(#{'Actor' => 'Object'}, Result)
     end).
@@ -191,7 +228,7 @@ foldl_empty_returns_acc_test() ->
 %% Default: a freshly inserted compiled-class row has the gate flag off.
 has_runtime_class_methods_defaults_false_test() ->
     with_clean_tables(fun() ->
-        ok = beamtalk_class_metadata:insert('CompileOnly', m, [foo], 'Object'),
+        ok = beamtalk_class_metadata:insert('CompileOnly', m, [foo], 'Object', undefined),
         ?assertNot(beamtalk_class_metadata:has_runtime_class_methods('CompileOnly')),
         %% Unknown class is also false (no row).
         ?assertNot(beamtalk_class_metadata:has_runtime_class_methods('NeverSeen'))
@@ -200,7 +237,7 @@ has_runtime_class_methods_defaults_false_test() ->
 %% Round-trip: write a fun, set the gate flag, fetch it back.
 put_and_lookup_class_method_fun_test() ->
     with_clean_tables(fun() ->
-        ok = beamtalk_class_metadata:insert('Tally', m, [], 'Object'),
+        ok = beamtalk_class_metadata:insert('Tally', m, [], 'Object', undefined),
         Fun = fun(_CS, CV) -> CV end,
         Info = #{block => Fun, arity => 2},
         ok = beamtalk_class_metadata:put_class_method_fun('Tally', bump, Info),
@@ -215,7 +252,7 @@ put_and_lookup_class_method_fun_test() ->
 %% never consulted). This is the compile-time-only skip guarantee.
 lookup_class_method_fun_is_gated_test() ->
     with_clean_tables(fun() ->
-        ok = beamtalk_class_metadata:insert('Gated', m, [], 'Object'),
+        ok = beamtalk_class_metadata:insert('Gated', m, [], 'Object', undefined),
         Info = #{block => fun(_, CV) -> CV end, arity => 2},
         %% Write the fun directly but leave the gate flag false.
         ok = beamtalk_class_metadata:put_class_method_fun('Gated', bump, Info),
@@ -226,7 +263,7 @@ lookup_class_method_fun_is_gated_test() ->
 %% A missing selector returns error even when the gate is open.
 lookup_class_method_fun_missing_selector_test() ->
     with_clean_tables(fun() ->
-        ok = beamtalk_class_metadata:insert('Tally', m, [], 'Object'),
+        ok = beamtalk_class_metadata:insert('Tally', m, [], 'Object', undefined),
         Info = #{block => fun(_, CV) -> CV end, arity => 2},
         ok = beamtalk_class_metadata:put_class_method_fun('Tally', bump, Info),
         ok = beamtalk_class_metadata:set_runtime_class_methods('Tally', [bump]),
@@ -236,8 +273,8 @@ lookup_class_method_fun_missing_selector_test() ->
 %% delete_class_method_funs/1 removes only the target class's funs.
 delete_class_method_funs_test() ->
     with_clean_tables(fun() ->
-        ok = beamtalk_class_metadata:insert('A', m, [], 'Object'),
-        ok = beamtalk_class_metadata:insert('B', m, [], 'Object'),
+        ok = beamtalk_class_metadata:insert('A', m, [], 'Object', undefined),
+        ok = beamtalk_class_metadata:insert('B', m, [], 'Object', undefined),
         InfoA = #{block => fun(_, CV) -> CV end, arity => 2},
         InfoB = #{block => fun(_, CV) -> CV end, arity => 2},
         ok = beamtalk_class_metadata:put_class_method_fun('A', f, InfoA),
@@ -254,7 +291,7 @@ delete_class_method_funs_test() ->
 %% delete/1 (class teardown) also purges the funs sibling table.
 delete_row_purges_funs_test() ->
     with_clean_tables(fun() ->
-        ok = beamtalk_class_metadata:insert('Gone', m, [], 'Object'),
+        ok = beamtalk_class_metadata:insert('Gone', m, [], 'Object', undefined),
         Info = #{block => fun(_, CV) -> CV end, arity => 2},
         ok = beamtalk_class_metadata:put_class_method_fun('Gone', f, Info),
         ok = beamtalk_class_metadata:set_runtime_class_methods('Gone', [f]),
@@ -353,7 +390,7 @@ lookup_class_method_fun_when_fun_table_absent_test() ->
     ets:delete_all_objects(?FUN_TABLE),
     try
         %% Set up a class with the gate flag enabled while both tables exist.
-        ok = beamtalk_class_metadata:insert('GateClass', m, [], 'Object'),
+        ok = beamtalk_class_metadata:insert('GateClass', m, [], 'Object', undefined),
         Info = #{block => fun(_, V) -> V end, arity => 2},
         ok = beamtalk_class_metadata:put_class_method_fun('GateClass', f, Info),
         ok = beamtalk_class_metadata:set_runtime_class_methods('GateClass', [f]),

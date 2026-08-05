@@ -168,9 +168,9 @@ inherits_from_test_() ->
             beamtalk_class_registry:ensure_hierarchy_table(),
             Saved = ets:tab2list(beamtalk_class_metadata),
             ets:delete_all_objects(beamtalk_class_metadata),
-            beamtalk_class_metadata:insert('Object', undefined, undefined, none),
-            beamtalk_class_metadata:insert('Actor', undefined, undefined, 'Object'),
-            beamtalk_class_metadata:insert('Counter', undefined, undefined, 'Actor'),
+            beamtalk_class_metadata:insert('Object', undefined, undefined, none, undefined),
+            beamtalk_class_metadata:insert('Actor', undefined, undefined, 'Object', undefined),
+            beamtalk_class_metadata:insert('Counter', undefined, undefined, 'Actor', undefined),
             Saved
         end,
         fun(Saved) ->
@@ -209,10 +209,10 @@ direct_subclasses_test_() ->
             beamtalk_class_registry:ensure_hierarchy_table(),
             Saved = ets:tab2list(beamtalk_class_metadata),
             ets:delete_all_objects(beamtalk_class_metadata),
-            beamtalk_class_metadata:insert('Object', undefined, undefined, none),
-            beamtalk_class_metadata:insert('Actor', undefined, undefined, 'Object'),
-            beamtalk_class_metadata:insert('Counter', undefined, undefined, 'Actor'),
-            beamtalk_class_metadata:insert('Timer', undefined, undefined, 'Actor'),
+            beamtalk_class_metadata:insert('Object', undefined, undefined, none, undefined),
+            beamtalk_class_metadata:insert('Actor', undefined, undefined, 'Object', undefined),
+            beamtalk_class_metadata:insert('Counter', undefined, undefined, 'Actor', undefined),
+            beamtalk_class_metadata:insert('Timer', undefined, undefined, 'Actor', undefined),
             Saved
         end,
         fun(Saved) ->
@@ -245,10 +245,10 @@ all_subclasses_test_() ->
             beamtalk_class_registry:ensure_hierarchy_table(),
             Saved = ets:tab2list(beamtalk_class_metadata),
             ets:delete_all_objects(beamtalk_class_metadata),
-            beamtalk_class_metadata:insert('Object', undefined, undefined, none),
-            beamtalk_class_metadata:insert('Actor', undefined, undefined, 'Object'),
-            beamtalk_class_metadata:insert('Counter', undefined, undefined, 'Actor'),
-            beamtalk_class_metadata:insert('Timer', undefined, undefined, 'Actor'),
+            beamtalk_class_metadata:insert('Object', undefined, undefined, none, undefined),
+            beamtalk_class_metadata:insert('Actor', undefined, undefined, 'Object', undefined),
+            beamtalk_class_metadata:insert('Counter', undefined, undefined, 'Actor', undefined),
+            beamtalk_class_metadata:insert('Timer', undefined, undefined, 'Actor', undefined),
             Saved
         end,
         fun(Saved) ->
@@ -426,20 +426,22 @@ get_method_return_type_test_() ->
                 superclass => none,
                 method_return_types => #{getValue => 'Integer'}
             }),
-            beamtalk_class_metadata:insert('TestObject1002', undefined, undefined, none),
+            beamtalk_class_metadata:insert('TestObject1002', undefined, undefined, none, undefined),
             {ok, ParentPid} = beamtalk_object_class:start('TestParent1002', #{
                 superclass => 'TestObject1002',
                 method_return_types => #{name => 'String'},
                 class_method_return_types => #{'from:' => 'TestParent1002'}
             }),
             beamtalk_class_metadata:insert(
-                'TestParent1002', undefined, undefined, 'TestObject1002'
+                'TestParent1002', undefined, undefined, 'TestObject1002', undefined
             ),
             {ok, ChildPid} = beamtalk_object_class:start('TestChild1002', #{
                 superclass => 'TestParent1002',
                 method_return_types => #{size => 'Integer'}
             }),
-            beamtalk_class_metadata:insert('TestChild1002', undefined, undefined, 'TestParent1002'),
+            beamtalk_class_metadata:insert(
+                'TestChild1002', undefined, undefined, 'TestParent1002', undefined
+            ),
             {Saved, [ObjPid, ParentPid, ChildPid]}
         end,
         fun({Saved, Pids}) ->
@@ -1025,7 +1027,9 @@ bt1982_restart_class_already_started_test_() ->
             },
             {ok, Pid} = beamtalk_object_class:start(ClassName, ClassInfo),
             %% Record in module table so restart_class can find it.
-            beamtalk_class_metadata:insert(ClassName, beamtalk_class_bt, undefined, undefined),
+            beamtalk_class_metadata:insert(
+                ClassName, beamtalk_class_bt, undefined, undefined, undefined
+            ),
             {ClassName, Pid}
         end,
         fun({_Name, Pid}) ->
@@ -1086,7 +1090,9 @@ bt1982_restart_class_recovers_dead_process_test_() ->
             %% Use start/2 (unlinked) so we can kill it without taking
             %% down the EUnit test supervisor.
             {ok, Pid} = beamtalk_object_class:start(ClassName, ClassInfo),
-            beamtalk_class_metadata:insert(ClassName, beamtalk_class_bt, undefined, undefined),
+            beamtalk_class_metadata:insert(
+                ClassName, beamtalk_class_bt, undefined, undefined, undefined
+            ),
             %% Kill the class process so restart_class can resurrect it.
             MRef = monitor(process, Pid),
             exit(Pid, kill),
@@ -1144,12 +1150,14 @@ bt1982_get_method_return_type_walks_on_process_exit_test_() ->
                 superclass => none,
                 method_return_types => #{answer => 'Integer'}
             }),
-            beamtalk_class_metadata:insert('BT1982RTParent', undefined, undefined, none),
+            beamtalk_class_metadata:insert('BT1982RTParent', undefined, undefined, none, undefined),
             {ok, ChildPid} = beamtalk_object_class:start('BT1982RTChild', #{
                 superclass => 'BT1982RTParent',
                 method_return_types => #{}
             }),
-            beamtalk_class_metadata:insert('BT1982RTChild', undefined, undefined, 'BT1982RTParent'),
+            beamtalk_class_metadata:insert(
+                'BT1982RTChild', undefined, undefined, 'BT1982RTParent', undefined
+            ),
             [ParentPid, ChildPid]
         end,
         fun(Pids) ->

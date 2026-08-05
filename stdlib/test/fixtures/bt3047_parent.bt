@@ -1,0 +1,36 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3047 / ADR 0109 amendment: owns the block containing an inherited
+// self-send (and, separately, an instantiation intrinsic) that gets handed to
+// another class's block-taking method. The block executes inside that other
+// class's gen_server process (ADR 0109), so both `self foo` and `self new`
+// must resolve against THIS class's lexical identity — closure-captured via
+// `ClassSelf` — not the process the block happens to execute in.
+
+BT3047Ancestor subclass: BT3047Parent
+
+  // `foo` is inherited from BT3047Ancestor (not overridden here). `self foo`
+  // is a statement, its result captured in a local before the `^` relays it
+  // out through aDriverClass's frame — matching the shape of BT-3047's own
+  // repro (`self foo. ^x`).
+  class runFooThrough: aDriverClass over: aList :: List -> Symbol =>
+    aDriverClass
+      run: [:x |
+        result := self foo
+        ^result
+      ]
+      over: aList
+    #wrong
+
+  // `new` is inherited from Value (`class sealed new => @intrinsic basicNew`,
+  // never overridden here). Returns the constructed instance's own class, so
+  // the test can assert it's BT3047Parent — not aDriverClass, and not Value.
+  class makeSelfThrough: aDriverClass over: aList :: List =>
+    aDriverClass
+      run: [:x |
+        result := self new
+        ^result
+      ]
+      over: aList
+    #wrong

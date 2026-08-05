@@ -377,7 +377,9 @@ mro_ancestor_delivery_test_() ->
             ?_test(begin
                 %% A sibling-class subscriber is NOT matched (not on the chain).
                 build_hierarchy(),
-                beamtalk_class_metadata:insert('OtherEvent', undefined, undefined, 'DomainEvent'),
+                beamtalk_class_metadata:insert(
+                    'OtherEvent', undefined, undefined, 'DomainEvent', undefined
+                ),
                 Collector = self(),
                 Sub = spawn_subscriber(Collector),
                 try
@@ -491,8 +493,8 @@ mro_cyclic_hierarchy_test_() ->
         [
             ?_test(begin
                 %% Cycle: 'CycA' -> 'CycB' -> 'CycA' -> ...
-                beamtalk_class_metadata:insert('CycA', undefined, undefined, 'CycB'),
-                beamtalk_class_metadata:insert('CycB', undefined, undefined, 'CycA'),
+                beamtalk_class_metadata:insert('CycA', undefined, undefined, 'CycB', undefined),
+                beamtalk_class_metadata:insert('CycB', undefined, undefined, 'CycA', undefined),
                 Collector = self(),
                 Sub = spawn_subscriber(Collector),
                 try
@@ -1613,9 +1615,9 @@ insert_subscription_row(Class, Pid, Handler, Once) ->
 %% Rows carry only the superclass link (module/selectors undefined — the MRO walk
 %% reads only superclass). cleanup/1 drops these rows after each test.
 build_hierarchy() ->
-    beamtalk_class_metadata:insert('DomainEvent', undefined, undefined, none),
-    beamtalk_class_metadata:insert('UIEvent', undefined, undefined, 'DomainEvent'),
-    beamtalk_class_metadata:insert('ButtonClicked', undefined, undefined, 'UIEvent'),
+    beamtalk_class_metadata:insert('DomainEvent', undefined, undefined, none, undefined),
+    beamtalk_class_metadata:insert('UIEvent', undefined, undefined, 'DomainEvent', undefined),
+    beamtalk_class_metadata:insert('ButtonClicked', undefined, undefined, 'UIEvent', undefined),
     ok.
 
 %% Set up for the `when:send:to:` test: the standalone bus (via `setup/0`) plus

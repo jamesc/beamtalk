@@ -3429,14 +3429,28 @@ impl CoreErlangGenerator {
         // BT-1548: basicNew/basicNewWith intrinsics in class method context.
         // When Value defines `class sealed new => @intrinsic basicNew`, the class
         // method body needs to call class_self_new (which routes through handle_new
-        // to the target class's auto-generated new/0 via the process dictionary).
+        // to the target class's auto-generated new/0).
+        //
+        // BT-3047 / ADR 0109 amendment: ClassName is derived from `ClassSelf`
+        // (closure-captured, correct even inside a block executing in a foreign
+        // class's process) rather than the process dictionary — the same fix
+        // applied to the instantiation intrinsics in `dispatch_codegen.rs`. Module
+        // is resolved by name via `beamtalk_class_instantiation:resolve_module_or_raise/2`
+        // rather than `element(3, ClassSelf)` (`class_mod`), which is not reliably
+        // the calling class's own module for an inherited class method — see that
+        // function's doc for why (discovered as a `Value does not understand 'x'`-
+        // shaped regression while implementing this amendment).
         if !is_quoted && self.in_class_method() {
             match name {
                 "basicNew" => {
                     return Ok(docvec![
                         "call 'beamtalk_class_instantiation':'class_self_new'(",
-                        "call 'erlang':'get'('beamtalk_class_name'), ",
-                        "call 'erlang':'get'('beamtalk_class_module'), [])",
+                        "call 'beamtalk_primitive':'class_name_from_tag'(call 'erlang':'element'(2, ",
+                        leaf::var("ClassSelf"),
+                        ")), call 'beamtalk_class_instantiation':'resolve_module_or_raise'(",
+                        "call 'beamtalk_primitive':'class_name_from_tag'(call 'erlang':'element'(2, ",
+                        leaf::var("ClassSelf"),
+                        ")), 'new'), [])",
                     ]);
                 }
                 "basicNewWith" => {
@@ -3447,8 +3461,12 @@ impl CoreErlangGenerator {
                         .unwrap_or_else(|| "InitArgs".to_string());
                     return Ok(docvec![
                         "call 'beamtalk_class_instantiation':'class_self_new'(",
-                        "call 'erlang':'get'('beamtalk_class_name'), ",
-                        "call 'erlang':'get'('beamtalk_class_module'), [",
+                        "call 'beamtalk_primitive':'class_name_from_tag'(call 'erlang':'element'(2, ",
+                        leaf::var("ClassSelf"),
+                        ")), call 'beamtalk_class_instantiation':'resolve_module_or_raise'(",
+                        "call 'beamtalk_primitive':'class_name_from_tag'(call 'erlang':'element'(2, ",
+                        leaf::var("ClassSelf"),
+                        ")), 'new:'), [",
                         leaf::var(param),
                         "])",
                     ]);

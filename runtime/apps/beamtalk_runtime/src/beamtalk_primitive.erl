@@ -20,6 +20,7 @@ See also: docs/internal/design-self-as-object.md Section 3.3
     send/3,
     responds_to/2,
     class_name_to_module/1,
+    class_name_from_tag/1,
     print_string/1,
     display_string/1,
     process_label/1,
@@ -970,7 +971,10 @@ Extract the class name atom from a class tag or class object tag.
 
 Handles both plain instance tags (e.g. 'Counter') and class object tags
 (e.g. 'Counter class') — in both cases returns the class name atom 'Counter'.
-Used by responds_to/2 to delegate to beamtalk_dispatch:responds_to/2.
+Used by responds_to/2 to delegate to beamtalk_dispatch:responds_to/2, and
+(BT-3047 / ADR 0109 amendment) called directly from generated Core Erlang to
+untag `element(2, ClassSelf)` at the inherited-self-dispatch and instantiation-
+intrinsic sites in `dispatch_codegen.rs`/`mod.rs` — hence the export.
 """.
 -spec class_name_from_tag(atom()) -> atom() | undefined.
 class_name_from_tag(Tag) ->
