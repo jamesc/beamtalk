@@ -104,4 +104,28 @@ defmodule BtAttach.TomlTest do
       assert {:error, {:malformed, 2, _}} = Toml.parse("[oidc]\nissuer\n")
     end
   end
+
+  describe "parser divergence from the Rust `toml` crate (BT-3005)" do
+    # The desktop broker's `oidc_guard.rs` parses the same `ide.toml` file
+    # with the full `toml` crate to decide whether to refuse spawning a
+    # front. These two constructs are standard TOML that the `toml` crate
+    # resolves into a populated `[oidc]` table, but this restricted reader
+    # doesn't expand — so the broker sees "configured" (over-refuses) in
+    # cases this side misses. See oidc_guard.rs's module doc comment for the
+    # full safety argument; this locks in the two divergence examples it
+    # documents from the Elixir side.
+    test "a top-level dotted-key oidc.* pair is NOT recognized as an [oidc] table" do
+      assert {:ok, map} = Toml.parse(~s(oidc.issuer = "https://idp.example.com"\n))
+
+      refute Map.has_key?(map, "oidc")
+      assert map["oidc.issuer"] == "https://idp.example.com"
+    end
+
+    test "a quoted table-header key is NOT recognized as the bare [oidc] table" do
+      assert {:ok, map} = Toml.parse(~s(["oidc"]\nissuer = "https://idp.example.com"\n))
+
+      refute Map.has_key?(map, "oidc")
+      assert map["\"oidc\""]["issuer"] == "https://idp.example.com"
+    end
+  end
 end

@@ -18,6 +18,61 @@
 //! any `BT_OIDC_*` env var is non-empty, or `ide.toml` has a non-empty
 //! `[oidc]` table.
 //!
+//! ## Parser divergence safety argument (BT-3005)
+//!
+//! This module parses `ide.toml` with the full `toml` crate (TOML v1.0.0);
+//! the front parses the same file with `BtAttach.Toml`
+//! (`editors/liveview/lib/bt_attach/toml.ex`), a deliberately tiny hand-rolled
+//! reader that only understands: line/trailing comments, `[table]` /
+//! `[table.nested]` headers written with literal `.`-separated segments,
+//! `key = "string"` pairs, and `key = ["a", "b"]` single-line string arrays.
+//! Anything else (dotted-key pairs like `oidc.issuer = "x"`, quoted table
+//! headers like `["oidc"]`, inline tables, non-string scalars, multi-line
+//! strings/arrays) is rejected outright by `BtAttach.Toml` with a structured
+//! `{:unsupported, _, _}` / `{:malformed, _, _}` error, which
+//! `BtAttach.IdeConfig.load!/1` turns into a raise — the front refuses to
+//! boot rather than silently mis-parse such a file.
+//!
+//! For every file where `BtAttach.IdeConfig.requested?/1` sees a populated
+//! `[oidc]` table, [`oidc_requested_by_file`] here also refuses to spawn —
+//! this side never under-refuses relative to the front's own check. That
+//! holds for two different reasons depending on the construct:
+//!
+//!   * If the construct is standard TOML `BtAttach.Toml` doesn't expand
+//!     (dotted-key pairs, quoted table-header keys — see the two examples
+//!     below), the `toml` crate resolves it to the identical `oidc` table
+//!     `BtAttach.Toml` would have needed the long-hand `[oidc]` form to see,
+//!     so this side detects "configured" too — often in *more* cases than
+//!     the front does, never fewer.
+//!   * If the construct is something the `toml` crate rejects as invalid
+//!     TOML but `BtAttach.Toml`'s more permissive line-based reader still
+//!     accepts (e.g. silently merging a redefined `[oidc]` header, which
+//!     standard TOML disallows — confirmed against `toml` 1.1), this side's
+//!     unparsable-file fallback treats the parse error as "configured"
+//!     anyway (fail-closed, see [`oidc_requested_by_file`]'s doc comment) —
+//!     so the outcome is still a refusal, never a silent pass-through.
+//!
+//! Concretely:
+//!
+//!   * `oidc.issuer = "x"` at the top level (dotted-key pair) — `BtAttach.Toml`
+//!     stores this under the literal key `"oidc.issuer"` (it doesn't expand
+//!     dotted pair keys), so `requested?/1` sees no `"oidc"` entry and treats
+//!     the front as unrequested. The `toml` crate resolves the identical file
+//!     into `{"oidc": {"issuer": "x"}}`, so [`oidc_requested_by_file`] refuses
+//!     to spawn anyway — the broker over-refuses here, it never under-refuses.
+//!   * `["oidc"]` (a quoted table-header key) — `BtAttach.Toml` treats the
+//!     quoted literal (quote characters included) as the table name, so it
+//!     never matches the bare key `"oidc"`. The `toml` crate normalizes
+//!     quoted and bare table-header keys to the same `oidc` entry, so this
+//!     side again sees "configured" in a case `BtAttach.Toml` would miss.
+//!
+//! Regression tests below (`dotted_key_oidc_is_detected_even_though_bt_attach_toml_misses_it`,
+//! `quoted_table_header_oidc_is_detected_even_though_bt_attach_toml_misses_it`,
+//! `redefined_oidc_header_is_unparsable_here_and_still_fails_closed`) lock in
+//! the divergence examples above: this resolves BT-3005 option (a) — the
+//! grammars diverge only in the safe direction, so no behavior change is
+//! required, just this documented argument and tests.
+//!
 //! **DDD Context:** Desktop Shell
 
 use std::path::{Path, PathBuf};
@@ -84,6 +139,11 @@ pub fn oidc_requested_by_env() -> Option<OidcSource> {
 /// treated conservatively as "configured" — refusing to spawn is the safe
 /// failure mode, not silently ignoring a file the front itself might still
 /// choke on.
+///
+/// Uses the full `toml` crate, not the front's restricted `BtAttach.Toml`
+/// reader — see this module's doc comment ("Parser divergence safety
+/// argument (BT-3005)") for why that divergence only ever makes this check
+/// *more* conservative than the front's, never less.
 #[must_use]
 pub fn oidc_requested_by_file(ide_toml_path: &Path) -> Option<OidcSource> {
     let Ok(content) = std::fs::read_to_string(ide_toml_path) else {
@@ -226,6 +286,73 @@ mod tests {
         );
         // SAFETY: guarded by ENV_LOCK above.
         unsafe { std::env::remove_var("BT_IDE_CONFIG") };
+    }
+
+    // BT-3005: `BtAttach.Toml` (the front's hand-rolled reader) does not
+    // expand dotted-key pairs — it would store this under the literal key
+    // `"oidc.issuer"`, so `BtAttach.IdeConfig.requested?/1` would see no
+    // `"oidc"` entry and treat OIDC as unrequested. The full `toml` crate
+    // resolves the same file into `{"oidc": {"issuer": ...}}`, so this side
+    // must still refuse to spawn — over-refusing relative to the front,
+    // never under-refusing. See the module doc comment's safety argument.
+    #[test]
+    fn dotted_key_oidc_is_detected_even_though_bt_attach_toml_misses_it() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("ide.toml");
+        std::fs::write(
+            &path,
+            "oidc.issuer = \"https://idp.example.com\"\noidc.client_id = \"beamtalk-ide\"\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            oidc_requested_by_file(&path),
+            Some(OidcSource::IdeToml(path)),
+            "a dotted-key oidc.* pair is standard TOML for a populated [oidc] \
+             table even though BtAttach.Toml's restricted grammar doesn't \
+             expand it — this side must still refuse to spawn"
+        );
+    }
+
+    // BT-3005: `BtAttach.Toml` treats a quoted table-header key (`["oidc"]`)
+    // as a literal table name including the quote characters, so it never
+    // matches the bare key `"oidc"` and `requested?/1` sees the front as
+    // unrequested. The `toml` crate normalizes quoted and bare table-header
+    // keys to the same entry, so this side must still detect it.
+    #[test]
+    fn quoted_table_header_oidc_is_detected_even_though_bt_attach_toml_misses_it() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("ide.toml");
+        std::fs::write(&path, "[\"oidc\"]\nissuer = \"https://idp.example.com\"\n").unwrap();
+
+        assert_eq!(
+            oidc_requested_by_file(&path),
+            Some(OidcSource::IdeToml(path)),
+            "a quoted table-header key is standard TOML for [oidc] even \
+             though BtAttach.Toml's restricted grammar doesn't normalize it \
+             — this side must still refuse to spawn"
+        );
+    }
+
+    // BT-3005: `BtAttach.Toml`'s permissive line-based reader silently merges
+    // a redefined `[oidc]` header (no duplicate-table check), while standard
+    // TOML disallows redefining a table and the `toml` crate rejects this as
+    // invalid. The rejection routes through the unparsable-file fallback,
+    // which is already "configured" (fail-closed) — so even a construct
+    // `BtAttach.Toml` accepts but the `toml` crate doesn't still ends in a
+    // refusal, never a silent pass-through.
+    #[test]
+    fn redefined_oidc_header_is_unparsable_here_and_still_fails_closed() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("ide.toml");
+        std::fs::write(&path, "[oidc]\nissuer = \"a\"\n[oidc]\nclient_id = \"b\"\n").unwrap();
+
+        assert_eq!(
+            oidc_requested_by_file(&path),
+            Some(OidcSource::IdeToml(path)),
+            "a redefined [oidc] header is invalid TOML the `toml` crate \
+             rejects; the unparsable-file fallback must still refuse to spawn"
+        );
     }
 
     #[test]
