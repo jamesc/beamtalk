@@ -1478,10 +1478,12 @@ impl CoreErlangGenerator {
     /// preamble from `capture_args_with_preamble` is guaranteed to be consumed
     /// correctly for — a zero-argument call (e.g. bare `self new`) produces a
     /// `Nil` args preamble and must stay a *closed* expression. Recomputing this
-    /// cheap expression (a suffix check + `binary_to_existing_atom`) up to twice
-    /// per call site is negligible and matches the pre-existing style at these
-    /// same sites, which already repeated process-dictionary reads inline rather
-    /// than hoisting them through a `let`.
+    /// cheap expression (a suffix check + `binary_to_existing_atom`) inline at
+    /// each use — up to three times per call site for the `spawn`/`spawnAs:`/
+    /// `spawnWith:as:` intrinsics, which also resolve `is_abstract` — is
+    /// negligible and matches the pre-existing style at these same sites, which
+    /// already repeated process-dictionary reads inline rather than hoisting
+    /// them through a `let`.
     pub(super) fn class_self_name_doc() -> Document<'static> {
         docvec![
             "call 'beamtalk_primitive':'class_name_from_tag'(call 'erlang':'element'(2, ",
