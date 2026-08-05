@@ -94,7 +94,14 @@ defmodule BtAttach.MixProject do
       # Decision 1). Assent is a lightweight, framework-agnostic auth library
       # (no Plug/DB coupling) that does discovery, PKCE and ID-token validation
       # over OTP's built-in :httpc — we don't roll our own crypto (Principle 5).
-      {:assent, "~> 0.2"}
+      {:assent, "~> 0.2"},
+      # Test-only: stubs `:net_adm.names/0` and `:net_adm.names/1` independently
+      # (BT-3003 regression, workspace_classify_unreachable_hostname_test.exs) —
+      # dynamically starting real distribution isn't reliable across CI
+      # containers (some can't bring up epmd/dist post-boot), so the hostname
+      # self-resolution bug is reproduced by mocking the two arities directly
+      # instead of a live epmd. Never included in a release (`only: :test`).
+      {:meck, "~> 1.0", only: :test}
     ]
   end
 
