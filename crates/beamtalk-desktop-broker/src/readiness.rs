@@ -305,7 +305,7 @@ struct ErrBody {
 ///
 /// **Measured against a real `dist-liveview` release (BT-3004), that
 /// assumption does not hold on loopback** — the only topology this broker
-/// ever spawns into (ADR 0091 "Local-only posture"). Racing a bad cookie and
+/// ever spawns into (ADR 0097 "Local-only posture"). Racing a bad cookie and
 /// a dead-workspace target against a real front, both `503`s came back in
 /// single-digit-to-low-double-digit milliseconds (bad cookie: ~7–27ms across
 /// 3 runs; dead workspace: ~15ms), not after any multi-second wait.
