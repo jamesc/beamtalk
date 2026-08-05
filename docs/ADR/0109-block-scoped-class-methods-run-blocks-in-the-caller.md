@@ -7,7 +7,7 @@ Accepted (2026-07-28)
 
 **Issues:** BT-3018 (class-process block execution) · BT-3020 (handle ownership/leak, partially)
 **Related:** BT-2975 (FileHandle incremental I/O — surfaced the problem), BT-3019 (unbounded `readAll` — same blast radius)
-**Amendment (proposed, 2026-08-05):** BT-3047 — class self-identity resolution for self-sends and instantiation intrinsics inside a block that executes in a foreign class's process. **Status of the amendment below: drafted, not yet accepted** — recorded here for review before implementation.
+**Amendment (Accepted, 2026-08-05):** BT-3047 — class self-identity resolution for self-sends and instantiation intrinsics inside a block that executes in a foreign class's process. See the Amendment section below for the accepted decision and implementation plan.
 
 ## Context
 
@@ -88,9 +88,9 @@ Not in scope: a general continuation protocol for class methods; changing the 60
 - `File open:mode:` (no block) is unaffected — it already returns to the caller immediately.
 - The handle remains non-`raw` (BT-2975): the descriptor is still opened in the class process, so it must stay usable from another process.
 
-## Amendment (proposed, 2026-08-05, BT-3047): Class Self-Identity Must Be Closure-Captured, Not Process-Read
+## Amendment (Accepted, 2026-08-05, BT-3047): Class Self-Identity Must Be Closure-Captured, Not Process-Read
 
-**Status: drafted, awaiting decision — not yet accepted.**
+**Status: Accepted.**
 
 ### Problem
 
@@ -188,7 +188,7 @@ Extend `stdlib/test/class_var_nlr_shadow_test.bt` (or a sibling file if scope gr
 - `beamtalk_class_dispatch.erl` — `class_send/3`, `class_send_dispatch/3`, `handle_metaclass_self_call/2` (BT-2005 precedent)
 - `crates/beamtalk-core/src/ast/well_known.rs` — the call-site interception mechanism this decision extends
 
-### Amendment (proposed, BT-3047) references
+### Amendment (BT-3047) references
 
 - BT-3047 — the issue driving the amendment; found during BT-3039's review
 - BT-908 — origin of the polymorphic-factory intent for instantiation intrinsics the amendment preserves
