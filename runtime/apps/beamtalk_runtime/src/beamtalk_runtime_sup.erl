@@ -119,6 +119,18 @@ init([]) ->
             shutdown => 5000,
             type => worker,
             modules => [beamtalk_object_watch]
+        },
+        %% `File open:mode:` handle-registry (BT-3020): tracks outstanding
+        %% caller-owned FileHandles and closes an owner's handles on its
+        %% 'DOWN'. Module lives in beamtalk_stdlib (with the rest of File),
+        %% same cross-app placement as the beamtalk_stdlib worker above.
+        #{
+            id => beamtalk_file_handle_registry,
+            start => {beamtalk_file_handle_registry, start_link, []},
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [beamtalk_file_handle_registry]
         }
     ],
 

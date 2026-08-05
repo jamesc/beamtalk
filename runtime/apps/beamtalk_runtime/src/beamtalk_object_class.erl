@@ -1106,6 +1106,12 @@ state, restoring the previously-seeded session context afterwards.
 (explicit-context path, BT-2379) or `seed_caller_session_context/1` (legacy
 3-tuple fallback). It is always run, even on a method-body crash, so a
 concurrent call from another session never observes a stale mirrored context.
+
+BT-3020: also mirrors the caller's pid into `beamtalk_dispatch_caller_pid` for
+the duration of the call. `From` is already supplied here for free by every
+`handle_call` — no wire-protocol change, unlike the session context above.
+`File open:mode:` reads this key to resolve tier-2 (calling-actor) FileHandle
+ownership when there is no session context to fall back to (tier 1).
 """.
 -spec dispatch_class_method(
     atom(), list(), {pid(), term()} | term(), #class_state{}, fun(() -> ok)
@@ -1118,6 +1124,7 @@ dispatch_class_method(Selector, Args, From, State, Restore) ->
         module = Module,
         class_state = ClassVars
     } = State,
+    PrevCaller = put(beamtalk_dispatch_caller_pid, caller_pid(From)),
     try
         beamtalk_class_dispatch:handle_class_method_call(
             Selector, Args, ClassName, Module, ClassMethods, ClassVars
@@ -1133,8 +1140,13 @@ dispatch_class_method(Selector, Args, From, State, Restore) ->
         {error, not_found} ->
             {reply, {error, not_found}, State}
     after
+        restore_dict_key(beamtalk_dispatch_caller_pid, PrevCaller),
         Restore()
     end.
+
+-spec caller_pid({pid(), term()} | term()) -> pid() | undefined.
+caller_pid({CallerPid, _Tag}) when is_pid(CallerPid) -> CallerPid;
+caller_pid(_) -> undefined.
 
 -doc """
 Seed this class gen_server with a session context passed explicitly in the

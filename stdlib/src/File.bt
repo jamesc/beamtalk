@@ -298,3 +298,19 @@ typed Object subclass: File native: beamtalk_file
   /// File tempDirectory
   /// ```
   class sealed tempDirectory -> String => self delegate
+
+  /// List every outstanding `open:mode:` handle for diagnostics (class method).
+  ///
+  /// Returns an Array of 3-element Arrays `#(path mode owner)`. `owner` is the
+  /// REPL session or actor pid that opened the handle, or `nil` if it was
+  /// opened from compiled code with neither. Handles from `open:do:` and
+  /// `open:mode:do:` never appear — they are block-scoped and always closed
+  /// before the call returns.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// h := (File open: "events.log" mode: #append) unwrap.
+  /// File openHandles   // => #(#("events.log" #append <a Pid> or nil))
+  /// h close.
+  /// ```
+  class sealed openHandles -> Array => self delegate
