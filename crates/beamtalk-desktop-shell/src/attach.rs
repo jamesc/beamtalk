@@ -77,11 +77,12 @@ enum Slot {
     /// for this workspace and no matching [`AttachManager::record_attached`]
     /// or [`AttachManager::release_claim`] has happened yet — a spawn +
     /// readiness wait is presumed in flight. Carries the generation assigned
-    /// at claim time, so [`AttachManager::record_attached_if_claiming`] can
-    /// tell a live claim from a *different*, newer claim for the same
-    /// workspace (the claim was released and re-claimed while the original
-    /// caller's spawn/probe was still in flight) rather than treating any
-    /// `Claiming` slot as a match for any caller.
+    /// at claim time, so [`AttachManager::record_attached_if_claiming`] and
+    /// [`AttachManager::release_claim`] can each tell a live claim from a
+    /// *different*, newer claim for the same workspace (the claim was
+    /// cleared and re-claimed while the original caller's spawn/probe was
+    /// still in flight) rather than treating any `Claiming` slot as a match
+    /// for any caller.
     Claiming(u64),
     /// A front is attached and its window should already exist.
     Attached(AttachedFront),
@@ -200,11 +201,21 @@ impl AttachManager {
 
     /// Release a claim that didn't pan out (spawn or readiness failed) so
     /// the next attach click is free to try again instead of being stuck
-    /// behind a claim nothing will ever resolve. A no-op if `workspace_id`
-    /// isn't currently claiming (e.g. it was already attached, or already
-    /// released) — safe to call defensively from every failure path.
-    pub fn release_claim(&mut self, workspace_id: &str) {
-        if matches!(self.attached.get(workspace_id), Some(Slot::Claiming(_))) {
+    /// behind a claim nothing will ever resolve. A no-op unless `workspace_id`
+    /// is currently claiming *under this exact `generation`* — mirroring
+    /// [`Self::record_attached_if_claiming`]'s guard, and for the same
+    /// reason: checking only "is *a* claim pending" would let a stale caller
+    /// whose own claim was already cleared (e.g. by a concurrent `remove`)
+    /// clear out a *different*, newer claim that has since replaced it —
+    /// silently undoing another in-flight attach's `AlreadyInFlight`
+    /// protection and letting a third `decide_and_claim` spawn a second
+    /// front for the same workspace while that newer claim is still live.
+    /// Safe to call defensively from every failure path regardless of
+    /// whether `workspace_id` was ever actually claimed under this
+    /// generation, was already attached, or was already released.
+    pub fn release_claim(&mut self, workspace_id: &str, generation: u64) {
+        if matches!(self.attached.get(workspace_id), Some(Slot::Claiming(claimed_generation)) if *claimed_generation == generation)
+        {
             self.attached.remove(workspace_id);
         }
     }
@@ -319,7 +330,7 @@ mod tests {
         // lives.
         let mut manager = AttachManager::new();
         let gen1 = claim(&mut manager, "abc123");
-        manager.release_claim("abc123");
+        manager.release_claim("abc123", gen1);
         let gen2 = claim(&mut manager, "abc123");
         assert_ne!(gen1, gen2);
     }
@@ -367,9 +378,9 @@ mod tests {
     #[test]
     fn release_claim_lets_a_failed_attach_be_retried() {
         let mut manager = AttachManager::new();
-        claim(&mut manager, "abc123");
+        let generation = claim(&mut manager, "abc123");
 
-        manager.release_claim("abc123");
+        manager.release_claim("abc123", generation);
 
         assert!(matches!(
             manager.decide_and_claim("abc123"),
@@ -384,7 +395,7 @@ mod tests {
 
         // Defensive call from a failure path must never undo a real,
         // already-recorded attachment.
-        manager.release_claim("abc123");
+        manager.release_claim("abc123", 0);
 
         assert!(manager.is_attached("abc123"));
     }
@@ -392,8 +403,35 @@ mod tests {
     #[test]
     fn release_claim_of_an_untracked_workspace_is_a_no_op() {
         let mut manager = AttachManager::new();
-        manager.release_claim("nonexistent"); // must not panic
+        manager.release_claim("nonexistent", 0); // must not panic
         assert!(!manager.is_attached("nonexistent"));
+    }
+
+    #[test]
+    fn release_claim_refuses_a_stale_generation_after_re_claim() {
+        // The exact race an adversarial review pass found: caller A claims,
+        // something else (e.g. a concurrent `remove`) clears A's claim
+        // before A's own spawn/probe resolves, caller B then claims fresh
+        // (a new generation) — and A's own failure path *still* calls
+        // `release_claim` with its now-stale generation. Without the
+        // generation check, that stale call would see "some claim is
+        // pending" (true — it's B's) and clear B's live claim out from under
+        // it, letting a third `decide_and_claim` spawn a second front for
+        // this workspace while B's attach is still in flight — silently
+        // defeating the `AttachDecision::AlreadyInFlight` protection.
+        let mut manager = AttachManager::new();
+        let stale_generation = claim(&mut manager, "abc123"); // caller A
+        manager.remove("abc123"); // something clears A's claim
+        let fresh_generation = claim(&mut manager, "abc123"); // caller B, fresh
+        assert_ne!(stale_generation, fresh_generation);
+
+        manager.release_claim("abc123", stale_generation); // A's stale failure path
+
+        assert_eq!(
+            manager.decide_and_claim("abc123"),
+            AttachDecision::AlreadyInFlight,
+            "a stale release_claim must not clear a newer, live claim"
+        );
     }
 
     #[test]

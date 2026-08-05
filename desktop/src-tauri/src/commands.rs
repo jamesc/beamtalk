@@ -122,7 +122,7 @@ pub fn attach(
     match attach_and_open_window(&app, &state, &workspace_id, generation) {
         Ok(outcome) => Ok(outcome),
         Err(err) => {
-            locked(&state.attach).release_claim(&workspace_id);
+            locked(&state.attach).release_claim(&workspace_id, generation);
             Err(err)
         }
     }
