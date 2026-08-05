@@ -649,3 +649,39 @@ fragility the issue flagged for approach 1 is caught by CI, not left to
 manual vigilance. `class_of/1` and every selector not in the shared set are
 untouched and still pay the full `is_utf8/1` scan, so dispatch stays exactly
 as consistent with `class` as BT-2999 made it.
+
+### Follow-up: route straight to `bt@stdlib@binary` (BT-3049)
+
+BT-3033's initial fast path routed to `'bt@stdlib@string'` for the 9 shared
+selectors. Since none of them are locally defined in `String.bt`, that
+module's compiled `dispatch/3` re-checks `beamtalk_extensions:lookup/2` for
+a `String` extension and then delegates to `'bt@stdlib@binary'` anyway — a
+redundant hop the fast path pays on every shared-selector send. Since all 9
+selectors are locally defined on `Binary`, and ADR 0066 forbids an `extend`
+from overriding a class-body-defined method, `Binary` itself can never have
+a competing extension for one of them — so once the `String`-extension
+check (already required for correctness, see above) passes, routing
+straight to `'bt@stdlib@binary'` is safe and skips that hop entirely.
+
+**Isolated measurement** (`bench_hop/0` in the same escript, 1 MB binary,
+200,000 direct `dispatch/3` calls, no `send/3` wrapper — isolates the hop
+cost from `module_for_value/2`'s own ~40-200 ns of overhead):
+
+| path | us/op |
+|---|---|
+| via `'bt@stdlib@string'` (old: extra hop + extension re-check) | 0.214 |
+| via `'bt@stdlib@binary'` (new: direct) | 0.036 |
+
+**~6x reduction on the isolated hop** — consistent across repeated runs
+(0.21-0.22 vs 0.035-0.04 us/op). In the full `send/3` pipeline (the `after`
+rows in the table above), this shows up as a smaller, noisier effect since
+`module_for_value/2`'s own checks (selector match, `extensions:has`) and
+`send/3`'s dispatch wrapper dominate the ~0.2 us total — the removed hop was
+a large fraction of a small number, not a large fraction of the whole path.
+
+**Decision:** implemented — `module_for_value/2`'s shared-selector branch
+now returns `'bt@stdlib@binary'` directly (see `beamtalk_primitive.erl`'s
+doc comment on `module_for_value/2` for the ADR 0066 argument this relies
+on). `test_binary_string_shared_selectors_stay_in_sync` gained a note that
+it can't see `extend`-registered overrides (ADR 0066), documenting the
+guarantee boundary the issue asked for.
