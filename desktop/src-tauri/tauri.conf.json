@@ -36,6 +36,11 @@
     "resources": {
       "../../dist-liveview": "dist-liveview"
     },
+    "linux": {
+      "deb": {
+        "depends": ["libssl3t64"]
+      }
+    },
     "macOS": {
       "entitlements": "entitlements.plist",
       "hardenedRuntime": true,
