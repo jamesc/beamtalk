@@ -683,5 +683,5 @@ a large fraction of a small number, not a large fraction of the whole path.
 now returns `'bt@stdlib@binary'` directly (see `beamtalk_primitive.erl`'s
 doc comment on `module_for_value/2` for the ADR 0066 argument this relies
 on). `test_binary_string_shared_selectors_stay_in_sync` gained a note that
-it can't see `extend`-registered overrides (ADR 0005), documenting the
+it can't see `extend`-registered overrides (ADR 0066), documenting the
 guarantee boundary the issue asked for.

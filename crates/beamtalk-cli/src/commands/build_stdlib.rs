@@ -2936,7 +2936,7 @@ mod tests {
     ///
     /// BT-3049: this only sees overrides made by editing `Binary.bt`/`String.bt`
     /// directly — it has no visibility into selectors added via the `extend`
-    /// mechanism (ADR 0005), which lives in separate extension sources, not the
+    /// mechanism (ADR 0066), which lives in separate extension sources, not the
     /// class bodies this test parses. That's a known, currently-low-risk gap
     /// (an `extend` can't override a class-body-defined method per ADR 0066, and
     /// `beamtalk_primitive:module_for_value/2` separately checks the extension
