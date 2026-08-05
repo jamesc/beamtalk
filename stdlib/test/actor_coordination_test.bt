@@ -18,17 +18,13 @@ TestCase subclass: ActorCoordinationTest
     self.col isNil ifFalse: [self.col stop]
 
   testSyncEventDelivery =>
-    col := self.col
-    bus := self.bus
-    bus subscribe: col
-    bus notify: "hello"
+    self.bus subscribe: self.col
+    self.bus notify: "hello"
     // notify: is synchronous; no barriers needed
-    self assert: col eventCount equals: 1
+    self assert: self.col eventCount equals: 1
 
   // Multiple events delivered in order
   testMultipleEventsDelivered =>
-    col := self.col
-    bus := self.bus
-    bus subscribe: col; notify: "first"; notify: "second"; notify: "third"
-    self assert: col eventCount equals: 3
-    self assert: col events equals: #("first", "second", "third")
+    self.bus subscribe: self.col; notify: "first"; notify: "second"; notify: "third"
+    self assert: self.col eventCount equals: 3
+    self assert: self.col events equals: #("first", "second", "third")
