@@ -174,6 +174,7 @@ open_handles() ->
 %%% ============================================================================
 
 init([]) ->
+    beamtalk_logging_config:set_domain(stdlib),
     {ok, #state{}}.
 
 handle_call({register, Handle, Owner}, _From, State) ->
@@ -206,7 +207,7 @@ terminate(Reason, #state{handles = Handles}) ->
     ?LOG_WARNING(
         "beamtalk_file_handle_registry terminating abnormally — losing "
         "ownership/reclamation tracking for outstanding FileHandles",
-        #{reason => Reason, tracked_handles => map_size(Handles), domain => [beamtalk, stdlib]}
+        #{reason => Reason, tracked_handles => map_size(Handles)}
     ),
     ok.
 
