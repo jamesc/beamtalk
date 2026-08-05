@@ -544,10 +544,18 @@ entirely — String and Binary agree on that selector's behaviour regardless
 of which one the value "really" is, so either module answers identically.
 Falls back to `module_for_value/1` (and its UTF-8 scan) for every other
 selector, and for a shared selector that a `String` extension has
-overridden — `'bt@stdlib@string':dispatch/3` checks the extension registry
-*before* delegating to `'bt@stdlib@binary'`, so an unconditional fast path
-would let a String-only extension fire on a genuinely non-UTF-8 receiver
-that `class_of/1` still reports as `Binary` (caught in review).
+overridden — an unconditional fast path would let a String-only extension
+fire on a genuinely non-UTF-8 receiver that `class_of/1` still reports as
+`Binary` (caught in review).
+
+Routes straight to `'bt@stdlib@binary'` rather than `'bt@stdlib@string'`
+(BT-3049): all 9 shared selectors are locally defined on `Binary`, and ADR
+0066 extensions cannot override a class-body-defined method, so `Binary`
+itself can never have a competing extension for one of them — only
+`String`'s extension registry needs checking (done above), and going
+straight to `'bt@stdlib@binary'` skips the redundant hop through
+`'bt@stdlib@string':dispatch/3`, which would otherwise re-check the
+extension registry itself before delegating to `'bt@stdlib@binary'` anyway.
 """.
 -spec module_for_value(term(), atom()) -> atom() | undefined.
 module_for_value(X, Selector) when is_binary(X) ->
@@ -555,7 +563,7 @@ module_for_value(X, Selector) when is_binary(X) ->
         is_string_binary_shared_selector(Selector) andalso
             not beamtalk_extensions:has('String', Selector)
     of
-        true -> 'bt@stdlib@string';
+        true -> 'bt@stdlib@binary';
         false -> module_for_value(X)
     end;
 module_for_value(X, _Selector) ->
@@ -582,23 +590,24 @@ Soundness depends on a codegen invariant, not just name-matching: a selector
 `String.bt` doesn't locally define is never duplicated into
 `'bt@stdlib@string'`'s compiled `dispatch/3`/`has_method/1` — it's compiled
 as a runtime delegation to `'bt@stdlib@binary'`'s implementation instead. So
-routing one of these selectors through `'bt@stdlib@string'` calls the exact
-same code as routing it through `'bt@stdlib@binary'` would, for any binary,
-valid UTF-8 or not — the sync test only needs to track selector *names*
-because the two modules already share the method *body*. If that delegation
-model ever changes (e.g. inherited primitives get inlined/duplicated per
-subclass for a future perf win), this list's safety would need re-deriving
-from semantics again, not just names.
+routing one of these selectors through `'bt@stdlib@string'` would call the
+exact same code as routing it through `'bt@stdlib@binary'` directly — which
+is what `module_for_value/2` does (BT-3049), skipping that redundant
+delegation hop — for any binary, valid UTF-8 or not. The sync test only
+needs to track selector *names* because the two modules already share the
+method *body*. If that delegation model ever changes (e.g. inherited
+primitives get inlined/duplicated per subclass for a future perf win), this
+list's safety would need re-deriving from semantics again, not just names.
 
 This function alone is *not* sufficient to pick the fast path, only a
-necessary precondition: `'bt@stdlib@string':dispatch/3`'s generated fallback
-checks `beamtalk_extensions:lookup/2` for a `String` extension (ADR 0066)
-*before* delegating to `'bt@stdlib@binary'`. A selector in this set with a
-registered `String` extension is no longer "identical either way" — it
-would run String-only logic against a receiver `class_of/1` still reports
-as `Binary`. Callers must additionally check `beamtalk_extensions:has/2`
-(see `module_for_value/2`, the only caller — call this function directly
-elsewhere only if you replicate that check too).
+necessary precondition: since these selectors are locally defined on
+`Binary`, ADR 0066 forbids a competing `Binary` extension for any of them,
+but a `String` extension is legal (they're absent from `String.bt`) and
+would make the selector no longer "identical either way" — it would run
+String-only logic against a receiver `class_of/1` still reports as
+`Binary`. Callers must additionally check `beamtalk_extensions:has/2` for a
+`String` override (see `module_for_value/2`, the only caller — call this
+function directly elsewhere only if you replicate that check too).
 """.
 -spec is_string_binary_shared_selector(atom()) -> boolean().
 is_string_binary_shared_selector('byteAt:') -> true;

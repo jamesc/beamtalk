@@ -2933,6 +2933,15 @@ mod tests {
     /// drifts from the hardcoded Erlang list, so a future edit to either file
     /// that changes the override relationship is caught here instead of
     /// silently reintroducing BT-2999-style misdispatch.
+    ///
+    /// BT-3049: this only sees overrides made by editing `Binary.bt`/`String.bt`
+    /// directly — it has no visibility into selectors added via the `extend`
+    /// mechanism (ADR 0005), which lives in separate extension sources, not the
+    /// class bodies this test parses. That's a known, currently-low-risk gap
+    /// (an `extend` can't override a class-body-defined method per ADR 0066, and
+    /// `beamtalk_primitive:module_for_value/2` separately checks the extension
+    /// registry at runtime for `String`-side overrides), not a guarantee this
+    /// test makes today.
     #[test]
     fn test_binary_string_shared_selectors_stay_in_sync() {
         let root = project_root();
