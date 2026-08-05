@@ -38,7 +38,7 @@ Collection. They fold over `to_list/1`; `max`/`min`/`average` raise
 %% dispatch, not @primitive — see docs/beamtalk-native-erlang.md "The naming
 %% rule": the function name is the first keyword with its colon removed, no
 %% case conversion, hence camelCase.
--export([raiseEmpty/2, raiseDetectNotFound/1]).
+-export([raiseEmpty/2, raiseDetectNotFound/1, raiseIndexOutOfBounds/2]).
 
 %%% ============================================================================
 %%% Public API
@@ -140,7 +140,10 @@ Raise `empty_collection` naming `Class` and `Selector`.
 BT-3021: pure Beamtalk has no way to raise a *named* error kind — `self error:`
 always yields `user_error` — so collection classes written in Beamtalk (e.g.
 `Interval`) call this to report empty-collection access with the same kind the
-`@primitive` accessors on `List`/`String` raise.
+`@primitive` accessors on `List`/`String` raise. This is `empty_collection`-specific
+sugar with an auto-generated hint; for any other kind, or a hint specific to
+the call site, use `Exception class >> signalKind:class:selector:hint:` (BT-3042)
+directly from Beamtalk.
 """.
 -spec raiseEmpty(atom(), atom()) -> no_return().
 raiseEmpty(Class, Selector) ->
@@ -151,6 +154,24 @@ raiseEmpty(Class, Selector) ->
         <<"`">>
     ]),
     beamtalk_error:raise(beamtalk_error:new(empty_collection, Class, Selector, Hint)).
+
+-doc """
+Raise `index_out_of_bounds` naming `Class` and `Selector`.
+
+BT-3027: pure Beamtalk has no way to raise a *named* error kind (`self
+error:` always yields `user_error`), so collection classes written in
+Beamtalk (e.g. `Interval`) call this to report an out-of-range index with
+the same kind the `@primitive` accessors on `List`/`Array`/`String` raise.
+Unlike `raiseEmpty/2`, this is deliberately not conditioned on emptiness —
+callers use it for *every* out-of-range index, empty receiver or not.
+""".
+-spec raiseIndexOutOfBounds(atom(), atom()) -> no_return().
+raiseIndexOutOfBounds(Class, Selector) ->
+    Hint = iolist_to_binary([
+        <<"Index is out of bounds for ">>,
+        atom_to_binary(Class, utf8)
+    ]),
+    beamtalk_error:raise(beamtalk_error:new(index_out_of_bounds, Class, Selector, Hint)).
 
 -doc """
 Raise `not_found` for a `detect:` that ran to completion without matching.

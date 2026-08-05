@@ -61,6 +61,17 @@ TestCase subclass: SetTest
     self assert: (d includes: 1)
     self deny: (d includes: 3)
 
+  // BT-3027 — Set has no first/last; anyOne is the deliberately
+  // non-deterministic single-element accessor.
+  testAnyOne =>
+    s := Set new fromList: #(1, 2, 3)
+    self assert: (s includes: s anyOne)
+
+  testAnyOneOnSingletonSet => self assert: ((Set new add: 42) anyOne) equals: 42
+
+  testAnyOneOnEmptySetRaisesEmptyCollection =>
+    self should: [Set new anyOne] raise: #empty_collection
+
   testIssubsetof =>
     small := Set new fromList: #(1, 2)
     big := Set new fromList: #(1, 2, 3)

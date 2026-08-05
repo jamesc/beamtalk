@@ -1444,11 +1444,30 @@
       "tags": [
         "beamtalk-language-features"
       ],
-      "source": "#() first                  // raises empty_collection\n#() last                   // raises empty_collection\n#() at: 1                  // raises empty_collection\n\"\" first                   // raises empty_collection\n\"\" at: 1                   // raises empty_collection\n(Array withAll: #()) at: 1 // raises empty_collection\n(Binary fromBytes: #()) at: 1   // raises empty_collection\n(1 to: 0) first            // raises empty_collection\n#() max                    // raises empty_collection (also min, average)",
+      "source": "#() first                  // raises empty_collection\n#() last                   // raises empty_collection\n#() at: 1                  // raises empty_collection\n\"\" first                   // raises empty_collection\n\"\" at: 1                   // raises empty_collection\n#[] first                  // raises empty_collection\n#[] last                   // raises empty_collection\n(Array withAll: #()) at: 1 // raises empty_collection\n(Binary fromBytes: #()) at: 1   // raises empty_collection\n(1 to: 0) first            // raises empty_collection\n#() max                    // raises empty_collection (also min, average)",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-195",
+      "id": "docs-beamtalk-language-features-block-196",
+      "title": "Accessing an Empty Collection (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features",
+        "constructor",
+        "create",
+        "for each",
+        "for-each",
+        "forEach",
+        "instantiate",
+        "iterate",
+        "iteration",
+        "loop"
+      ],
+      "source": "(Set new add: 1) anyOne           // => 1\nSet new anyOne                    // raises empty_collection\n(Bag withAll: #(1, 1, 2)) anyOne  // => 1 or 2 — no ordering guarantee\n#{#a => 1} anyOne                 // => 1 (a *value*, consistent with do:)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-197",
       "title": "Accessing an Empty Collection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1458,26 +1477,13 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-198",
-      "title": "Lookups That Find Nothing (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features",
-        "find",
-        "first match",
-        "search"
-      ],
-      "source": "#(1, 2, 3) asSet detect: [:x | x > 10]      // raises not_found\n(1 to: 3) detect: [:x | x > 10]             // raises not_found\n(Stream on: #(1, 2, 3)) detect: [:n | n > 10]  // raises not_found\n\n(1 to: 3) detect: [:x | x > 10] ifNone: [0] // => 0",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
       "id": "docs-beamtalk-language-features-block-199",
-      "title": "Lookups That Find Nothing (beamtalk-language-features)",
+      "title": "Accessing an Empty Collection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
         "beamtalk-language-features"
       ],
-      "source": "#(1, 2, 3) from: 0 to: 2   // raises index_out_of_bounds\n#(1, 2, 3) from: 3 to: 1   // => #()  (empty range, not an error)\n#(1, 2, 3) from: 2 to: 99  // => #(2, 3)  (clamped)",
+      "source": "(1 to: 10) at: 1     // => 1\n(1 to: 10) at: 11    // raises index_out_of_bounds\n(1 to: 0) at: 1       // raises index_out_of_bounds (not empty_collection)",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -1506,7 +1512,30 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-200",
+      "id": "docs-beamtalk-language-features-block-201",
+      "title": "Lookups That Find Nothing (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features",
+        "find",
+        "first match",
+        "search"
+      ],
+      "source": "#(1, 2, 3) asSet detect: [:x | x > 10]      // raises not_found\n(1 to: 3) detect: [:x | x > 10]             // raises not_found\n(Stream on: #(1, 2, 3)) detect: [:n | n > 10]  // raises not_found\n\n(1 to: 3) detect: [:x | x > 10] ifNone: [0] // => 0",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-202",
+      "title": "Lookups That Find Nothing (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "#(1, 2, 3) from: 0 to: 2   // raises index_out_of_bounds\n#(1, 2, 3) from: 3 to: 1   // => #()  (empty range, not an error)\n#(1, 2, 3) from: 2 to: 99  // => #(2, 3)  (clamped)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-203",
       "title": "Interval — Arithmetic Sequences (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1518,11 +1547,11 @@
         "transform",
         "where"
       ],
-      "source": "1 to: 10                    // => (1 to: 10) — 10 elements: 1, 2, ..., 10\n1 to: 10 by: 2             // => (1 to: 10 by: 2) — 5 elements: 1, 3, 5, 7, 9\n10 to: 1 by: -1            // => (10 to: 1 by: -1) — 10 elements: 10, 9, ..., 1\n\n(1 to: 10) size            // => 10\n(1 to: 10) first           // => 1\n(1 to: 10) last            // => 10\n(1 to: 10) includes: 5     // => true\n\n// Interval supports the full Collection protocol:\n(1 to: 5) inject: 0 into: [:sum :x | sum + x]   // => 15\n(1 to: 10) select: [:x | x isEven]              // => #(2, 4, 6, 8, 10)\n(1 to: 5) collect: [:x | x * x]                 // => #(1, 4, 9, 16, 25)",
+      "source": "1 to: 10                    // => (1 to: 10) — 10 elements: 1, 2, ..., 10\n1 to: 10 by: 2             // => (1 to: 10 by: 2) — 5 elements: 1, 3, 5, 7, 9\n10 to: 1 by: -1            // => (10 to: 1 by: -1) — 10 elements: 10, 9, ..., 1\n\n(1 to: 10) size            // => 10\n(1 to: 10) first           // => 1\n(1 to: 10) last            // => 10\n(1 to: 10) at: 5            // => 5 — bounds-checked; out-of-range raises\n                             // index_out_of_bounds (see \"Accessing an Empty\n                             // Collection\" above), never empty_collection\n(1 to: 10) includes: 5     // => true\n\n// Interval supports the full Collection protocol:\n(1 to: 5) inject: 0 into: [:sum :x | sum + x]   // => 15\n(1 to: 10) select: [:x | x isEven]              // => #(2, 4, 6, 8, 10)\n(1 to: 5) collect: [:x | x * x]                 // => #(1, 4, 9, 16, 25)",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-201",
+      "id": "docs-beamtalk-language-features-block-204",
       "title": "Bag(E) — Multisets (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1542,11 +1571,11 @@
         "mutation",
         "set"
       ],
-      "source": "Bag new class                           // => Bag\n(Bag new add: 1) occurrencesOf: 1      // => 1\n\nb := Bag withAll: #(1, 2, 1, 3, 1)\nb size                                  // => 5 (total occurrences)\nb occurrencesOf: 1                      // => 3\nb includes: 2                           // => true\nb includes: 9                           // => false\n\n// Bag mutating operations return new Bags:\nb2 := b add: 2                         // one more occurrence of 2\nb2 occurrencesOf: 2                    // => 2\nb3 := b add: 4 withCount: 5           // add 5 occurrences of 4\nb4 := b remove: 1                      // remove one occurrence of 1\nb4 occurrencesOf: 1                    // => 2\n\n// do: iterates each element once per occurrence:\n(Bag withAll: #(1, 1, 2)) inject: 0 into: [:sum :x | sum + x]  // => 4",
+      "source": "Bag new class                           // => Bag\n(Bag new add: 1) occurrencesOf: 1      // => 1\n\nb := Bag withAll: #(1, 2, 1, 3, 1)\nb size                                  // => 5 (total occurrences)\nb occurrencesOf: 1                      // => 3\nb includes: 2                           // => true\nb includes: 9                           // => false\n\n// Bag mutating operations return new Bags:\nb2 := b add: 2                         // one more occurrence of 2\nb2 occurrencesOf: 2                    // => 2\nb3 := b add: 4 withCount: 5           // add 5 occurrences of 4\nb4 := b remove: 1                      // remove one occurrence of 1\nb4 occurrencesOf: 1                    // => 2\n\n// do: iterates each element once per occurrence:\n(Bag withAll: #(1, 1, 2)) inject: 0 into: [:sum :x | sum + x]  // => 4\n\n// Bag is unordered, so it has no first/last — use anyOne for a single\n// element (no ordering guarantee) or asList first/last for a fixed order:\n(Bag withAll: #(1, 1, 2)) anyOne        // => 1 or 2, no ordering guarantee\nBag new anyOne                          // raises empty_collection",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-202",
+      "id": "docs-beamtalk-language-features-block-205",
       "title": "Constructors (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1565,7 +1594,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-203",
+      "id": "docs-beamtalk-language-features-block-206",
       "title": "Lazy Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1586,7 +1615,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-204",
+      "id": "docs-beamtalk-language-features-block-207",
       "title": "Terminal Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1599,7 +1628,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-205",
+      "id": "docs-beamtalk-language-features-block-208",
       "title": "printString — Pipeline Inspection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1615,7 +1644,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-206",
+      "id": "docs-beamtalk-language-features-block-209",
       "title": "Eager vs Lazy — The Boundary (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1625,56 +1654,6 @@
         "where"
       ],
       "source": "// Eager — List methods return a List immediately\n#(1, 2, 3, 4, 5) select: [:n | n > 2]\n// => [3,4,5]  (a List)\n\n// Lazy — stream methods return a Stream (unevaluated)\n(#(1, 2, 3, 4, 5) stream) select: [:n | n > 2]\n// => Stream  (unevaluated — call asList or take: to materialize)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-207",
-      "title": "File Streaming (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features",
-        "filter",
-        "filtering",
-        "for each",
-        "for-each",
-        "forEach",
-        "iterate",
-        "iteration",
-        "loop",
-        "where"
-      ],
-      "source": "// Read lines lazily\n(File lines: \"data.csv\") do: [:line | Transcript show: line]\n\n// Pipeline composition\n(File lines: \"app.log\") select: [:l | l includes: \"ERROR\"]\n\n// Block-scoped handle for explicit lifecycle control\nFile open: \"data.csv\" do: [:handle |\n  handle lines take: 10\n]\n// handle closed automatically when block exits",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-208",
-      "title": "File I/O and Directory Operations (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features"
-      ],
-      "source": "File writeAll: \"output.txt\" contents: \"hello\"\nFile readAll: \"output.txt\"              // => \"hello\"\nFile mkdirAll: \"target/data/logs\"\nFile listDirectory: \"target/data\"       // => [\"logs\"]\nFile rename: \"output.txt\" to: \"target/data/output.txt\"\nFile delete: \"target/data/output.txt\"\nFile deleteAll: \"target/data\"",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-209",
-      "title": "Incremental File I/O — FileHandle (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "for each",
-        "for-each",
-        "forEach",
-        "iterate",
-        "iteration",
-        "loop",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "// Block scope — the handle is closed however the block exits\n(File open: \"events.log\" mode: #append do: [:handle |\n  handle writeLine: \"an event\".\n  handle sync\n]) unwrap\n\n// Caller-owned handle — you close it\nhandle := (File open: \"data.bin\" mode: #read) unwrap\n(handle seek: 16) unwrap\nheader := (handle read: 4) unwrap\nhandle close",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -1699,6 +1678,56 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-210",
+      "title": "File Streaming (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features",
+        "filter",
+        "filtering",
+        "for each",
+        "for-each",
+        "forEach",
+        "iterate",
+        "iteration",
+        "loop",
+        "where"
+      ],
+      "source": "// Read lines lazily\n(File lines: \"data.csv\") do: [:line | Transcript show: line]\n\n// Pipeline composition\n(File lines: \"app.log\") select: [:l | l includes: \"ERROR\"]\n\n// Block-scoped handle for explicit lifecycle control\nFile open: \"data.csv\" do: [:handle |\n  handle lines take: 10\n]\n// handle closed automatically when block exits",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-211",
+      "title": "File I/O and Directory Operations (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "File writeAll: \"output.txt\" contents: \"hello\"\nFile readAll: \"output.txt\"              // => \"hello\"\nFile mkdirAll: \"target/data/logs\"\nFile listDirectory: \"target/data\"       // => [\"logs\"]\nFile rename: \"output.txt\" to: \"target/data/output.txt\"\nFile delete: \"target/data/output.txt\"\nFile deleteAll: \"target/data\"",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-212",
+      "title": "Incremental File I/O — FileHandle (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "for each",
+        "for-each",
+        "forEach",
+        "iterate",
+        "iteration",
+        "loop",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "// Block scope — the handle is closed however the block exits\n(File open: \"events.log\" mode: #append do: [:handle |\n  handle writeLine: \"an event\".\n  handle sync\n]) unwrap\n\n// Caller-owned handle — you close it\nhandle := (File open: \"data.bin\" mode: #read) unwrap\n(handle seek: 16) unwrap\nheader := (handle read: 4) unwrap\nhandle close",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-213",
       "title": "Incremental File I/O — FileHandle (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1717,7 +1746,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-212",
+      "id": "docs-beamtalk-language-features-block-215",
       "title": "Side-Effect Timing ⚠️ (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1735,7 +1764,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-213",
+      "id": "docs-beamtalk-language-features-block-216",
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1750,7 +1779,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-214",
+      "id": "docs-beamtalk-language-features-block-217",
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1760,7 +1789,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-215",
+      "id": "docs-beamtalk-language-features-block-218",
       "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1778,7 +1807,22 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-218",
+      "id": "docs-beamtalk-language-features-block-22",
+      "title": "Field Access and Assignment (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "// Assignment as expression (returns 6)\n(self.x := 5) + 1\n\n// Field assignments as sequential statements\nself.x := 5\nself.y := self.x + 1\nself.y",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-221",
       "title": "Creating a Table (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1801,7 +1845,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-219",
+      "id": "docs-beamtalk-language-features-block-222",
       "title": "Reading and Writing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1811,22 +1855,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-22",
-      "title": "Field Access and Assignment (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "// Assignment as expression (returns 6)\n(self.x := 5) + 1\n\n// Field assignments as sequential statements\nself.x := 5\nself.y := self.x + 1\nself.y",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-220",
+      "id": "docs-beamtalk-language-features-block-223",
       "title": "Other Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1836,7 +1865,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-221",
+      "id": "docs-beamtalk-language-features-block-224",
       "title": "Cross-Actor Sharing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1859,7 +1888,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-223",
+      "id": "docs-beamtalk-language-features-block-226",
       "title": "Enqueueing and Dequeueing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1874,7 +1903,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-224",
+      "id": "docs-beamtalk-language-features-block-227",
       "title": "Other Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1884,7 +1913,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-226",
+      "id": "docs-beamtalk-language-features-block-229",
       "title": "Atomic Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1894,75 +1923,6 @@
         "instantiate"
       ],
       "source": "c increment                    // atomically add 1, return new value\nc incrementBy: 5               // atomically add N, return new value\nc decrement                    // atomically subtract 1, return new value\nc decrementBy: 3               // atomically subtract N, return new value\nc value                        // instantaneous read; may observe a stale value under concurrent updates or reset\nc reset                        // set to 0, return nil (not atomic with concurrent increments/decrements)\nc delete                       // destroy the backing ETS table",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-227",
-      "title": "Cross-Actor Sharing (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "async",
-        "beamtalk-language-features",
-        "concurrent",
-        "constructor",
-        "create",
-        "gen_server",
-        "genserver",
-        "instantiate",
-        "mutate",
-        "mutation",
-        "process",
-        "set"
-      ],
-      "source": "// Actor A — create\nc := AtomicCounter new: #hits\n\n// Actor B — look up by name and increment\nc := AtomicCounter named: #hits\nc increment",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-228",
-      "title": "TestCase — BUnit Testing (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "CounterTest",
-        "TestCase",
-        "beamtalk-language-features",
-        "extends",
-        "field",
-        "inherit",
-        "inheritance",
-        "instance variable",
-        "member",
-        "object",
-        "property",
-        "setUp",
-        "subclassing",
-        "testIncrement"
-      ],
-      "source": "TestCase subclass: CounterTest\n  field: counter = nil\n\n  setUp => self withCounter: (Counter spawn)\n\n  testIncrement =>\n    self.counter increment.\n    self assert: (self.counter getValue) equals: 1",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-229",
-      "title": "TestCase — BUnit Testing (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "IntegrationTest",
-        "TestCase",
-        "beamtalk-language-features",
-        "extends",
-        "field",
-        "inherit",
-        "inheritance",
-        "instance variable",
-        "member",
-        "object",
-        "property",
-        "setUp",
-        "subclassing",
-        "testLookup"
-      ],
-      "source": "TestCase subclass: IntegrationTest\n  field: db = nil\n  field: cache = nil\n\n  setUp =>\n    (self withDb: (DB connect)) withCache: (Cache spawn)\n\n  testLookup =>\n    self.cache at: \"key\" put: \"value\".\n    self assert: (self.cache at: \"key\") equals: \"value\"",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -1992,6 +1952,75 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-230",
+      "title": "Cross-Actor Sharing (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "async",
+        "beamtalk-language-features",
+        "concurrent",
+        "constructor",
+        "create",
+        "gen_server",
+        "genserver",
+        "instantiate",
+        "mutate",
+        "mutation",
+        "process",
+        "set"
+      ],
+      "source": "// Actor A — create\nc := AtomicCounter new: #hits\n\n// Actor B — look up by name and increment\nc := AtomicCounter named: #hits\nc increment",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-231",
+      "title": "TestCase — BUnit Testing (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "CounterTest",
+        "TestCase",
+        "beamtalk-language-features",
+        "extends",
+        "field",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "object",
+        "property",
+        "setUp",
+        "subclassing",
+        "testIncrement"
+      ],
+      "source": "TestCase subclass: CounterTest\n  field: counter = nil\n\n  setUp => self withCounter: (Counter spawn)\n\n  testIncrement =>\n    self.counter increment.\n    self assert: (self.counter getValue) equals: 1",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-232",
+      "title": "TestCase — BUnit Testing (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "IntegrationTest",
+        "TestCase",
+        "beamtalk-language-features",
+        "extends",
+        "field",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "object",
+        "property",
+        "setUp",
+        "subclassing",
+        "testLookup"
+      ],
+      "source": "TestCase subclass: IntegrationTest\n  field: db = nil\n  field: cache = nil\n\n  setUp =>\n    (self withDb: (DB connect)) withCache: (Cache spawn)\n\n  testLookup =>\n    self.cache at: \"key\" put: \"value\".\n    self assert: (self.cache at: \"key\") equals: \"value\"",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-233",
       "title": "Suite-Level Setup — setUpOnce / tearDownOnce (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -2022,7 +2051,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-231",
+      "id": "docs-beamtalk-language-features-block-234",
       "title": "Parallel Test Execution (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -11279,7 +11308,7 @@
         "testSyncEventDelivery",
         "unless"
       ],
-      "source": "// BT-898: Tests actor-to-actor coordination with sync-by-default dispatch\n// bus notify: calls receive: on the collector synchronously — when notify:\n// returns, the collector has already processed the event\n\nTestCase subclass: ActorCoordinationTest\n  field: col = nil\n  field: bus = nil\n\n  setUp =>\n    self.col := EventCollector spawn\n    self.bus := EventBus spawn\n\n  tearDown =>\n    self.bus isNil ifFalse: [self.bus stop]\n    self.col isNil ifFalse: [self.col stop]\n\n  testSyncEventDelivery =>\n    col := self.col\n    bus := self.bus\n    bus subscribe: col\n    bus notify: \"hello\"\n    // notify: is synchronous; no barriers needed\n    self assert: col eventCount equals: 1\n\n  // Multiple events delivered in order\n  testMultipleEventsDelivered =>\n    col := self.col\n    bus := self.bus\n    bus subscribe: col; notify: \"first\"; notify: \"second\"; notify: \"third\"\n    self assert: col eventCount equals: 3\n    self assert: col events equals: #(\"first\", \"second\", \"third\")",
+      "source": "// BT-898: Tests actor-to-actor coordination with sync-by-default dispatch\n// bus notify: calls receive: on the collector synchronously — when notify:\n// returns, the collector has already processed the event\n\nTestCase subclass: ActorCoordinationTest\n  field: col = nil\n  field: bus = nil\n\n  setUp =>\n    self.col := EventCollector spawn\n    self.bus := EventBus spawn\n\n  tearDown =>\n    self.bus isNil ifFalse: [self.bus stop]\n    self.col isNil ifFalse: [self.col stop]\n\n  testSyncEventDelivery =>\n    self.bus subscribe: self.col\n    self.bus notify: \"hello\"\n    // notify: is synchronous; no barriers needed\n    self assert: self.col eventCount equals: 1\n\n  // Multiple events delivered in order\n  testMultipleEventsDelivered =>\n    self.bus subscribe: self.col; notify: \"first\"; notify: \"second\"; notify: \"third\"\n    self assert: self.col eventCount equals: 3\n    self assert: self.col events equals: #(\"first\", \"second\", \"third\")",
       "explanation": "BT-898: Tests actor-to-actor coordination with sync-by-default dispatch bus notify: calls receive: on the collector synchronously — when notify: returns, the collector has already processed the event"
     },
     {
@@ -12498,6 +12527,8 @@
         "testCollectReturnsArray",
         "testDo",
         "testEmptyArray",
+        "testFirstAndLast",
+        "testFirstAndLastOnEmptyRaiseEmptyCollection",
         "testIncludes",
         "testInjectInto",
         "testLiteralEquality",
@@ -12513,7 +12544,7 @@
         "transform",
         "where"
       ],
-      "source": "// BUnit tests for the Array collection type (BT-822)\n\nTestCase subclass: ArrayTest\n\n  testClassAndCreation =>\n    self assert: #[1, 2, 3] class equals: Array\n    self assert: #[] class equals: Array\n\n  testSizeAndIsEmpty =>\n    self assert: #[] size equals: 0\n    self assert: #[1, 2, 3] size equals: 3\n    self assert: #[] isEmpty\n    self deny: #[1] isEmpty\n    self assert: #[1] isNotEmpty\n\n  testAtIndexedAccess =>\n    a := #[10, 20, 30]\n    self assert: (a at: 1) equals: 10\n    self assert: (a at: 2) equals: 20\n    self assert: (a at: 3) equals: 30\n\n  testAtPutFunctionalUpdate =>\n    a := #[1, 2, 3]\n    b := a at: 2 put: 99\n    self assert: (b at: 2) equals: 99\n    // Original is unchanged (immutable)\n    self assert: (a at: 2) equals: 2\n\n  testIncludes =>\n    a := #[1, 2, 3]\n    self assert: (a includes: 2)\n    self deny: (a includes: 9)\n    self deny: (#[] includes: 1)\n\n  testDo =>\n    // do: returns nil\n    self assert: (#[1, 2, 3] do: [:x | x + 1]) equals: nil\n    // do: on empty array also returns nil\n    self assert: (#[] do: [:x | x]) equals: nil\n\n  testCollect =>\n    self assert: (#[1, 2, 3] collect: [:x | x * 2]) equals: #[2, 4, 6]\n    self assert: (#[] collect: [:x | x * 2]) equals: #[]\n    // collect: preserves order\n    self assert: (#[3, 1, 2] collect: [:x | x + 10]) equals: #[13, 11, 12]\n\n  testCollectReturnsArray =>\n    result := #[1, 2, 3] collect: [:x | x * 2]\n    self assert: result class equals: Array\n\n  testSelect =>\n    self assert: (#[1, 2, 3, 4] select: [:x | x > 2]) equals: #[3, 4]\n    self assert: (#[1, 2, 3] select: [:x | x > 10]) equals: #[]\n    self assert: (#[1, 2, 3] select: [:x | true]) equals: #[1, 2, 3]\n\n  testSelectReturnsArray =>\n    result := #[1, 2, 3, 4] select: [:x | x > 2]\n    self assert: result class equals: Array\n\n  testReject =>\n    self assert: (#[1, 2, 3, 4] reject: [:x | x > 2]) equals: #[1, 2]\n    self assert: (#[1, 2, 3] reject: [:x | false]) equals: #[1, 2, 3]\n\n  testInjectInto =>\n    self assert: (#[1, 2, 3] inject: 0 into: [:acc :x | acc + x]) equals: 6\n    self assert: (#[1, 2, 3, 4] inject: 1 into: [:acc :x | acc * x]) equals: 24\n    self assert: (#[] inject: 0 into: [:acc :x | acc + x]) equals: 0\n\n  testPerformOnStatefulBlockRaisesClearErrorInsteadOfCrashing =>\n    // BT-2888: the do:/collect:/select:/inject:into: stateful_block_dispatch\n    // guard also applies to Array, since the guard is keyed on selector\n    // name, not receiver class. (Array has no reject: primitive, so that\n    // selector isn't guarded here.)\n    count := 0\n    statefulDoBlock := [:x | count := count + x]\n    self should: [\n      #[1, 2, 3] perform: #do: withArguments: #(statefulDoBlock)\n    ] raise: #stateful_block_dispatch\n\n    count := 0\n    statefulBlock := [:x |\n      count := count + 1\n      x * 2\n    ]\n    self should: [\n      #[1, 2, 3] perform: #collect: withArguments: #(statefulBlock)\n    ] raise: #stateful_block_dispatch\n\n    count := 0\n    statefulSelectBlock := [:x |\n      count := count + 1\n      x > 1\n    ]\n    self should: [\n      #[1, 2, 3] perform: #select: withArguments: #(statefulSelectBlock)\n    ] raise: #stateful_block_dispatch\n\n    count := 0\n    statefulInjectBlock := [:acc :x |\n      count := count + 1\n      acc + x\n    ]\n    self should: [\n      #[1, 2, 3] perform: #inject:into: withArguments: #(0, statefulInjectBlock)\n    ] raise: #stateful_block_dispatch\n\n  testPrintString =>\n    self assert: #[1, 2, 3] printString equals: \"#[1, 2, 3]\"\n    self assert: #[] printString equals: \"#[]\"\n    self assert: #[\"a\", \"b\"] printString equals: \"#[\"\"a\"\", \"\"b\"\"]\"\n\n  testWithAll =>\n    a := Array withAll: #(1, 2, 3)\n    self assert: a class equals: Array\n    self assert: a size equals: 3\n    self assert: (a at: 1) equals: 1\n    self assert: (a at: 3) equals: 3\n\n  testEmptyArray =>\n    self assert: #[] size equals: 0\n    self assert: #[] isEmpty\n    self assert: #[] printString equals: \"#[]\"\n\n  testLiteralEquality =>\n    self assert: #[1, 2, 3] equals: #[1, 2, 3]\n    self deny: (#[1, 2, 3] =:= #[1, 2, 4])\n    self deny: (#[1, 2] =:= #[1, 2, 3])",
+      "source": "// BUnit tests for the Array collection type (BT-822)\n\nTestCase subclass: ArrayTest\n\n  testClassAndCreation =>\n    self assert: #[1, 2, 3] class equals: Array\n    self assert: #[] class equals: Array\n\n  testSizeAndIsEmpty =>\n    self assert: #[] size equals: 0\n    self assert: #[1, 2, 3] size equals: 3\n    self assert: #[] isEmpty\n    self deny: #[1] isEmpty\n    self assert: #[1] isNotEmpty\n\n  testAtIndexedAccess =>\n    a := #[10, 20, 30]\n    self assert: (a at: 1) equals: 10\n    self assert: (a at: 2) equals: 20\n    self assert: (a at: 3) equals: 30\n\n  testAtPutFunctionalUpdate =>\n    a := #[1, 2, 3]\n    b := a at: 2 put: 99\n    self assert: (b at: 2) equals: 99\n    // Original is unchanged (immutable)\n    self assert: (a at: 2) equals: 2\n\n  // BT-3027\n  testFirstAndLast =>\n    self assert: #[10, 20, 30] first equals: 10\n    self assert: #[10, 20, 30] last equals: 30\n    self assert: #[42] first equals: 42\n    self assert: #[42] last equals: 42\n\n  testFirstAndLastOnEmptyRaiseEmptyCollection =>\n    self should: [#[] first] raise: #empty_collection\n    self should: [#[] last] raise: #empty_collection\n\n  testIncludes =>\n    a := #[1, 2, 3]\n    self assert: (a includes: 2)\n    self deny: (a includes: 9)\n    self deny: (#[] includes: 1)\n\n  testDo =>\n    // do: returns nil\n    self assert: (#[1, 2, 3] do: [:x | x + 1]) equals: nil\n    // do: on empty array also returns nil\n    self assert: (#[] do: [:x | x]) equals: nil\n\n  testCollect =>\n    self assert: (#[1, 2, 3] collect: [:x | x * 2]) equals: #[2, 4, 6]\n    self assert: (#[] collect: [:x | x * 2]) equals: #[]\n    // collect: preserves order\n    self assert: (#[3, 1, 2] collect: [:x | x + 10]) equals: #[13, 11, 12]\n\n  testCollectReturnsArray =>\n    result := #[1, 2, 3] collect: [:x | x * 2]\n    self assert: result class equals: Array\n\n  testSelect =>\n    self assert: (#[1, 2, 3, 4] select: [:x | x > 2]) equals: #[3, 4]\n    self assert: (#[1, 2, 3] select: [:x | x > 10]) equals: #[]\n    self assert: (#[1, 2, 3] select: [:x | true]) equals: #[1, 2, 3]\n\n  testSelectReturnsArray =>\n    result := #[1, 2, 3, 4] select: [:x | x > 2]\n    self assert: result class equals: Array\n\n  testReject =>\n    self assert: (#[1, 2, 3, 4] reject: [:x | x > 2]) equals: #[1, 2]\n    self assert: (#[1, 2, 3] reject: [:x | false]) equals: #[1, 2, 3]\n\n  testInjectInto =>\n    self assert: (#[1, 2, 3] inject: 0 into: [:acc :x | acc + x]) equals: 6\n    self assert: (#[1, 2, 3, 4] inject: 1 into: [:acc :x | acc * x]) equals: 24\n    self assert: (#[] inject: 0 into: [:acc :x | acc + x]) equals: 0\n\n  testPerformOnStatefulBlockRaisesClearErrorInsteadOfCrashing =>\n    // BT-2888: the do:/collect:/select:/inject:into: stateful_block_dispatch\n    // guard also applies to Array, since the guard is keyed on selector\n    // name, not receiver class. (Array has no reject: primitive, so that\n    // selector isn't guarded here.)\n    count := 0\n    statefulDoBlock := [:x | count := count + x]\n    self should: [\n      #[1, 2, 3] perform: #do: withArguments: #(statefulDoBlock)\n    ] raise: #stateful_block_dispatch\n\n    count := 0\n    statefulBlock := [:x |\n      count := count + 1\n      x * 2\n    ]\n    self should: [\n      #[1, 2, 3] perform: #collect: withArguments: #(statefulBlock)\n    ] raise: #stateful_block_dispatch\n\n    count := 0\n    statefulSelectBlock := [:x |\n      count := count + 1\n      x > 1\n    ]\n    self should: [\n      #[1, 2, 3] perform: #select: withArguments: #(statefulSelectBlock)\n    ] raise: #stateful_block_dispatch\n\n    count := 0\n    statefulInjectBlock := [:acc :x |\n      count := count + 1\n      acc + x\n    ]\n    self should: [\n      #[1, 2, 3] perform: #inject:into: withArguments: #(0, statefulInjectBlock)\n    ] raise: #stateful_block_dispatch\n\n  testPrintString =>\n    self assert: #[1, 2, 3] printString equals: \"#[1, 2, 3]\"\n    self assert: #[] printString equals: \"#[]\"\n    self assert: #[\"a\", \"b\"] printString equals: \"#[\"\"a\"\", \"\"b\"\"]\"\n\n  testWithAll =>\n    a := Array withAll: #(1, 2, 3)\n    self assert: a class equals: Array\n    self assert: a size equals: 3\n    self assert: (a at: 1) equals: 1\n    self assert: (a at: 3) equals: 3\n\n  testEmptyArray =>\n    self assert: #[] size equals: 0\n    self assert: #[] isEmpty\n    self assert: #[] printString equals: \"#[]\"\n\n  testLiteralEquality =>\n    self assert: #[1, 2, 3] equals: #[1, 2, 3]\n    self deny: (#[1, 2, 3] =:= #[1, 2, 4])\n    self deny: (#[1, 2] =:= #[1, 2, 3])",
       "explanation": "BUnit tests for the Array collection type (BT-822)"
     },
     {
@@ -12665,6 +12696,9 @@
         "testAddWithCount",
         "testAddWithCountNegativeRaisesError",
         "testAddWithCountZeroIsNoop",
+        "testAnyOne",
+        "testAnyOneOnEmptyBagRaisesEmptyCollection",
+        "testAnyOneOnSingletonBag",
         "testCollect",
         "testCreationClass",
         "testDoIteratesEachOccurrence",
@@ -12686,7 +12720,7 @@
         "transform",
         "where"
       ],
-      "source": "// BUnit tests for Bag — immutable multiset collection (BT-1249)\n\nTestCase subclass: BagTest\n\n  testCreationClass => self assert: Bag new class equals: Bag\n\n  testNewIsEmpty =>\n    self assert: Bag new isEmpty\n    self assert: Bag new size equals: 0\n\n  testWithAll =>\n    b := Bag withAll: #(1, 2, 1, 3)\n    self assert: b class equals: Bag\n    self assert: b size equals: 4\n\n  testOccurrencesOf =>\n    b := Bag withAll: #(1, 1, 2)\n    self assert: (b occurrencesOf: 1) equals: 2\n    self assert: (b occurrencesOf: 2) equals: 1\n    self assert: (b occurrencesOf: 3) equals: 0\n\n  testIncludes =>\n    b := Bag withAll: #(1, 2)\n    self assert: (b includes: 1)\n    self assert: (b includes: 2)\n    self deny: (b includes: 3)\n\n  testAdd =>\n    b := Bag new add: 1\n    self assert: (b occurrencesOf: 1) equals: 1\n    b2 := b add: 1\n    self assert: (b2 occurrencesOf: 1) equals: 2\n    // Original unchanged\n    self assert: (b occurrencesOf: 1) equals: 1\n\n  testAddWithCount =>\n    b := (Bag new) add: 1 withCount: 3\n    self assert: (b occurrencesOf: 1) equals: 3\n    self assert: b size equals: 3\n\n  testRemoveOneOccurrence =>\n    b := Bag withAll: #(1, 1, 2)\n    b2 := b remove: 1\n    self assert: (b2 occurrencesOf: 1) equals: 1\n    self assert: b2 size equals: 2\n\n  testRemoveLastOccurrence =>\n    b := Bag withAll: #(1, 2)\n    b2 := b remove: 1\n    self deny: (b2 includes: 1)\n    self assert: b2 size equals: 1\n\n  testRemoveAbsentIsNoop =>\n    b := Bag withAll: #(1, 2)\n    b2 := b remove: 3\n    self assert: b2 size equals: 2\n\n  testSizeIsTotal =>\n    b := Bag withAll: #(1, 1, 1, 2, 2)\n    self assert: b size equals: 5\n\n  testDoIteratesEachOccurrence =>\n    b := Bag withAll: #(1, 1, 2)\n    result := Bag new\n    b do: [:x | result := result add: x]\n    self assert: result size equals: 3\n    self assert: (result occurrencesOf: 1) equals: 2\n    self assert: (result occurrencesOf: 2) equals: 1\n\n  testInjectInto =>\n    b := Bag withAll: #(1, 2, 3)\n    sum := b inject: 0 into: [:acc :x | acc + x]\n    self assert: sum equals: 6\n\n  testInjectIntoWithDuplicates =>\n    b := Bag withAll: #(1, 1, 2)\n    sum := b inject: 0 into: [:acc :x | acc + x]\n    self assert: sum equals: 4\n\n  testCollect =>\n    b := Bag withAll: #(1, 2)\n    b2 := b collect: [:x | x * 2]\n    self assert: b2 class equals: Bag\n    self assert: b2 size equals: 2\n    self assert: (b2 occurrencesOf: 2) equals: 1\n    self assert: (b2 occurrencesOf: 4) equals: 1\n\n  testSelect =>\n    b := Bag withAll: #(1, 2, 3, 4)\n    b2 := b select: [:x | x > 2]\n    self assert: b2 class equals: Bag\n    self assert: b2 size equals: 2\n    self assert: (b2 occurrencesOf: 3) equals: 1\n    self assert: (b2 occurrencesOf: 4) equals: 1\n\n  testReject =>\n    b := Bag withAll: #(1, 2, 3, 4)\n    b2 := b reject: [:x | x > 2]\n    self assert: b2 class equals: Bag\n    self assert: b2 size equals: 2\n    self assert: (b2 occurrencesOf: 1) equals: 1\n    self assert: (b2 occurrencesOf: 2) equals: 1\n\n  testPrintString =>\n    self assert: Bag new printString equals: \"Bag\"\n    self assert: (Bag withAll: #(1, 2)) printString equals: \"Bag\"\n\n  testAddWithCountZeroIsNoop =>\n    b := (Bag new) add: 1 withCount: 0\n    self assert: b isEmpty\n\n  testAddWithCountNegativeRaisesError =>\n    self should: [(Bag new) add: 1 withCount: -1] raise: #user_error",
+      "source": "// BUnit tests for Bag — immutable multiset collection (BT-1249)\n\nTestCase subclass: BagTest\n\n  testCreationClass => self assert: Bag new class equals: Bag\n\n  testNewIsEmpty =>\n    self assert: Bag new isEmpty\n    self assert: Bag new size equals: 0\n\n  testWithAll =>\n    b := Bag withAll: #(1, 2, 1, 3)\n    self assert: b class equals: Bag\n    self assert: b size equals: 4\n\n  testOccurrencesOf =>\n    b := Bag withAll: #(1, 1, 2)\n    self assert: (b occurrencesOf: 1) equals: 2\n    self assert: (b occurrencesOf: 2) equals: 1\n    self assert: (b occurrencesOf: 3) equals: 0\n\n  testIncludes =>\n    b := Bag withAll: #(1, 2)\n    self assert: (b includes: 1)\n    self assert: (b includes: 2)\n    self deny: (b includes: 3)\n\n  testAdd =>\n    b := Bag new add: 1\n    self assert: (b occurrencesOf: 1) equals: 1\n    b2 := b add: 1\n    self assert: (b2 occurrencesOf: 1) equals: 2\n    // Original unchanged\n    self assert: (b occurrencesOf: 1) equals: 1\n\n  testAddWithCount =>\n    b := (Bag new) add: 1 withCount: 3\n    self assert: (b occurrencesOf: 1) equals: 3\n    self assert: b size equals: 3\n\n  testRemoveOneOccurrence =>\n    b := Bag withAll: #(1, 1, 2)\n    b2 := b remove: 1\n    self assert: (b2 occurrencesOf: 1) equals: 1\n    self assert: b2 size equals: 2\n\n  testRemoveLastOccurrence =>\n    b := Bag withAll: #(1, 2)\n    b2 := b remove: 1\n    self deny: (b2 includes: 1)\n    self assert: b2 size equals: 1\n\n  testRemoveAbsentIsNoop =>\n    b := Bag withAll: #(1, 2)\n    b2 := b remove: 3\n    self assert: b2 size equals: 2\n\n  testSizeIsTotal =>\n    b := Bag withAll: #(1, 1, 1, 2, 2)\n    self assert: b size equals: 5\n\n  testDoIteratesEachOccurrence =>\n    b := Bag withAll: #(1, 1, 2)\n    result := Bag new\n    b do: [:x | result := result add: x]\n    self assert: result size equals: 3\n    self assert: (result occurrencesOf: 1) equals: 2\n    self assert: (result occurrencesOf: 2) equals: 1\n\n  testInjectInto =>\n    b := Bag withAll: #(1, 2, 3)\n    sum := b inject: 0 into: [:acc :x | acc + x]\n    self assert: sum equals: 6\n\n  testInjectIntoWithDuplicates =>\n    b := Bag withAll: #(1, 1, 2)\n    sum := b inject: 0 into: [:acc :x | acc + x]\n    self assert: sum equals: 4\n\n  testCollect =>\n    b := Bag withAll: #(1, 2)\n    b2 := b collect: [:x | x * 2]\n    self assert: b2 class equals: Bag\n    self assert: b2 size equals: 2\n    self assert: (b2 occurrencesOf: 2) equals: 1\n    self assert: (b2 occurrencesOf: 4) equals: 1\n\n  testSelect =>\n    b := Bag withAll: #(1, 2, 3, 4)\n    b2 := b select: [:x | x > 2]\n    self assert: b2 class equals: Bag\n    self assert: b2 size equals: 2\n    self assert: (b2 occurrencesOf: 3) equals: 1\n    self assert: (b2 occurrencesOf: 4) equals: 1\n\n  testReject =>\n    b := Bag withAll: #(1, 2, 3, 4)\n    b2 := b reject: [:x | x > 2]\n    self assert: b2 class equals: Bag\n    self assert: b2 size equals: 2\n    self assert: (b2 occurrencesOf: 1) equals: 1\n    self assert: (b2 occurrencesOf: 2) equals: 1\n\n  testPrintString =>\n    self assert: Bag new printString equals: \"Bag\"\n    self assert: (Bag withAll: #(1, 2)) printString equals: \"Bag\"\n\n  testAddWithCountZeroIsNoop =>\n    b := (Bag new) add: 1 withCount: 0\n    self assert: b isEmpty\n\n  testAddWithCountNegativeRaisesError =>\n    self should: [(Bag new) add: 1 withCount: -1] raise: #user_error\n\n  // BT-3027 — Bag has no first/last; anyOne is the deliberately\n  // non-deterministic single-element accessor.\n  testAnyOne =>\n    b := Bag withAll: #(1, 1, 2)\n    self assert: (b includes: b anyOne)\n\n  testAnyOneOnSingletonBag => self assert: ((Bag new add: 7) anyOne) equals: 7\n\n  testAnyOneOnEmptyBagRaisesEmptyCollection =>\n    self should: [Bag new anyOne] raise: #empty_collection",
       "explanation": "BUnit tests for Bag — immutable multiset collection (BT-1249)"
     },
     {
@@ -14490,6 +14524,7 @@
         "tearDown",
         "testBlockInteriorMutationStillDiscardedOnNormalReturn",
         "testClassBuilderMutationSurvivesForeignNlrEscape",
+        "testCrossClassMutationDoesNotCorruptForeignProcessShadow",
         "testGenuineErrorStillRevertsMutation",
         "testInheritedSelfDispatchMutationSurvivesRelay",
         "testMutationPersistsOnNormalReturn",
@@ -14497,8 +14532,8 @@
         "testRepeatedEscapesAccumulate",
         "unless"
       ],
-      "source": "// BT-3032 / BT-3037 / ADR 0110: class-var mutations made before a foreign `^`\n// escapes a class method must survive the non-local-return relay.\n//\n// Codegen writes the just-updated ClassVars map into the\n// '$bt_class_vars_shadow' process-dictionary key at every *top-frame*\n// class-var mutation in a class method; the runtime's `{nlr_relay, ...}`\n// path (BT-3036) reads it back instead of reverting to the pre-call map.\n//\n// Fixtures: fixtures/collection_driver.bt, fixtures/collection_probe.bt,\n// fixtures/shadow_relay_parent.bt, fixtures/shadow_relay_child.bt,\n// fixtures/shadow_relay_probe.bt,\n// fixtures/class_method_conditional_self_call.bt.\n\nTestCase subclass: ClassVarNlrShadowTest\n  field: cls = nil\n\n  setUp =>\n    CollectionDriver resetRunCount\n    ShadowRelayParent resetHits\n    ShadowRelayChild resetHits\n    ClassMethodConditionalSelfCall resetCounter\n    self\n\n  tearDown => self.cls isNil ifFalse: [self.cls removeFromSystem]\n\n  // --- (a) the BT-3032 repro -----------------------------------------------\n\n  // Control: a normally-returning block keeps the increment (worked before\n  // ADR 0110 too — pins that the shadow write changes nothing here).\n  testMutationPersistsOnNormalReturn =>\n    CollectionDriver countedRun: [:x | x] over: #(1, 2, 3)\n    self assert: CollectionDriver runCount equals: 1\n\n  // The repro: the `^` in the probe's block is foreign to countedRun:over:'s\n  // frame. The returned value was already correct (BT-3022); the class-var\n  // increment must now survive too.\n  testMutationSurvivesForeignNlrEscape =>\n    self assert: (CollectionProbe escapeAfterCountedRun: #(1, 2, 3)) equals: 2\n    self assert: CollectionDriver runCount equals: 1\n\n  // Escaping twice accumulates — each relay persists its own increment.\n  testRepeatedEscapesAccumulate =>\n    self assert: (CollectionProbe escapeAfterCountedRun: #(1, 2, 3)) equals: 2\n    self assert: (CollectionProbe escapeAfterCountedRun: #(1, 2, 3)) equals: 2\n    self assert: CollectionDriver runCount equals: 2\n\n  // --- (b) a genuine error still reverts -----------------------------------\n  testGenuineErrorStillRevertsMutation =>\n    // The raw badarith from `1 / 0` is classified to #type_error at the\n    // class-dispatch boundary (as elsewhere off the caller's process).\n    self should: [CollectionDriver failAfterCount] raise: #type_error\n    self assert: CollectionDriver runCount equals: 0\n\n  // --- (c) self-dispatched inherited class method --------------------------\n\n  // The mutation happens in ShadowRelayParent's hitRun:over: running via\n  // `self hitRun:over:` inside ShadowRelayChild's class process; the foreign\n  // `^` relays through the self-dispatch chain and the increment lands in the\n  // child's ClassVars.\n  testInheritedSelfDispatchMutationSurvivesRelay =>\n    self assert: (ShadowRelayProbe escapeThroughChild: #(1, 2, 3)) equals: 2\n    self assert: ShadowRelayChild hitCount equals: 1\n    // Per-class ClassVars: the parent's own counter is untouched.\n    self assert: ShadowRelayParent hitCount equals: 0\n\n  // --- (d) block-interior mutations stay discarded -------------------------\n\n  // A *direct* class-var assignment inside a block in a class method is a\n  // compile-time error (BT-2792 FieldAssignmentInUnsupportedBlock), so the\n  // runtime-expressible block-interior mutation is the BT-1550 shape: a\n  // conditional self-call whose callee mutates. That mutation is discarded on\n  // the normal-return path today, and the ADR 0110 shadow write — gated on\n  // the method's own top frame, block_depth == 0 — deliberately does not\n  // change this. (The gate itself is pinned by Rust codegen tests in\n  // crates/beamtalk-core/src/codegen/core_erlang/tests/.)\n  testBlockInteriorMutationStillDiscardedOnNormalReturn =>\n    self assert: (ClassMethodConditionalSelfCall triggerWithMutation: 5) equals: 5\n    self assert: ClassMethodConditionalSelfCall counterValue equals: 0\n\n  // --- (e) ClassBuilder-defined classes ------------------------------------\n\n  // Same repro against a runtime-built class: the classMethods: fun lowers\n  // through the shared class-method body path, so the shadow write fires\n  // there too.\n  testClassBuilderMutationSurvivesForeignNlrEscape =>\n    Object classBuilder name: #BT3037ShadowBuilt;\n      superclass: Object;\n      classVars: #{#runs => 0};\n      classMethods: #{#countedRun:over: => [:self :aBlock :aList |\n          self.runs := self.runs + 1\n          aList do: [:x | aBlock value: x]\n          nil\n        ], #runCount => [:self | self.runs]};\n      register\n    self.cls := (Erlang beamtalk_interface) findClass: #BT3037ShadowBuilt\n    self assert: (ShadowRelayProbe escapeThrough: self.cls over: #(1, 2, 3)) equals: 2\n    self assert: self.cls runCount equals: 1\n\n// A builder cascade with a *mutating* classMethods: block written inside a\n// block literal is rejected at compile time today (BT-2792 stored-closure\n// field-write validation sees the classMethods: mutation), so the\n// \"cascade lexically inside a block\" arm of ADR 0110 — the\n// generate_class_method_fun_from_block block_depth reset — is pinned at the\n// Rust level instead:\n// crates/beamtalk-core/src/codegen/core_erlang/tests/dispatch.rs,\n// test_builder_cascade_at_block_depth_still_emits_shadow_write.",
-      "explanation": "BT-3032 / BT-3037 / ADR 0110: class-var mutations made before a foreign `^` escapes a class method must survive the non-local-return relay.  Codegen writes the just-updated ClassVars map into the '$bt_class_vars_shadow' process-dictionary key at every *top-frame* class-var mutation in a class method; the runtime's `{nlr_relay, ...}` path (BT-3036) reads it back instead of reverting to the pre-call map.  Fixtures: fixtures/collection_driver.bt, fixtures/collection_probe.bt, fixtures/shadow_relay_parent.bt, fixtures/shadow_relay_child.bt, fixtures/shadow_relay_probe.bt, fixtures/class_method_conditional_self_call.bt."
+      "source": "// BT-3032 / BT-3037 / ADR 0110: class-var mutations made before a foreign `^`\n// escapes a class method must survive the non-local-return relay.\n//\n// Codegen writes the just-updated ClassVars map into the\n// '$bt_class_vars_shadow' process-dictionary key at every *top-frame*\n// class-var mutation in a class method; the runtime's `{nlr_relay, ...}`\n// path (BT-3036) reads it back instead of reverting to the pre-call map.\n//\n// Fixtures: fixtures/collection_driver.bt, fixtures/collection_probe.bt,\n// fixtures/shadow_relay_parent.bt, fixtures/shadow_relay_child.bt,\n// fixtures/shadow_relay_probe.bt,\n// fixtures/class_method_conditional_self_call.bt,\n// fixtures/shadow_cross_class_owner.bt.\n\nTestCase subclass: ClassVarNlrShadowTest\n  field: cls = nil\n\n  setUp =>\n    CollectionDriver resetRunCount\n    ShadowRelayParent resetHits\n    ShadowRelayChild resetHits\n    ClassMethodConditionalSelfCall resetCounter\n    ShadowCrossClassOwner resetBumps\n    self\n\n  tearDown => self.cls isNil ifFalse: [self.cls removeFromSystem]\n\n  // --- (a) the BT-3032 repro -----------------------------------------------\n\n  // Control: a normally-returning block keeps the increment (worked before\n  // ADR 0110 too — pins that the shadow write changes nothing here).\n  testMutationPersistsOnNormalReturn =>\n    CollectionDriver countedRun: [:x | x] over: #(1, 2, 3)\n    self assert: CollectionDriver runCount equals: 1\n\n  // The repro: the `^` in the probe's block is foreign to countedRun:over:'s\n  // frame. The returned value was already correct (BT-3022); the class-var\n  // increment must now survive too.\n  testMutationSurvivesForeignNlrEscape =>\n    self assert: (CollectionProbe escapeAfterCountedRun: #(1, 2, 3)) equals: 2\n    self assert: CollectionDriver runCount equals: 1\n\n  // Escaping twice accumulates — each relay persists its own increment.\n  testRepeatedEscapesAccumulate =>\n    self assert: (CollectionProbe escapeAfterCountedRun: #(1, 2, 3)) equals: 2\n    self assert: (CollectionProbe escapeAfterCountedRun: #(1, 2, 3)) equals: 2\n    self assert: CollectionDriver runCount equals: 2\n\n  // --- (b) a genuine error still reverts -----------------------------------\n  testGenuineErrorStillRevertsMutation =>\n    // The raw badarith from `1 / 0` is classified to #type_error at the\n    // class-dispatch boundary (as elsewhere off the caller's process).\n    self should: [CollectionDriver failAfterCount] raise: #type_error\n    self assert: CollectionDriver runCount equals: 0\n\n  // --- (c) self-dispatched inherited class method --------------------------\n\n  // The mutation happens in ShadowRelayParent's hitRun:over: running via\n  // `self hitRun:over:` inside ShadowRelayChild's class process; the foreign\n  // `^` relays through the self-dispatch chain and the increment lands in the\n  // child's ClassVars.\n  testInheritedSelfDispatchMutationSurvivesRelay =>\n    self assert: (ShadowRelayProbe escapeThroughChild: #(1, 2, 3)) equals: 2\n    self assert: ShadowRelayChild hitCount equals: 1\n    // Per-class ClassVars: the parent's own counter is untouched.\n    self assert: ShadowRelayParent hitCount equals: 0\n\n  // --- (d) block-interior mutations stay discarded -------------------------\n\n  // A *direct* class-var assignment inside a block in a class method is a\n  // compile-time error (BT-2792 FieldAssignmentInUnsupportedBlock), so the\n  // runtime-expressible block-interior mutation is the BT-1550 shape: a\n  // conditional self-call whose callee mutates. That mutation is discarded on\n  // the normal-return path today, and the ADR 0110 shadow write — gated on\n  // the method's own top frame, block_depth == 0 — deliberately does not\n  // change this. (The gate itself is pinned by Rust codegen tests in\n  // crates/beamtalk-core/src/codegen/core_erlang/tests/.)\n  testBlockInteriorMutationStillDiscardedOnNormalReturn =>\n    self assert: (ClassMethodConditionalSelfCall triggerWithMutation: 5) equals: 5\n    self assert: ClassMethodConditionalSelfCall counterValue equals: 0\n\n  // --- (e) ClassBuilder-defined classes ------------------------------------\n\n  // Same repro against a runtime-built class: the classMethods: fun lowers\n  // through the shared class-method body path, so the shadow write fires\n  // there too.\n  testClassBuilderMutationSurvivesForeignNlrEscape =>\n    Object classBuilder name: #BT3037ShadowBuilt;\n      superclass: Object;\n      classVars: #{#runs => 0};\n      classMethods: #{#countedRun:over: => [:self :aBlock :aList |\n          self.runs := self.runs + 1\n          aList do: [:x | aBlock value: x]\n          nil\n        ], #runCount => [:self | self.runs]};\n      register\n    self.cls := (Erlang beamtalk_interface) findClass: #BT3037ShadowBuilt\n    self assert: (ShadowRelayProbe escapeThrough: self.cls over: #(1, 2, 3)) equals: 2\n    self assert: self.cls runCount equals: 1\n\n  // --- (f) cross-class contamination (BT-3039) ------------------------------\n\n  // The repro from BT-3039: ShadowCrossClassOwner hands CollectionDriver a\n  // block containing a mutating self-send (`self bump`) plus the `^` that\n  // escapes CollectionDriver's frame. `self bump` runs physically inside\n  // CollectionDriver's class process (ADR 0109), so before the class-keyed\n  // fix its shadow write clobbered CollectionDriver's own — corrupting\n  // CollectionDriver's persisted class vars with ShadowCrossClassOwner's map\n  // (a later `CollectionDriver runCount` would raise on the missing `runs`\n  // key). CollectionDriver's own mutation must survive uncorrupted.\n  testCrossClassMutationDoesNotCorruptForeignProcessShadow =>\n    self assert: (ShadowCrossClassOwner bumpThenEscapeThrough: CollectionDriver over: #(1, 2, 3)) equals: 1\n    self assert: CollectionDriver runCount equals: 1\n    // The `^` belongs to ShadowCrossClassOwner's own frame (it lexically\n    // contains the block), so its own mutation is carried out via the\n    // ordinary matching-token NLR catch (BT-3022/ADR 0041) — not the shadow\n    // at all. Both classes' own state end up correct simultaneously: P's via\n    // the normal NLR value, C's via the class-keyed shadow read.\n    self assert: ShadowCrossClassOwner bumpCount equals: 1\n\n// A builder cascade with a *mutating* classMethods: block written inside a\n// block literal is rejected at compile time today (BT-2792 stored-closure\n// field-write validation sees the classMethods: mutation), so the\n// \"cascade lexically inside a block\" arm of ADR 0110 — the\n// generate_class_method_fun_from_block block_depth reset — is pinned at the\n// Rust level instead:\n// crates/beamtalk-core/src/codegen/core_erlang/tests/dispatch.rs,\n// test_builder_cascade_at_block_depth_still_emits_shadow_write.",
+      "explanation": "BT-3032 / BT-3037 / ADR 0110: class-var mutations made before a foreign `^` escapes a class method must survive the non-local-return relay.  Codegen writes the just-updated ClassVars map into the '$bt_class_vars_shadow' process-dictionary key at every *top-frame* class-var mutation in a class method; the runtime's `{nlr_relay, ...}` path (BT-3036) reads it back instead of reverting to the pre-call map.  Fixtures: fixtures/collection_driver.bt, fixtures/collection_probe.bt, fixtures/shadow_relay_parent.bt, fixtures/shadow_relay_child.bt, fixtures/shadow_relay_probe.bt, fixtures/class_method_conditional_self_call.bt, fixtures/shadow_cross_class_owner.bt."
     },
     {
       "id": "stdlib-test-class-var-subexpr-test",
@@ -15640,6 +15675,9 @@
         "reduce",
         "set",
         "subclassing",
+        "testAnyOne",
+        "testAnyOneOnEmptyDictionaryRaisesEmptyCollection",
+        "testAnyOneOnSingletonDictionary",
         "testAtIfabsentLookupWithDefault",
         "testAtLookup",
         "testAtPutInsertUpdateReturnsNewDictionary",
@@ -15663,7 +15701,7 @@
         "unless",
         "where"
       ],
-      "source": "// E2E tests for Dictionary (Erlang map) methods (BT-418)\n\nTestCase subclass: DictionaryTest\n\n  testCreation =>\n    self assert: Dictionary new equals: #{}\n    self assert: (Dictionary new) size equals: 0\n    self assert: (Dictionary new) class equals: Dictionary\n    // Dictionary new: initializes with given entries\n    self assert: (Dictionary new: #{\n      #x => 10,\n      #y => 20\n    }) equals: #{#x => 10, #y => 20}\n    self assert: (Dictionary new: #{#x => 10, #y => 20}) size equals: 2\n    self assert: ((Dictionary new: #{#x => 10}) at: #x) equals: 10\n    self assert: (Dictionary new: #{#x => 10}) class equals: Dictionary\n\n  testClass =>\n    self assert: #{#a => 1} class equals: Dictionary\n    self assert: #{} class equals: Dictionary\n\n  testSize =>\n    self assert: #{#a => 1, #b => 2, #c => 3} size equals: 3\n    self assert: #{} size equals: 0\n\n  testKeysValues =>\n    self assert: #{#x => 10} keys equals: #(#x)\n    self assert: #{#x => 10} values equals: #(10)\n\n  testAtLookup =>\n    self assert: (#{#name => \"Alice\", #age => 30} at: #name) equals: \"Alice\"\n    self assert: (#{#x => 42} at: #x) equals: 42\n\n  testAtPutInsertUpdateReturnsNewDictionary =>\n    d := #{#x => 1}\n    self assert: d equals: #{#x => 1}\n    self assert: (d at: #y put: 2) equals: #{#x => 1, #y => 2}\n    self assert: (#{#a => 1} at: #b put: 2) size equals: 2\n    self assert: ((#{#a => 1} at: #a put: 99) at: #a) equals: 99\n\n  testAtIfabsentLookupWithDefault =>\n    self assert: (#{#a => 1} at: #a ifAbsent: [42]) equals: 1\n    self assert: (#{#a => 1} at: #b ifAbsent: [42]) equals: 42\n\n  testIncludeskey =>\n    self assert: (#{#a => 1, #b => 2} includesKey: #a)\n    self deny: (#{#a => 1, #b => 2} includesKey: #c)\n    self deny: (#{} includesKey: #x)\n\n  testRemovekey =>\n    self assert: (#{#a => 1, #b => 2} removeKey: #a) size equals: 1\n    self deny: ((#{#a => 1, #b => 2} removeKey: #a) includesKey: #a)\n\n  testMerge =>\n    d1 := #{#a => 1, #b => 2}\n    self assert: d1 equals: #{#a => 1, #b => 2}\n    d2 := #{#b => 20, #c => 3}\n    self assert: d2 equals: #{#b => 20, #c => 3}\n    self assert: (d1 merge: d2) equals: #{#a => 1, #b => 20, #c => 3}\n    self assert: ((#{#a => 1} merge: #{#a => 99}) at: #a) equals: 99\n\n  testPerformOnStatefulDoBlockRaisesClearErrorInsteadOfCrashing =>\n    // BT-2888: the do: stateful_block_dispatch guard also applies\n    // to Dictionary, since the guard is keyed on selector name, not receiver\n    // class.\n    count := 0\n    statefulBlock := [:v | count := count + v]\n    self should: [\n      #{#a => 1, #b => 2} perform: #do: withArguments: #(statefulBlock)\n    ] raise: #stateful_block_dispatch\n\n  testPerformOnStatefulDoWithKeyBlockRaisesClearErrorInsteadOfCrashing =>\n    // BT-2913: doWithKey:'s BIF-lowered body had no stateful_block_dispatch\n    // guard (unlike do:/collect:/select:/reject:/inject:into:, BT-2888) — a\n    // Tier 2 (stateful) block reaching it via perform: hit a raw arity crash\n    // in beamtalk_map:do_with_key/2 instead of a clear diagnostic.\n    // keysAndValuesDo: delegates to doWithKey: (`self doWithKey: block` in\n    // Dictionary.bt), so it inherits the same fix.\n    count := 0\n    statefulBlock := [:k :v | count := count + v]\n    self should: [\n      #{#a => 1, #b => 2} perform: #doWithKey: withArguments: #(statefulBlock)\n    ] raise: #stateful_block_dispatch\n\n    count := 0\n    statefulBlock2 := [:k :v | count := count + v]\n    self\n      should: [\n        #{\n          #a => 1,\n          #b => 2\n        } perform: #keysAndValuesDo: withArguments: #(statefulBlock2)\n      ]\n      raise: #stateful_block_dispatch\n\n  testPerformOnPureDoWithKeyBlockAlreadyWorked =>\n    // BT-2913: a Tier 1 (pure) block reached via perform: already worked\n    // correctly before this fix; pinned here as a baseline.\n    self assert: (#{\n      #a => 1,\n      #b => 2\n    } perform: #doWithKey: withArguments: #([:k :v | nil])) equals: nil\n    self assert: (#{\n      #a => 1,\n      #b => 2\n    } perform: #keysAndValuesDo: withArguments: #([:k :v | nil])) equals: nil\n\n  testDowithkey =>\n    // Returns nil\n    self assert: (#{#a => 1} doWithKey: [:k :v | nil]) equals: nil\n    // Works for empty dictionary\n    self assert: (#{} doWithKey: [:k :v | nil]) equals: nil\n    // Works for multi-entry dictionary\n    self assert: (#{#a => 1, #b => 2} doWithKey: [:k :v | nil]) equals: nil\n    // Block receives correct key (#a) and value (99) — raises if wrong values passed\n    self\n      assert: (#{#a => 99}\n        doWithKey: [:k :v |\n          (k =:= #a) ifFalse: [k error: \"unexpected key\"]\n          (v =:= 99) ifFalse: [v error: \"unexpected value\"]\n        ])\n      equals: nil\n\n  testKeysandvaluesdo =>\n    // keysAndValuesDo: delegates to doWithKey:\n    self assert: (#{#a => 1} keysAndValuesDo: [:k :v | nil]) equals: nil\n    // Works for empty dictionary\n    self assert: (#{} keysAndValuesDo: [:k :v | nil]) equals: nil\n    // Block receives correct key and value\n    self\n      assert: (#{#a => 99}\n        keysAndValuesDo: [:k :v |\n          (k =:= #a) ifFalse: [k error: \"unexpected key\"]\n          (v =:= 99) ifFalse: [v error: \"unexpected value\"]\n        ])\n      equals: nil\n\n  testNestedDictionaries =>\n    // Nested dictionaries display correctly\n    self assert: #{#a => #{#x => 1}} equals: #{#a => #{#x => 1}}\n    // Empty nested dictionary\n    self assert: #{#a => #{}} equals: #{#a => #{}}\n\n  testBinaryExpressionsInMapValues =>\n    // Simple arithmetic in map value\n    self assert: #{#x => 1 + 2} equals: #{#x => 3}\n    // Multiple binary expressions in values\n    self assert: #{#x => 1 + 2, #y => 3 * 4} equals: #{#x => 3, #y => 12}\n    // Subtraction in map value\n    self assert: #{#result => 10 - 3} equals: #{#result => 7}\n\n  testKeywordMessageInMapValue =>\n    // BT-1854: nested keyword messages inside map literal values\n    // Keyword send with map arg as map value\n    self assert: (#{\n      #data => Dictionary new: #{#x => 1}\n    } at: #data) equals: #{#x => 1}\n    // Multiple entries, one with keyword send\n    d := #{#a => Dictionary new: #{#n => 0}, #b => 42}\n    self assert: (d at: #a) equals: #{#n => 0}\n    self assert: (d at: #b) equals: 42",
+      "source": "// E2E tests for Dictionary (Erlang map) methods (BT-418)\n\nTestCase subclass: DictionaryTest\n\n  testCreation =>\n    self assert: Dictionary new equals: #{}\n    self assert: (Dictionary new) size equals: 0\n    self assert: (Dictionary new) class equals: Dictionary\n    // Dictionary new: initializes with given entries\n    self assert: (Dictionary new: #{\n      #x => 10,\n      #y => 20\n    }) equals: #{#x => 10, #y => 20}\n    self assert: (Dictionary new: #{#x => 10, #y => 20}) size equals: 2\n    self assert: ((Dictionary new: #{#x => 10}) at: #x) equals: 10\n    self assert: (Dictionary new: #{#x => 10}) class equals: Dictionary\n\n  testClass =>\n    self assert: #{#a => 1} class equals: Dictionary\n    self assert: #{} class equals: Dictionary\n\n  testSize =>\n    self assert: #{#a => 1, #b => 2, #c => 3} size equals: 3\n    self assert: #{} size equals: 0\n\n  testKeysValues =>\n    self assert: #{#x => 10} keys equals: #(#x)\n    self assert: #{#x => 10} values equals: #(10)\n\n  testAtLookup =>\n    self assert: (#{#name => \"Alice\", #age => 30} at: #name) equals: \"Alice\"\n    self assert: (#{#x => 42} at: #x) equals: 42\n\n  testAtPutInsertUpdateReturnsNewDictionary =>\n    d := #{#x => 1}\n    self assert: d equals: #{#x => 1}\n    self assert: (d at: #y put: 2) equals: #{#x => 1, #y => 2}\n    self assert: (#{#a => 1} at: #b put: 2) size equals: 2\n    self assert: ((#{#a => 1} at: #a put: 99) at: #a) equals: 99\n\n  testAtIfabsentLookupWithDefault =>\n    self assert: (#{#a => 1} at: #a ifAbsent: [42]) equals: 1\n    self assert: (#{#a => 1} at: #b ifAbsent: [42]) equals: 42\n\n  testIncludeskey =>\n    self assert: (#{#a => 1, #b => 2} includesKey: #a)\n    self deny: (#{#a => 1, #b => 2} includesKey: #c)\n    self deny: (#{} includesKey: #x)\n\n  testRemovekey =>\n    self assert: (#{#a => 1, #b => 2} removeKey: #a) size equals: 1\n    self deny: ((#{#a => 1, #b => 2} removeKey: #a) includesKey: #a)\n\n  testMerge =>\n    d1 := #{#a => 1, #b => 2}\n    self assert: d1 equals: #{#a => 1, #b => 2}\n    d2 := #{#b => 20, #c => 3}\n    self assert: d2 equals: #{#b => 20, #c => 3}\n    self assert: (d1 merge: d2) equals: #{#a => 1, #b => 20, #c => 3}\n    self assert: ((#{#a => 1} merge: #{#a => 99}) at: #a) equals: 99\n\n  testPerformOnStatefulDoBlockRaisesClearErrorInsteadOfCrashing =>\n    // BT-2888: the do: stateful_block_dispatch guard also applies\n    // to Dictionary, since the guard is keyed on selector name, not receiver\n    // class.\n    count := 0\n    statefulBlock := [:v | count := count + v]\n    self should: [\n      #{#a => 1, #b => 2} perform: #do: withArguments: #(statefulBlock)\n    ] raise: #stateful_block_dispatch\n\n  testPerformOnStatefulDoWithKeyBlockRaisesClearErrorInsteadOfCrashing =>\n    // BT-2913: doWithKey:'s BIF-lowered body had no stateful_block_dispatch\n    // guard (unlike do:/collect:/select:/reject:/inject:into:, BT-2888) — a\n    // Tier 2 (stateful) block reaching it via perform: hit a raw arity crash\n    // in beamtalk_map:do_with_key/2 instead of a clear diagnostic.\n    // keysAndValuesDo: delegates to doWithKey: (`self doWithKey: block` in\n    // Dictionary.bt), so it inherits the same fix.\n    count := 0\n    statefulBlock := [:k :v | count := count + v]\n    self should: [\n      #{#a => 1, #b => 2} perform: #doWithKey: withArguments: #(statefulBlock)\n    ] raise: #stateful_block_dispatch\n\n    count := 0\n    statefulBlock2 := [:k :v | count := count + v]\n    self\n      should: [\n        #{\n          #a => 1,\n          #b => 2\n        } perform: #keysAndValuesDo: withArguments: #(statefulBlock2)\n      ]\n      raise: #stateful_block_dispatch\n\n  testPerformOnPureDoWithKeyBlockAlreadyWorked =>\n    // BT-2913: a Tier 1 (pure) block reached via perform: already worked\n    // correctly before this fix; pinned here as a baseline.\n    self assert: (#{\n      #a => 1,\n      #b => 2\n    } perform: #doWithKey: withArguments: #([:k :v | nil])) equals: nil\n    self assert: (#{\n      #a => 1,\n      #b => 2\n    } perform: #keysAndValuesDo: withArguments: #([:k :v | nil])) equals: nil\n\n  testDowithkey =>\n    // Returns nil\n    self assert: (#{#a => 1} doWithKey: [:k :v | nil]) equals: nil\n    // Works for empty dictionary\n    self assert: (#{} doWithKey: [:k :v | nil]) equals: nil\n    // Works for multi-entry dictionary\n    self assert: (#{#a => 1, #b => 2} doWithKey: [:k :v | nil]) equals: nil\n    // Block receives correct key (#a) and value (99) — raises if wrong values passed\n    self\n      assert: (#{#a => 99}\n        doWithKey: [:k :v |\n          (k =:= #a) ifFalse: [k error: \"unexpected key\"]\n          (v =:= 99) ifFalse: [v error: \"unexpected value\"]\n        ])\n      equals: nil\n\n  testKeysandvaluesdo =>\n    // keysAndValuesDo: delegates to doWithKey:\n    self assert: (#{#a => 1} keysAndValuesDo: [:k :v | nil]) equals: nil\n    // Works for empty dictionary\n    self assert: (#{} keysAndValuesDo: [:k :v | nil]) equals: nil\n    // Block receives correct key and value\n    self\n      assert: (#{#a => 99}\n        keysAndValuesDo: [:k :v |\n          (k =:= #a) ifFalse: [k error: \"unexpected key\"]\n          (v =:= 99) ifFalse: [v error: \"unexpected value\"]\n        ])\n      equals: nil\n\n  testNestedDictionaries =>\n    // Nested dictionaries display correctly\n    self assert: #{#a => #{#x => 1}} equals: #{#a => #{#x => 1}}\n    // Empty nested dictionary\n    self assert: #{#a => #{}} equals: #{#a => #{}}\n\n  testBinaryExpressionsInMapValues =>\n    // Simple arithmetic in map value\n    self assert: #{#x => 1 + 2} equals: #{#x => 3}\n    // Multiple binary expressions in values\n    self assert: #{#x => 1 + 2, #y => 3 * 4} equals: #{#x => 3, #y => 12}\n    // Subtraction in map value\n    self assert: #{#result => 10 - 3} equals: #{#result => 7}\n\n  testKeywordMessageInMapValue =>\n    // BT-1854: nested keyword messages inside map literal values\n    // Keyword send with map arg as map value\n    self assert: (#{\n      #data => Dictionary new: #{#x => 1}\n    } at: #data) equals: #{#x => 1}\n    // Multiple entries, one with keyword send\n    d := #{#a => Dictionary new: #{#n => 0}, #b => 42}\n    self assert: (d at: #a) equals: #{#n => 0}\n    self assert: (d at: #b) equals: 42\n\n  // BT-3027 — Dictionary has no first/last; anyOne is the deliberately\n  // non-deterministic single-element accessor. It answers a *value*\n  // (consistent with do:), not a key-value pair.\n  testAnyOne =>\n    d := #{#a => 1, #b => 2, #c => 3}\n    self assert: (d includes: d anyOne)\n\n  testAnyOneOnSingletonDictionary =>\n    self assert: (#{#only => 99} anyOne) equals: 99\n\n  testAnyOneOnEmptyDictionaryRaisesEmptyCollection =>\n    self should: [#{} anyOne] raise: #empty_collection",
       "explanation": "E2E tests for Dictionary (Erlang map) methods (BT-418)"
     },
     {
@@ -16025,6 +16063,14 @@
         "subclassing",
         "testArrayAtBeyondSizeRaisesIndexOutOfBounds",
         "testArrayAtOnEmptyRaisesEmptyCollection",
+        "testArrayFirstAndLastReturnElements",
+        "testArrayFirstOnEmptyRaisesEmptyCollection",
+        "testArrayLastOnEmptyRaisesEmptyCollection",
+        "testBagAnyOneOnEmptyRaisesEmptyCollection",
+        "testBagAnyOneOnNonEmptyReturnsAMember",
+        "testBagLastRaisesDoesNotUnderstand",
+        "testDictionaryAnyOneOnEmptyRaisesEmptyCollection",
+        "testDictionaryAnyOneOnNonEmptyReturnsAValue",
         "testElementAccessorsRaiseWhereSubsequenceOpsAnswer",
         "testEmptyArrayAtZeroRaisesIndexOutOfBounds",
         "testEmptyCollectionAverageRaisesEmptyCollection",
@@ -16032,12 +16078,15 @@
         "testEmptyCollectionMaxRaisesEmptyCollection",
         "testEmptyCollectionMinRaisesEmptyCollection",
         "testEmptyCollectionSumIsZero",
+        "testEmptyIntervalAtRaisesIndexOutOfBoundsNotEmptyCollection",
         "testEmptyIntervalFirstRaisesEmptyCollection",
         "testEmptyIntervalLastRaisesEmptyCollection",
         "testEmptyListAtZeroRaisesIndexOutOfBounds",
         "testEmptyQueueIsCatchableAsRuntimeError",
         "testEmptySetAsListFirstRaisesEmptyCollection",
         "testEmptyStringAtZeroRaisesIndexOutOfBounds",
+        "testIntervalAtOutOfRangeRaisesIndexOutOfBounds",
+        "testIntervalAtReturnsElement",
         "testListAtBeyondSizeRaisesIndexOutOfBounds",
         "testListAtMessageNamesTheCondition",
         "testListAtOnEmptyRaisesEmptyCollection",
@@ -16050,6 +16099,11 @@
         "testRestOnEmptyAnswersEmptyList",
         "testRestOnEmptyDoesNotRaise",
         "testRestOnSingletonAnswersEmptyList",
+        "testSetAnyOneOnEmptyRaisesEmptyCollection",
+        "testSetAnyOneOnNonEmptyReturnsAMember",
+        "testSetFirstRaisesDoesNotUnderstand",
+        "testSignalKindRoundTripsIndexOutOfBounds",
+        "testSignalKindUsesTheSuppliedHint",
         "testStringAtBeyondLengthRaisesIndexOutOfBounds",
         "testStringAtOnEmptyRaisesEmptyCollection",
         "testStringFirstIsGraphemeAware",
@@ -16062,7 +16116,7 @@
         "testTakeAndDropOnEmptyAreAlsoTotal",
         "unless"
       ],
-      "source": "// BUnit tests for empty-collection element access (BT-3021).\n//\n// Accessing an element of an empty collection used to raise\n// `does_not_understand` — a dispatch failure — which sent readers hunting for\n// a typo or a wrong receiver type instead of a missing emptiness guard, and\n// could not be caught selectively (a genuine typo surfaced identically).\n//\n// The element accessors (`first`, `last`, `at:`) now raise `empty_collection`.\n// The subsequence operations (`rest`, `take:`, `drop:`) stay total and answer\n// the empty collection — see the `rest` tests at the bottom.\n\nTestCase subclass: EmptyCollectionAccessTest\n\n  // ==========================================================================\n  // List — element accessors raise empty_collection\n  // ==========================================================================\n  testListFirstOnEmptyRaisesEmptyCollection =>\n    self should: [#() first] raise: #empty_collection\n\n  testListLastOnEmptyRaisesEmptyCollection =>\n    self should: [#() last] raise: #empty_collection\n\n  testListAtOnEmptyRaisesEmptyCollection =>\n    self should: [#() at: 1] raise: #empty_collection\n\n  // A List materialised from another collection behaves the same — this is the\n  // shape the bug was originally reported against.\n  testEmptySetAsListFirstRaisesEmptyCollection =>\n    self should: [Set new asList first] raise: #empty_collection\n\n  // The error names the condition, not a dispatch failure.\n  testListFirstMessageNamesTheCondition =>\n    message := [#() first] on: Error do: [:e | e message]\n    self assert: (message includesSubstring: \"is empty\")\n    self deny: (message includesSubstring: \"does not understand\")\n\n  testListAtMessageNamesTheCondition =>\n    message := [#() at: 1] on: Error do: [:e | e message]\n    self assert: (message includesSubstring: \"is empty\")\n    self deny: (message includesSubstring: \"does not understand\")\n\n  // empty_collection is catchable as a RuntimeError, so `on:do:` can\n  // discriminate it from an unrelated failure in the same block.\n  testEmptyCollectionIsCatchableAsRuntimeError =>\n    caught := [#() first] on: RuntimeError do: [:e | \"caught\"]\n    self assert: caught equals: \"caught\"\n\n  // ==========================================================================\n  // List — out-of-bounds is a *different* condition from empty\n  // ==========================================================================\n  testListAtBeyondSizeRaisesIndexOutOfBounds =>\n    self should: [#(1, 2, 3) at: 9] raise: #index_out_of_bounds\n\n  testListAtZeroRaisesIndexOutOfBounds =>\n    self should: [#(1, 2, 3) at: 0] raise: #index_out_of_bounds\n\n  // An index below 1 is malformed whether or not the List is empty, so it\n  // reports as out-of-bounds rather than as emptiness.\n  testEmptyListAtZeroRaisesIndexOutOfBounds =>\n    self should: [#() at: 0] raise: #index_out_of_bounds\n\n  // (A non-Integer index is rejected at compile time, so it has no runtime\n  // test here — the type checker reports it before the program runs.)\n\n  // ==========================================================================\n  // String — element accessors are grapheme-aware and raise on empty\n  // ==========================================================================\n  testStringFirstOnEmptyRaisesEmptyCollection =>\n    self should: [\"\" first] raise: #empty_collection\n\n  testStringLastOnEmptyRaisesEmptyCollection =>\n    self should: [\"\" last] raise: #empty_collection\n\n  // `String at:` mirrors `List at:`: empty is empty_collection, out-of-range\n  // is index_out_of_bounds, and a sub-1 index is malformed either way.\n  testStringAtOnEmptyRaisesEmptyCollection =>\n    self should: [\"\" at: 1] raise: #empty_collection\n\n  testStringAtBeyondLengthRaisesIndexOutOfBounds =>\n    self should: [\"abc\" at: 9] raise: #index_out_of_bounds\n\n  testEmptyStringAtZeroRaisesIndexOutOfBounds =>\n    self should: [\"\" at: 0] raise: #index_out_of_bounds\n\n  testStringFirstReturnsFirstGrapheme => self assert: \"hello\" first equals: \"h\"\n\n  testStringLastReturnsLastGrapheme => self assert: \"hello\" last equals: \"o\"\n\n  // Grapheme-aware, not byte-aware: \"ü\" is two UTF-8 bytes.\n  testStringFirstIsGraphemeAware => self assert: \"über\" first equals: \"ü\"\n\n  testStringLastIsGraphemeAware => self assert: \"grüß\" last equals: \"ß\"\n\n  testStringFirstOnSingleCharacterString =>\n    self assert: \"x\" first equals: \"x\"\n    self assert: \"x\" last equals: \"x\"\n\n  // ==========================================================================\n  // Array — at: agrees with List and String\n  // ==========================================================================\n\n  // `Array withAll: #()` — Array has no `new`, only `withAll:` / `new:`.\n  testArrayAtOnEmptyRaisesEmptyCollection =>\n    self should: [(Array withAll: #()) at: 1] raise: #empty_collection\n\n  testArrayAtBeyondSizeRaisesIndexOutOfBounds =>\n    self should: [(Array withAll: #(1, 2, 3)) at: 9] raise: #index_out_of_bounds\n\n  testEmptyArrayAtZeroRaisesIndexOutOfBounds =>\n    self should: [(Array withAll: #()) at: 0] raise: #index_out_of_bounds\n\n  // ==========================================================================\n  // Queue — predates empty_collection and keeps its own kind, but classifies\n  // as RuntimeError like the rest of the family\n  // ==========================================================================\n  testQueuePeekOnEmptyStillRaisesEmptyQueue =>\n    self should: [Queue new peek] raise: #empty_queue\n\n  testEmptyQueueIsCatchableAsRuntimeError =>\n    caught := [Queue new peek] on: RuntimeError do: [:e | \"caught\"]\n    self assert: caught equals: \"caught\"\n\n  // ==========================================================================\n  // Interval — pure-Beamtalk collection, same kind via the Erlang helper\n  // ==========================================================================\n  testEmptyIntervalFirstRaisesEmptyCollection =>\n    self should: [(1 to: 0) first] raise: #empty_collection\n\n  testEmptyIntervalLastRaisesEmptyCollection =>\n    self should: [(1 to: 0) last] raise: #empty_collection\n\n  testNonEmptyIntervalFirstAndLastStillWork =>\n    self assert: (1 to: 10) first equals: 1\n    self assert: (1 to: 10) last equals: 10\n\n  // ==========================================================================\n  // Collection aggregates — max/min/average over nothing\n  // ==========================================================================\n  testEmptyCollectionMaxRaisesEmptyCollection =>\n    self should: [#() max] raise: #empty_collection\n\n  testEmptyCollectionMinRaisesEmptyCollection =>\n    self should: [#() min] raise: #empty_collection\n\n  testEmptyCollectionAverageRaisesEmptyCollection =>\n    self should: [#() average] raise: #empty_collection\n\n  // `sum` has an identity element (0), so it stays total.\n  testEmptyCollectionSumIsZero => self assert: #() sum equals: 0\n\n  // ==========================================================================\n  // Subsequence operations stay total — the decided `rest` behaviour\n  // ==========================================================================\n\n  // `rest` is not an element accessor: unlike `first`/`last` it has a\n  // well-defined total answer on empty, so it answers `#()` rather than\n  // raising. This keeps the `isEmpty ifFalse: [... rest ...]` recursion idiom\n  // working and matches its neighbours `take:`/`drop:`.\n  testRestOnEmptyAnswersEmptyList => self assert: #() rest equals: #()\n\n  testRestOnEmptyDoesNotRaise =>\n    self assert: ([#() rest] on: Error do: [:e | \"raised\"]) equals: #()\n\n  testRestOnSingletonAnswersEmptyList => self assert: #(1) rest equals: #()\n\n  testTakeAndDropOnEmptyAreAlsoTotal =>\n    self assert: (#() take: 3) equals: #()\n    self assert: (#() drop: 3) equals: #()\n\n  // The whole point of the split: `first` raises where `rest` answers.\n  testElementAccessorsRaiseWhereSubsequenceOpsAnswer =>\n    self should: [#() first] raise: #empty_collection\n    self assert: #() rest equals: #()",
+      "source": "// BUnit tests for empty-collection element access (BT-3021).\n//\n// Accessing an element of an empty collection used to raise\n// `does_not_understand` — a dispatch failure — which sent readers hunting for\n// a typo or a wrong receiver type instead of a missing emptiness guard, and\n// could not be caught selectively (a genuine typo surfaced identically).\n//\n// The element accessors (`first`, `last`, `at:`) now raise `empty_collection`.\n// The subsequence operations (`rest`, `take:`, `drop:`) stay total and answer\n// the empty collection — see the `rest` tests at the bottom.\n\nTestCase subclass: EmptyCollectionAccessTest\n\n  // ==========================================================================\n  // List — element accessors raise empty_collection\n  // ==========================================================================\n  testListFirstOnEmptyRaisesEmptyCollection =>\n    self should: [#() first] raise: #empty_collection\n\n  testListLastOnEmptyRaisesEmptyCollection =>\n    self should: [#() last] raise: #empty_collection\n\n  testListAtOnEmptyRaisesEmptyCollection =>\n    self should: [#() at: 1] raise: #empty_collection\n\n  // A List materialised from another collection behaves the same — this is the\n  // shape the bug was originally reported against.\n  testEmptySetAsListFirstRaisesEmptyCollection =>\n    self should: [Set new asList first] raise: #empty_collection\n\n  // The error names the condition, not a dispatch failure.\n  testListFirstMessageNamesTheCondition =>\n    message := [#() first] on: Error do: [:e | e message]\n    self assert: (message includesSubstring: \"is empty\")\n    self deny: (message includesSubstring: \"does not understand\")\n\n  testListAtMessageNamesTheCondition =>\n    message := [#() at: 1] on: Error do: [:e | e message]\n    self assert: (message includesSubstring: \"is empty\")\n    self deny: (message includesSubstring: \"does not understand\")\n\n  // empty_collection is catchable as a RuntimeError, so `on:do:` can\n  // discriminate it from an unrelated failure in the same block.\n  testEmptyCollectionIsCatchableAsRuntimeError =>\n    caught := [#() first] on: RuntimeError do: [:e | \"caught\"]\n    self assert: caught equals: \"caught\"\n\n  // ==========================================================================\n  // List — out-of-bounds is a *different* condition from empty\n  // ==========================================================================\n  testListAtBeyondSizeRaisesIndexOutOfBounds =>\n    self should: [#(1, 2, 3) at: 9] raise: #index_out_of_bounds\n\n  testListAtZeroRaisesIndexOutOfBounds =>\n    self should: [#(1, 2, 3) at: 0] raise: #index_out_of_bounds\n\n  // An index below 1 is malformed whether or not the List is empty, so it\n  // reports as out-of-bounds rather than as emptiness.\n  testEmptyListAtZeroRaisesIndexOutOfBounds =>\n    self should: [#() at: 0] raise: #index_out_of_bounds\n\n  // (A non-Integer index is rejected at compile time, so it has no runtime\n  // test here — the type checker reports it before the program runs.)\n\n  // ==========================================================================\n  // String — element accessors are grapheme-aware and raise on empty\n  // ==========================================================================\n  testStringFirstOnEmptyRaisesEmptyCollection =>\n    self should: [\"\" first] raise: #empty_collection\n\n  testStringLastOnEmptyRaisesEmptyCollection =>\n    self should: [\"\" last] raise: #empty_collection\n\n  // `String at:` mirrors `List at:`: empty is empty_collection, out-of-range\n  // is index_out_of_bounds, and a sub-1 index is malformed either way.\n  testStringAtOnEmptyRaisesEmptyCollection =>\n    self should: [\"\" at: 1] raise: #empty_collection\n\n  testStringAtBeyondLengthRaisesIndexOutOfBounds =>\n    self should: [\"abc\" at: 9] raise: #index_out_of_bounds\n\n  testEmptyStringAtZeroRaisesIndexOutOfBounds =>\n    self should: [\"\" at: 0] raise: #index_out_of_bounds\n\n  testStringFirstReturnsFirstGrapheme => self assert: \"hello\" first equals: \"h\"\n\n  testStringLastReturnsLastGrapheme => self assert: \"hello\" last equals: \"o\"\n\n  // Grapheme-aware, not byte-aware: \"ü\" is two UTF-8 bytes.\n  testStringFirstIsGraphemeAware => self assert: \"über\" first equals: \"ü\"\n\n  testStringLastIsGraphemeAware => self assert: \"grüß\" last equals: \"ß\"\n\n  testStringFirstOnSingleCharacterString =>\n    self assert: \"x\" first equals: \"x\"\n    self assert: \"x\" last equals: \"x\"\n\n  // ==========================================================================\n  // Array — at: agrees with List and String\n  // ==========================================================================\n\n  // `Array withAll: #()` — Array has no `new`, only `withAll:` / `new:`.\n  testArrayAtOnEmptyRaisesEmptyCollection =>\n    self should: [(Array withAll: #()) at: 1] raise: #empty_collection\n\n  testArrayAtBeyondSizeRaisesIndexOutOfBounds =>\n    self should: [(Array withAll: #(1, 2, 3)) at: 9] raise: #index_out_of_bounds\n\n  testEmptyArrayAtZeroRaisesIndexOutOfBounds =>\n    self should: [(Array withAll: #()) at: 0] raise: #index_out_of_bounds\n\n  // ==========================================================================\n  // Array — first/last (BT-3027), same shape as List/String\n  // ==========================================================================\n  testArrayFirstOnEmptyRaisesEmptyCollection =>\n    self should: [#[] first] raise: #empty_collection\n\n  testArrayLastOnEmptyRaisesEmptyCollection =>\n    self should: [#[] last] raise: #empty_collection\n\n  testArrayFirstAndLastReturnElements =>\n    self assert: #[10, 20, 30] first equals: 10\n    self assert: #[10, 20, 30] last equals: 30\n\n  // ==========================================================================\n  // Queue — predates empty_collection and keeps its own kind, but classifies\n  // as RuntimeError like the rest of the family\n  // ==========================================================================\n  testQueuePeekOnEmptyStillRaisesEmptyQueue =>\n    self should: [Queue new peek] raise: #empty_queue\n\n  testEmptyQueueIsCatchableAsRuntimeError =>\n    caught := [Queue new peek] on: RuntimeError do: [:e | \"caught\"]\n    self assert: caught equals: \"caught\"\n\n  // ==========================================================================\n  // Interval — pure-Beamtalk collection, same kind via the Erlang helper\n  // ==========================================================================\n  testEmptyIntervalFirstRaisesEmptyCollection =>\n    self should: [(1 to: 0) first] raise: #empty_collection\n\n  testEmptyIntervalLastRaisesEmptyCollection =>\n    self should: [(1 to: 0) last] raise: #empty_collection\n\n  testNonEmptyIntervalFirstAndLastStillWork =>\n    self assert: (1 to: 10) first equals: 1\n    self assert: (1 to: 10) last equals: 10\n\n  // `Interval>>at:` (BT-3027) is bounds-checked like `Array`/`List` at:, but\n  // *always* reports out-of-range as index_out_of_bounds — including on an\n  // empty interval — never empty_collection. Only the no-arg accessors\n  // (first/last/anyOne) treat emptiness as its own condition.\n  testIntervalAtOutOfRangeRaisesIndexOutOfBounds =>\n    self should: [(1 to: 10) at: 11] raise: #index_out_of_bounds\n    self should: [(1 to: 10) at: 0] raise: #index_out_of_bounds\n\n  testEmptyIntervalAtRaisesIndexOutOfBoundsNotEmptyCollection =>\n    self should: [(1 to: 0) at: 1] raise: #index_out_of_bounds\n\n  testIntervalAtReturnsElement =>\n    self assert: ((1 to: 10) at: 1) equals: 1\n    self assert: ((1 to: 10) at: 10) equals: 10\n    self assert: ((1 to: 10 by: 2) at: 3) equals: 5\n\n  // ==========================================================================\n  // Set/Bag/Dictionary — deliberately no first/last; anyOne instead (BT-3027)\n  // ==========================================================================\n  testSetAnyOneOnEmptyRaisesEmptyCollection =>\n    self should: [Set new anyOne] raise: #empty_collection\n\n  testBagAnyOneOnEmptyRaisesEmptyCollection =>\n    self should: [Bag new anyOne] raise: #empty_collection\n\n  testDictionaryAnyOneOnEmptyRaisesEmptyCollection =>\n    self should: [#{} anyOne] raise: #empty_collection\n\n  testSetAnyOneOnNonEmptyReturnsAMember =>\n    s := Set new fromList: #(1, 2, 3)\n    self assert: (s includes: s anyOne)\n\n  testBagAnyOneOnNonEmptyReturnsAMember =>\n    b := Bag withAll: #(1, 2, 3)\n    self assert: (b includes: b anyOne)\n\n  testDictionaryAnyOneOnNonEmptyReturnsAValue =>\n    d := #{#a => 1, #b => 2}\n    self assert: (d includes: d anyOne)\n\n  // Set/Bag/Dictionary have no `first`/`last` at all — the design\n  // deliberately does not give them those selectors (they'd misleadingly\n  // imply an ordering guarantee). The type checker emits a compile-time\n  // hint for the unresolved selector, but this does not block compilation\n  // (see `@expect dnu` convention) — it still dispatches at runtime and\n  // raises `does_not_understand`, exactly like any other typo.\n  @expect dnu\n  testSetFirstRaisesDoesNotUnderstand =>\n    self should: [Set new first] raise: #does_not_understand\n\n  @expect dnu\n  testBagLastRaisesDoesNotUnderstand =>\n    self should: [(Bag withAll: #(1, 2)) last] raise: #does_not_understand\n\n  // ==========================================================================\n  // Collection aggregates — max/min/average over nothing\n  // ==========================================================================\n  testEmptyCollectionMaxRaisesEmptyCollection =>\n    self should: [#() max] raise: #empty_collection\n\n  testEmptyCollectionMinRaisesEmptyCollection =>\n    self should: [#() min] raise: #empty_collection\n\n  testEmptyCollectionAverageRaisesEmptyCollection =>\n    self should: [#() average] raise: #empty_collection\n\n  // `sum` has an identity element (0), so it stays total.\n  testEmptyCollectionSumIsZero => self assert: #() sum equals: 0\n\n  // ==========================================================================\n  // Subsequence operations stay total — the decided `rest` behaviour\n  // ==========================================================================\n\n  // `rest` is not an element accessor: unlike `first`/`last` it has a\n  // well-defined total answer on empty, so it answers `#()` rather than\n  // raising. This keeps the `isEmpty ifFalse: [... rest ...]` recursion idiom\n  // working and matches its neighbours `take:`/`drop:`.\n  testRestOnEmptyAnswersEmptyList => self assert: #() rest equals: #()\n\n  testRestOnEmptyDoesNotRaise =>\n    self assert: ([#() rest] on: Error do: [:e | \"raised\"]) equals: #()\n\n  testRestOnSingletonAnswersEmptyList => self assert: #(1) rest equals: #()\n\n  testTakeAndDropOnEmptyAreAlsoTotal =>\n    self assert: (#() take: 3) equals: #()\n    self assert: (#() drop: 3) equals: #()\n\n  // The whole point of the split: `first` raises where `rest` answers.\n  testElementAccessorsRaiseWhereSubsequenceOpsAnswer =>\n    self should: [#() first] raise: #empty_collection\n    self assert: #() rest equals: #()\n\n  // ==========================================================================\n  // Exception class >> signalKind:class:selector:hint: — general named-kind\n  // signal primitive for pure-Beamtalk code (BT-3042). Ordinary Beamtalk\n  // syntax, no Erlang FFI at the call site: any kind, with a hint specific\n  // to the call site.\n  // ==========================================================================\n  testSignalKindRoundTripsIndexOutOfBounds =>\n    self\n      should: [\n        Exception\n          signalKind: #index_out_of_bounds\n          class: #ListZipper\n          selector: #left\n          hint: \"already at the start of the sequence\"\n      ]\n      raise: #index_out_of_bounds\n\n  testSignalKindUsesTheSuppliedHint =>\n    hint := [\n      Exception\n        signalKind: #index_out_of_bounds\n        class: #ListZipper\n        selector: #left\n        hint: \"already at the start of the sequence\"\n    ] on: Error do: [:e | e hint]\n    self assert: (hint includesSubstring: \"already at the start of the sequence\")",
       "explanation": "BUnit tests for empty-collection element access (BT-3021).  Accessing an element of an empty collection used to raise `does_not_understand` — a dispatch failure — which sent readers hunting for a typo or a wrong receiver type instead of a missing emptiness guard, and could not be caught selectively (a genuine typo surfaced identically).  The element accessors (`first`, `last`, `at:`) now raise `empty_collection`. The subsequence operations (`rest`, `take:`, `drop:`) stay total and answer the empty collection — see the `rest` tests at the bottom."
     },
     {
@@ -22599,6 +22653,36 @@
       "explanation": "BT-1457: Server subclass fixture for handleInfo: codegen testing"
     },
     {
+      "id": "stdlib-test-fixtures-shadow-cross-class-owner",
+      "title": "ShadowCrossClassOwner",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "ShadowCrossClassOwner",
+        "Value",
+        "assign",
+        "assignment",
+        "bump",
+        "bumpCount",
+        "bumpThenEscapeThrough:over:",
+        "extends",
+        "field",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "mutate",
+        "mutation",
+        "property",
+        "resetBumps",
+        "set",
+        "shadow_cross_class_owner",
+        "subclassing",
+        "value"
+      ],
+      "source": "// BT-3039 / ADR 0110 amendment: owns the mutating self-send that gets handed,\n// inside a block, into a *different* class's mutating method\n// (fixtures/collection_driver.bt's CollectionDriver). The block executes in\n// the other class's gen_server process (ADR 0109), so `self bump`'s own\n// top-frame shadow write happens physically there, under this class's own\n// key — it must never be mistaken for that other class's shadow entry.\n\nValue subclass: ShadowCrossClassOwner\n  classState: bumps = 0\n\n  class bump => self.bumps := self.bumps + 1\n\n  class bumpCount -> Integer => self.bumps\n\n  class resetBumps => self.bumps := 0\n\n  // BT-3039: `k`'s own mutating method (`countedRun:over:`) hands this\n  // method's block to `k`'s class process. `self bump` inside the block is\n  // this class's own top-frame mutation, running physically inside `k`'s\n  // process; `^x` is foreign to `k countedRun:over:`'s frame and relays back\n  // out through it.\n  class bumpThenEscapeThrough: k over: aList :: List -> Integer =>\n    k\n      countedRun: [:x |\n        self bump\n        ^x\n      ]\n      over: aList\n    0",
+      "explanation": "BT-3039 / ADR 0110 amendment: owns the mutating self-send that gets handed, inside a block, into a *different* class's mutating method (fixtures/collection_driver.bt's CollectionDriver). The block executes in the other class's gen_server process (ADR 0109), so `self bump`'s own top-frame shadow write happens physically there, under this class's own key — it must never be mistaken for that other class's shadow entry."
+    },
+    {
       "id": "stdlib-test-fixtures-shadow-relay-child",
       "title": "ShadowRelayChild",
       "category": "stdlib-fixtures",
@@ -24657,6 +24741,11 @@
         "testAsListSingleElement",
         "testAsListWrongDirectionNeg",
         "testAsListWrongDirectionPos",
+        "testAt",
+        "testAtByStep",
+        "testAtNegativeStep",
+        "testAtOnEmptyIntervalRaisesIndexOutOfBoundsNotEmptyCollection",
+        "testAtOutOfRangeRaisesIndexOutOfBounds",
         "testCollect",
         "testCreationByClass",
         "testCreationClass",
@@ -24692,7 +24781,7 @@
         "transform",
         "where"
       ],
-      "source": "// BUnit tests for Interval — arithmetic sequence of integers (BT-1249)\n\nTestCase subclass: IntervalTest\n\n  testCreationClass =>\n    iv := 1 to: 10\n    self assert: iv class equals: Interval\n\n  testCreationByClass =>\n    iv := 1 to: 10 by: 2\n    self assert: iv class equals: Interval\n\n  testSizeSimple => self assert: (1 to: 10) size equals: 10\n\n  testSizeByStep => self assert: (1 to: 10 by: 2) size equals: 5\n\n  testSizeByStepThree => self assert: (1 to: 10 by: 3) size equals: 4\n\n  testSizeSingleElement => self assert: (5 to: 5) size equals: 1\n\n  testSizeEmpty => self assert: (1 to: 0) size equals: 0\n\n  testSizeNegativeStep => self assert: (10 to: 1 by: -1) size equals: 10\n\n  testSizeNegativeStepByThree => self assert: (10 to: 1 by: -3) size equals: 4\n\n  testIsEmpty =>\n    self assert: (1 to: 0) isEmpty\n    self deny: (1 to: 10) isEmpty\n\n  testFirst => self assert: (1 to: 10) first equals: 1\n\n  testFirstByStep => self assert: (5 to: 20 by: 3) first equals: 5\n\n  testLast => self assert: (1 to: 10) last equals: 10\n\n  testLastByStep => self assert: (1 to: 10 by: 3) last equals: 10\n\n  testLastByStepNotExact =>\n    // 1, 4, 7, 10 — last is 10\n    self assert: (1 to: 11 by: 3) last equals: 10\n\n  testDoCollectsElements =>\n    result := #()\n    (1 to: 3) do: [:i | result := result addFirst: i]\n    self assert: result equals: #(3, 2, 1)\n\n  testDoNegativeStep =>\n    result := #()\n    (3 to: 1 by: -1) do: [:i | result := result addFirst: i]\n    self assert: result equals: #(1, 2, 3)\n\n  testInjectInto =>\n    sum := (1 to: 5) inject: 0 into: [:acc :x | acc + x]\n    self assert: sum equals: 15\n\n  testInjectIntoByStep =>\n    sum := (1 to: 10 by: 2) inject: 0 into: [:acc :x | acc + x]\n    self assert: sum equals: 25\n\n  testCollect =>\n    result := (1 to: 3) collect: [:x | x * 2]\n    self assert: result equals: #(2, 4, 6)\n\n  testSelect =>\n    result := (1 to: 6) select: [:x | x isEven]\n    self assert: result equals: #(2, 4, 6)\n\n  testReject =>\n    result := (1 to: 6) reject: [:x | x isEven]\n    self assert: result equals: #(1, 3, 5)\n\n  testIncludes =>\n    self assert: ((1 to: 10) includes: 5)\n    self deny: ((1 to: 10) includes: 11)\n    self deny: ((1 to: 10) includes: 0)\n\n  testIncludesByStep =>\n    self assert: ((1 to: 10 by: 2) includes: 3)\n    self deny: ((1 to: 10 by: 2) includes: 2)\n\n  testPrintString => self assert: (1 to: 10) printString equals: \"(1 to: 10)\"\n\n  testPrintStringByStep =>\n    self assert: (1 to: 10 by: 2) printString equals: \"(1 to: 10 by: 2)\"\n\n  testEmptyDoIsNoop =>\n    count := 0\n    (1 to: 0) do: [:_x | count := count + 1]\n    self assert: count equals: 0\n\n  testSizeWrongDirectionPositiveStep =>\n    // step > 0 but from > to — must be empty (do: iterates nothing)\n    self assert: (1 to: 0 by: 2) size equals: 0\n\n  testSizeWrongDirectionNegativeStep =>\n    // step < 0 but from < to — must be empty (do: iterates nothing)\n    self assert: (1 to: 10 by: -1) size equals: 0\n\n  testZeroStepRaisesError => self should: [1 to: 10 by: 0] raise: #user_error\n\n  testAsListForward => self assert: (1 to: 5) asList equals: #(1, 2, 3, 4, 5)\n\n  testAsListSingleElement => self assert: (3 to: 3) asList equals: #(3)\n\n  testAsListForwardByStep =>\n    self assert: (1 to: 10 by: 3) asList equals: #(1, 4, 7, 10)\n\n  testAsListEmptyInterval => self assert: (1 to: 0) asList equals: #()\n\n  testAsListNegativeStep =>\n    self assert: (5 to: 1 by: -1) asList equals: #(5, 4, 3, 2, 1)\n\n  testAsListNegativeStepBy2 =>\n    self assert: (10 to: 2 by: -2) asList equals: #(10, 8, 6, 4, 2)\n\n  testAsListWrongDirectionPos =>\n    // step > 0 but from > to — empty list (beamtalk_interval:from/3 line 31)\n    self assert: (5 to: 3 by: 1) asList equals: #()\n\n  testAsListWrongDirectionNeg =>\n    // step < 0 but from < to — empty list (beamtalk_interval:from/3 line 31)\n    self assert: (1 to: 5 by: -1) asList equals: #()",
+      "source": "// BUnit tests for Interval — arithmetic sequence of integers (BT-1249)\n\nTestCase subclass: IntervalTest\n\n  testCreationClass =>\n    iv := 1 to: 10\n    self assert: iv class equals: Interval\n\n  testCreationByClass =>\n    iv := 1 to: 10 by: 2\n    self assert: iv class equals: Interval\n\n  testSizeSimple => self assert: (1 to: 10) size equals: 10\n\n  testSizeByStep => self assert: (1 to: 10 by: 2) size equals: 5\n\n  testSizeByStepThree => self assert: (1 to: 10 by: 3) size equals: 4\n\n  testSizeSingleElement => self assert: (5 to: 5) size equals: 1\n\n  testSizeEmpty => self assert: (1 to: 0) size equals: 0\n\n  testSizeNegativeStep => self assert: (10 to: 1 by: -1) size equals: 10\n\n  testSizeNegativeStepByThree => self assert: (10 to: 1 by: -3) size equals: 4\n\n  testIsEmpty =>\n    self assert: (1 to: 0) isEmpty\n    self deny: (1 to: 10) isEmpty\n\n  testFirst => self assert: (1 to: 10) first equals: 1\n\n  testFirstByStep => self assert: (5 to: 20 by: 3) first equals: 5\n\n  testLast => self assert: (1 to: 10) last equals: 10\n\n  testLastByStep => self assert: (1 to: 10 by: 3) last equals: 10\n\n  testLastByStepNotExact =>\n    // 1, 4, 7, 10 — last is 10\n    self assert: (1 to: 11 by: 3) last equals: 10\n\n  // BT-3027\n  testAt =>\n    self assert: ((1 to: 10) at: 1) equals: 1\n    self assert: ((1 to: 10) at: 10) equals: 10\n    self assert: ((1 to: 10) at: 5) equals: 5\n\n  testAtByStep =>\n    self assert: ((1 to: 10 by: 2) at: 1) equals: 1\n    self assert: ((1 to: 10 by: 2) at: 2) equals: 3\n    self assert: ((1 to: 10 by: 2) at: 5) equals: 9\n\n  testAtNegativeStep =>\n    self assert: ((10 to: 1 by: -1) at: 1) equals: 10\n    self assert: ((10 to: 1 by: -1) at: 10) equals: 1\n\n  testAtOutOfRangeRaisesIndexOutOfBounds =>\n    self should: [(1 to: 10) at: 11] raise: #index_out_of_bounds\n    self should: [(1 to: 10) at: 0] raise: #index_out_of_bounds\n\n  // Interval `at:` always reports out-of-range as index_out_of_bounds, even\n  // when the receiver is empty — never empty_collection, unlike `first`/`last`.\n  testAtOnEmptyIntervalRaisesIndexOutOfBoundsNotEmptyCollection =>\n    self should: [(1 to: 0) at: 1] raise: #index_out_of_bounds\n\n  testDoCollectsElements =>\n    result := #()\n    (1 to: 3) do: [:i | result := result addFirst: i]\n    self assert: result equals: #(3, 2, 1)\n\n  testDoNegativeStep =>\n    result := #()\n    (3 to: 1 by: -1) do: [:i | result := result addFirst: i]\n    self assert: result equals: #(1, 2, 3)\n\n  testInjectInto =>\n    sum := (1 to: 5) inject: 0 into: [:acc :x | acc + x]\n    self assert: sum equals: 15\n\n  testInjectIntoByStep =>\n    sum := (1 to: 10 by: 2) inject: 0 into: [:acc :x | acc + x]\n    self assert: sum equals: 25\n\n  testCollect =>\n    result := (1 to: 3) collect: [:x | x * 2]\n    self assert: result equals: #(2, 4, 6)\n\n  testSelect =>\n    result := (1 to: 6) select: [:x | x isEven]\n    self assert: result equals: #(2, 4, 6)\n\n  testReject =>\n    result := (1 to: 6) reject: [:x | x isEven]\n    self assert: result equals: #(1, 3, 5)\n\n  testIncludes =>\n    self assert: ((1 to: 10) includes: 5)\n    self deny: ((1 to: 10) includes: 11)\n    self deny: ((1 to: 10) includes: 0)\n\n  testIncludesByStep =>\n    self assert: ((1 to: 10 by: 2) includes: 3)\n    self deny: ((1 to: 10 by: 2) includes: 2)\n\n  testPrintString => self assert: (1 to: 10) printString equals: \"(1 to: 10)\"\n\n  testPrintStringByStep =>\n    self assert: (1 to: 10 by: 2) printString equals: \"(1 to: 10 by: 2)\"\n\n  testEmptyDoIsNoop =>\n    count := 0\n    (1 to: 0) do: [:_x | count := count + 1]\n    self assert: count equals: 0\n\n  testSizeWrongDirectionPositiveStep =>\n    // step > 0 but from > to — must be empty (do: iterates nothing)\n    self assert: (1 to: 0 by: 2) size equals: 0\n\n  testSizeWrongDirectionNegativeStep =>\n    // step < 0 but from < to — must be empty (do: iterates nothing)\n    self assert: (1 to: 10 by: -1) size equals: 0\n\n  testZeroStepRaisesError => self should: [1 to: 10 by: 0] raise: #user_error\n\n  testAsListForward => self assert: (1 to: 5) asList equals: #(1, 2, 3, 4, 5)\n\n  testAsListSingleElement => self assert: (3 to: 3) asList equals: #(3)\n\n  testAsListForwardByStep =>\n    self assert: (1 to: 10 by: 3) asList equals: #(1, 4, 7, 10)\n\n  testAsListEmptyInterval => self assert: (1 to: 0) asList equals: #()\n\n  testAsListNegativeStep =>\n    self assert: (5 to: 1 by: -1) asList equals: #(5, 4, 3, 2, 1)\n\n  testAsListNegativeStepBy2 =>\n    self assert: (10 to: 2 by: -2) asList equals: #(10, 8, 6, 4, 2)\n\n  testAsListWrongDirectionPos =>\n    // step > 0 but from > to — empty list (beamtalk_interval:from/3 line 31)\n    self assert: (5 to: 3 by: 1) asList equals: #()\n\n  testAsListWrongDirectionNeg =>\n    // step < 0 but from < to — empty list (beamtalk_interval:from/3 line 31)\n    self assert: (1 to: 5 by: -1) asList equals: #()",
       "explanation": "BUnit tests for Interval — arithmetic sequence of integers (BT-1249)"
     },
     {
@@ -27225,6 +27314,9 @@
         "subclassing",
         "testAddDeduplication",
         "testAddIncludes",
+        "testAnyOne",
+        "testAnyOneOnEmptySetRaisesEmptyCollection",
+        "testAnyOneOnSingletonSet",
         "testAslist",
         "testCreationClass",
         "testDifference",
@@ -27247,7 +27339,7 @@
         "toString",
         "to_string"
       ],
-      "source": "// E2E tests for Set (unique element collections using ordsets) (BT-73)\n\nTestCase subclass: SetTest\n\n  testCreationClass => self assert: (Set new) class equals: Set\n\n  testIsemptySize =>\n    self assert: (Set new) isEmpty\n    self assert: (Set new) size equals: 0\n\n  testAddIncludes =>\n    s := (Set new) add: 1\n    self assert: (s includes: 1)\n    self deny: (s includes: 2)\n    self assert: s size equals: 1\n\n  testAddDeduplication =>\n    s := (Set new) add: 1\n    s2 := (s add: 2) add: 1\n    self assert: s2 size equals: 2\n    self assert: (s2 includes: 1)\n    self assert: (s2 includes: 2)\n\n  testRemove =>\n    s2 := ((Set new) add: 1) add: 2\n    s3 := s2 remove: 1\n    self deny: (s3 includes: 1)\n    self assert: (s3 includes: 2)\n    self assert: s3 size equals: 1\n\n  testFromList =>\n    colors := Set new fromList: #(#red, #green, #blue)\n    self assert: colors size equals: 3\n    self assert: (colors includes: #red)\n    self deny: (colors includes: #yellow)\n\n  testUnion =>\n    a := Set new fromList: #(1, 2, 3)\n    b := Set new fromList: #(3, 4, 5)\n    u := a union: b\n    self assert: u size equals: 5\n    self assert: (u includes: 1)\n    self assert: (u includes: 5)\n\n  testIntersection =>\n    a := Set new fromList: #(1, 2, 3)\n    b := Set new fromList: #(3, 4, 5)\n    i := a intersection: b\n    self assert: i size equals: 1\n    self assert: (i includes: 3)\n    self deny: (i includes: 1)\n\n  testDifference =>\n    a := Set new fromList: #(1, 2, 3)\n    b := Set new fromList: #(3, 4, 5)\n    d := a difference: b\n    self assert: d size equals: 2\n    self assert: (d includes: 1)\n    self deny: (d includes: 3)\n\n  testIssubsetof =>\n    small := Set new fromList: #(1, 2)\n    big := Set new fromList: #(1, 2, 3)\n    self assert: (small isSubsetOf: big)\n    self deny: (big isSubsetOf: small)\n\n  testAslist =>\n    self assert: ((Set new) fromList: #(3, 1, 2)) asList equals: #(1, 2, 3)\n\n  testIteration =>\n    self assert: (((Set new) fromList: #(1, 2, 3)) do: [:x | nil]) equals: nil\n    // Block receives each element — inject:into: verifies correct values are passed\n    self assert: (((Set new) fromList: #(1, 2, 3)) inject: 0 into: [:sum :x |\n      sum + x\n    ]) equals: 6\n\n  testPerformOnStatefulDoBlockRaisesClearErrorInsteadOfCrashing =>\n    // BT-2888: the do: stateful_block_dispatch guard also applies\n    // to Set, since the guard is keyed on selector name, not receiver class.\n    count := 0\n    statefulBlock := [:x | count := count + x]\n    self should: [\n      ((Set new) fromList: #(1, 2, 3)) perform: #do: withArguments: #(statefulBlock)\n    ] raise: #stateful_block_dispatch\n\n  testRespondstoMethodReflection =>\n    s4 := (Set new) add: 1\n    self assert: (s4 respondsTo: #size)\n    self assert: (s4 respondsTo: #includes:)\n    self deny: (s4 respondsTo: #nonExistent)\n\n  testPrintstring =>\n    self assert: (((Set new) fromList: #(1, 2, 3)) printString) equals: \"Set(1, 2, 3)\"\n    self assert: ((Set new) printString) equals: \"Set()\"\n\n  // ===== Element identity is `=:=`, not term order (BT-2997) =====\n  //\n  // Set was backed by `ordsets`, which decides membership by Erlang term\n  // *order* — `==` semantics — so `1` and `1.0` collapsed into one element.\n  // That made Set the odd one out: `Dictionary` keys (Erlang maps) and\n  // `List>>includes:` both use `=:=`, which ADR 0002 and BT-1562 make the\n  // language's element identity.\n  testIntAndFloatAreDistinctElements =>\n    s := (Set new add: 1) add: 1.0\n    self assert: s size equals: 2\n    self assert: s asList equals: #(1, 1.0)\n\n  testStrictMembership =>\n    s := (Set new) add: 1\n    self assert: (s includes: 1)\n    self deny: (s includes: 1.0)\n\n  testStrictRemovalKeepsTheOtherNumber =>\n    s := (Set new add: 1) add: 1.0\n    self assert: (s remove: 1.0) asList equals: #(1)\n    self assert: (s remove: 1) asList equals: #(1.0)\n\n  testSetNowAgreesWithDictionaryOnKeyIdentity =>\n    // The divergence this fixes: both hold two entries now.\n    s := (Set new add: 1) add: 1.0\n    d := (Dictionary new at: 1 put: #a) at: 1.0 put: #b\n    self assert: s size equals: d size\n\n  testStrictSetOperations =>\n    ints := (Set new) fromList: #(1, 2)\n    floats := (Set new) fromList: #(1.0, 2.0)\n    // Disjoint under `=:=`, though every element compares `==` to one in the other.\n    self assert: (ints intersection: floats) size equals: 0\n    self assert: (ints union: floats) size equals: 4\n    self assert: (ints difference: floats) asList equals: #(1, 2)\n    self deny: (ints isSubsetOf: floats)\n    self assert: (ints isSubsetOf: (ints union: floats))\n\n  testSortedOrderPreserved =>\n    // The representation is still a term-order-sorted list, so `asList`\n    // remains sorted regardless of insertion order.\n    self assert: (((Set new) fromList: #(3, 1, 2)) asList) equals: #(1, 2, 3)",
+      "source": "// E2E tests for Set (unique element collections using ordsets) (BT-73)\n\nTestCase subclass: SetTest\n\n  testCreationClass => self assert: (Set new) class equals: Set\n\n  testIsemptySize =>\n    self assert: (Set new) isEmpty\n    self assert: (Set new) size equals: 0\n\n  testAddIncludes =>\n    s := (Set new) add: 1\n    self assert: (s includes: 1)\n    self deny: (s includes: 2)\n    self assert: s size equals: 1\n\n  testAddDeduplication =>\n    s := (Set new) add: 1\n    s2 := (s add: 2) add: 1\n    self assert: s2 size equals: 2\n    self assert: (s2 includes: 1)\n    self assert: (s2 includes: 2)\n\n  testRemove =>\n    s2 := ((Set new) add: 1) add: 2\n    s3 := s2 remove: 1\n    self deny: (s3 includes: 1)\n    self assert: (s3 includes: 2)\n    self assert: s3 size equals: 1\n\n  testFromList =>\n    colors := Set new fromList: #(#red, #green, #blue)\n    self assert: colors size equals: 3\n    self assert: (colors includes: #red)\n    self deny: (colors includes: #yellow)\n\n  testUnion =>\n    a := Set new fromList: #(1, 2, 3)\n    b := Set new fromList: #(3, 4, 5)\n    u := a union: b\n    self assert: u size equals: 5\n    self assert: (u includes: 1)\n    self assert: (u includes: 5)\n\n  testIntersection =>\n    a := Set new fromList: #(1, 2, 3)\n    b := Set new fromList: #(3, 4, 5)\n    i := a intersection: b\n    self assert: i size equals: 1\n    self assert: (i includes: 3)\n    self deny: (i includes: 1)\n\n  testDifference =>\n    a := Set new fromList: #(1, 2, 3)\n    b := Set new fromList: #(3, 4, 5)\n    d := a difference: b\n    self assert: d size equals: 2\n    self assert: (d includes: 1)\n    self deny: (d includes: 3)\n\n  // BT-3027 — Set has no first/last; anyOne is the deliberately\n  // non-deterministic single-element accessor.\n  testAnyOne =>\n    s := Set new fromList: #(1, 2, 3)\n    self assert: (s includes: s anyOne)\n\n  testAnyOneOnSingletonSet => self assert: ((Set new add: 42) anyOne) equals: 42\n\n  testAnyOneOnEmptySetRaisesEmptyCollection =>\n    self should: [Set new anyOne] raise: #empty_collection\n\n  testIssubsetof =>\n    small := Set new fromList: #(1, 2)\n    big := Set new fromList: #(1, 2, 3)\n    self assert: (small isSubsetOf: big)\n    self deny: (big isSubsetOf: small)\n\n  testAslist =>\n    self assert: ((Set new) fromList: #(3, 1, 2)) asList equals: #(1, 2, 3)\n\n  testIteration =>\n    self assert: (((Set new) fromList: #(1, 2, 3)) do: [:x | nil]) equals: nil\n    // Block receives each element — inject:into: verifies correct values are passed\n    self assert: (((Set new) fromList: #(1, 2, 3)) inject: 0 into: [:sum :x |\n      sum + x\n    ]) equals: 6\n\n  testPerformOnStatefulDoBlockRaisesClearErrorInsteadOfCrashing =>\n    // BT-2888: the do: stateful_block_dispatch guard also applies\n    // to Set, since the guard is keyed on selector name, not receiver class.\n    count := 0\n    statefulBlock := [:x | count := count + x]\n    self should: [\n      ((Set new) fromList: #(1, 2, 3)) perform: #do: withArguments: #(statefulBlock)\n    ] raise: #stateful_block_dispatch\n\n  testRespondstoMethodReflection =>\n    s4 := (Set new) add: 1\n    self assert: (s4 respondsTo: #size)\n    self assert: (s4 respondsTo: #includes:)\n    self deny: (s4 respondsTo: #nonExistent)\n\n  testPrintstring =>\n    self assert: (((Set new) fromList: #(1, 2, 3)) printString) equals: \"Set(1, 2, 3)\"\n    self assert: ((Set new) printString) equals: \"Set()\"\n\n  // ===== Element identity is `=:=`, not term order (BT-2997) =====\n  //\n  // Set was backed by `ordsets`, which decides membership by Erlang term\n  // *order* — `==` semantics — so `1` and `1.0` collapsed into one element.\n  // That made Set the odd one out: `Dictionary` keys (Erlang maps) and\n  // `List>>includes:` both use `=:=`, which ADR 0002 and BT-1562 make the\n  // language's element identity.\n  testIntAndFloatAreDistinctElements =>\n    s := (Set new add: 1) add: 1.0\n    self assert: s size equals: 2\n    self assert: s asList equals: #(1, 1.0)\n\n  testStrictMembership =>\n    s := (Set new) add: 1\n    self assert: (s includes: 1)\n    self deny: (s includes: 1.0)\n\n  testStrictRemovalKeepsTheOtherNumber =>\n    s := (Set new add: 1) add: 1.0\n    self assert: (s remove: 1.0) asList equals: #(1)\n    self assert: (s remove: 1) asList equals: #(1.0)\n\n  testSetNowAgreesWithDictionaryOnKeyIdentity =>\n    // The divergence this fixes: both hold two entries now.\n    s := (Set new add: 1) add: 1.0\n    d := (Dictionary new at: 1 put: #a) at: 1.0 put: #b\n    self assert: s size equals: d size\n\n  testStrictSetOperations =>\n    ints := (Set new) fromList: #(1, 2)\n    floats := (Set new) fromList: #(1.0, 2.0)\n    // Disjoint under `=:=`, though every element compares `==` to one in the other.\n    self assert: (ints intersection: floats) size equals: 0\n    self assert: (ints union: floats) size equals: 4\n    self assert: (ints difference: floats) asList equals: #(1, 2)\n    self deny: (ints isSubsetOf: floats)\n    self assert: (ints isSubsetOf: (ints union: floats))\n\n  testSortedOrderPreserved =>\n    // The representation is still a term-order-sorted list, so `asList`\n    // remains sorted regardless of insertion order.\n    self assert: (((Set new) fromList: #(3, 1, 2)) asList) equals: #(1, 2, 3)",
       "explanation": "E2E tests for Set (unique element collections using ordsets) (BT-73)"
     },
     {

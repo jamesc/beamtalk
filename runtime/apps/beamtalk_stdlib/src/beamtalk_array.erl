@@ -39,6 +39,8 @@ maps.
     do/2,
     at/2,
     at_put/3,
+    first/1,
+    last/1,
     collect/2,
     select/2,
     inject_into/3,
@@ -133,6 +135,51 @@ at(#{'$beamtalk_class' := 'Array'}, Index) when is_integer(Index) ->
     );
 at(#{'$beamtalk_class' := 'Array'}, _Index) ->
     beamtalk_error:raise_type_error('Array', 'at:', <<"Index must be an Integer">>).
+
+-doc """
+Return the first element of the Array.
+
+BT-3027: mirrors `beamtalk_string:first/1` and `beamtalk_list:first/1` —
+raises `empty_collection` on an empty Array so `on:do:` can handle all three
+element accessors with the same clause.
+""".
+-spec first(map()) -> term().
+first(#{'$beamtalk_class' := 'Array', 'data' := Data}) ->
+    case maps:size(Data) of
+        0 ->
+            beamtalk_error:raise(
+                beamtalk_error:new(
+                    empty_collection,
+                    'Array',
+                    'first',
+                    <<"Array is empty; guard with `isEmpty` before calling `first`">>
+                )
+            );
+        _ ->
+            maps:get(0, Data)
+    end.
+
+-doc """
+Return the last element of the Array.
+
+Raises `empty_collection` if the Array is empty (see `first/1`).
+""".
+-spec last(map()) -> term().
+last(#{'$beamtalk_class' := 'Array', 'data' := Data}) ->
+    N = maps:size(Data),
+    case N of
+        0 ->
+            beamtalk_error:raise(
+                beamtalk_error:new(
+                    empty_collection,
+                    'Array',
+                    'last',
+                    <<"Array is empty; guard with `isEmpty` before calling `last`">>
+                )
+            );
+        _ ->
+            maps:get(N - 1, Data)
+    end.
 
 -doc """
 Return a new Array with the element at `Index` (1-based) replaced by `Value`.

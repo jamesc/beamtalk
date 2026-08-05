@@ -109,6 +109,38 @@ fn collect_diagnostics(
     lint_diags
 }
 
+/// Decides whether a diagnostic from one file's [`collect_diagnostics`] call
+/// should be kept, deduplicating repeat sightings of a pre-loaded alias
+/// collision across the whole `run_lint` invocation (BT-3043).
+///
+/// `run_lint`'s Pass 2 loop calls `collect_diagnostics` once per project
+/// file, each time seeding a *fresh* `AliasRegistry` from the same
+/// project-wide `all_alias_infos` list. A genuine collision between two of
+/// that list's entries is therefore rediscovered — with byte-identical
+/// message and span, since neither depends on the file currently being
+/// analysed — on every single call, once per file in the project instead of
+/// once per lint run. `seen` tracks which (message, span) pairs have already
+/// been kept so only the first sighting survives; every other diagnostic
+/// (file-specific by construction) always passes through unfiltered.
+///
+/// The `"Pre-loaded type alias "` prefix is the stable, distinctive lead-in
+/// shared by all three of `AliasRegistry::add_pre_loaded`'s diagnostic
+/// messages (alias-vs-class, alias-vs-protocol, alias-vs-alias) and no other
+/// diagnostic in the compiler — matching on it (rather than deduping every
+/// diagnostic indiscriminately by (message, span)) avoids ever dropping a
+/// genuinely distinct per-file diagnostic that happens to coincide with
+/// another file's on both message text and byte offset.
+fn dedup_pre_loaded_alias_collision(
+    diag: &beamtalk_core::source_analysis::Diagnostic,
+    seen: &mut std::collections::HashSet<(String, beamtalk_core::source_analysis::Span)>,
+) -> bool {
+    if diag.message.starts_with("Pre-loaded type alias ") {
+        seen.insert((diag.message.to_string(), diag.span))
+    } else {
+        true
+    }
+}
+
 /// Run lint passes on the given path (file or directory).
 ///
 /// Prints each lint diagnostic and returns an error if any are found.
@@ -205,6 +237,21 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
     let mut total_lint_count = 0usize;
     let mut all_diags: Vec<beamtalk_core::source_analysis::Diagnostic> = Vec::new();
 
+    // BT-3043: `all_alias_infos` (the pre-loaded/cross-package alias seed
+    // list) is identical on every iteration of the Pass 2 loop below, so a
+    // genuine collision between two of its entries — reported fresh by
+    // `AliasRegistry::add_pre_loaded` inside `collect_diagnostics` (a new
+    // `AliasRegistry` per file, seeded from the same list every time) — would
+    // otherwise be re-diagnosed once per file in the project instead of once
+    // per lint run. Dedup by (message, span): every `add_pre_loaded`
+    // collision diagnostic for a given colliding pair has byte-identical
+    // text and span regardless of which file triggered the seeding, since
+    // neither depends on the file currently being analysed.
+    let mut seen_pre_loaded_alias_collisions: std::collections::HashSet<(
+        String,
+        beamtalk_core::source_analysis::Span,
+    )> = std::collections::HashSet::new();
+
     // BT-2796: With a package root, Pass 1 walked the full package source set
     // (BT-2027), so the injected knowledge is project-complete. Without one
     // (a bare file outside any package), only the targeted files were parsed
@@ -234,6 +281,14 @@ pub fn run_lint(path: &str, format: OutputFormat) -> Result<()> {
             has_package_dependencies,
             current_package.as_deref(),
         );
+
+        // BT-3043: Drop repeat sightings of a pre-loaded alias collision —
+        // see `seen_pre_loaded_alias_collisions`'s doc above. Every other
+        // diagnostic is file-specific and passes through unfiltered.
+        let lint_diags: Vec<_> = lint_diags
+            .into_iter()
+            .filter(|d| dedup_pre_loaded_alias_collision(d, &mut seen_pre_loaded_alias_collisions))
+            .collect();
 
         for diag in &lint_diags {
             match format {
@@ -1211,6 +1266,350 @@ mod tests {
             !unresolved_names.iter().any(|m| m.contains("Greetable")),
             "dependency-exported Greetable protocol should resolve, unresolved: {unresolved_names:?}"
         );
+    }
+
+    /// BT-3043: `collect_lint_files`'s directory walk must never treat a
+    /// dependency's own vendored checkout under `_build/deps/` as first-party
+    /// project source. Unlike a path dependency (whose source lives wherever
+    /// the path points, outside `_build`), a git/registry dependency is
+    /// cloned straight into `_build/deps/<name>/` — the actual reproduction
+    /// shape of the original bug report (an `http` dependency, not a path
+    /// dep): without this exclusion, `beamtalk lint .` would (a) lint the
+    /// vendored dependency's own source as if it were the user's code, and
+    /// (b) extract its declarations a second time stamped with the
+    /// *consuming* project's package name, producing a genuine mismatch
+    /// against the same declaration merged in correctly (stamped with the
+    /// dependency's own package name) via `merge_dependency_infos` — a
+    /// collision `AliasRegistry::add_pre_loaded`'s identity check cannot
+    /// recognise as a duplicate, since the two entries' `package` differs.
+    #[test]
+    fn collect_lint_files_excludes_vendored_dependency_checkout_under_build_dir() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = temp.path();
+        std::fs::write(
+            root.join("beamtalk.toml"),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(
+            root.join("src").join("Main.bt"),
+            "Object subclass: Main\n  foo => 1\n",
+        )
+        .unwrap();
+
+        // Simulate a git/registry dependency's checkout (`clone_repo` clones
+        // straight into `_build/deps/<name>/` — see `BuildLayout::dep_checkout_dir`).
+        std::fs::create_dir_all(
+            root.join("_build")
+                .join("deps")
+                .join("producer")
+                .join("src"),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("_build")
+                .join("deps")
+                .join("producer")
+                .join("src")
+                .join("types.bt"),
+            "type Handler = Block | Integer\n",
+        )
+        .unwrap();
+
+        let source_path = camino::Utf8PathBuf::from_path_buf(root.to_path_buf()).unwrap();
+        let (source_files, _erl_files) =
+            collect_lint_files(&source_path, source_path.as_str()).unwrap();
+
+        assert!(
+            source_files.iter().all(|f| !f.as_str().contains("_build")),
+            "vendored dependency source under _build/ must never be treated as project \
+             source: {source_files:?}"
+        );
+    }
+
+    /// BT-3043 (acceptance criterion): a project depending on a package that
+    /// declares a type alias exactly once must lint clean across every file
+    /// in the project — no false "Pre-loaded type alias ... collides with
+    /// another type alias of the same name" diagnostic, no matter how many
+    /// project files are analysed against the same merged
+    /// `all_alias_infos` seed list.
+    ///
+    /// Mirrors `lint_resolves_dependency_protocol_and_public_alias_but_not_internal_alias`'s
+    /// fixture shape (a real producer/consumer path-dependency pair with a
+    /// faked-fresh dependency stamp), but drives `collect_diagnostics` across
+    /// *several* consumer files the way `run_lint`'s Pass 2 loop does, since
+    /// the bug this guards against only manifests when the same pre-loaded
+    /// alias list is re-seeded into a fresh `AliasRegistry` once per file.
+    #[test]
+    fn lint_across_many_files_does_not_flag_a_singly_declared_dependency_alias_as_colliding() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = temp.path();
+
+        let producer_dir = root.join("producer");
+        std::fs::create_dir_all(producer_dir.join("src")).unwrap();
+        std::fs::write(
+            producer_dir.join("beamtalk.toml"),
+            "[package]\nname = \"producer\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            producer_dir.join("src").join("types.bt"),
+            "type Handler = Block | Integer\n",
+        )
+        .unwrap();
+
+        let consumer_dir = root.join("consumer");
+        std::fs::create_dir_all(consumer_dir.join("src")).unwrap();
+        std::fs::write(
+            consumer_dir.join("beamtalk.toml"),
+            "[package]\nname = \"consumer\"\nversion = \"0.1.0\"\n\n\
+             [dependencies]\nproducer = { path = \"../producer\" }\n",
+        )
+        .unwrap();
+        let mut source_files = Vec::new();
+        for i in 0..8 {
+            let file = consumer_dir.join("src").join(format!("File{i}.bt"));
+            std::fs::write(
+                &file,
+                format!("Object subclass: File{i}\n  useIt: h :: Handler => h\n"),
+            )
+            .unwrap();
+            source_files.push(camino::Utf8PathBuf::from_path_buf(file).unwrap());
+        }
+
+        let consumer_root = camino::Utf8PathBuf::from_path_buf(consumer_dir.clone()).unwrap();
+
+        // Fake the producer's compiled state so dependency resolution takes
+        // the fresh/no-recompile fast path (mirrors the sibling test above).
+        let layout = crate::commands::build_layout::BuildLayout::new(&consumer_root);
+        let ebin_dir = layout.dep_ebin_dir("producer");
+        std::fs::create_dir_all(&ebin_dir).unwrap();
+        std::fs::write(ebin_dir.join("bt@producer@types.beam"), b"BEAM").unwrap();
+        crate::commands::build_stamp::write_stamp(
+            &layout.dep_stamp_path("producer"),
+            crate::commands::build_stamp::current_otp_version(),
+        );
+
+        let (
+            mut all_class_infos,
+            extension_index,
+            mut all_protocol_infos,
+            mut all_alias_infos,
+            parsed_files,
+        ) = parse_and_extract_class_infos(&source_files, Some(&consumer_root), Some("consumer"))
+            .unwrap();
+        merge_dependency_infos(
+            &consumer_root,
+            &mut all_class_infos,
+            &mut all_protocol_infos,
+            &mut all_alias_infos,
+        );
+        assert_eq!(
+            all_alias_infos
+                .iter()
+                .filter(|a| a.name == "Handler")
+                .count(),
+            1,
+            "the fixture declares Handler exactly once: {all_alias_infos:?}"
+        );
+
+        let mut seen_pre_loaded_alias_collisions = std::collections::HashSet::new();
+        for (_file, _source, module, parse_diags) in parsed_files {
+            let cross_file_classes =
+                beamtalk_core::semantic_analysis::ClassHierarchy::cross_file_class_infos(
+                    &all_class_infos,
+                    &module,
+                );
+            let diags = collect_diagnostics(
+                &module,
+                parse_diags,
+                cross_file_classes,
+                all_protocol_infos.clone(),
+                all_alias_infos.clone(),
+                None,
+                beamtalk_core::semantic_analysis::KnowledgeScope::ProjectComplete,
+                &extension_index,
+                true,
+                Some("consumer"),
+            )
+            .into_iter()
+            .filter(|d| dedup_pre_loaded_alias_collision(d, &mut seen_pre_loaded_alias_collisions))
+            .collect::<Vec<_>>();
+
+            assert!(
+                diags
+                    .iter()
+                    .all(|d| !d.message.contains("collides with another type alias")),
+                "a once-declared dependency alias must never be flagged as colliding: {diags:?}"
+            );
+        }
+    }
+
+    /// BT-3043 (acceptance criterion): a *genuine* cross-package alias
+    /// collision — two different dependencies each exporting a same-named
+    /// alias with a different RHS — must be reported exactly once across a
+    /// multi-file consumer project, not once per file. Exercises the real
+    /// pipeline end to end (`parse_and_extract_class_infos` +
+    /// `merge_dependency_infos` + the same Pass-2 loop shape `run_lint` uses,
+    /// dedup included) rather than synthetic diagnostics, so it would have
+    /// caught a regression in either the `AliasRegistry::add_pre_loaded`
+    /// identity check or `run_lint`'s cross-file dedup.
+    #[test]
+    fn lint_across_many_files_reports_a_genuine_cross_package_alias_collision_exactly_once() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = temp.path();
+
+        for (pkg, rhs) in [("producer_a", "String"), ("producer_b", "Integer")] {
+            let dir = root.join(pkg);
+            std::fs::create_dir_all(dir.join("src")).unwrap();
+            std::fs::write(
+                dir.join("beamtalk.toml"),
+                format!("[package]\nname = \"{pkg}\"\nversion = \"0.1.0\"\n"),
+            )
+            .unwrap();
+            std::fs::write(
+                dir.join("src").join("types.bt"),
+                format!("type Shared = {rhs}\n"),
+            )
+            .unwrap();
+        }
+
+        let consumer_dir = root.join("consumer");
+        std::fs::create_dir_all(consumer_dir.join("src")).unwrap();
+        std::fs::write(
+            consumer_dir.join("beamtalk.toml"),
+            "[package]\nname = \"consumer\"\nversion = \"0.1.0\"\n\n\
+             [dependencies]\nproducer_a = { path = \"../producer_a\" }\n\
+             producer_b = { path = \"../producer_b\" }\n",
+        )
+        .unwrap();
+        let mut source_files = Vec::new();
+        for i in 0..8 {
+            let file = consumer_dir.join("src").join(format!("File{i}.bt"));
+            std::fs::write(&file, format!("Object subclass: File{i}\n  foo => 1\n")).unwrap();
+            source_files.push(camino::Utf8PathBuf::from_path_buf(file).unwrap());
+        }
+
+        let consumer_root = camino::Utf8PathBuf::from_path_buf(consumer_dir.clone()).unwrap();
+
+        // Fake both producers' compiled state so dependency resolution takes
+        // the fresh/no-recompile fast path (mirrors the sibling tests above).
+        let layout = crate::commands::build_layout::BuildLayout::new(&consumer_root);
+        for pkg in ["producer_a", "producer_b"] {
+            let ebin_dir = layout.dep_ebin_dir(pkg);
+            std::fs::create_dir_all(&ebin_dir).unwrap();
+            std::fs::write(ebin_dir.join(format!("bt@{pkg}@types.beam")), b"BEAM").unwrap();
+            crate::commands::build_stamp::write_stamp(
+                &layout.dep_stamp_path(pkg),
+                crate::commands::build_stamp::current_otp_version(),
+            );
+        }
+
+        let (
+            mut all_class_infos,
+            extension_index,
+            mut all_protocol_infos,
+            mut all_alias_infos,
+            parsed_files,
+        ) = parse_and_extract_class_infos(&source_files, Some(&consumer_root), Some("consumer"))
+            .unwrap();
+        merge_dependency_infos(
+            &consumer_root,
+            &mut all_class_infos,
+            &mut all_protocol_infos,
+            &mut all_alias_infos,
+        );
+        assert_eq!(
+            all_alias_infos
+                .iter()
+                .filter(|a| a.name == "Shared")
+                .count(),
+            2,
+            "the fixture declares Shared twice, with different RHS: {all_alias_infos:?}"
+        );
+
+        let mut seen_pre_loaded_alias_collisions = std::collections::HashSet::new();
+        let mut collision_count = 0usize;
+        for (_file, _source, module, parse_diags) in parsed_files {
+            let cross_file_classes =
+                beamtalk_core::semantic_analysis::ClassHierarchy::cross_file_class_infos(
+                    &all_class_infos,
+                    &module,
+                );
+            let diags = collect_diagnostics(
+                &module,
+                parse_diags,
+                cross_file_classes,
+                all_protocol_infos.clone(),
+                all_alias_infos.clone(),
+                None,
+                beamtalk_core::semantic_analysis::KnowledgeScope::ProjectComplete,
+                &extension_index,
+                true,
+                Some("consumer"),
+            )
+            .into_iter()
+            .filter(|d| dedup_pre_loaded_alias_collision(d, &mut seen_pre_loaded_alias_collisions))
+            .collect::<Vec<_>>();
+
+            collision_count += diags
+                .iter()
+                .filter(|d| d.message.contains("collides with another type alias"))
+                .count();
+        }
+
+        assert_eq!(
+            collision_count, 1,
+            "a genuine cross-package collision must be reported exactly once for the whole \
+             lint run, not once per file"
+        );
+    }
+
+    /// BT-3043 (acceptance criterion): when two pre-loaded aliases *do*
+    /// genuinely collide, `run_lint`'s per-file loop must report that
+    /// collision once for the whole run, not once per file — `add_pre_loaded`
+    /// rediscovers the same collision on every file (a fresh `AliasRegistry`
+    /// seeded from the same list each time), so without `run_lint`'s own
+    /// cross-file dedup the user would see the same diagnostic N times for
+    /// an N-file project.
+    #[test]
+    fn dedup_pre_loaded_alias_collision_keeps_only_the_first_sighting_across_simulated_files() {
+        use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span};
+
+        let collision = |span: Span| {
+            Diagnostic::error(
+                "Pre-loaded type alias `Id` collides with another type alias of the same name",
+                span,
+            )
+            .with_category(DiagnosticCategory::Type)
+        };
+
+        let mut seen = std::collections::HashSet::new();
+        // Same collision, rediscovered on 5 simulated files (byte-identical
+        // message + span, exactly as `add_pre_loaded` would re-emit it).
+        let kept: Vec<bool> = (0..5)
+            .map(|_| dedup_pre_loaded_alias_collision(&collision(Span::new(10, 12)), &mut seen))
+            .collect();
+
+        assert_eq!(
+            kept,
+            vec![true, false, false, false, false],
+            "only the first sighting of a given collision should survive"
+        );
+    }
+
+    #[test]
+    fn dedup_pre_loaded_alias_collision_never_drops_unrelated_diagnostics() {
+        use beamtalk_core::source_analysis::{Diagnostic, Span};
+
+        let mut seen = std::collections::HashSet::new();
+        // Two ordinary (non-"Pre-loaded type alias") diagnostics that happen
+        // to share message text and span across two simulated files — these
+        // are file-specific by construction and must never be deduped away.
+        let unrelated = Diagnostic::error("Unresolved class `Foo`", Span::new(5, 8));
+        assert!(dedup_pre_loaded_alias_collision(&unrelated, &mut seen));
+        assert!(dedup_pre_loaded_alias_collision(&unrelated, &mut seen));
     }
 
     /// BT-2027: `collect_package_class_files` must dedup across the absolute

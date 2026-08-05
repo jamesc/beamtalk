@@ -2101,8 +2101,19 @@ defmodule BtAttach.Workspace do
   if epmd has no record of it at all, `:epmd_absent` if the names query itself
   failed. Exposed (not `defp`) so the pure classification is unit-testable
   against a fabricated names list, without a real epmd/workspace.
+
+  The default queries epmd via the explicit `:localhost` host, not the
+  zero-arg `:net_adm.names/0` form — that form resolves via
+  `inet:gethostname/0` (the machine's *real* hostname), which fails outright
+  on hosts where the local hostname doesn't cleanly self-resolve for an epmd
+  TCP query (confirmed on a WSL2 sandbox, plausible on other containers/CI
+  runners/some macOS mDNS setups). Since the catch-all below is
+  `{:error, _} -> :epmd_absent`, a bare `:net_adm.names()` failure there
+  silently collapsed `:bad_cookie` and `:dead_workspace` into `:epmd_absent`
+  even though epmd was reachable and correctly enumerable via `:localhost`
+  (BT-3003).
   """
-  def classify_unreachable(target_node, epmd_names \\ :net_adm.names())
+  def classify_unreachable(target_node, epmd_names \\ :net_adm.names(:localhost))
 
   def classify_unreachable(_target_node, {:error, _reason}), do: :epmd_absent
 

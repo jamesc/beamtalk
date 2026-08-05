@@ -43,6 +43,30 @@ TestCase subclass: IntervalTest
     // 1, 4, 7, 10 — last is 10
     self assert: (1 to: 11 by: 3) last equals: 10
 
+  // BT-3027
+  testAt =>
+    self assert: ((1 to: 10) at: 1) equals: 1
+    self assert: ((1 to: 10) at: 10) equals: 10
+    self assert: ((1 to: 10) at: 5) equals: 5
+
+  testAtByStep =>
+    self assert: ((1 to: 10 by: 2) at: 1) equals: 1
+    self assert: ((1 to: 10 by: 2) at: 2) equals: 3
+    self assert: ((1 to: 10 by: 2) at: 5) equals: 9
+
+  testAtNegativeStep =>
+    self assert: ((10 to: 1 by: -1) at: 1) equals: 10
+    self assert: ((10 to: 1 by: -1) at: 10) equals: 1
+
+  testAtOutOfRangeRaisesIndexOutOfBounds =>
+    self should: [(1 to: 10) at: 11] raise: #index_out_of_bounds
+    self should: [(1 to: 10) at: 0] raise: #index_out_of_bounds
+
+  // Interval `at:` always reports out-of-range as index_out_of_bounds, even
+  // when the receiver is empty — never empty_collection, unlike `first`/`last`.
+  testAtOnEmptyIntervalRaisesIndexOutOfBoundsNotEmptyCollection =>
+    self should: [(1 to: 0) at: 1] raise: #index_out_of_bounds
+
   testDoCollectsElements =>
     result := #()
     (1 to: 3) do: [:i | result := result addFirst: i]

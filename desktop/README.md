@@ -74,6 +74,25 @@ Tauri produces are unsigned; that's a real gap (unsigned installers trigger
 SmartScreen warnings), tracked as follow-up rather than silently worked
 around here.
 
+On Linux, `bundle.linux.deb.depends` in `tauri.conf.json` declares
+`libssl3t64` — Tauri's generated `.deb` metadata only covers the
+webkit2gtk/gtk3 stack it needs directly, and has no idea the bundled
+`dist-liveview` release also ships a full BEAM release whose `:crypto`
+NIF (`crypto.so`) dynamically links `libcrypto.so.3`. That package name
+and the rest of this list (BT-3017) came from running `ldd` against a real
+`just dist-liveview` build's `erts-*/bin/beam.smp`, `erts-*/bin/epmd`, and
+every NIF `.so` under `lib/*/priv/lib/` on Ubuntu 24.04 (`noble`) — the OS
+`desktop-release.yml`'s `ubuntu-latest` runner used at the time. Every
+other shared-library dependency those binaries have (`libc.so.6`,
+`libm.so.6`, `libgcc_s.so.1`, `libstdc++.so.6`, `libtinfo.so.6`,
+`libz.so.1`) is already pulled in transitively by the webkit2gtk/gtk3/
+appindicator packages Tauri's bundler declares on its own, so they're
+deliberately left off this list rather than declared redundantly. **This
+list needs re-deriving (same `ldd` procedure) if the CI runner's Ubuntu
+version ever changes** — package names and transitive-dependency
+guarantees are specific to `noble`'s package set and aren't guaranteed to
+hold on a future Ubuntu release.
+
 **This packaging lane is unverified for the same reason the app itself is**
 (see below) — no macOS/Linux/Windows Tauri toolchain has been available to
 actually run `cargo tauri build` end-to-end here, so it is wired as

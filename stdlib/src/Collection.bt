@@ -76,6 +76,34 @@ abstract typed Value subclass: Collection(E)
   /// ```
   isNotEmpty -> Boolean => self isEmpty not
 
+  /// Return any single element of the collection — no ordering guarantee.
+  ///
+  /// Intended for the unordered collections (`Set`, `Bag`, `Dictionary`),
+  /// which deliberately have no `first`/`last`: there is no canonical order
+  /// to answer from, so this answers *some* element without promising
+  /// which one — the answer may differ between calls, and callers must not
+  /// rely on it being stable. Ordered collections (`Array`, `Interval`,
+  /// `List`) inherit it too, but should reach for `first`/`last` instead
+  /// when order matters.
+  ///
+  /// Defined once here, not per-subclass: `do:` already gives every
+  /// collection a way to grab one element — whichever one `do:` reaches
+  /// first, in the receiver's own iteration order. Raises
+  /// `empty_collection` if the collection has no elements.
+  ///
+  /// Uses `^` (non-local return) for early exit — compiles to throw/catch
+  /// on BEAM, the same trick `detect:`/`anySatisfy:` use further below.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Set new add: 1) anyOne                       // => 1
+  /// ((Bag new add: 1) anyOne)                      // => 1
+  /// (#{#a => 1} anyOne)                             // => 1
+  /// ```
+  anyOne -> E =>
+    self do: [:each | ^each]
+    (Erlang beamtalk_collection) raiseEmpty: self class name selector: #anyOne
+
   /// Test if the collection contains the given element.
   ///
   /// Default implementation iterates with `do:` and returns early on match.

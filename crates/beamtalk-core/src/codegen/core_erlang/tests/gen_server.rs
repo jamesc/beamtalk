@@ -3582,8 +3582,10 @@ fn test_class_var_mutation_emits_shadow_write() {
     )
     .expect("codegen should succeed");
     assert!(
-        code.contains("call 'erlang':'put'('$bt_class_vars_shadow', ClassVars1)"),
-        "class-var mutation should emit the ADR 0110 shadow write. Got:\n{code}"
+        code.contains(
+            "call 'erlang':'put'({'$bt_class_vars_shadow', call 'erlang':'element'(2, ClassSelf)}, ClassVars1)"
+        ),
+        "class-var mutation should emit the ADR 0110 (BT-3039) class-keyed shadow write. Got:\n{code}"
     );
 }
 
@@ -6274,5 +6276,102 @@ fn test_bt_2998_opaque_native_class_registers_as_non_constructible() {
     assert!(
         code.contains("'isConstructible' => 'false'"),
         "opaque native class must register isConstructible => false. Got:\n{code}"
+    );
+}
+
+// ── Foreign cross-class extension codegen (gen_server/extensions.rs) ──────
+
+/// BT-2250: A unary foreign extension on a stdlib value class generates a
+/// `beamtalk_extensions:register/5` call with a 2-arity fun.
+///
+/// The target class (`String`) is not declared in this module, so the
+/// standalone method is foreign and must be registered at load time.
+#[test]
+fn test_foreign_extension_unary_emits_register_with_2arity_fun() {
+    let src = "String >> shout => self uppercase ++ \"!\"\n";
+    let code = super::codegen(src);
+    assert!(
+        code.contains("call 'beamtalk_extensions':'register'"),
+        "foreign extension should emit beamtalk_extensions:register. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'String'"),
+        "foreign extension should register under the bare class name 'String'. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'shout'"),
+        "foreign extension should register the selector atom. Got:\n{code}"
+    );
+    // Value-type targets use a 2-arity fun (ExtArgs + Self).
+    assert!(
+        code.contains("fun (_ExtArgs, Self)"),
+        "value-type foreign extension fun must be 2-arity. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("fun (_ExtArgs, Self, State)"),
+        "value-type foreign extension must NOT use the 3-arity actor fun shape. Got:\n{code}"
+    );
+}
+
+/// BT-2250: A keyword foreign extension generates `_ExtArgs` list unpacking
+/// for each declared parameter.
+#[test]
+fn test_foreign_extension_keyword_unpacks_ext_args() {
+    let src = "String >> wrapWith: edge => edge ++ self ++ edge\n";
+    let code = super::codegen(src);
+    assert!(
+        code.contains("call 'beamtalk_extensions':'register'"),
+        "keyword foreign extension should emit register. Got:\n{code}"
+    );
+    assert!(
+        code.contains("_ExtArgs"),
+        "keyword foreign extension should reference _ExtArgs for parameter unpacking. Got:\n{code}"
+    );
+    // The first (and only) parameter is bound via erlang:hd(_ExtArgs).
+    assert!(
+        code.contains("'erlang':'hd'"),
+        "first keyword parameter must be bound via erlang:hd(_ExtArgs). Got:\n{code}"
+    );
+}
+
+/// BT-2250: A class-side foreign extension (`Target class >> sel`) registers
+/// under the metaclass tag `'Target class'` (with a space), not the bare class
+/// name. This is the established tag convention for metaclass registration.
+#[test]
+fn test_foreign_extension_class_side_uses_metaclass_tag() {
+    let src = "String class >> banner => \"=== banner ===\"\n";
+    let code = super::codegen(src);
+    assert!(
+        code.contains("call 'beamtalk_extensions':'register'"),
+        "class-side foreign extension should emit register. Got:\n{code}"
+    );
+    // Metaclass tag uses a space: 'String class' (not 'Stringclass' or 'String').
+    assert!(
+        code.contains("'String class'"),
+        "class-side extension must use the metaclass tag 'String class'. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'banner'"),
+        "class-side extension should register the selector atom. Got:\n{code}"
+    );
+}
+
+/// BT-2250: A self-extension (target class declared in the same module) is
+/// folded into the host class module and must NOT emit a
+/// `beamtalk_extensions:register` call.
+#[test]
+fn test_self_extension_not_registered_via_beamtalk_extensions() {
+    let src = concat!(
+        "Actor subclass: Counter\n",
+        "  state: value = 0\n",
+        "  get => value\n",
+        "\n",
+        "Counter >> getDouble => value * 2\n",
+    );
+    let code = super::codegen(src);
+    assert!(
+        !code.contains("call 'beamtalk_extensions':'register'"),
+        "self-extension (Counter >> in the same module as Counter) must NOT emit \
+         beamtalk_extensions:register. Got:\n{code}"
     );
 }

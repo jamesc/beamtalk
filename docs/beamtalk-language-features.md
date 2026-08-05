@@ -4776,6 +4776,8 @@ no element to answer, and `nil` would be indistinguishable from a stored `nil`:
 #() at: 1                  // raises empty_collection
 "" first                   // raises empty_collection
 "" at: 1                   // raises empty_collection
+#[] first                  // raises empty_collection
+#[] last                   // raises empty_collection
 (Array withAll: #()) at: 1 // raises empty_collection
 (Binary fromBytes: #()) at: 1   // raises empty_collection
 (1 to: 0) first            // raises empty_collection
@@ -4794,6 +4796,38 @@ crucially, *separately* from a genuine typo, which raises
 [orders first] on: RuntimeError do: [:e | e kind =:= #empty_collection]
 ```
 
+**Ordered vs. unordered: `first`/`last` vs. `anyOne`**
+([BT-3027](https://linear.app/beamtalk/issue/BT-3027)). Only collections with
+a defined iteration order — `Array`, `List`, `Interval`, `String`, `Binary` —
+have `first`/`last`. `Set`, `Bag`, and `Dictionary` are unordered and
+deliberately do **not** have `first`/`last`: either name would misleadingly
+promise an ordering guarantee the collection does not make. Sending `first` or
+`last` to one of them raises `does_not_understand`, exactly like any other
+unimplemented selector — it is not treated as an empty-collection condition:
+
+```beamtalk
+Set new first                    // raises does_not_understand
+(Bag withAll: #(1, 2)) last      // raises does_not_understand
+```
+
+Instead they answer `anyOne` — *some* element with no ordering guarantee (the
+answer may differ between calls), raising `empty_collection` when there is
+nothing to answer. `anyOne` is defined once on the abstract `Collection`
+class in terms of `do:`, so every collection has it, but it is most useful on
+the unordered three:
+
+```beamtalk
+(Set new add: 1) anyOne           // => 1
+Set new anyOne                    // raises empty_collection
+(Bag withAll: #(1, 1, 2)) anyOne  // => 1 or 2 — no ordering guarantee
+#{#a => 1} anyOne                 // => 1 (a *value*, consistent with do:)
+```
+
+If you specifically want the order `asList` currently answers in, convert
+first: `aSet asList first`. That order is an implementation detail (Set's
+`asList` happens to sort by term order today), not a contract — prefer
+`anyOne` when any single element will do.
+
 **Subsequence operations stay total** and answer the empty collection. `rest`,
 `take:`, and `drop:` all have a well-defined answer on empty, so they never
 raise — which keeps recursive idioms working without a guard at every step:
@@ -4811,6 +4845,19 @@ again, and raises `index_out_of_bounds`:
 ```beamtalk
 #(1, 2, 3) at: 9           // raises index_out_of_bounds
 #(1, 2, 3) at: 0           // raises index_out_of_bounds (index < 1 is malformed)
+```
+
+**`Interval>>at:` always raises `index_out_of_bounds`, never
+`empty_collection`, for any out-of-range index** — including on an empty
+interval. This differs from `first`/`last` (which do raise
+`empty_collection` on an empty interval): `at:` is a bounds-checked keyed
+accessor like `Array>>at:`, and `empty_collection` is reserved for no-argument
+accessors (`first`, `last`, `anyOne`) where there is no index to blame:
+
+```beamtalk
+(1 to: 10) at: 1     // => 1
+(1 to: 10) at: 11    // raises index_out_of_bounds
+(1 to: 0) at: 1       // raises index_out_of_bounds (not empty_collection)
 ```
 
 ### Lookups That Find Nothing
@@ -4873,6 +4920,9 @@ An `Interval` represents an arithmetic sequence of integers without materialisin
 (1 to: 10) size            // => 10
 (1 to: 10) first           // => 1
 (1 to: 10) last            // => 10
+(1 to: 10) at: 5            // => 5 — bounds-checked; out-of-range raises
+                             // index_out_of_bounds (see "Accessing an Empty
+                             // Collection" above), never empty_collection
 (1 to: 10) includes: 5     // => true
 
 // Interval supports the full Collection protocol:
@@ -4904,7 +4954,16 @@ b4 occurrencesOf: 1                    // => 2
 
 // do: iterates each element once per occurrence:
 (Bag withAll: #(1, 1, 2)) inject: 0 into: [:sum :x | sum + x]  // => 4
+
+// Bag is unordered, so it has no first/last — use anyOne for a single
+// element (no ordering guarantee) or asList first/last for a fixed order:
+(Bag withAll: #(1, 1, 2)) anyOne        // => 1 or 2, no ordering guarantee
+Bag new anyOne                          // raises empty_collection
 ```
+
+`Set` and `Dictionary` are unordered the same way and follow the same rule —
+see "Accessing an Empty Collection" above for the full `first`/`last`/`anyOne`
+split.
 
 ### Stream — Lazy Pipelines
 

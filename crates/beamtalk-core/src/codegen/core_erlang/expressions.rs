@@ -553,19 +553,33 @@ impl CoreErlangGenerator {
                 // ADR 0110 (BT-3032/BT-3037): shadow write-through so a foreign
                 // NLR (`^` belonging to another method's frame) relayed out of
                 // this class method does not lose the mutation —
-                // `invoke_class_method/7` reads '$bt_class_vars_shadow' back on
-                // the `{nlr_relay, ...}` path and erases it in `after` on every
+                // `invoke_class_method/7` reads the shadow back on the
+                // `{nlr_relay, ...}` path and erases it in `after` on every
                 // path. Gated on `block_depth == 0`: a block literal written in
                 // this method can execute in a *different* class's gen_server
                 // process (ADR 0109), where an unconditional write would corrupt
                 // that class's vars with this class's map. Top-frame-only also
                 // matches existing semantics — block-interior class-var
                 // mutations are already discarded on normal return (BT-1550).
+                //
+                // ADR 0110 amendment (BT-3039): keyed by `element(2, ClassSelf)`
+                // — this call's dynamic runtime class identity — not a single
+                // shared key. A mutating self-send inside a block invoked from a
+                // foreign class's process (block_depth resets to 0 on entering
+                // the self-sent method's own body) would otherwise write the
+                // *same* global key that process's own class method is using,
+                // clobbering it before that class's `invoke_class_method/7`
+                // reads it back. `element(2, ClassSelf)` (not the static
+                // `self.class_name()`) also keeps an inherited self-dispatch
+                // chain (`self otherClassMethod:`) tagged with the calling
+                // subclass's identity, not the defining ancestor's.
                 let shadow_doc = if self.block_depth == 0 {
                     docvec![
-                        "let _ = call 'erlang':'put'(",
+                        "let _ = call 'erlang':'put'({",
                         leaf::atom("$bt_class_vars_shadow"),
-                        ", ",
+                        ", call 'erlang':'element'(2, ",
+                        leaf::var("ClassSelf"),
+                        ")}, ",
                         leaf::var(new_cv.clone()),
                         ") in ",
                     ]
