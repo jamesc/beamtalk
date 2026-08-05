@@ -7,6 +7,7 @@ Accepted (2026-07-28)
 
 **Issues:** BT-3018 (class-process block execution) · BT-3020 (handle ownership/leak, partially)
 **Related:** BT-2975 (FileHandle incremental I/O — surfaced the problem), BT-3019 (unbounded `readAll` — same blast radius)
+**Amendment (proposed, 2026-08-05):** BT-3047 — class self-identity resolution for self-sends and instantiation intrinsics inside a block that executes in a foreign class's process. **Status of the amendment below: drafted, not yet accepted** — recorded here for review before implementation.
 
 ## Context
 
@@ -87,9 +88,83 @@ Not in scope: a general continuation protocol for class methods; changing the 60
 - `File open:mode:` (no block) is unaffected — it already returns to the caller immediately.
 - The handle remains non-`raw` (BT-2975): the descriptor is still opened in the class process, so it must stay usable from another process.
 
-## Alternatives Considered
+## Amendment (proposed, 2026-08-05, BT-3047): Class Self-Identity Must Be Closure-Captured, Not Process-Read
 
-**Restructure `beamtalk_class_dispatch` for a general call/callback/resume protocol.** Rejected: large change to the hottest path, new failure semantics to define, and no benefit to the ~99% of class methods that take no Block. Revisit only if block-taking class methods become common.
+**Status: drafted, awaiting decision — not yet accepted.**
+
+### Problem
+
+This ADR's premise — "the block never needs to reach the class process" — is deliberately narrow (see Scope): only `File open:do:`/`open:mode:do:` are lowered at the call site. Every other class method that takes a Block keeps the pre-existing, unchanged behavior this ADR's Context section describes: the method body, including any block argument, executes inside the *target* class's own gen_server. That was always true, and remains true here — this amendment does not change it.
+
+What it exposes is a bug in how a **self-send inside such a block** resolves its target class. A block literal is lexically part of one class's method but, when handed to another class's block-taking method, executes physically inside *that other class's* process. Two codegen sites assume the executing process's identity always equals the correct "self" identity, which fails exactly in this shape:
+
+- **Inherited self-dispatch** (`crates/beamtalk-core/src/codegen/core_erlang/dispatch_codegen.rs:1449-1450`): `self <inheritedSelector>` emits `class_self_dispatch(erlang:get('beamtalk_class_name'), Selector, ClassVars, Args)`. Confirmed still present (BT-3047).
+- **Instantiation intrinsics** (`dispatch_codegen.rs:1471-1525`): `self new`/`self new:`/`self spawn`/`self spawnWith:`/`self spawnAs:`/`self spawnWith:as:` read `erlang:get('beamtalk_class_name')`, `'beamtalk_class_module'`, `'beamtalk_class_is_abstract'` the same way.
+
+Concrete repro (from BT-3047): `Ancestor` defines `class foo`; subclass `P` (no override) does `C someMutatingMethod: [:x | self foo. ^x] over: aList`. The block executes inside `C`'s process (this ADR's own baseline semantics, unchanged). `self foo` is inherited on `P`, so it hits the fallback branch — which, evaluated inside `C`'s process, resolves against **`C`'s** hierarchy, not `P`'s: a confusing `does_not_understand` blaming the wrong class, or worse, silently executing a same-named method against `C`'s own live state.
+
+### Why this isn't a new problem for this ADR to "cause," but is one this ADR's context makes newly reachable
+
+Passing a block to another class's method, and having that block execute in the callee's process, predates this ADR (it is simply how a class-side gen_server call has always worked). What ADR 0110's BT-3039 amendment already established, though, is the fix pattern: `ClassSelf` — the value `self` is bound to in every class method (`crates/beamtalk-core/src/codegen/core_erlang/gen_server/methods.rs:2977-2978`, `self.bind_var("self", "ClassSelf")`) — is an ordinary Core Erlang closure variable. A block literal that references `self` closes over `ClassSelf`'s value *at the point the block was created*, which is always the block's lexical home class, regardless of which process later calls `value:` on it. ADR 0110's amendment already relies on exactly this to key the class-var shadow write correctly (`element(2, ClassSelf)`); this amendment applies the same fact to the two process-dictionary reads BT-3047 found still using the wrong source.
+
+### Decision
+
+Replace the process-dictionary reads at the two sites above with values derived from `ClassSelf`, which is already in scope (bound to `self`) everywhere a class method body — including a nested block — can reference it:
+
+1. **Inherited self-dispatch** (`dispatch_codegen.rs:1450`): replace
+   ```erlang
+   call 'erlang':'get'('beamtalk_class_name')
+   ```
+   with
+   ```erlang
+   call 'beamtalk_primitive':'class_name_from_tag'(call 'erlang':'element'(2, ClassSelf))
+   ```
+   `class_name_from_tag/1` already exists (`beamtalk_primitive.erl:975-981`) and already strips the `' class'` tag suffix (`'P class'` → `'P'`) — it is the exact untagging step BT-3047 flagged as an open question (point 3 in its description), answered by reusing existing code rather than inventing a new one.
+
+2. **`class_mod`** (used by the instantiation intrinsics): replace `erlang:get('beamtalk_class_module')` with `call 'erlang':'element'(3, ClassSelf)` — already stored on `ClassSelf` at every construction site (`beamtalk_class_dispatch.erl:392`, `:714`), no lookup needed.
+
+3. **`is_abstract`** (used by `self spawn`/`self spawnWith:`/etc.): **not** currently derivable from `ClassSelf` or any existing name-keyed table without either a gen_server call (which would reintroduce the BT-893 self-call deadlock in the common, non-block case, where `ClassSelf`'s owning process *is* the currently-executing one) or a new lookup structure. Rather than adding a new ETS table, extend the existing unified `#class_metadata{}` row (`beamtalk_class_metadata.erl:83-92` — `name`, `module`, `selectors`, `superclass`, `has_runtime_class_methods`) with an `is_abstract` field:
+   ```erlang
+   -record(class_metadata, {
+       name :: class_name(),
+       module :: module() | undefined,
+       selectors :: [selector()] | undefined,
+       superclass :: superclass() | undefined,
+       has_runtime_class_methods = false :: boolean(),
+       is_abstract = false :: boolean()   % new
+   }).
+   ```
+   This table already exists for exactly this purpose — BT-2222 consolidated three separate per-class ETS tables into one specifically to avoid table proliferation for class-lifetime static metadata, and it is already read on hot dispatch paths without a gen_server hop (`lookup_module/1`, `lookup_superclass/1`, `has_runtime_class_methods/1` all use `ets:lookup_element/4`, no messaging). Both existing write sites (`beamtalk_object_class.erl:453` in `init/1`, `:1619` in the hot-reload path) already compute `IsAbstract`/`NewIsAbstract` locally at the call site — `insert/4` becomes `insert/5` threading it through, and a new `lookup_is_abstract/1` mirrors the existing `lookup_superclass/1` shape (sentinel `false` default, matching `has_runtime_class_methods/1`'s collapse of "row absent" and "field unset" into one falsy answer — abstractness gates a hard error on instantiation, so defaulting to non-abstract on any lookup miss fails toward "raise if genuinely abstract; otherwise proceed," never the reverse).
+   The instantiation intrinsics then become: derive the bare class name as in (1), then `beamtalk_class_metadata:lookup_is_abstract(ClassName)`. No new table, no gen_server call, no change to the deadlock-avoidance property BT-893 established (this remains a plain function call, never a message send).
+
+4. Apply (1)-(3) at every `try_instantiation_intrinsic` call site (`dispatch_codegen.rs:1482`, `:1497`, `:1542`) as well as the inherited self-dispatch site — closing BT-3047's point 2 (whether the instantiation intrinsics need the same treatment) with an explicit yes, for the reasoning below, rather than leaving it a separate open question.
+
+### Why this is a no-op for every call outside a block
+
+For a class method executing in its own process (the overwhelming majority of calls — no block involved), `ClassSelf`'s `.class`/`.class_mod` were populated from the *same* source as the process-dictionary values, at the same moment: both are seeded from `ClassName`/`Module`/`IsAbstract` at `beamtalk_object_class.erl` registration/`init` (`beamtalk_class_registry:class_object_tag(ClassName)` for `ClassSelf.class`, `put(beamtalk_class_name, ClassName)` for the pdict copy — literally adjacent lines). They were never two independent sources of truth that happened to usually agree; they were the same value, copied twice. This amendment removes the copy that breaks across a block boundary and keeps the one that doesn't.
+
+### Why this preserves BT-908's intent rather than overriding it
+
+BT-908 chose "an inherited factory method creates an instance of the *calling* class" (the polymorphic-factory pattern) specifically so that `self new` inside an ancestor-defined `make` behaves correctly when invoked via a subclass's own gen_server process. Reading `ClassSelf` continues to produce exactly that value in every case BT-908 was written for — it's the same value, sourced differently. What changes is only the definition of "calling" in the one case BT-908's author could not have had in view (ADR 0109 postdates BT-908): inside a block, "calling" today accidentally means "whichever process happens to execute this fun," which nothing in the language's semantics elsewhere means by `self`. After this amendment it means "the class that lexically owns this self-send" — consistent with how `self` already behaves for actor and value-type state (ADR 0041) and for the class-var shadow key (ADR 0110). This is closing an inconsistency between two things that were supposed to be the same value, not introducing a new semantic for `self`.
+
+### Test plan
+
+Extend `stdlib/test/class_var_nlr_shadow_test.bt` (or a sibling file if scope grows) with:
+
+- A case mirroring this amendment's repro: a block lexically part of `P`'s method, handed to `C`'s block-taking method, performs `self <selector>` for a selector defined only on `P`'s own ancestor (not on `C`'s hierarchy) — asserts it resolves and executes against `P`, not `C`.
+- A companion where `C`'s hierarchy *does* define a same-named selector — asserts `P`'s version runs, pinning the "silently executes the wrong method" half of the bug as fixed, not just the DNU half.
+- An instantiation-intrinsic case: `self new` (or `self spawn`) inside such a foreign block creates an instance of the block's lexical home class, not the class whose process is executing the block.
+- A `beamtalk_class_metadata` EUnit case for `lookup_is_abstract/1` (write via `insert/5`, read back; absent-row default).
+
+### Consequences
+
+**Positive:** Closes BT-3047 for both the confirmed self-dispatch bug and the previously-undecided instantiation-intrinsic question, with one coherent rule instead of a partial fix plus a deferred follow-up. Makes `ClassSelf` the single closure-captured source of class self-identity across the whole class-method surface (self-sends, instantiation, and the ADR 0110 shadow key), removing two of the three remaining process-dictionary reads for class identity. Reuses existing infrastructure throughout (`class_name_from_tag/1`, `ClassSelf.class_mod`, the `beamtalk_class_metadata` table) — no new ETS table, no new module.
+
+**Negative:** Adds one untag call (`class_name_from_tag/1`, itself a cheap binary-suffix check plus `binary_to_existing_atom`) to the compiled hot path for inherited self-dispatch — negligible next to the `maps:put`/gen_server-call costs already paid there. Widens `#class_metadata{}` and `insert/4` → `insert/5`, touching both of its call sites (`beamtalk_object_class.erl:453`, `:1619`) and the record's readers/tests. `beamtalk_class_name`/`beamtalk_class_module`/`beamtalk_class_is_abstract` remain seeded in the process dictionary for any other reader of those keys (this amendment stops these call sites from depending on them; it does not remove the keys themselves — a broader audit of `mod.rs:3438,3450` and any other reads, flagged but not yet confirmed in BT-3047, is separate follow-up work).
+
+**Neutral:** No change to where a block executes (still governed by the unchanged, pre-ADR-0109 baseline: it runs in whichever process's method received it) — only to how a self-send or instantiation *inside* that block resolves its target class. No change to the `File open:do:`/`open:mode:do:` call-site lowering this ADR's original Decision covers.
+
+ Rejected: large change to the hottest path, new failure semantics to define, and no benefit to the ~99% of class methods that take no Block. Revisit only if block-taking class methods become common.
 
 **Document the constraints and stop there.** This is the status quo after BT-2975, which documented all three consequences in `File.bt` and `beamtalk-language-features.md`. Rejected because the append-only-log pattern the API exists to serve is precisely the one that trips the 60s ceiling, and "don't message `File` from inside `File`" is a rule users only learn by hitting an opaque gen_server tuple.
 
@@ -104,3 +179,17 @@ Not in scope: a general continuation protocol for class methods; changing the 60
 - ADR 0056 — actor dispatch and `self delegate`
 - `beamtalk_class_dispatch.erl` — `class_send/3`, `class_send_dispatch/3`, `handle_metaclass_self_call/2` (BT-2005 precedent)
 - `crates/beamtalk-core/src/ast/well_known.rs` — the call-site interception mechanism this decision extends
+
+### Amendment (proposed, BT-3047) references
+
+- BT-3047 — the issue driving the amendment; found during BT-3039's review
+- BT-908 — origin of the polymorphic-factory intent for instantiation intrinsics the amendment preserves
+- BT-2007 — introduced the inherited self-dispatch fallback branch the amendment fixes
+- BT-893 — established the gen_server-bypass deadlock-avoidance property the amendment's `is_abstract` mechanism must not reintroduce
+- BT-2222 — consolidated the three predecessor class-keyed ETS tables into `beamtalk_class_metadata`, the table the amendment extends rather than duplicating
+- ADR 0110 (Class-Variable Shadow Write-Through) — prior art: its BT-3039 amendment first established that `ClassSelf` is closure-safe across a block's foreign-process boundary (`element(2, ClassSelf)`), the fact this amendment generalizes
+- `crates/beamtalk-core/src/codegen/core_erlang/dispatch_codegen.rs` — `generate_class_method_self_send` (:1450, the confirmed-broken site), `try_instantiation_intrinsic` (:1471-1525)
+- `crates/beamtalk-core/src/codegen/core_erlang/gen_server/methods.rs:2977-2978` — `self` bound to `ClassSelf` in every class method
+- `runtime/apps/beamtalk_runtime/src/beamtalk_primitive.erl:975-981` — `class_name_from_tag/1`
+- `runtime/apps/beamtalk_runtime/src/beamtalk_class_metadata.erl` — `#class_metadata{}`, `insert/4`, `lookup_superclass/1` (the shape the amendment's `lookup_is_abstract/1` mirrors)
+- `runtime/apps/beamtalk_runtime/src/beamtalk_object_class.erl:453,1619` — the two `beamtalk_class_metadata:insert/4` call sites that become `insert/5`
