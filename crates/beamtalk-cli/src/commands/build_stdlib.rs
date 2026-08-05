@@ -2913,4 +2913,74 @@ mod tests {
             "Case-folded collision must be rejected. Got: {err}"
         );
     }
+
+    /// Project root, two levels up from this crate's manifest directory —
+    /// mirrors `erlfmt.rs`'s `project_root()` test helper.
+    fn project_root() -> Utf8PathBuf {
+        let manifest_dir = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        manifest_dir
+            .parent()
+            .and_then(|p| p.parent())
+            .expect("project root")
+            .to_owned()
+    }
+
+    /// BT-3033: `beamtalk_primitive:is_string_binary_shared_selector/1` hand-lists
+    /// the `Binary.bt` instance selectors that `String.bt` inherits unchanged
+    /// (byte-level primitives, safe to dispatch without the `is_utf8/1` scan).
+    /// This test recomputes that set from the real `.bt` sources — Binary's own
+    /// instance selectors minus whatever String redefines — and fails if it
+    /// drifts from the hardcoded Erlang list, so a future edit to either file
+    /// that changes the override relationship is caught here instead of
+    /// silently reintroducing BT-2999-style misdispatch.
+    #[test]
+    fn test_binary_string_shared_selectors_stay_in_sync() {
+        let root = project_root();
+        let binary_path = root.join("stdlib/src/Binary.bt");
+        let string_path = root.join("stdlib/src/String.bt");
+
+        let binary_meta = extract_class_metadata(&binary_path, "bt@stdlib@binary")
+            .expect("Binary.bt should parse");
+        let string_meta = extract_class_metadata(&string_path, "bt@stdlib@string")
+            .expect("String.bt should parse");
+
+        let string_overrides: std::collections::HashSet<&str> = string_meta
+            .methods
+            .iter()
+            .map(|m| m.selector.as_str())
+            .collect();
+
+        let inherited_unchanged: std::collections::BTreeSet<&str> = binary_meta
+            .methods
+            .iter()
+            .map(|m| m.selector.as_str())
+            .filter(|selector| !string_overrides.contains(selector))
+            .collect();
+
+        // Mirrors beamtalk_primitive:is_string_binary_shared_selector/1 in
+        // runtime/apps/beamtalk_runtime/src/beamtalk_primitive.erl — keep both
+        // lists identical.
+        let hardcoded: std::collections::BTreeSet<&str> = [
+            "byteAt:",
+            "byteSize",
+            "part:size:",
+            "concat:",
+            "toBytes",
+            "asStringUnchecked",
+            "asBase64",
+            "asBase64Url",
+            "asHex",
+        ]
+        .into_iter()
+        .collect();
+
+        assert_eq!(
+            inherited_unchanged, hardcoded,
+            "Binary.bt selectors NOT overridden by String.bt (left) no longer \
+             match beamtalk_primitive.erl's is_string_binary_shared_selector/1 \
+             (right). Update that Erlang function to match — a selector only \
+             belongs there if String.bt truly inherits it unchanged from \
+             Binary.bt."
+        );
+    }
 }

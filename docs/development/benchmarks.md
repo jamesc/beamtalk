@@ -558,3 +558,94 @@ module, a raw tuple, and a list.
 - **No perf justification for a `Vector` class or a backing swap. BT-2696 closed.**
 - Minor optional win: `beamtalk_array:at` adds ~2× over raw `maps:get` (it
   recomputes `maps:size` for the bounds check each call) — trimmable, low priority.
+
+## Selector-aware UTF-8 scan skip — dynamic dispatch on large binaries (BT-3033)
+
+BT-2999 made `module_for_value/1` classify a bare binary by `is_utf8/1`
+(String vs Binary) on every dynamic send, replacing an O(1) `is_binary` guard
+with an O(byte_size) validating scan. That cost only bites for **large,
+valid-UTF-8** binaries sent to **dynamically**-typed receivers: repeatedly
+messaging the same multi-megabyte binary re-scans it every send, so an
+N-iteration loop over one large binary is O(N x size). This benchmark
+establishes that baseline and measures the fix: for selectors where String
+and Binary behave identically (`byteAt:`, `byteSize`, `part:size:`,
+`concat:`, `toBytes`, `asStringUnchecked`, `asBase64`, `asBase64Url`,
+`asHex` — see `is_string_binary_shared_selector/1`), `send/3` and
+`responds_to/2` now skip the scan entirely via `module_for_value/2`.
+
+### Harness
+
+`runtime/perf/bench_string_binary_dispatch.escript`. Run from the `runtime/`
+directory after `just build`:
+
+```bash
+escript perf/bench_string_binary_dispatch.escript
+```
+
+For each binary size, sends `byteAt:` dynamically (`beamtalk_primitive:send/3`,
+no static type annotation) in a loop over the *same* receiver, 2000 times:
+
+- **before** — the pre-fix path, simulated inline (`is_utf8/1` then dispatch)
+  since `module_for_value/1` itself is unchanged and still used by callers
+  without a selector in hand.
+- **after** — the real current `send/3` path (`module_for_value/2`, skips the
+  scan for `byteAt:`).
+- **after, `size`** — a contrasting selector that genuinely differs between
+  String and Binary, so it must (and does) keep paying the scan — proving the
+  fix is selector-specific, not a blanket skip.
+
+A sanity check asserts all three paths agree with `binary:at/2` on a sample
+index before timing starts, so the speedup isn't a correctness regression in
+disguise.
+
+### Workspace
+
+Valid-UTF-8 (ASCII) binaries of 1 KB, 64 KB, and 1 MB — the sizes BT-2999's
+own measurements used, plus the >=1 MB acceptance-criteria size.
+
+### Results (K = 2000 dynamic sends per size)
+
+| size | before (always scans) | after (`byteAt:`, skips) | speedup | after (`size`, still scans) |
+|---|---|---|---|---|
+| 1 KB | 0.670 us/op | 0.214 us/op | ~3.1x | 2.954 us/op |
+| 64 KB | 28.878 us/op | 0.192 us/op | ~150x | 148.439 us/op |
+| 1 MB | 368.910 us/op | 0.224 us/op | **~1650x** | 2389.153 us/op |
+
+**Note:** these numbers were captured before a follow-up fix added a
+`beamtalk_extensions:has('String', Selector)` guard to the fast path (a
+review-caught correctness gap: an ADR 0066 `String` extension on one of the
+9 shared selectors must not fire for a genuinely non-UTF-8 receiver). That
+guard is a single `ets:member` check, negligible next to the numbers above —
+re-measure if the table is ever regenerated, but no material change is
+expected.
+
+### Interpretation
+
+- **`byteAt:`'s cost is now flat (~0.2 us/op) regardless of receiver size** —
+  the scan it used to pay is gone, and what's left is ordinary dispatch
+  overhead. The N-iteration-over-one-large-binary case the issue was filed
+  for goes from ~369 us/send to ~0.22 us/send at 1 MB.
+- **`size` is deliberately unaffected** (in fact its per-op cost is *higher*
+  than the simulated `is_utf8/1`-only "before" row, since it pays both the
+  scan in `module_for_value/1` — `size` is not in the shared-selector set —
+  *and* String's own O(size) grapheme count once dispatched). This is
+  expected and correct: `size` means different things on String vs Binary,
+  so it must keep discriminating.
+- Confirms BT-2999's own measurements (~0.4 ns/byte scan cost) at all three
+  sizes, and confirms the fix removes exactly that cost for the selectors
+  it's safe to remove it for.
+
+### Decision (BT-3033)
+
+**Implemented approach 1/2 from the issue** (selector-aware skip, backed by a
+build-time-checked selector set rather than a purely hand-maintained one):
+`beamtalk_primitive:is_string_binary_shared_selector/1` lists the `Binary.bt`
+instance selectors `String.bt` does not redefine, and
+`crates/beamtalk-cli/src/commands/build_stdlib.rs`'s
+`test_binary_string_shared_selectors_stay_in_sync` recomputes that same set
+from the real `.bt` sources on every `cargo test` run, failing if either file
+changes the override relationship the hardcoded Erlang list assumes — the
+fragility the issue flagged for approach 1 is caught by CI, not left to
+manual vigilance. `class_of/1` and every selector not in the shared set are
+untouched and still pay the full `is_utf8/1` scan, so dispatch stays exactly
+as consistent with `class` as BT-2999 made it.
