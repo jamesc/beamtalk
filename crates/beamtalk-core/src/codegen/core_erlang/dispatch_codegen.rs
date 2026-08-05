@@ -1482,7 +1482,7 @@ impl CoreErlangGenerator {
     /// per call site is negligible and matches the pre-existing style at these
     /// same sites, which already repeated process-dictionary reads inline rather
     /// than hoisting them through a `let`.
-    fn class_self_name_doc() -> Document<'static> {
+    pub(super) fn class_self_name_doc() -> Document<'static> {
         docvec![
             "call 'beamtalk_primitive':'class_name_from_tag'(call 'erlang':'element'(2, ",
             leaf::var("ClassSelf"),
@@ -1502,7 +1502,7 @@ impl CoreErlangGenerator {
     /// `Value`-shaped map missing `x`/`y` — caught as a regression while
     /// implementing this amendment). `Selector` names the call for the
     /// structured error `resolve_module_or_raise/2` raises on a metadata miss.
-    fn class_self_module_doc(selector_atom: &str) -> Document<'static> {
+    pub(super) fn class_self_module_doc(selector_atom: &str) -> Document<'static> {
         docvec![
             "call 'beamtalk_class_instantiation':'resolve_module_or_raise'(",
             Self::class_self_name_doc(),

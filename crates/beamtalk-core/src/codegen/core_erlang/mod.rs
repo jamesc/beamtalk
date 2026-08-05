@@ -3445,12 +3445,10 @@ impl CoreErlangGenerator {
                 "basicNew" => {
                     return Ok(docvec![
                         "call 'beamtalk_class_instantiation':'class_self_new'(",
-                        "call 'beamtalk_primitive':'class_name_from_tag'(call 'erlang':'element'(2, ",
-                        leaf::var("ClassSelf"),
-                        ")), call 'beamtalk_class_instantiation':'resolve_module_or_raise'(",
-                        "call 'beamtalk_primitive':'class_name_from_tag'(call 'erlang':'element'(2, ",
-                        leaf::var("ClassSelf"),
-                        ")), 'new'), [])",
+                        Self::class_self_name_doc(),
+                        ", ",
+                        Self::class_self_module_doc("new"),
+                        ", [])",
                     ]);
                 }
                 "basicNewWith" => {
@@ -3461,12 +3459,10 @@ impl CoreErlangGenerator {
                         .unwrap_or_else(|| "InitArgs".to_string());
                     return Ok(docvec![
                         "call 'beamtalk_class_instantiation':'class_self_new'(",
-                        "call 'beamtalk_primitive':'class_name_from_tag'(call 'erlang':'element'(2, ",
-                        leaf::var("ClassSelf"),
-                        ")), call 'beamtalk_class_instantiation':'resolve_module_or_raise'(",
-                        "call 'beamtalk_primitive':'class_name_from_tag'(call 'erlang':'element'(2, ",
-                        leaf::var("ClassSelf"),
-                        ")), 'new:'), [",
+                        Self::class_self_name_doc(),
+                        ", ",
+                        Self::class_self_module_doc("new:"),
+                        ", [",
                         leaf::var(param),
                         "])",
                     ]);
