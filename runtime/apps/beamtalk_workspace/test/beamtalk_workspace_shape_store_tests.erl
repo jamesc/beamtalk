@@ -81,7 +81,7 @@ prime_on_unregistered_class_seeds_undefined(_Pid) ->
 capture_without_prime_is_always_no_op(_Pid) ->
     beamtalk_class_metadata:new(),
     ok = beamtalk_class_metadata:insert(
-        'ShapeFixtureClass', beamtalk_shape_store_fixture, [count, name], 'Actor'
+        'ShapeFixtureClass', beamtalk_shape_store_fixture, [count, name], 'Actor', undefined
     ),
     try
         {Prev, DiffResult} = beamtalk_workspace_shape_store:capture(<<"ShapeFixtureClass">>),
@@ -100,7 +100,7 @@ capture_without_prime_is_always_no_op(_Pid) ->
 previous_does_not_mutate_store(_Pid) ->
     beamtalk_class_metadata:new(),
     ok = beamtalk_class_metadata:insert(
-        'ShapeFixtureClass', beamtalk_shape_store_fixture, [count, name], 'Actor'
+        'ShapeFixtureClass', beamtalk_shape_store_fixture, [count, name], 'Actor', undefined
     ),
     try
         ok = beamtalk_workspace_shape_store:prime(<<"ShapeFixtureClass">>),
@@ -120,7 +120,7 @@ previous_does_not_mutate_store(_Pid) ->
 clear_resets_the_session(_Pid) ->
     beamtalk_class_metadata:new(),
     ok = beamtalk_class_metadata:insert(
-        'ShapeFixtureClass', beamtalk_shape_store_fixture, [count, name], 'Actor'
+        'ShapeFixtureClass', beamtalk_shape_store_fixture, [count, name], 'Actor', undefined
     ),
     try
         ok = beamtalk_workspace_shape_store:prime(<<"ShapeFixtureClass">>),
@@ -135,7 +135,7 @@ clear_resets_the_session(_Pid) ->
 different_classes_are_independent(_Pid) ->
     beamtalk_class_metadata:new(),
     ok = beamtalk_class_metadata:insert(
-        'ShapeFixtureClass', beamtalk_shape_store_fixture, [count, name], 'Actor'
+        'ShapeFixtureClass', beamtalk_shape_store_fixture, [count, name], 'Actor', undefined
     ),
     try
         ok = beamtalk_workspace_shape_store:prime(<<"ShapeFixtureClass">>),
@@ -153,7 +153,7 @@ different_classes_are_independent(_Pid) ->
 %% degrades to undefined rather than crashing the prime/capture hook.
 read_shape_degrades_to_undefined_when_no_meta_exported_test() ->
     beamtalk_class_metadata:new(),
-    ok = beamtalk_class_metadata:insert('NoMetaClass', lists, [foo], 'Object'),
+    ok = beamtalk_class_metadata:insert('NoMetaClass', lists, [foo], 'Object', undefined),
     try
         ?assertEqual(
             undefined, beamtalk_workspace_shape_store:read_shape_from_meta(<<"NoMetaClass">>)
@@ -176,7 +176,7 @@ read_shape_degrades_to_undefined_for_unregistered_class_test() ->
 read_shape_reads_field_types_from_meta_test() ->
     beamtalk_class_metadata:new(),
     ok = beamtalk_class_metadata:insert(
-        'ShapeFixtureClass', beamtalk_shape_store_fixture, [count, name], 'Actor'
+        'ShapeFixtureClass', beamtalk_shape_store_fixture, [count, name], 'Actor', undefined
     ),
     try
         ?assertEqual(

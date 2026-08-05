@@ -36,7 +36,9 @@ Called by `beamtalk_object_class` gen_server handle_call clauses.
     class_self_spawn_with/5,
     ensure_is_constructible/3,
     compute_is_constructible/2,
-    abstract_class_error/2
+    abstract_class_error/2,
+    resolve_is_abstract_or_raise/2,
+    resolve_module_or_raise/2
 ]).
 
 -type class_name() :: atom().
@@ -566,3 +568,85 @@ abstract_class_error(ClassName, Selector) ->
     beamtalk_error:with_hint(
         Error1, <<"Abstract classes cannot be instantiated. Subclass it first.">>
     ).
+
+-doc """
+Build a structured internal_error for a class-metadata lookup miss during
+instantiation (BT-3047 / ADR 0109 amendment) — a resolved `ClassName` with no
+`beamtalk_class_metadata` row, which should never happen for a class already
+live enough to be dispatching. `internal_error` (not `instantiation_error`,
+which `abstract_class_error/2` uses): this is a runtime/dispatch bug, not a
+user mistake like instantiating an abstract class.
+""".
+-spec class_metadata_missing_error(atom(), atom()) -> #beamtalk_error{}.
+class_metadata_missing_error(ClassName, Selector) ->
+    Error1 = beamtalk_error:new(internal_error, ClassName, Selector),
+    beamtalk_error:with_hint(
+        Error1,
+        <<"Internal error: class metadata unavailable for this class. Please report this as a bug.">>
+    ).
+
+-doc """
+Resolve a class's own compiled module for a class-method self-send (BT-3047 /
+ADR 0109 amendment).
+
+Codegen calls this from the instantiation intrinsics with a `ClassName` derived
+from `ClassSelf` (closure-captured, correct even inside a block executing in a
+foreign class's process). Deliberately does **not** read `ClassSelf.class_mod`
+(`element(3, ClassSelf)`) — that field is not reliably "the calling class's own
+module": at the inherited-class-method dispatch site
+(`beamtalk_class_dispatch:apply_class_method_in_context/6`), `ClassSelf` is
+constructed with `class_mod = DefiningModule` (the ancestor whose code is
+executing), while `class` is the calling subclass's own tag. Using
+`class_mod` for instantiation would construct an instance of the wrong
+class's module (e.g. `Point new: Map` building a bare `Value`-shaped map with
+no `x`/`y` fields, discovered as a regression by this amendment's own test run).
+`beamtalk_class_metadata:lookup_module/1` is name-keyed and always returns a
+class's own module regardless of which dispatch path resolved `ClassName`.
+
+Raises a structured `internal_error` (`class_metadata_missing_error/2`) if the
+metadata row is missing, rather than guessing — the row is written
+unconditionally at the same point that establishes the class's other identity,
+so a genuine miss means this call resolved a class name before its own
+metadata was visible: a bug worth surfacing loudly.
+""".
+-spec resolve_module_or_raise(class_name(), atom()) -> module().
+resolve_module_or_raise(ClassName, Selector) ->
+    case beamtalk_class_metadata:lookup_module(ClassName) of
+        {ok, Module} ->
+            Module;
+        not_found ->
+            Wrapped = beamtalk_exception_handler:ensure_wrapped(
+                class_metadata_missing_error(ClassName, Selector)
+            ),
+            error(Wrapped)
+    end.
+
+-doc """
+Resolve a class's `is_abstract` flag for a class-method self-send (BT-3047 /
+ADR 0109 amendment).
+
+Codegen calls this from `self spawn`/`self spawnWith:`/`self spawnAs:`/
+`self spawnWith:as:` with a `ClassName` derived from `ClassSelf` (closure-
+captured, correct even inside a block executing in a foreign class's process)
+rather than the `beamtalk_class_is_abstract` process-dictionary flag, which
+resolves against the wrong class in that case.
+
+Raises a structured `internal_error` (`class_metadata_missing_error/2`) — not
+`abstract_class_error/2`, which would misleadingly claim the class *is*
+abstract — if the metadata row is missing, rather than silently defaulting to
+`true` or `false`: the row is written unconditionally at the same point that
+establishes the class's other identity, so a genuine miss here means this call
+resolved a class name before its own metadata was visible — a bug worth
+surfacing loudly, not smoothing over with a guess in either direction.
+""".
+-spec resolve_is_abstract_or_raise(class_name(), atom()) -> boolean().
+resolve_is_abstract_or_raise(ClassName, Selector) ->
+    case beamtalk_class_metadata:lookup_is_abstract(ClassName) of
+        {ok, IsAbstract} ->
+            IsAbstract;
+        not_found ->
+            Wrapped = beamtalk_exception_handler:ensure_wrapped(
+                class_metadata_missing_error(ClassName, Selector)
+            ),
+            error(Wrapped)
+    end.

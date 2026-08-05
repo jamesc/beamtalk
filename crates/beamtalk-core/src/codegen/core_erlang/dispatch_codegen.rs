@@ -1445,9 +1445,17 @@ impl CoreErlangGenerator {
 
         let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
         let cv = self.current_class_var();
+        // BT-3047 / ADR 0109 amendment: derive the target class from `ClassSelf`
+        // (closure-captured, so correct even when this self-send executes inside a
+        // block running in a foreign class's process) instead of
+        // `erlang:get('beamtalk_class_name')` (the *executing process's* identity,
+        // which is only the same thing outside a block). `class_name_from_tag/1`
+        // strips the `' class'` metaclass tag `element(2, ClassSelf)` carries.
         let call_doc = docvec![
             "call 'beamtalk_class_dispatch':'class_self_dispatch'(",
-            "call 'erlang':'get'('beamtalk_class_name'), ",
+            "call 'beamtalk_primitive':'class_name_from_tag'(call 'erlang':'element'(2, ",
+            leaf::var("ClassSelf"),
+            ")), ",
             leaf::atom(selector_atom),
             ", ",
             leaf::var(cv),
@@ -1461,13 +1469,64 @@ impl CoreErlangGenerator {
         Ok(doc)
     }
 
+    /// BT-3047 / ADR 0109 amendment: the class-name expression derived from
+    /// `ClassSelf` (closure-captured, so correct even inside a block executing in
+    /// a foreign class's process), for inlining at instantiation-intrinsic call
+    /// sites. Deliberately inlined rather than let-bound: `finalize_dispatch_with_preamble`
+    /// treats *any* non-`Nil` preamble as an open let-chain the caller must
+    /// continue (setting `last_open_scope_result`), which only the argument-hoisting
+    /// preamble from `capture_args_with_preamble` is guaranteed to be consumed
+    /// correctly for — a zero-argument call (e.g. bare `self new`) produces a
+    /// `Nil` args preamble and must stay a *closed* expression. Recomputing this
+    /// cheap expression (a suffix check + `binary_to_existing_atom`) inline at
+    /// each use — up to three times per call site for the `spawn`/`spawnAs:`/
+    /// `spawnWith:as:` intrinsics, which also resolve `is_abstract` — is
+    /// negligible and matches the pre-existing style at these same sites, which
+    /// already repeated process-dictionary reads inline rather than hoisting
+    /// them through a `let`.
+    pub(super) fn class_self_name_doc() -> Document<'static> {
+        docvec![
+            "call 'beamtalk_primitive':'class_name_from_tag'(call 'erlang':'element'(2, ",
+            leaf::var("ClassSelf"),
+            "))"
+        ]
+    }
+
+    /// BT-3047 / ADR 0109 amendment: the calling class's own compiled module,
+    /// resolved by name via `beamtalk_class_metadata:lookup_module/1` — **not**
+    /// `element(3, ClassSelf)` (`class_mod`). That field is not reliably "the
+    /// calling class's own module": at the inherited-class-method dispatch site
+    /// (`beamtalk_class_dispatch:apply_class_method_in_context/6`), `ClassSelf`
+    /// is constructed with `class_mod = DefiningModule` (the ancestor whose code
+    /// is executing), while `class` (used by `class_self_name_doc`) is correctly
+    /// the calling subclass's own tag. Using `class_mod` here would construct an
+    /// instance via the wrong module (e.g. `Point new: aMap` building a bare
+    /// `Value`-shaped map missing `x`/`y` — caught as a regression while
+    /// implementing this amendment). `Selector` names the call for the
+    /// structured error `resolve_module_or_raise/2` raises on a metadata miss.
+    pub(super) fn class_self_module_doc(selector_atom: &str) -> Document<'static> {
+        docvec![
+            "call 'beamtalk_class_instantiation':'resolve_module_or_raise'(",
+            Self::class_self_name_doc(),
+            ", ",
+            leaf::atom(selector_atom),
+            ")"
+        ]
+    }
+
     /// Lowers instantiation-like selectors (`new`, `spawn`, `spawnAs:`, ...) into
     /// direct calls on `beamtalk_class_instantiation`, bypassing the class
     /// `gen_server` to avoid deadlock from within a class method.
     ///
-    /// BT-908: ClassName/Module/IsAbstract are read from the process dictionary
-    /// rather than baked in at compile time so inherited factory methods create
-    /// an instance of the CALLING class (the running class `gen_server` process).
+    /// BT-908: ClassName/Module create an instance of the CALLING class (the
+    /// running class `gen_server` process) for inherited factory methods.
+    ///
+    /// BT-3047 / ADR 0109 amendment: ClassName/Module/IsAbstract are derived from
+    /// `ClassSelf` (closure-captured) rather than read from the process
+    /// dictionary, so a block invoked from a *different* class's process still
+    /// resolves against the block's own lexical class — preserving BT-908's intent
+    /// rather than overriding it (`ClassSelf` already carries the same value the
+    /// process dictionary did in every non-block case).
     fn try_instantiation_intrinsic(
         &mut self,
         selector_atom: &str,
@@ -1479,8 +1538,10 @@ impl CoreErlangGenerator {
                 let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
                 let call_doc = docvec![
                     "call 'beamtalk_class_instantiation':'class_self_new'(",
-                    "call 'erlang':'get'('beamtalk_class_name'), ",
-                    "call 'erlang':'get'('beamtalk_class_module'), [",
+                    Self::class_self_name_doc(),
+                    ", ",
+                    Self::class_self_module_doc(selector_atom),
+                    ", [",
                     args_doc,
                     "])"
                 ];
@@ -1494,9 +1555,14 @@ impl CoreErlangGenerator {
                 let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
                 let call_doc = docvec![
                     "call 'beamtalk_class_instantiation':'class_self_spawn'(",
-                    "call 'erlang':'get'('beamtalk_class_name'), ",
-                    "call 'erlang':'get'('beamtalk_class_module'), ",
-                    "call 'erlang':'get'('beamtalk_class_is_abstract'), [",
+                    Self::class_self_name_doc(),
+                    ", ",
+                    Self::class_self_module_doc(selector_atom),
+                    ", call 'beamtalk_class_instantiation':'resolve_is_abstract_or_raise'(",
+                    Self::class_self_name_doc(),
+                    ", ",
+                    leaf::atom(selector_atom),
+                    "), [",
                     args_doc,
                     "])"
                 ];
@@ -1513,11 +1579,13 @@ impl CoreErlangGenerator {
             "spawnAs:" => Ok(Some(self.generate_class_self_named_spawn(
                 "class_self_spawn_as",
                 "SpawnAsRes",
+                "spawnAs:",
                 arguments,
             )?)),
             "spawnWith:as:" => Ok(Some(self.generate_class_self_named_spawn(
                 "class_self_spawn_with",
                 "SpawnWithAsRes",
+                "spawnWith:as:",
                 arguments,
             )?)),
             _ => Ok(None),
@@ -1526,12 +1594,14 @@ impl CoreErlangGenerator {
 
     /// BT-2004: Shared emitter for `self spawnAs:` and `self spawnWith:as:` in
     /// class-method context. Emits a call to `beamtalk_class_instantiation`'s
-    /// Result-returning helper with ClassName/Module/IsAbstract pulled from the
-    /// process dictionary, followed by the Beamtalk-level arguments.
+    /// Result-returning helper with ClassName/Module/IsAbstract derived from
+    /// `ClassSelf` (BT-3047 / ADR 0109 amendment — see `try_instantiation_intrinsic`),
+    /// followed by the Beamtalk-level arguments.
     fn generate_class_self_named_spawn(
         &mut self,
         helper: &'static str,
         result_prefix: &'static str,
+        selector_atom: &'static str,
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
         let (args_preamble, args_doc) = self.capture_args_with_preamble(arguments)?;
@@ -1539,9 +1609,14 @@ impl CoreErlangGenerator {
             "call 'beamtalk_class_instantiation':'",
             Document::Str(helper),
             "'(",
-            "call 'erlang':'get'('beamtalk_class_name'), ",
-            "call 'erlang':'get'('beamtalk_class_module'), ",
-            "call 'erlang':'get'('beamtalk_class_is_abstract'), ",
+            Self::class_self_name_doc(),
+            ", ",
+            Self::class_self_module_doc(selector_atom),
+            ", call 'beamtalk_class_instantiation':'resolve_is_abstract_or_raise'(",
+            Self::class_self_name_doc(),
+            ", ",
+            leaf::atom(selector_atom),
+            "), ",
             args_doc,
             ")"
         ];

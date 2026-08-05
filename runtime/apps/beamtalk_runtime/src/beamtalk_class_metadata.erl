@@ -20,9 +20,11 @@ same three lifecycle points (`init`, `update_class`, `terminate`) — and the
 
 Each row is a `#class_metadata{}` record keyed by `name`:
 
-* `module`     — defining BEAM module, or `undefined` if unset
-* `selectors`  — local class-method selectors, or `undefined` if unset
-* `superclass` — superclass atom, `none` for a root class, or `undefined` if unset
+* `module`      — defining BEAM module, or `undefined` if unset
+* `selectors`   — local class-method selectors, or `undefined` if unset
+* `superclass`  — superclass atom, `none` for a root class, or `undefined` if unset
+* `is_abstract` — whether the class is abstract, or `undefined` if unset (BT-3047 /
+  ADR 0109 amendment)
 
 `undefined` is the "field never written" sentinel and is distinct from `none`
 (an explicitly root class). The typed lookups treat `undefined` as `not_found`,
@@ -52,11 +54,12 @@ a table deleted between an existence check and the op (teardown/shutdown).
 
 -export([
     new/0,
-    insert/4,
+    insert/5,
     delete/1,
     lookup_module/1,
     lookup_methods/1,
     lookup_superclass/1,
+    lookup_is_abstract/1,
     match_subclasses/1,
     foldl/2,
     all_builtins/0,
@@ -88,7 +91,16 @@ a table deleted between an existence check and the op (teardown/shutdown).
     %% BT-2266 / ADR 0084: true once a runtime/builder class-method fun has been
     %% installed for this class. The dispatch-time gate: false means the funs
     %% table is never read for this class.
-    has_runtime_class_methods = false :: boolean()
+    has_runtime_class_methods = false :: boolean(),
+    %% BT-3047 / ADR 0109 amendment: whether the class is abstract, read by the
+    %% instantiation intrinsics (`self spawn`/`self spawnWith:`/etc.) instead of
+    %% the `beamtalk_class_is_abstract` process-dictionary flag, which resolves
+    %% against the wrong class when read from inside a block executing in a
+    %% foreign class's process. `undefined` (the "field never written" sentinel,
+    %% not a boolean default — see `lookup_is_abstract/1`) rather than `false`,
+    %% because a class-existence guard must not silently default toward
+    %% *permitting* instantiation on a lookup miss.
+    is_abstract :: boolean() | undefined
 }).
 
 %%====================================================================
@@ -144,19 +156,28 @@ ensure_table(Table, Opts) ->
 Insert or overwrite the **entire** metadata row for a class.
 
 This is a full-row write, not a per-field merge: every call replaces all of
-`module`, `selectors`, and `superclass`. The class gen_server always supplies
-all three together (`init`/`update_class`), so the write is atomic for readers.
-Do NOT call this to update a single field — the others would be wiped. Pass
-`undefined` only to leave a field genuinely unset (used by tests that exercise
-one field in isolation).
+`module`, `selectors`, `superclass`, and `is_abstract`. The class gen_server
+always supplies all four together (`init`/`update_class`), so the write is
+atomic for readers. Do NOT call this to update a single field — the others
+would be wiped. Pass `undefined` only to leave a field genuinely unset (used by
+tests that exercise one field in isolation, and by callers that don't know
+`is_abstract` — BT-3047 / ADR 0109 amendment).
 """.
 -spec insert(
-    class_name(), module() | undefined, [selector()] | undefined, superclass() | undefined
+    class_name(),
+    module() | undefined,
+    [selector()] | undefined,
+    superclass() | undefined,
+    boolean() | undefined
 ) ->
     ok.
-insert(Name, Module, Selectors, Superclass) ->
+insert(Name, Module, Selectors, Superclass, IsAbstract) ->
     Row = #class_metadata{
-        name = Name, module = Module, selectors = Selectors, superclass = Superclass
+        name = Name,
+        module = Module,
+        selectors = Selectors,
+        superclass = Superclass,
+        is_abstract = IsAbstract
     },
     new(),
     try
@@ -229,6 +250,27 @@ lookup_superclass(Name) ->
     case field(Name, #class_metadata.superclass) of
         undefined -> not_found;
         Super -> {ok, Super}
+    end.
+
+-doc """
+Look up whether a class is abstract (BT-3047 / ADR 0109 amendment).
+
+Returns `not_found` — never a defaulted boolean — when the row or field is
+unset. Callers that use this to gate instantiation (e.g.
+`beamtalk_class_instantiation:resolve_is_abstract_or_raise/2`) must not
+silently pick either boolean on a miss: `false` would let a genuinely abstract
+class be constructed if the row hasn't been written yet, and `true` would
+wrongly refuse a genuinely concrete one. A miss should never happen for a live,
+already-dispatching class (the row is written unconditionally at the same
+`init`/reload point that establishes the class's other identity), so `not_found`
+here indicates a bug worth surfacing loudly rather than a normal case to paper
+over with a default.
+""".
+-spec lookup_is_abstract(class_name()) -> {ok, boolean()} | not_found.
+lookup_is_abstract(Name) ->
+    case field(Name, #class_metadata.is_abstract) of
+        undefined -> not_found;
+        IsAbstract -> {ok, IsAbstract}
     end.
 
 -doc """

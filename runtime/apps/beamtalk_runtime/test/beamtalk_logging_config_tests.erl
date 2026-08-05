@@ -820,7 +820,7 @@ actor_filter_ignores_other_pid() ->
 enableDebug_with_registered_class_sets_module_level() ->
     beamtalk_logging_config:disableAllDebug(),
     beamtalk_class_metadata:new(),
-    beamtalk_class_metadata:insert('RegisteredClass', lists, undefined, undefined),
+    beamtalk_class_metadata:insert('RegisteredClass', lists, undefined, undefined, undefined),
     try
         ClassRef = #beamtalk_object{
             class = 'RegisteredClass class', class_mod = lists, pid = self()
@@ -837,7 +837,7 @@ enableDebug_with_registered_class_sets_module_level() ->
 disableDebug_with_registered_class_unsets_module_level() ->
     beamtalk_logging_config:disableAllDebug(),
     beamtalk_class_metadata:new(),
-    beamtalk_class_metadata:insert('RegisteredClass2', lists, undefined, undefined),
+    beamtalk_class_metadata:insert('RegisteredClass2', lists, undefined, undefined, undefined),
     try
         ClassRef = #beamtalk_object{
             class = 'RegisteredClass2 class', class_mod = lists, pid = self()
@@ -856,7 +856,7 @@ disableDebug_with_registered_class_unsets_module_level() ->
 disableAllDebug_with_registered_class_unsets_module_level() ->
     beamtalk_logging_config:disableAllDebug(),
     beamtalk_class_metadata:new(),
-    beamtalk_class_metadata:insert('RegisteredClass3', lists, undefined, undefined),
+    beamtalk_class_metadata:insert('RegisteredClass3', lists, undefined, undefined, undefined),
     try
         ClassRef = #beamtalk_object{
             class = 'RegisteredClass3 class', class_mod = lists, pid = self()

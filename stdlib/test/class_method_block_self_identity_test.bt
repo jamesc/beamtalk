@@ -1,0 +1,36 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3047 / ADR 0109 amendment: a self-send or instantiation intrinsic inside
+// a block that executes in a foreign class's process (ADR 0109) must resolve
+// against the block's lexical home class — closure-captured via `ClassSelf`
+// — not whichever class's process happens to be running the block.
+//
+// Fixtures: fixtures/bt3047_ancestor.bt, fixtures/bt3047_parent.bt,
+// fixtures/bt3047_driver_plain.bt, fixtures/bt3047_driver_with_foo.bt.
+
+TestCase subclass: ClassMethodBlockSelfIdentityTest
+
+  // --- inherited self-send inside a foreign-process block ------------------
+
+  // `foo` is defined only on BT3047Ancestor; BT3047DriverPlain's hierarchy
+  // doesn't define it at all. Before the fix, resolving `self foo` against
+  // the *executing process's* identity (BT3047DriverPlain, since the block
+  // runs there) raised a does_not_understand blaming the wrong class.
+  testInheritedSelfSendResolvesAgainstLexicalHomeNotDriver =>
+    self assert: (BT3047Parent runFooThrough: BT3047DriverPlain over: #(1)) equals: #FromAncestor
+
+  // BT3047DriverWithFoo defines its *own* `foo` — pins that the resolution
+  // doesn't just avoid DNU, it runs the *correct* method rather than silently
+  // executing BT3047DriverWithFoo's same-named selector against the wrong
+  // class's live state.
+  testInheritedSelfSendDoesNotSilentlyRunDriversOwnMethod =>
+    self assert: (BT3047Parent runFooThrough: BT3047DriverWithFoo over: #(1)) equals: #FromAncestor
+
+  // --- instantiation intrinsic inside a foreign-process block ---------------
+
+  // `self new` is inherited from Value (`class sealed new => @intrinsic
+  // basicNew`). Before the fix, the constructed instance's class followed the
+  // *executing process's* identity (the driver), not the block's lexical home.
+  testSelfNewInsideForeignBlockCreatesLexicalHomeInstance =>
+    self assert: (BT3047Parent makeSelfThrough: BT3047DriverPlain over: #(1)) class equals: BT3047Parent

@@ -450,8 +450,12 @@ init({ClassName, ClassInfo}) ->
     %% BT-2222: One unified metadata row carries hierarchy + module + class-method
     %% selectors. The module name enables deadlock-free lookup during supervisor
     %% init (BT-1285); the selector set lets the inherited class-method chain walk
-    %% in beamtalk_class_dispatch avoid gen_server hops (BT-2008).
-    beamtalk_class_metadata:insert(ClassName, Module, maps:keys(ClassMethods), Superclass),
+    %% in beamtalk_class_dispatch avoid gen_server hops (BT-2008). BT-3047 / ADR
+    %% 0109 amendment: is_abstract rides along so instantiation intrinsics can
+    %% look it up by class name too, without a gen_server hop.
+    beamtalk_class_metadata:insert(
+        ClassName, Module, maps:keys(ClassMethods), Superclass, IsAbstract
+    ),
 
     %% ADR 0084 / BT-2266: Seed the runtime class-method fun retrieval store for
     %% any builder-supplied class methods that arrived as funs (#{block, arity}).
@@ -1648,7 +1652,11 @@ apply_class_info(State, ClassInfo) ->
     %% supplies funs re-installs them.
     beamtalk_class_metadata:delete_class_method_funs(State#class_state.name),
     beamtalk_class_metadata:insert(
-        State#class_state.name, NewModule, maps:keys(NewClassMethods), NewSuperclass
+        State#class_state.name,
+        NewModule,
+        maps:keys(NewClassMethods),
+        NewSuperclass,
+        NewIsAbstract
     ),
     seed_runtime_class_methods(State#class_state.name, NewClassMethods),
 

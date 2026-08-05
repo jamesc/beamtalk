@@ -1691,7 +1691,9 @@ walk_chain_superclass_inheritance_test() ->
     beamtalk_class_registry:ensure_hierarchy_table(),
     Saved = ets:tab2list(beamtalk_class_metadata),
     ets:delete_all_objects(beamtalk_class_metadata),
-    beamtalk_class_metadata:insert('WalkChainSub', undefined, undefined, 'WalkChainSuper'),
+    beamtalk_class_metadata:insert(
+        'WalkChainSub', undefined, undefined, 'WalkChainSuper', undefined
+    ),
     PidSub = spawn_mock_class_with_return_types('WalkChainSub', #{}, #{}),
     PidSuper = spawn_mock_class_with_return_types(
         'WalkChainSuper', #{size => 'Integer'}, #{}

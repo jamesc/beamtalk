@@ -206,7 +206,9 @@ is_supervisor_unknown_class_test() ->
 is_supervisor_returns_true_for_supervisor_subclass_test() ->
     %% BT-1960: A class registered as inheriting from 'Supervisor' returns true.
     beamtalk_class_metadata:new(),
-    beamtalk_class_metadata:insert('BT1960SupervisorChild', undefined, undefined, 'Supervisor'),
+    beamtalk_class_metadata:insert(
+        'BT1960SupervisorChild', undefined, undefined, 'Supervisor', undefined
+    ),
     try
         ?assertEqual(true, beamtalk_supervisor:is_supervisor('BT1960SupervisorChild'))
     after
@@ -216,7 +218,9 @@ is_supervisor_returns_true_for_supervisor_subclass_test() ->
 is_supervisor_returns_true_for_dynamic_supervisor_subclass_test() ->
     %% BT-1960: A class inheriting from 'DynamicSupervisor' returns true.
     beamtalk_class_metadata:new(),
-    beamtalk_class_metadata:insert('BT1960DynChild', undefined, undefined, 'DynamicSupervisor'),
+    beamtalk_class_metadata:insert(
+        'BT1960DynChild', undefined, undefined, 'DynamicSupervisor', undefined
+    ),
     try
         ?assertEqual(true, beamtalk_supervisor:is_supervisor('BT1960DynChild'))
     after
@@ -226,8 +230,8 @@ is_supervisor_returns_true_for_dynamic_supervisor_subclass_test() ->
 is_supervisor_returns_false_for_non_supervisor_class_test() ->
     %% BT-1960: A class that inherits from 'Actor' (not Supervisor) returns false.
     beamtalk_class_metadata:new(),
-    beamtalk_class_metadata:insert('BT1960Worker', undefined, undefined, 'Actor'),
-    beamtalk_class_metadata:insert('Actor', undefined, undefined, none),
+    beamtalk_class_metadata:insert('BT1960Worker', undefined, undefined, 'Actor', undefined),
+    beamtalk_class_metadata:insert('Actor', undefined, undefined, none, undefined),
     try
         ?assertEqual(false, beamtalk_supervisor:is_supervisor('BT1960Worker'))
     after
@@ -698,11 +702,11 @@ static_init_walks_hierarchy_via_ets_not_genserver_test() ->
     %%   'BT1285Child' extends 'BT1285Parent' extends none
     %% Neither has a registered class gen_server process — this simulates
     %% the scenario where 'BT1285Parent' gen_server is blocked in startLink/1.
-    beamtalk_class_metadata:insert('BT1285Child', undefined, undefined, 'BT1285Parent'),
+    beamtalk_class_metadata:insert('BT1285Child', undefined, undefined, 'BT1285Parent', undefined),
 
     %% Register module for 'BT1285Parent' only — 'BT1285Child' uses a module
     %% (erlang) that does NOT export class_children/2, forcing the walk upward.
-    beamtalk_class_metadata:insert('BT1285Parent', ?MODULE, undefined, none),
+    beamtalk_class_metadata:insert('BT1285Parent', ?MODULE, undefined, none, undefined),
 
     %% static_init/2 takes (Module, ClassName) where Module is the child's
     %% BEAM module.  We use 'erlang' as the child module so none of the
@@ -728,11 +732,15 @@ dynamic_init_walks_hierarchy_via_ets_test() ->
     %% BT-1960: dynamic_init/2 uses the same ETS hierarchy walk as static_init.
     beamtalk_class_metadata:new(),
 
-    beamtalk_class_metadata:insert('BT1960DynChild', undefined, undefined, 'BT1960DynParent'),
-    beamtalk_class_metadata:insert('BT1960DynParent', ?MODULE, undefined, none),
+    beamtalk_class_metadata:insert(
+        'BT1960DynChild', undefined, undefined, 'BT1960DynParent', undefined
+    ),
+    beamtalk_class_metadata:insert('BT1960DynParent', ?MODULE, undefined, none, undefined),
 
     %% class_childClass returns a supervisor subclass object, so register it.
-    beamtalk_class_metadata:insert('BT1960DynChildSup', undefined, undefined, 'Supervisor'),
+    beamtalk_class_metadata:insert(
+        'BT1960DynChildSup', undefined, undefined, 'Supervisor', undefined
+    ),
 
     %% dynamic_init needs class_childClass, class_maxRestarts, class_restartWindow.
     %% class_childClass returns a class object (beamtalk_object record).
@@ -760,8 +768,8 @@ hierarchy_depth_limit_error_test() ->
     %% the method, eventually exceeding the depth limit of 30.
     %% A points to B, B points to A — circular, will hit depth limit.
     %% Both modules are 'erlang' which won't have class_children.
-    beamtalk_class_metadata:insert('BT1960LoopA', erlang, undefined, 'BT1960LoopB'),
-    beamtalk_class_metadata:insert('BT1960LoopB', erlang, undefined, 'BT1960LoopA'),
+    beamtalk_class_metadata:insert('BT1960LoopA', erlang, undefined, 'BT1960LoopB', undefined),
+    beamtalk_class_metadata:insert('BT1960LoopB', erlang, undefined, 'BT1960LoopA', undefined),
 
     try
         ?assertError(
@@ -860,7 +868,7 @@ setup_fake_class(ClassName) ->
     RegName = beamtalk_class_registry:registry_name(ClassName),
     register(RegName, FakeClassPid),
     %% Register module mapping so call_class_method_direct can find our fake methods.
-    beamtalk_class_metadata:insert(ClassName, ?MODULE, undefined, undefined),
+    beamtalk_class_metadata:insert(ClassName, ?MODULE, undefined, undefined, undefined),
     FakeClassPid.
 
 -doc "Clean up after a fake class test.".
@@ -1044,8 +1052,10 @@ start_child_via_class_method_returns_supervisor_tuple_test() ->
 is_supervisor_transitive_inheritance_test() ->
     %% BT-1960: is_supervisor returns true for a grandchild of Supervisor.
     beamtalk_class_metadata:new(),
-    beamtalk_class_metadata:insert('BT1960GrandChild', undefined, undefined, 'BT1960Middle'),
-    beamtalk_class_metadata:insert('BT1960Middle', undefined, undefined, 'Supervisor'),
+    beamtalk_class_metadata:insert(
+        'BT1960GrandChild', undefined, undefined, 'BT1960Middle', undefined
+    ),
+    beamtalk_class_metadata:insert('BT1960Middle', undefined, undefined, 'Supervisor', undefined),
     try
         ?assertEqual(true, beamtalk_supervisor:is_supervisor('BT1960GrandChild'))
     after
@@ -1444,7 +1454,7 @@ run_initialize_invokes_class_initialize_test() ->
     end),
     try
         register(RegName, FakeClassPid),
-        beamtalk_class_metadata:insert(ClassName, ?MODULE, undefined, undefined),
+        beamtalk_class_metadata:insert(ClassName, ?MODULE, undefined, undefined, undefined),
         SupTuple = {beamtalk_supervisor, ClassName, ?MODULE, self()},
         erase(bt1980_init_called),
         Result = beamtalk_supervisor:run_initialize(SupTuple),
@@ -1469,8 +1479,10 @@ to_otp_strategy_oneForOne_test() ->
     %% Exercised indirectly via static_init tests, but we also assert the
     %% strategies land in a supervisor's SupFlags.
     beamtalk_class_metadata:new(),
-    beamtalk_class_metadata:insert('BT1980StratOne', undefined, undefined, 'BT1980StratOneParent'),
-    beamtalk_class_metadata:insert('BT1980StratOneParent', ?MODULE, undefined, none),
+    beamtalk_class_metadata:insert(
+        'BT1980StratOne', undefined, undefined, 'BT1980StratOneParent', undefined
+    ),
+    beamtalk_class_metadata:insert('BT1980StratOneParent', ?MODULE, undefined, none, undefined),
     try
         {ok, {#{strategy := one_for_one}, _}} =
             beamtalk_supervisor:static_init(erlang, 'BT1980StratOne')
@@ -1506,11 +1518,11 @@ apply_to_otp_strategy(BtStrategy) ->
             integer_to_list(erlang:unique_integer([positive]))
     ),
     Parent = list_to_atom(atom_to_list(Name) ++ "_p"),
-    beamtalk_class_metadata:insert(Name, undefined, undefined, Parent),
+    beamtalk_class_metadata:insert(Name, undefined, undefined, Parent, undefined),
     %% Install an on-demand parent module with the right class_strategy. We
     %% compile a tiny module at runtime that exports class_strategy/2 etc.
     ParentMod = compile_strategy_parent(BtStrategy),
-    beamtalk_class_metadata:insert(Parent, ParentMod, undefined, none),
+    beamtalk_class_metadata:insert(Parent, ParentMod, undefined, none, undefined),
     try
         {ok, {#{strategy := Strategy}, _}} =
             beamtalk_supervisor:static_init(erlang, Name),
@@ -1603,7 +1615,7 @@ wrap_child_supervisor_returns_beamtalk_supervisor_test() ->
     %% class inherits from Supervisor.
     beamtalk_class_metadata:new(),
     beamtalk_class_metadata:insert(
-        'BT1980WrapSupChildCls', undefined, undefined, 'Supervisor'
+        'BT1980WrapSupChildCls', undefined, undefined, 'Supervisor', undefined
     ),
     Parent = self(),
     ChildSpec = #{
@@ -1651,7 +1663,7 @@ build_child_specs_nested_supervisor_test() ->
     %% {ChildModule, start_link, []}, type => supervisor, shutdown => infinity.
     beamtalk_class_metadata:new(),
     beamtalk_class_metadata:insert(
-        'BT1980NestedSupCls', undefined, undefined, 'Supervisor'
+        'BT1980NestedSupCls', undefined, undefined, 'Supervisor', undefined
     ),
     FakeClassPid = spawn(fun() ->
         (fun Loop() ->

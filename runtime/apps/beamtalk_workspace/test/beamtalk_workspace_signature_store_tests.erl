@@ -273,7 +273,7 @@ rollback_after_a_chain_only_undoes_the_last_capture(_Pid) ->
 %% `undefined` rather than crashing the capture hook.
 seed_degrades_to_undefined_when_no_meta_exported_test() ->
     beamtalk_class_metadata:new(),
-    ok = beamtalk_class_metadata:insert('NoMetaClass', lists, [foo], 'Object'),
+    ok = beamtalk_class_metadata:insert('NoMetaClass', lists, [foo], 'Object', undefined),
     try
         {ok, Pid} = beamtalk_workspace_signature_store:start_link(),
         try
@@ -297,7 +297,7 @@ seed_degrades_to_undefined_when_no_meta_exported_test() ->
 seed_reads_original_signature_from_meta_test() ->
     beamtalk_class_metadata:new(),
     ok = beamtalk_class_metadata:insert(
-        'FixtureClass', beamtalk_signature_store_fixture, [greet], 'Object'
+        'FixtureClass', beamtalk_signature_store_fixture, [greet], 'Object', undefined
     ),
     try
         {ok, Pid} = beamtalk_workspace_signature_store:start_link(),
@@ -323,7 +323,7 @@ seed_reads_original_signature_from_meta_test() ->
 seed_reads_dynamic_for_unannotated_meta_entry_test() ->
     beamtalk_class_metadata:new(),
     ok = beamtalk_class_metadata:insert(
-        'FixtureClass', beamtalk_signature_store_fixture, [untyped], 'Object'
+        'FixtureClass', beamtalk_signature_store_fixture, [untyped], 'Object', undefined
     ),
     try
         {ok, Pid} = beamtalk_workspace_signature_store:start_link(),
@@ -346,7 +346,7 @@ seed_reads_dynamic_for_unannotated_meta_entry_test() ->
 seed_reads_class_side_from_class_method_info_test() ->
     beamtalk_class_metadata:new(),
     ok = beamtalk_class_metadata:insert(
-        'FixtureClass', beamtalk_signature_store_fixture, ['new'], 'Object'
+        'FixtureClass', beamtalk_signature_store_fixture, ['new'], 'Object', undefined
     ),
     try
         {ok, Pid} = beamtalk_workspace_signature_store:start_link(),

@@ -144,6 +144,32 @@ Replace the process-dictionary reads at the three sites above with values derive
 
 5. Apply (1)-(2) at `mod.rs:3438-3439,3450-3451` and (1)-(3) at every `try_instantiation_intrinsic` call site (`dispatch_codegen.rs:1482`, `:1497`, `:1542`) as well as the inherited self-dispatch site — closing BT-3047's point 2 (whether the instantiation intrinsics need the same treatment) with an explicit yes, for the reasoning below, rather than leaving it a separate open question, and folding in the `basicNew` site rather than deferring it as unconfirmed follow-up.
 
+### Implementation note (2026-08-05): two points above diverged during implementation
+
+Points 2 and 3 above describe the plan as accepted; the code that shipped deviates from
+each in a way worth flagging so this section isn't read as a literal account of the final
+implementation:
+
+- **Point 2** said `class_mod` needs "no lookup" — `erlang:element(3, ClassSelf)` would do.
+  In practice `apply_class_method_in_context/6` (`beamtalk_class_dispatch.erl:704-714`)
+  constructs `ClassSelf` for an *inherited* class method with `class_mod = DefiningModule`
+  (the ancestor that defines the method), not the calling subclass's own module — so
+  `element(3, ClassSelf)` is unsafe for exactly the inherited-dispatch case this amendment
+  exists to fix. The shipped code instead adds `resolve_module_or_raise/2`, a name-keyed
+  `beamtalk_class_metadata:lookup_module/1` call, and resolves the module from the
+  already-corrected class *name* (point 1) rather than trusting `ClassSelf.class_mod`.
+- **Point 3** said a metadata miss on `is_abstract` should raise "the same structured
+  error ... for the confirmed-abstract case." The shipped code instead raises a distinct
+  `class_metadata_missing_error/2` (a dedicated `internal_error`), reusing
+  `abstract_class_error/2` here would misleadingly claim the class *is* abstract when the
+  real failure is "its metadata row isn't visible yet" — a different condition that
+  deserves a different message.
+
+Both divergences are the more correct choice, not implementation shortcuts; this note
+exists so the "Decision" text above isn't mistaken for what actually shipped. See
+`beamtalk_class_instantiation.erl`'s doc comments on `resolve_module_or_raise/2` and
+`class_metadata_missing_error/2` for the in-code version of this reasoning.
+
 ### Why this is a no-op for every call outside a block
 
 For a class method executing in its own process (the overwhelming majority of calls — no block involved), `ClassSelf`'s `.class`/`.class_mod` were populated from the *same* source as the process-dictionary values, at the same moment: both are seeded from `ClassName`/`Module`/`IsAbstract` at `beamtalk_object_class.erl` registration/`init` (`beamtalk_class_registry:class_object_tag(ClassName)` for `ClassSelf.class`, `put(beamtalk_class_name, ClassName)` for the pdict copy — literally adjacent lines). They were never two independent sources of truth that happened to usually agree; they were the same value, copied twice. This amendment removes the copy that breaks across a block boundary and keeps the one that doesn't.
