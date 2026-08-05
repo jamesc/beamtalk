@@ -569,6 +569,18 @@ dispatch (or reject) correctly.
 Kept in sync with the two source files by
 `build_stdlib.rs`'s `test_binary_string_shared_selectors_stay_in_sync`,
 which fails the build if either file's method list drifts from this set.
+
+Soundness depends on a codegen invariant, not just name-matching: a selector
+`String.bt` doesn't locally define is never duplicated into
+`'bt@stdlib@string'`'s compiled `dispatch/3`/`has_method/1` — it's compiled
+as a runtime delegation to `'bt@stdlib@binary'`'s implementation instead. So
+routing one of these selectors through `'bt@stdlib@string'` calls the exact
+same code as routing it through `'bt@stdlib@binary'` would, for any binary,
+valid UTF-8 or not — the sync test only needs to track selector *names*
+because the two modules already share the method *body*. If that delegation
+model ever changes (e.g. inherited primitives get inlined/duplicated per
+subclass for a future perf win), this list's safety would need re-deriving
+from semantics again, not just names.
 """.
 -spec is_string_binary_shared_selector(atom()) -> boolean().
 is_string_binary_shared_selector('byteAt:') -> true;
