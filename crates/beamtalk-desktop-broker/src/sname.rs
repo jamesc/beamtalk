@@ -21,21 +21,22 @@
 //!   with that suffix and a known OS pid will end up with, once the broker
 //!   knows the child's pid (available immediately after spawn).
 //!
-//! **Unverified assumption, flagged in review**: prediction assumes the OS
-//! pid `std::process::Child::id()` reports for the spawned `bin/server`
-//! process is the *same* pid the BEAM VM sees as `System.pid()` — true only
-//! if `bin/server → bin/bt_attach → erlexec → beam.smp` is an unbroken `exec`
-//! chain (no intermediate `fork`), which is standard `mix release` launcher
-//! behavior but was not confirmed against this project's actual generated
-//! release script — no built `dist-liveview` target was available in the
-//! environment this crate was developed in (the spike instead validated
-//! names by querying epmd directly after a real spawn, not by predicting
-//! from a captured pid). Any consumer relying on [`predict_node_name`] for
-//! correctness (not just a monitoring hint) should confirm this live before
-//! depending on it, and prefer an epmd query as the source of truth where
-//! one is available. The Windows launch path (BT-2988, `bin/bt_attach`
-//! invoked directly, no `bin/server` wrapper) has one fewer hop and is
-//! likelier to hold, but is equally unverified here.
+//! **Verified against a real `dist-liveview` release (BT-3004).** Prediction
+//! assumes the OS pid `std::process::Child::id()` reports for the spawned
+//! `bin/server` process is the *same* pid the BEAM VM sees as
+//! `System.pid()` — true only if `bin/server → bin/bt_attach → erlexec →
+//! beam.smp` is an unbroken `exec` chain (no intermediate `fork`). A
+//! `Command::new(bin/server).spawn()` call was raced against a real
+//! `dist-liveview` release (`just dist-liveview`) attached to a live
+//! workspace: the captured `Child::id()` matched, byte for byte, the short
+//! name epmd reported once the front's lazy `ensure_distributed/0` ran (the
+//! first `/readiness` call) — e.g. `Child::id()` 26765 against a workspace
+//! suffix `bt3004test` produced the exact epmd registration
+//! `bt_attach_bt3004test_26765`. The launcher chain holds: no fork breaks it
+//! on this platform. The Windows launch path (BT-2988, `bin/bt_attach`
+//! invoked directly, no `bin/server` wrapper) has one fewer hop and was not
+//! itself exercised, but is at least as likely to hold given it removes a
+//! link from the same unbroken-`exec` chain this validated.
 //!
 //! **DDD Context:** Desktop Shell
 

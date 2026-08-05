@@ -176,13 +176,45 @@ impl SpawnAttemptConfig {
 }
 
 /// Default grace period for [`spawn_front_with_port_retry`]'s bind-failure
-/// heuristic. **Not calibrated against a real release build** (no built
-/// `dist-liveview` target is available in the environment this crate was
-/// developed in) — see that function's doc comment. Generous relative to how
-/// fast a genuine `:eaddrinuse` crash should surface, so the heuristic errs
-/// toward "assume it bound" rather than false-retrying a front that was just
-/// slow to boot.
-pub const DEFAULT_BIND_FAILURE_GRACE: Duration = Duration::from_millis(1500);
+/// heuristic.
+///
+/// **Calibrated against a real `dist-liveview` release (BT-3004)**, racing
+/// two fronts for the same port against a live workspace: a genuine
+/// `:eaddrinuse` crash took 2.76s–3.40s (mean ~3.05s, n=3) to surface as a
+/// process exit — the VM boots fully, the supervision tree's `Endpoint`
+/// child fails to bind, the failure unwinds through `application_controller`,
+/// a crash dump is written, and only then does the OS process exit. A
+/// healthy front, by contrast, reaches HTTP-up in under 1s. The
+/// previous 1.5s default sat *between* those two figures — comfortably
+/// after a healthy bind, but routinely **before** a real conflict's crash
+/// had actually happened, which would have handed
+/// [`spawn_front_with_port_retry`]'s caller a doomed child (misclassified as
+/// [`crate::port::SpawnAttempt::Bound`]) that then died ~1.5-2s later,
+/// outside this heuristic's view. 5s gives ~1.6s of margin over the worst
+/// observed crash latency, matching the safety-margin style used by
+/// [`crate::readiness::ProbeTimeouts::default_local`].
+///
+/// This grace period is paid on **every** spawn attempt, successful or not
+/// (`spawn_front_with_port_retry` always sleeps the full duration before
+/// checking `try_wait`) — so raising it here trades ~3.5s of extra latency
+/// on every attach for not silently handing back a front that is already
+/// doomed. Correctness was judged more important than shaving that fixed
+/// cost; a future revision could poll `try_wait` instead of sleeping once,
+/// but that still can't return early on the *success* path (a still-running
+/// process can't be told apart from one about to crash without waiting out
+/// the full window), so it was not pursued here.
+///
+/// This also compounds with [`port::DEFAULT_MAX_ATTEMPTS`]: the pathological
+/// worst case (every one of 10 fresh, OS-assigned candidate ports conflicts)
+/// now takes up to 50s before [`spawn_front_with_port_retry`] gives up,
+/// versus 15s at the old 1.5s grace. In practice each candidate is a
+/// distinct ephemeral port from a fresh [`port::find_free_port`] call, not
+/// the same port retried, so an all-10-conflict run is far less likely than
+/// the single-attempt TOCTOU race [`port`]'s module docs describe — but a
+/// future caller setting a tight overall UI timeout around the whole spawn
+/// call should size it with this worst case in mind, not just the common
+/// one-attempt path.
+pub const DEFAULT_BIND_FAILURE_GRACE: Duration = Duration::from_secs(5);
 
 /// Spawn a front with automatic retry on port conflict (ADR 0097 Broker §2;
 /// ties [`crate::port::allocate_port_with_retry`] to [`spawn_front`] — see
@@ -198,13 +230,12 @@ pub const DEFAULT_BIND_FAILURE_GRACE: Duration = Duration::from_millis(1500);
 /// `bind_failure_grace` — a process that exits almost immediately is a
 /// reasonable (if imperfect) proxy for "the port was already taken and the
 /// release's supervision tree gave up," while one still running is treated
-/// as bound and handed to the caller. Calibrating `bind_failure_grace`
-/// against a real `bin/server`/`dist-liveview` boot (how fast does an
-/// `:eaddrinuse` actually surface as a process exit, versus how long does a
-/// slow-but-healthy boot take before the port is truly free of contention?)
-/// requires a live release this crate could not build/run in the sandbox it
-/// was developed in — tracked as a follow-up before this ships in a real
-/// shell (BT-2986).
+/// as bound and handed to the caller. `bind_failure_grace` was calibrated
+/// against a real `bin/server`/`dist-liveview` boot (BT-3004): a genuine
+/// `:eaddrinuse` takes 2.76s–3.40s to surface as a process exit, versus well
+/// under 1s for a healthy boot to reach HTTP-up — see
+/// [`DEFAULT_BIND_FAILURE_GRACE`]'s doc comment for the full measurement and
+/// the resulting default.
 ///
 /// # Errors
 ///

@@ -38,10 +38,29 @@ use crate::dto::{
 };
 use crate::state::AppState;
 
-/// Overall attach timeout: generous enough for a slow-but-healthy front boot
-/// plus the worst-case bad-cookie `/readiness` wait (Erlang's ~7s
-/// `net_setuptime` — see `beamtalk_desktop_broker::readiness::ProbeTimeouts`'s
-/// doc comment).
+/// Overall timeout for the `wait_ready` readiness-polling phase only —
+/// generous headroom above a healthy boot, not a measured requirement. It
+/// does **not** bound `spawn_front_with_port_retry` above, which runs first
+/// and can itself block synchronously for up to
+/// `port::DEFAULT_MAX_ATTEMPTS * spawn::DEFAULT_BIND_FAILURE_GRACE`
+/// (currently up to 50s in the pathological worst case — every candidate
+/// port conflicting) before `wait_ready` is ever called; `attach`'s true
+/// worst-case latency is that plus this timeout, not just this timeout. In
+/// practice each candidate is a fresh, distinct OS-assigned ephemeral port
+/// (not the same port retried), so an all-conflict run is far less likely
+/// than the single-attempt TOCTOU race `beamtalk_desktop_broker::port`'s
+/// module docs describe — noted here rather than acted on, since bounding
+/// the combined worst case is a product-judgment call (drop
+/// `max_port_attempts` for this caller? wrap both phases in one timeout?)
+/// beyond what BT-3004's calibration pass itself changed.
+///
+/// Originally sized against an assumption that a bad-cookie `/readiness`
+/// blocks for Erlang's ~7s `net_setuptime` — measured wrong on loopback
+/// (BT-3004): a real bad-cookie/dead-workspace `503` arrives in
+/// milliseconds. `30s` is kept as safe headroom for a slow-but-healthy
+/// front boot, not because the bad-cookie path needs it — see
+/// `beamtalk_desktop_broker::readiness::ProbeTimeouts`'s doc comment for the
+/// measurement.
 const ATTACH_TIMEOUT: Duration = Duration::from_secs(30);
 const ATTACH_POLL_INTERVAL: Duration = Duration::from_millis(300);
 
